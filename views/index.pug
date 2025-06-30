@@ -1,0 +1,37 @@
+extends layout
+
+block content
+  h1= title
+  div.new_psi(style={width:"48%", float: "left"})
+    style.
+      form.table { display: table; }
+      p.table { display: table-row; }
+      label.table { display: table-cell; }
+      input.table { display: table-cell; }
+      textarea.table { display: table-cell; }
+
+    p Start a new PSI session
+    form.table(action="/new" method="get")
+      p.table
+        label.table(for="initiatedName") Your name*:
+        input.table#initiatedName(type="text" name="initiatedName" required)
+
+      p.table
+        label.table(for="invitedName") Name of person to invite*:
+        input.table#invitedName(type="text" name="invitedName" required)
+
+      p.table
+        label.table(for="description") Description (optional):
+        textarea.table#description(name="description" rows=3 cols=40)
+
+      p(style={display: "table-row"})
+        input(type="submit", style={display: "block", margin: "0px auto"})
+
+  div.join_psi(style={width:"48%", float:"right"})
+
+    p Join an existing PSI session
+    form(action="/join", method="get")
+      label(form="id") Session ID 
+        input#id(type="text" name="id" required)
+        br
+        input(type="submit")

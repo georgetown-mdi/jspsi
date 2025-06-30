@@ -1,0 +1,13 @@
+extends layout
+
+block scripts
+  script.
+    const sessionId = '!{sessionId}';
+  script(src='./javascripts/peerjs.min.js')
+  script(src='./javascripts/psi_server.js')
+
+block content
+  h1= title
+  p Share this link with the recipient: #{link}
+  p Messages
+    ul#messages
