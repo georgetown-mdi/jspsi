@@ -1,0 +1,51 @@
+extends layout
+
+block scripts
+  script.
+    const sessionId = '!{sessionId}';
+  script(src='./javascripts/peerjs.min.js')
+  if isServer
+    script(src='./javascripts/psi_server.js')
+  else
+    script(src='./javascripts/psi_client.js')
+
+block content
+  h1= title
+  div(style={width:"60%", float: "left"})
+    if isServer
+      div#serverStartup
+        form#fileSelection(onsubmit="processFileSelection(event);")
+          label(for="inputFile") Pick a file for PSI: 
+          input#inputFile(type="file" name="inputFile" accept=".csv" required)
+          br
+          input(type="submit", value="Submit")
+    else
+      div#clientStartup
+        p Confirm the session details
+        form#fileSelection(onsubmit="startPSI(event);")
+          label(for="inputFile") Pick a file for PSI: 
+          input#inputFile(type="file" name="inputFile" accept=".csv" required)
+          br
+          input(type="submit", value="Start")
+    div#messageLog.messageLog(style={display:'none'})
+      p Messages
+        ul#messages
+  div(style={width:"38%", float: "right"})
+    p Session:
+    table
+      tr
+        td PSI initiated by:
+        td #{initiatedName}
+      tr
+        td Party invited to participate:
+        td #{invitedName}
+      tr
+        td Description of task:
+        td #{description}
+      tr
+        td Running PSI on:
+        td#fileName <em>Not yet specified</em>
+      if isServer
+        tr#linkRow
+          td Share link to session:
+          td #{link}

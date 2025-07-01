@@ -11,7 +11,7 @@ block content
       textarea.table { display: table-cell; }
 
     p Start a new PSI session
-    form.table(action="/new" method="get")
+    form.table(action="/server" method="get")
       p.table
         label.table(for="initiatedName") Your name*:
         input.table#initiatedName(type="text" name="initiatedName" required)
@@ -30,7 +30,7 @@ block content
   div.join_psi(style={width:"48%", float:"right"})
 
     p Join an existing PSI session
-    form(action="/join", method="get")
+    form(action="/client", method="get")
       label(form="id") Session ID 
         input#id(type="text" name="id" required)
         br

@@ -10,7 +10,8 @@
 
 // see https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
 
-var eventList;
+var eventList = null;
+var file = null;
 
 function addMessageToList(message) {
   const newElement = document.createElement("li");
@@ -18,10 +19,23 @@ function addMessageToList(message) {
   eventList.appendChild(newElement);
 }
 
-function openEventStream() {
-  eventList = document.querySelector('ul#messages');
 
-  const evtSource = new EventSource(`/server_sse?sessionId=${sessionId}`);
+function processFileSelection(event) {
+  event.preventDefault();
+
+  document.getElementById("serverStartup").style.display = "none";
+  document.getElementById("messageLog").style.removeProperty("display");
+
+  file = document.getElementById("inputFile").files[0];
+  document.getElementById("fileName").innerHTML = file.name;
+
+  addMessageToList(`waiting for peer to join`);
+}
+
+function openEventStream() {
+  eventList = document.querySelector("ul#messages");
+
+  const evtSource = new EventSource(`/server/peerId?sessionId=${sessionId}`);
 
   evtSource.onopen = function() {
     console.log("SSE connection opened; waiting for peer id");
@@ -29,13 +43,15 @@ function openEventStream() {
 
   evtSource.onmessage = function(e) {
     const messageData = JSON.parse(e.data);
-    if (!('invitedPeerId' in messageData)) {
+    if (!("invitedPeerId" in messageData)) {
       addMessageToList("received unexpected message from server:" + messageData)
     } else {
-      const invitedPeerId = messageData['invitedPeerId'];
+      const invitedPeerId = messageData["invitedPeerId"];
 
-      console.log(`received peer id ${invitedPeerId}; opening peer to peer connection`);
-      addMessageToList(`received peer id ${invitedPeerId}; opening peer to peer connection`);
+      console.log(`received peer id ${invitedPeerId}; opening direct connection`);
+      addMessageToList(`received peer id ${invitedPeerId}; opening direct connection`);
+
+      document.getElementById("linkRow").remove();
 
       const peer = new Peer({
         host: "/",
@@ -44,32 +60,32 @@ function openEventStream() {
         debug: 2
       })
 
-      peer.on('open', function(id) {
+      peer.on("open", function(id) {
         console.log(`peer id identified as: ${id}`);
 
         const conn = peer.connect(invitedPeerId);
 
-        conn.on('open', function() {
-            console.log('peer connection open');
+        conn.on("open", function() {
+            console.log("peer connection open");
 
-            conn.send('Hello world');
+            conn.send("Hello world");
 
             addMessageToList("sent hello world");
 
             conn.close();
         });
         
-        conn.on('data', function(data) {
+        conn.on("data", function(data) {
             addMessageToList("received message: " + data);
         });
         
-        conn.on('error', function(err) {
-            console.error('connection error: ' + err);
+        conn.on("error", function(err) {
+            console.error("connection error: " + err);
         });
       })
 
-      peer.on('error', function(err) {
-        console.error('peer error: ' + err);
+      peer.on("error", function(err) {
+        console.error("peer error: " + err);
       });
 
       

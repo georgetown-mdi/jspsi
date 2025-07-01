@@ -1,11 +1,24 @@
 const PEER_ID_SERVER_POLLING_FREQUENCY_MS = 100;
 
-var eventList;
+var eventList = null;
+var file = null;
 
 function addMessageToList(message) {
   const newElement = document.createElement("li");
   newElement.textContent = message
   eventList.appendChild(newElement);
+}
+
+function startPSI(event) {
+  event.preventDefault();
+
+  document.getElementById("clientStartup").style.display = "none";
+  document.getElementById("messageLog").style.removeProperty("display");
+
+  file = document.getElementById("inputFile").files[0];
+  document.getElementById("fileName").innerHTML = file.name;
+
+  openPeerConnection();
 }
 
 async function openPeerConnection() {
@@ -24,7 +37,7 @@ async function openPeerConnection() {
 
     try {
       const response = await fetch(
-        './client_peer_id',
+        './client/peerId',
       {
         headers: {
           'Accept': 'application/json',
@@ -64,5 +77,3 @@ async function openPeerConnection() {
     console.error("peer error " + err);
   });
 };
-
-window.onload = openPeerConnection;
