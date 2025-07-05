@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "DEBUG=jspsi.* node ./bin/www",
-    "dev": "DEBUG=jspsi.* nodemon ./bin/www"
+    "start": "NODE_ENV=production DEBUG=jspsi.* node ./bin/www",
+    "dev": "NODE_ENV=development DEBUG=jspsi.*  nodemon ./bin/www"
   },
   "dependencies": {
     "cookie-parser": "~1.4.4",

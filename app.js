@@ -1,4 +1,3 @@
-
 var express = require('express');
 var path = require('path');
 var cookieParser = require('cookie-parser');
@@ -14,6 +13,8 @@ var app = module.exports = express();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 app.set('query parser', (str) => qs.parse(str))
+
+app.set('isDevelopment', process.env.NODE_ENV === 'development');
 
 app.use(logger('dev'));
 app.use(express.json());
