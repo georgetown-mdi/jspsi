@@ -3,6 +3,7 @@ const PEER_ID_SERVER_POLLING_FREQUENCY_MS = 100;
 var eventList = null;
 var file = null;
 var serverSetup = null;
+var clientData = null;
 
 function addMessageToList(message) {
   const newElement = document.createElement("li");
@@ -16,14 +17,26 @@ function startPSI(event) {
   document.getElementById("clientStartup").style.display = "none";
   document.getElementById("messageLog").style.removeProperty("display");
 
+  eventList = document.querySelector('ul#messages');
+
   file = document.getElementById("inputFile").files[0];
   document.getElementById("fileName").innerHTML = file.name;
-
-  openPeerConnection();
+  
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    clientData = event.target.result.split("\n");
+    if (file.type === "csv") clientData = clientData.slice(1);
+    clientData = clientData.filter(function(entry) { return entry.trim() != ''; });
+    
+    console.log("loaded client data: " + clientData.slice(0, Math.min(clientData.length, 5)));
+    addMessageToList("loaded client data: " + clientData.slice(0, Math.min(clientData.length, 5)));
+      
+    openPeerConnection();
+  }
+  reader.readAsText(file);
 }
 
-async function openPeerConnection() {
-  eventList = document.querySelector('ul#messages');
+function openPeerConnection() {
 
   const peer = new Peer({
     host: "/",
@@ -34,7 +47,7 @@ async function openPeerConnection() {
 
   peer.on('open', async function(id) {
     console.log(`peer id identified as: ${id}; sending to server`);
-    addMessageToList(`peer id identified as: ${id}; sending to server`)
+    addMessageToList(`peer id identified as: ${id}; sending to server`);
 
     try {
       const response = await fetch(
@@ -61,23 +74,13 @@ async function openPeerConnection() {
   });
 
   peer.on('connection', function(conn) {
-    console.log('connection event recieved');
-    addMessageToList(`connection event recieved`);
+    console.log('connection event received');
+    addMessageToList(`connection event received`);
 
-    /* await (async () => {
-    await import("./psi/psi_wasm_web.js");
-  })();
-  psi = await PSI(); */
     console.log("loading PSI");
     import("./psi/psi_wasm_web.js").then(() => { PSI().then((psi) => {
       console.log("PSI loaded");
       conn.on("open", function() {
-        
-        const clientData = [
-          "Carol",
-          "Elizabeth",
-          "Henry"
-        ];
 
         const client = psi.client.createWithNewKey(true);
 
@@ -116,10 +119,7 @@ async function openPeerConnection() {
 
             conn.close();
           }
-
         });
-
-        
       });
     });});
   });
