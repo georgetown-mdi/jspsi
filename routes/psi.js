@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require("uuid");
+var debug = require('debug')('jspsi:psi');
 
 var express = require("express");
 var router = module.exports = express.Router();
@@ -10,7 +11,7 @@ const INVITED_PEER_ID_POLLING_FREQUENCY_MS = 250;
 var sessions = {};
 
 /* GET home page. */
-router.get("/", function(req, res, next) {
+router.get("/", function(_, res) {
   res.render("index", { title: "Private Set Intersection Online" });
 });
 
@@ -27,6 +28,8 @@ router.get("/client", function(req, res) {
   if (!("initiatedName" in session) || !("invitedName" in session) || !("description" in session)) {
     return res.status(500).send("Invalid session content");
   }
+
+  debug(`client joining session ${sessionId}`);
 
   res.render("psi", {
     title: "Private Set Intersection Session",
@@ -57,7 +60,7 @@ router.post("/client/peerId", function(req, res) {
     return res.status(500).send("Invited peer id already in session");
   }
 
-  console.log(`setting invited peer id to ${invitedPeerId} for ${sessionId} and sending status 200`);
+  debug(`setting invited peer id to ${invitedPeerId} for ${sessionId} and sending status 200`);
 
   session["invitedPeerId"] = invitedPeerId;
 
@@ -79,6 +82,8 @@ router.get("/server", function(req, res) {
     description: "description" in req.query ? req.query["description"] : null
   };
   const session = sessions[sessionId];
+
+  debug(`new psi session ${sessionId} created`);
 
   res.render("psi", {
     title: "Private Set Intersection Session",
@@ -114,7 +119,8 @@ router.get("/server/peerId", function(req, res) {
       payload = {
         invitedPeerId: session["invitedPeerId"]
       };
-      console.log("sending peer id")
+      debug(`sending SSE peer id ${session["invitedPeerId"]} for session ${sessionId}`);
+
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
       res.end();
       return;
@@ -122,12 +128,11 @@ router.get("/server/peerId", function(req, res) {
     setTimeout(getInvitedPeerId, INVITED_PEER_ID_POLLING_FREQUENCY_MS);
   }
 
-  console.log(`established SSE connection for session ${sessionId} and waiting until invited peer id is available`)
+  debug(`established SSE connection for session ${sessionId} and waiting until invited peer id is available`)
 
   setTimeout(getInvitedPeerId, INVITED_PEER_ID_POLLING_FREQUENCY_MS)
 
   res.on("close", () => {
-    console.log("client disconnected from SSE stream");
     res.end();
   });
 });

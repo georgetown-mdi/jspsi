@@ -3,7 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "nodemon ./bin/www"
+    "start": "DEBUG=jspsi.* node ./bin/www",
+    "dev": "DEBUG=jspsi.* nodemon ./bin/www"
   },
   "dependencies": {
     "cookie-parser": "~1.4.4",
@@ -15,7 +16,6 @@
     "peer": "^1.0.2",
     "pug": "^3.0.3",
     "qs": "^6.14.0",
-    "sqlite3": "^5.1.7",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
