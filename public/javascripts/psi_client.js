@@ -2,6 +2,7 @@ const PEER_ID_SERVER_POLLING_FREQUENCY_MS = 100;
 
 var eventList = null;
 var file = null;
+var serverSetup = null;
 
 function addMessageToList(message) {
   const newElement = document.createElement("li");
@@ -63,14 +64,64 @@ async function openPeerConnection() {
     console.log('connection event recieved');
     addMessageToList(`connection event recieved`);
 
-    conn.on('data', function(data) {
-      console.log('Received', data);
-      addMessageToList(`received message ${data}; sending response`)
+    /* await (async () => {
+    await import("./psi/psi_wasm_web.js");
+  })();
+  psi = await PSI(); */
+    console.log("loading PSI");
+    import("./psi/psi_wasm_web.js").then(() => { PSI().then((psi) => {
+      console.log("PSI loaded");
+      conn.on("open", function() {
+        
+        const clientData = [
+          "Carol",
+          "Elizabeth",
+          "Henry"
+        ];
 
-      conn.send('I see you!');
+        const client = psi.client.createWithNewKey(true);
 
-      conn.close();
-    })
+        console.log("sending client input size");
+        addMessageToList("sending client input size");
+        
+        conn.send(clientData.length);
+        
+        conn.on("data", function(data) {
+          if (serverSetup === null) {
+            console.log("disconnecting from peer server");
+            peer.disconnect();
+
+            console.log("received setup message; sending request");
+            addMessageToList("received setup message; sending request");
+
+            serverSetup = psi.serverSetup.deserializeBinary(data);
+            const clientRequest = client.createRequest(clientData);
+
+            conn.send(clientRequest.serializeBinary());
+          } else {
+            console.log("received response message; calculating intersection");
+            addMessageToList("received response message; calculating intersection");
+            const serverResponse = psi.response.deserializeBinary(data);
+            const intersection = client.getIntersection(
+              serverSetup,
+              serverResponse
+            );
+            console.log("intersection contains: ", intersection)
+            var commonValues = [];
+            for (var i = 0; i < intersection.length; i++) {
+              commonValues.push(clientData[intersection[i]]);
+            }
+            console.log("common values: ", commonValues);
+            addMessageToList("common values: " + commonValues);
+
+            conn.close();
+          }
+
+        });
+
+        
+      });
+    });});
   });
 
   peer.on('error', function(err) {
