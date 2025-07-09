@@ -25,7 +25,7 @@ function startPSI(event) {
   const reader = new FileReader();
   reader.onload = (event) => {
     clientData = event.target.result.split("\n");
-    if (file.type === "csv") clientData = clientData.slice(1);
+    if (file.type === "text/csv") clientData = clientData.slice(1);
     clientData = clientData.filter(function(entry) { return entry.trim() != ''; });
     
     console.log("loaded client data: " + clientData.slice(0, Math.min(clientData.length, 5)));
@@ -80,46 +80,41 @@ function openPeerConnection() {
     console.log("loading PSI");
     import("./psi/psi_wasm_web.js").then(() => { PSI().then((psi) => {
       console.log("PSI loaded");
+
+      const client = psi.client.createWithNewKey(true);
+
       conn.on("open", function() {
+        console.log("connection open");
+      }).on("data", function(data) {
+        if (serverSetup === null) {
+          console.log("disconnecting from peer server");
+          peer.disconnect();
 
-        const client = psi.client.createWithNewKey(true);
+          console.log("received setup message; sending request");
+          addMessageToList("received setup message; sending request");
 
-        console.log("sending client input size");
-        addMessageToList("sending client input size");
-        
-        conn.send(clientData.length);
-        
-        conn.on("data", function(data) {
-          if (serverSetup === null) {
-            console.log("disconnecting from peer server");
-            peer.disconnect();
+          serverSetup = psi.serverSetup.deserializeBinary(data);
+          const clientRequest = client.createRequest(clientData);
 
-            console.log("received setup message; sending request");
-            addMessageToList("received setup message; sending request");
-
-            serverSetup = psi.serverSetup.deserializeBinary(data);
-            const clientRequest = client.createRequest(clientData);
-
-            conn.send(clientRequest.serializeBinary());
-          } else {
-            console.log("received response message; calculating intersection");
-            addMessageToList("received response message; calculating intersection");
-            const serverResponse = psi.response.deserializeBinary(data);
-            const intersection = client.getIntersection(
-              serverSetup,
-              serverResponse
-            );
-            console.log("intersection contains: ", intersection)
-            var commonValues = [];
-            for (var i = 0; i < intersection.length; i++) {
-              commonValues.push(clientData[intersection[i]]);
-            }
-            console.log("common values: ", commonValues);
-            addMessageToList("common values: " + commonValues);
-
-            conn.close();
+          conn.send(clientRequest.serializeBinary());
+        } else {
+          console.log("received response message; calculating intersection");
+          addMessageToList("received response message; calculating intersection");
+          const serverResponse = psi.response.deserializeBinary(data);
+          const associationTable = client.getAssociationTable(
+            serverSetup,
+            serverResponse
+          );
+          console.log("assocations (to server sorted elements) are: ", associationTable);
+          var commonValues = [];
+          for (var i = 0; i < associationTable[0].length; i++) {
+            commonValues.push(clientData[associationTable[0][i]]);
           }
-        });
+          console.log("common values: ", commonValues);
+          addMessageToList("common values: " + commonValues);
+
+          conn.close();
+        }
       });
     });});
   });

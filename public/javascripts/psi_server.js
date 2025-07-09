@@ -12,7 +12,6 @@
 
 var eventList = null;
 var file = null;
-var numClientInputs = null;
 var serverData = null;
 var invitedPeerId = null;
 
@@ -35,7 +34,7 @@ function processFileSelection(event) {
   const reader = new FileReader();
   reader.onload = (event) => {
     serverData = event.target.result.split("\n");
-    if (file.type === "csv") serverData = serverData.slice(1);
+    if (file.type === "text/csv") serverData = serverData.slice(1);
     serverData = serverData.filter(function(entry) { return entry.trim() != ''; });
     
     console.log("loaded server data: " + serverData.slice(0, Math.min(serverData.length, 5)));
@@ -74,41 +73,31 @@ function openPeerConnection() {
 
         server = psi.server.createWithNewKey(true);
 
-        conn.on("data", function(data) {
-          console.log('received data ', data);
+        console.log("sending setup message");
+        addMessageToList("sending setup message");
+        var sortingPermutation = [];
+        const serverSetup = server.createSetupMessage(
+          0.0,
+          -1,
+          serverData,
+          psi.dataStructure.Raw,
+          sortingPermutation
+        );
 
-          if (numClientInputs === null) {
-            console.log("disconnecting from peer server");
-            peer.disconnect();
+        conn.send(serverSetup.serializeBinary());
+      }).on("data", function(data) {
+        console.log('received data ', data);
 
-            if (typeof data !== "number" || !Number.isInteger(data) || data <= 0) {
-              conn.close();
-              throw new Error("invalid message: expected positive integer");
-            }
-            numClientInputs = data;
-            console.log("received client input size");
-            addMessageToList("received client input size");
-            
-            console.log("sending setup message");
-            addMessageToList("sending setup message");
-            const serverSetup = server.createSetupMessage(
-              0.0,
-              numClientInputs,
-              serverData,
-              psi.dataStructure.Raw
-            );
+        console.log("disconnecting from peer server");
+        peer.disconnect();
 
-            conn.send(serverSetup.serializeBinary());
-          } else {
-            console.log("received request message, sending response");
-            addMessageToList("received request message, sending response");
-            const clientRequest = psi.request.deserializeBinary(data);
-            const serverResponse = server.processRequest(clientRequest);
-            conn.send(serverResponse.serializeBinary());
+        console.log("received request message, sending response");
+        addMessageToList("received request message, sending response");
+        const clientRequest = psi.request.deserializeBinary(data);
+        const serverResponse = server.processRequest(clientRequest);
+        conn.send(serverResponse.serializeBinary());
 
-            conn.close();
-          }
-        });
+        conn.close();
       }).on("error", function(err) {
           console.error("connection error: " + err);
       });
