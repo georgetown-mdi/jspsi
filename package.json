@@ -1,10 +1,12 @@
 {
   "name": "jspsi",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "NODE_ENV=production DEBUG=jspsi.* node ./bin/www",
-    "dev": "NODE_ENV=development DEBUG=jspsi.*  nodemon ./bin/www"
+    "build": "tsc",
+    "start": "NODE_OPTIONS='-r ts-node/register' node --env-file=.env ./src/server.js",
+    "dev": "NODE_OPTIONS='-r ts-node/register' nodemon",
+    "lint": "eslint 'src/**/*.ts'"
   },
   "dependencies": {
     "cookie-parser": "~1.4.4",
@@ -12,13 +14,30 @@
     "express": "^4.21.2",
     "http-errors": "~1.6.3",
     "morgan": "~1.9.1",
-    "nodemon": "^3.1.10",
     "peer": "^1.0.2",
     "pug": "^3.0.3",
     "qs": "^6.14.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.8"
+    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/js": "^9.30.1",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/debug": "^4.1.12",
+    "@types/express": "^5.0.3",
+    "@types/http-errors": "^2.0.5",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^24.0.13",
+    "@types/qs": "^6.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.36.0",
+    "@typescript-eslint/parser": "^8.36.0",
+    "eslint": "^9.30.1",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.5.1",
+    "globals": "^16.3.0",
+    "nodemon": "^3.1.10",
+    "prettier": "3.6.2",
+    "ts-node": "^10.9.2",
+    "typescript-eslint": "^8.36.0"
   }
 }
