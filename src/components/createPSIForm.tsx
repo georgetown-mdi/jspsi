@@ -1,27 +1,72 @@
 import { useForm } from '@tanstack/react-form';
 import { TextInput, Textarea, Group, Button } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 
 export default function CreatePSIForm() {
-  const { Field, handleSubmit, state } = useForm({
+  const navigate = useNavigate();
+
+  const form = useForm({
     defaultValues: {
       initiatedName: '',
       invitedName: '',
       description: ''
     },
     onSubmit: async ({ value }) => {
-      console.log(value);
-      // fetch()
+      const response = await fetch('./api/psi/create', {
+        method: 'POST',
+        body: JSON.stringify({
+          initiatedName: value.initiatedName,
+          invitedName: value.invitedName,
+          description: value.description
+        }),
+      });
+      
+      const { id: sessionId, timeToLive: timeToLive } = await response.json();
+
+      if (response.ok) {
+        navigate({
+          to: '/psi/start',
+          search: {
+            id: sessionId,
+          }
+        });
+      } else {
+        console.log(`error: ${response.statusText}`);
+      }
     }
   });
+
+  /* const { mutate, isLoading, error } = useMutation(newForm =>
+    fetch('/api/psi', {
+      method: 'GET',
+    }).then(res => res.json())
+  );
+
+  const submitForm = (formData) => {
+    mutate(formData, {
+      onSuccess: (data) => console.log('Form submitted successfully', data),
+      onError: (error) => form.setError('server', { message: error.message })
+    });
+  };
   
+
+  if (error) {
+    return <div>An error occurred: {error.message}</div>;
+  }
+  if (isLoading) {
+    return <div>Submitting...</div>;
+  }
+*/
+
   return (
     <form
       onSubmit={(e) => {
-        e.preventDefault()
-        handleSubmit()
+        e.preventDefault();
+        e.stopPropagation();
+        form.handleSubmit();
       }}
     >
-      <Field
+      <form.Field
         name='initiatedName'
         validators={{
           onChange: ({ value }) =>
@@ -40,7 +85,7 @@ export default function CreatePSIForm() {
             />
         )}
         />
-      <Field
+      <form.Field
         name='invitedName'
         validators={{
           onChange: ({ value }) =>
@@ -59,7 +104,7 @@ export default function CreatePSIForm() {
             />
         )}
         />
-      <Field
+      <form.Field
         name='description'
         children={({ state, handleChange, handleBlur }) => (
           <Textarea

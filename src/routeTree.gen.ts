@@ -12,7 +12,10 @@ import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { ServerRoute as ApiPsiServerRouteImport } from './routes/api/psi'
+import { Route as PsiStartRouteImport } from './routes/psi/start'
+import { ServerRoute as ApiPsiCreateServerRouteImport } from './routes/api/psi/create'
+import { ServerRoute as ApiPsiIdIndexServerRouteImport } from './routes/api/psi/$id/index'
+import { ServerRoute as ApiPsiIdWaitServerRouteImport } from './routes/api/psi/$id/wait'
 
 const rootServerRouteImport = createServerRootRoute()
 
@@ -21,53 +24,80 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPsiServerRoute = ApiPsiServerRouteImport.update({
-  id: '/api/psi',
-  path: '/api/psi',
+const PsiStartRoute = PsiStartRouteImport.update({
+  id: '/psi/start',
+  path: '/psi/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPsiCreateServerRoute = ApiPsiCreateServerRouteImport.update({
+  id: '/api/psi/create',
+  path: '/api/psi/create',
+  getParentRoute: () => rootServerRouteImport,
+} as any)
+const ApiPsiIdIndexServerRoute = ApiPsiIdIndexServerRouteImport.update({
+  id: '/api/psi/$id/',
+  path: '/api/psi/$id/',
+  getParentRoute: () => rootServerRouteImport,
+} as any)
+const ApiPsiIdWaitServerRoute = ApiPsiIdWaitServerRouteImport.update({
+  id: '/api/psi/$id/wait',
+  path: '/api/psi/$id/wait',
   getParentRoute: () => rootServerRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/psi/start': typeof PsiStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/psi/start': typeof PsiStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/psi/start': typeof PsiStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/psi/start'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/psi/start'
+  id: '__root__' | '/' | '/psi/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PsiStartRoute: typeof PsiStartRoute
 }
 export interface FileServerRoutesByFullPath {
-  '/api/psi': typeof ApiPsiServerRoute
+  '/api/psi/create': typeof ApiPsiCreateServerRoute
+  '/api/psi/$id/wait': typeof ApiPsiIdWaitServerRoute
+  '/api/psi/$id': typeof ApiPsiIdIndexServerRoute
 }
 export interface FileServerRoutesByTo {
-  '/api/psi': typeof ApiPsiServerRoute
+  '/api/psi/create': typeof ApiPsiCreateServerRoute
+  '/api/psi/$id/wait': typeof ApiPsiIdWaitServerRoute
+  '/api/psi/$id': typeof ApiPsiIdIndexServerRoute
 }
 export interface FileServerRoutesById {
   __root__: typeof rootServerRouteImport
-  '/api/psi': typeof ApiPsiServerRoute
+  '/api/psi/create': typeof ApiPsiCreateServerRoute
+  '/api/psi/$id/wait': typeof ApiPsiIdWaitServerRoute
+  '/api/psi/$id/': typeof ApiPsiIdIndexServerRoute
 }
 export interface FileServerRouteTypes {
   fileServerRoutesByFullPath: FileServerRoutesByFullPath
-  fullPaths: '/api/psi'
+  fullPaths: '/api/psi/create' | '/api/psi/$id/wait' | '/api/psi/$id'
   fileServerRoutesByTo: FileServerRoutesByTo
-  to: '/api/psi'
-  id: '__root__' | '/api/psi'
+  to: '/api/psi/create' | '/api/psi/$id/wait' | '/api/psi/$id'
+  id: '__root__' | '/api/psi/create' | '/api/psi/$id/wait' | '/api/psi/$id/'
   fileServerRoutesById: FileServerRoutesById
 }
 export interface RootServerRouteChildren {
-  ApiPsiServerRoute: typeof ApiPsiServerRoute
+  ApiPsiCreateServerRoute: typeof ApiPsiCreateServerRoute
+  ApiPsiIdWaitServerRoute: typeof ApiPsiIdWaitServerRoute
+  ApiPsiIdIndexServerRoute: typeof ApiPsiIdIndexServerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -79,15 +109,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/psi/start': {
+      id: '/psi/start'
+      path: '/psi/start'
+      fullPath: '/psi/start'
+      preLoaderRoute: typeof PsiStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 declare module '@tanstack/react-start/server' {
   interface ServerFileRoutesByPath {
-    '/api/psi': {
-      id: '/api/psi'
-      path: '/api/psi'
-      fullPath: '/api/psi'
-      preLoaderRoute: typeof ApiPsiServerRouteImport
+    '/api/psi/create': {
+      id: '/api/psi/create'
+      path: '/api/psi/create'
+      fullPath: '/api/psi/create'
+      preLoaderRoute: typeof ApiPsiCreateServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
+    '/api/psi/$id/': {
+      id: '/api/psi/$id/'
+      path: '/api/psi/$id'
+      fullPath: '/api/psi/$id'
+      preLoaderRoute: typeof ApiPsiIdIndexServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
+    '/api/psi/$id/wait': {
+      id: '/api/psi/$id/wait'
+      path: '/api/psi/$id/wait'
+      fullPath: '/api/psi/$id/wait'
+      preLoaderRoute: typeof ApiPsiIdWaitServerRouteImport
       parentRoute: typeof rootServerRouteImport
     }
   }
@@ -95,12 +146,15 @@ declare module '@tanstack/react-start/server' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PsiStartRoute: PsiStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 const rootServerRouteChildren: RootServerRouteChildren = {
-  ApiPsiServerRoute: ApiPsiServerRoute,
+  ApiPsiCreateServerRoute: ApiPsiCreateServerRoute,
+  ApiPsiIdWaitServerRoute: ApiPsiIdWaitServerRoute,
+  ApiPsiIdIndexServerRoute: ApiPsiIdIndexServerRoute,
 }
 export const serverRouteTree = rootServerRouteImport
   ._addFileChildren(rootServerRouteChildren)

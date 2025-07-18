@@ -13,6 +13,8 @@ import {
 import '@mantine/core/styles.css';
 import type { ReactNode } from 'react';
 import { seo } from '../utils/seo';
+import { DefaultCatchBoundary } from '../components/DefaultCatchBoundary';
+import { NotFound } from '../components/NotFound';
 
 import '@mantine/core/styles.css';
 import { mantineTheme } from '../theme'
@@ -34,6 +36,8 @@ export const Route = createRootRoute({
       }),
     ],
   }),
+  errorComponent: DefaultCatchBoundary,
+  notFoundComponent: () => <NotFound />,
   component: RootComponent,
 })
 

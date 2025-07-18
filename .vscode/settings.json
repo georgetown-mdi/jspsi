@@ -20,5 +20,4 @@
     "*.ts": "$(capture).*.ts",
     "vite.config.ts": "vitest.config.ts"
   },
-  "editor.formatOnSave": true,
 }

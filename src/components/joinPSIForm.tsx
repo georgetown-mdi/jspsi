@@ -1,7 +1,7 @@
 import { useForm } from '@tanstack/react-form';
 import { TextInput, Group, Button } from '@mantine/core';
 
-export default function CreatePSIForm() {
+export default function JoinPSIForm() {
   const { Field, handleSubmit, state } = useForm({
     defaultValues: {
       id: '',

@@ -1,26 +1,24 @@
 
-import { createFileRoute } from '@tanstack/react-router'
-import CreatePSIForm from '../components/createPSIForm'
-import JoinPSIForm from '../components/joinPSIForm'
+import { createFileRoute } from '@tanstack/react-router';
+import CreatePSIForm from '../components/CreatePSIForm';
+import JoinPSIForm from '../components/JoinPSIForm';
+import { Center, Group, Paper } from '@mantine/core';
 
 export const Route = createFileRoute('/')({
   component: Home
-})
+});
 
 function Home() {
-  // const { state } = Route.useLoaderData();
-  
   return (
-    <div>
-      <div
-        className='new_psi'
-        style={{width:"48%", float: "left"}}
-      >
-        <CreatePSIForm />
-      </div>
-      <div className='join_psi' style={{width:'48%', float:'right'}}>
-        <JoinPSIForm />
-      </div>
-    </div>
+    <Center>
+      <Group>
+        <Paper shadow="xs" p="xl">
+          <CreatePSIForm />
+        </Paper>
+        <Paper shadow="xs" p="xl">
+          <JoinPSIForm />
+        </Paper>
+      </Group>
+    </Center>
   );
 }
