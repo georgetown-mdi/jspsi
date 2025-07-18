@@ -1,5 +1,5 @@
 
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useRouter} from '@tanstack/react-router';
 import { Center, Paper, Title, Text, Stack, Button } from '@mantine/core';
 import { useClipboard } from '@mantine/hooks';
 
@@ -27,9 +27,16 @@ function Home() {
   const { id } = Route.useSearch();
   const session = Route.useLoaderData();
   const clipboard = useClipboard();
+  const router = useRouter();
 
-  // TODO: figure out how to detect if on server and user that when applicable
-  const url = `${window.location.protocol}//${window.location.host}/api/psi/${id}/join`;
+  let url: string;
+  if (router.isServer) {
+    url = `http://localhost:3000/api/psi/${id}/join`;
+    // TODO: figure out how to lookup the host from something, anything
+    console.log('is server');
+  } else {
+    url = `${window.location.protocol}//${window.location.host}/api/psi/${id}/join`;
+  }
   
   return (
     <Center>

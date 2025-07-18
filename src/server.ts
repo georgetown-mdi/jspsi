@@ -1,4 +1,3 @@
-// src/server.ts
 import {
   createStartHandler,
   defaultStreamHandler,
