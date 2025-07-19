@@ -9,7 +9,7 @@ import { json } from '@tanstack/react-start';
 import { sessions } from '../../../../utils/sessions';
 
 export const ServerRoute = createServerFileRoute('/api/psi/$id/').methods({
-  GET: async ({ request, params }) => {
+  GET: ({ request, params }) => {
     if (!('id' in params) || params['id'] === undefined) {
       setResponseStatus(400);
       return new Response('Missing id of PSI session');

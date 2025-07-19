@@ -1,4 +1,5 @@
 export type Session = {
+  id: string;
   initiatedName: string;
   invitedName: string;
   description: string;

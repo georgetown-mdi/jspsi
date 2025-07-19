@@ -1,9 +1,10 @@
 
 import { createFileRoute, useRouter} from '@tanstack/react-router';
-import { Center, Paper, Title, Text, Stack, Button } from '@mantine/core';
+import { Center, Paper, Title, Stack, Button } from '@mantine/core';
 import { useClipboard } from '@mantine/hooks';
 
 import type { Session } from '../../utils/sessions';
+import { SessionDetails } from '../../components/SessionDetails';
 
 export const Route = createFileRoute('/psi/start')({
   validateSearch: (search: Record<string, unknown>): { id: string } => {
@@ -24,40 +25,30 @@ export const Route = createFileRoute('/psi/start')({
 });
 
 function Home() {
-  const { id } = Route.useSearch();
   const session = Route.useLoaderData();
   const clipboard = useClipboard();
   const router = useRouter();
 
-  let url: string;
+  let url: URL;
+  const searchParams = new URLSearchParams({id: session['id']});
   if (router.isServer) {
-    url = `http://localhost:3000/api/psi/${id}/join`;
+    url = new URL(`http://localhost:3000/psi/join?${searchParams}`);
     // TODO: figure out how to lookup the host from something, anything
     console.log('is server');
   } else {
-    url = `${window.location.protocol}//${window.location.host}/api/psi/${id}/join`;
+    url = new URL(`${window.location.protocol}//${window.location.host}/psi/join?${searchParams}`);
   }
   
   return (
     <Center>
       <Stack>
-        <Paper shadow="xs" p="xl">
-          <Title order={1}>Session Details</Title>
-          <Title order={2}>Initiated By:</Title>
-          <Text>{ session['initiatedName'] }</Text>
-          <Title order={2}>Agency/Person Invited:</Title>
-          <Text>{ session['invitedName'] }</Text>
-          <Title order={2}>Description:</Title>
-          <Text>{ session['description'] }</Text>
-          <Title order={2}>Session ID</Title>
-          <Text>{ id }</Text>
-        </Paper>
+        <SessionDetails session={session}/>
         <Paper shadow="xs" p="xl">
           <Title order={1}>Sharable Link</Title>
-          <pre>{url}</pre>
+          <pre>{url.toString()}</pre>
           <Button
             color={clipboard.copied ? 'teal' : 'blue'}
-            onClick={() => clipboard.copy(url)}
+            onClick={() => clipboard.copy(url.toString())}
           >{clipboard.copied ? 'Copied' : 'Copy'}
           </Button>
         </Paper>

@@ -19,6 +19,7 @@ import { NotFound } from '../components/NotFound';
 import '@mantine/core/styles.css';
 import { mantineTheme } from '../theme'
 
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -45,6 +46,7 @@ function RootComponent() {
   return (
     <RootDocument>
       <Outlet />
+      <TanStackRouterDevtools />
     </RootDocument>
   )
 }

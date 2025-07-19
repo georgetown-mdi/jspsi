@@ -13,6 +13,7 @@ import { createServerRootRoute } from '@tanstack/react-start/server'
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PsiStartRouteImport } from './routes/psi/start'
+import { Route as PsiJoinRouteImport } from './routes/psi/join'
 import { ServerRoute as ApiPsiCreateServerRouteImport } from './routes/api/psi/create'
 import { ServerRoute as ApiPsiIdIndexServerRouteImport } from './routes/api/psi/$id/index'
 import { ServerRoute as ApiPsiIdWaitServerRouteImport } from './routes/api/psi/$id/wait'
@@ -27,6 +28,11 @@ const IndexRoute = IndexRouteImport.update({
 const PsiStartRoute = PsiStartRouteImport.update({
   id: '/psi/start',
   path: '/psi/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PsiJoinRoute = PsiJoinRouteImport.update({
+  id: '/psi/join',
+  path: '/psi/join',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPsiCreateServerRoute = ApiPsiCreateServerRouteImport.update({
@@ -47,27 +53,31 @@ const ApiPsiIdWaitServerRoute = ApiPsiIdWaitServerRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/psi/join': typeof PsiJoinRoute
   '/psi/start': typeof PsiStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/psi/join': typeof PsiJoinRoute
   '/psi/start': typeof PsiStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/psi/join': typeof PsiJoinRoute
   '/psi/start': typeof PsiStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/psi/start'
+  fullPaths: '/' | '/psi/join' | '/psi/start'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/psi/start'
-  id: '__root__' | '/' | '/psi/start'
+  to: '/' | '/psi/join' | '/psi/start'
+  id: '__root__' | '/' | '/psi/join' | '/psi/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PsiJoinRoute: typeof PsiJoinRoute
   PsiStartRoute: typeof PsiStartRoute
 }
 export interface FileServerRoutesByFullPath {
@@ -116,6 +126,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PsiStartRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/psi/join': {
+      id: '/psi/join'
+      path: '/psi/join'
+      fullPath: '/psi/join'
+      preLoaderRoute: typeof PsiJoinRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 declare module '@tanstack/react-start/server' {
@@ -146,6 +163,7 @@ declare module '@tanstack/react-start/server' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PsiJoinRoute: PsiJoinRoute,
   PsiStartRoute: PsiStartRoute,
 }
 export const routeTree = rootRouteImport

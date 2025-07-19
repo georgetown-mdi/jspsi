@@ -28,6 +28,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
     const id = uuidv4();
     
     sessions[id] = {
+      id: id,
       initiatedName: payload['initiatedName'] as string,
       invitedName: payload['invitedName'] as string,
       description:

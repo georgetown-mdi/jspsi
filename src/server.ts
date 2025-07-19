@@ -3,7 +3,33 @@ import {
   defaultStreamHandler,
 } from '@tanstack/react-start/server'
 import { createRouter } from './router'
+import { PeerServer } from 'peer';
+
+import * as http from 'http';
+import * as https from 'https';
 
 export default createStartHandler({
   createRouter,
 })(defaultStreamHandler)
+
+let peerServerServer: http.Server | https.Server;
+
+export const peerServer = PeerServer(
+  { port: 3001, path: "/api" },
+  (server) => {
+    peerServerServer = server;
+  }
+);
+
+if (import.meta.hot) {
+  import.meta.hot.on("vite:beforeFullReload", () => {
+    if (peerServerServer !== undefined)
+       peerServerServer.close();
+  })
+
+  import.meta.hot.dispose(() => {
+    if (peerServerServer !== undefined)
+      peerServerServer.close()
+  });
+}
+
