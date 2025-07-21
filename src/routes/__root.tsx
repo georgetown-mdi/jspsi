@@ -1,25 +1,27 @@
 /// <reference types="vite/client" />
 import {
-  ColorSchemeScript,
-  MantineProvider,
-  mantineHtmlProps
-} from '@mantine/core';
-import {
   HeadContent,
   Outlet,
   Scripts,
   createRootRoute,
 } from '@tanstack/react-router'
-import '@mantine/core/styles.css';
 import type { ReactNode } from 'react';
+
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+
+import {
+  ColorSchemeScript,
+  MantineProvider,
+  mantineHtmlProps
+} from '@mantine/core';
+import '@mantine/core/styles.css';
+import '@mantine/dropzone/styles.css';
+
 import { seo } from '../utils/seo';
 import { DefaultCatchBoundary } from '../components/DefaultCatchBoundary';
 import { NotFound } from '../components/NotFound';
 
-import '@mantine/core/styles.css';
 import { mantineTheme } from '../theme'
-
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 export const Route = createRootRoute({
   head: () => ({

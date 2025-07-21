@@ -8,3 +8,7 @@ export type Session = {
 }
 
 export const sessions: { [key: string]: Session } = {};
+
+export type SessionProp = {
+  session: Session
+};

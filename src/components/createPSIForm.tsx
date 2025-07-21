@@ -25,9 +25,10 @@ export default function CreatePSIForm() {
 
       if (response.ok) {
         navigate({
-          to: '/psi/start',
+          to: '/psi',
           search: {
             id: sessionId,
+            start: true
           }
         });
       } else {

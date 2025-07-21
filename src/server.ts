@@ -21,6 +21,7 @@ export const peerServer = PeerServer(
   }
 );
 
+// see: https://github.com/vitest-dev/vitest/issues/2334
 if (import.meta.hot) {
   import.meta.hot.on("vite:beforeFullReload", () => {
     if (peerServerServer !== undefined)
