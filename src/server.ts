@@ -15,7 +15,11 @@ export default createStartHandler({
 let peerServerServer: http.Server | https.Server;
 
 export const peerServer = PeerServer(
-  { port: 3001, path: "/api" },
+  {
+    port: 3001,
+    path: "/api",
+    corsOptions: { origin: ['http://localhost:3000'] }
+  },
   (server) => {
     peerServerServer = server;
   }

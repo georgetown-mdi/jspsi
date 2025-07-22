@@ -2,66 +2,76 @@ import {
   createServerFileRoute,
   setResponseStatus,
   clearResponseHeaders,
-  setResponseHeaders
+  setResponseHeaders,
+  getEvent
 } from '@tanstack/react-start/server';
+
+import { createEventStream, sendNoContent } from 'h3';
 
 import { sessions } from '../../../../utils/sessions';
 
 const INVITED_PEER_ID_POLLING_FREQUENCY_MS = 250;
 
-/*
-export const ServerRoute = createServerFileRoute('/api/psi').methods((api) => ({
-  POST: api.handler((event) => {
-    const response = new Response();
-    setResponseHeaders(event, {
-    })
-    console.log(event)
-  })
-}));
-*/
+export const ServerRoute = createServerFileRoute('/api/psi/$id/wait').methods((api) => ({
+  GET: api.handler(async (ctx) => {
+    console.log("getting event");
+    const event = getEvent();
+    console.log("creating event stream");
+    const eventStream = createEventStream(event);
 
-export const ServerRoute = createServerFileRoute('/api/psi/$id/wait').methods({
-  POST: async ({ request, params }) => {
+    const params = ctx.params;
     if (!('id' in params) || params['id'] === undefined) {
-      setResponseStatus(400);
-      return new Response('Missing id of PSI session');
+      setResponseStatus(400, 'missing session id');
+      return 'missing session id';
     }
     const sessionId = params['id'] as string;
     if (!(sessionId in sessions)) {
-      setResponseStatus(400);
-      return new Response('Invalid session id');
+      setResponseStatus(400, `invalid session id: ${sessionId}`);
+      return `invalid session id: ${sessionId}`;
     }
     const session = sessions[sessionId];
     if (Date.now() > session.timeToLive.getTime()) {
-      setResponseStatus(400);
-      return new Response('Expired session id');
+      setResponseStatus(400, `session ${sessionId} has expired`);
+      return `session ${sessionId} has expired`;
     }
-    // see https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
-    // headers from https://stackoverflow.com/a/59041709
-    clearResponseHeaders();
-    setResponseHeaders({
-      'Cache-Control': 'no-cache',
-      'Content-Type': 'text/event-stream',
-      'Access-Control-Allow-Origin': '*',
-      'Connection': 'keep-alive'
-    });
-    // flushHeaders(); h3 is under the hood
     
-    function getInvitedPeerId() {
-      if ('invitedPeerId' in session) {
+    var clientWaiting = true;
+    const getInvitedPeerId = function() {
+      if (!clientWaiting) {
+        // client closed while function was timed out - we can gracefully exit
+        console.log('stream has closed; exiting timeout recursion')
+      } else if ('invitedPeerId' in session) {
         console.log(
           `sending SSE peer id ${session['invitedPeerId']} for session ${sessionId}`
         );
 
-        return new Response(JSON.stringify({invitedPeerId: session['invitedPeerId']}));
+        eventStream
+          .push(JSON.stringify({invitedPeerId: session['invitedPeerId']}))
+          // .then(() => eventStream.close())
+      } else if (Date.now() > session.timeToLive.getTime()) {
+        console.log(`pushing session expired message`)
+        eventStream.
+          push(JSON.stringify({error: `session ${sessionId} timedout waiting`}))
+          // .then(() => eventStream.close())
+      } else {
+        setTimeout(getInvitedPeerId, INVITED_PEER_ID_POLLING_FREQUENCY_MS)
       }
-      setTimeout(getInvitedPeerId, INVITED_PEER_ID_POLLING_FREQUENCY_MS);
     }
+    
+    eventStream.onClosed(async () => {
+      console.log('event stream closed');
+      clientWaiting = false;
+      await eventStream.close();
+    });
 
-    console.log(
-      `established SSE connection for session ${sessionId} and waiting until invited peer id is available`
-    );
+    console.log(`waiting for peer to register on ${session['id']}`);
+    getInvitedPeerId();
+    //eventStream.push(JSON.stringify({ invitedPeerId: "12345" }));
 
-    return getInvitedPeerId();
-  }
-});
+    console.log('sending event stream');
+    await eventStream.send();
+
+    setResponseStatus(event, 204);
+    return new Response();
+  })
+}));

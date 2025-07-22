@@ -3,86 +3,55 @@ import { Button, Text, Center, Loader, Transition, Paper, PaperProps, Progress }
 
 import type { Session } from '../utils/sessions';
 
+export type PSIStatus =
+  | 'stopped'
+  | 'waiting for peer';
+
+type StatusInfo = [
+  description: string,
+  stage: number
+]
+
+const statusInfos = {
+  'stopped': ['Stopped', 0] as StatusInfo,
+  'waiting for peer': ['Waiting for peer', 1] as StatusInfo
+};
+
+
 interface StatusIndicatorProps extends PaperProps {
   session: Session;
+  status: PSIStatus
 }
 
-const protocolStages = [
-  'Initializing...',
-  'Connecting to server...',
-  'Authenticating...',
-  'Fetching data...',
-  'Processing...',
-  'Finalizing...',
-  'Complete!',
-];
-
 export default function StatusIndicator(props: StatusIndicatorProps) {
-  const { session, ...paperProps } = props;
+  const { session, status, ...paperProps } = props;
 
-  const [started, setStarted] = useState(false);
-  const [currentStage, setCurrentStage] = useState(0);
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-
-    if (started && currentStage < protocolStages.length - 1) {
-      timer = setTimeout(() => {
-        setVisible(false);
-        setTimeout(() => {
-          setCurrentStage((prev) => prev + 1);
-          setVisible(true);
-        }, 200); // match transition duration
-      }, 1500);
-    }
-
-    return () => clearTimeout(timer);
-  }, [started, currentStage]);
-
-  const handleStart = () => {
-    setStarted(true);
-    setCurrentStage(0);
-  };
+  const started = status != 'stopped';
+  const visible = started;
+  let stage = 0;
 
   return (
     <Paper {...paperProps} >
-      {!started ? (
-        <Button size="lg" onClick={handleStart}>
-          Start
-        </Button>
-      ) : (
-        <>
-          <Transition mounted={visible} transition="fade" duration={200} timingFunction="ease">
-            {(styles) => (
-              <div style={styles}>
-                <Text ta="center" size="lg" fw={500}>
-                  {protocolStages[currentStage]}
-                </Text>
-              </div>
-            )}
-          </Transition>
-
-          {currentStage < protocolStages.length - 1 ? (
-            <>
-              <Center mt="md">
-                <Loader size="sm" />
-              </Center>
-              <Progress
-                mt="md"
-                value={((currentStage + 1) / protocolStages.length) * 100}
-                radius="xl"
-                striped
-                animated
-              />
-            </>
-          ) : (
-            <Text mt="md" ta="center" c="green" fw={600}>
-              Protocol Complete!
+      <Transition mounted={visible} transition="fade" duration={200} timingFunction="ease">
+        {(styles) => (
+          <div style={styles}>
+            <Text ta="center" size="lg" fw={500}>
+              {statusInfos[status]['description']}
             </Text>
-          )}
-        </>
-      )}
+          </div>
+        )}
+      </Transition>
+
+      <Center mt="md">
+        <Loader size="sm" />
+      </Center>
+      <Progress
+        mt="md"
+        value={((statusInfos[status]['stage'] + 1) / Object.keys(statusInfos).length) * 100}
+        radius="xl"
+        striped
+        animated
+      />
     </Paper>
   );
 }
