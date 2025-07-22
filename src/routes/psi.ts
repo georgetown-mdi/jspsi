@@ -154,4 +154,55 @@ router.get('/server/peerId', function (req, res) {
   });
 });
 
+router.post('/api/session', function (req, res) {
+  const { initiatedName, invitedName, description } = req.body;
+
+  // Validate input
+  if (!initiatedName) {
+    return res
+      .status(400)
+      .json({ error: 'Missing name of person initiating PSI' });
+  }
+  if (!invitedName) {
+    return res
+      .status(400)
+      .json({ error: 'Missing name of person invited to PSI' });
+  }
+
+  // Create a unique session ID
+  const sessionId = uuidv4();
+
+  // Store the session in memory
+  sessions[sessionId] = {
+    initiatedName,
+    invitedName,
+    description: description || ''
+  };
+
+  // Build a link for joining the session (optional)
+  const link = `${req.protocol}://${req.get('host')}/client?sessionId=${sessionId}`;
+  debug(`new psi session ${sessionId} created`);
+
+  // Respond with JSON containing the session info
+  res.json({
+    sessionId,
+    initiatedName,
+    invitedName,
+    description: description || '',
+    link
+  });
+});
+
+router.get('/api/session/:id', (req, res) => {
+  const session = sessions[req.params.id];
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  res.json(session);
+});
+
+router.get('/api/test', (req, res) => {
+  res.json({ message: 'API is working!' });
+});
+
 export default router;
