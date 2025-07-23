@@ -2,19 +2,31 @@ import type { Session } from './sessions';
 
 import type { Peer, DataConnection } from 'peerjs';
 
+export const stages = [
+  ['before start', 'Stopped'],
+  ['waiting for startup message', 'Waiting for partner\'s encrypted data'],
+  ['sending client request', 'Sending my encrypted data'],
+  ['waiting for response', 'Waiting for my doubly-encrypted data'],
+  ['sending results', 'Sending results'],
+  ['done', 'Done']
+];
+
 export class PSIAsClient {
   psi: any;
   data: Array<string>
   client: any;
   serverSetup: any
+  setStage: (name: string) => void;
 
   messageHandlers = [
     (conn: DataConnection, data) => {
       console.log('responding server setup message with request');
+      this.setStage('sending client request');
       this.serverSetup = this.psi.serverSetup.deserializeBinary(data);
       const clientRequest = this.client.createRequest(this.data);
 
       conn.send(clientRequest.serializeBinary());
+      this.setStage('waiting for response');
     },
     (conn: DataConnection, data) => {
       console.log('responding to server response by creating association table');
@@ -27,13 +39,16 @@ export class PSIAsClient {
       for (var i = 0; i < associationTable[0].length; i++) {
         commonValues.push(this.data[associationTable[0][i]]);
       }
+
+      this.setStage('sending results');
     }
   ]
 
-  constructor(psi, data: Array<string>) {
+  constructor(psi, data: Array<string>, setStage: (name: string) => void) {
     this.psi = psi;
     this.data = data;
     this.client = psi.client.createWithNewKey(true);
+    this.setStage = setStage;
   }
 }
 

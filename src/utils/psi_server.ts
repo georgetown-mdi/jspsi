@@ -2,13 +2,25 @@ import type { Session } from './sessions'
 
 import type { Peer, DataConnection } from 'peerjs';
 
+export const stages = [
+  ['before start', 'Stopped'],
+  ['waiting for peer', 'Waiting for peer'],
+  ['sending startup message', 'Sending my encrypted data'],
+  ['waiting for client request', 'Waiting for partner\'s encrypted data'],
+  ['sending response', 'Sending partner\'s doubly-encrypted data'],
+  ['waiting for results', 'Waiting for results'],
+  ['done', 'Done']
+];
+
 export class PSIAsServer {
   psi: any;
   data: Array<string>
   server: any;
+  setStage: (name: string) => void;
 
   startupHandler = (conn: DataConnection) => {
     console.log('creating server setup message for new connection');
+    this.setStage('sending startup message')
     this.server = this.psi.server.createWithNewKey(true);
 
     let sortingPermutation: Array<number> = [];
@@ -21,19 +33,26 @@ export class PSIAsServer {
     );
 
     conn.send(serverSetup.serializeBinary());
+
+    this.setStage('waiting for client request');
   }
   messageHandlers = [
     (conn: DataConnection, data) => {
       console.log('responding to client request with server response');
+      this.setStage('sending response')
       const clientRequest = this.psi.request.deserializeBinary(data);
       const serverResponse = this.server.processRequest(clientRequest);
+
       conn.send(serverResponse.serializeBinary());
+
+      this.setStage('waiting for results');
     }
   ]
 
-  constructor(psi, data: Array<string>) {
+  constructor(psi, data: Array<string>, setStage: (name: string) => void) {
     this.psi = psi;
     this.data = data;
+    this.setStage = setStage;
     this.server = psi.server.createWithNewKey(true);
   }
 }

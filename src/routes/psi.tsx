@@ -12,10 +12,10 @@ import type { Session } from '../utils/sessions';
 
 import SessionDetails from '../components/SessionDetails';
 import FileSelect from '../components/FileSelect';
-import StatusIndicator, { type PSIStatus } from '../components/StatusIndicator';
+import { StatusIndicatorFactory, ProtocolStage } from '../components/StatusIndicator';
 
-import { waitForPeerId, openPeerConnection, PSIAsServer } from '../utils/psi_server';
-import { createAndSharePeerId, PSIAsClient } from '../utils/psi_client';
+import { waitForPeerId, openPeerConnection, PSIAsServer, stages as serverStages } from '../utils/psi_server';
+import { createAndSharePeerId, PSIAsClient, stages as clientStages } from '../utils/psi_client';
 
 import { loadPSILibrary } from '../utils/psi'
 import { PeerConnectionProtocol } from '../utils/PeerConnectionProtocol';
@@ -75,15 +75,19 @@ function Home() {
     select: (search) => search.start
   }) ? 'server' : 'client';
 
+  const stages: ProtocolStage[] = (role === 'server' ? serverStages : clientStages) as ProtocolStage[];
+  const StatusIndicator = StatusIndicatorFactory(stages);
+
   const [files, setFiles] = useState<File[]>([]);
   const [submitted, setSubmitted] = useState(false);
-  const [status, setStatus] = useState('waiting for peer' as PSIStatus);
+  const [stage, setStage] = useState(stages[0][0]);
 
   const handleSubmit = async () => {
     setSubmitted(true);
     
     if (role === 'server') {
       // wait for peer no matter what
+      setStage(stages[1][0]);
       waitForPeerId(session).then((peerId) => {
         Promise.all([
           loadPSILibrary(),
@@ -92,7 +96,7 @@ function Home() {
         ]).then(async (values) => {
           const [ psi, data, [peer, conn] ] = values;
           
-          const server = new PSIAsServer(psi, data);
+          const server = new PSIAsServer(psi, data, (stage) => { console.log("setting to stage: " + stage); setStage(stage); });
           const protocolHandler = new PeerConnectionProtocol(
             peer,
             conn,
@@ -103,6 +107,7 @@ function Home() {
         })
       })
     } else {
+      setStage(stages[1][0]);
       Promise.all([
         loadPSILibrary(),
         loadFile(files[0]),
@@ -111,7 +116,7 @@ function Home() {
         const peer = await createAndSharePeerId(session);
 
         peer.on('connection', async (conn) => {
-          const client = new PSIAsClient(psi, data);
+          const client = new PSIAsClient(psi, data, (stage) => { console.log("setting to stage: " + stage); setStage(stage); });
           const protocolHandler = new PeerConnectionProtocol(
             peer,
             conn,
@@ -142,7 +147,7 @@ function Home() {
       <Stack>
         <Group justify="space-between" align="stretch" grow>
           <SessionDetails session={session} />
-          <StatusIndicator session={session} status={status}/>
+          <StatusIndicator session={session} stageName={stage}/>
         </Group>
         { role === 'server' && (
           <Paper>
