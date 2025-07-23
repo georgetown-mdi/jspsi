@@ -40,6 +40,22 @@ const CreateSession = () => {
 
   const { sessionId: urlSessionId } = useParams();
 
+  const handleCreate = async (e) => {
+    e.preventDefault(); // Prevents the page from reloading on form submit
+
+    // Send a POST request to your backend API to create a session
+    const res = await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionName, initiatedName, invitedName, description })
+    });
+    const data = await res.json();
+
+    // Redirect to the session page (or show session info)
+    navigate(`/session/${data.sessionId}`);
+  };
+  
+  
   useEffect(() => {
     if (urlSessionId) {
       setSessionId(urlSessionId);
@@ -166,7 +182,7 @@ const CreateSession = () => {
                   Set up your session and upload your dataset to get started
                 </p>
               </div>
-
+              <form onSubmit={handleCreate}>
               <Card className="shadow-lg">
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -341,6 +357,7 @@ const CreateSession = () => {
                   </Button>
                 </CardContent>
               </Card>
+              </form>
             </div>
           )}
 

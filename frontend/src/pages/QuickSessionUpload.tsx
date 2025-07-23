@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Shield, Users, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-const SessionUpload = () => {
+const QuickSessionUpload = () => {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const [sessionInfo, setSessionInfo] = useState(null);
@@ -79,6 +79,10 @@ const SessionUpload = () => {
                 {sessionInfo ? (
                   <div>
                     <div className="mb-2">
+                      <span className="font-semibold">Session Name:</span>{' '}
+                      {sessionInfo.sessionName}
+                    </div>
+                    <div className="mb-2">
                       <span className="font-semibold">Your Name:</span>{' '}
                       {sessionInfo.initiatedName}
                     </div>
@@ -122,4 +126,4 @@ const SessionUpload = () => {
   );
 };
 
-export default SessionUpload;
+export default QuickSessionUpload;

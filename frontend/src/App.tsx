@@ -9,7 +9,7 @@ import CreateSession from "./pages/CreateSession";
 import JoinSession from "./pages/JoinSession";
 import ExecuteSession from "./pages/ExecuteSession";
 import NotFound from "./pages/NotFound";
-import SessionUpload from "./pages/SessionUpload";
+import QuickSessionUpload from "./pages/QuickSessionUpload";
 
 const queryClient = new QueryClient();
 
@@ -24,7 +24,7 @@ const App = () => (
           <Route path="/create" element={<CreateSession />} />
           <Route path="/join/:sessionId?" element={<JoinSession />} />
           <Route path="/execute/:sessionId" element={<ExecuteSession />} />
-          <Route path="/session/:sessionId" element={<SessionUpload />} />
+          <Route path="/session/:sessionId" element={<QuickSessionUpload />} />
           <Route path="/session/:sessionId/ready" element={<ExecuteSession />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

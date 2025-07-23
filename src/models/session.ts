@@ -1,4 +1,5 @@
 export interface Session {
+  sessionName: string;
   initiatedName: string;
   invitedName: string;
   description: string;

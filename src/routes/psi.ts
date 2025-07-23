@@ -74,6 +74,10 @@ router.post('/client/peerId', function (req, res) {
   res.sendStatus(200);
 });
 
+
+
+
+
 router.get('/server', function (req, res) {
   if (
     !('initiatedName' in req.query)
@@ -87,6 +91,7 @@ router.get('/server', function (req, res) {
   const sessionId = uuidv4();
 
   sessions[sessionId] = {
+    sessionName: `${req.query['initiatedName']} and ${req.query['invitedName']}'s PSI Quick Session`,
     initiatedName: req.query['initiatedName'] as string,
     invitedName: req.query['invitedName'] as string,
     description:
@@ -108,6 +113,12 @@ router.get('/server', function (req, res) {
     description: session['description']
   });
 });
+
+
+
+
+
+
 
 router.get('/server/peerId', function (req, res) {
   if (!('sessionId' in req.query) || req.query['sessionId'] === undefined) {
@@ -154,10 +165,16 @@ router.get('/server/peerId', function (req, res) {
   });
 });
 
+//can include stuff about advanced psi protocol later
 router.post('/api/session', function (req, res) {
-  const { initiatedName, invitedName, description } = req.body;
+  const { sessionName, initiatedName, invitedName, description} = req.body;
 
   // Validate input
+  let finalSessionName = sessionName;
+
+  if (!sessionName) {
+    finalSessionName = `${initiatedName} and ${invitedName}'s PSI Quick Session`;
+  }
   if (!initiatedName) {
     return res
       .status(400)
@@ -169,23 +186,22 @@ router.post('/api/session', function (req, res) {
       .json({ error: 'Missing name of person invited to PSI' });
   }
 
-  // Create a unique session ID
   const sessionId = uuidv4();
 
-  // Store the session in memory
   sessions[sessionId] = {
+    sessionName: finalSessionName,
     initiatedName,
     invitedName,
     description: description || ''
   };
 
-  // Build a link for joining the session (optional)
   const link = `${req.protocol}://${req.get('host')}/client?sessionId=${sessionId}`;
   debug(`new psi session ${sessionId} created`);
 
   // Respond with JSON containing the session info
   res.json({
     sessionId,
+    sessionName: finalSessionName,
     initiatedName,
     invitedName,
     description: description || '',
