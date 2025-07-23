@@ -1,14 +1,10 @@
 import { useState } from 'react';
-import { useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Shield,
   Upload,
-  Copy,
-  CheckCircle,
-  ArrowLeft,
   Users,
-  Clock,
+  ArrowLeft,
   Info,
   Settings,
   Download
@@ -20,131 +16,64 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import FileUpload from '@/components/FileUpload';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { Switch } from '@/components/ui/switch';
 
 const CreateSession = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [sessionName, setSessionName] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [shareableLink, setShareableLink] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [step, setStep] = useState<'setup' | 'waiting'>('setup');
-
   const [initiatedName, setInitiatedName] = useState('');
   const [invitedName, setInvitedName] = useState('');
   const [description, setDescription] = useState('');
-  const [enableAdvancedPSI, setEnableAdvancedPSI] = useState(false); // temporary nub, no functionality
-  const [oneTimeLink, setOneTimeLink] = useState(false); // temporary nub, no functionality
+  const [enableAdvancedPSI, setEnableAdvancedPSI] = useState(false);
+  const [oneTimeLink, setOneTimeLink] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  const { sessionId: urlSessionId } = useParams();
-
-  const handleCreate = async (e) => {
-    e.preventDefault(); // Prevents the page from reloading on form submit
-
-    // Send a POST request to your backend API to create a session
-    const res = await fetch('/api/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionName, initiatedName, invitedName, description })
-    });
-    const data = await res.json();
-
-    // Redirect to the session page (or show session info)
-    navigate(`/session/${data.sessionId}`);
-  };
-  
-  
-  useEffect(() => {
-    if (urlSessionId) {
-      setSessionId(urlSessionId);
-      setStep('waiting');
-    }
-  }, [urlSessionId]);
-
-  const generateSessionId = () => {
-    return (
-      Math.random().toString(36).substring(2, 15)
-      + Math.random().toString(36).substring(2, 15)
-    );
-  };
-
-  const handleGenerateLink = async () => {
-    if (!sessionName.trim()) {
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !sessionName.trim()
+      || !initiatedName.trim()
+      || !invitedName.trim()
+      || !file
+    ) {
       toast({
-        title: 'Session name required',
-        description: 'Please enter a name for your session.',
+        title: 'Missing required fields',
+        description: 'Please fill out all required fields and upload your CSV.',
         variant: 'destructive'
       });
       return;
     }
-
-    if (!initiatedName.trim()) {
-      toast({
-        title: 'Your name required',
-        description: 'Please enter a name for your name.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    if (!invitedName.trim()) {
-      toast({
-        title: "Invitee's name required",
-        description: 'Please enter a name for your name.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    if (!file) {
-      toast({
-        title: 'File required',
-        description: 'Please upload your CSV file.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
     setIsGenerating(true);
-
-    // Simulate processing time
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    const newSessionId = generateSessionId();
-    const link = `${window.location.origin}/join/${newSessionId}`;
-
-    setSessionId(newSessionId);
-    setShareableLink(link);
-    setStep('waiting');
-    setIsGenerating(false);
-
-    toast({
-      title: 'Session created successfully!',
-      description: 'Share the link with the other party to begin.'
-    });
-  };
-
-  const copyLink = async () => {
-    if (shareableLink) {
-      await navigator.clipboard.writeText(shareableLink);
-      toast({
-        title: 'Link copied!',
-        description: 'The session link has been copied to your clipboard.'
+    try {
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionName,
+          initiatedName,
+          invitedName,
+          description,
+          enableAdvancedPSI,
+          oneTimeLink
+        })
       });
-    }
-  };
-
-  const proceedToExecution = () => {
-    if (sessionId) {
-      navigate(`/execute/${sessionId}`);
+      const data = await res.json();
+      if (!data.sessionId) throw new Error('Session creation failed');
+      navigate(`/session/${data.sessionId}/ready`);
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to create session.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsGenerating(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
-      {/* Header */}
       <header className="border-b bg-white/80 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -163,26 +92,22 @@ const CreateSession = () => {
               </div>
               <h1 className="text-xl font-bold text-gray-900">PSI Secure</h1>
             </div>
-            <div className="text-sm text-gray-600">
-              Step {step === 'setup' ? '1' : '2'} of 3
-            </div>
+            <div className="text-sm text-gray-600">Step 1 of 2</div>
           </div>
         </div>
       </header>
-
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-2xl mx-auto">
-          {step === 'setup' && (
-            <div className="animate-fade-in">
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold text-gray-900 mb-4">
-                  Create New Session
-                </h2>
-                <p className="text-lg text-gray-600">
-                  Set up your session and upload your dataset to get started
-                </p>
-              </div>
-              <form onSubmit={handleCreate}>
+          <div className="animate-fade-in">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                Create New Session
+              </h2>
+              <p className="text-lg text-gray-600">
+                Set up your session and upload your dataset to get started
+              </p>
+            </div>
+            <form onSubmit={handleCreate}>
               <Card className="shadow-lg">
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -205,12 +130,7 @@ const CreateSession = () => {
                       placeholder="e.g., Customer Overlap Analysis"
                       className="mt-1"
                     />
-                    <p className="text-sm text-gray-500 mt-1">
-                      Choose a descriptive name that the other party will
-                      recognize
-                    </p>
                   </div>
-
                   <div>
                     <Label
                       htmlFor="initiatedName"
@@ -226,7 +146,6 @@ const CreateSession = () => {
                       className="mt-1"
                     />
                   </div>
-
                   <div>
                     <Label
                       htmlFor="invitedName"
@@ -242,7 +161,6 @@ const CreateSession = () => {
                       className="mt-1"
                     />
                   </div>
-
                   <div>
                     <Label
                       htmlFor="description"
@@ -259,13 +177,8 @@ const CreateSession = () => {
                       className="mt-1 w-full border border-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-200 px-4 py-2 rounded-lg bg-white text-gray-900 placeholder-gray-400 transition resize-y min-h-[2.5rem] max-h-40 text-sm"
                     />
                   </div>
-
-                  {/* advanced session settings (temporary) */}
-                  <div className="flex flex-col gap-2 ">
-                    <Label
-                      htmlFor="description"
-                      className="text-base font-medium"
-                    >
+                  <div className="flex flex-col gap-2 mt-4">
+                    <Label className="text-base font-medium">
                       Advanced Settings
                     </Label>
                     <label className="flex items-center gap-2">
@@ -276,7 +189,7 @@ const CreateSession = () => {
                         className="accent-blue-600 h-4 w-4"
                       />
                       <span className="text-sm text-gray-800">
-                        Enable Advanced PSI Protocol (coming soon)
+                        Enable Advanced PSI Protocol
                       </span>
                     </label>
                     <label className="flex items-center gap-2">
@@ -287,26 +200,25 @@ const CreateSession = () => {
                         className="accent-blue-600 h-4 w-4"
                       />
                       <span className="text-sm text-gray-800">
-                        Generate One-Time Link (coming soon)
+                        Generate One-Time Link
                       </span>
                     </label>
                   </div>
-
                   <div>
                     <Label className="text-base font-medium mb-3 block">
-                      Upload Your Dataset <span className="text-red-500">*</span>
+                      Upload Your Dataset{' '}
+                      <span className="text-red-500">*</span>
                     </Label>
                     <FileUpload
                       onFileSelect={setFile}
                       selectedFile={file}
                       accept=".csv"
-                      maxSize={10 * 1024 * 1024} // 10MB
+                      maxSize={10 * 1024 * 1024}
                     />
                     <p className="text-sm text-gray-500 mt-2">
                       CSV files only • Maximum 10MB • Your data stays in your
                       browser
                     </p>
-                    {/* Metadata identification and cleaning (placeholder) */}
                     <Card className="mt-6 bg-gray-50 border border-gray-200">
                       <CardContent className="py-4 flex flex-col gap-2 items-center">
                         <button
@@ -337,9 +249,8 @@ const CreateSession = () => {
                       </CardContent>
                     </Card>
                   </div>
-
                   <Button
-                    onClick={handleGenerateLink}
+                    type="submit"
                     disabled={isGenerating}
                     className="w-full bg-blue-600 hover:bg-blue-700 py-3 text-lg"
                   >
@@ -357,118 +268,8 @@ const CreateSession = () => {
                   </Button>
                 </CardContent>
               </Card>
-              </form>
-            </div>
-          )}
-
-          {step === 'waiting' && (
-            <div className="animate-fade-in">
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                </div>
-                <h2 className="text-3xl font-bold text-gray-900 mb-4">
-                  Session Ready!
-                </h2>
-                <p className="text-lg text-gray-600">
-                  Share the link below with the other party to begin the PSI
-                  process
-                </p>
-              </div>
-
-              <div className="space-y-6">
-                <Card className="shadow-lg">
-                  <CardHeader>
-                    <CardTitle>Session Details</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          Session Name
-                        </Label>
-                        <p className="text-lg font-medium text-gray-900">
-                          {sessionName}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          Session ID
-                        </Label>
-                        <p className="text-sm font-mono text-gray-700 bg-gray-100 px-3 py-2 rounded">
-                          {sessionId}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          File Uploaded
-                        </Label>
-                        <p className="text-sm text-gray-700">{file?.name}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="shadow-lg border-blue-200">
-                  <CardHeader>
-                    <CardTitle className="text-blue-900">
-                      Shareable Link
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center space-x-3">
-                      <Input
-                        value={shareableLink || ''}
-                        readOnly
-                        className="font-mono text-sm"
-                      />
-                      <Button onClick={copyLink} variant="outline">
-                        <Copy className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <p className="text-sm text-gray-600 mt-2">
-                      Send this link to the other party. They'll use it to join
-                      your session.
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-orange-50 border-orange-200">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center space-x-3">
-                      <Clock className="w-5 h-5 text-orange-600" />
-                      <div>
-                        <p className="font-medium text-orange-900">
-                          Waiting for other party
-                        </p>
-                        <p className="text-sm text-orange-700">
-                          Once they join and upload their file, you'll be able
-                          to proceed with the intersection.
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <div className="flex space-x-4">
-                  <Button
-                    variant="outline"
-                    onClick={() => setStep('setup')}
-                    className="flex-1"
-                  >
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    Back to Setup
-                  </Button>
-                  <Button
-                    onClick={proceedToExecution}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  >
-                    Continue to Execution
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+            </form>
+          </div>
         </div>
       </div>
     </div>
