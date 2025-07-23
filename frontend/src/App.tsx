@@ -25,6 +25,7 @@ const App = () => (
           <Route path="/join/:sessionId?" element={<JoinSession />} />
           <Route path="/execute/:sessionId" element={<ExecuteSession />} />
           <Route path="/session/:sessionId" element={<SessionUpload />} />
+          <Route path="/session/:sessionId/ready" element={<ExecuteSession />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
