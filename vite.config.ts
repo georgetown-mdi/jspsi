@@ -7,20 +7,27 @@ import viteReact from '@vitejs/plugin-react'
 
 
 export default defineConfig({
-   resolve: {
+  server: {
+    host: '127.0.0.1',
+    port: 3000,
+  },
+  build: {
+    rollupOptions: {
+      logLevel: 'debug'
+    }
+  },
+  plugins: [
+    tsConfigPaths({
+      projects: ['./tsconfig.json']
+    }),
+    tanstackStart({ customViteReactPlugin: true, target: 'netlifly' }),
+    viteReact()
+  ],
+  resolve: {
     alias: {
       "@components": path.resolve(__dirname, "src/components"),
       "@util": path.resolve(__dirname, "src/util"),
       "@": path.resolve(__dirname, "src"),
     },
-  },
-  server: {
-    host: '127.0.0.1',
-    port: 3000,
-  },
-  plugins: [
-    tsConfigPaths(),
-    tanstackStart({ customViteReactPlugin: true, target: 'netlify' }),
-    viteReact()
-  ],
+  }
 })
