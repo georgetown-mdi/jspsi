@@ -1,6 +1,0 @@
-{
-  "watch": ["src", "public"],
-  "ext": "ts,json,js",
-  "ignore": ["src/**/*.spec.ts"],
-  "exec": "node --env-file=.env ./src/server.ts"
-}

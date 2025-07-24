@@ -1,76 +1,40 @@
-import app from './app';
-import { debug as debugConstructor } from 'debug';
-const debug = debugConstructor('jspsi:wwwserver');
+import {
+  createStartHandler,
+  defaultStreamHandler,
+} from '@tanstack/react-start/server'
+import { createRouter } from './router'
+import { PeerServer } from 'peer';
 
-import http from 'http';
+import * as http from 'http';
+import * as https from 'https';
 
-import { default as createError, HttpError } from 'http-errors';
+export default createStartHandler({
+  createRouter,
+})(defaultStreamHandler)
 
-import { ExpressPeerServer } from 'peer';
+let peerServerServer: http.Server | https.Server;
 
-/**
- * Get port from environment and store in Express.
- */
-const port = parseInt(process.env.PORT || '3000', 10) || 3000;
-app.set('port', port);
-
-/**
- * Create HTTP server.
- */
-
-const server = http.createServer(app);
-
-/**
- * Listen on provided port, on all network interfaces.
- */
-
-const peerServer = ExpressPeerServer(server, {
-  path: '',
-  port: port
-});
-
-app.use('/peerjs', peerServer);
-
-// catch 404 and forward to error handler
-app.use(function (_req, _res, next) {
-  next(createError(404));
-});
-
-server.listen(port);
-server.on('error', onError);
-server.on('listening', onListening);
-
-/**
- * Event listener for HTTP server "error" event.
- */
-function onError(error: HttpError) {
-  if (error.syscall !== 'listen') {
-    throw error;
+export const peerServer = PeerServer(
+  {
+    port: 3001,
+    path: "/api",
+    corsOptions: { origin: ['http://localhost:3000'] }
+  },
+  (server) => {
+    peerServerServer = server;
   }
+);
 
-  const bind = typeof port === 'string' ? 'Pipe ' + port : 'Port ' + port;
+// see: https://github.com/vitest-dev/vitest/issues/2334
+if (import.meta.hot) {
+  import.meta.hot.on("vite:beforeFullReload", () => {
+    if (peerServerServer !== undefined)
+       peerServerServer.close();
+  })
 
-  // handle specific listen errors with friendly messages
-  switch (error.code) {
-    case 'EACCES':
-      console.error(bind + ' requires elevated privileges');
-      process.exit(1);
-      break;
-    case 'EADDRINUSE':
-      console.error(bind + ' is already in use');
-      process.exit(1);
-      break;
-    default:
-      throw error;
-  }
+  import.meta.hot.dispose(() => {
+    if (peerServerServer !== undefined)
+      peerServerServer.close()
+  });
 }
 
-/**
- * Event listener for HTTP server "listening" event.
- */
-
-function onListening() {
-  const addr = server.address();
-  const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr!.port;
-  debug('Listening on ' + bind);
-}
