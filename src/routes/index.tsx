@@ -11,11 +11,11 @@ export const Route = createFileRoute('/')({
 function Home() {
   return (
     <Center>
-      <Group>
-        <Paper shadow="xs" p="xl">
+      <Group justify="space-between" align="stretch" grow>
+        <Paper>
           <CreatePSIForm />
         </Paper>
-        <Paper shadow="xs" p="xl">
+        <Paper>
           <JoinPSIForm />
         </Paper>
       </Group>

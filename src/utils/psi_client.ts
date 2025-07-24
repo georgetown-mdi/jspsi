@@ -2,14 +2,15 @@ import type { Peer, DataConnection } from 'peerjs';
 
 import type { Session } from './sessions';
 import type { ProtocolStage } from '../components/Status';
+import { ShowStatusElements } from '../components/Status';
 
 export const stages: ProtocolStage[] = [
-  ['before start', 'Stopped', false, false],
-  ['waiting for startup message', 'Waiting for partner\'s encrypted data', true, true],
-  ['sending client request', 'Sending my encrypted data', true, true],
-  ['waiting for response', 'Waiting for my doubly-encrypted data', true, true],
-  ['sending results', 'Sending results', true, true],
-  ['done', 'Done', false, true]
+  ['before start', 'Stopped', ShowStatusElements.None],
+  ['waiting for startup message', 'Waiting for partner\'s encrypted data', ShowStatusElements.ProgressBar],
+  ['sending client request', 'Sending my encrypted data', ShowStatusElements.ProgressBar],
+  ['waiting for response', 'Waiting for my doubly-encrypted data', ShowStatusElements.ProgressBar],
+  ['sending results', 'Sending results', ShowStatusElements.ProgressBar],
+  ['done', 'Done', ShowStatusElements.Completion]
 ];
 
 export class PSIAsClient {
@@ -71,7 +72,26 @@ export function createAndSharePeerId(session: Session): Promise<Peer> {
       host: "/",
       path: "/api/",
       port: 3001,
-      debug: 2
+      debug: 2,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          /* Explicitly disable TURN survers, since they relay data. This is
+             mostly semantics since all data is relayed across servers on the
+             Internet, but we should look into establishing our own TURN
+             servers at some point.
+           */
+          /* {
+            urls: [
+              "turn:eu-0.turn.peerjs.com:3478",
+              "turn:us-0.turn.peerjs.com:3478",
+            ],
+            username: "peerjs",
+            credential: "peerjsp",
+          }, */
+        ],
+        sdpSemantics: 'unified-plan'
+      }
     });
 
     peer.on('open', function(peerId: string) {

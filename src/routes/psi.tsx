@@ -54,8 +54,6 @@ const loadFile = (file: File): Promise<Array<string>> =>  {
       if (file.type === "text/csv") result = result.slice(1);
       result = result.filter(function(entry) { return entry.trim() != ''; });
       
-      console.log("loaded server data: " + result.slice(0, Math.min(result.length, 5)));
-
       resolve(result);
     }
 
@@ -96,7 +94,7 @@ function Home() {
         ]).then(async (values) => {
           const [ psi, data, [peer, conn] ] = values;
           
-          const server = new PSIAsServer(psi, data, (stage) => { console.log("setting to stage: " + stage); setStage(stage); });
+          const server = new PSIAsServer(psi, data, setStage);
           const protocolHandler = new PeerConnectionProtocol(
             peer,
             conn,
@@ -106,13 +104,12 @@ function Home() {
           )
           await protocolHandler.runProtocol();
           
-          const fileData = new Blob(server.result, {type: 'text/plain'});
+          const fileData = new Blob([server.result.join('\n')], {type: 'text/plain'});
           const newResultURL = window.URL.createObjectURL(fileData);
 
           if (resultURL !== undefined)
             window.URL.revokeObjectURL(resultURL);
           
-          console.log('setting result url to ' + newResultURL);
           setResultURL(newResultURL);
         });
       })
@@ -126,7 +123,7 @@ function Home() {
         const peer = await createAndSharePeerId(session);
 
         peer.on('connection', async (conn) => {
-          const client = new PSIAsClient(psi, data, (stage) => { console.log("setting to stage: " + stage); setStage(stage); });
+          const client = new PSIAsClient(psi, data, setStage);
           const protocolHandler = new PeerConnectionProtocol(
             peer,
             conn,
@@ -137,7 +134,7 @@ function Home() {
 
           await protocolHandler.runProtocol();
 
-          const fileData = new Blob(client.result, {type: 'text/plain'});
+          const fileData = new Blob([client.result.join('\n')], {type: 'text/plain'});
           const newResultURL = window.URL.createObjectURL(fileData);
 
           if (resultURL !== undefined)

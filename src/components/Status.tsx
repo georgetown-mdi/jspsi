@@ -16,6 +16,13 @@ import type { Session } from '../utils/sessions';
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 
+export enum ShowStatusElements {
+  None,
+  Spinner,
+  ProgressBar,
+  Completion
+}
+
 export interface StatusProps extends PaperProps {
   session: Session
   stageName: string
@@ -25,34 +32,40 @@ export interface StatusProps extends PaperProps {
 export type ProtocolStage = [
   name: string,
   description: string,
-  showSpinner: boolean,
-  showProgressBar: boolean
+  show: ShowStatusElements
 ]
 
 type ProtocolStageInfo = [
   description: string,
-  showSpinner: boolean,
-  showProgressBar: boolean,
-  index: number
+  showElements: ShowStatusElements,
+  progressBarIndex: number
 ]
 
 export function StatusFactory(stages: ProtocolStage[]) {
   let numProgressBarStages = 0;
   const stageMap = Object.fromEntries(stages.map((value) => {
     const [ name, ...otherValues] = value;
-    let index = -1;
-    if (otherValues[2]) {
-      index = numProgressBarStages;
+    let progressBarIndex = -1;
+    if (otherValues[1] === ShowStatusElements.ProgressBar
+      || otherValues[1] === ShowStatusElements.Completion)
+    {
+      progressBarIndex = numProgressBarStages;
       numProgressBarStages += 1;
     }
-    return [ name, [ ...otherValues, index ] as ProtocolStageInfo ]
+    return [ name, [ ...otherValues, progressBarIndex ] as ProtocolStageInfo ]
   }));
 
   return (
     function Status(props: StatusProps) {
       const { session, stageName, resultsFileURL, ...paperProps } = props;
-      const [ stageDescription, showSpinner, showProgressBar, progressBarIndex ] = stageMap[stageName];
-      const isDone = progressBarIndex === numProgressBarStages - 1;
+      const [ stageDescription, showElements, progressBarIndex ] = stageMap[stageName];
+
+      const showSpiner = showElements === ShowStatusElements.Spinner;
+      const showProgressBar = (
+        showElements === ShowStatusElements.ProgressBar
+        || showElements === ShowStatusElements.Completion
+      );
+      const isCompleted = showElements == ShowStatusElements.Completion
 
       return (
         <Paper {...paperProps} >
@@ -67,7 +80,7 @@ export function StatusFactory(stages: ProtocolStage[]) {
             )}
           </Transition>
 
-          { showSpinner &&  
+          { showSpiner &&  
             (
               <Center mt="md">
                 <Loader size="sm" />
@@ -86,7 +99,7 @@ export function StatusFactory(stages: ProtocolStage[]) {
                 value={(progressBarIndex / (numProgressBarStages - 1)) * 100}
                 radius="xl"
                 striped
-                animated={!isDone}
+                animated={!isCompleted}
               />
 
               <Group
@@ -97,8 +110,8 @@ export function StatusFactory(stages: ProtocolStage[]) {
                 <Text>
                   Download result:
                 </Text>
-                <Link to={resultsFileURL} download='results.txt' disabled={!isDone}>
-                  <ActionIcon onClick={() => {}} variant="light" color="blue" disabled={!isDone}>
+                <Link to={resultsFileURL} download='results.txt' disabled={!isCompleted}>
+                  <ActionIcon onClick={() => {}} variant="light" color="blue" disabled={!isCompleted}>
                     <IconDownload size={18} />
                   </ActionIcon>
                 </Link>
