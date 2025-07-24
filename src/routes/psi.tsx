@@ -12,12 +12,11 @@ import type { Session } from '../utils/sessions';
 
 import SessionDetails from '../components/SessionDetails';
 import FileSelect from '../components/FileSelect';
-import { StatusIndicatorFactory, ProtocolStage } from '../components/StatusIndicator';
-
-import { waitForPeerId, openPeerConnection, PSIAsServer, stages as serverStages } from '../utils/psi_server';
-import { createAndSharePeerId, PSIAsClient, stages as clientStages } from '../utils/psi_client';
+import { StatusFactory, ProtocolStage } from '../components/Status';
 
 import { loadPSILibrary } from '../utils/psi'
+import { waitForPeerId, openPeerConnection, PSIAsServer, stages as serverStages } from '../utils/psi_server';
+import { createAndSharePeerId, PSIAsClient, stages as clientStages } from '../utils/psi_client';
 import { PeerConnectionProtocol } from '../utils/PeerConnectionProtocol';
 
 export const Route = createFileRoute('/psi')({
@@ -76,11 +75,12 @@ function Home() {
   }) ? 'server' : 'client';
 
   const stages: ProtocolStage[] = (role === 'server' ? serverStages : clientStages) as ProtocolStage[];
-  const StatusIndicator = StatusIndicatorFactory(stages);
+  const Status = StatusFactory(stages);
 
   const [files, setFiles] = useState<File[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [stage, setStage] = useState(stages[0][0]);
+  const [resultURL, setResultURL] = useState<string>();
 
   const handleSubmit = async () => {
     setSubmitted(true);
@@ -101,10 +101,20 @@ function Home() {
             peer,
             conn,
             server.startupHandler,
-            server.messageHandlers
+            server.messageHandlers,
+            server.closeHandler
           )
           await protocolHandler.runProtocol();
-        })
+          
+          const fileData = new Blob(server.result, {type: 'text/plain'});
+          const newResultURL = window.URL.createObjectURL(fileData);
+
+          if (resultURL !== undefined)
+            window.URL.revokeObjectURL(resultURL);
+          
+          console.log('setting result url to ' + newResultURL);
+          setResultURL(newResultURL);
+        });
       })
     } else {
       setStage(stages[1][0]);
@@ -121,11 +131,21 @@ function Home() {
             peer,
             conn,
             undefined,
-            client.messageHandlers
+            client.messageHandlers,
+            client.closeHandler
           )
 
           await protocolHandler.runProtocol();
-        })
+
+          const fileData = new Blob(client.result, {type: 'text/plain'});
+          const newResultURL = window.URL.createObjectURL(fileData);
+
+          if (resultURL !== undefined)
+            window.URL.revokeObjectURL(resultURL);
+          
+          console.log('setting result url to ' + newResultURL);
+          setResultURL(newResultURL);
+        });
       })
     }
   };
@@ -147,11 +167,11 @@ function Home() {
       <Stack>
         <Group justify="space-between" align="stretch" grow>
           <SessionDetails session={session} />
-          <StatusIndicator session={session} stageName={stage}/>
+          <Status session={session} stageName={stage} resultsFileURL={resultURL} />
         </Group>
         { role === 'server' && (
           <Paper>
-            <Title order={1}>Sharable Link</Title>
+            <Title order={2}>Sharable Link</Title>
             <Code block={false} style={{ whiteSpace: 'pre', flex: 1 }}>
               {url!.toString()}
             </Code>

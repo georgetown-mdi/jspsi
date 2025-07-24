@@ -1,14 +1,15 @@
-import type { Session } from './sessions';
-
 import type { Peer, DataConnection } from 'peerjs';
 
-export const stages = [
-  ['before start', 'Stopped'],
-  ['waiting for startup message', 'Waiting for partner\'s encrypted data'],
-  ['sending client request', 'Sending my encrypted data'],
-  ['waiting for response', 'Waiting for my doubly-encrypted data'],
-  ['sending results', 'Sending results'],
-  ['done', 'Done']
+import type { Session } from './sessions';
+import type { ProtocolStage } from '../components/Status';
+
+export const stages: ProtocolStage[] = [
+  ['before start', 'Stopped', false, false],
+  ['waiting for startup message', 'Waiting for partner\'s encrypted data', true, true],
+  ['sending client request', 'Sending my encrypted data', true, true],
+  ['waiting for response', 'Waiting for my doubly-encrypted data', true, true],
+  ['sending results', 'Sending results', true, true],
+  ['done', 'Done', false, true]
 ];
 
 export class PSIAsClient {
@@ -16,6 +17,7 @@ export class PSIAsClient {
   data: Array<string>
   client: any;
   serverSetup: any
+  result: string[]
   setStage: (name: string) => void;
 
   messageHandlers = [
@@ -31,23 +33,32 @@ export class PSIAsClient {
     (conn: DataConnection, data) => {
       console.log('responding to server response by creating association table');
       const serverResponse = this.psi.response.deserializeBinary(data);
-      const associationTable = this.client.getAssociationTable(
+      /** association table is indexes into client data mapped to the indexes
+       * given by the server (which are likely permuted).
+       */
+      const associationTable: number[][] = this.client.getAssociationTable(
         this.serverSetup,
         serverResponse
       );
-      let commonValues: Array<string> = [];
-      for (var i = 0; i < associationTable[0].length; i++) {
-        commonValues.push(this.data[associationTable[0][i]]);
-      }
 
       this.setStage('sending results');
+
+      conn.send(associationTable);
+
+      for (var i = 0; i < associationTable[0].length; i++) {
+        this.result.push(this.data[associationTable[0][i]]);
+      }
     }
   ]
+  closeHandler = (_conn: DataConnection) => {
+    this.setStage('done');
+  }
 
   constructor(psi, data: Array<string>, setStage: (name: string) => void) {
     this.psi = psi;
     this.data = data;
     this.client = psi.client.createWithNewKey(true);
+    this.result = [];
     this.setStage = setStage;
   }
 }

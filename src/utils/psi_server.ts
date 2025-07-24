@@ -1,21 +1,24 @@
-import type { Session } from './sessions'
-
 import type { Peer, DataConnection } from 'peerjs';
 
-export const stages = [
-  ['before start', 'Stopped'],
-  ['waiting for peer', 'Waiting for peer'],
-  ['sending startup message', 'Sending my encrypted data'],
-  ['waiting for client request', 'Waiting for partner\'s encrypted data'],
-  ['sending response', 'Sending partner\'s doubly-encrypted data'],
-  ['waiting for results', 'Waiting for results'],
-  ['done', 'Done']
+import type { Session } from './sessions'
+import type { ProtocolStage } from '../components/Status';
+
+export const stages: ProtocolStage[] = [
+  ['before start', 'Stopped', false, false],
+  ['waiting for peer', 'Waiting for peer', true, false],
+  ['sending startup message', 'Sending my encrypted data', true, true],
+  ['waiting for client request', 'Waiting for partner\'s encrypted data', true, true],
+  ['sending response', 'Sending partner\'s doubly-encrypted data', true, true],
+  ['waiting for results', 'Waiting for results', true, true],
+  ['done', 'Done', false, true]
 ];
 
 export class PSIAsServer {
   psi: any;
-  data: Array<string>
+  data: string[];
   server: any;
+  result: string[];
+  sortingPermutation: number[]
   setStage: (name: string) => void;
 
   startupHandler = (conn: DataConnection) => {
@@ -23,13 +26,12 @@ export class PSIAsServer {
     this.setStage('sending startup message')
     this.server = this.psi.server.createWithNewKey(true);
 
-    let sortingPermutation: Array<number> = [];
     const serverSetup = this.server.createSetupMessage(
       0.0,
       -1,
       this.data,
       this.psi.dataStructure.Raw,
-      sortingPermutation
+      this.sortingPermutation
     );
 
     conn.send(serverSetup.serializeBinary());
@@ -46,14 +48,27 @@ export class PSIAsServer {
       conn.send(serverResponse.serializeBinary());
 
       this.setStage('waiting for results');
+    },
+    (_conn: DataConnection, data) => {
+      console.log('received results')
+      const associationTable = data as number[][];
+
+      for (var i = 0; i < associationTable[0].length; i++) {
+        this.result.push(this.data[associationTable[1][this.sortingPermutation[i]]]);
+      }
     }
   ]
+  closeHandler = (_conn: DataConnection) => {
+    this.setStage('done');
+  }
 
   constructor(psi, data: Array<string>, setStage: (name: string) => void) {
     this.psi = psi;
     this.data = data;
-    this.setStage = setStage;
     this.server = psi.server.createWithNewKey(true);
+    this.result = []
+    this.sortingPermutation = []
+    this.setStage = setStage;
   }
 }
 

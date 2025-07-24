@@ -6,26 +6,32 @@ export type MessageHandler = (conn: DataConnection, data) => void;
 export class PeerConnectionProtocol {
   peer: Peer
   conn: DataConnection
+  /** Function to run when the connection's 'open' event is received. */
   connectionHandler?: ConnectionHandler;
-  messageHandlers: Array<MessageHandler>;
+  /** Functions to run sequentially as data are received. */
+  messageHandlers: MessageHandler[];
+  /** Function to run when the connection's 'close' event is received. */
+  closeHandler?: ConnectionHandler;
   firstMessage: boolean = false;
   
   constructor(
     peer: Peer,
     conn: DataConnection,
     connectionHandler: ConnectionHandler | undefined,
-    messageHandlers: Array<MessageHandler>
+    messageHandlers: Array<MessageHandler>,
+    closeHander: ConnectionHandler | undefined
   ) {
     this.peer = peer;
     this.conn = conn;
     this.connectionHandler = connectionHandler;
     this.messageHandlers = messageHandlers;
+    this.closeHandler = closeHander;
   }
 
   runProtocol(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (this.connectionHandler !== undefined) {
-        this.conn.on('open', () => { this.connectionHandler!(this.conn) });
+      if (this.connectionHandler) {
+        this.conn.on('open', () => { this.connectionHandler!(this.conn); });
       }
       this.conn.on('data', (data) => {
         if (this.firstMessage) {
@@ -41,6 +47,9 @@ export class PeerConnectionProtocol {
         }
       });
       this.conn.on('error', (err) => { reject(err) })
+      if (this.closeHandler) {
+        this.conn.on('close', () => { this.closeHandler!(this.conn); });
+      }
     })
   }
 }
