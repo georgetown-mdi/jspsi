@@ -9,7 +9,6 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
   "type": "module",
   "dependencies": {
     "@mantine/core": "^8.1.3",
@@ -26,8 +25,7 @@
     "peerjs": "^1.5.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "uuid": "^11.1.0",
-    "vite": "^7.0.4"
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@tanstack/eslint-config": "^0.3.0",
@@ -37,6 +35,7 @@
     "eslint-visitor-keys": "^4.2.1",
     "postcss-preset-mantine": "^1.18.0",
     "typescript": "^5.8.3",
+    "vite": "^7.0.4",
     "vite-tsconfig-paths": "^5.1.4"
   }
 }

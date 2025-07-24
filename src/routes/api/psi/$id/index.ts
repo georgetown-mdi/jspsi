@@ -2,10 +2,10 @@ import { createServerFileRoute, setResponseStatus } from '@tanstack/react-start/
 
 import { json } from '@tanstack/react-start';
 
-import { sessions } from '../../../../utils/sessions';
+import { sessions } from '@utils/sessions';
 
 export const ServerRoute = createServerFileRoute('/api/psi/$id/').methods({
-  GET: ({ request, params }) => {
+  GET: ({ params }) => {
     if (!('id' in params)) {
       setResponseStatus(400, 'missing session id');
       return 'missing session id';

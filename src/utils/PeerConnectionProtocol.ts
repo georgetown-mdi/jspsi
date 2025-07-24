@@ -1,7 +1,7 @@
-import type { DataConnection, Peer } from "peerjs";
+import type { DataConnection, Peer } from 'peerjs';
 
 export type ConnectionHandler = (conn: DataConnection) => void;
-export type MessageHandler = (conn: DataConnection, data) => void;
+export type MessageHandler = (conn: DataConnection, data: any) => void;
 
 export class PeerConnectionProtocol {
   peer: Peer

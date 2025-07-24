@@ -6,7 +6,7 @@ import {
 
 import { createEventStream } from 'h3';
 
-import { sessions } from '../../../../utils/sessions';
+import { sessions } from '@utils/sessions';
 
 const INVITED_PEER_ID_POLLING_FREQUENCY_MS = 250;
 
@@ -60,7 +60,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/$id/wait').methods((a
       await eventStream.close();
     });
 
-    console.log(`GET /api/psi/${session['id']}/wait: creating event stream to wait for peer`);
+    console.log(`GET /api/psi/${session['id']}/wait: created event stream and waiting`);
     getInvitedPeerId();
 
     await eventStream.send();

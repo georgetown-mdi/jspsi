@@ -3,7 +3,7 @@ import {
   defaultStreamHandler,
 } from '@tanstack/react-start/server'
 import { PeerServer } from 'peer';
-import { createRouter } from './router'
+import { createRouter } from '@router'
 
 import type * as http from 'node:http';
 import type * as https from 'node:https';

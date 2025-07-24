@@ -1,11 +1,11 @@
 import type { DataConnection, Peer } from 'peerjs';
 
-import type { Session } from './sessions';
+import type { Session } from '@utils/sessions';
 
 // eslint-disable-next-line import/order
-import { ShowStatusElements } from '../components/Status';
+import { ShowStatusElements } from '@components/Status';
 
-import type { ProtocolStage } from '../components/Status';
+import type { ProtocolStage } from '@components/Status';
 
 export const stages: Array<ProtocolStage> = [
   ['before start', 'Stopped', ShowStatusElements.None],
@@ -25,7 +25,7 @@ export class PSIAsClient {
   setStage: (name: string) => void;
 
   messageHandlers = [
-    (conn: DataConnection, data) => {
+    (conn: DataConnection, data: any) => {
       console.log('responding server setup message with request');
       this.setStage('sending client request');
       this.serverSetup = this.psi.serverSetup.deserializeBinary(data);
@@ -34,7 +34,7 @@ export class PSIAsClient {
       conn.send(clientRequest.serializeBinary());
       this.setStage('waiting for response');
     },
-    (conn: DataConnection, data) => {
+    (conn: DataConnection, data: any) => {
       console.log('responding to server response by creating association table');
       const serverResponse = this.psi.response.deserializeBinary(data);
       /** association table is indexes into client data mapped to the indexes
@@ -58,7 +58,7 @@ export class PSIAsClient {
     this.setStage('done');
   }
 
-  constructor(psi, data: Array<string>, setStage: (name: string) => void) {
+  constructor(psi: any, data: Array<string>, setStage: (name: string) => void) {
     this.psi = psi;
     this.data = data;
     this.client = psi.client.createWithNewKey(true);

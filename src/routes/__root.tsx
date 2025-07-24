@@ -18,11 +18,11 @@ import {
   mantineHtmlProps
 } from '@mantine/core';
 
-import { DefaultCatchBoundary } from '../components/DefaultCatchBoundary';
-import { NotFound } from '../components/NotFound';
-import { seo } from '../utils/seo';
+import { DefaultCatchBoundary } from '@components/DefaultCatchBoundary';
+import { NotFound } from '@components/NotFound';
+import { seo } from '@utils/seo';
 
-import { mantineTheme } from '../theme'
+import { mantineTheme } from '@theme'
 
 export const Route = createRootRoute({
   head: () => ({

@@ -2,7 +2,7 @@ import { createServerFileRoute, setResponseStatus } from '@tanstack/react-start/
 import { json } from '@tanstack/react-start';
 import { v4 as uuidv4 } from 'uuid';
 
-import { sessions } from '../../../utils/sessions';
+import { sessions } from '@utils/sessions';
 
 const DEFAULT_SESSION_DURATION_MS = 1000 * 60 * 15;
 

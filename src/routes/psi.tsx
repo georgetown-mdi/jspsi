@@ -8,17 +8,17 @@ import { useClipboard } from '@mantine/hooks';
 
 import { IconCopy } from '@tabler/icons-react';
 
-import { PSIAsClient, stages as clientStages, createAndSharePeerId } from '../utils/psi_client';
-import { PSIAsServer, openPeerConnection, stages as serverStages, waitForPeerId } from '../utils/psi_server';
-import { PeerConnectionProtocol } from '../utils/PeerConnectionProtocol';
-import { loadPSILibrary } from '../utils/psi'
+import { PSIAsClient, stages as clientStages, createAndSharePeerId } from '@utils/psi_client';
+import { PSIAsServer, openPeerConnection, stages as serverStages, waitForPeerId } from '@utils/psi_server';
+import { PeerConnectionProtocol } from '@utils/PeerConnectionProtocol';
+import { loadPSILibrary } from '@utils/psi'
 
-import FileSelect from '../components/FileSelect';
-import SessionDetails from '../components/SessionDetails';
-import { StatusFactory } from '../components/Status';
+import FileSelect from '@components/FileSelect';
+import SessionDetails from '@components/SessionDetails';
+import { StatusFactory } from '@components/Status';
 
-import type { ProtocolStage } from '../components/Status';
-import type { Session } from '../utils/sessions';
+import type { ProtocolStage } from '@components/Status';
+import type { Session } from '@utils/sessions';
 
 export const Route = createFileRoute('/psi')({
   validateSearch: (search: Record<string, unknown>): { id: string, start?: boolean } => {
@@ -39,7 +39,7 @@ export const Route = createFileRoute('/psi')({
     return await response.json() as Session;
   },
   component: Home,
-  head: (ctx) => {
+  head: () => {
     return {
       scripts: [ { src: '/js/peerjs.min.js'} , { src: '/js/psi_wasm_web.js' } ]
     }

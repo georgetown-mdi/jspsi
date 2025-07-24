@@ -16,7 +16,7 @@ import { Link } from '@tanstack/react-router';
 
 import type { PaperProps } from '@mantine/core';
 
-import type { Session } from '../utils/sessions';
+import type { Session } from '@utils/sessions';
 
 export enum ShowStatusElements {
   None,

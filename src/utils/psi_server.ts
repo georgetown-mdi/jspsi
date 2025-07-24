@@ -1,11 +1,11 @@
 import type { DataConnection, Peer } from 'peerjs';
 
-import type { Session } from './sessions'
+import type { Session } from '@utils/sessions'
 
 // eslint-disable-next-line import/order
-import { ShowStatusElements } from '../components/Status';
+import { ShowStatusElements } from '@components/Status';
 
-import type { ProtocolStage } from '../components/Status';
+import type { ProtocolStage } from '@components/Status';
 
 export const stages: Array<ProtocolStage> = [
   ['before start', 'Stopped', ShowStatusElements.None],
@@ -43,7 +43,7 @@ export class PSIAsServer {
     this.setStage('waiting for client request');
   }
   messageHandlers = [
-    (conn: DataConnection, data) => {
+    (conn: DataConnection, data: any) => {
       console.log('responding to client request with server response');
       this.setStage('sending response')
       const clientRequest = this.psi.request.deserializeBinary(data);
@@ -53,7 +53,7 @@ export class PSIAsServer {
 
       this.setStage('waiting for results');
     },
-    (_conn: DataConnection, data) => {
+    (_conn: DataConnection, data: any) => {
       console.log('received association table');
       const associationTable = data as Array<Array<number>>;
 
@@ -66,7 +66,7 @@ export class PSIAsServer {
     this.setStage('done');
   }
 
-  constructor(psi, data: Array<string>, setStage: (name: string) => void) {
+  constructor(psi: any, data: Array<string>, setStage: (name: string) => void) {
     this.psi = psi;
     this.data = data;
     this.server = psi.server.createWithNewKey(true);
