@@ -18,9 +18,10 @@ export default defineConfig({
   },
   plugins: [
     tsConfigPaths({
-      projects: ['./tsconfig.json']
+      projects: ['./tsconfig.json'],
+      skip: (dir: string) => { return ['.netlify', '.nitro', '.tanstack', 'dist'].includes(dir); }
     }),
-    tanstackStart({ customViteReactPlugin: true, target: 'netlifly' }),
+    tanstackStart({ customViteReactPlugin: true, target: 'netlify' }),
     viteReact()
   ],
   resolve: {
