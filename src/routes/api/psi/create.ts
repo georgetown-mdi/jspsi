@@ -1,25 +1,28 @@
 import { createServerFileRoute, setResponseStatus } from '@tanstack/react-start/server';
 import { json } from '@tanstack/react-start';
-import { sessions } from '../../../utils/sessions';
 import { v4 as uuidv4 } from 'uuid';
+
+import { sessions } from '../../../utils/sessions';
 
 const DEFAULT_SESSION_DURATION_MS = 1000 * 60 * 15;
 
 export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
   POST: async ({ request }) => {
-    console.log('creating psi session');
     const payload = await request.json();
     if (!('initiatedName' in payload) || payload['initiatedName'] === undefined
     ) {
       setResponseStatus(400);
-      return new Response('Missing name of person initiating PSI');
+      return new Response('missing name of person initiating PSI');
     }
     if (!('invitedName' in payload) || payload['invitedName'] === undefined) {
       setResponseStatus(400);
-      return new Response('Missing name of person invited to PSI');
+      return new Response('missing name of person invited to PSI');
     }
     let timeToLive: Date;
-    if (!('valid_duration_minutes' in payload) || typeof(payload['valid_duration_minutes']) !== "number") {
+    if (!('valid_duration_minutes' in payload)
+        || typeof(payload['valid_duration_minutes']) !== "number"
+        || payload['valid_duration_minutes'] <= 0
+      ) {
       timeToLive = new Date(Date.now() + DEFAULT_SESSION_DURATION_MS);
     } else {
       timeToLive = new Date(Date.now() + 1000 * 60 * payload['valid_duration_minutes']);
@@ -38,7 +41,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
       timeToLive: timeToLive
     };
     
-    console.log(`new psi session ${id} created`);
+    console.log(`POST /api/psi/create: session ${id} created`);
 
     return json({id: id, timeToLive: timeToLive});
   },

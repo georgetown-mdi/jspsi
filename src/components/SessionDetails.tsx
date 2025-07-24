@@ -1,6 +1,8 @@
-import { Paper, Title, Text, PaperProps } from '@mantine/core';
+import { Paper, Text, Title } from '@mantine/core';
 
 import type { Session } from '../utils/sessions'
+
+import type { PaperProps } from '@mantine/core';
 
 interface SessionDetailProps extends PaperProps {
   session: Session;

@@ -6,11 +6,11 @@ import { sessions } from '../../../../utils/sessions';
 
 export const ServerRoute = createServerFileRoute('/api/psi/$id/').methods({
   GET: ({ request, params }) => {
-    if (!('id' in params) || params['id'] === undefined) {
+    if (!('id' in params)) {
       setResponseStatus(400, 'missing session id');
       return 'missing session id';
     }
-    const sessionId = params['id'] as string;
+    const sessionId = params['id'];
     if (!(sessionId in sessions)) {
       setResponseStatus(400, `invalid session id: ${sessionId}`);
       return `invalid session id: ${sessionId}`;
@@ -20,16 +20,16 @@ export const ServerRoute = createServerFileRoute('/api/psi/$id/').methods({
       setResponseStatus(400, `session ${sessionId} has expired`);
       return `session ${sessionId} has expired`;
     }
-    console.log(`getting psi session ${sessionId}`);
+    console.log(`GET /api/psi/${sessionId}`);
     
     return json(session);
   },
   POST: async ({ request, params }) => {
-    if (!('id' in params) || params['id'] === undefined) {
+    if (!('id' in params)) {
       setResponseStatus(400, 'missing session id');
       return 'missing session id';
     }
-    const sessionId = params['id'] as string;
+    const sessionId = params['id'];
     if (!(sessionId in sessions)) {
       setResponseStatus(400, `invalid session id: ${sessionId}`);
       return `invalid session id: ${sessionId}`;
@@ -39,7 +39,8 @@ export const ServerRoute = createServerFileRoute('/api/psi/$id/').methods({
       setResponseStatus(400, `session ${sessionId} has expired`);
       return `session ${sessionId} has expired`;
     }
-    console.log(`setting peer id for session ${sessionId}`);
+    
+    console.log(`POST /api/psi/${sessionId}: set peer id`);
 
     const requestJson = await request.json();
 

@@ -1,5 +1,5 @@
 {
-  "include": ["**/*.ts", "**/*.tsx", "public/js/*.js"],
+  "include": ["**/*.ts", "**/*.tsx", "public/js/*.js", "eslint.config.js"],
   "compilerOptions": {
     "jsx": "react-jsx",
     "moduleResolution": "Bundler",

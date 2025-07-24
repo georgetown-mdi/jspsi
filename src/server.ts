@@ -2,17 +2,17 @@ import {
   createStartHandler,
   defaultStreamHandler,
 } from '@tanstack/react-start/server'
-import { createRouter } from './router'
 import { PeerServer } from 'peer';
+import { createRouter } from './router'
 
-import * as http from 'http';
-import * as https from 'https';
+import type * as http from 'node:http';
+import type * as https from 'node:https';
 
 export default createStartHandler({
   createRouter,
 })(defaultStreamHandler)
 
-let peerServerServer: http.Server | https.Server;
+let peerServerServer: http.Server | https.Server | undefined;
 
 export const peerServer = PeerServer(
   {
@@ -28,13 +28,17 @@ export const peerServer = PeerServer(
 // see: https://github.com/vitest-dev/vitest/issues/2334
 if (import.meta.hot) {
   import.meta.hot.on("vite:beforeFullReload", () => {
-    if (peerServerServer !== undefined)
+    if (peerServerServer !== undefined) {
        peerServerServer.close();
+       peerServerServer = undefined;
+    }
   })
 
   import.meta.hot.dispose(() => {
-    if (peerServerServer !== undefined)
+    if (peerServerServer !== undefined) {
       peerServerServer.close()
+      peerServerServer = undefined;
+    }
   });
 }
 

@@ -8,16 +8,17 @@ import { useClipboard } from '@mantine/hooks';
 
 import { IconCopy } from '@tabler/icons-react';
 
-import type { Session } from '../utils/sessions';
-
-import SessionDetails from '../components/SessionDetails';
-import FileSelect from '../components/FileSelect';
-import { StatusFactory, ProtocolStage } from '../components/Status';
-
-import { loadPSILibrary } from '../utils/psi'
-import { waitForPeerId, openPeerConnection, PSIAsServer, stages as serverStages } from '../utils/psi_server';
-import { createAndSharePeerId, PSIAsClient, stages as clientStages } from '../utils/psi_client';
+import { PSIAsClient, stages as clientStages, createAndSharePeerId } from '../utils/psi_client';
+import { PSIAsServer, openPeerConnection, stages as serverStages, waitForPeerId } from '../utils/psi_server';
 import { PeerConnectionProtocol } from '../utils/PeerConnectionProtocol';
+import { loadPSILibrary } from '../utils/psi'
+
+import FileSelect from '../components/FileSelect';
+import SessionDetails from '../components/SessionDetails';
+import { StatusFactory } from '../components/Status';
+
+import type { ProtocolStage } from '../components/Status';
+import type { Session } from '../utils/sessions';
 
 export const Route = createFileRoute('/psi')({
   validateSearch: (search: Record<string, unknown>): { id: string, start?: boolean } => {
@@ -29,7 +30,8 @@ export const Route = createFileRoute('/psi')({
   },
   loaderDeps: ({ search: { id } }) => ({ id }),
   loader: async ({ deps: { id } }) =>  {
-    console.log(`looking up session ${id}`)
+    // as a curiosity, this runs on the server
+    // return sessions[id];
     const response = await fetch(`/api/psi/${id}`)
     if (!response.ok) {
       throw new Error(`failed to lookup PSI with id ${id} with error: ${response.statusText}`);
@@ -72,15 +74,15 @@ function Home() {
     select: (search) => search.start
   }) ? 'server' : 'client';
 
-  const stages: ProtocolStage[] = (role === 'server' ? serverStages : clientStages) as ProtocolStage[];
+  const stages: Array<ProtocolStage> = role === 'server' ? serverStages : clientStages;
   const Status = StatusFactory(stages);
 
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
   const [stage, setStage] = useState(stages[0][0]);
   const [resultURL, setResultURL] = useState<string>();
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     setSubmitted(true);
     
     if (role === 'server') {
@@ -140,7 +142,6 @@ function Home() {
           if (resultURL !== undefined)
             window.URL.revokeObjectURL(resultURL);
           
-          console.log('setting result url to ' + newResultURL);
           setResultURL(newResultURL);
         });
       })

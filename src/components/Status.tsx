@@ -1,20 +1,22 @@
 import {
+  ActionIcon,
   Center,
   Group,
   Loader,
+  Paper,
+  Progress,
   Stack,
   Text,
   Title,
-  Transition,
-  Paper,
-  PaperProps,
-  Progress,
-  ActionIcon
+  Transition
 } from '@mantine/core';
 
-import type { Session } from '../utils/sessions';
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
+
+import type { PaperProps } from '@mantine/core';
+
+import type { Session } from '../utils/sessions';
 
 export enum ShowStatusElements {
   None,
@@ -41,7 +43,7 @@ type ProtocolStageInfo = [
   progressBarIndex: number
 ]
 
-export function StatusFactory(stages: ProtocolStage[]) {
+export function StatusFactory(stages: Array<ProtocolStage>) {
   let numProgressBarStages = 0;
   const stageMap = Object.fromEntries(stages.map((value) => {
     const [ name, ...otherValues] = value;

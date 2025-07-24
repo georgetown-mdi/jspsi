@@ -1,10 +1,13 @@
-import type { Peer, DataConnection } from 'peerjs';
+import type { DataConnection, Peer } from 'peerjs';
 
 import type { Session } from './sessions';
-import type { ProtocolStage } from '../components/Status';
+
+// eslint-disable-next-line import/order
 import { ShowStatusElements } from '../components/Status';
 
-export const stages: ProtocolStage[] = [
+import type { ProtocolStage } from '../components/Status';
+
+export const stages: Array<ProtocolStage> = [
   ['before start', 'Stopped', ShowStatusElements.None],
   ['waiting for startup message', 'Waiting for partner\'s encrypted data', ShowStatusElements.ProgressBar],
   ['sending client request', 'Sending my encrypted data', ShowStatusElements.ProgressBar],
@@ -18,7 +21,7 @@ export class PSIAsClient {
   data: Array<string>
   client: any;
   serverSetup: any
-  result: string[]
+  result: Array<string>
   setStage: (name: string) => void;
 
   messageHandlers = [
@@ -37,7 +40,7 @@ export class PSIAsClient {
       /** association table is indexes into client data mapped to the indexes
        * given by the server (which are likely permuted).
        */
-      const associationTable: number[][] = this.client.getAssociationTable(
+      const associationTable: Array<Array<number>> = this.client.getAssociationTable(
         this.serverSetup,
         serverResponse
       );
@@ -46,8 +49,8 @@ export class PSIAsClient {
 
       conn.send(associationTable);
 
-      for (var i = 0; i < associationTable[0].length; i++) {
-        this.result.push(this.data[associationTable[0][i]]);
+      for (const i of associationTable[0]) {
+        this.result.push(this.data[i]);
       }
     }
   ]
@@ -67,9 +70,13 @@ export class PSIAsClient {
 /** Connects to peer server, gets a peer id, and posts to API. Returns Peer. */
 export function createAndSharePeerId(session: Session): Promise<Peer> {
   return new Promise((resolve, reject) => {
+    let host = window.location.hostname;
+    if (host === 'localhost') host = '127.0.0.1'
+    console.log(`connecting to peer server at ${host} and getting peer id`);
+
     // @ts-ignore - Peer is imported in client-side route code
     const peer = new Peer({
-      host: "/",
+      host: host,
       path: "/api/",
       port: 3001,
       debug: 2,
@@ -94,21 +101,23 @@ export function createAndSharePeerId(session: Session): Promise<Peer> {
       }
     });
 
-    peer.on('open', function(peerId: string) {
-      console.log(`got peer id ${peerId} from peer server; posting to server`)
+    peer.on('open', function(id: string) {
+      console.log(`got peer id ${id} from peer server; posting to server`)
+
       fetch(`/api/psi/${session['id']}`, {
         headers: {
           'Content-Type': 'application/json'
         },
         method: 'POST',
         body: JSON.stringify({
-          invitedPeerId: peerId
+          invitedPeerId: id
         })
       }).then((response) => {
         if (!response.ok) {
-          console.error(`error posting peerId: ${response.status}, text: ${response.statusText}`)
-          reject(new Error(`error posting peerId: ${response.status}, text: ${response.statusText}`));
+          console.error(`error posting peer id: ${response.status}, text: ${response.statusText}`)
+          reject(new Error(`error posting peer id: ${response.status}, text: ${response.statusText}`));
         } else {
+          console.log('posting successful');
           resolve(peer);
         }
       });

@@ -30,9 +30,11 @@
     "vite": "^7.0.4"
   },
   "devDependencies": {
+    "@tanstack/eslint-config": "^0.3.0",
     "@tanstack/eslint-plugin-router": "^1.125.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "eslint-visitor-keys": "^4.2.1",
     "postcss-preset-mantine": "^1.18.0",
     "typescript": "^5.8.3",
     "vite-tsconfig-paths": "^5.1.4"

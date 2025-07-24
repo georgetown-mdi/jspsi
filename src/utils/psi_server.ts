@@ -1,10 +1,13 @@
-import type { Peer, DataConnection } from 'peerjs';
+import type { DataConnection, Peer } from 'peerjs';
 
 import type { Session } from './sessions'
-import type { ProtocolStage } from '../components/Status';
+
+// eslint-disable-next-line import/order
 import { ShowStatusElements } from '../components/Status';
 
-export const stages: ProtocolStage[] = [
+import type { ProtocolStage } from '../components/Status';
+
+export const stages: Array<ProtocolStage> = [
   ['before start', 'Stopped', ShowStatusElements.None],
   ['waiting for peer', 'Waiting for peer', ShowStatusElements.Spinner],
   ['sending startup message', 'Sending my encrypted data', ShowStatusElements.ProgressBar],
@@ -16,10 +19,10 @@ export const stages: ProtocolStage[] = [
 
 export class PSIAsServer {
   psi: any;
-  data: string[];
+  data: Array<string>;
   server: any;
-  result: string[];
-  sortingPermutation: number[]
+  result: Array<string>;
+  sortingPermutation: Array<number>
   setStage: (name: string) => void;
 
   startupHandler = (conn: DataConnection) => {
@@ -52,10 +55,10 @@ export class PSIAsServer {
     },
     (_conn: DataConnection, data) => {
       console.log('received association table');
-      const associationTable = data as number[][];
+      const associationTable = data as Array<Array<number>>;
 
-      for (var i = 0; i < associationTable[1].length; i++) {
-        this.result.push(this.data[this.sortingPermutation[associationTable[1][i]]]);
+      for (const i of associationTable[1]) {
+        this.result.push(this.data[this.sortingPermutation[i]]);
       }
     }
   ]
@@ -117,9 +120,13 @@ export function waitForPeerId(session: Session): Promise<string> {
 
 export function openPeerConnection(peerId: string): Promise<[Peer, DataConnection]> {
   return new Promise((resolve, reject) => {
+    let host = window.location.hostname;
+    if (host === 'localhost') host = '127.0.0.1'
+    console.log(`connecting to peer server at ${host} and getting peer id`);
+    
     // @ts-ignore - Peer is imported in client-side route code
     const peer = new Peer({
-      host: "/",
+      host: host,
       path: "/api/",
       port: 3001,
       debug: 2,
@@ -144,7 +151,8 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
       }
     });
 
-    peer.on('open', (_id) => {
+    peer.on('open', (id) => {
+      console.log(`got peer id ${id} from peer server; connecting to peer ${peerId}`)
       const conn = peer.connect(peerId);
       resolve([peer, conn]);
     });

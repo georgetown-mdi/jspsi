@@ -1,6 +1,7 @@
 import { useForm } from '@tanstack/react-form';
-import { Center, TextInput, Textarea, Button, Stack } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
+
+import { Button, Center, Stack, TextInput, Textarea } from '@mantine/core';
 
 export default function CreatePSIForm() {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ export default function CreatePSIForm() {
         }),
       });
       
-      const { id: sessionId, timeToLive: timeToLive } = await response.json();
+      const { id: sessionId, timeToLive: _timeToLive } = await response.json();
 
       if (response.ok) {
         navigate({

@@ -1,4 +1,4 @@
-import type { Peer, DataConnection } from "peerjs";
+import type { DataConnection, Peer } from "peerjs";
 
 export type ConnectionHandler = (conn: DataConnection) => void;
 export type MessageHandler = (conn: DataConnection, data) => void;
@@ -9,10 +9,10 @@ export class PeerConnectionProtocol {
   /** Function to run when the connection's 'open' event is received. */
   connectionHandler?: ConnectionHandler;
   /** Functions to run sequentially as data are received. */
-  messageHandlers: MessageHandler[];
+  messageHandlers: Array<MessageHandler>;
   /** Function to run when the connection's 'close' event is received. */
   closeHandler?: ConnectionHandler;
-  firstMessage: boolean = false;
+  firstMessage = true;
   
   constructor(
     peer: Peer,
@@ -35,6 +35,7 @@ export class PeerConnectionProtocol {
       }
       this.conn.on('data', (data) => {
         if (this.firstMessage) {
+          console.log('disconnecting from peer server');
           this.peer.disconnect();
           this.firstMessage = false;
         }

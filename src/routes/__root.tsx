@@ -5,21 +5,22 @@ import {
   Scripts,
   createRootRoute,
 } from '@tanstack/react-router'
+// eslint-disable-next-line import/order
 import type { ReactNode } from 'react';
 
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
+import '@mantine/core/styles.css';
+import '@mantine/dropzone/styles.css';
 import {
   ColorSchemeScript,
   MantineProvider,
   mantineHtmlProps
 } from '@mantine/core';
-import '@mantine/core/styles.css';
-import '@mantine/dropzone/styles.css';
 
-import { seo } from '../utils/seo';
 import { DefaultCatchBoundary } from '../components/DefaultCatchBoundary';
 import { NotFound } from '../components/NotFound';
+import { seo } from '../utils/seo';
 
 import { mantineTheme } from '../theme'
 

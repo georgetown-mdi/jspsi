@@ -1,14 +1,24 @@
 import { useForm } from '@tanstack/react-form';
+
 import { Button, Center, Stack, TextInput } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 
 export default function JoinPSIForm() {
+  const navigate = useNavigate();
+
   const form = useForm({
     defaultValues: {
       id: '',
     },
-    onSubmit: async ({ value }) => {
+    onSubmit: ({ value }) => {
       console.log(value);
-      // fetch()
+      navigate({
+        to: '/psi',
+        search: {
+          id: value['id'],
+          start: false
+        }
+      });
     }
   });
 
