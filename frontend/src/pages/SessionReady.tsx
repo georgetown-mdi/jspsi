@@ -10,8 +10,13 @@ const SessionReady = () => {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const [sessionInfo, setSessionInfo] = useState<any>(null);
+  // State to hold the invited peer's ID (when it arrives)
+  const [invitedPeerId, setInvitedPeerId] = useState<string | null>(null);
+  // State to track if we're still waiting for the peer
+  const [waiting, setWaiting] = useState(true);
 
   useEffect(() => {
+    // Fetch session info as before
     const fetchSession = async () => {
       const res = await fetch(`/api/session/${sessionId}`);
       if (res.ok) {
@@ -20,6 +25,26 @@ const SessionReady = () => {
       }
     };
     fetchSession();
+
+    // --- SSE logic: Wait for the invited peer to join ---
+    // Only run if we have a sessionId
+    if (sessionId) {
+      // Open an SSE connection to the backend
+      const es = new EventSource(`/server/peerId?sessionId=${sessionId}`);
+      es.onmessage = (event) => {
+        // The backend sends the invited peer's ID as JSON
+        const data = JSON.parse(event.data);
+        setInvitedPeerId(data.invitedPeerId);
+        setWaiting(false); // No longer waiting
+        es.close(); // Close the SSE connection
+      };
+      es.onerror = () => {
+        // Optionally handle errors (e.g., show a message or retry)
+        es.close();
+      };
+      // Clean up the connection if the component unmounts
+      return () => es.close();
+    }
   }, [sessionId]);
 
   const copyLink = async () => {
@@ -131,15 +156,41 @@ const SessionReady = () => {
               <Card className="bg-orange-50 border-orange-200">
                 <CardContent className="pt-6">
                   <div className="flex items-center space-x-3">
-                    <Clock className="w-5 h-5 text-orange-600" />
+                    {waiting ? (
+                      <div className="w-8 h-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600 mr-2" />
+                    ) : (
+                      <Clock className="w-5 h-5 text-orange-600" />
+                    )}
                     <div>
                       <p className="font-medium text-orange-900">
                         Waiting for other party
                       </p>
-                      <p className="text-sm text-orange-700">
-                        Once they join and upload their file, you'll be able to
-                        proceed with the intersection.
-                      </p>
+                      {/* Integrate waiting/joined UI here */}
+                      {waiting ? (
+                        <div className="flex flex-col items-start mt-1">
+                          <p className="text-sm text-orange-700">
+                            Once they join and upload their file, you'll be able
+                            to proceed with the intersection.
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Keep this page open. You'll be notified as soon as
+                            the other party connects.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-start mt-2">
+                          <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mb-2">
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                          </div>
+                          <p className="text-green-700 font-semibold text-sm">
+                            The other party has joined!
+                          </p>
+                          <p className="text-gray-700 text-xs mt-1">
+                            Peer ID:{' '}
+                            <span className="font-mono">{invitedPeerId}</span>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardContent>
