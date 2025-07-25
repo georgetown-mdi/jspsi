@@ -22,6 +22,12 @@ const SessionReady = () => {
       if (res.ok) {
         const data = await res.json();
         setSessionInfo(data);
+      // } else if (res.status === 404) {
+      //   // Session not found
+      //   setSessionInfo(null);
+      // } else {
+      //   // Other error
+      //   console.error('Failed to fetch session:', res.status);
       }
     };
     fetchSession();
@@ -48,9 +54,10 @@ const SessionReady = () => {
   }, [sessionId]);
 
   const copyLink = async () => {
-    if (sessionInfo?.link) {
-      await navigator.clipboard.writeText(sessionInfo.link);
-    }
+    // Use the link from backend, or generate one if not available
+    const linkToCopy =
+      sessionInfo?.link || `http://localhost:8080/join/${sessionId}`;
+    await navigator.clipboard.writeText(linkToCopy);
   };
 
   if (!sessionInfo) {
@@ -139,9 +146,13 @@ const SessionReady = () => {
                 <CardContent>
                   <div className="flex items-center space-x-3">
                     <Input
-                      value={sessionInfo.link || ''}
+                      value={
+                        sessionInfo?.link
+                        || `http://localhost:8080/join/${sessionId}`
+                      }
                       readOnly
                       className="font-mono text-sm"
+                      placeholder="localhost:8080/join/..."
                     />
                     <Button onClick={copyLink} variant="outline">
                       <Copy className="w-4 h-4" />
@@ -189,6 +200,14 @@ const SessionReady = () => {
                             Peer ID:{' '}
                             <span className="font-mono">{invitedPeerId}</span>
                           </p>
+                          <Button
+                            onClick={() =>
+                              navigate(`/session/${sessionId}/execute`)
+                            }
+                            className="mt-3 bg-green-600 hover:bg-green-700"
+                          >
+                            Start PSI Execution
+                          </Button>
                         </div>
                       )}
                     </div>

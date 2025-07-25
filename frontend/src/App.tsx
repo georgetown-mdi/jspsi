@@ -10,6 +10,8 @@ import ExecuteSession from './pages/ExecuteSession';
 import NotFound from './pages/NotFound';
 import QuickSessionUpload from './pages/QuickSessionUpload';
 import SessionReady from './pages/SessionReady';
+import JoinSessionUpload from './pages/JoinSessionUpload';
+import JoinSessionReady from './pages/JoinSessionReady';
 
 const queryClient = new QueryClient();
 
@@ -22,10 +24,15 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/create" element={<CreateSession />} />
-          <Route path="/join/:sessionId?" element={<JoinSession />} />
-          <Route path="/execute/:sessionId" element={<ExecuteSession />} />
           <Route path="/session/:sessionId" element={<QuickSessionUpload />} />
           <Route path="/session/:sessionId/ready" element={<SessionReady />} />
+          <Route path="/session/:sessionId/execute" element={<ExecuteSession />} />
+          <Route path="/join/:sessionId?" element={<JoinSession />} />
+          <Route path="/join/:sessionId/upload" element={<JoinSessionUpload />} />
+          <Route path="/join/:sessionId/ready" element={<JoinSessionReady />} />
+          <Route path="/join/:sessionId/execute" element={<ExecuteSession />} />
+
+
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
