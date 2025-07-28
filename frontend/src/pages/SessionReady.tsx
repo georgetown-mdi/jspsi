@@ -192,7 +192,7 @@ const SessionReady = () => {
                       {waiting ? (
                         <div className="flex flex-col items-start mt-1">
                           <p className="text-sm text-orange-700">
-                            Once they join and upload their file, you'll be able
+                            Once they join and initiate the PSI protocol, you'll be able
                             to proceed with the intersection.
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
@@ -204,7 +204,7 @@ const SessionReady = () => {
                         <div className="flex flex-col items-start mt-1">
                           <p className="text-green-700 font-semibold text-sm">
                             The other party has successfully uploaded their
-                            file!
+                            file and initiated the protocol!
                           </p>
                           <p className="text-gray-700 text-xs mt-1">
                             Peer ID:{' '}

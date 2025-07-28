@@ -412,6 +412,42 @@ const ExecuteServer: React.FC = () => {
             </Card>
           </div>
 
+          {/* What Happens Next */}
+          <Card className="mt-8 animate-fade-in bg-blue-50 border-blue-200">
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <h3 className="font-semibold text-blue-900 mb-2">
+                  What happens next?
+                </h3>
+                <p className="text-sm text-blue-800 mb-4">
+                  The PSI algorithm will securely compute the intersection of
+                  both datasets without revealing any information beyond the
+                  common items.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-blue-700">
+                  <div className="text-center">
+                    <div className="w-8 h-8 bg-blue-200 rounded-full flex items-center justify-center mx-auto mb-2">
+                      1
+                    </div>
+                    <p>Secure connection established</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="w-8 h-8 bg-blue-200 rounded-full flex items-center justify-center mx-auto mb-2">
+                      2
+                    </div>
+                    <p>Cryptographic computation</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="w-8 h-8 bg-blue-200 rounded-full flex items-center justify-center mx-auto mb-2">
+                      3
+                    </div>
+                    <p>Results revealed</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Messages Log */}
           <Card className="mt-8 animate-fade-in">
             <CardHeader>
