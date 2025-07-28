@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Shield, Upload, ArrowLeft, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import FileUpload from '@/components/FileUpload';
 
 const JoinSessionUpload = () => {
   const { sessionId } = useParams();
@@ -35,11 +36,8 @@ const JoinSessionUpload = () => {
     fetchSession();
   }, [sessionId]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile && selectedFile.type === 'text/csv') {
-      setFile(selectedFile);
-    }
+  const handleFileChange = (selectedFile: File | null) => {
+    setFile(selectedFile);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -221,20 +219,12 @@ const JoinSessionUpload = () => {
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select CSV File
-                  </label>
-                  <input
-                    type="file"
+                  <FileUpload
+                    onFileSelect={handleFileChange}
+                    selectedFile={file}
                     accept=".csv"
-                    onChange={handleFileChange}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-                    required
+                    maxSize={10 * 1024 * 1024}
                   />
-                  <p className="text-sm text-gray-500 mt-1">
-                    CSV files only • Maximum 10MB • Your data stays in your
-                    browser
-                  </p>
                 </div>
 
                 <Button

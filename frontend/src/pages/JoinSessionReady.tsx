@@ -183,37 +183,26 @@ const JoinSessionReady = () => {
               </CardContent>
             </Card>
 
-            <Card className="shadow-lg border-green-200">
-              <CardHeader>
-                <CardTitle className="flex items-center text-green-700">
-                  <CheckCircle className="w-5 h-5 mr-2" />
-                  Ready for PSI Execution
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    <div>
-                      <p className="font-medium text-green-900">
-                        Both parties ready
-                      </p>
-                      <p className="text-sm text-green-700">
-                        All files uploaded and validated
-                      </p>
-                    </div>
-                  </div>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+              <div className="flex items-center space-x-3 mb-4">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+                <div>
+                  <p className="font-medium text-green-900">
+                    Both parties ready
+                  </p>
+                  <p className="text-sm text-green-700">
+                    All files uploaded and validated
+                  </p>
                 </div>
+              </div>
 
-                <Button
-                  onClick={handleStartPSI}
-                  className="w-full bg-green-600 hover:bg-green-700 py-3 text-lg mt-4"
-                >
-                  Start PSI Execution
-                  <FileText className="ml-2 w-5 h-5" />
-                </Button>
-              </CardContent>
-            </Card>
+              <Button
+                onClick={handleStartPSI}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-200"
+              >
+                Start PSI Execution
+              </Button>
+            </div>
           </div>
         </div>
       </div>

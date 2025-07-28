@@ -22,12 +22,12 @@ const SessionReady = () => {
       if (res.ok) {
         const data = await res.json();
         setSessionInfo(data);
-      // } else if (res.status === 404) {
-      //   // Session not found
-      //   setSessionInfo(null);
-      // } else {
-      //   // Other error
-      //   console.error('Failed to fetch session:', res.status);
+        // } else if (res.status === 404) {
+        //   // Session not found
+        //   setSessionInfo(null);
+        // } else {
+        //   // Other error
+        //   console.error('Failed to fetch session:', res.status);
       }
     };
     fetchSession();
@@ -164,17 +164,29 @@ const SessionReady = () => {
                   </p>
                 </CardContent>
               </Card>
-              <Card className="bg-orange-50 border-orange-200">
+              <Card
+                className={
+                  waiting
+                    ? 'bg-orange-50 border-orange-200'
+                    : 'bg-green-50 border-green-200'
+                }
+              >
                 <CardContent className="pt-6">
-                  <div className="flex items-center space-x-3">
+                  <div className="flex items-start space-x-3">
                     {waiting ? (
                       <div className="w-8 h-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600 mr-2" />
                     ) : (
-                      <Clock className="w-5 h-5 text-orange-600" />
+                      <div className="flex-shrink-0 pt-1">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                      </div>
                     )}
                     <div>
-                      <p className="font-medium text-orange-900">
-                        Waiting for other party
+                      <p
+                        className={`font-medium ${waiting ? 'text-orange-900' : 'text-green-900'}`}
+                      >
+                        {waiting
+                          ? 'Waiting for other party'
+                          : 'Other party has joined!'}
                       </p>
                       {/* Integrate waiting/joined UI here */}
                       {waiting ? (
@@ -189,12 +201,10 @@ const SessionReady = () => {
                           </p>
                         </div>
                       ) : (
-                        <div className="flex flex-col items-start mt-2">
-                          <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mb-2">
-                            <CheckCircle className="w-5 h-5 text-green-600" />
-                          </div>
+                        <div className="flex flex-col items-start mt-1">
                           <p className="text-green-700 font-semibold text-sm">
-                            The other party has joined!
+                            The other party has successfully uploaded their
+                            file!
                           </p>
                           <p className="text-gray-700 text-xs mt-1">
                             Peer ID:{' '}
@@ -204,7 +214,7 @@ const SessionReady = () => {
                             onClick={() =>
                               navigate(`/session/${sessionId}/execute`)
                             }
-                            className="mt-3 bg-green-600 hover:bg-green-700"
+                            className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-200"
                           >
                             Start PSI Execution
                           </Button>
