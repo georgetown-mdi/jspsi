@@ -35,7 +35,7 @@ const JoinSessionReady = () => {
 
   const handleStartPSI = () => {
     // Navigate to the PSI execution page
-    navigate(`/execute/${sessionId}`);
+    navigate(`/join/${sessionId}/execute`);
   };
 
   if (isLoading) {

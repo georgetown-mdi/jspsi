@@ -1,23 +1,56 @@
-
-import { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Shield, ArrowLeft, Download, Users, CheckCircle, AlertCircle, Play } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { useToast } from "@/hooks/use-toast";
-import LoadingSpinner from "@/components/LoadingSpinner";
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  Shield,
+  ArrowLeft,
+  Download,
+  Users,
+  CheckCircle,
+  AlertCircle,
+  Play
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { useToast } from '@/hooks/use-toast';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 const ExecuteSession = () => {
   const navigate = useNavigate();
   const { sessionId } = useParams();
   const { toast } = useToast();
-  const [step, setStep] = useState<'ready' | 'executing' | 'complete' | 'error'>('ready');
+  const [step, setStep] = useState<
+    'ready' | 'executing' | 'complete' | 'error'
+  >('ready');
   const [progress, setProgress] = useState(0);
-  const [progressStep, setProgressStep] = useState("");
+  const [progressStep, setProgressStep] = useState('');
   const [results, setResults] = useState<string[]>([]);
-  const [sessionName] = useState("Customer Overlap Analysis");
   const [executionTime, setExecutionTime] = useState<number | null>(null);
+  const [sessionInfo, setSessionInfo] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      try {
+        const res = await fetch(`/api/session/${sessionId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSessionInfo(data);
+        } else if (res.status === 404) {
+          // Session not found
+          setSessionInfo(null);
+        } else {
+          // Other error
+          console.error('Failed to fetch session:', res.status);
+        }
+      } catch (error) {
+        console.error('Failed to fetch session:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchSession();
+  }, [sessionId]);
 
   const mockResults = [
     "john.doe@example.com",
@@ -43,10 +76,10 @@ const ExecuteSession = () => {
     try {
       let currentProgress = 0;
       const totalSteps = executeSteps.length;
-      
+
       for (let i = 0; i < executeSteps.length; i++) {
         setProgressStep(executeSteps[i].step);
-        
+
         // Simulate step execution
         await new Promise(resolve => setTimeout(resolve, executeSteps[i].duration));
         
@@ -58,12 +91,11 @@ const ExecuteSession = () => {
       setResults(mockResults);
       setExecutionTime(Date.now() - startTime);
       setStep('complete');
-      
+
       toast({
-        title: "PSI Complete!",
+        title: 'PSI Complete!',
         description: `Found ${mockResults.length} overlapping items.`
       });
-      
     } catch (error) {
       setStep('error');
       toast({
@@ -88,8 +120,8 @@ const ExecuteSession = () => {
     document.body.removeChild(link);
 
     toast({
-      title: "Download started",
-      description: "Your PSI results are being downloaded."
+      title: 'Download started',
+      description: 'Your PSI results are being downloaded.'
     });
   };
 
@@ -118,26 +150,51 @@ const ExecuteSession = () => {
               </div>
               <h1 className="text-xl font-bold text-gray-900">PSI Secure</h1>
             </div>
-            <div className="text-sm text-gray-600">
-              Session: {sessionId}
-            </div>
+            <div className="text-sm text-gray-600">Session: {sessionId}</div>
           </div>
         </div>
       </header>
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-3xl mx-auto">
-          {step === 'ready' && (
-            <div className="animate-fade-in">
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Play className="w-8 h-8 text-blue-600" />
-                </div>
-                <h2 className="text-3xl font-bold text-gray-900 mb-4">Ready to Execute PSI</h2>
-                <p className="text-lg text-gray-600">
-                  Both parties have uploaded their datasets. Click below to begin the private set intersection.
-                </p>
+          {isLoading ? (
+            <div className="text-center py-12">
+              <LoadingSpinner className="w-8 h-8 mx-auto mb-4" />
+              <p className="text-gray-600">Loading session information...</p>
+            </div>
+          ) : !sessionInfo ? (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-8 h-8 text-red-600" />
               </div>
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                Session Not Found
+              </h2>
+              <p className="text-lg text-gray-600 mb-6">
+                The session ID "{sessionId}" does not exist or has expired.
+              </p>
+              <Button
+                onClick={() => navigate('/')}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                Back to Home
+              </Button>
+            </div>
+          ) : (
+            step === 'ready' && (
+              <div className="animate-fade-in">
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Play className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                    Ready to Execute PSI
+                  </h2>
+                  <p className="text-lg text-gray-600">
+                    Both parties have uploaded their datasets. Click below to
+                    begin the private set intersection.
+                  </p>
+                </div>
 
               <div className="space-y-6">
                 <Card className="shadow-lg">
@@ -152,7 +209,7 @@ const ExecuteSession = () => {
                       <div>
                         <h4 className="font-medium text-gray-900 mb-2">Session Details</h4>
                         <div className="space-y-1 text-sm text-gray-600">
-                          <p><span className="font-medium">Name:</span> {sessionName}</p>
+                          <p><span className="font-medium">Name:</span> {sessionInfo.sessionName}</p>
                           <p><span className="font-medium">ID:</span> {sessionId}</p>
                           <p><span className="font-medium">Status:</span> Ready to execute</p>
                         </div>
@@ -162,11 +219,11 @@ const ExecuteSession = () => {
                         <div className="space-y-2">
                           <div className="flex items-center space-x-2">
                             <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-gray-700">User A (Session Creator)</span>
+                            <span className="text-sm text-gray-700">{sessionInfo.initiatedName} (Session Creator)</span>
                           </div>
                           <div className="flex items-center space-x-2">
                             <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-gray-700">User B (You)</span>
+                            <span className="text-sm text-gray-700">{sessionInfo.invitedName} (Invitee)</span>
                           </div>
                         </div>
                       </div>
@@ -209,9 +266,10 @@ const ExecuteSession = () => {
                 </Button>
               </div>
             </div>
+            )
           )}
 
-          {step === 'executing' && (
+          {!isLoading && sessionInfo && step === 'executing' && (
             <div className="animate-fade-in">
               <div className="text-center mb-8">
                 <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -233,7 +291,7 @@ const ExecuteSession = () => {
                       </div>
                       <Progress value={progress} className="h-3" />
                     </div>
-                    
+
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                       <div className="flex items-center space-x-2">
                         <AlertCircle className="w-5 h-5 text-yellow-600" />
@@ -251,7 +309,7 @@ const ExecuteSession = () => {
             </div>
           )}
 
-          {step === 'complete' && (
+          {!isLoading && sessionInfo && step === 'complete' && (
             <div className="animate-fade-in">
               <div className="text-center mb-8">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -330,7 +388,7 @@ const ExecuteSession = () => {
             </div>
           )}
 
-          {step === 'error' && (
+          {!isLoading && sessionInfo && step === 'error' && (
             <div className="animate-fade-in">
               <div className="text-center mb-8">
                 <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
