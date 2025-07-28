@@ -1,13 +1,13 @@
 {
-  "name": "frontend",
+  "name": "jspsi",
   "version": "1.0.0",
-  "description": "",
+  "description": "JavaScript implementation of private set intersection for record linkage using peer-to-peer connections.",
   "main": "index.js",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build"
   },
-  "keywords": [],
+  "keywords": ["private set intersection", "record linkage"],
   "author": "",
   "type": "module",
   "dependencies": {
