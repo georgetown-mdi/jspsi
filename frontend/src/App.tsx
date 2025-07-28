@@ -7,6 +7,8 @@ import Index from './pages/Index';
 import CreateSession from './pages/CreateSession';
 import JoinSession from './pages/JoinSession';
 import ExecuteSession from './pages/ExecuteSession';
+import ExecuteServer from './pages/ExecuteServer';
+import ExecuteClient from './pages/ExecuteClient';
 import NotFound from './pages/NotFound';
 import QuickSessionUpload from './pages/QuickSessionUpload';
 import SessionReady from './pages/SessionReady';
@@ -26,12 +28,25 @@ const App = () => (
           <Route path="/create" element={<CreateSession />} />
           <Route path="/session/:sessionId" element={<QuickSessionUpload />} />
           <Route path="/session/:sessionId/ready" element={<SessionReady />} />
-          <Route path="/session/:sessionId/execute" element={<ExecuteSession />} />
+          <Route
+            path="/session/:sessionId/execute"
+            element={<ExecuteSession />}
+          />
+          <Route
+            path="/execute/server/:sessionId"
+            element={<ExecuteServer />}
+          />
+          <Route
+            path="/execute/client/:sessionId"
+            element={<ExecuteClient />}
+          />
           <Route path="/join/:sessionId?" element={<JoinSession />} />
-          <Route path="/join/:sessionId/upload" element={<JoinSessionUpload />} />
+          <Route
+            path="/join/:sessionId/upload"
+            element={<JoinSessionUpload />}
+          />
           <Route path="/join/:sessionId/ready" element={<JoinSessionReady />} />
           <Route path="/join/:sessionId/execute" element={<ExecuteSession />} />
-
 
           <Route path="*" element={<NotFound />} />
         </Routes>

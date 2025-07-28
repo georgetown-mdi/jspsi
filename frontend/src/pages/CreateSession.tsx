@@ -46,21 +46,53 @@ const CreateSession = () => {
     }
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionName,
-          initiatedName,
-          invitedName,
-          description,
-          enableAdvancedPSI,
-          oneTimeLink
-        })
-      });
-      const data = await res.json();
-      if (!data.sessionId) throw new Error('Session creation failed');
-      navigate(`/session/${data.sessionId}/ready`);
+      // Process the CSV file first
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const content = event.target?.result as string;
+        const lines = content.split('\n');
+
+        // Remove header if it's a CSV
+        let data = lines;
+        if (file.type === 'text/csv') {
+          data = lines.slice(1);
+        }
+
+        // Filter out empty lines
+        data = data.filter((line) => line.trim() !== '');
+
+        console.log('Processed advanced session data:', data);
+
+        // Create the session
+        const res = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionName,
+            initiatedName,
+            invitedName,
+            description,
+            enableAdvancedPSI,
+            oneTimeLink
+          })
+        });
+        const sessionData = await res.json();
+        if (!sessionData.sessionId) throw new Error('Session creation failed');
+
+        // Store the processed data in sessionStorage
+        sessionStorage.setItem(
+          `psi_data_${sessionData.sessionId}`,
+          JSON.stringify({
+            data: data,
+            fileName: file.name,
+            fileSize: file.size
+          })
+        );
+
+        navigate(`/session/${sessionData.sessionId}/ready`);
+      };
+
+      reader.readAsText(file);
     } catch (err: any) {
       toast({
         title: 'Error',

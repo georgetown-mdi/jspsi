@@ -25,8 +25,42 @@ const QuickSessionUpload = () => {
   }, [sessionId]);
 
   const handleSubmit = async () => {
-    // ...your CSV upload logic...
-    navigate(`/session/${sessionId}/ready`);
+    if (!file) return;
+
+    try {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        const lines = content.split('\n');
+
+        // Remove header if it's a CSV
+        let data = lines;
+        if (file.type === 'text/csv') {
+          data = lines.slice(1);
+        }
+
+        // Filter out empty lines
+        data = data.filter((line) => line.trim() !== '');
+
+        console.log('Processed server data:', data);
+
+        // Store in sessionStorage
+        sessionStorage.setItem(
+          `psi_data_${sessionId}`,
+          JSON.stringify({
+            data: data,
+            fileName: file.name,
+            fileSize: file.size
+          })
+        );
+
+        navigate(`/session/${sessionId}/ready`);
+      };
+
+      reader.readAsText(file);
+    } catch (error) {
+      console.error('Error processing file:', error);
+    }
   };
 
   return (

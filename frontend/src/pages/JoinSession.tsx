@@ -79,7 +79,7 @@ const JoinSession = () => {
               Enter the session ID to join an existing PSI session
             </p>
           </div>
-
+          <div className="animate-fade-in">
           <Card className="shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -121,8 +121,11 @@ const JoinSession = () => {
               </form>
             </CardContent>
           </Card>
+          </div>
 
+   
           {sessionInfo && (
+            <div className="animate-fade-in">
             <Card className="shadow-lg mt-6">
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -171,7 +174,9 @@ const JoinSession = () => {
                 </Button>
               </CardContent>
             </Card>
+            </div>
           )}
+ 
         </div>
       </div>
     </div>

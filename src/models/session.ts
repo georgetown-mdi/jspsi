@@ -4,6 +4,7 @@ export interface Session {
   invitedName: string;
   description: string;
   invitedPeerId?: string;
+  clientReady?: boolean;
 }
 
 export const sessions: { [key: string]: Session } = {};

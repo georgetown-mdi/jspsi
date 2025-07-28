@@ -212,7 +212,7 @@ const SessionReady = () => {
                           </p>
                           <Button
                             onClick={() =>
-                              navigate(`/session/${sessionId}/execute`)
+                              navigate(`/execute/server/${sessionId}`)
                             }
                             className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-200"
                           >

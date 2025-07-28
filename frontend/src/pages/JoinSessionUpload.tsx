@@ -44,30 +44,40 @@ const JoinSessionUpload = () => {
     e.preventDefault();
     if (!file) return;
 
-    // Here you would process the CSV file in the browser
-    // For now, we'll just navigate to the ready page
-    // In the future, this is where you'd parse the CSV and store it in component state
-
-    // Generate a mock PeerJS ID (in real implementation, this would come from PeerJS)
-    const mockPeerId = 'peerjs-' + Math.random().toString(36).substr(2, 9);
-
-    // Register this peer ID with the backend
     try {
-      const res = await fetch('/client/peerId', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: sessionId,
-          invitedPeerId: mockPeerId
-        })
-      });
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        const lines = content.split('\n');
 
-      if (res.ok) {
+        // Remove header if it's a CSV
+        let data = lines;
+        if (file.type === 'text/csv') {
+          data = lines.slice(1);
+        }
+
+        // Filter out empty lines
+        data = data.filter((line) => line.trim() !== '');
+
+        console.log('Processed client data:', data);
+
+        // Store in sessionStorage
+        sessionStorage.setItem(
+          `psi_data_${sessionId}`,
+          JSON.stringify({
+            data: data,
+            fileName: file.name,
+            fileSize: file.size
+          })
+        );
+
         // Navigate to the joiner's ready page
         navigate(`/join/${sessionId}/ready`);
-      }
+      };
+
+      reader.readAsText(file);
     } catch (error) {
-      console.error('Failed to register peer ID:', error);
+      console.error('Error processing file:', error);
     }
   };
 
@@ -169,7 +179,7 @@ const JoinSessionUpload = () => {
               Join the session and upload your CSV file to begin
             </p>
           </div>
-
+          <div className="animate-fade-in">
           <Card className="shadow-lg mb-6">
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -208,7 +218,8 @@ const JoinSessionUpload = () => {
               )}
             </CardContent>
           </Card>
-
+          </div>
+          <div className="animate-fade-in">
           <Card className="shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -238,6 +249,7 @@ const JoinSessionUpload = () => {
               </form>
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
     </div>

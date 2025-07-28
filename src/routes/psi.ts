@@ -74,10 +74,6 @@ router.post('/client/peerId', function (req, res) {
   res.sendStatus(200);
 });
 
-
-
-
-
 router.get('/server', function (req, res) {
   if (
     !('initiatedName' in req.query)
@@ -113,12 +109,6 @@ router.get('/server', function (req, res) {
     description: session['description']
   });
 });
-
-
-
-
-
-
 
 router.get('/server/peerId', function (req, res) {
   if (!('sessionId' in req.query) || req.query['sessionId'] === undefined) {
@@ -165,9 +155,24 @@ router.get('/server/peerId', function (req, res) {
   });
 });
 
+// Client ready signal endpoint
+router.post('/client/ready', function (req, res) {
+  const { sessionId, clientReady } = req.body;
+
+  if (!sessionId || !(sessionId in sessions)) {
+    return res.status(400).send('Invalid session id');
+  }
+
+  const session = sessions[sessionId];
+  session.clientReady = clientReady;
+
+  debug(`client ready signal received for session ${sessionId}`);
+  res.status(200).send('OK');
+});
+
 //can include stuff about advanced psi protocol later
 router.post('/api/session', function (req, res) {
-  const { sessionName, initiatedName, invitedName, description} = req.body;
+  const { sessionName, initiatedName, invitedName, description } = req.body;
 
   // Validate input
   let finalSessionName = sessionName;

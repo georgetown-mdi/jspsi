@@ -35,7 +35,7 @@ const JoinSessionReady = () => {
 
   const handleStartPSI = () => {
     // Navigate to the PSI execution page
-    navigate(`/join/${sessionId}/execute`);
+    navigate(`/execute/client/${sessionId}`);
   };
 
   if (isLoading) {
@@ -140,8 +140,9 @@ const JoinSessionReady = () => {
               for PSI execution.
             </p>
           </div>
-
+          
           <div className="space-y-6">
+            <div className="animate-fade-in">
             <Card className="shadow-lg">
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -182,7 +183,9 @@ const JoinSessionReady = () => {
                 )}
               </CardContent>
             </Card>
+            </div>
 
+            <div className="animate-fade-in">
             <div className="bg-green-50 border border-green-200 rounded-lg p-6">
               <div className="flex items-center space-x-3 mb-4">
                 <CheckCircle className="w-5 h-5 text-green-600" />
@@ -202,6 +205,7 @@ const JoinSessionReady = () => {
               >
                 Start PSI Execution
               </Button>
+            </div>
             </div>
           </div>
         </div>
