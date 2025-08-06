@@ -1,9 +1,12 @@
-import express from "express";
+// import express from "express";
 
-import { CreateInstanceWSOnly, createInstance } from "./instance.ts";
+// import { CreateInstanceWSOnly, createInstance } from "./instance.ts";
+import { CreateInstanceWSOnly } from "./instance.ts";
 import defaultConfig from "./config/index.ts";
 
-import type { PeerServerEvents, PeerServerInstance } from "./instance.ts";
+// import type { PeerServerEvents, PeerServerInstance } from "./instance.ts";
+import type { PeerServerInstance } from "./instance.ts";
+
 import type { IClient } from "./models/client.ts";
 import type { IConfig } from "./config/index.ts";
 import type { IMessage } from "./models/message.ts";
@@ -12,12 +15,13 @@ import type { Server as HttpServer } from "node:http";
 import type { Http2SecureServer as HttpsServer } from "node:http2";
 
 export type { MessageType } from "./enums.ts";
-export type { IConfig, PeerServerEvents, IClient, IMessage };
+// export type { IConfig, PeerServerEvents, IClient, IMessage };
+export type { IConfig, IClient, IMessage };
 
-export interface TanstackPeerServer {
+/* export interface TanstackPeerServer {
   app: express.Express & PeerServerEvents
   instance: PeerServerInstance
-}
+} */
 
 
 export function CreatePeerServerWSOnly(
@@ -32,7 +36,7 @@ export function CreatePeerServerWSOnly(
   return CreateInstanceWSOnly({server, options: newOptions})
 }
 
-export default function CreatePeerServer(
+/* export default function CreatePeerServer(
 	server: HttpServer | HttpsServer,
 	options?: Partial<IConfig>,
 ): TanstackPeerServer {
@@ -65,4 +69,4 @@ export default function CreatePeerServer(
 		instance,
 		app: app as express.Express & PeerServerEvents
 	}
-}
+} */

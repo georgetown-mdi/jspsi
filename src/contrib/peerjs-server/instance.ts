@@ -8,7 +8,7 @@ import { WebSocketServer } from "./services/webSocketServer/index.ts";
 
 import defaultConfig from "./config/index.ts";
 
-import type express from "express";
+// import type express from "express";
 
 import type { IMessagesExpire } from "./services/messagesExpire/index.ts";
 import type { IRealm } from "./models/realm.ts";
@@ -23,13 +23,13 @@ import type { IConfig } from "./config/index.ts";
 import type { IMessage } from "./models/message.ts";
 
 
-export interface PeerServerEvents {
+/* export interface PeerServerEvents {
 	on:
 		((event: "connection", listener: (client: IClient) => void) => this)
 		& ((event: "message", listener: (client: IClient, message: IMessage) => void) => this)
 	    & ((event: "disconnect", listener: (client: IClient) => void) => this)
 	    & ((event: "error", listener: (client: Error) => void) => this)
-}
+} */
 
 export interface PeerServerInstance {
 	config: IConfig
@@ -107,7 +107,7 @@ export function CreateInstanceWSOnly(
 	return { config, realm };
 }
 
-export const createInstance = ({
+/* export const createInstance = ({
 	app,
 	server,
 	options,
@@ -181,4 +181,4 @@ export const createInstance = ({
 	checkBrokenConnections.start();
 
 	return { config, realm }
-};
+}; */
