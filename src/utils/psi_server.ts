@@ -128,7 +128,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
     const peer = new Peer({
       host: host,
       path: "/api/",
-      port: 3001,
+      port: 3000,
       debug: 2,
       config: {
         iceServers: [

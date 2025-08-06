@@ -13,9 +13,12 @@ import { createServerRootRoute } from '@tanstack/react-start/server'
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PsiRouteImport } from './routes/psi'
 import { Route as IndexRouteImport } from './routes/index'
+import { ServerRoute as ApiPeerjsIndexServerRouteImport } from './routes/api/peerjs/index'
 import { ServerRoute as ApiPsiCreateServerRouteImport } from './routes/api/psi/create'
+import { ServerRoute as ApiPeerjsIdServerRouteImport } from './routes/api/peerjs/id'
 import { ServerRoute as ApiPsiIdIndexServerRouteImport } from './routes/api/psi/$id/index'
 import { ServerRoute as ApiPsiIdWaitServerRouteImport } from './routes/api/psi/$id/wait'
+import { ServerRoute as ApiPeerjsKeyPeersServerRouteImport } from './routes/api/peerjs/$key/peers'
 
 const rootServerRouteImport = createServerRootRoute()
 
@@ -29,9 +32,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPeerjsIndexServerRoute = ApiPeerjsIndexServerRouteImport.update({
+  id: '/api/peerjs/',
+  path: '/api/peerjs/',
+  getParentRoute: () => rootServerRouteImport,
+} as any)
 const ApiPsiCreateServerRoute = ApiPsiCreateServerRouteImport.update({
   id: '/api/psi/create',
   path: '/api/psi/create',
+  getParentRoute: () => rootServerRouteImport,
+} as any)
+const ApiPeerjsIdServerRoute = ApiPeerjsIdServerRouteImport.update({
+  id: '/api/peerjs/id',
+  path: '/api/peerjs/id',
   getParentRoute: () => rootServerRouteImport,
 } as any)
 const ApiPsiIdIndexServerRoute = ApiPsiIdIndexServerRouteImport.update({
@@ -42,6 +55,11 @@ const ApiPsiIdIndexServerRoute = ApiPsiIdIndexServerRouteImport.update({
 const ApiPsiIdWaitServerRoute = ApiPsiIdWaitServerRouteImport.update({
   id: '/api/psi/$id/wait',
   path: '/api/psi/$id/wait',
+  getParentRoute: () => rootServerRouteImport,
+} as any)
+const ApiPeerjsKeyPeersServerRoute = ApiPeerjsKeyPeersServerRouteImport.update({
+  id: '/api/peerjs/$key/peers',
+  path: '/api/peerjs/$key/peers',
   getParentRoute: () => rootServerRouteImport,
 } as any)
 
@@ -71,31 +89,62 @@ export interface RootRouteChildren {
   PsiRoute: typeof PsiRoute
 }
 export interface FileServerRoutesByFullPath {
+  '/api/peerjs/id': typeof ApiPeerjsIdServerRoute
   '/api/psi/create': typeof ApiPsiCreateServerRoute
+  '/api/peerjs': typeof ApiPeerjsIndexServerRoute
+  '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersServerRoute
   '/api/psi/$id/wait': typeof ApiPsiIdWaitServerRoute
   '/api/psi/$id': typeof ApiPsiIdIndexServerRoute
 }
 export interface FileServerRoutesByTo {
+  '/api/peerjs/id': typeof ApiPeerjsIdServerRoute
   '/api/psi/create': typeof ApiPsiCreateServerRoute
+  '/api/peerjs': typeof ApiPeerjsIndexServerRoute
+  '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersServerRoute
   '/api/psi/$id/wait': typeof ApiPsiIdWaitServerRoute
   '/api/psi/$id': typeof ApiPsiIdIndexServerRoute
 }
 export interface FileServerRoutesById {
   __root__: typeof rootServerRouteImport
+  '/api/peerjs/id': typeof ApiPeerjsIdServerRoute
   '/api/psi/create': typeof ApiPsiCreateServerRoute
+  '/api/peerjs/': typeof ApiPeerjsIndexServerRoute
+  '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersServerRoute
   '/api/psi/$id/wait': typeof ApiPsiIdWaitServerRoute
   '/api/psi/$id/': typeof ApiPsiIdIndexServerRoute
 }
 export interface FileServerRouteTypes {
   fileServerRoutesByFullPath: FileServerRoutesByFullPath
-  fullPaths: '/api/psi/create' | '/api/psi/$id/wait' | '/api/psi/$id'
+  fullPaths:
+    | '/api/peerjs/id'
+    | '/api/psi/create'
+    | '/api/peerjs'
+    | '/api/peerjs/$key/peers'
+    | '/api/psi/$id/wait'
+    | '/api/psi/$id'
   fileServerRoutesByTo: FileServerRoutesByTo
-  to: '/api/psi/create' | '/api/psi/$id/wait' | '/api/psi/$id'
-  id: '__root__' | '/api/psi/create' | '/api/psi/$id/wait' | '/api/psi/$id/'
+  to:
+    | '/api/peerjs/id'
+    | '/api/psi/create'
+    | '/api/peerjs'
+    | '/api/peerjs/$key/peers'
+    | '/api/psi/$id/wait'
+    | '/api/psi/$id'
+  id:
+    | '__root__'
+    | '/api/peerjs/id'
+    | '/api/psi/create'
+    | '/api/peerjs/'
+    | '/api/peerjs/$key/peers'
+    | '/api/psi/$id/wait'
+    | '/api/psi/$id/'
   fileServerRoutesById: FileServerRoutesById
 }
 export interface RootServerRouteChildren {
+  ApiPeerjsIdServerRoute: typeof ApiPeerjsIdServerRoute
   ApiPsiCreateServerRoute: typeof ApiPsiCreateServerRoute
+  ApiPeerjsIndexServerRoute: typeof ApiPeerjsIndexServerRoute
+  ApiPeerjsKeyPeersServerRoute: typeof ApiPeerjsKeyPeersServerRoute
   ApiPsiIdWaitServerRoute: typeof ApiPsiIdWaitServerRoute
   ApiPsiIdIndexServerRoute: typeof ApiPsiIdIndexServerRoute
 }
@@ -120,11 +169,25 @@ declare module '@tanstack/react-router' {
 }
 declare module '@tanstack/react-start/server' {
   interface ServerFileRoutesByPath {
+    '/api/peerjs/': {
+      id: '/api/peerjs/'
+      path: '/api/peerjs'
+      fullPath: '/api/peerjs'
+      preLoaderRoute: typeof ApiPeerjsIndexServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
     '/api/psi/create': {
       id: '/api/psi/create'
       path: '/api/psi/create'
       fullPath: '/api/psi/create'
       preLoaderRoute: typeof ApiPsiCreateServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
+    '/api/peerjs/id': {
+      id: '/api/peerjs/id'
+      path: '/api/peerjs/id'
+      fullPath: '/api/peerjs/id'
+      preLoaderRoute: typeof ApiPeerjsIdServerRouteImport
       parentRoute: typeof rootServerRouteImport
     }
     '/api/psi/$id/': {
@@ -141,6 +204,13 @@ declare module '@tanstack/react-start/server' {
       preLoaderRoute: typeof ApiPsiIdWaitServerRouteImport
       parentRoute: typeof rootServerRouteImport
     }
+    '/api/peerjs/$key/peers': {
+      id: '/api/peerjs/$key/peers'
+      path: '/api/peerjs/$key/peers'
+      fullPath: '/api/peerjs/$key/peers'
+      preLoaderRoute: typeof ApiPeerjsKeyPeersServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
   }
 }
 
@@ -152,7 +222,10 @@ export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 const rootServerRouteChildren: RootServerRouteChildren = {
+  ApiPeerjsIdServerRoute: ApiPeerjsIdServerRoute,
   ApiPsiCreateServerRoute: ApiPsiCreateServerRoute,
+  ApiPeerjsIndexServerRoute: ApiPeerjsIndexServerRoute,
+  ApiPeerjsKeyPeersServerRoute: ApiPeerjsKeyPeersServerRoute,
   ApiPsiIdWaitServerRoute: ApiPsiIdWaitServerRoute,
   ApiPsiIdIndexServerRoute: ApiPsiIdIndexServerRoute,
 }

@@ -1,44 +1,36 @@
-import {
-  createStartHandler,
-  defaultStreamHandler,
-} from '@tanstack/react-start/server'
-import { PeerServer } from 'peer';
+import { createStartHandler, defaultStreamHandler } from '@tanstack/react-start/server'
 import { createRouter } from '@router'
 
-import type * as http from 'node:http';
-import type * as https from 'node:https';
-
 export default createStartHandler({
-  createRouter,
-})(defaultStreamHandler)
+    createRouter,
+  })(defaultStreamHandler)
 
-let peerServerServer: http.Server | https.Server | undefined;
-
-export const peerServer = PeerServer(
-  {
-    port: 3001,
-    path: "/api",
-    corsOptions: { origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] }
-  },
-  (server) => {
-    peerServerServer = server;
+/* if (import.meta.env.SSR && import.meta.env.PROD) {
+  try {
+    const { useNitroApp } = await import('nitropack/runtime')
+    const nitroApp = useNitroApp();
+    // console.log(nitroApp)
+    if (nitroApp?.hooks) {
+      nitroApp.hooks.hook('nitro:listen', (server, info) => {
+        console.log('Nitro production server', server, 'with info', info)
+      })
+    }
+  } catch (err) {
+    console.warn('Nitro not available in this context:', err)
   }
-);
+} */
 
 // see: https://github.com/vitest-dev/vitest/issues/2334
 if (import.meta.hot) {
   import.meta.hot.on("vite:beforeFullReload", () => {
-    if (peerServerServer !== undefined) {
-       peerServerServer.close();
-       peerServerServer = undefined;
-    }
+    // peerServer.close();
   })
 
   import.meta.hot.dispose(() => {
-    if (peerServerServer !== undefined) {
+    /* if (peerServerServer !== undefined) {
       peerServerServer.close()
       peerServerServer = undefined;
-    }
+    } */
   });
 }
 

@@ -31,6 +31,9 @@
       "@utils/*": [
         "./src/utils/*"
       ],
+      "@peerjs-server/*": [
+        "./src/contrib/peerjs-server/*"
+      ],
       "@*": [
         "./src/*"
       ]

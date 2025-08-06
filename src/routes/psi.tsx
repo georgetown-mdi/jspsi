@@ -1,5 +1,4 @@
-
-import { createFileRoute, useRouter, useSearch} from '@tanstack/react-router';
+import { createFileRoute, useSearch} from '@tanstack/react-router';
 
 import { useState } from 'react';
 
@@ -7,6 +6,8 @@ import { ActionIcon, Code, Container, Group, Paper, Stack, Title, Tooltip } from
 import { useClipboard } from '@mantine/hooks';
 
 import { IconCopy } from '@tabler/icons-react';
+
+import { getHostname as getHttpServerHostname } from '@httpServer';
 
 import { PSIAsClient, stages as clientStages, createAndSharePeerId } from '@utils/psi_client';
 import { PSIAsServer, openPeerConnection, stages as serverStages, waitForPeerId } from '@utils/psi_server';
@@ -68,7 +69,6 @@ const loadFile = (file: File): Promise<Array<string>> =>  {
 function Home() {
   const session = Route.useLoaderData();
   const clipboard = useClipboard();
-  const router = useRouter();
   const role = useSearch({
     strict: false,
     select: (search) => search.start
@@ -151,12 +151,10 @@ function Home() {
   let url: URL;
   if (role === 'server') {
     const searchParams = new URLSearchParams({id: session['id']});
-    if (router.isServer) {
-      url = new URL(`http://localhost:3000/psi?${searchParams}`);
-      // TODO: figure out how to lookup the host from something, anything
-      console.log('is server');
-    } else {
+    if (typeof window !== 'undefined') {
       url = new URL(`${window.location.protocol}//${window.location.host}/psi?${searchParams}`);
+    } else {
+      url = new URL(`${getHttpServerHostname()}/psi?${searchParams}`);
     }
   }
   
