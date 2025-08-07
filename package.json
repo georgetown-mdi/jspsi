@@ -28,6 +28,7 @@
     "@tanstack/react-start": "^1.127.6",
     "@types/cors": "^2.8.19",
     "@types/uuid": "^10.0.0",
+    "cors": "^2.8.5",
     "peerjs": "^1.5.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

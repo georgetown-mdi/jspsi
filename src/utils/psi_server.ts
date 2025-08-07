@@ -78,11 +78,12 @@ export class PSIAsServer {
 
 export function waitForPeerId(session: Session): Promise<string> {
   return new Promise((resolve, reject) => {
-    console.log('creating event source');
     const eventSource = new EventSource(
       `/api/psi/${session['id']}/wait`,
       { withCredentials: true }
     );
+    console.log('created event source at', eventSource.url);
+    
 
     eventSource.addEventListener('open', () => {
       console.log("SSE connection opened; waiting for peer id");
@@ -128,7 +129,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
     const peer = new Peer({
       host: host,
       path: "/api/",
-      port: 3000,
+      port: window.location.port,
       debug: 2,
       config: {
         iceServers: [

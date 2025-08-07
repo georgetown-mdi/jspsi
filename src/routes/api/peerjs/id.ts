@@ -32,16 +32,17 @@ const corsMiddleware = createMiddleware({ type: 'request' }).server(
         getHeader: getResponseHeader,
         setHeader: setResponseHeader,
         end: () => {
-          console.log('end was called within cors');
+          console.warn('end was called within cors');
           corsResult = 'end';
         }
       },
       (err) => { 
-        console.log('next was called and err is:', err ? err : 'undefined')
-        if (err)
+        if (err) {
+          console.warn('next was called and err is:', err)
           corsResult = err
-        else
+        } else {
           corsResult = 'next'
+        }
       }
     )
 

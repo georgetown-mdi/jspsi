@@ -47,7 +47,7 @@ function createPeerServer(): PeerServerInstance {
       origin = '*'
     }
   }
-
+  console.info('creating peer server with origin:', origin);
 
   return CreatePeerServerWSOnly(
     server,

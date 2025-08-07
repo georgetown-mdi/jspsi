@@ -2,10 +2,20 @@ import { createFileRoute, useSearch} from '@tanstack/react-router';
 
 import { useState } from 'react';
 
-import { ActionIcon, Code, Container, Group, Paper, Stack, Title, Tooltip } from '@mantine/core';
-import { useClipboard } from '@mantine/hooks';
+import {
+  ActionIcon,
+  Code,
+  Container,
+  CopyButton,
+  Group,
+  Paper,
+  Stack,
+  Text,
+  Title,
+  Tooltip,
+} from '@mantine/core';
 
-import { IconCopy } from '@tabler/icons-react';
+import { IconCheck, IconCopy } from '@tabler/icons-react';
 
 import { getHostname as getHttpServerHostname } from '@httpServer';
 
@@ -31,7 +41,7 @@ export const Route = createFileRoute('/psi')({
   },
   loaderDeps: ({ search: { id } }) => ({ id }),
   loader: async ({ deps: { id } }) =>  {
-    // as a curiosity, this runs on the server
+    // as a curiosity, this sometimes runs on the server
     // return sessions[id];
     const response = await fetch(`/api/psi/${id}`)
     if (!response.ok) {
@@ -68,7 +78,6 @@ const loadFile = (file: File): Promise<Array<string>> =>  {
 
 function Home() {
   const session = Route.useLoaderData();
-  const clipboard = useClipboard();
   const role = useSearch({
     strict: false,
     select: (search) => search.start
@@ -148,7 +157,7 @@ function Home() {
     }
   };
 
-  let url: URL;
+  let url: URL | undefined;
   if (role === 'server') {
     const searchParams = new URLSearchParams({id: session['id']});
     if (typeof window !== 'undefined') {
@@ -165,17 +174,31 @@ function Home() {
           <SessionDetails session={session} />
           <Status session={session} stageName={stage} resultsFileURL={resultURL} />
         </Group>
-        { role === 'server' && (
+        { url && (
           <Paper>
             <Title order={2}>Sharable Link</Title>
             <Code block={false} style={{ whiteSpace: 'pre', flex: 1 }}>
-              {url!.toString()}
+              {url.toString()}
             </Code>
-            <Tooltip label="Copy to clipboard">
-              <ActionIcon onClick={() => clipboard.copy(url.toString())} variant="light" color="blue">
-                <IconCopy size={18} />
-              </ActionIcon>
-            </Tooltip>
+            {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+              navigator.clipboard ?
+              (
+                <CopyButton value={url.toString()} timeout={500}>
+                  {({ copied, copy }) => (
+                    <Tooltip label="Copy to clipboard">
+                      <ActionIcon onClick={copy} variant={copied ? 'light' : 'filled'}>
+                        {copied ? <IconCheck size={18} /> : <IconCopy size={18} />}
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </CopyButton>
+              ) :
+              (
+                <Text>No cliboard available</Text>
+              )
+            }
+            
           </Paper>
         )}
         <FileSelect handleSubmit={handleSubmit} submitted={submitted} files={files} setFiles={setFiles}/>

@@ -78,7 +78,7 @@ export function createAndSharePeerId(session: Session): Promise<Peer> {
     const peer = new Peer({
       host: host,
       path: "/api/",
-      port: 3000,
+      port: window.location.port,
       debug: 2,
       config: {
         iceServers: [
