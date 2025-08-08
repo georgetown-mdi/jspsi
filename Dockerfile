@@ -20,6 +20,7 @@ WORKDIR /app
 RUN cat <<EOF > start_server.sh
 #!/bin/sh
 cd /app/backend
+touch .env
 npm run dev -- --host 0.0.0.0 &
 cd /app/frontend
 npm run dev -- --host 0.0.0.0
