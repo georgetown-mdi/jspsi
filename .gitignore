@@ -12,8 +12,4 @@ count.txt
 count.txt
 *.swp
 .netlify
-
-# Elastic Beanstalk Files
-.elasticbeanstalk/*
-!.elasticbeanstalk/*.cfg.yml
-!.elasticbeanstalk/*.global.yml
+terraform.tfvars
