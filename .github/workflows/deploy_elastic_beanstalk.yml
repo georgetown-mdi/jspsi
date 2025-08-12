@@ -3,17 +3,7 @@ name: Deploy to Elastic Beanstalk
 on:
   push:
     branches: "main"
-    paths: [
-      'deploy/aws_eb/*',
-      'public/*',
-      'server/*',
-      'src/*',
-      'nitro.config.ts',
-      'package-lock.json',
-      'package.json',
-      'postcss.config.cjs',
-      'tsconfig.json'
-    ]
+    
 
 env:
   EB_APPLICATION_NAME: JSPSI
