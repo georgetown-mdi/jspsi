@@ -1,9 +1,10 @@
-import type { DataConnection, Peer } from 'peerjs';
+import { ShowStatusElements } from '@components/Status';
+
+import { Peer } from 'peerjs';
+
+import type { DataConnection } from 'peerjs';
 
 import type { Session } from '@utils/sessions'
-
-// eslint-disable-next-line import/order
-import { ShowStatusElements } from '@components/Status';
 
 import type { ProtocolStage } from '@components/Status';
 
@@ -125,11 +126,10 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
     if (host === 'localhost') host = '127.0.0.1'
     console.log(`connecting to peer server at ${host} and getting peer id`);
     
-    // @ts-ignore - Peer is imported in client-side route code
     const peer = new Peer({
       host: host,
       path: "/api/",
-      port: window.location.port,
+      port: parseInt(window.location.port),
       debug: 2,
       config: {
         iceServers: [

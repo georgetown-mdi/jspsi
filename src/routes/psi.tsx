@@ -184,7 +184,7 @@ function Home() {
               // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
               navigator.clipboard ?
               (
-                <CopyButton value={url.toString()} timeout={500}>
+                <CopyButton value={url.toString()} timeout={100}>
                   {({ copied, copy }) => (
                     <Tooltip label="Copy to clipboard">
                       <ActionIcon onClick={copy} variant={copied ? 'light' : 'filled'}>
