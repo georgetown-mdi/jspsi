@@ -134,7 +134,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
       host: host,
       path: "/api/",
       port: port,
-      debug: 2,
+      debug: 3,
       config: {
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
