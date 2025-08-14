@@ -52,7 +52,7 @@ export const Route = createFileRoute('/psi')({
   component: Home,
   head: () => {
     return {
-      scripts: [ { src: '/js/peerjs.min.js'} , { src: '/js/psi_wasm_web.js' } ]
+      scripts: [ { src: '/js/psi_wasm_web.js' } ]
     }
   }
 });
@@ -66,7 +66,11 @@ const loadFile = (file: File): Promise<Array<string>> =>  {
       let result = (reader.result! as string).split('\n');
       if (file.type === "text/csv") result = result.slice(1);
       result = result.filter(function(entry) { return entry.trim() != ''; });
-      
+
+      result = result
+        .map(function(row) { return row.split(',')[0]; })
+        .filter((row) => { return row.trim() != ''; })
+
       resolve(result);
     }
 

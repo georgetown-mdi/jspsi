@@ -56,8 +56,8 @@ export function CreateInstanceWSOnly(
 	const checkBrokenConnections = new CheckBrokenConnections({
 		realm,
 		config,
-		onClose: (client) => {
-			console.log("disconnect", client);
+		onClose: (_client) => {
+			// emit("disconnect", client);
 		},
 	});
 
@@ -85,20 +85,19 @@ export function CreateInstanceWSOnly(
 		}
         
         // emit("connection", client)
-		// console.log();
 	});
 
 	wss.on("message", (client: IClient, message: IMessage) => {
-		// console.log("message", client, message);
+		// emit("message", client, message);
 		messageHandler.handle(client, message);
 	});
 
 	wss.on("close", (_client: IClient) => {
-		// console.log("disconnect", client);
+		// emit("disconnect", client);
 	});
 
 	wss.on("error", (_error: Error) => {
-		// console.log("error", error);
+		// emit("error", error);
 	});
 
 	messagesExpire.startMessagesExpiration();

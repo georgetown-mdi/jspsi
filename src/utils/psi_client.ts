@@ -1,6 +1,6 @@
 import { ShowStatusElements } from '@components/Status';
 
-import { Peer } from 'peerjs'
+import Peer from 'peerjs';
 
 import type { DataConnection } from 'peerjs';
 
@@ -75,10 +75,14 @@ export function createAndSharePeerId(session: Session): Promise<Peer> {
     if (host === 'localhost') host = '127.0.0.1'
     console.log(`connecting to peer server at ${host} and getting peer id`);
 
+    const port = parseInt(window.location.port) || (
+      window.location.protocol == 'http' ? 80 : 443
+    )
+
     const peer = new Peer({
       host: host,
       path: "/api/",
-      port: parseInt(window.location.port),
+      port: port,
       debug: 2,
       config: {
         iceServers: [

@@ -3,19 +3,33 @@ name: Deploy to Elastic Beanstalk
 on:
   push:
     branches: "main"
-    
+    paths: [
+      'deploy/aws_eb/**',
+      'public/**',
+      'server/**',
+      'src/**',
+      'nitro.config.ts',
+      'package-lock.json',
+      'package.json',
+      'postcss.config.cjs',
+      'tsconfig.json'
+    ]
 
 env:
   EB_APPLICATION_NAME: JSPSI
   EB_ENVIRONMENT_NAME: jspsi-env
   AWS_REGION_NAME: us-west-2
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     environment: Production
-    steps:
 
+    steps:
     - uses: actions/checkout@v4
     - name: Setup NodeJS
       uses: actions/setup-node@v4
