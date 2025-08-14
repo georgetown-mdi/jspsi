@@ -143,14 +143,14 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
              Internet, but we should look into establishing our own TURN
              servers at some point.
            */
-          /* {
+           {
             urls: [
               "turn:eu-0.turn.peerjs.com:3478",
               "turn:us-0.turn.peerjs.com:3478",
             ],
             username: "peerjs",
             credential: "peerjsp",
-          }, */
+          },
         ],
         'sdpSemantics': 'unified-plan'
       }
