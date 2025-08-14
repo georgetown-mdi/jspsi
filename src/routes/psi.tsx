@@ -126,6 +126,8 @@ function Home() {
             window.URL.revokeObjectURL(resultURL);
           
           setResultURL(newResultURL);
+        }).catch((error) => {
+          console.error(error);
         });
       })
     } else {
