@@ -14,27 +14,21 @@ on:
       'postcss.config.cjs',
       'tsconfig.json'
     ]
+  workflow_dispatch:
 
 env:
   EB_APPLICATION_NAME: JSPSI
   EB_ENVIRONMENT_NAME: jspsi-env
   AWS_REGION_NAME: us-west-2
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment: Production
 
     steps:
     - uses: actions/checkout@v4
     - name: Setup NodeJS
       uses: actions/setup-node@v4
-      with:
-        node-version-file: package.json
     - name: Build
       run: |
         npm ci
@@ -52,28 +46,34 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
+    environment: Production
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
     - uses: actions/download-artifact@v4
     - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v4.3.1
       with:
         aws-region: ${{ env.AWS_REGION_NAME }}
-        role-session-name: GitHub_to_AWS_via_FederatedOIDC
         role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        role-session-name: ${{ github.run_id }}
     - name: Deploy
+      env:
+        AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       run: |
         aws s3 cp \
           "deploy-files/${{github.sha}}.zip" \
-          s3://elasticbeanstalk-${{ env.AWS_REGION_NAME }}-${{ secrets.AWS_ACCOUNT_ID }}/
+          s3://elasticbeanstalk-${{ env.AWS_REGION_NAME }}-${{ env.AWS_ACCOUNT_ID }}/
         aws elasticbeanstalk create-application-version \
             --application-name $EB_APPLICATION_NAME \
             --version-label ${{github.sha}} \
             --description ${{github.sha}} \
-            --source-bundle S3Bucket="elasticbeanstalk-${{ env.AWS_REGION_NAME }}-${{ secrets.AWS_ACCOUNT_ID }}",S3Key="${{github.run_id}}.zip"
+            --source-bundle S3Bucket="elasticbeanstalk-${{ env.AWS_REGION_NAME }}-${{ env.AWS_ACCOUNT_ID }}",S3Key="${{github.sha}}.zip"
         aws elasticbeanstalk update-environment \
-            --application-name $EB_APPLICATION_NAME
-            --environment-name $EB_ENVIRONMENT_NAME
+            --application-name $EB_APPLICATION_NAME \
+            --environment-name $EB_ENVIRONMENT_NAME \
             --version-label ${{github.sha}}
         aws elasticbeanstalk wait environment-updated \
             --application-name $EB_APPLICATION_NAME \
