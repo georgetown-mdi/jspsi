@@ -1,0 +1,22 @@
+name: Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches: [ main, staging, dev ]
+
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    uses: ./.github/workflows/eb_build_and_test.yaml
+
+  deploy:
+    needs: build-and-test
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/eb_deploy_reusable_action.yaml
+    with:
+      artifactName: ${{needs.build-and-test.outputs.artifactName}}
+      branchName: ${{github.ref_name}}
+    secrets: inherit

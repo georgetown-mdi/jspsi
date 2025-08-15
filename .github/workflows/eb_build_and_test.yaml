@@ -1,0 +1,70 @@
+name: Build and Test for Elastic Beanstalk
+
+# Yoinked from here:
+# https://blog.danskingdom.com/Multiple-ways-to-setup-your-CI-CD-pipelines-in-GitHub-Actions/#approach-5-deploy-workflow-includes-build-workflow-and-uses-template-for-deployments-include-approach-with-reusable-workflows
+
+on:
+  pull_request:
+    branches: [ main, staging ]
+
+  push:
+    branches-ignore: [ main, staging ]
+    paths: [
+      'deploy/aws_eb/**',
+      'public/**',
+      'server/**',
+      'src/**',
+      'nitro.config.ts',
+      'package-lock.json',
+      'package.json',
+      'postcss.config.cjs',
+      'tsconfig.json'
+    ]
+
+  workflow_call:
+    outputs:
+      artifactName:
+        description: "Name of the uploaded artifact"
+        value: ${{jobs.build-and-test.outputs.artifactName}}
+
+env:
+  ARTIFACT_NAME: ${{format('{0}-{1}', vars.EB_APPLICATION_NAME, github.sha)}}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      artifactName: ${{steps.artifact-name.outputs.artifactName}}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+      - name: Get npm cache directory
+        id: npm-cache-dir
+        shell: bash
+        run: echo "dir=$(npm config get cache)" >> ${GITHUB_OUTPUT}
+      - uses: actions/cache@v4
+        id: npm-cache # use this to check for `cache-hit` ==> if: steps.npm-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{steps.npm-cache-dir.outputs.dir}}
+          key: ${{runner.os}}-node-${{hashFiles('**/package-lock.json')}}
+          restore-keys: |
+            ${{runner.os}}-node-
+      - name: Build server
+        run: |
+          npm ci
+          npm run build
+      - name: Package for Elastic Beanstalk
+        run: |
+          cp -a deploy/aws_eb/. .output \
+          && (cd .output && zip -r ../${{github.sha}}.zip .)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{env.ARTIFACT_NAME}}
+          path: ${{github.sha}}.zip
+          compression-level: 0
+      - name: Output artifact name
+        id: artifact-name
+        run: echo "artifactName=${{env.ARTIFACT_NAME}}" >> $GITHUB_OUTPUT

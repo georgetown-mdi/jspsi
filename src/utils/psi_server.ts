@@ -137,13 +137,18 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
       debug: 3,
       config: {
         iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: [
+              "stun:stun.l.google.com:19302",
+              "stun:stunserver2024.stunprotocol.org:3478"
+            ]
+          },
           /* Explicitly disable TURN survers, since they relay data. This is
              mostly semantics since all data is relayed across servers on the
              Internet, but we should look into establishing our own TURN
              servers at some point.
            */
-           {
+          /* {
             urls: [
               "turn:eu-0.turn.peerjs.com:3478",
               "turn:us-0.turn.peerjs.com:3478",
@@ -151,8 +156,10 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
             username: "peerjs",
             credential: "peerjsp",
           },
+          */
         ],
-        'sdpSemantics': 'unified-plan'
+        'sdpSemantics': 'unified-plan',
+        iceTransportPolicy: 'all',
       }
     });
 
