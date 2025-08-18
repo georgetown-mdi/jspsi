@@ -14,28 +14,19 @@ import {
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 
+import { ShowStatusElements } from './StatusStages';
+
 import type { PaperProps } from '@mantine/core';
 
-import type { Session } from '@utils/sessions';
+import type { LinkSession } from '@utils/sessions';
+import type { ProtocolStage } from './StatusStages';
 
-export enum ShowStatusElements {
-  None,
-  Spinner,
-  ProgressBar,
-  Completion
-}
 
 export interface StatusProps extends PaperProps {
-  session: Session
+  session: LinkSession
   stageName: string
   resultsFileURL: string | undefined
 }
-
-export type ProtocolStage = [
-  name: string,
-  description: string,
-  show: ShowStatusElements
-]
 
 type ProtocolStageInfo = [
   description: string,

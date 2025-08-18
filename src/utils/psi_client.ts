@@ -1,12 +1,12 @@
-import { ShowStatusElements } from '@components/Status';
+import { ShowStatusElements } from '@components/StatusStages';
 
 import Peer from 'peerjs';
 
 import type { DataConnection } from 'peerjs';
 
-import type { Session } from '@utils/sessions';
+import type { LinkSession } from '@utils/sessions';
 
-import type { ProtocolStage } from '@components/Status';
+import type { ProtocolStage } from '@components/StatusStages';
 
 export const stages: Array<ProtocolStage> = [
   ['before start', 'Stopped', ShowStatusElements.None],
@@ -69,7 +69,7 @@ export class PSIAsClient {
 }
 
 /** Connects to peer server, gets a peer id, and posts to API. Returns Peer. */
-export function createAndSharePeerId(session: Session): Promise<Peer> {
+export function createAndSharePeerId(session: LinkSession): Promise<Peer> {
   return new Promise((resolve, reject) => {
     let host = window.location.hostname;
     if (host === 'localhost') host = '127.0.0.1'
@@ -109,7 +109,7 @@ export function createAndSharePeerId(session: Session): Promise<Peer> {
     peer.on('open', function(id: string) {
       console.log(`got peer id ${id} from peer server; posting to server`)
 
-      fetch(`/api/psi/${session['id']}`, {
+      fetch(`/api/psi/${session['uuid']}`, {
         headers: {
           'Content-Type': 'application/json'
         },

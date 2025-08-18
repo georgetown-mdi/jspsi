@@ -1,20 +1,19 @@
 import { createServerFileRoute, setResponseStatus } from '@tanstack/react-start/server';
 import { json } from '@tanstack/react-start';
-import { v4 as uuidv4 } from 'uuid';
 
-import { sessions } from '@utils/sessions';
+import { useSessionManager } from '@utils/sessions';
 
 const DEFAULT_SESSION_DURATION_MS = 1000 * 60 * 15;
 
 export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
   POST: async ({ request }) => {
     const payload = await request.json();
-    if (!('initiatedName' in payload) || payload['initiatedName'] === undefined
+    if (!('initiatedName' in payload) || !payload['initiatedName']
     ) {
       setResponseStatus(400);
       return new Response('missing name of person initiating PSI');
     }
-    if (!('invitedName' in payload) || payload['invitedName'] === undefined) {
+    if (!('invitedName' in payload) || !payload['invitedName']) {
       setResponseStatus(400);
       return new Response('missing name of person invited to PSI');
     }
@@ -25,24 +24,27 @@ export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
       ) {
       timeToLive = new Date(Date.now() + DEFAULT_SESSION_DURATION_MS);
     } else {
-      timeToLive = new Date(Date.now() + 1000 * 60 * payload['valid_duration_minutes']);
+      timeToLive = new Date(
+        Date.now() + 1000 * 60 * payload['valid_duration_minutes']
+      );
     }
 
-    const id = uuidv4();
-    
-    sessions[id] = {
-      id: id,
-      initiatedName: payload['initiatedName'] as string,
-      invitedName: payload['invitedName'] as string,
-      description:
-        'description' in payload && payload['description'] !== undefined
-          ? (payload['description'] as string)
-          : '',
-      timeToLive: timeToLive
-    };
-    
-    console.log(`POST /api/psi/create: session ${id} created`);
+    const sessionManager = await useSessionManager();
 
-    return json({id: id, timeToLive: timeToLive});
+    const session = sessionManager.set(
+      {
+        initiatedName: payload['initiatedName'] as string,
+        invitedName: payload['invitedName'] as string,
+        description:
+          'description' in payload && !payload['description']
+            ? (payload['description'] as string)
+            : '',
+        timeToLive: timeToLive,
+      }
+    );
+    
+    console.log(`POST /api/psi/create: session ${session.uuid} created`);
+
+    return json({uuid: session.uuid, timeToLive: timeToLive});
   },
-})
+});

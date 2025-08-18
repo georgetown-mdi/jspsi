@@ -1,12 +1,10 @@
-import { ShowStatusElements } from '@components/Status';
-
 import Peer from 'peerjs';
+
+import { ShowStatusElements } from '../components/StatusStages.ts';
 
 import type { DataConnection } from 'peerjs';
 
-import type { Session } from '@utils/sessions'
-
-import type { ProtocolStage } from '@components/Status';
+import type { ProtocolStage } from '../components/StatusStages.ts';
 
 export const stages: Array<ProtocolStage> = [
   ['before start', 'Stopped', ShowStatusElements.None],
@@ -67,7 +65,11 @@ export class PSIAsServer {
     this.setStage('done');
   }
 
-  constructor(psi: any, data: Array<string>, setStage: (name: string) => void) {
+  constructor(
+    psi: any,
+    data: Array<string>,
+    setStage: (name: string) => void
+  ) {
     this.psi = psi;
     this.data = data;
     this.server = psi.server.createWithNewKey(true);
@@ -77,14 +79,13 @@ export class PSIAsServer {
   }
 }
 
-export function waitForPeerId(session: Session): Promise<string> {
+export function waitForPeerId(uuid: string): Promise<string> {
   return new Promise((resolve, reject) => {
+    console.log(`opening event source at: /api/psi/${uuid}/wait`)
     const eventSource = new EventSource(
-      `/api/psi/${session['id']}/wait`,
-      { withCredentials: true }
+      `/api/psi/${uuid}/wait`, { withCredentials: true }
     );
     console.log('created event source at', eventSource.url);
-    
 
     eventSource.addEventListener('open', () => {
       console.log("SSE connection opened; waiting for peer id");

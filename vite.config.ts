@@ -1,20 +1,26 @@
 import path from 'node:path';
 
-import { defineConfig } from 'vite'
-import { tanstackStart } from '@tanstack/react-start/plugin/vite'
-import tsConfigPaths from 'vite-tsconfig-paths'
-import viteReact from '@vitejs/plugin-react'
+
+import { defineConfig } from 'vite';
+import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import tsConfigPaths from 'vite-tsconfig-paths';
+import viteReact from '@vitejs/plugin-react';
+
+import { Config } from './src/utils/config';
 
 import { registerServer } from './src/httpServer';
 
 import type { PreviewServer, ViteDevServer } from 'vite'
 
 
+const configManager = new Config();
+const config = await configManager.load({dotenv: true});
+
 export default defineConfig((_configEnv) => {
   return {
     server: {
       host: '127.0.0.1',
-      port: 3000,
+      port: config.PORT,
     },
     build: {
       rollupOptions: {

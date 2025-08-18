@@ -8,14 +8,14 @@ export default function JoinPSIForm() {
 
   const form = useForm({
     defaultValues: {
-      id: '',
+      uuid: '',
     },
     onSubmit: ({ value }) => {
       console.log(value);
       navigate({
         to: '/psi',
         search: {
-          id: value['id'],
+          uuid: value['uuid'],
           start: false
         }
       });
@@ -31,7 +31,7 @@ export default function JoinPSIForm() {
     >
       <Stack>
         <form.Field
-          name='id'
+          name='uuid'
           validators={{
             onChange: ({ value }) =>
               !value ? 'PSI session ID required' : undefined,

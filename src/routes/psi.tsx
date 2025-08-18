@@ -22,32 +22,33 @@ import { getHostname as getHttpServerHostname } from '@httpServer';
 import { PSIAsClient, stages as clientStages, createAndSharePeerId } from '@utils/psi_client';
 import { PSIAsServer, openPeerConnection, stages as serverStages, waitForPeerId } from '@utils/psi_server';
 import { PeerConnectionProtocol } from '@utils/PeerConnectionProtocol';
-import { loadPSILibrary } from '@utils/psi'
+import { loadPSILibrary } from '@utils/psi';
 
 import FileSelect from '@components/FileSelect';
 import SessionDetails from '@components/SessionDetails';
 import { StatusFactory } from '@components/Status';
 
-import type { ProtocolStage } from '@components/Status';
-import type { Session } from '@utils/sessions';
+import type { LinkSession } from '@utils/sessions';
+import type { ProtocolStage } from '@components/StatusStages';
+
 
 export const Route = createFileRoute('/psi')({
-  validateSearch: (search: Record<string, unknown>): { id: string, start?: boolean } => {
+  validateSearch: (search: Record<string, unknown>): { uuid: string, start?: boolean } => {
     // validate and parse the search params into a typed state
     return {
-      id: (search.id as string) || '',
+      uuid: (search.uuid as string) || '',
       start: (search.start as boolean) || false
     };
   },
-  loaderDeps: ({ search: { id } }) => ({ id }),
-  loader: async ({ deps: { id } }) =>  {
+  loaderDeps: ({ search: { uuid } }) => ({ uuid }),
+  loader: async ({ deps: { uuid } }) =>  {
     // as a curiosity, this sometimes runs on the server
     // return sessions[id];
-    const response = await fetch(`/api/psi/${id}`)
+    const response = await fetch(`/api/psi/${uuid}`)
     if (!response.ok) {
-      throw new Error(`failed to lookup PSI with id ${id} with error: ${response.statusText}`);
+      throw new Error(`failed to lookup PSI with id ${uuid} with error: ${response.statusText}`);
     }
-    return await response.json() as Session;
+    return await response.json() as LinkSession;
   },
   component: Home,
   head: () => {
@@ -101,7 +102,8 @@ function Home() {
     if (role === 'server') {
       // wait for peer no matter what
       setStage(stages[1][0]);
-      waitForPeerId(session).then((peerId) => {
+      waitForPeerId(session.uuid)
+      .then((peerId) => {
         Promise.all([
           loadPSILibrary(),
           loadFile(files[0]),
@@ -165,7 +167,7 @@ function Home() {
 
   let url: URL | undefined;
   if (role === 'server') {
-    const searchParams = new URLSearchParams({id: session['id']});
+    const searchParams = new URLSearchParams({uuid: session.uuid});
     if (typeof window !== 'undefined') {
       url = new URL(`${window.location.protocol}//${window.location.host}/psi?${searchParams}`);
     } else {

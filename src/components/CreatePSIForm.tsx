@@ -22,13 +22,13 @@ export default function CreatePSIForm() {
         }),
       });
       
-      const { id: sessionId, timeToLive: _timeToLive } = await response.json();
+      const { uuid: uuid, timeToLive: _timeToLive } = await response.json();
 
       if (response.ok) {
         navigate({
           to: '/psi',
           search: {
-            id: sessionId,
+            uuid,
             start: true
           }
         });

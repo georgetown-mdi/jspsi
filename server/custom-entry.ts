@@ -1,6 +1,7 @@
 import { Server as HttpServer } from "node:http";
 import { Server as HttpsServer } from "node:https";
 
+
 import {
   setupGracefulShutdown,
   startScheduleRunner,
@@ -12,14 +13,16 @@ import {
 import "#nitro-internal-pollyfills";
 
 import { useNitroApp, useRuntimeConfig } from "nitropack/runtime";
-import destr from "destr";
 import { toNodeListener } from "h3";
 import wsAdapter from "crossws/adapters/node";
 
+import { Config } from '../src/utils/config';
 import { registerServer } from "../src/httpServer";
 
 import type { AddressInfo } from "node:net";
 
+const configManager = new Config();
+const config = await configManager.load();
 
 const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
@@ -34,8 +37,7 @@ const server =
     : new HttpServer(toNodeListener(nitroApp.h3App));
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-const port = (destr(process.env.NITRO_PORT || process.env.PORT) ||
-  3000) as number;
+const port = (config.PORT || 3000) as number;
 const host = process.env.NITRO_HOST || process.env.HOST;
 
 const path = process.env.NITRO_UNIX_SOCKET;
