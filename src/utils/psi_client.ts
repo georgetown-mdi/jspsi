@@ -86,7 +86,12 @@ export function createAndSharePeerId(session: LinkSession): Promise<Peer> {
       debug: 3,
       config: {
         iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: [
+              "stun:stun.l.google.com:19302",
+              "stun:54.187.199.193:443"
+            ]
+          },
           /* Explicitly disable TURN survers, since they relay data. This is
              mostly semantics since all data is relayed across servers on the
              Internet, but we should look into establishing our own TURN

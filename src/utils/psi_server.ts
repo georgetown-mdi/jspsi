@@ -141,7 +141,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
           {
             urls: [
               "stun:stun.l.google.com:19302",
-              "stun:stunserver2024.stunprotocol.org:3478"
+              "stun:54.187.199.193:443"
             ]
           },
           /* Explicitly disable TURN survers, since they relay data. This is
