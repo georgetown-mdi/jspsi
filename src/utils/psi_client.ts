@@ -89,7 +89,7 @@ export function createAndSharePeerId(session: LinkSession): Promise<Peer> {
           {
             urls: [
               "stun:stun.l.google.com:19302",
-              "stun:54.187.199.193:443"
+              "stun:44.247.30.68:443"
             ]
           },
           /* Explicitly disable TURN survers, since they relay data. This is

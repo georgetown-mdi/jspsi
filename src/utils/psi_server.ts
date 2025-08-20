@@ -141,7 +141,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
           {
             urls: [
               "stun:stun.l.google.com:19302",
-              "stun:54.187.199.193:443"
+              "stun:44.247.30.68:443"
             ]
           },
           /* Explicitly disable TURN survers, since they relay data. This is
@@ -166,10 +166,13 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
 
     peer.on('open', (id) => {
       console.log(`got peer id ${id} from peer server; connecting to peer ${peerId}`)
-      const conn = peer.connect(peerId);
+      const conn = peer.connect(peerId, {reliable: true});
       resolve([peer, conn]);
     });
 
-    peer.on('error', (err) => reject(err));
+    peer.on('error', (err) => {
+      console.error('error getting peer connection:', err);
+      reject(err)}
+    );
   });
 }

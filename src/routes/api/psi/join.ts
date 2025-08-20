@@ -53,7 +53,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/join').methods({
       timeToLive
     });
 
-    setResponseStatus(200);
+    setResponseStatus(204);
     return new Response();
   }
 });

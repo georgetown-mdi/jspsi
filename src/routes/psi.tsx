@@ -113,13 +113,11 @@ function Home() {
           
           const server = new PSIAsServer(psi, data, setStage);
           const protocolHandler = new PeerConnectionProtocol(
-            peer,
-            conn,
-            server.startupHandler,
             server.messageHandlers,
+            server.startupHandler,
             server.closeHandler
           )
-          await protocolHandler.runProtocol();
+          await protocolHandler.runProtocol(peer, conn);
           
           const fileData = new Blob([server.result.join('\n')], {type: 'text/plain'});
           const newResultURL = window.URL.createObjectURL(fileData);
@@ -144,14 +142,12 @@ function Home() {
         peer.on('connection', async (conn) => {
           const client = new PSIAsClient(psi, data, setStage);
           const protocolHandler = new PeerConnectionProtocol(
-            peer,
-            conn,
-            undefined,
             client.messageHandlers,
+            undefined,
             client.closeHandler
           )
 
-          await protocolHandler.runProtocol();
+          await protocolHandler.runProtocol(peer, conn);
 
           const fileData = new Blob([client.result.join('\n')], {type: 'text/plain'});
           const newResultURL = window.URL.createObjectURL(fileData);

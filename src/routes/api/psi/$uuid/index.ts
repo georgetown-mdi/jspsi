@@ -59,7 +59,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/$uuid/').methods({
 
     session['invitedPeerId'] = invitedPeerId;
 
-    setResponseStatus(200);
+    setResponseStatus(204);
     return new Response();
   }
 });

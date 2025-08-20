@@ -1,55 +1,73 @@
 import type { DataConnection, Peer } from 'peerjs';
 
 export type ConnectionHandler = (conn: DataConnection) => void;
-export type MessageHandler = (conn: DataConnection, data: any) => void;
+export type MessageHandler = (
+  conn: DataConnection,
+  data: any,
+  next: (() => void)
+) => void;
 
 export class PeerConnectionProtocol {
-  peer: Peer
-  conn: DataConnection
-  /** Function to run when the connection's 'open' event is received. */
-  connectionHandler?: ConnectionHandler;
   /** Functions to run sequentially as data are received. */
-  messageHandlers: Array<MessageHandler>;
+  private messageHandlers: Array<MessageHandler>;
+  /** Function to run when the connection's 'open' event is received. */
+  private connectionHandler?: ConnectionHandler;
   /** Function to run when the connection's 'close' event is received. */
-  closeHandler?: ConnectionHandler;
-  firstMessage = true;
-  
+  private closeHandler?: ConnectionHandler;
+  private firstMessage = true;
+
   constructor(
-    peer: Peer,
-    conn: DataConnection,
-    connectionHandler: ConnectionHandler | undefined,
     messageHandlers: Array<MessageHandler>,
-    closeHander: ConnectionHandler | undefined
+    connectionHandler?: ConnectionHandler,
+    closeHander?: ConnectionHandler
   ) {
-    this.peer = peer;
-    this.conn = conn;
-    this.connectionHandler = connectionHandler;
     this.messageHandlers = messageHandlers;
+    this.connectionHandler = connectionHandler;
     this.closeHandler = closeHander;
   }
 
-  runProtocol(): Promise<void> {
+  public runProtocol(peer: Peer, conn: DataConnection): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.connectionHandler) {
-        this.conn.on('open', () => { this.connectionHandler!(this.conn); });
+        conn.on('open', () => {
+          try {
+            this.connectionHandler!(conn);
+          } catch (error) {
+            conn.close();
+            reject(error);
+          }
+        });
       }
-      this.conn.on('data', (data) => {
+      conn.on('data', (data) => {
         if (this.firstMessage) {
-          console.log('disconnecting from peer server');
-          this.peer.disconnect();
+          peer.disconnect();
           this.firstMessage = false;
         }
-        if (this.messageHandlers.length > 0) {
-          const messageHandler = this.messageHandlers.shift()!;
-          messageHandler(this.conn, data);
+        const next = () => {
+          if (this.messageHandlers.length > 0) {
+            const currentHandler = this.messageHandlers.shift()!;
+            try {
+              currentHandler(conn, data, next);
+            } catch (error) {
+              conn.close();
+              reject(error);
+            }
+          }
         }
+        next();
         if (this.messageHandlers.length == 0) {
-          resolve(this.conn.close());
+          resolve(conn.close());
         }
       });
-      this.conn.on('error', (err) => { reject(err) })
+      conn.on('error', (err) => { reject(err) })
       if (this.closeHandler) {
-        this.conn.on('close', () => { this.closeHandler!(this.conn); });
+        conn.on('close', () => {
+          try {
+            this.closeHandler!(conn);
+          } catch (error) {
+            reject(error);
+          }
+        });
       }
     })
   }
