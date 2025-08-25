@@ -1,20 +1,20 @@
+/// <reference types="vitest" />
 import path from 'node:path';
-
 
 import { defineConfig } from 'vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tsConfigPaths from 'vite-tsconfig-paths';
 import viteReact from '@vitejs/plugin-react';
 
-import { Config } from './src/utils/config';
+import { ConfigManager } from './src/utils/serverConfig';
 
 import { registerServer } from './src/httpServer';
 
 import type { PreviewServer, ViteDevServer } from 'vite'
 
-
-const configManager = new Config();
+const configManager = new ConfigManager();
 const config = await configManager.load({dotenv: true});
+
 
 export default defineConfig((_configEnv) => {
   return {
@@ -22,10 +22,7 @@ export default defineConfig((_configEnv) => {
       host: '127.0.0.1',
       port: config.PORT,
     },
-    build: {
-      rollupOptions: {
-        logLevel: 'debug'
-      }
+    test: {
     },
     plugins: [
       tsConfigPaths({

@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const PASSWORD_HASH_ALGORITHM = 'sha256';
 
-// import { Config } from '@utils/config'
+// import { ConfigManager } from '@utils/serverConfig'
 
 interface LinkSessionProperties {
   initiatedName: string;
@@ -128,7 +128,7 @@ export const useSessionManager = async function() {
 }
 
 /* 
-const configManager = new Config();
+const configManager = new ConfigManager();
 const config = await configManager.load();
 
 if (config.TEST_SESSION) {

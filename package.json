@@ -9,7 +9,8 @@
     "lint": "npx eslint src --ignore-pattern src/contrib/**",
     "type-check": "tsc --noEmit",
     "start": "node --env=.env .output/server/index.mjs",
-    "cli_server": "node --experimental-transform-types scripts/psi.ts"
+    "cli_server": "node --import=tsx scripts/psi.ts",
+    "test": "vitest"
   },
   "keywords": [
     "private set intersection",
@@ -31,11 +32,13 @@
     "@types/uuid": "^10.0.0",
     "cors": "^2.8.5",
     "env-schema": "^6.0.1",
+    "loglevel": "^1.9.2",
     "peerjs": "^1.5.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "uuid": "^11.1.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "zod": "^4.0.17"
   },
   "devDependencies": {
     "@tanstack/eslint-config": "^0.3.0",
@@ -50,6 +53,7 @@
     "postcss-preset-mantine": "^1.18.0",
     "typescript": "^5.8.3",
     "vite": "^7.0.4",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.2.4"
   }
 }

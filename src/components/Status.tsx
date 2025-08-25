@@ -14,51 +14,48 @@ import {
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 
-import { ShowStatusElements } from './StatusStages';
+import { ProcessState } from '@psi/participant';
 
 import type { PaperProps } from '@mantine/core';
 
 import type { LinkSession } from '@utils/sessions';
-import type { ProtocolStage } from './StatusStages';
 
-
-export interface StatusProps extends PaperProps {
-  session: LinkSession
-  stageName: string
+export interface StatusProps<T extends Array<{ id: string, label: string, state: ProcessState }>> extends PaperProps {
+  session: LinkSession;
+  stageId: T[number]['id']
   resultsFileURL: string | undefined
 }
 
 type ProtocolStageInfo = [
-  description: string,
-  showElements: ShowStatusElements,
+  label: string,
+  state: ProcessState,
   progressBarIndex: number
 ]
 
-export function StatusFactory(stages: Array<ProtocolStage>) {
+export function StatusFactory
+<T extends Array<{ id: string, label: string, state: ProcessState }>>
+(stages: T) {
   let numProgressBarStages = 0;
-  const stageMap = Object.fromEntries(stages.map((value) => {
-    const [ name, ...otherValues] = value;
+  const stageMap = Object.fromEntries(stages.map(({id, label, state}) => {
     let progressBarIndex = -1;
-    if (otherValues[1] === ShowStatusElements.ProgressBar
-      || otherValues[1] === ShowStatusElements.Completion)
+    if (state === ProcessState.Working || state === ProcessState.Done)
     {
       progressBarIndex = numProgressBarStages;
       numProgressBarStages += 1;
     }
-    return [ name, [ ...otherValues, progressBarIndex ] as ProtocolStageInfo ]
-  }));
+    return [id, [label, state, progressBarIndex] as ProtocolStageInfo]
+  }))
 
   return (
-    function Status(props: StatusProps) {
-      const { session, stageName, resultsFileURL, ...paperProps } = props;
-      const [ stageDescription, showElements, progressBarIndex ] = stageMap[stageName];
+    function Status(props: StatusProps<T>) {
+      const { session, stageId, resultsFileURL, ...paperProps } = props;
+      const [ stageDescription, state, progressBarIndex ] = stageMap[stageId];
 
-      const showSpiner = showElements === ShowStatusElements.Spinner;
+      const showSpiner = state === ProcessState.Waiting;
       const showProgressBar = (
-        showElements === ShowStatusElements.ProgressBar
-        || showElements === ShowStatusElements.Completion
+        state === ProcessState.Working || state === ProcessState.Done
       );
-      const isCompleted = showElements == ShowStatusElements.Completion
+      const isCompleted = state === ProcessState.Done
 
       return (
         <Paper {...paperProps} >

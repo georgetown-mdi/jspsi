@@ -2,9 +2,11 @@ import { envSchema } from 'env-schema'
 
 import type { EnvSchemaOpt, JSONSchemaType } from 'env-schema';
 
+import type { LogLevel } from 'loglevel';
+
 interface Env {
   PORT: number;
-  LOG_LEVEL: string;
+  LOG_LEVEL: keyof LogLevel,
   TEST_SESSION: boolean;
 }
 
@@ -20,7 +22,7 @@ const schema: JSONSchemaType<Env> = {
     },
     LOG_LEVEL: {
       type: 'string',
-      default: 'info'
+      default: 'INFO'
     },
     TEST_SESSION: {
       type: 'boolean',
@@ -29,23 +31,21 @@ const schema: JSONSchemaType<Env> = {
   }
 }
 
-class Config {
+class ConfigManager {
   config: Env | null
 
   constructor() {
     this.config = null;
   }
-
   
-  // eslint-disable-next-line @typescript-eslint/require-await
   async load(configOptions: EnvSchemaOpt<Env> = {}) {
     if (!this.config) {
       configOptions.schema = configOptions.schema || schema;
-      this.config = envSchema(configOptions)
+      this.config = await envSchema(configOptions)
     }
 
     return this.config;
   }
 }
 
-export { Config };
+export { ConfigManager };

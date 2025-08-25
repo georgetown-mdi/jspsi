@@ -16,6 +16,7 @@ function createPeerServer(): PeerServerInstance {
   const protocol = server.setSecureContext === undefined ? 'http' : 'https'
 
   let origin: boolean | string | Array<string | RegExp> = true;
+  let port = 3000;
 
   if (typeof addressInfo !== "string") {
     if (
@@ -46,13 +47,15 @@ function createPeerServer(): PeerServerInstance {
       // listening to all, so disable cors
       origin = '*'
     }
+
+    port = addressInfo.port;
   }
 
   return CreatePeerServerWSOnly(
     server,
     {
       corsOptions: { origin: origin },
-      port: 3000,
+      port,
       path: "/api",
     },
   )

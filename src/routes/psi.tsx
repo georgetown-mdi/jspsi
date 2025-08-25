@@ -1,3 +1,5 @@
+import log from 'loglevel';
+
 import { createFileRoute, useSearch} from '@tanstack/react-router';
 
 import { useState } from 'react';
@@ -19,17 +21,17 @@ import { IconCheck, IconCopy } from '@tabler/icons-react';
 
 import { getHostname as getHttpServerHostname } from '@httpServer';
 
-import { PSIAsClient, stages as clientStages, createAndSharePeerId } from '@utils/psi_client';
-import { PSIAsServer, openPeerConnection, stages as serverStages, waitForPeerId } from '@utils/psi_server';
-import { PeerConnectionProtocol } from '@utils/PeerConnectionProtocol';
-import { loadPSILibrary } from '@utils/psi';
+import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from '@psi/participant';
+import { openPeerConnection,  waitForPeerId } from '@utils/psi_server';
+import { createAndSharePeerId } from '@utils/psi_client';
 
 import FileSelect from '@components/FileSelect';
 import SessionDetails from '@components/SessionDetails';
 import { StatusFactory } from '@components/Status';
 
+import type { PSIConfig } from '@psi/participant';
+
 import type { LinkSession } from '@utils/sessions';
-import type { ProtocolStage } from '@components/StatusStages';
 
 
 export const Route = createFileRoute('/psi')({
@@ -88,74 +90,111 @@ function Home() {
     select: (search) => search.start
   }) ? 'server' : 'client';
 
-  const stages: Array<ProtocolStage> = role === 'server' ? serverStages : clientStages;
+  const stages =
+    role === 'server' ?
+    [
+      ...[
+        {id: 'before start', label: 'Before start', state: ProcessState.BeforeStart},
+        {id: 'waiting for peer', label: 'Waiting for peer', state: ProcessState.Waiting},
+      ] as const,
+      ...starterProtocolStages
+    ] :
+    [
+      ...[
+          {id: 'before start', label: 'Before start', state: ProcessState.BeforeStart},
+      ] as const,
+      ...joinerProtocolStages
+    ];
+  
+
   const Status = StatusFactory(stages);
 
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
-  const [stage, setStage] = useState(stages[0][0]);
+  const [stageId, setStageById] = useState<typeof stages[number]['id']>('before start')
   const [resultURL, setResultURL] = useState<string>();
 
   const handleSubmit = () => {
     setSubmitted(true);
     
     if (role === 'server') {
-      // wait for peer no matter what
-      setStage(stages[1][0]);
+      setStageById('waiting for peer');
       waitForPeerId(session.uuid)
       .then((peerId) => {
         Promise.all([
-          loadPSILibrary(),
+          // @ts-ignore PSI is loaded by browser
+          new Promise((resolve) => { PSI().then((psi: any) => resolve(psi)) }), 
           loadFile(files[0]),
           openPeerConnection(peerId)
         ]).then(async (values) => {
-          const [ psi, data, [peer, conn] ] = values;
+        const [ psi, data, [peer, conn] ] = values;
+          conn.once('data', () => peer.disconnect());
+
+          const psiConfig: PSIConfig = {role: 'starter'};
+          const participant = new PSIParticipant(
+            'server',
+            psi,
+            conn,
+            psiConfig,
+            (id: typeof stageId) => setStageById(id)
+          );
+
+          log.info(`${psiConfig.role}: exchanging config`);
+          await participant.exchangeRoles(true);
+          log.info(`${psiConfig.role}: identifying intersection`);
+          const associationTable = await participant.identifyIntersection(data);
+
+          const result = associationTable[0].map(i => data[i]);
           
-          const server = new PSIAsServer(psi, data, setStage);
-          const protocolHandler = new PeerConnectionProtocol(
-            server.messageHandlers,
-            server.startupHandler,
-            server.closeHandler
-          )
-          await protocolHandler.runProtocol(peer, conn);
-          
-          const fileData = new Blob([server.result.join('\n')], {type: 'text/plain'});
+          const fileData = new Blob([result.join('\n')], {type: 'text/plain'});
           const newResultURL = window.URL.createObjectURL(fileData);
 
           if (resultURL !== undefined)
             window.URL.revokeObjectURL(resultURL);
           
           setResultURL(newResultURL);
-        }).catch((error) => {
-          console.error(error);
         });
-      })
+      }).catch((error) => {
+        console.error(error);
+      });
     } else {
-      setStage(stages[1][0]);
+      // role is client
+      setStageById('before start');
       Promise.all([
-        loadPSILibrary(),
+        // @ts-ignore PSI is loaded by browser
+        new Promise((resolve) => { PSI().then((psi: any) => resolve(psi)) }), 
         loadFile(files[0]),
       ]).then(async (values) => {
         const [ psi, data ] = values;
         const peer = await createAndSharePeerId(session);
 
-        peer.on('connection', async (conn) => {
-          const client = new PSIAsClient(psi, data, setStage);
-          const protocolHandler = new PeerConnectionProtocol(
-            client.messageHandlers,
-            undefined,
-            client.closeHandler
-          )
+        peer.on('connection', (conn) => {
+          conn.on('open', async () => {
+            conn.once('data', () => peer.disconnect());
 
-          await protocolHandler.runProtocol(peer, conn);
+            const psiConfig: PSIConfig = {role: 'joiner'};
+            const participant = new PSIParticipant(
+              'client',
+              psi,
+              conn,
+              psiConfig,
+              (id: typeof stageId) => setStageById(id)
+            );
+            log.info(`${psiConfig.role}: exchanging config`);
+            await participant.exchangeRoles(false);
+            log.info(`${psiConfig.role}: identifying intersection`);
+            const associationTable = await participant.identifyIntersection(data);
 
-          const fileData = new Blob([client.result.join('\n')], {type: 'text/plain'});
-          const newResultURL = window.URL.createObjectURL(fileData);
+            const result = associationTable[0].map(i => data[i]);
+            
+            const fileData = new Blob([result.join('\n')], {type: 'text/plain'});
+            const newResultURL = window.URL.createObjectURL(fileData);
 
-          if (resultURL !== undefined)
-            window.URL.revokeObjectURL(resultURL);
-          
-          setResultURL(newResultURL);
+            if (resultURL !== undefined)
+              window.URL.revokeObjectURL(resultURL);
+            
+            setResultURL(newResultURL);
+          });
         });
       })
     }
@@ -176,7 +215,7 @@ function Home() {
       <Stack>
         <Group justify="space-between" align="stretch" grow>
           <SessionDetails session={session} />
-          <Status session={session} stageName={stage} resultsFileURL={resultURL} />
+          <Status session={session} stageId={stageId} resultsFileURL={resultURL} />
         </Group>
         { url && (
           <Paper>

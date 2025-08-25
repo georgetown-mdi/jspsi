@@ -16,16 +16,21 @@ import { useNitroApp, useRuntimeConfig } from "nitropack/runtime";
 import { toNodeListener } from "h3";
 import wsAdapter from "crossws/adapters/node";
 
-import { Config } from '../src/utils/config';
+import log from "loglevel";
+
+import { ConfigManager } from '../src/utils/serverConfig';
 import { registerServer } from "../src/httpServer";
+
 
 import type { AddressInfo } from "node:net";
 
-const configManager = new Config();
+const configManager = new ConfigManager();
 const config = await configManager.load();
 
 const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
+
+log.setLevel(config.LOG_LEVEL);
 
 const nitroApp = useNitroApp();
 
@@ -51,7 +56,7 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
   const protocol = cert && key ? "https" : "http";
   const addressInfo = listener.address() as AddressInfo;
   if (typeof addressInfo === "string") {
-    console.log(`Listening on unix socket ${addressInfo}`);
+    log.info(`Listening on unix socket ${addressInfo}`);
     return;
   }
   const baseURL = (useRuntimeConfig().app.baseURL || "").replace(/\/$/, "");
@@ -60,7 +65,7 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
       ? `[${addressInfo.address}]`
       : addressInfo.address
   }:${addressInfo.port}${baseURL}`;
-  console.log(`Listening on ${url}`);
+  log.info(`Listening on ${url}`);
 });
 
 // Trap unhandled errors
