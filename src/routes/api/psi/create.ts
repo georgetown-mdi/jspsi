@@ -36,7 +36,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
         initiatedName: payload['initiatedName'] as string,
         invitedName: payload['invitedName'] as string,
         description:
-          'description' in payload && !payload['description']
+          'description' in payload && payload['description']
             ? (payload['description'] as string)
             : '',
         timeToLive: timeToLive,
@@ -44,6 +44,8 @@ export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
     );
     
     console.log(`POST /api/psi/create: session ${session.uuid} created`);
+
+    console.log('goddamn session', payload);
 
     return json({uuid: session.uuid, timeToLive: timeToLive});
   },

@@ -134,15 +134,14 @@ function Home() {
           const participant = new PSIParticipant(
             'server',
             psi,
-            conn,
             psiConfig,
             (id: typeof stageId) => setStageById(id)
           );
 
           log.info(`${psiConfig.role}: exchanging config`);
-          await participant.exchangeRoles(true);
+          await participant.exchangeRoles(conn, true);
           log.info(`${psiConfig.role}: identifying intersection`);
-          const associationTable = await participant.identifyIntersection(data);
+          const associationTable = await participant.identifyIntersection(conn, data);
 
           const result = associationTable[0].map(i => data[i]);
           
@@ -176,14 +175,13 @@ function Home() {
             const participant = new PSIParticipant(
               'client',
               psi,
-              conn,
               psiConfig,
               (id: typeof stageId) => setStageById(id)
             );
             log.info(`${psiConfig.role}: exchanging config`);
-            await participant.exchangeRoles(false);
+            await participant.exchangeRoles(conn, false);
             log.info(`${psiConfig.role}: identifying intersection`);
-            const associationTable = await participant.identifyIntersection(data);
+            const associationTable = await participant.identifyIntersection(conn, data);
 
             const result = associationTable[0].map(i => data[i]);
             
