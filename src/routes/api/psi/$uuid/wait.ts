@@ -1,10 +1,12 @@
+import log from 'loglevel';
+
 import {
   createServerFileRoute,
   getEvent,
   setResponseStatus
 } from '@tanstack/react-start/server';
 
-import { createEventStream, setHeader } from 'h3';
+import { createEventStream } from 'h3';
 
 import { useSessionManager } from '@utils/sessions';
 
@@ -38,19 +40,17 @@ export const ServerRoute = createServerFileRoute('/api/psi/$uuid/wait').methods(
     let clientWaiting = true;
     eventStream.onClosed(() => {
       clientWaiting = false;
-      console.log(`GET /api/psi/${session.uuid}/wait: event stream closed`);
+      log.info(`GET /api/psi/${session.uuid}/wait: event stream closed`);
     });
-
-    console.log(`GET /api/psi/${session.uuid}/wait: created event stream`);
 
     const getInvitedPeerId = async () => {
       if (!clientWaiting) {
-        console.log(`GET /api/psi/${session.uuid}/wait: stream has closed; exiting timeout recursion`)
+        log.info(`GET /api/psi/${session.uuid}/wait: stream has closed; exiting timeout recursion`)
         return;
       }
 
       if ('invitedPeerId' in session) {
-        console.log(
+        log.info(
           `GET /api/psi/${session.uuid}/wait: SSE pushing peer id ${session.invitedPeerId}`
         );
 
@@ -58,7 +58,7 @@ export const ServerRoute = createServerFileRoute('/api/psi/$uuid/wait').methods(
 
         return eventStream.close();
       } else if (Date.now() > session.timeToLive.getTime()) {
-        console.log(`GET /api/psi/${session.uuid}/wait: SSE session expired}`);
+        log.info(`GET /api/psi/${session.uuid}/wait: SSE session expired}`);
         await eventStream.push(JSON.stringify({error: `session ${session.uuid} timed-out waiting`}));
 
         return eventStream.close();
@@ -67,13 +67,13 @@ export const ServerRoute = createServerFileRoute('/api/psi/$uuid/wait').methods(
       }
     }
 
-    console.log(`GET /api/psi/${session.uuid}/wait: sending event stream`);
+    log.info(`GET /api/psi/${session.uuid}/wait: sending event stream`);
     const sentEventStream = eventStream.send();
 
     getInvitedPeerId();
 
     return sentEventStream.then(() => {
-      console.log(`GET /api/psi/${session.uuid}/wait: sending 200`);
+      log.info(`GET /api/psi/${session.uuid}/wait: sending 200`);
       return new Response();
     });
   })
