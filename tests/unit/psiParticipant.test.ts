@@ -1,12 +1,10 @@
 import { expect, test } from 'vitest'
 
-import log from 'loglevel';
-
 import { PSIParticipant } from "src/psi/participant";
 
-import { PassthroughConnection } from './passthroughConnection';
+import { PassthroughConnection } from '../utils/passthroughConnection';
+import { sortAssociationTable } from '../utils/associationTable';
 
-log.setLevel('DEBUG');
 
 async function psiLoader() {
   // @ts-ignore not implementing types
@@ -22,11 +20,11 @@ const clientConn = new PassthroughConnection(serverConn);
 serverConn.setOther(clientConn);
 
 const server = new PSIParticipant(
-  'server', psiLibrary, { role: 'either', verbose: 1 }
+  'server', psiLibrary, { role: 'either', verbose: 0 }
 );
 
 const client = new PSIParticipant(
-  'client', psiLibrary, { role: 'either', verbose: 1 }
+  'client', psiLibrary, { role: 'either', verbose: 0 }
 );
 
 const serverData = [
@@ -36,7 +34,7 @@ const serverData = [
 const clientData = [ 'Carol', 'Elizabeth', 'Henry' ];
 
 
-await (async() => {
+await (async () => {
   await Promise.all([
     server.exchangeRoles(serverConn, true),
     client.exchangeRoles(clientConn, false),
@@ -50,14 +48,17 @@ let [serverResult, clientResult] = await (async () => {
   ]);
 })();
 
+serverResult = sortAssociationTable(serverResult);
+clientResult = sortAssociationTable(clientResult, true);
+
 test('server and client yield identical results', () => {
-  expect(serverResult[0].sort()).toStrictEqual(clientResult[1].sort());
-  expect(serverResult[1].sort()).toStrictEqual(clientResult[0].sort());
+  expect(serverResult[0]).toStrictEqual(clientResult[1]);
+  expect(serverResult[1]).toStrictEqual(clientResult[0]);
 });
 
 test('psi yields correct results', () => {
-  expect(serverResult[0].sort()).toStrictEqual([2, 4]);
-  expect(serverResult[1].sort()).toStrictEqual([0, 1]);
+  expect(serverResult[0]).toStrictEqual([2, 4]);
+  expect(serverResult[1]).toStrictEqual([0, 1]);
 });
 
 test('listeners removed correctly', () => {
@@ -72,9 +73,12 @@ test('listeners removed correctly', () => {
   ]);
 })();
 
+serverResult = sortAssociationTable(serverResult);
+clientResult = sortAssociationTable(clientResult, true);
+
 test('order doesn\'t matter', () => {
   expect(serverResult[0]).toStrictEqual(clientResult[1]);
   expect(serverResult[1]).toStrictEqual(clientResult[0]);
-  expect(serverResult[0].sort()).toStrictEqual([2, 4]);
-  expect(serverResult[1].sort()).toStrictEqual([0, 1]);
+  expect(serverResult[0]).toStrictEqual([2, 4]);
+  expect(serverResult[1]).toStrictEqual([0, 1]);
 });

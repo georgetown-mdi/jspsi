@@ -1,8 +1,10 @@
 import * as z from 'zod';
 
-import logLibrary from 'loglevel';
+import { getLoggerForVerbosity } from '../utils/logger';
 
-import type { PSIConnection, PSIParticipant } from "./participant";
+import type { Connection } from './psi';
+import type { PSIParticipant } from "./participant";
+
 
 const associationAndIterationArray = z.array(
   z.object({theirIndex: z.number(), iteration: z.number()})
@@ -61,7 +63,7 @@ export async function linkViaPSI(
     cardinality: 'one-to-one' | 'one-to-many' | 'many-to-one' | 'many-to-many'
   },
   participant: PSIParticipant,
-  conn: PSIConnection,
+  conn: Connection,
   data: Array<IndexableIterable<string>>,
   verbose: number = 1
 )
@@ -70,43 +72,29 @@ export async function linkViaPSI(
     throw new Error('participants role is unresolved')
   const sendFirst = participant.config.role === 'starter';
 
-  let log: {
-    info: (...msg: Array<any>) => void;
-    debug: (...msg: Array<any>) => void;
-  };
-  if (verbose >= 2) {
-    log = { info: (...msg: Array<any>) => logLibrary.info(...msg), debug: (...msg: Array<any>) => logLibrary.debug(...msg) };
-  } else if (verbose === 1) {
-    log = { info: (...msg: Array<any>) => logLibrary.info(...msg), debug: (..._msg: Array<any>) => {} };
-  } else {
-    log = { info: (..._msg: Array<any>) => {}, debug: (..._msg: Array<any>) => {} };
-  };
+  const log = getLoggerForVerbosity('psiLink', verbose);
 
-  log.info(`${participant.id}: linking ${data.length} data elements via PSI`)
+  log.info(`${participant.id}: linking ${data.length} data elements via PSI`);
 
   if (['one-to-one', 'many-to-one'].includes(protocol.cardinality)) {
     let indexIterationMap: IndexIterationMap = [];
-    const unidentifiedOriginalIndicesForEachIteration: Array<Array<number>> = [];
+    const unmappedIndicesByIter: Array<Array<number>> = [];
 
     for (let j = 0; j < data.length; ++j) {
       let dataWithDuplicates: Array<string>;
-      let unidentifiedSubsetIndices: Array<number> | undefined;
+      let unidentifiedIndices: Array<number> | undefined;
       if (j === 0) {
         dataWithDuplicates = Array.from(data[j]);
         indexIterationMap = Array(dataWithDuplicates.length).fill(undefined);
       } else {
-        unidentifiedSubsetIndices = getUnidentifiedIndices(
-          indexIterationMap
-        );
-        dataWithDuplicates = unidentifiedSubsetIndices.map(i => { return data[j][i]; });
+        unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
+        dataWithDuplicates = unidentifiedIndices.map(i => { return data[j][i]; });
       }
-      const [data_j, unidentifiedOriginalIndices_j] = removeDuplicates(
+      const [data_j, unmappedIndices] = removeDuplicates(
         dataWithDuplicates,
-        unidentifiedSubsetIndices
+        unidentifiedIndices
       );
-      unidentifiedOriginalIndicesForEachIteration.push(
-        unidentifiedOriginalIndices_j
-      );
+      unmappedIndicesByIter.push(unmappedIndices);
 
       if (data_j.length === 0) continue;
 
@@ -114,9 +102,7 @@ export async function linkViaPSI(
         await participant.identifyIntersection(conn, data_j);
 
       for (let ii = 0; ii < myIndices.length; ++ii) {
-        const i = unidentifiedOriginalIndices_j[
-          myIndices[ii]
-        ];
+        const i = unmappedIndices[myIndices[ii]];
 
         indexIterationMap[i] = {
           theirIndex: theirIndices[ii],
@@ -150,7 +136,7 @@ export async function linkViaPSI(
       );
 
     for (const e of theirIdentifiedIndexIterationMap) {
-      const i = unidentifiedOriginalIndicesForEachIteration[e.iteration][
+      const i = unmappedIndicesByIter[e.iteration][
         e.theirIndex
       ];
       e.theirIndex = i;
@@ -185,7 +171,7 @@ export async function linkViaPSI(
 
 async function exchangeMappedElements(
   id: string,
-  conn: PSIConnection,
+  conn: Connection,
   log: { info: (...msg: Array<any>) => void, debug: (...msg: Array<any>) => void },
   sendFirst: boolean,
   values: IterationMap

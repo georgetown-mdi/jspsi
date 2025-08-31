@@ -1,8 +1,15 @@
 import * as z from 'zod';
 
-import logLibrary from 'loglevel';
+import { getLoggerForVerbosity } from '../utils/logger';
 
 import { EventHandlerQueue } from './eventHandlerQueue';
+
+import type {
+  AssociationTable,
+  Config,
+  Connection,
+  Role
+} from './psi';
 
 const protocolMessage = z.object({
   role: z.literal(['starter', 'joiner', 'either'])
@@ -15,29 +22,7 @@ const statusMessage = z.object({
 const numberArrayMessage = z.array(z.number());
 const associationTableMessage = z.array(z.array(z.number()));
 
-type PSIRole = 'starter' | 'joiner' | 'either';
 
-interface Logger {
-  info: (...msg: Array<any>) => void;
-  debug: (...msg: Array<any>) => void;
-};
-const devNull = (..._msg: Array<any>) => {};
-
-export type PSIConnection = {
-  on: (event: "data", fn: (data: unknown) => void, context?: undefined) => PSIConnection
-  once: (event: "data", fn: (data: unknown) => void, context?: undefined) => PSIConnection
-  removeListener: (
-    event: "data",
-    fn?: ((data: unknown) => void) | undefined,
-    context?: undefined, once?: boolean
-  ) => PSIConnection
-  send: (data: any, chunked?: boolean) => void | Promise<void>;
-};
-
-export interface PSIConfig {
-  role: PSIRole;
-  verbose?: number;
-}
 const DEFAULT_VERBOSITY = 1;
 
 export enum ProcessState {
@@ -46,8 +31,6 @@ export enum ProcessState {
   Working,
   Done
 };
-
-type AssociationTable = [Array<number>, Array<number>];
 
 function defineProtocol
 <const T extends Array<{ id: string, label: string, state: ProcessState }>>
@@ -88,17 +71,17 @@ type ProtocolId = StarterProtocolStageId | JoinerProtocolStageId;
 export class PSIParticipant {
   id: string;
   private library: any;
-  config: PSIConfig;
+  config: Config;
   private setStage: (id: ProtocolId) => void;
   private stages: typeof joinerProtocolStages | typeof starterProtocolStages | undefined;
-  private log: Logger;
+  private log: ReturnType<typeof getLoggerForVerbosity>;
 
   private psi;
 
   constructor(
     id: string,
     library: any,
-    config: PSIConfig,
+    config: Config,
     setStage?: (id: ProtocolId) => void,
   ) {
     this.id = id;
@@ -110,13 +93,8 @@ export class PSIParticipant {
       this.config.verbose = DEFAULT_VERBOSITY;
     }
 
-    if (this.config.verbose >= 2) {
-      this.log = { info: (...msg: Array<any>) => logLibrary.info(...msg), debug: (...msg: Array<any>) => logLibrary.debug(...msg) };
-    } else if (this.config.verbose === 1) {
-      this.log = { info: (...msg: Array<any>) => logLibrary.info(...msg), debug: devNull };
-    } else {
-      this.log = { info: devNull, debug: devNull };
-    }
+    this.log = getLoggerForVerbosity('participant', this.config.verbose);
+
     if (this.config.role === 'starter') {
       this.psi = library.server.createWithNewKey(true);
     } else if (this.config.role === 'joiner') {
@@ -134,7 +112,7 @@ export class PSIParticipant {
 
   getStages() { return this.stages; }
 
-  async exchangeRoles(conn: PSIConnection, firstToParty: boolean): Promise<PSIRole> {
+  async exchangeRoles(conn: Connection, firstToParty: boolean): Promise<Role> {
     this.log.info(`${this.id}: starting role exchange with role ${this.config.role}`);
     this.setStage('confirming protocol');
 
@@ -209,7 +187,7 @@ export class PSIParticipant {
   }
 
   /** Returns an association table with elements [myIndices, theirIndices] */
-  public async identifyIntersection(conn: PSIConnection, set: Array<string>):
+  public async identifyIntersection(conn: Connection, set: Array<string>):
     Promise<AssociationTable>
   {
     if (this.config.role === 'starter') {

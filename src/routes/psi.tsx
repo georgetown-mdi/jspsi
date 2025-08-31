@@ -22,14 +22,14 @@ import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { getHostname as getHttpServerHostname } from '@httpServer';
 
 import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from '@psi/participant';
-import { openPeerConnection,  waitForPeerId } from '@utils/psi_server';
-import { createAndSharePeerId } from '@utils/psi_client';
+import { openPeerConnection,  waitForPeerId } from '@psi/server';
+import { createAndSharePeerId } from '@psi/client';
 
 import FileSelect from '@components/FileSelect';
 import SessionDetails from '@components/SessionDetails';
 import { StatusFactory } from '@components/Status';
 
-import type { PSIConfig } from '@psi/participant';
+import type { Config as PSIConfig } from '@psi/psi';
 
 import type { LinkSession } from '@utils/sessions';
 

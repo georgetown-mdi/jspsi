@@ -2,7 +2,7 @@
   "name": "jspsi",
   "version": "1.0.0",
   "description": "JavaScript implementation of private set intersection for record linkage using peer-to-peer connections.",
-  "main": "index.js",
+  "main": "index.tsx",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -10,7 +10,9 @@
     "type-check": "tsc --noEmit",
     "start": "node --env=.env .output/server/index.mjs",
     "cli_server": "node --import=tsx scripts/psi.ts",
-    "test": "vitest"
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
   },
   "keywords": [
     "private set intersection",
@@ -48,8 +50,10 @@
     "@types/react-dom": "^19.1.6",
     "@types/vary": "^1.1.3",
     "@types/ws": "^8.18.1",
+    "@vitest/browser": "^3.2.4",
     "eslint-visitor-keys": "^4.2.1",
     "eventsource": "^4.0.0",
+    "playwright": "^1.55.0",
     "postcss-preset-mantine": "^1.18.0",
     "typescript": "^5.8.3",
     "vite": "^7.0.4",

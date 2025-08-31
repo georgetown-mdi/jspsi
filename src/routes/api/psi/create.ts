@@ -45,8 +45,6 @@ export const ServerRoute = createServerFileRoute('/api/psi/create').methods({
     
     console.log(`POST /api/psi/create: session ${session.uuid} created`);
 
-    console.log('goddamn session', payload);
-
     return json({uuid: session.uuid, timeToLive: timeToLive});
   },
 });

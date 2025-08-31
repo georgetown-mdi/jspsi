@@ -29,12 +29,12 @@ export function getHostname() {
     return addressInfo; 
   }
 
-  const protocol = isSecure(server) ? 'https' : 'http';
+  const protocol = isSecure(server) ? 'https:' : 'http:';
 
   // no clue what is happening if we don't have an address
   if (!addressInfo) throw Error('no address information available for getHostname');
   
-  const port = protocol === 'http'
+  const port = protocol === 'http:'
     ? (addressInfo.port !== 80 ? addressInfo.port.toString() : undefined)
     : (addressInfo.port !== 443 ? addressInfo.port.toString() : undefined);
 
@@ -57,6 +57,6 @@ export function getHostname() {
     )
   );
   
-  return `${protocol}://${hostname}${port ? ':' + port : ''}`;
+  return `${protocol}//${hostname}${port ? ':' + port : ''}`;
 }
 

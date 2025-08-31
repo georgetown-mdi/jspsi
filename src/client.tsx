@@ -1,7 +1,7 @@
 import { StartClient } from '@tanstack/react-start'
 import { StrictMode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
-import { setLevel } from 'loglevel'
+import { setDefaultLevel } from 'loglevel'
 
 import { ConfigManager } from '@utils/clientConfig'
 import { createRouter } from './router'
@@ -19,7 +19,7 @@ const config = await configManager.load(
   }
 );
 
-setLevel(config.LOG_LEVEL);
+setDefaultLevel(config.LOG_LEVEL);
 
 hydrateRoot(
   document,

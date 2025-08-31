@@ -3,9 +3,10 @@ import { expect, test } from 'vitest'
 import log from 'loglevel';
 
 import { PSIParticipant } from "src/psi/participant";
-import { linkViaPSI } from "src/psi/psiLink";
+import { linkViaPSI } from "src/psi/link";
 
-import { PassthroughConnection } from './passthroughConnection';
+import { PassthroughConnection } from '../utils/passthroughConnection';
+import { sortAssociationTable } from '../utils/associationTable';
 
 async function psiLoader() {
   // @ts-ignore not implementing types
@@ -30,7 +31,7 @@ const client = new PSIParticipant(
 
 const serverData = [
   ['Alice', 'Bob', 'Carol', 'David', 'Elizabeth', 'Frank', 'Greta'],
-  ['1',     '1',   '1',     '1',     '1'        , '2',     '1']
+  ['1',     '2',   '1',     '1',     '1'        , '1',     '1']
 ];
 
 const clientData = [
@@ -54,29 +55,15 @@ let [serverResult, clientResult] = await (async() => {
   ]);
 })();
 
-serverResult = serverResult[0]
-  .map((x, i) => ({ x: x, y: serverResult[1][i]}))
-  .sort((a, b) => a.x - b.x)
-  .reduce((acc, v) => {
-      acc[0].push(v.x);
-      acc[1].push(v.y);
-      return acc
-    },
-    [[], []] as [Array<number>, Array<number>]
-  );
-
-clientResult = clientResult[1]
-  .map((x, i) => ({ x: x, y: clientResult[0][i]}))
-  .sort((a, b) => a.x - b.x)
-  .reduce((acc, v) => {
-      acc[1].push(v.x);
-      acc[0].push(v.y);
-      return acc
-    },
-    [[], []] as [Array<number>, Array<number>]
-  );
+serverResult = sortAssociationTable(serverResult);
+clientResult = sortAssociationTable(clientResult, true);
 
 test('server and client yield identical results', () => {
   expect(serverResult[0]).toStrictEqual(clientResult[1]);
   expect(serverResult[1]).toStrictEqual(clientResult[0]);
+});
+
+test('results are correct', () => {
+  expect(serverResult[0]).toStrictEqual([1, 2, 4]);
+  expect(serverResult[1]).toStrictEqual([2, 0, 1]);
 });

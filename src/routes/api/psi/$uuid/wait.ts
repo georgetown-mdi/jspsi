@@ -4,7 +4,7 @@ import {
   setResponseStatus
 } from '@tanstack/react-start/server';
 
-import { createEventStream } from 'h3';
+import { createEventStream, setHeader } from 'h3';
 
 import { useSessionManager } from '@utils/sessions';
 
@@ -34,44 +34,47 @@ export const ServerRoute = createServerFileRoute('/api/psi/$uuid/wait').methods(
 
     const event = getEvent();
     const eventStream = createEventStream(event);
-
+    
     let clientWaiting = true;
-    const getInvitedPeerId = function() {
+    eventStream.onClosed(() => {
+      clientWaiting = false;
+      console.log(`GET /api/psi/${session.uuid}/wait: event stream closed`);
+    });
+
+    console.log(`GET /api/psi/${session.uuid}/wait: created event stream`);
+
+    const getInvitedPeerId = async () => {
       if (!clientWaiting) {
-        // client closed while function was timed out - we can gracefully exit
         console.log(`GET /api/psi/${session.uuid}/wait: stream has closed; exiting timeout recursion`)
-      } else if ('invitedPeerId' in session) {
+        return;
+      }
+
+      if ('invitedPeerId' in session) {
         console.log(
-          `GET /api/psi/${session.uuid}/wait: SSE peer id ${session.invitedPeerId}`
+          `GET /api/psi/${session.uuid}/wait: SSE pushing peer id ${session.invitedPeerId}`
         );
 
-        eventStream
-          .push(JSON.stringify({invitedPeerId: session.invitedPeerId}))
-           .then(() => eventStream.close())
+        await eventStream.push(JSON.stringify({invitedPeerId: session.invitedPeerId}));
+
+        return eventStream.close();
       } else if (Date.now() > session.timeToLive.getTime()) {
         console.log(`GET /api/psi/${session.uuid}/wait: SSE session expired}`);
-        eventStream.
-          push(JSON.stringify({error: `session ${session.uuid} timed-out waiting`}))
-           .then(() => eventStream.close())
+        await eventStream.push(JSON.stringify({error: `session ${session.uuid} timed-out waiting`}));
+
+        return eventStream.close();
       } else {
-        setTimeout(getInvitedPeerId, INVITED_PEER_ID_POLLING_FREQUENCY_MS)
+        setTimeout(getInvitedPeerId, INVITED_PEER_ID_POLLING_FREQUENCY_MS);
       }
     }
 
-    eventStream.onClosed(async () => {
-      console.log(`GET /api/psi/${session.uuid}/wait: event stream closed`);
-      clientWaiting = false;
-      await eventStream.close();
-    });
+    console.log(`GET /api/psi/${session.uuid}/wait: sending event stream`);
+    const sentEventStream = eventStream.send();
 
-    console.log(`GET /api/psi/${session.uuid}/wait: created event stream and waiting`);
     getInvitedPeerId();
 
-    await eventStream.send();
-
-    console.log(`GET /api/psi/${session.uuid}/wait: sending 204`);
-
-    setResponseStatus(event, 204);
-    return new Response();
+    return sentEventStream.then(() => {
+      console.log(`GET /api/psi/${session.uuid}/wait: sending 200`);
+      return new Response();
+    });
   })
 }));

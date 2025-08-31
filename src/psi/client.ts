@@ -2,7 +2,7 @@ import log from 'loglevel';
 
 import Peer from 'peerjs';
 
-import { ConfigManager } from './clientConfig';
+import { ConfigManager } from '@utils/clientConfig';
 
 import type { LinkSession } from '@utils/sessions';
 

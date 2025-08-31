@@ -2,7 +2,7 @@ import log from 'loglevel';
 
 import Peer from 'peerjs';
 
-import { ConfigManager } from './clientConfig';
+import { ConfigManager } from '@utils/clientConfig';
 
 import type { DataConnection } from 'peerjs';
 
@@ -17,10 +17,6 @@ export function waitForPeerId(uuid: string): Promise<string> {
     );
     log.info('created event source at', eventSource.url);
 
-    eventSource.addEventListener('open', () => {
-      log.info("SSE connection opened; waiting for peer id");
-    });
-    
     eventSource.addEventListener('message', (event) => {
       try {
         const messageData = event.data && JSON.parse(event.data);
