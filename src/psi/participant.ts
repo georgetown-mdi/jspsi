@@ -2,7 +2,7 @@ import * as z from 'zod';
 
 import { getLoggerForVerbosity } from '../utils/logger';
 
-import { EventHandlerQueue } from './eventHandlerQueue';
+import { EventHandlerQueue } from './connection/eventHandlerQueue';
 
 import type {
   AssociationTable,

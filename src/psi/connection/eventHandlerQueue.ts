@@ -1,4 +1,3 @@
-
 export class EventHandlerQueue<T extends (...args: Array<any>) => void>  {
   /** Functions to run sequentially as data are received. */
   private handlers: Array<T>;

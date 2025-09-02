@@ -6,7 +6,7 @@ import Peer from "peerjs";
 
 import { PSIParticipant } from "../../src/psi/participant.js";
 
-import { sortAssociationTable } from '../utils/associationTable';
+import { sortAssociationTable } from '../utils/associationTable.js';
 
 import type { DataConnection } from 'peerjs';
 

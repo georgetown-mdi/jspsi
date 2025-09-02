@@ -10,9 +10,10 @@
     "type-check": "tsc --noEmit",
     "start": "node --env=.env .output/server/index.mjs",
     "cli_server": "node --import=tsx scripts/psi.ts",
-    "test": "vitest",
-    "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration"
+    "test": "vitest run",
+    "test:browser": "vitest run --project browser",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "keywords": [
     "private set intersection",
@@ -31,6 +32,7 @@
     "@tanstack/react-router-devtools": "^1.128.4",
     "@tanstack/react-start": "^1.127.6",
     "@types/cors": "^2.8.19",
+    "@types/ssh2-sftp-client": "^9.0.5",
     "@types/uuid": "^10.0.0",
     "cors": "^2.8.5",
     "env-schema": "^6.0.1",
@@ -38,6 +40,7 @@
     "peerjs": "^1.5.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "ssh2-sftp-client": "^12.0.1",
     "uuid": "^11.1.0",
     "ws": "^8.18.3",
     "zod": "^4.0.17"

@@ -2,6 +2,7 @@
 import path from 'node:path';
 
 import { defineConfig } from 'vite';
+import logLibrary from 'loglevel';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tsConfigPaths from 'vite-tsconfig-paths';
 import viteReact from '@vitejs/plugin-react';
@@ -10,11 +11,13 @@ import { ConfigManager } from './src/utils/serverConfig';
 
 import { registerServer } from './src/httpServer';
 
+
 import type { PreviewServer, ViteDevServer } from 'vite'
 
 const configManager = new ConfigManager();
 const config = await configManager.load({dotenv: true});
 
+logLibrary.setDefaultLevel(config.LOG_LEVEL);
 
 export default defineConfig((_configEnv) => {
   return {
@@ -26,11 +29,9 @@ export default defineConfig((_configEnv) => {
       projects: [
         {
           test: {
-            // an example of file based convention,
-            // you don't have to follow it
             include: [
-              'tests/unit/**/*.{test,spec}.ts',
-              'tests/**/*.unit.{test,spec}.ts',
+              'test/unit/**/*.{test,spec}.ts',
+              'test/**/*.unit.{test,spec}.ts',
             ],
             name: 'unit',
             environment: 'node',
@@ -38,11 +39,19 @@ export default defineConfig((_configEnv) => {
         },
         {
           test: {
-            // an example of file based convention,
-            // you don't have to follow it
             include: [
-              'tests/browser/**/*.{test,spec}.ts',
-              'tests/**/*.browser.{test,spec}.ts',
+              'test/integration/**/*.{test,spec}.ts',
+              'test/**/*.integration.{test,spec}.ts',
+            ],
+            name: 'integration',
+            environment: 'node',
+          },
+        },
+        {
+          test: {
+            include: [
+              'test/browser/**/*.{test,spec}.ts',
+              'test/**/*.browser.{test,spec}.ts',
             ],
             name: 'browser',
             browser: {
