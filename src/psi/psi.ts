@@ -9,6 +9,7 @@ export type Connection = {
     context?: undefined, once?: boolean
   ) => Connection
   send: (data: any, chunked?: boolean) => void | Promise<void>;
+  close: () => void;
 };
 
 export type Role = 'starter' | 'joiner' | 'either';

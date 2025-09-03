@@ -53,7 +53,7 @@ export function createAndSharePeerId(session: LinkSession): Promise<Peer> {
       }
     });
 
-    peer.on('open', function(id: string) {
+    peer.once('open', function(id: string) {
       log.info(`got peer id ${id} from peer server; posting to server`)
 
       fetch(`/api/psi/${session['uuid']}`, {

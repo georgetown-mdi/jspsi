@@ -13,6 +13,7 @@ import { createServerRootRoute } from '@tanstack/react-start/server'
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PsiRouteImport } from './routes/psi'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as V2IndexRouteImport } from './routes/v2/index'
 import { ServerRoute as ApiPeerjsIndexServerRouteImport } from './routes/api/peerjs/index'
 import { ServerRoute as ApiPsiJoinServerRouteImport } from './routes/api/psi/join'
 import { ServerRoute as ApiPsiCreateServerRouteImport } from './routes/api/psi/create'
@@ -31,6 +32,11 @@ const PsiRoute = PsiRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V2IndexRoute = V2IndexRouteImport.update({
+  id: '/v2/',
+  path: '/v2/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPeerjsIndexServerRoute = ApiPeerjsIndexServerRouteImport.update({
@@ -72,27 +78,31 @@ const ApiPeerjsKeyPeersServerRoute = ApiPeerjsKeyPeersServerRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
+  '/v2': typeof V2IndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
+  '/v2': typeof V2IndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
+  '/v2/': typeof V2IndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/psi'
+  fullPaths: '/' | '/psi' | '/v2'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/psi'
-  id: '__root__' | '/' | '/psi'
+  to: '/' | '/psi' | '/v2'
+  id: '__root__' | '/' | '/psi' | '/v2/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PsiRoute: typeof PsiRoute
+  V2IndexRoute: typeof V2IndexRoute
 }
 export interface FileServerRoutesByFullPath {
   '/api/peerjs/id': typeof ApiPeerjsIdServerRoute
@@ -178,6 +188,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/v2/': {
+      id: '/v2/'
+      path: '/v2'
+      fullPath: '/v2'
+      preLoaderRoute: typeof V2IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 declare module '@tanstack/react-start/server' {
@@ -237,6 +254,7 @@ declare module '@tanstack/react-start/server' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PsiRoute: PsiRoute,
+  V2IndexRoute: V2IndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

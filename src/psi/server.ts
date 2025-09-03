@@ -90,7 +90,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
       }
     });
 
-    peer.on('open', (id) => {
+    peer.once('open', (id) => {
       log.info(`got peer id ${id} from peer server; connecting to peer ${peerId}`)
       const conn = peer.connect(peerId, {reliable: true});
       resolve([peer, conn]);

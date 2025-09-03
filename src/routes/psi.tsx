@@ -142,6 +142,7 @@ function Home() {
           await participant.exchangeRoles(conn, true);
           log.info(`${psiConfig.role}: identifying intersection`);
           const associationTable = await participant.identifyIntersection(conn, data);
+          conn.close()
 
           const result = associationTable[0].map(i => data[i]);
           
@@ -182,6 +183,7 @@ function Home() {
             await participant.exchangeRoles(conn, false);
             log.info(`${psiConfig.role}: identifying intersection`);
             const associationTable = await participant.identifyIntersection(conn, data);
+            conn.close();
 
             const result = associationTable[0].map(i => data[i]);
             
