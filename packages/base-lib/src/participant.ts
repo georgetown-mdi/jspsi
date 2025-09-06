@@ -1,7 +1,5 @@
 import * as z from 'zod';
 
-import logLibrary from 'loglevel';
-
 import { EventHandlerQueue } from './connection/eventHandlerQueue';
 
 import type {
@@ -15,28 +13,7 @@ import type { Client as PSIClient } from '@openmined/psi.js/implementation/clien
 import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 import type { Server as PSIServer } from '@openmined/psi.js/implementation/server.d.ts'
 
-const { getLevel, getLogger } = logLibrary
-const logLevels = logLibrary.levels;
-
-const getLoggerForVerbosity = (
-  name: string | symbol,
-  verbose: number
-) => {
-  const preferredLogLevel =
-    verbose >= 2
-    ? logLevels.DEBUG
-    : (verbose === 1 ? logLevels.INFO : logLevels.WARN);
-  
-  const result = getLogger(name);
-  result.setLevel(
-    preferredLogLevel >= getLevel()
-    ? preferredLogLevel
-    : getLevel(),
-    false
-  );
-
-  return result;
-}
+import { getLoggerForVerbosity } from './utils/logger';
 
 const protocolMessage = z.object({
   role: z.literal(['starter', 'joiner', 'either'])

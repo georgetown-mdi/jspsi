@@ -21,6 +21,7 @@
   ],
   "dependencies": {
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6.tgz",
+    "eventemitter3": "^5.0.1",
     "loglevel": "^1.9.2",
     "zod": "^4.1.5"
   },
@@ -28,7 +29,6 @@
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^12.1.4",
-    "eventemitter3": "^5.0.1",
     "rimraf": "^6.0.1",
     "rollup": "^4.50.0",
     "rollup-plugin-dts": "^6.2.3",

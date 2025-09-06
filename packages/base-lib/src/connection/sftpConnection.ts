@@ -2,9 +2,7 @@ import * as z from 'zod';
 import { default as EventEmitter } from 'eventemitter3';
 import { v4 as uuidv4 } from 'uuid';
 
-import SFTPClient from 'ssh2-sftp-client';
-
-import { getLoggerForVerbosity } from '../../utils/logger';
+import { getLoggerForVerbosity } from '../utils/logger';
 
 /** 1 hour */
 const DEFAULT_TIME_TO_LIVE_MS = 1000 * 60 * 60;
@@ -38,15 +36,46 @@ const getDefaultOptions = (): Options => {
   }
 }
 
+export interface FileInfo {
+  name: string
+  modifyTime: number
+}
+
+export interface PutOptions {
+  mode?: number | string;
+  flags?: "w" | "a";
+  encoding?: null | string;
+}
+
+export interface GetOptions {
+  mode?: number | string;
+  flags?: "r";
+  encoding?: null | string;
+  handle?: null | string;
+}
+
+export interface SFTPClient {
+  connect: (options: object) => Promise<void>;
+  end: () => Promise<void>;
+  list: (path: string) => Promise<Array<FileInfo>>;
+  get: (path: string, options?: GetOptions) => Promise<Buffer<ArrayBufferLike>>;
+  put: (src: string | Buffer | NodeJS.ReadableStream, dest: string, options?: PutOptions) => Promise<unknown>;
+  /** */
+  delete: (path: string) => Promise<void>;
+  safeDelete: (path: string) => Promise<void>;
+  atomicRename: (fromPath: string, toPath: string) => Promise<void>;
+  exists: (remotePath: string) => Promise<boolean | string>;
+}
+
 /**
  * Catches and emits SFTP errors, throws errors related to improper usage such
  * as connections not being initialized or the remote path containing files it
  * should not.
  */
-export class SFTPConnection 
+export class SFTPConnection
 extends EventEmitter<Events, never>
 {
-  sftp: SFTPClient;
+  private sftp: SFTPClient;
   id: string;
   role: string;
   options: Options;
@@ -60,9 +89,9 @@ extends EventEmitter<Events, never>
   firstToParty: boolean | undefined;
   private poller: NodeJS.Timeout | undefined;
 
-  constructor(options?: Partial<Options>) {
+  constructor(sftp: SFTPClient, options?: Partial<Options>) {
     super();
-    this.sftp = new SFTPClient();
+    this.sftp = sftp;
     this.id = uuidv4();
     this.role = 'unknown';
 
@@ -72,7 +101,7 @@ extends EventEmitter<Events, never>
 
   async open(
     url: string,
-    options?: SFTPClient.ConnectOptions
+    options?: object
   ) {
     if (!url.startsWith('sftp://')) url = 'sftp://' + url;
 
@@ -116,7 +145,7 @@ extends EventEmitter<Events, never>
   
     this.log.info(`${this.role}: synchronizing at remote path ${this.path}`);
 
-    let files: Array<SFTPClient.FileInfo>
+    let files: Array<FileInfo>
     try {
       files = await this.sftp.list(this.path);
     } catch (err: any) {
@@ -169,7 +198,7 @@ extends EventEmitter<Events, never>
         await this.sftp.put(
           Buffer.from(new ArrayBuffer(0)),
           helloPath,
-          { writeStreamOptions: { encoding: null} }
+          { flags: 'w', encoding: 'utf-8' }
         );
       } catch (err: any) {
         this.emit('error', err.message);
@@ -196,7 +225,7 @@ extends EventEmitter<Events, never>
       await this.sftp.put(
         Buffer.from(new ArrayBuffer(0)),
         helloPath,
-        { writeStreamOptions: { encoding: null } }
+        { flags: 'w', encoding: 'utf-8' }
       );
       let wavePath: string | undefined;
 
@@ -279,9 +308,9 @@ extends EventEmitter<Events, never>
 
             this.log.debug(`${this.role}: parsed ${waveFile.name}`);
 
-            await this.sftp.delete(`${this.path}/${waveFile.name}`, true);
-            await this.sftp.delete(`${this.path}/${otherFile.name}`, true);
-            await this.sftp.delete(helloPath, true);
+            await this.sftp.safeDelete(`${this.path}/${waveFile.name}`);
+            await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
+            await this.sftp.safeDelete(helloPath);
 
             return;
           }
@@ -314,7 +343,7 @@ extends EventEmitter<Events, never>
               `${this.role} detected ${otherFile.name}; deleting it`
             );
 
-            await this.sftp.delete(otherPath, true);
+            await this.sftp.safeDelete(otherPath);
 
             return;
           } else {
@@ -346,14 +375,11 @@ extends EventEmitter<Events, never>
             await this.sftp.put(
               Buffer.from(new ArrayBuffer(0)),
               tempPath,
-              { writeStreamOptions: { encoding: null } }
+              { flags: 'w', encoding: 'utf-8' }
             );
 
             try {
-              await this.sftp.rename(
-                tempPath,
-                wavePath
-              );
+              await this.sftp.atomicRename(tempPath, wavePath);
               /**
                * A ~ B list
                * A ~ B hello
@@ -374,7 +400,7 @@ extends EventEmitter<Events, never>
                * 
                * This is B
                */
-              await this.sftp.delete(tempPath, true);
+              await this.sftp.safeDelete(tempPath);
 
               if (!err.message.toLowerCase().includes('rename'))
                 throw err;
@@ -383,9 +409,9 @@ extends EventEmitter<Events, never>
                 `${this.role} wave file creation failed, assuming race condition`
               );
 
-              await this.sftp.delete(wavePath, true);
-              await this.sftp.delete(`${this.path}/${otherFile.name}`, true);
-              await this.sftp.delete(helloPath, true);
+              await this.sftp.safeDelete(wavePath);
+              await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
+              await this.sftp.safeDelete(helloPath);
             }
             return;
           }
@@ -397,8 +423,8 @@ extends EventEmitter<Events, never>
         return await waitForPeer();
       } catch (err: any) {
         if (wavePath)
-          await this.sftp.delete(wavePath, true);
-        await this.sftp.delete(helloPath, true);
+          await this.sftp.safeDelete(wavePath);
+        await this.sftp.safeDelete(helloPath);
         if (err.cause === 'usage') {
           delete err.cause;
           throw err;
@@ -441,16 +467,13 @@ extends EventEmitter<Events, never>
       await this.sftp.put(
         Buffer.from(messsage),
         tempPath,
-        { writeStreamOptions: { encoding: 'utf-8' } }
+        { flags: 'w', encoding: null }
       );
 
       this.log.info(`${this.role} renaming ${tempFile} to ${this.id}.json`);
-      await this.sftp.rename(
-        tempPath,
-        outPath
-      );
+      await this.sftp.atomicRename(tempPath, outPath);
     } catch (err: any) {
-      await this.sftp.delete(tempPath, true);
+      await this.sftp.safeDelete(tempPath);
       if (err.cause === 'usage') {
         delete err.cause;
         throw err;
@@ -477,11 +500,10 @@ extends EventEmitter<Events, never>
 
       const message = await this.sftp.get(
         inPath,
-        undefined,
-        { readStreamOptions: { flags: 'r', encoding: 'utf-8', autoClose: true } }
+        { encoding: 'utf-8' }
       );
 
-      this.sftp.delete(inPath, true);
+      this.sftp.safeDelete(inPath);
 
       this.start();
       const validatedMessage = Message.parse(JSON.parse(message.toString()));

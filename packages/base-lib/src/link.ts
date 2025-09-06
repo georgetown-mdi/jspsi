@@ -1,32 +1,9 @@
 import * as z from 'zod';
 
-import logLibrary from 'loglevel';
-
 import type { Connection } from './types';
 import type { PSIParticipant } from "./participant";
 
-const { getLevel, getLogger } = logLibrary
-const logLevels = logLibrary.levels;
-
-const getLoggerForVerbosity = (
-  name: string | symbol,
-  verbose: number
-) => {
-  const preferredLogLevel =
-    verbose >= 2
-    ? logLevels.DEBUG
-    : (verbose === 1 ? logLevels.INFO : logLevels.WARN);
-  
-  const result = getLogger(name);
-  result.setLevel(
-    preferredLogLevel >= getLevel()
-    ? preferredLogLevel
-    : getLevel(),
-    false
-  );
-
-  return result;
-}
+import { getLoggerForVerbosity } from './utils/logger';
 
 const associationAndIterationArray = z.array(
   z.object({theirIndex: z.number(), iteration: z.number()})

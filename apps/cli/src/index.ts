@@ -3,13 +3,14 @@ import logLibrary from 'loglevel';
 
 import PSI from '@openmined/psi.js'
 
-import { PSIParticipant } from "psi-link"
-import { SFTPConnection } from "../src/psi/connection/sftpConnection";
+import { PSIParticipant, SFTPConnection } from "base-lib"
+
+import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 
 
 logLibrary.setDefaultLevel(logLibrary.levels.DEBUG);
 
-const conn = new SFTPConnection({verbose: 2});
+const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {verbose: 2});
 
 const args = process.argv.slice(2);
 
