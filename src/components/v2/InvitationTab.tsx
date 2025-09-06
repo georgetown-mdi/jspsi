@@ -1,28 +1,37 @@
 import {
+  ActionIcon,
   Alert,
   Button,
   Center,
   Fieldset,
+  Group,
+  NativeSelect,
   Paper,
   PasswordInput,
+  Radio,
   SegmentedControl,
+  Select,
   Stack,
   Text,
   TextInput,
   Textarea,
 } from '@mantine/core';
-import { IconBrandSamsungpass, IconClockShield, IconCloudLock, IconUsers } from '@tabler/icons-react';
+import { IconBrandSamsungpass, IconClockShield, IconCloudLock, IconRepeat, IconUsers } from '@tabler/icons-react';
 import { useState } from "react";
 
 import { useForm } from '@tanstack/react-form';
 
-type Credential = 'token' | 'passcode' | 'none';
+import { v4 as uuidv4 } from 'uuid';
+
+type Credential = 'passcode' | 'none';
 type Channel = 'peer-to-peer' | 'server';
+type PasscodeType = 'token' | 'password';
 
 export function InvitationTab() {
   const form = useForm();
-  const [credential, setCredential] = useState<Credential>('token');
+  const [credential, setCredential] = useState<Credential>('passcode');
   const [channel, setChannel] = useState<Channel>('peer-to-peer');
+  const [passcodeType, setPassCodeType] = useState<PasscodeType>('token');
 
   return (
     <Paper>
@@ -65,64 +74,8 @@ export function InvitationTab() {
                 />
             )}
             />
-          <Fieldset legend='Credentialing'>
-            <Text size='sm' mb={3}>
-              How you will ensure the right person joins
-            </Text>
-            <SegmentedControl
-              value={credential}
-              onChange={value => setCredential(value as Credential)}
-              mb="xs"
-              data={[
-                {
-                  label: (
-                    <Center style={{ gap: 10 }}>
-                      <IconClockShield size={14}/>
-                      Single use token
-                    </Center>
-                  ),
-                  value: 'token'
-                },
-                {
-                  label: (
-                    <Center style={{ gap: 10 }}>
-                      <IconBrandSamsungpass size={14}/>
-                      Passcode
-                    </Center>
-                  ),
-                  value: 'passcode'
-                },
-                {
-                  label: (
-                    <Center style={{ gap: 10 }}>
-                      <IconCloudLock size={14}/>
-                      Trusted server
-                    </Center>
-                  ),
-                  value: 'none'
-                },
-              ]}
-            />
-            {
-              credential === 'passcode'
-              ? (<form.Field
-              name='secret'
-              children={() => (
-                <PasswordInput
-                  withAsterisk
-                  required
-                  description='Something you and your invitee will know'
-                />
-              )}
-              />)
-              : (
-                credential === 'token'
-                ? (<Text size="xs" c="dimmed">A code will be generated that you can use</Text>)
-                : (<Text size="xs" c="dimmed">Share login information with the person you invite; use no other credentials</Text>)
-              )
-            }
-          </Fieldset>
-          <Fieldset legend='Connection'>
+          <Group justify="center" grow preventGrowOverflow={false}>
+          <Fieldset legend='Connection' style={{alignSelf: 'flex-start'}}>
             <Text size='sm' mb={3}>
               How you will you communicate
             </Text>
@@ -139,7 +92,6 @@ export function InvitationTab() {
                     </Center>
                   ),
                   value: 'peer-to-peer',
-                  disabled: credential === 'none'
                 },
                 {
                   label: (
@@ -157,15 +109,86 @@ export function InvitationTab() {
               ? (<Text size="xs" c="dimmed">Your browser will handle the connection</Text>)
               : (<Text size="xs" c="dimmed">Enter connection information on the next page</Text>)
             }
+          </Fieldset>
+          <Fieldset legend='Credentialing'>
+            <Text size='sm' mb={3}>
+              How you will ensure the right person joins
+            </Text>
+            <SegmentedControl
+              value={credential}
+              onChange={value => setCredential(value as Credential)}
+              mb="xs"
+              data={[
+                {
+                  label: (
+                    <Center style={{ gap: 10 }}>
+                      <IconBrandSamsungpass size={14}/>
+                      Passcode
+                    </Center>
+                  ),
+                  value: 'passcode'
+                },
+                {
+                  label: (
+                    <Center style={{ gap: 10 }}>
+                      <IconCloudLock size={14}/>
+                      Trusted server
+                    </Center>
+                  ),
+                  value: 'none',
+                  disabled: channel === 'peer-to-peer'
+                },
+              ]}
+            />
             {
-              credential !== 'none' || channel !== 'peer-to-peer'
-              || (
-                <Alert variant='outline' color='red' mt="sm">
-                  Peer-to-peer connections cannot be used with no credentialing. Select another option.
-                </Alert>
+              credential === 'passcode'
+              ? (
+                <form.Field
+                  name='secret'
+                  children={() => (
+                    <Group grow preventGrowOverflow={false}>
+                      <NativeSelect
+                        name="passcodeType"
+                        label="Passcode type"
+                        value={passcodeType}
+                        onChange={event => setPassCodeType(event.currentTarget.value as PasscodeType)}
+                        data={[
+                          { label: 'Single-use token', value: 'token' },
+                          { label: 'Password', value: 'password' }
+                        ]}
+                      />
+                      {
+                        passcodeType === 'password'
+                        ? <PasswordInput style={{alignSelf: 'flex-end'}}
+                            withAsterisk
+                            required
+                            description='Something you and your invitee will know'
+                          />
+                        : <Group gap='xs' component='span' style={{alignSelf: 'flex-end'}}>
+                            <TextInput value={uuidv4()}/>
+                            <ActionIcon variant='light'>
+                              <IconRepeat size={14}/>
+                            </ActionIcon>
+                          </Group>
+                      }
+                    </Group>
+                  )}
+                />
               )
+              : <Text size="xs" c="dimmed">
+                  Share login information with the person you invite; use no other credentials
+                </Text>
             }
           </Fieldset>
+          </Group>
+          {
+            credential !== 'none' || channel !== 'peer-to-peer'
+            || (
+              <Alert variant='outline' color='red' mt="sm">
+                Peer-to-peer connections cannot be used with no credentialing. Select another option.
+              </Alert>
+            )
+          }
           <Button type="submit">
             Create invitation
           </Button>

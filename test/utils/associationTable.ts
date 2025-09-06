@@ -1,4 +1,4 @@
-import type { AssociationTable } from 'src/psi/psi'
+export type AssociationTable = [Array<number>, Array<number>];
 
 export const sortAssociationTable = (
   value: AssociationTable,

@@ -60,7 +60,7 @@ export function JoinTab() {
                   <PasswordInput
                     withAsterisk
                     required
-                    description='Passcode you were given'
+                    description='Passcode you share'
                   />
                 )}
               />)
@@ -78,7 +78,7 @@ export function JoinTab() {
             )
           }
           <Button type="submit">
-            See session details
+            See exchange details
           </Button>
         </Stack>
       </form>

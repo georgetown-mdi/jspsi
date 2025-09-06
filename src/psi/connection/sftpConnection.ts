@@ -26,6 +26,7 @@ interface Options {
 const Message = z.object({
   ts: z.number().nonnegative(),
   seq: z.number().nonnegative(),
+  type: z.literal(['Object', 'Uint8Array']),
   payload: z.json()
 });
 
@@ -204,7 +205,7 @@ extends EventEmitter<Events, never>
           const currentFiles = await this.sftp.list(this.path!);
 
           const otherFiles = currentFiles.filter(
-            (file) => file.name !== `${this.id}.hello`
+            (file) => file.name !== `${this.id}.hello` && file.name.endsWith('.hello')
           );
           const theseFiles = currentFiles.filter(
             (file) => file.name === `${this.id}.hello`
@@ -417,19 +418,28 @@ extends EventEmitter<Events, never>
     const tempPath = `${this.path}/${tempFile}`;
 
     try {
-      if (await this.sftp.exists(outPath))
+      if (await this.sftp.exists(outPath)) {
         throw new Error(
           `message from ${this.id} exists on server and has not yet been consumed`,
           { cause: 'usage' }
         )
-      const msg = JSON.stringify({
+      }
+
+      let type = 'Object';
+      if (data instanceof Uint8Array) {
+        data = btoa(String.fromCodePoint(...data));
+        type = 'Uint8Array';
+      }
+
+      const messsage = JSON.stringify({
         ts: Date.now(),
         seq: this.seq++,
-        payload: data
+        type,
+        payload: data,
       });
       this.log.info(`${this.role} writing message ${tempFile}`);
       await this.sftp.put(
-        Buffer.from(msg),
+        Buffer.from(messsage),
         tempPath,
         { writeStreamOptions: { encoding: 'utf-8' } }
       );
@@ -475,7 +485,19 @@ extends EventEmitter<Events, never>
 
       this.start();
       const validatedMessage = Message.parse(JSON.parse(message.toString()));
-      this.emit('data', validatedMessage.payload);
+
+      if (validatedMessage.type === 'Uint8Array') {
+        // @ts-ignore type indicates that it will parse as a string
+        const binaryString = atob(validatedMessage.payload);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.codePointAt(i)!;
+        }
+
+        this.emit('data', bytes);
+      } else {
+        this.emit('data', validatedMessage.payload);
+      }
     } catch (err: any) {
       this.emit('error', err.message);
     }

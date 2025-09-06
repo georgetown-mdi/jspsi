@@ -11,6 +11,7 @@
 import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SftpRouteImport } from './routes/sftp'
 import { Route as PsiRouteImport } from './routes/psi'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as V2IndexRouteImport } from './routes/v2/index'
@@ -24,6 +25,11 @@ import { ServerRoute as ApiPeerjsKeyPeersServerRouteImport } from './routes/api/
 
 const rootServerRouteImport = createServerRootRoute()
 
+const SftpRoute = SftpRouteImport.update({
+  id: '/sftp',
+  path: '/sftp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PsiRoute = PsiRouteImport.update({
   id: '/psi',
   path: '/psi',
@@ -78,30 +84,34 @@ const ApiPeerjsKeyPeersServerRoute = ApiPeerjsKeyPeersServerRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
+  '/sftp': typeof SftpRoute
   '/v2': typeof V2IndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
+  '/sftp': typeof SftpRoute
   '/v2': typeof V2IndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
+  '/sftp': typeof SftpRoute
   '/v2/': typeof V2IndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/psi' | '/v2'
+  fullPaths: '/' | '/psi' | '/sftp' | '/v2'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/psi' | '/v2'
-  id: '__root__' | '/' | '/psi' | '/v2/'
+  to: '/' | '/psi' | '/sftp' | '/v2'
+  id: '__root__' | '/' | '/psi' | '/sftp' | '/v2/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PsiRoute: typeof PsiRoute
+  SftpRoute: typeof SftpRoute
   V2IndexRoute: typeof V2IndexRoute
 }
 export interface FileServerRoutesByFullPath {
@@ -174,6 +184,13 @@ export interface RootServerRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sftp': {
+      id: '/sftp'
+      path: '/sftp'
+      fullPath: '/sftp'
+      preLoaderRoute: typeof SftpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/psi': {
       id: '/psi'
       path: '/psi'
@@ -254,6 +271,7 @@ declare module '@tanstack/react-start/server' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PsiRoute: PsiRoute,
+  SftpRoute: SftpRoute,
   V2IndexRoute: V2IndexRoute,
 }
 export const routeTree = rootRouteImport

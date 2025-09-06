@@ -16,4 +16,6 @@ extends EventEmitter<{data: (data: unknown) => void}, never> {
   setOther(other: PassthroughConnection) {
     this.other = other;
   }
+
+  close() {}
 }

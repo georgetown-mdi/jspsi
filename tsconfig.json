@@ -7,10 +7,14 @@
     "nitro.config.ts",
     "vite.config.ts"
   ],
+  "exclude": [
+    "node_modules",
+    "psi-link-lib",
+  ],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
-    "module": "ESNext",
+    "module": "esnext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     /* "types": ["vite/client"], // declared manually in __root.tsx */
 

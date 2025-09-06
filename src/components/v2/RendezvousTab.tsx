@@ -30,7 +30,7 @@ export function RendezvousTab() {
         <Stack>
           <Fieldset legend='Credentials'>
             <Text size='sm' mb={3}>
-              How you will ensure you meet the right person
+              How you will ensure you can trust the other partner
             </Text>
             <SegmentedControl
               value={credential}
@@ -65,7 +65,7 @@ export function RendezvousTab() {
                 <PasswordInput
                   withAsterisk
                   required
-                  description='Something you and your invitee will know'
+                  description='Something you and your partner know'
                 />
               )}
               />)
@@ -126,7 +126,7 @@ export function RendezvousTab() {
             }
           </Fieldset>
           <Button type="submit">
-            Join session
+            Join exchange
           </Button>
         </Stack>
       </form>

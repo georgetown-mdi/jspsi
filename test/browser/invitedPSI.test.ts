@@ -4,13 +4,12 @@ import { expect, test } from 'vitest'
 
 import Peer from "peerjs";
 
-import { PSIParticipant } from "../../src/psi/participant.js";
-
+import { PSIParticipant } from 'psi-link';
 import { sortAssociationTable } from '../utils/associationTable.js';
 
-import type { DataConnection } from 'peerjs';
+import type { Config as PSIConfig } from "psi-link"
 
-import type { Config as PSIConfig } from "../../src/psi/psi.js";
+import type { DataConnection } from 'peerjs';
 
 import '../../public/js/psi_wasm_web.js'
 

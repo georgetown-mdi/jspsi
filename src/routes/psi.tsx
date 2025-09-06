@@ -21,7 +21,9 @@ import { IconCheck, IconCopy } from '@tabler/icons-react';
 
 import { getHostname as getHttpServerHostname } from '@httpServer';
 
-import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from '@psi/participant';
+import PSI from '@openmined/psi.js/psi_wasm_web'
+
+import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from 'psi-link'
 import { openPeerConnection,  waitForPeerId } from '@psi/server';
 import { createAndSharePeerId } from '@psi/client';
 
@@ -29,7 +31,9 @@ import FileSelect from '@components/FileSelect';
 import SessionDetails from '@components/SessionDetails';
 import { StatusFactory } from '@components/Status';
 
-import type { Config as PSIConfig } from '@psi/psi';
+import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
+
+import type { Config as PSIConfig } from 'psi-link';
 
 import type { LinkSession } from '@utils/sessions';
 
@@ -53,11 +57,6 @@ export const Route = createFileRoute('/psi')({
     return await response.json() as LinkSession;
   },
   component: Home,
-  head: () => {
-    return {
-      scripts: [ { src: '/js/psi_wasm_web.js' } ]
-    }
-  }
 });
 
 const loadFile = (file: File): Promise<Array<string>> =>  {
@@ -122,8 +121,7 @@ function Home() {
       waitForPeerId(session.uuid)
       .then((peerId) => {
         Promise.all([
-          // @ts-ignore PSI is loaded by browser
-          new Promise((resolve) => { PSI().then((psi: any) => resolve(psi)) }), 
+          PSI() as Promise<PSILibrary>,
           loadFile(files[0]),
           openPeerConnection(peerId)
         ]).then(async (values) => {
@@ -161,8 +159,7 @@ function Home() {
       // role is client
       setStageById('before start');
       Promise.all([
-        // @ts-ignore PSI is loaded by browser
-        new Promise((resolve) => { PSI().then((psi: any) => resolve(psi)) }), 
+        PSI() as PSILibrary,
         loadFile(files[0]),
       ]).then(async (values) => {
         const [ psi, data ] = values;

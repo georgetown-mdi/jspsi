@@ -1,0 +1,38 @@
+{
+  "name": "psi-link",
+  "version": "1.0.0",
+  "description": "Library for linkage with private set intersection",
+  "license": "Apache-2.0",
+  "author": "Vincent Dorie <vdorie@gmail.com>",
+  "type": "module",
+  "main": "./dist/psi-link.cjs",
+  "module": "./dist/psi-link.esm.js",
+  "types": "./dist/index.d.ts",
+  "browser": "./dist/psi-link.umd.js",
+  "scripts": {
+    "build": "rollup -c rollup.config.ts --configPlugin typescript",
+    "clean": "rimraf dist",
+    "dev": "rollup -c rollup.config.ts --configPlugin typescript -w",
+    "pretest": "npm run build",
+    "test": "vitest run"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@openmined/psi.js": "file:../lib/openmined-psi.js-2.0.6.tgz",
+    "loglevel": "^1.9.2",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.6",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-typescript": "^12.1.4",
+    "eventemitter3": "^5.0.1",
+    "rimraf": "^6.0.1",
+    "rollup": "^4.50.0",
+    "rollup-plugin-dts": "^6.2.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
