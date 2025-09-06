@@ -21,9 +21,10 @@ import { IconCheck, IconCopy } from '@tabler/icons-react';
 
 import { getHostname as getHttpServerHostname } from '@httpServer';
 
+// @ts-ignore this is really there
 import PSI from '@openmined/psi.js/psi_wasm_web'
 
-import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from 'psi-link'
+import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from 'base-lib'
 import { openPeerConnection,  waitForPeerId } from '@psi/server';
 import { createAndSharePeerId } from '@psi/client';
 
@@ -33,7 +34,7 @@ import { StatusFactory } from '@components/Status';
 
 import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 
-import type { Config as PSIConfig } from 'psi-link';
+import type { Config as PSIConfig } from 'base-lib';
 
 import type { LinkSession } from '@utils/sessions';
 

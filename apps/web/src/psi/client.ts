@@ -1,10 +1,13 @@
-import log from 'loglevel';
+import logLibrary from 'loglevel';
 
 import Peer from 'peerjs';
 
 import { ConfigManager } from '@utils/clientConfig';
 
 import type { LinkSession } from '@utils/sessions';
+
+const { getLogger } = logLibrary;
+const log = getLogger('client');
 
 const configManager = new ConfigManager();
 const config = await configManager.load();

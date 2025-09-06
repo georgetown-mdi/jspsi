@@ -16,13 +16,17 @@ import { useNitroApp, useRuntimeConfig } from "nitropack/runtime";
 import { toNodeListener } from "h3";
 import wsAdapter from "crossws/adapters/node";
 
-import log from "loglevel";
+import logLibrary from "loglevel";
 
 import { ConfigManager } from '../src/utils/serverConfig';
 import { registerServer } from "../src/httpServer";
 
 
 import type { AddressInfo } from "node:net";
+
+const { getLogger } = logLibrary;
+
+const log = getLogger('server-entry')
 
 const configManager = new ConfigManager();
 const config = await configManager.load();

@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-import { getLevel, getLogger, levels as logLevels } from 'loglevel';
+import logLibrary from 'loglevel';
 
 import { EventHandlerQueue } from './connection/eventHandlerQueue';
 
@@ -14,6 +14,9 @@ import type {
 import type { Client as PSIClient } from '@openmined/psi.js/implementation/client.d.ts'
 import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 import type { Server as PSIServer } from '@openmined/psi.js/implementation/server.d.ts'
+
+const { getLevel, getLogger } = logLibrary
+const logLevels = logLibrary.levels;
 
 const getLoggerForVerbosity = (
   name: string | symbol,

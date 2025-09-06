@@ -10,7 +10,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
-import { IconBrandSamsungpass, IconClockShield, IconCloudLock, IconUsers } from '@tabler/icons-react';
+import { IconBrandSamsungpass, IconCloudLock, IconUsers } from '@tabler/icons-react';
 import { useForm } from '@tanstack/react-form';
 import { useState } from "react";
 

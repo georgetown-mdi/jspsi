@@ -1,19 +1,21 @@
 import logLibrary from 'loglevel';
 
+const { getLevel, getLogger, levels } = logLibrary;
+
 export const getLoggerForVerbosity = (
   name: string | symbol,
   verbose: number
 ) => {
   const preferredLogLevel =
     verbose >= 2
-    ? logLibrary.levels.DEBUG
-    : (verbose === 1 ? logLibrary.levels.INFO : logLibrary.levels.WARN);
+    ? levels.DEBUG
+    : (verbose === 1 ? levels.INFO : levels.WARN);
   
-  const result = logLibrary.getLogger(name);
+  const result = getLogger(name);
   result.setLevel(
-    preferredLogLevel >= logLibrary.getLevel()
+    preferredLogLevel >= getLevel()
     ? preferredLogLevel
-    : logLibrary.getLevel(),
+    : getLevel(),
     false
   );
 

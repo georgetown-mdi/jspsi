@@ -8,15 +8,13 @@ import {
   NativeSelect,
   Paper,
   PasswordInput,
-  Radio,
   SegmentedControl,
-  Select,
   Stack,
   Text,
   TextInput,
   Textarea,
 } from '@mantine/core';
-import { IconBrandSamsungpass, IconClockShield, IconCloudLock, IconRepeat, IconUsers } from '@tabler/icons-react';
+import { IconBrandSamsungpass, IconCloudLock, IconRepeat, IconUsers } from '@tabler/icons-react';
 import { useState } from "react";
 
 import { useForm } from '@tanstack/react-form';

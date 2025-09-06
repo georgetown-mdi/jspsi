@@ -1,9 +1,12 @@
 import * as z from 'zod';
 
-import { getLevel, getLogger, levels as logLevels } from 'loglevel';
+import logLibrary from 'loglevel';
 
 import type { Connection } from './types';
 import type { PSIParticipant } from "./participant";
+
+const { getLevel, getLogger } = logLibrary
+const logLevels = logLibrary.levels;
 
 const getLoggerForVerbosity = (
   name: string | symbol,

@@ -1,68 +1,23 @@
 {
   "name": "jspsi",
   "version": "1.0.0",
-  "description": "JavaScript implementation of private set intersection for record linkage using peer-to-peer connections.",
+  "description": "JavaScript implementation of private set intersection for record linkage.",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
-  "type": "module",
-  "main": "index.tsx",
+  "workspaces":[
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "lint": "npx eslint src --ignore-pattern src/contrib/**",
-    "type-check": "tsc --noEmit",
-    "start": "node --env=.env .output/server/index.mjs",
-    "cli_server": "node --import=tsx scripts/psi.ts",
-    "test": "vitest run",
-    "test:browser": "vitest run --project browser",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "build": "npm run build -ws",
+    "lint": "eslint .",
+    "format": "prettier --write ."
   },
   "keywords": [
     "private set intersection",
     "record linkage"
   ],
-  "dependencies": {
-    "@mantine/core": "^8.1.3",
-    "@mantine/dropzone": "^8.2.1",
-    "@mantine/hooks": "^8.1.3",
-    "@tabler/icons-react": "^3.34.1",
-    "@tanstack/react-form": "^1.14.1",
-    "@tanstack/react-query": "^5.83.0",
-    "@tanstack/react-router": "^1.127.3",
-    "@tanstack/react-router-devtools": "^1.128.4",
-    "@tanstack/react-start": "^1.127.6",
-    "@types/cors": "^2.8.19",
-    "@types/ssh2-sftp-client": "^9.0.5",
-    "@types/uuid": "^10.0.0",
-    "cors": "^2.8.5",
-    "env-schema": "^6.0.1",
-    "loglevel": "^1.9.2",
-    "peerjs": "^1.5.5",
-    "psi-link": "file:psi-link/psi-link-1.0.0.tgz",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "ssh2-sftp-client": "^12.0.1",
-    "uuid": "^11.1.0",
-    "ws": "^8.18.3",
-    "zod": "^4.0.17"
-  },
   "devDependencies": {
-    "@tanstack/eslint-config": "^0.3.0",
-    "@tanstack/eslint-plugin-router": "^1.125.0",
-    "@types/object-assign": "^4.0.33",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
-    "@types/vary": "^1.1.3",
-    "@types/ws": "^8.18.1",
-    "@vitest/browser": "^3.2.4",
-    "eslint-visitor-keys": "^4.2.1",
-    "eventsource": "^4.0.0",
-    "playwright": "^1.55.0",
-    "postcss-preset-mantine": "^1.18.0",
-    "typescript": "^5.8.3",
-    "vite": "^7.0.4",
-    "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.2.4"
+    "typescript": "^5.8.3"
   }
 }

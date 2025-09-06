@@ -1,8 +1,8 @@
 {
+  "extends": "../../tsconfig.base.json",
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "eslint.config.js",
     "rollup.config.ts",
     "vitest.config.ts"
   ],
@@ -11,6 +11,9 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
+
+    "composite": true,
+    "outDir": "dist",
 
     "strict": true,
     "noUnusedLocals": true,

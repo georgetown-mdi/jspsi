@@ -1,13 +1,7 @@
 
 import {
   Container,
-  Paper,
-  Stack,
   Tabs,
-  Text,
-  TextInput,
-  Textarea,
-  Title,
 } from '@mantine/core';
 import { createFileRoute } from '@tanstack/react-router';
 
@@ -20,8 +14,6 @@ import { RendezvousTab } from '@components/v2/RendezvousTab';
 export const Route = createFileRoute('/v2/')({
   component: Home
 });
-
-
 
 function Home() {
   return (
