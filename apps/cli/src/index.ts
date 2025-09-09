@@ -124,7 +124,10 @@ async function run() {
   console.log('closing connection')
   conn.close();
 
-  console.log(associationTable);
+  const result: Array<string> = [];
+  associationTable[0].forEach(i => result.push(data[i]));
+
+  console.log(result);
 }
 
 run();

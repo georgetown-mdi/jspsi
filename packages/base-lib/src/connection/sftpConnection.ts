@@ -503,7 +503,7 @@ extends EventEmitter<Events, never>
         { encoding: 'utf-8' }
       );
 
-      this.sftp.safeDelete(inPath);
+      await this.sftp.safeDelete(inPath);
 
       this.start();
       const validatedMessage = Message.parse(JSON.parse(message.toString()));
