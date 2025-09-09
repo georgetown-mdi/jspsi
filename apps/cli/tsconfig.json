@@ -6,7 +6,10 @@
     "declaration": true,
     "declarationMap": true
   },
-  "include": ["src"],
+  "include": [
+    "src",
+    "rollup.config.ts"
+  ],
   "references": [
     { "path": "../../packages/base-lib" }
   ]

@@ -128,7 +128,7 @@ extends EventEmitter<Events, never>
   }
 
   async close() {
-    if (!this.connected || !this.path)
+    if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
     const result = await this.sftp.end();
     this.connected = false;
@@ -137,7 +137,7 @@ extends EventEmitter<Events, never>
   }
 
   async synchronize() {
-    if (!this.connected || !this.path)
+    if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
 
     if (this.peerId)
@@ -436,7 +436,7 @@ extends EventEmitter<Events, never>
   }
 
   async send(data: any) {
-    if (!this.connected || !this.path)
+    if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
 
     const outPath = `${this.path}/${this.id}.json`;
@@ -483,7 +483,7 @@ extends EventEmitter<Events, never>
   }
 
   private async poll() {
-    if (!this.connected || !this.path)
+    if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
 
     if (!this.peerId)

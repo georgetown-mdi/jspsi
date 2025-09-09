@@ -13,21 +13,31 @@ const pkg = require('./package.json');
 export default defineConfig([
 	{
 		input: 'src/main.ts',
-		external: Object.keys(pkg.dependencies).filter(name => name != '@openmined/psi.js'),
+		external: Object.keys(pkg.dependencies).filter(name =>
+			name !== '@openmined/psi.js'
+		),
 		output: {
 			name: 'psi-link',
 			file: pkg.browser,
-			format: 'umd'
+			format: 'umd',
+			globals: {
+				zod: "z",
+				loglevel: "log",
+				eventemitter3: "EventEmitter",
+				uuid: "uuid"
+			},
 		},
 		plugins: [
 			resolve(),
 			commonjs(),
 			typescript()
-		]
+		],
 	},
 	{
 		input: 'src/main.ts',
-		external: Object.keys(pkg.dependencies).filter(name => name != '@openmined/psi.js'),
+		external: Object.keys(pkg.dependencies).filter(
+			name => name !== '@openmined/psi.js'
+		),
 		plugins: [
 			typescript()
 		],
