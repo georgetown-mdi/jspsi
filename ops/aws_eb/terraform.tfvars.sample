@@ -1,4 +1,0 @@
-vpc_cidr_block = 
-public_subnet_cidr_block = 
-notification_email = 
-ssh_key = 

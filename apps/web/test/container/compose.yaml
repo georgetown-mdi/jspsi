@@ -1,0 +1,18 @@
+services:
+  sftp:
+    image: atmoz/sftp
+    build: https://github.com/atmoz/sftp.git
+    pull_policy: missing
+    ports:
+      - "2222:22"
+    volumes:
+      - ${PWD}/test/container/sftp/users.conf:/etc/sftp/users.conf:ro
+      - ${PWD}/test/container/sftp/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
+      - ${PWD}/test/container/sftp/ssh_host_rsa_key:/etc/ssh/ssh_host_rsa_key:ro
+      - ${PWD}/test/container/sftp/srv:/home/usera/psi
+      - ${PWD}/test/container/sftp/srv:/home/userb/psi
+    networks:
+      - sftp
+
+networks:
+  sftp:

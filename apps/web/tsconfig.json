@@ -1,0 +1,57 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "public/js/*.js",
+    "eslint.config.js",
+    "nitro.config.ts",
+    "vite.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "psi-link-lib",
+  ],
+  "references": [
+    { "path": "../../packages/base-lib" }
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "module": "esnext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    /* "types": ["vite/client"], // declared manually in __root.tsx */
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    /* Linting */
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "baseUrl": ".",
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "paths": {
+      "@components/*": [
+        "./src/components/*"
+      ],
+      "@utils/*": [
+        "./src/utils/*"
+      ],
+      "@peerjs-server/*": [
+        "./src/contrib/peerjs-server/*"
+      ],
+      "@*": [
+        "./src/*"
+      ]
+    }
+  }
+}
