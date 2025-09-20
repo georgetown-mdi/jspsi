@@ -53,12 +53,16 @@ jobs:
             ${{runner.os}}-node-
       - name: Build server
         run: |
-          npm ci
-          npm run build
+          npm i . -w packages/base-lib -w apps/web
+          npm run -w packages/base-lib apps/web build
+      - name: Run tests
+        run: |
+          npm run -w packages/base-lib test
       - name: Package for Elastic Beanstalk
         run: |
-          cp -a deploy/aws_eb/. .output \
-          && (cd .output && zip -r ../${{github.sha}}.zip .)
+          cp -a deploy/aws_eb/. apps/web/.output
+          touch apps/web/.output/.env
+          (cd apps/web/.output && zip -r ../../../${{github.sha}}.zip .)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
