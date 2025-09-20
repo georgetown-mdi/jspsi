@@ -11,8 +11,6 @@ import { PSIParticipant, SFTPConnection } from "base-lib"
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 
-import type {PositionalOptions} from 'yargs';
-
 
 async function run() {
   const { positionals, options, groups } = schemaToYargs(configSchema);
@@ -93,7 +91,13 @@ async function run() {
   conn.on('error', (err: any) => {
     console.error('sftp error:', err);
     process.exit(69);
-  })
+  });
+  process.on('SIGINT', function() {
+    console.log('caught SIGINT, exiting');
+    if (conn.connected) conn.close();
+    
+    process.exit(0);
+  });
 
   console.log('opening connection to', cliOptions.data.server, 'with options', cliOptions.data.serverOptions)
   await conn.open(cliOptions.data.server, cliOptions.data.serverOptions);

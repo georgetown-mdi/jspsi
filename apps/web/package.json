@@ -11,7 +11,7 @@
     "build": "vite build",
     "lint": "npx eslint src --ignore-pattern src/contrib/**",
     "type-check": "tsc --noEmit",
-    "start": "node --env=.env .output/server/index.mjs",
+    "start": "node --env-file=.env .output/server/index.mjs",
     "cli_server": "node --import=tsx scripts/psi.ts",
     "test": "vitest run",
     "test:browser": "vitest run --project browser",
