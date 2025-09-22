@@ -66,7 +66,7 @@ jobs:
           npm run -w packages/base-lib test
       - name: Package for Elastic Beanstalk
         run: |
-          cp -a deploy/aws_eb/. apps/web/.output
+          cp -a apps/web/deploy/aws_eb/. apps/web/.output
           touch apps/web/.output/.env
           (cd apps/web/.output && zip -r ../../../${{github.sha}}.zip .)
       - name: Upload artifact

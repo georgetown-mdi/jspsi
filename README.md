@@ -12,7 +12,7 @@ This repository contains two applications, a web-based on that allows peer-to-pe
    * On Alpine Linux: `apk add nodejs npm`
    * On other Linux variants, see [here](https://nodejs.org/en/download/package-manager/all).
 2. Run `npm install . -w packages/base-lib -w apps/web`
-3. RUn `npm run -w packages/base-lib build`
+3. Run `npm run -w packages/base-lib build`
 4. Run `npm run -w apps/web dev`
 5. Visit [http://localhost:3000](http://localhost:3000)
 
