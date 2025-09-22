@@ -4,14 +4,15 @@ import { expect, test } from 'vitest'
 
 import Peer from "peerjs";
 
-import { PSIParticipant } from 'psi-link';
+import { PSIParticipant } from 'base-lib';
+// @ts-ignore this is really there
+import PSI from '@openmined/psi.js/psi_wasm_web'
+
 import { sortAssociationTable } from '../utils/associationTable.js';
 
-import type { Config as PSIConfig } from "psi-link"
-
 import type { DataConnection } from 'peerjs';
-
-import '../../public/js/psi_wasm_web.js'
+import type { Config as PSIConfig } from "base-lib"
+import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 
 interface AddressInfo {
 	address: string;
@@ -125,11 +126,7 @@ const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
 	})
 })();
 
-const psiLibrary = await (async () => {
-  // @ts-ignore PSI defined by import
-	const module = await PSI;
-	return await module();
-})();
+const psiLibrary = await (PSI() as Promise<PSILibrary>);
 
 const clientConn = await clientConnPromise;
 

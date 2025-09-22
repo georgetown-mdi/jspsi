@@ -1,11 +1,23 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 
 import { afterAll, beforeAll, expect, test,  } from 'vitest'
 
-import { SFTPConnection } from 'src/psi/connection/sftpConnection';
+import { SFTPConnection } from 'base-lib'
+
+import { SSH2SFTPClientAdapter } from '../../src/connection/ssh2SftpAdapter'
 
 import log from 'loglevel';
 
 log.setLevel(log.levels.DEBUG);
+
+const SFTP_LOCAL_DIRECTORY = 'test/container/sftp/srv'
+
+async function cleanServer() {
+  for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {
+    await fs.unlink(path.join(SFTP_LOCAL_DIRECTORY, file));
+  }
+}
 
 function asynchronize(conn: SFTPConnection) {
   conn.peerId = undefined;
@@ -13,16 +25,19 @@ function asynchronize(conn: SFTPConnection) {
   conn.role = 'unknown'
 }
 
-const serverConn = new SFTPConnection({verbose: 0});
-const clientConn = new SFTPConnection({verbose: 0});
+const serverSFTP = new SSH2SFTPClientAdapter()
+const serverConn = new SFTPConnection(serverSFTP, { verbose: 0 });
+const clientSFTP = new SSH2SFTPClientAdapter();
+const clientConn = new SFTPConnection(clientSFTP, { verbose: 0 });
 
 serverConn.on('error', (err: any) => { throw new Error(err) })
 clientConn.on('error', (err: any) => { throw new Error(err) })
 
 beforeAll(async () => {
+  await cleanServer();
   await Promise.all([
     serverConn.open('sftp://usera:usera@localhost:2222/psi'),
-    clientConn.open('sftp://userb:userb@localhost:2222/psi')
+    clientConn.open('sftp://userb:userb@localhost:2222/psi'),
   ]);
 });
 
@@ -31,6 +46,7 @@ afterAll(async () => {
     clientConn.close(),
     serverConn.close()
   ]);
+  await cleanServer();
 });
 
 test('wave synchronization with race condition', async () => {
@@ -39,7 +55,7 @@ test('wave synchronization with race condition', async () => {
     clientConn.synchronize()
   ]);
 
-  const currentFiles = await serverConn.sftp.list('/psi');
+  const currentFiles = await serverSFTP.list('/psi');
 
   expect(serverConn.peerId).toEqual(clientConn.id);
   expect(clientConn.peerId).toEqual(serverConn.id);
@@ -52,16 +68,16 @@ test('wave synchronization with race condition', async () => {
 });
 
 test('basic synchronization', async () => {
-  await serverConn.sftp.put(
+  await serverSFTP.put(
     Buffer.from(new ArrayBuffer(0)),
     `/psi/${clientConn.id}.hello`
   );
 
   await serverConn.synchronize();
 
-  const currentFiles = await serverConn.sftp.list('/psi');
+  const currentFiles = await serverSFTP.list('/psi');
 
-  await serverConn.sftp.delete(`/psi/${serverConn.id}.hello`, true);
+  await serverSFTP.safeDelete(`/psi/${serverConn.id}.hello`);
 
   expect(serverConn.peerId).toBe(clientConn.id);
   expect(serverConn.firstToParty).toBe(false);

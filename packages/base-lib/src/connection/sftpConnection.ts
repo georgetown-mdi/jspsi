@@ -63,7 +63,7 @@ export interface SFTPClient {
   /** */
   delete: (path: string) => Promise<void>;
   safeDelete: (path: string) => Promise<void>;
-  atomicRename: (fromPath: string, toPath: string) => Promise<void>;
+  rename: (fromPath: string, toPath: string) => Promise<void>;
   exists: (remotePath: string) => Promise<boolean | string>;
 }
 
@@ -379,7 +379,8 @@ extends EventEmitter<Events, never>
             );
 
             try {
-              await this.sftp.atomicRename(tempPath, wavePath);
+              await this.sftp.rename(tempPath, wavePath);
+
               /**
                * A ~ B list
                * A ~ B hello
@@ -471,7 +472,7 @@ extends EventEmitter<Events, never>
       );
 
       this.log.info(`${this.role} renaming ${tempFile} to ${this.id}.json`);
-      await this.sftp.atomicRename(tempPath, outPath);
+      await this.sftp.rename(tempPath, outPath);
     } catch (err: any) {
       await this.sftp.safeDelete(tempPath);
       if (err.cause === 'usage') {

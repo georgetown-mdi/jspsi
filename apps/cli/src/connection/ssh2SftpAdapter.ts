@@ -36,12 +36,8 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
     return this.client.delete(path, true).then(() => {});
   }
 
-  atomicRename(fromPath: string, toPath: string): Promise<void> {
-    try {
-      return this.client.posixRename(fromPath, toPath).then(() => {});
-    } catch {
-      return this.client.rename(fromPath, toPath).then(() => {});
-    }
+  rename(fromPath: string, toPath: string): Promise<void> {
+    return this.client.rename(fromPath, toPath).then(() => {});
   }
 
   exists(remotePath: string): Promise<boolean | string> {

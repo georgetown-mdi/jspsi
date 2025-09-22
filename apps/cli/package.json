@@ -7,7 +7,8 @@
   },
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin typescript",
-    "dev": "node --import=tsx src/index.ts"
+    "dev": "node --import=tsx src/index.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "base-lib": "file:../../packages/base-lib",
@@ -23,6 +24,7 @@
     "@rollup/plugin-typescript": "^12.1.4",
     "@types/ssh2-sftp-client": "^9.0.5",
     "@types/yargs": "^17.0.33",
-    "rollup": "^4.50.1"
+    "rollup": "^4.50.1",
+    "vitest": "^3.2.4"
   }
 }
