@@ -10,15 +10,21 @@ on:
   push:
     branches-ignore: [ main, staging ]
     paths: [
-      'deploy/aws_eb/**',
-      'public/**',
-      'server/**',
-      'src/**',
-      'nitro.config.ts',
       'package-lock.json',
-      'package.json',
-      'postcss.config.cjs',
-      'tsconfig.json'
+      'apps/web/deploy/aws_eb/**',
+      'apps/web/public/**',
+      'apps/web/server/**',
+      'apps/web/src/**',
+      'apps/web/nitro.config.ts',
+      'apps/web/package.json',
+      'apps/web/postcss.config.cjs',
+      'apps/web/tsconfig.json',
+      'apps/web/vite.config.ts',
+      'packages/base-lib/src/**',
+      'packages/base-lib/src/test/**',
+      'packages/base-lib/package.json',
+      'packages/base-lib/rollup.config.ts',
+      'packages/base-lib/tsconfig.json'
     ]
 
   workflow_call:
