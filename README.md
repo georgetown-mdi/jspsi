@@ -1,39 +1,45 @@
-## Quickstart
+PSI Link
+========
 
-Install Node.js.
-1. Mac: Install [Homebrew](https://brew.sh/) and execute `brew install node`
-2. Run `npm install`
-3. Run `npm run dev`
-4. Visit [http://localhost:3000](http://localhost:3000)
+***Secure record linkage and data transfer using private set intersection.***
 
-## Testing container
+This repository contains two applications, a web-based on that allows peer-to-peer exchanges and a command line one that uses SFTP as an intermediary.
 
-Currently needed for SFTP tests.
+## Web App Quickstart
 
-### If on Mac OS or other ARM
+1. Install Node.js and NPM
+   * On a Mac: Install [Homebrew](https://brew.sh/) and execute `brew install node`
+   * On Alpine Linux: `apk add nodejs npm`
+   * On other Linux variants, see [here](https://nodejs.org/en/download/package-manager/all).
+2. Run `npm install . -w packages/base-lib -w apps/web`
+3. RUn `npm run -w packages/base-lib build`
+4. Run `npm run -w apps/web dev`
+5. Visit [http://localhost:3000](http://localhost:3000)
 
-Do once:
+See [apps/web](apps/web) for more details.
 
+## CLI App Quickstart
+
+This app has a pre-built Docker image that can be used.
+
+To link a file:
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. Execute:  
 ```sh
-DOCKER_DEFAULT_PLATFORM=linux/arm64 docker compose -f test/container/compose.yaml build
-```
+docker run \
+  -it --rm \
+  --mount type=bind,src=PATH_TO_DATA_FILE,dst=/work \
+  vdorie/psi-link:latest \
+  sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH \
+  /work/NAME_OF_DATA_FILE
+```  
+Replacing each of the following:
+   * `PATH_TO_DATA_FILE` - relative of absolute path on your host machine where the file you wish to transfer is
+   * `SFTP_USER`, `SFTP_PASSWORD`, `SFTP_HOST`, `SFTP_PORT` - standard SFTP connection information
+   * `SFTP_PATH` - path from root on the SFTP server where both parties can read and write; the exchange will happen here
+   * `NAME_OF_DATA_FILE`
 
-### Regular usage
+The only content accessible to the container will be that in `PATH_TO_DATA_FILE`, so you are recommended to make a new directory and place it in the file you wish to transfer.
 
-Do once:
-
-```sh
-sh test/container/setup.sh
-```
-
-Do every time:
-
-```sh
-docker compose -f test/container/compose.yaml up -d
-```
-
-To stop:
-
-```sh
-docker compose -f test/container/compose.yaml down
-```
+For more information, see [apps/cli](apps/cli/).

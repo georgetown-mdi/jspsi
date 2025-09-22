@@ -28,3 +28,9 @@ And add these lines to `package.json`:
   }
 }
 ```
+
+## Running tests
+
+```sh
+npm run -w packages/base-lib test
+```
