@@ -1,9 +1,10 @@
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { configSchema, schemaToYargs } from './config';
+import { configSchema, flattenObject, schemaToYargs, unflattenObject } from './config';
 
 import fs from 'node:fs';
 import logLibrary from 'loglevel';
+import YAML from 'yaml';
 
 import PSI from '@openmined/psi.js'
 
@@ -36,6 +37,8 @@ async function run() {
         for (const [key, groupName] of groups) {
           cmd = cmd.group(key, groupName);
         }
+        cmd = cmd.option('config', {type: 'string', describe: 'optional yaml config file'});
+
         return cmd.demand(numRequiredPositionals);
       }
     )
@@ -49,12 +52,12 @@ async function run() {
   const argv = cli.parseSync(hideBin(process.argv));
   // @ts-ignore it does exists
   const newAliases = cli.parsed.newAliases as { [key: string]: boolean };
-  Object.entries(newAliases).forEach(([key, value]) => {
+  Object.entries(newAliases).forEach(([key, _value]) => {
     delete argv[key];
   });
   ['h', 'v', 'p', 't'].forEach(key => {
     delete argv[key];
-  })
+  });
 
   const positionalArgs = Object.fromEntries(argv._.map((x, i) => { return [positionals[i].key, x] }));
   const optionPathMap = Object.fromEntries(options.map(x => [x.key, x.meta.optionPath]));
@@ -65,10 +68,21 @@ async function run() {
       return [ optionPathMap[key] || key, value  ]
     }));
 
-  const allArgs = { ...positionalArgs, ...otherArgs };
+  let allArgs = { ...positionalArgs, ...otherArgs };
 
-  const cliOptions = configSchema.safeParse(allArgs);
+  const configFile = allArgs['config'];
+  delete allArgs['config'];
 
+  if (configFile && typeof configFile === 'string') {
+    const configOptions = Object.fromEntries(Object.entries(
+      flattenObject(YAML.parse(fs.readFileSync(configFile, 'utf8')), "", '-')
+    ).map(([key, value]) => {
+      return [ optionPathMap[key] || key, value  ]
+    }));
+    allArgs = {...allArgs, ...configOptions};
+  }
+
+  let cliOptions = configSchema.safeParse(unflattenObject(allArgs));
   if (!cliOptions.success) {
     console.error('unable to parse input:', cliOptions.error);
     cli.showHelp();
