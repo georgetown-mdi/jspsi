@@ -13,6 +13,18 @@ To connect:
 npm run dev -w apps/cli sftp://USER:PASSWORD@HOST/PATH FILE
 ```
 
+To avoid using a password on the command line, place it in a plain-text file and execute:
+
+```sh
+npm run dev -w apps/cli --server-password=@PASSWORD_FILE sftp://USER@HOST/PATH FILE 
+```
+
+Similarly, to use a private key:
+
+```sh
+npm run dev -w apps/cli --server-private-key=@PEM_FILE sftp://USER@HOST/PATH FILE 
+```
+
 ## To build for Docker Hub
 
 Do once:
