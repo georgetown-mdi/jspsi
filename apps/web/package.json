@@ -46,6 +46,7 @@
   "devDependencies": {
     "@tanstack/eslint-config": "^0.3.0",
     "@tanstack/eslint-plugin-router": "^1.125.0",
+    "@tanstack/nitro-v2-vite-plugin": "^1.132.40",
     "@tanstack/react-router-devtools": "^1.128.4",
     "@types/cors": "^2.8.19",
     "@types/object-assign": "^4.0.33",

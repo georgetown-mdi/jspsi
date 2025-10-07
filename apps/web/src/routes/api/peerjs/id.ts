@@ -1,9 +1,9 @@
 import {
-  createServerFileRoute,
   getResponseHeader,
   setResponseHeader
 } from '@tanstack/react-start/server';
 
+import { createFileRoute } from '@tanstack/react-router';
 import { createMiddleware } from '@tanstack/react-start'
 
 import cors from 'cors'
@@ -54,14 +54,20 @@ const corsMiddleware = createMiddleware({ type: 'request' }).server(
   },
 )
 
-export const ServerRoute = createServerFileRoute('/api/peerjs/id').methods(
-  (api) => ({
-    GET: api.middleware([corsMiddleware]).handler(() => {
-      const peerServer = usePeerServer();
+export const Route = createFileRoute('/api/peerjs/id')({
+  server: {
+    handlers: ({ createHandlers }) =>
+      createHandlers({
+        GET: {
+          middleware: [corsMiddleware],
+          handler: () => {
+            const peerServer = usePeerServer();
 
-      return new Response(
-        peerServer.realm.generateClientId(peerServer.config.generateClientId)
-      );
-    })
-  })
-);
+            return new Response(
+              peerServer.realm.generateClientId(peerServer.config.generateClientId)
+            );
+          }
+        }
+      })
+  }
+});

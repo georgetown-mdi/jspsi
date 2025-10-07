@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { defineConfig } from 'vite';
 import logLibrary from 'loglevel';
+import { nitroV2Plugin } from '@tanstack/nitro-v2-vite-plugin'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tsConfigPaths from 'vite-tsconfig-paths';
 import viteReact from '@vitejs/plugin-react';
@@ -72,9 +73,11 @@ export default defineConfig((_configEnv) => {
         skip: (dir: string) => { return ['.netlify', '.nitro', '.tanstack', 'dist'].includes(dir); }
       }),
       tanstackStart({
-        customViteReactPlugin: true,
-        target: 'node-server',
+        srcDirectory: 'src',
       }),
+      nitroV2Plugin(
+        { preset: 'node-server' },
+      ),
       viteReact(),
       {
         name: 'dev-server-snagger',
