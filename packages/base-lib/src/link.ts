@@ -17,8 +17,8 @@ interface IndexIterationPair {
 type IndexIterationMap = Array<IndexIterationPair | undefined>
 type IterationMap = Array<IndexIterationPair>
 
-interface IndexableIterable<T> extends Iterable<T> {
-  [index: number]: T;
+export interface IndexableIterable<T> extends Iterable<T> {
+  [index: number]: T | undefined;
 }
 
 function getUnidentifiedIndices(
@@ -87,7 +87,7 @@ export async function linkViaPSI(
         indexIterationMap = Array(dataWithDuplicates.length).fill(undefined);
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
-        dataWithDuplicates = unidentifiedIndices.map(i => { return data[j][i]; });
+        dataWithDuplicates = unidentifiedIndices.map(i => { return data[j][i]!; });
       }
       const [data_j, unmappedIndices] = removeDuplicates(
         dataWithDuplicates,
