@@ -6,6 +6,21 @@
     { "path": "packages/base-lib" },
   ],
   "settings": {
-    "typescript.tsdk": "node_modules/typescript/lib"
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "files.watcherExclude": {
+      "apps/web/**/routeTree.gen.ts": true
+    },
+    "search.exclude": {
+      "apps/web/**/routeTree.gen.ts": true
+    },
+    "files.readonlyInclude": {
+      "apps/web/**/routeTree.gen.ts": true
+    },
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.patterns": {
+      "package.json": "package-lock.json",
+      "*.ts": "$(capture).*.ts",
+      "vite.config.ts": "vitest.config.ts"
+    },
   }
 }

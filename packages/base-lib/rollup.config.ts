@@ -24,7 +24,8 @@ export default defineConfig([
 				zod: "z",
 				loglevel: "log",
 				eventemitter3: "EventEmitter",
-				uuid: "uuid"
+				uuid: "uuid",
+				papaparse: 'Papa'
 			},
 		},
 		plugins: [

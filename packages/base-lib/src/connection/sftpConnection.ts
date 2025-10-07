@@ -98,7 +98,7 @@ extends EventEmitter<Events, never>
     this.responsibleFiles = new Set();
 
     this.options = {...getDefaultOptions(), ...options} as Options;
-    this.log = getLoggerForVerbosity('sftp', this.options.verbose);
+    this.log = getLoggerForVerbosity(`sftp-${this.id.substring(0, 8)}`, this.options.verbose);
   }
 
   async open(
@@ -129,12 +129,16 @@ extends EventEmitter<Events, never>
     return value;
   }
 
+  async cleanup() {
+    this.responsibleFiles.forEach(async (filename) => {
+      await this.sftp.safeDelete(`${this.path}/${filename}`);
+    });
+  }
+
   async close() {
     if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
-    this.responsibleFiles.forEach((filename) => {
-      this.sftp.safeDelete(`${this.path}/${filename}`);
-    });
+    
     const result = await this.sftp.end();
     this.connected = false;
     this.path = undefined;

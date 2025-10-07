@@ -177,22 +177,22 @@ async function exchangeMappedElements(
 ): Promise<IterationMap>
 {
   if (sendFirst) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       conn.once('data', (rawData: unknown) => {
         log.debug(`${id}: received other mapped elements`);
         resolve(associationAndIterationArray.parse(rawData));
       });
       log.debug(`${id}: sending own mapped elements`);
-      conn.send(values);
+      await conn.send(values);
       log.debug(`${id}: waiting for response`);
     });
   } else {
     return new Promise((resolve) => {
-      conn.once('data', (rawData: unknown) => {
+      conn.once('data', async (rawData: unknown) => {
         log.debug(`${id}: received other mapped elements`);
 
         log.debug(`${id}: sending own mapped elements`);
-        conn.send(values);
+        await conn.send(values);
 
         resolve(associationAndIterationArray.parse(rawData));
       });
