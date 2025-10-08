@@ -396,7 +396,7 @@ const ExecuteClient: React.FC = () => {
           </div>
 
           {/* What Happens Next */}
-          <Card className="mt-8 animate-fade-in bg-blue-50 border-blue-200">
+          {/* <Card className="mt-8 animate-fade-in bg-blue-50 border-blue-200">
             <CardContent className="pt-6">
               <div className="text-center">
                 <h3 className="font-semibold text-blue-900 mb-2">
@@ -429,7 +429,7 @@ const ExecuteClient: React.FC = () => {
                 </div>
               </div>
             </CardContent>
-          </Card>
+          </Card> */}
 
           {/* Messages Log */}
           <Card className="mt-8 animate-fade-in">
