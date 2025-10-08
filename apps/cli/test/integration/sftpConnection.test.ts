@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-import { afterAll, beforeAll, expect, test,  } from 'vitest'
-
+import { afterAll, beforeAll, expect, test } from 'vitest';
 import { SFTPConnection } from 'base-lib'
 
 import { SSH2SFTPClientAdapter } from '../../src/connection/ssh2SftpAdapter'
@@ -15,7 +14,11 @@ const SFTP_LOCAL_DIRECTORY = 'test/container/sftp/srv'
 
 async function cleanServer() {
   for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {
-    await fs.unlink(path.join(SFTP_LOCAL_DIRECTORY, file));
+    try {
+      await fs.unlink(path.join(SFTP_LOCAL_DIRECTORY, file));
+    } catch {
+      // ignore
+    }
   }
 }
 

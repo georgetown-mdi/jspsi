@@ -5,9 +5,6 @@ import {
   Scripts,
   createRootRoute,
 } from '@tanstack/react-router'
-// eslint-disable-next-line import/order
-import type { ReactNode } from 'react';
-
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 import '@mantine/core/styles.css';
@@ -20,9 +17,10 @@ import {
 
 import { DefaultCatchBoundary } from '@components/DefaultCatchBoundary';
 import { NotFound } from '@components/NotFound';
+import { mantineTheme } from '@theme'
 import { seo } from '@utils/seo';
 
-import { mantineTheme } from '@theme'
+import type { ReactNode } from 'react';
 
 export const Route = createRootRoute({
   head: () => ({
@@ -39,6 +37,27 @@ export const Route = createRootRoute({
         description: 'Conduct a data sharing session using a private-set-intersection protocol over a peer-to-peer connection.'
       }),
     ],
+    links: [
+      {
+        rel: 'apple-touch-icon',
+        sizes: '180x180',
+        href: '/apple-touch-icon.png',
+      },
+      {
+        rel: 'icon',
+        type: 'image/png',
+        sizes: '32x32',
+        href: '/favicon-32x32.png',
+      },
+      {
+        rel: 'icon',
+        type: 'image/png',
+        sizes: '16x16',
+        href: '/favicon-16x16.png',
+      },
+      { rel: 'manifest', href: '/site.webmanifest', color: '#fffff' },
+      { rel: 'icon', href: '/favicon.ico' },
+    ]
   }),
   errorComponent: DefaultCatchBoundary,
   notFoundComponent: () => <NotFound />,
@@ -64,6 +83,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       <body>
         <MantineProvider theme={mantineTheme}>
           {children}
+          <TanStackRouterDevtools position="bottom-right" />
           <Scripts />
         </MantineProvider>
       </body>

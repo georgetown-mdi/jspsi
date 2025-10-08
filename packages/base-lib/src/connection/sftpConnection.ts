@@ -88,15 +88,17 @@ extends EventEmitter<Events, never>
   peerId: string | undefined;
   firstToParty: boolean | undefined;
   private poller: NodeJS.Timeout | undefined;
+  private responsibleFiles: Set<string>;
 
   constructor(sftp: SFTPClient, options?: Partial<Options>) {
     super();
     this.sftp = sftp;
     this.id = uuidv4();
     this.role = 'unknown';
+    this.responsibleFiles = new Set();
 
     this.options = {...getDefaultOptions(), ...options} as Options;
-    this.log = getLoggerForVerbosity('sftp', this.options.verbose);
+    this.log = getLoggerForVerbosity(`sftp-${this.id.substring(0, 8)}`, this.options.verbose);
   }
 
   async open(
@@ -127,9 +129,16 @@ extends EventEmitter<Events, never>
     return value;
   }
 
+  async cleanup() {
+    this.responsibleFiles.forEach(async (filename) => {
+      await this.sftp.safeDelete(`${this.path}/${filename}`);
+    });
+  }
+
   async close() {
     if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
+    
     const result = await this.sftp.end();
     this.connected = false;
     this.path = undefined;
@@ -152,6 +161,10 @@ extends EventEmitter<Events, never>
       this.emit('error', err.message);
       return;
     }
+    const fileNames = files.map((file) => file.name);
+    this.responsibleFiles.forEach((fileName) => {
+      if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
+    });
     const helloFiles = files.filter(
       (file) => file.name.endsWith('.hello')
     );
@@ -200,6 +213,7 @@ extends EventEmitter<Events, never>
           helloPath,
           { flags: 'w', encoding: 'utf-8' }
         );
+        this.responsibleFiles.add(`${this.id}.hello`);
       } catch (err: any) {
         this.emit('error', err.message);
         return;
@@ -227,11 +241,17 @@ extends EventEmitter<Events, never>
         helloPath,
         { flags: 'w', encoding: 'utf-8' }
       );
+      this.responsibleFiles.add(`${this.id}.hello`);
       let wavePath: string | undefined;
 
       const waitForPeer = async () => {
         while (Date.now() <= this.options.timeToLive.getTime()) {
           const currentFiles = await this.sftp.list(this.path!);
+
+          const fileNames = currentFiles.map((file) => file.name);
+          this.responsibleFiles.forEach((fileName) => {
+            if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
+          });
 
           const otherFiles = currentFiles.filter(
             (file) => file.name !== `${this.id}.hello` && file.name.endsWith('.hello')
@@ -312,6 +332,8 @@ extends EventEmitter<Events, never>
             await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
             await this.sftp.safeDelete(helloPath);
 
+            this.responsibleFiles.clear();
+
             return;
           }
 
@@ -344,6 +366,8 @@ extends EventEmitter<Events, never>
             );
 
             await this.sftp.safeDelete(otherPath);
+
+            this.responsibleFiles.clear();
 
             return;
           } else {
@@ -380,6 +404,7 @@ extends EventEmitter<Events, never>
 
             try {
               await this.sftp.rename(tempPath, wavePath);
+              this.responsibleFiles.add(waveName);
 
               /**
                * A ~ B list
@@ -413,6 +438,8 @@ extends EventEmitter<Events, never>
               await this.sftp.safeDelete(wavePath);
               await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
               await this.sftp.safeDelete(helloPath);
+
+              this.responsibleFiles.clear();
             }
             return;
           }
@@ -421,7 +448,9 @@ extends EventEmitter<Events, never>
         throw new Error(`${this.role}: synchronization has timed out`);
       }
       try {
-        return await waitForPeer();
+        await waitForPeer();
+        this.responsibleFiles.clear();
+        return;
       } catch (err: any) {
         if (wavePath)
           await this.sftp.safeDelete(wavePath);
@@ -473,6 +502,7 @@ extends EventEmitter<Events, never>
 
       this.log.info(`${this.role} renaming ${tempFile} to ${this.id}.json`);
       await this.sftp.rename(tempPath, outPath);
+      this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: any) {
       await this.sftp.safeDelete(tempPath);
       if (err.cause === 'usage') {

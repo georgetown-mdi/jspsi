@@ -3,14 +3,11 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    "public/js/*.js",
-    "eslint.config.js",
     "nitro.config.ts",
     "vite.config.ts"
   ],
   "exclude": [
     "node_modules",
-    "psi-link-lib",
   ],
   "references": [
     { "path": "../../packages/base-lib" }
@@ -27,6 +24,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    "isolatedModules": true,
 
     /* Linting */
     "skipLibCheck": true,

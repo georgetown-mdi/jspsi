@@ -30,7 +30,7 @@ jobs:
         with:
           name: ${{inputs.artifactName}}
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4.3.1
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-region: ${{vars.AWS_REGION_NAME}}
           role-to-assume: ${{secrets.AWS_DEPLOY_ROLE_ARN}}

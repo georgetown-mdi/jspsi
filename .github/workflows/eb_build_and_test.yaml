@@ -43,9 +43,11 @@ jobs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup NodeJS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
+        with:
+          node-version: '>=24.0.0'
       - name: Get npm cache directory
         id: npm-cache-dir
         shell: bash
