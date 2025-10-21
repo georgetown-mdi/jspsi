@@ -25,7 +25,7 @@ This app has a pre-built Docker image that can be used.
 To link a file:
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
-2. Execute:  
+2. Within the Docker terminal (or in a Windows/Mac/Linux terminal window), run:  
 ```sh
 docker run \
   -it --rm \
