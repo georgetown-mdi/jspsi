@@ -3,7 +3,7 @@ PSI Link
 
 ***Secure record linkage and data transfer using private set intersection.***
 
-This repository contains two applications, a web-based on that allows peer-to-peer exchanges and a command line one that uses SFTP as an intermediary.
+This repository contains two applications, a web-based one that allows peer-to-peer exchanges and a command line one that uses SFTP as an intermediary.
 
 ## Web App Quickstart
 
