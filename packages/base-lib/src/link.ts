@@ -64,7 +64,8 @@ export async function linkViaPSI(
   participant: PSIParticipant,
   conn: Connection,
   data: Array<IndexableIterable<string>>,
-  verbose: number = 1
+  verbose: number = 1,
+  setStage?: (id: string) => void,
 )
 {
   if (participant.config.role === 'either')
@@ -72,14 +73,16 @@ export async function linkViaPSI(
   const sendFirst = participant.config.role === 'starter';
 
   const log = getLoggerForVerbosity('psiLink', verbose);
+  setStage = setStage ? setStage : () => {};
 
-  log.info(`${participant.id}: linking ${data.length} data elements via PSI`);
+  log.info(`${participant.id}: linking using ${data.length} keys via PSI`);
 
   if (['one-to-one', 'many-to-one'].includes(protocol.cardinality)) {
     let indexIterationMap: IndexIterationMap = [];
     const unmappedIndicesByIter: Array<Array<number>> = [];
 
     for (let j = 0; j < data.length; ++j) {
+      setStage(`stage ${j + 1} / ${data.length}`);
       let dataWithDuplicates: Array<string>;
       let unidentifiedIndices: Array<number> | undefined;
       if (j === 0) {
@@ -108,6 +111,7 @@ export async function linkViaPSI(
           iteration: j
         };
       }
+
     }
 
     log.info(`${participant.id}: completed link, getting original element indices`);

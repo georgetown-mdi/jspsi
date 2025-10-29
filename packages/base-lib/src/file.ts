@@ -11,6 +11,7 @@ export function loadCSVFile(file: LocalFile): Promise<Papa.ParseResult<unknown>>
       file,
       {
         header: true,
+        skipEmptyLines: true,
         complete: (results, _file) => {
           resolve(results);
         },

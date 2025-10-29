@@ -1,6 +1,6 @@
 import log from 'loglevel';
 
-import { createFileRoute, useSearch} from '@tanstack/react-router';
+import { createFileRoute,  useSearch} from '@tanstack/react-router';
 
 import { useState } from 'react';
 
@@ -24,7 +24,13 @@ import { getHostname as getHttpServerHostname } from '@httpServer';
 // @ts-ignore this is really there
 import PSI from '@openmined/psi.js/psi_wasm_web'
 
-import { PSIParticipant, ProcessState, joinerProtocolStages, starterProtocolStages } from 'base-lib'
+import {
+  PSIParticipant,
+  ProcessState,
+  getDataForFixedRuleLink,
+  linkViaPSI,
+  linkageKeys
+} from 'base-lib'
 import { openPeerConnection,  waitForPeerId } from '@psi/server';
 import { createAndSharePeerId } from '@psi/client';
 
@@ -37,6 +43,7 @@ import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 import type { Config as PSIConfig } from 'base-lib';
 
 import type { LinkSession } from '@utils/sessions';
+// import { sortAssociationTable } from 'test/utils/associationTable';
 
 
 export const Route = createFileRoute('/psi')({
@@ -60,29 +67,6 @@ export const Route = createFileRoute('/psi')({
   component: Home,
 });
 
-const loadFile = (file: File): Promise<Array<string>> =>  {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = (_event) => {
-      if (reader.result === null) reject(new Error(file.name + ' is empty'))
-
-      let result = (reader.result! as string).split('\n');
-      if (file.type === "text/csv") result = result.slice(1);
-      result = result.filter(function(entry) { return entry.trim() != ''; });
-
-      result = result
-        .map(function(row) { return row.split(',')[0]; })
-        .filter((row) => { return row.trim() != ''; })
-
-      resolve(result);
-    }
-
-    reader.onerror = (error) => reject(error);
-
-    reader.readAsText(file);
-  })
-}
-
 function Home() {
   const session = Route.useLoaderData();
   const role = useSearch({
@@ -96,18 +80,35 @@ function Home() {
       ...[
         {id: 'before start', label: 'Before start', state: ProcessState.BeforeStart},
         {id: 'waiting for peer', label: 'Waiting for peer', state: ProcessState.Waiting},
-      ] as const,
-      ...starterProtocolStages
+        {id: 'confirming protocol', label: 'Confirming protocol', state: ProcessState.Working},
+        ...linkageKeys.map(
+          (_, i) => { return {
+            id: `stage ${i + 1} / ${linkageKeys.length}`,
+            label: `Linking key ${i + 1} / ${linkageKeys.length}`,
+            state: ProcessState.Working
+          }}
+        ),
+        {id: 'done', label: 'Done', state: ProcessState.Done},
+      ],
     ] :
     [
       ...[
           {id: 'before start', label: 'Before start', state: ProcessState.BeforeStart},
-      ] as const,
-      ...joinerProtocolStages
+          {id: 'confirming protocol', label: 'Confirming protocol', state: ProcessState.Working},
+          ...linkageKeys.map(
+          (_, i) => { return {
+            id: `stage ${i + 1} / ${linkageKeys.length}`,
+            label: `Linking key ${i + 1} / ${linkageKeys.length}`,
+            state: ProcessState.Working
+          }}
+        ),
+        {id: 'done', label: 'Done', state: ProcessState.Done}
+      ],
     ];
   
 
   const Status = StatusFactory(stages);
+  const stagesById = Object.fromEntries(stages.map((value) => [value['id'], value]));
 
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
@@ -123,7 +124,7 @@ function Home() {
       .then((peerId) => {
         Promise.all([
           PSI() as Promise<PSILibrary>,
-          loadFile(files[0]),
+          getDataForFixedRuleLink(files[0], true),
           openPeerConnection(peerId)
         ]).then(async (values) => {
         const [ psi, data, [peer, conn] ] = values;
@@ -134,18 +135,27 @@ function Home() {
             'server',
             psi,
             psiConfig,
-            (id: typeof stageId) => setStageById(id)
+            (id: any) => {if (stagesById.hasOwnProperty(id)) setStageById(id)}
           );
 
           log.info(`${psiConfig.role}: exchanging config`);
           await participant.exchangeRoles(conn, true);
           log.info(`${psiConfig.role}: identifying intersection`);
-          const associationTable = await participant.identifyIntersection(conn, data);
+          const associationTable = await linkViaPSI(
+            {cardinality: 'one-to-one'},
+            participant,
+            conn,
+            data,
+            1,
+            (id: any) => {if (stagesById.hasOwnProperty(id)) setStageById(id)}
+          );
           conn.close()
 
-          const result = associationTable[0].map(i => data[i]);
+          const result = 'our_row_id,their_row_id' +
+            associationTable[0].map((ours, i) => `\n${ours},${associationTable[1][i]}`)
+            .join('');
           
-          const fileData = new Blob([result.join('\n')], {type: 'text/plain'});
+          const fileData = new Blob([result], {type: 'text/plain'});
           const newResultURL = window.URL.createObjectURL(fileData);
 
           if (resultURL !== undefined)
@@ -161,7 +171,7 @@ function Home() {
       setStageById('before start');
       Promise.all([
         PSI() as PSILibrary,
-        loadFile(files[0]),
+        getDataForFixedRuleLink(files[0], false)
       ]).then(async (values) => {
         const [ psi, data ] = values;
         const peer = await createAndSharePeerId(session);
@@ -175,17 +185,27 @@ function Home() {
               'client',
               psi,
               psiConfig,
-              (id: typeof stageId) => setStageById(id)
+              (id: any) => {if (stagesById.hasOwnProperty(id)) setStageById(id)}
             );
             log.info(`${psiConfig.role}: exchanging config`);
+
             await participant.exchangeRoles(conn, false);
             log.info(`${psiConfig.role}: identifying intersection`);
-            const associationTable = await participant.identifyIntersection(conn, data);
+            const associationTable = await linkViaPSI(
+              {cardinality: 'one-to-one'},
+              participant,
+              conn,
+              data,
+              1,
+              (id: any) => {if (stagesById.hasOwnProperty(id)) setStageById(id)}
+            );
             conn.close();
 
-            const result = associationTable[0].map(i => data[i]);
+            const result = 'our_row_id,their_row_id' +
+              associationTable[0].map((ours, i) => `\n${ours},${associationTable[1][i]}`)
+              .join('');
             
-            const fileData = new Blob([result.join('\n')], {type: 'text/plain'});
+            const fileData = new Blob([result], {type: 'text/plain'});
             const newResultURL = window.URL.createObjectURL(fileData);
 
             if (resultURL !== undefined)

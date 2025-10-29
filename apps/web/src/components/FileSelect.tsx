@@ -33,11 +33,11 @@ export default function FileSelect(props: FileSelectProps) {
           onReject={() => {}}
           maxSize={10 * 1024 ** 2} // 10MB
           accept={[
-            'text/plain',
+            // 'text/plain',
             MIME_TYPES.csv,
-            MIME_TYPES.xls,
-            MIME_TYPES.xlsx,
-            'application/vnd.apache.parquet'
+            // MIME_TYPES.xls,
+            // MIME_TYPES.xlsx,
+            // 'application/vnd.apache.parquet'
           ]}
           {...(submitted ? {
               disabled: true,
