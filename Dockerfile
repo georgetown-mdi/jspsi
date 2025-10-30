@@ -1,4 +1,4 @@
-FROM node:current-slim AS builder
+FROM node:current-alpine AS builder
 
 WORKDIR /build
 
@@ -16,7 +16,7 @@ COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
 COPY apps/cli/src apps/cli/src/
 RUN npm run build -w packages/base-lib -w apps/cli
 
-FROM node:current-slim
+FROM node:current-alpine
 
 WORKDIR /app
 COPY --from=builder /build/apps/cli/package.json .
