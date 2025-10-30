@@ -39,6 +39,8 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t vdorie/psi-link:latest \
   --push .
+
+docker buildx stop multiarch-builder
 ```
 
 ## Testing container

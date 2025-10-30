@@ -27,6 +27,7 @@ To link a file:
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Within the Docker terminal (or in a Windows/Mac/Linux terminal window), run:  
 ```sh
+docker pull vdorie/psi-link:latest
 docker run \
   -it --rm \
   --mount type=bind,src=PATH_TO_DATA_FILE,dst=/work \
