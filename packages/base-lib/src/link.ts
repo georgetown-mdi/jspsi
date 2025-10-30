@@ -30,12 +30,13 @@ function getUnidentifiedIndices(
   );
 }
 
-function removeDuplicates(
-  dataWithDuplicates: Array<string>,
+function removeDuplicatesAndUndefineds(
+  dataWithDuplicatesAndUndefineds: Array<string | undefined>,
   permutation?: Array<number>
 ): [Array<string>, Array<number>] {
   const elementToIndexMap: Map<string, Array<number>> = new Map();
-  dataWithDuplicates.forEach((value, i) => {
+  dataWithDuplicatesAndUndefineds.forEach((value, i) => {
+    if (!value) return;
     const arr = elementToIndexMap.get(value);
     if (arr) {
       arr.push(i);
@@ -63,8 +64,9 @@ export async function linkViaPSI(
   },
   participant: PSIParticipant,
   conn: Connection,
-  data: Array<IndexableIterable<string>>,
-  verbose: number = 1
+  data: Array<IndexableIterable<string | undefined>>,
+  verbose: number = 1,
+  setStage?: (id: string) => void,
 )
 {
   if (participant.config.role === 'either')
@@ -72,25 +74,27 @@ export async function linkViaPSI(
   const sendFirst = participant.config.role === 'starter';
 
   const log = getLoggerForVerbosity('psiLink', verbose);
+  setStage = setStage ?? (() => {});
 
-  log.info(`${participant.id}: linking ${data.length} data elements via PSI`);
+  log.info(`${participant.id}: linking using ${data.length} keys via PSI`);
 
   if (['one-to-one', 'many-to-one'].includes(protocol.cardinality)) {
     let indexIterationMap: IndexIterationMap = [];
     const unmappedIndicesByIter: Array<Array<number>> = [];
 
     for (let j = 0; j < data.length; ++j) {
-      let dataWithDuplicates: Array<string>;
+      setStage(`stage ${j + 1} / ${data.length}`);
+      let dataWithDuplicatesAndUndefineds: Array<string | undefined>;
       let unidentifiedIndices: Array<number> | undefined;
       if (j === 0) {
-        dataWithDuplicates = Array.from(data[j]);
-        indexIterationMap = Array(dataWithDuplicates.length).fill(undefined);
+        dataWithDuplicatesAndUndefineds = Array.from(data[j]);
+        indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(undefined);
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
-        dataWithDuplicates = unidentifiedIndices.map(i => { return data[j][i]!; });
+        dataWithDuplicatesAndUndefineds = unidentifiedIndices.map(i => { return data[j][i]; });
       }
-      const [data_j, unmappedIndices] = removeDuplicates(
-        dataWithDuplicates,
+      const [data_j, unmappedIndices] = removeDuplicatesAndUndefineds(
+        dataWithDuplicatesAndUndefineds,
         unidentifiedIndices
       );
       unmappedIndicesByIter.push(unmappedIndices);
@@ -108,6 +112,7 @@ export async function linkViaPSI(
           iteration: j
         };
       }
+
     }
 
     log.info(`${participant.id}: completed link, getting original element indices`);

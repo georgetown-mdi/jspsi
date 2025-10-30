@@ -8,7 +8,15 @@ import YAML from 'yaml';
 
 import PSI from '@openmined/psi.js'
 
-import { PSIParticipant, SFTPConnection, getDataForFixedRuleLink, linkViaPSI } from "base-lib"
+import {
+  PSIParticipant,
+  SFTPConnection,
+  firstToPartyLinkageKeyDefinitions,
+  getLinkageKeys,
+  keyAliases,
+  linkViaPSI,
+  secondToPartyLinkageKeyDefinitions
+} from "base-lib"
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 
@@ -114,10 +122,11 @@ async function run() {
 
   console.log('synchronized to firstToParty', conn.firstToParty);
 
-  const data = await getDataForFixedRuleLink(
+  const data = await getLinkageKeys(
     fs.createReadStream(cliOptions.data.input),
-    conn.firstToParty!
-  )
+    conn.firstToParty ? firstToPartyLinkageKeyDefinitions : secondToPartyLinkageKeyDefinitions,
+    keyAliases
+  );
 
   console.log('starting polling')
   conn.start();
@@ -137,8 +146,7 @@ async function run() {
     participant,
     conn,
     data
-  )
-  // const associationTable = await participant.identifyIntersection(conn, data);
+  );
 
   console.log('stopping polling')
   conn.stop();

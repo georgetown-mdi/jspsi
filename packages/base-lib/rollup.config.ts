@@ -30,8 +30,8 @@ export default defineConfig([
 		},
 		plugins: [
 			resolve(),
-			commonjs(),
-			typescript()
+			typescript({outputToFilesystem: true}),
+			commonjs()
 		],
 	},
 	{

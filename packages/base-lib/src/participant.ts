@@ -100,7 +100,6 @@ export class PSIParticipant {
       this.config.verbose = DEFAULT_VERBOSITY;
     }
 
-
     this.log = getLoggerForVerbosity('participant', this.config.verbose);
 
     if (this.config.role === 'starter') {
