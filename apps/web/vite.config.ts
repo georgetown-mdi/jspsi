@@ -4,6 +4,7 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import logLibrary from 'loglevel';
 import { nitroV2Plugin } from '@tanstack/nitro-v2-vite-plugin'
+import { playwright } from '@vitest/browser-playwright'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tsConfigPaths from 'vite-tsconfig-paths';
 import viteReact from '@vitejs/plugin-react';
@@ -56,7 +57,7 @@ export default defineConfig((_configEnv) => {
             ],
             name: 'browser',
             browser: {
-              provider: 'playwright',
+              provider: playwright(),
               headless: true,
               enabled: true,
               instances: [

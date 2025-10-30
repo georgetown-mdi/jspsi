@@ -35,12 +35,12 @@
     "@tanstack/react-start": "^1.127.6",
     "base-lib": "file:../../packages/base-lib",
     "cors": "^2.8.5",
-    "env-schema": "^6.0.1",
+    "env-schema": "^7.0.0",
     "loglevel": "^1.9.2",
     "peerjs": "^1.5.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "uuid": "^11.1.0",
+    "uuid": "^13.0.0",
     "ws": "^8.18.3",
     "zod": "^4.0.17"
   },
@@ -56,13 +56,14 @@
     "@types/vary": "^1.1.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.0.4",
-    "@vitest/browser": "^3.2.4",
+    "@vitest/browser": "^4.0.5",
+    "@vitest/browser-playwright": "^4.0.5",
     "eslint-visitor-keys": "^4.2.1",
     "eventsource": "^4.0.0",
     "playwright": "^1.55.0",
     "postcss-preset-mantine": "^1.18.0",
     "vite": "^7.0.4",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.5"
   }
 }

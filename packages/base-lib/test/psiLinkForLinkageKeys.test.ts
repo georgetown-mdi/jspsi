@@ -9,8 +9,6 @@ import { PSIParticipant } from "../src/participant";
 import { linkViaPSI } from "../src/link";
 
 import { PassthroughConnection } from './utils/passthroughConnection';
-// import { sortAssociationTable } from './utils/associationTable';
-
 
 import type { KeyAliases, LinkageKeyDefinition } from '../src/types'
 
