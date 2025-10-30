@@ -27,9 +27,11 @@ import PSI from '@openmined/psi.js/psi_wasm_web'
 import {
   PSIParticipant,
   ProcessState,
-  getDataForFixedRuleLink,
+  secondToPartyLinkageKeyDefinitions as clientLinkageKeyDefinitions,
+  getLinkageKeys,
+  keyAliases,
   linkViaPSI,
-  linkageKeys
+  firstToPartyLinkageKeyDefinitions as serverLinkageKeyDefinitions,
 } from 'base-lib'
 import { openPeerConnection,  waitForPeerId } from '@psi/server';
 import { createAndSharePeerId } from '@psi/client';
@@ -81,10 +83,10 @@ function Home() {
         {id: 'before start', label: 'Before start', state: ProcessState.BeforeStart},
         {id: 'waiting for peer', label: 'Waiting for peer', state: ProcessState.Waiting},
         {id: 'confirming protocol', label: 'Confirming protocol', state: ProcessState.Working},
-        ...linkageKeys.map(
+        ...serverLinkageKeyDefinitions.map(
           (_, i) => { return {
-            id: `stage ${i + 1} / ${linkageKeys.length}`,
-            label: `Linking key ${i + 1} / ${linkageKeys.length}`,
+            id: `stage ${i + 1} / ${serverLinkageKeyDefinitions.length}`,
+            label: `Linking key ${i + 1} / ${serverLinkageKeyDefinitions.length}`,
             state: ProcessState.Working
           }}
         ),
@@ -95,10 +97,10 @@ function Home() {
       ...[
           {id: 'before start', label: 'Before start', state: ProcessState.BeforeStart},
           {id: 'confirming protocol', label: 'Confirming protocol', state: ProcessState.Working},
-          ...linkageKeys.map(
+          ...clientLinkageKeyDefinitions.map(
           (_, i) => { return {
-            id: `stage ${i + 1} / ${linkageKeys.length}`,
-            label: `Linking key ${i + 1} / ${linkageKeys.length}`,
+            id: `stage ${i + 1} / ${clientLinkageKeyDefinitions.length}`,
+            label: `Linking key ${i + 1} / ${clientLinkageKeyDefinitions.length}`,
             state: ProcessState.Working
           }}
         ),
@@ -124,7 +126,7 @@ function Home() {
       .then((peerId) => {
         Promise.all([
           PSI() as Promise<PSILibrary>,
-          getDataForFixedRuleLink(files[0], true),
+          getLinkageKeys(files[0], serverLinkageKeyDefinitions, keyAliases),
           openPeerConnection(peerId)
         ]).then(async (values) => {
         const [ psi, data, [peer, conn] ] = values;
@@ -171,7 +173,7 @@ function Home() {
       setStageById('before start');
       Promise.all([
         PSI() as PSILibrary,
-        getDataForFixedRuleLink(files[0], false)
+        getLinkageKeys(files[0], clientLinkageKeyDefinitions, keyAliases)
       ]).then(async (values) => {
         const [ psi, data ] = values;
         const peer = await createAndSharePeerId(session);

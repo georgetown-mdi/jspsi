@@ -30,12 +30,13 @@ function getUnidentifiedIndices(
   );
 }
 
-function removeDuplicates(
-  dataWithDuplicates: Array<string>,
+function removeDuplicatesAndUndefineds(
+  dataWithDuplicatesAndUndefineds: Array<string | undefined>,
   permutation?: Array<number>
 ): [Array<string>, Array<number>] {
   const elementToIndexMap: Map<string, Array<number>> = new Map();
-  dataWithDuplicates.forEach((value, i) => {
+  dataWithDuplicatesAndUndefineds.forEach((value, i) => {
+    if (!value) return;
     const arr = elementToIndexMap.get(value);
     if (arr) {
       arr.push(i);
@@ -63,7 +64,7 @@ export async function linkViaPSI(
   },
   participant: PSIParticipant,
   conn: Connection,
-  data: Array<IndexableIterable<string>>,
+  data: Array<IndexableIterable<string | undefined>>,
   verbose: number = 1,
   setStage?: (id: string) => void,
 )
@@ -73,7 +74,7 @@ export async function linkViaPSI(
   const sendFirst = participant.config.role === 'starter';
 
   const log = getLoggerForVerbosity('psiLink', verbose);
-  setStage = setStage ? setStage : () => {};
+  setStage = setStage ?? (() => {});
 
   log.info(`${participant.id}: linking using ${data.length} keys via PSI`);
 
@@ -83,17 +84,17 @@ export async function linkViaPSI(
 
     for (let j = 0; j < data.length; ++j) {
       setStage(`stage ${j + 1} / ${data.length}`);
-      let dataWithDuplicates: Array<string>;
+      let dataWithDuplicatesAndUndefineds: Array<string | undefined>;
       let unidentifiedIndices: Array<number> | undefined;
       if (j === 0) {
-        dataWithDuplicates = Array.from(data[j]);
-        indexIterationMap = Array(dataWithDuplicates.length).fill(undefined);
+        dataWithDuplicatesAndUndefineds = Array.from(data[j]);
+        indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(undefined);
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
-        dataWithDuplicates = unidentifiedIndices.map(i => { return data[j][i]!; });
+        dataWithDuplicatesAndUndefineds = unidentifiedIndices.map(i => { return data[j][i]; });
       }
-      const [data_j, unmappedIndices] = removeDuplicates(
-        dataWithDuplicates,
+      const [data_j, unmappedIndices] = removeDuplicatesAndUndefineds(
+        dataWithDuplicatesAndUndefineds,
         unidentifiedIndices
       );
       unmappedIndicesByIter.push(unmappedIndices);

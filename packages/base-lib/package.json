@@ -10,9 +10,9 @@
   "types": "./dist/index.d.ts",
   "browser": "./dist/base-lib.umd.js",
   "scripts": {
-    "build": "rollup -c rollup.config.ts --configPlugin typescript",
+    "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
     "clean": "rimraf dist",
-    "dev": "rollup -c rollup.config.ts --configPlugin typescript -w",
+    "dev": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript -w",
     "pretest": "npm run build",
     "test": "vitest run"
   },

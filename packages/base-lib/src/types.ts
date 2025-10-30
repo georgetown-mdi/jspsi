@@ -18,3 +18,17 @@ export interface Config {
   role: Role;
   verbose?: number;
 }
+
+export interface KeyAliases {
+  [key: string]: Array<string>
+}
+
+export type Formatter = (x: any) => string;
+
+export interface LinkageKeyFieldDefinition {
+  outputFieldName: string,
+  inputFieldName: string,
+  formatter: Formatter
+}
+
+export type LinkageKeyDefinition = Array<LinkageKeyFieldDefinition>;
