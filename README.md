@@ -36,7 +36,7 @@ docker run \
   /work/NAME_OF_DATA_FILE
 ```  
 Replacing each of the following:
-   * `PATH_TO_DATA_FILE` - relative of absolute path on your host machine where the file you wish to transfer is
+   * `PATH_TO_DATA_FILE` - relative or absolute path on your host machine where the file you wish to transfer is
    * `SFTP_USER`, `SFTP_PASSWORD`, `SFTP_HOST`, `SFTP_PORT` - standard SFTP connection information
    * `SFTP_PATH` - path from root on the SFTP server where both parties can read and write; the exchange will happen here
    * `NAME_OF_DATA_FILE`
