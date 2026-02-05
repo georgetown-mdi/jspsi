@@ -24,7 +24,6 @@ export default function FileSelect(props: FileSelectProps) {
   const { handleSubmit, files, setFiles, submitted, ...paperProps } = props;
 
   const handleDrop = (acceptedFiles: Array<File>) => {
-    log.warn('handling drop:', acceptedFiles)
     setFiles(acceptedFiles);
   };
   log.info(`rendering file select with submitted: ${submitted}`)
@@ -35,12 +34,13 @@ export default function FileSelect(props: FileSelectProps) {
         <Dropzone
           onDrop={handleDrop}
           onReject={(x) => {
-            log.warn('rejected:', x)
+            log.warn('rejected file(s):', x)
           }}
           maxSize={10 * 1024 ** 2} // 10MB
           accept={[
-            // 'text/plain',
+            'text/plain',
             MIME_TYPES.csv,
+            'application/vnd.ms-excel',
             // MIME_TYPES.xls,
             // MIME_TYPES.xlsx,
             // 'application/vnd.apache.parquet'
