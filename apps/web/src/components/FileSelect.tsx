@@ -9,6 +9,8 @@ import {
 import { Dropzone, MIME_TYPES } from '@mantine/dropzone';
 import { IconFile, IconFileDatabase, IconUpload, IconX  } from '@tabler/icons-react';
 
+import log from 'loglevel';
+
 import type { PaperProps } from '@mantine/core';
 
 interface FileSelectProps extends PaperProps {
@@ -24,6 +26,7 @@ export default function FileSelect(props: FileSelectProps) {
   const handleDrop = (acceptedFiles: Array<File>) => {
     setFiles(acceptedFiles);
   };
+  log.info(`rendering file select with submitted: ${submitted}`)
 
   return (
     <Paper {...paperProps}>
