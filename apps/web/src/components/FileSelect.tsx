@@ -26,15 +26,14 @@ export default function FileSelect(props: FileSelectProps) {
   const handleDrop = (acceptedFiles: Array<File>) => {
     setFiles(acceptedFiles);
   };
-  log.info(`rendering file select with submitted: ${submitted}`)
 
   return (
     <Paper {...paperProps}>
       <Stack gap="md">
         <Dropzone
           onDrop={handleDrop}
-          onReject={(x) => {
-            log.warn('rejected file(s):', x)
+          onReject={(rejectedFiles) => {
+            log.warn('rejected file(s):', rejectedFiles)
           }}
           maxSize={10 * 1024 ** 2} // 10MB
           accept={[
