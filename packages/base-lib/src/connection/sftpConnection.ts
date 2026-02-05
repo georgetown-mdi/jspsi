@@ -94,7 +94,7 @@ extends EventEmitter<Events, never>
     super();
     this.sftp = sftp;
     this.id = uuidv4();
-    this.role = 'unknown';
+    this.role = 'unknown role';
     this.responsibleFiles = new Set();
 
     this.options = {...getDefaultOptions(), ...options} as Options;

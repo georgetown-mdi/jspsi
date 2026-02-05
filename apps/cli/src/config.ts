@@ -6,7 +6,8 @@ interface ArgumentMeta {
   describe?: string;
   alias?: string | readonly string[];
   optionPath?: string;
-  coerce?: (val: string) => string;
+  coerce?: (val: any) => any;
+  default?: string | number;
 }
 
 interface OptionalArgumentMeta extends ArgumentMeta {
@@ -21,6 +22,7 @@ interface PositionalArgumentMeta extends ArgumentMeta {
 interface CliRegistryMeta extends Pick<ArgumentMeta, 'describe' | 'alias' | 'coerce'>{
   position?: number;
   optionName?: string;
+  yargsType?: 'string' | 'number' | 'boolean';
 }
 
 const cliRegistry = z.registry<CliRegistryMeta>();
@@ -75,6 +77,26 @@ export const configSchema = z.strictObject({
       describe: 'Seconds to wait for peer before quitting'
     }
   ),
+  verbose: z.int().min(-1).max(4).default(0).register(cliRegistry, {
+    describe: "verbosity level; use `--verbose` as a flag for 'info'; set `--verbose=level`, `--verbose level` is invalid",
+    yargsType: 'string',
+    coerce: (arg: any) => {
+      if (typeof arg === 'number') return arg;
+      if (!(typeof arg === 'string')) throw("verbose must be an integer or a string")
+      arg = arg.toLowerCase()
+      if (arg === 'true' || arg === '') return 2;
+      else if (arg === 'silent') return -1;
+      else if (arg === 'error') return 0;
+      else if (arg === 'warn') return 1;
+      else if (arg === 'info') return 2;
+      else if (arg === 'debug') return 3;
+      else if (arg === 'trace') return 4;
+      else {
+        const num = parseInt(arg, 10);
+        return isNaN(num) ? 0 : num;
+      }
+    }
+  }),
   serverOptions: z.optional(sftpConfigSchema).register(cliRegistry, { optionName: 'server', describe: 'Server Options:' })
 });
 
@@ -141,10 +163,13 @@ export function schemaToYargs(schema: z.ZodObject<any>): CliSpec {
       const otherProperties = (({ optionName, position, ...otherArguments}) => otherArguments)(meta);
       // map Zod type to Yargs type
       let type: OptionalArgumentMeta['type'];
-
-      if (nodeInner instanceof z.ZodString) type = "string";
-      if (nodeInner instanceof z.ZodNumber) type = "number";
-      if (nodeInner instanceof z.ZodBoolean) type = "boolean";
+      if ('yargsType' in otherProperties) {
+        type = otherProperties['yargsType']
+        delete otherProperties['yargsType']
+      }
+      else if (nodeInner instanceof z.ZodString) type = "string";
+      else if (nodeInner instanceof z.ZodNumber) type = "number";
+      else if (nodeInner instanceof z.ZodBoolean) type = "boolean";
 
       options.push({
         key: optionName,

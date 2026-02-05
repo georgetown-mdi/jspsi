@@ -57,7 +57,13 @@ async function run() {
     .alias('p', 'passkey')
     .alias('t', 'timeout');
 
-  const argv = cli.parseSync(hideBin(process.argv));
+  const argv = cli.parseSync(hideBin(process.argv).map(arg => {
+    // capture --verbose and prevent it from consuming an argument
+    if (arg === '--verbose') {
+      return '--verbose=info';
+    }
+    return arg
+  }));
   // @ts-ignore it does exists
   const newAliases = cli.parsed.newAliases as { [key: string]: boolean };
   Object.entries(newAliases).forEach(([key, _value]) => {
@@ -97,15 +103,31 @@ async function run() {
     process.exit(64);
   }
 
-  logLibrary.setDefaultLevel(logLibrary.levels.DEBUG);
+  const verbosity = cliOptions.data.verbose;
+  if (verbosity >= 4) {
+    logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
+  } else if (verbosity === 3) {
+    logLibrary.setDefaultLevel(logLibrary.levels.DEBUG);
+  } else if (verbosity === 2) {
+    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  } else if (verbosity === 1) {
+    logLibrary.setDefaultLevel(logLibrary.levels.WARN);
+  } else if (verbosity === 0) {
+    logLibrary.setDefaultLevel(logLibrary.levels.ERROR);
+  } else {
+    logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
+  }
 
-  const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), { verbose: 0 });
+  const conn = new SFTPConnection(
+    new SSH2SFTPClientAdapter(),
+    { verbose: verbosity >= 2 ? 2 : (verbosity === 1 ? 1 : 0) }
+  );
   conn.on('error', (err: any) => {
     console.error('sftp error:', err);
     process.exit(69);
   });
   process.on('SIGINT', async function() {
-    console.log('caught SIGINT, exiting');
+    console.info('caught SIGINT, exiting');
     if (conn.connected) {
       await conn.cleanup();
       await conn.close();
@@ -114,13 +136,13 @@ async function run() {
     process.exit(0);
   });
 
-  console.log('opening connection to', cliOptions.data.server, 'with options', cliOptions.data.serverOptions)
+  console.info('opening connection to', cliOptions.data.server, 'with options', cliOptions.data.serverOptions)
   await conn.open(cliOptions.data.server, cliOptions.data.serverOptions);
 
-  console.log('synchronizing')
+  console.info('synchronizing')
   await conn.synchronize();
 
-  console.log('synchronized to firstToParty', conn.firstToParty);
+  console.info('synchronized to firstToParty', conn.firstToParty);
 
   const data = await getLinkageKeys(
     fs.createReadStream(cliOptions.data.input),
@@ -128,19 +150,22 @@ async function run() {
     keyAliases
   );
 
-  console.log('starting polling')
+  console.info('starting polling')
   conn.start();
 
   const participant = new PSIParticipant(
     conn.firstToParty ? 'server' : 'client',
     await PSI(),
-    { role: conn.firstToParty ? 'starter' : 'joiner', verbose: 1 }
+    {
+      role: conn.firstToParty ? 'starter' : 'joiner',
+      verbose: verbosity >= 2 ? 2 : (verbosity === 1 ? 1 : 0)
+    }
   )
 
-  console.log('exchanging roles')
+  console.info('exchanging roles')
   await participant.exchangeRoles(conn, conn.firstToParty!);
 
-  console.log('identifying intersection')
+  console.info('identifying intersection')
   const associationTable = await linkViaPSI(
     {cardinality: 'one-to-one'},
     participant,
@@ -148,10 +173,10 @@ async function run() {
     data
   );
 
-  console.log('stopping polling')
+  console.info('stopping polling')
   conn.stop();
 
-  console.log('closing connection')
+  console.info('closing connection')
   conn.close();
 
   const out = cliOptions.data.output
