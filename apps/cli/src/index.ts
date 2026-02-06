@@ -15,7 +15,8 @@ import {
   getLinkageKeys,
   keyAliases,
   linkViaPSI,
-  secondToPartyLinkageKeyDefinitions
+  secondToPartyLinkageKeyDefinitions,
+  setLogPrefixer
 } from "base-lib"
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
@@ -118,16 +119,19 @@ async function run() {
     logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
   }
 
+  const log = logLibrary.getLogger('root');
+  setLogPrefixer(log);
+
   const conn = new SFTPConnection(
     new SSH2SFTPClientAdapter(),
     { verbose: verbosity >= 2 ? 2 : (verbosity === 1 ? 1 : 0) }
   );
   conn.on('error', (err: any) => {
-    console.error('sftp error:', err);
+    log.error('sftp error:', err);
     process.exit(69);
   });
   process.on('SIGINT', async function() {
-    console.info('caught SIGINT, exiting');
+    log.info('caught SIGINT, exiting');
     if (conn.connected) {
       await conn.cleanup();
       await conn.close();
@@ -136,13 +140,13 @@ async function run() {
     process.exit(0);
   });
 
-  console.info('opening connection to', cliOptions.data.server, 'with options', cliOptions.data.serverOptions)
+  log.info('opening connection to', cliOptions.data.server, 'with options', cliOptions.data.serverOptions)
   await conn.open(cliOptions.data.server, cliOptions.data.serverOptions);
 
-  console.info('synchronizing')
+  log.info('synchronizing')
   await conn.synchronize();
 
-  console.info('synchronized to firstToParty', conn.firstToParty);
+  log.info('synchronized to firstToParty', conn.firstToParty);
 
   const data = await getLinkageKeys(
     fs.createReadStream(cliOptions.data.input),
@@ -150,7 +154,7 @@ async function run() {
     keyAliases
   );
 
-  console.info('starting polling')
+  log.info('starting polling')
   conn.start();
 
   const participant = new PSIParticipant(
@@ -162,10 +166,10 @@ async function run() {
     }
   )
 
-  console.info('exchanging roles')
+  log.info('exchanging roles')
   await participant.exchangeRoles(conn, conn.firstToParty!);
 
-  console.info('identifying intersection')
+  log.info('identifying intersection')
   const associationTable = await linkViaPSI(
     {cardinality: 'one-to-one'},
     participant,
@@ -173,10 +177,10 @@ async function run() {
     data
   );
 
-  console.info('stopping polling')
+  log.info('stopping polling')
   conn.stop();
 
-  console.info('closing connection')
+  log.info('closing connection')
   conn.close();
 
   const out = cliOptions.data.output

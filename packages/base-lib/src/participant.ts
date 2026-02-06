@@ -131,6 +131,7 @@ export class PSIParticipant {
       const rolePromise: Promise<Role> = new Promise((resolve) => {
         conn.once('data', async (rawData: any) => {
           const peerConfig = protocolMessage.parse(rawData);
+
           this.log.debug(`${this.id}: received peer role '${peerConfig.role}'`);
           if (peerConfig.role === this.config.role && this.config.role !== 'either') {
             throw new Error(

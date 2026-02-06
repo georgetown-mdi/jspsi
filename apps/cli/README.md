@@ -43,6 +43,15 @@ docker buildx build \
 docker buildx stop multiarch-builder
 ```
 
+## To build for testing
+
+Before pushing to Docker hub:
+
+```sh
+docker image rm -f vdorie/psi-link:latest
+docker build -t vdorie/psi-link:latest .
+```
+
 ## Testing container
 
 This runs an SFTP server on localhost that can be used for testing. After starting it, you can connect via `sftp://usera:usera@localhost:2222/psi` and `sftp://userb:userb@localhost:2222/psi`. Files are "transfered" in `packages/base-lib/test/container/sftp/srv`.

@@ -88,6 +88,7 @@ extends EventEmitter<Events, never>
   peerId: string | undefined;
   firstToParty: boolean | undefined;
   private poller: NodeJS.Timeout | undefined;
+  private pollerActive: boolean;
   private responsibleFiles: Set<string>;
 
   constructor(sftp: SFTPClient, options?: Partial<Options>) {
@@ -95,6 +96,7 @@ extends EventEmitter<Events, never>
     this.sftp = sftp;
     this.id = uuidv4();
     this.role = 'unknown role';
+    this.pollerActive = false;
     this.responsibleFiles = new Set();
 
     this.options = {...getDefaultOptions(), ...options} as Options;
@@ -152,7 +154,7 @@ extends EventEmitter<Events, never>
     if (this.peerId)
       throw new Error('already synchronized');
   
-    this.log.info(`${this.role}: synchronizing at remote path ${this.path}`);
+    this.log.info(`[${this.role}] synchronizing at remote path ${this.path}`);
 
     let files: Array<FileInfo>
     try {
@@ -201,7 +203,7 @@ extends EventEmitter<Events, never>
       this.peerId = otherFile.name.slice(0, -6);
 
       this.log.debug(
-        `${this.role} creating response ${this.id}.hello and deleting `
+        `[${this.role}] creating response ${this.id}.hello and deleting `
         + `discovered ${otherFile.name}`
       );
 
@@ -235,7 +237,7 @@ extends EventEmitter<Events, never>
        * A ~ B wave
        */
 
-      this.log.debug(`${this.role}: creating initial ${this.id}.hello`);
+      this.log.debug(`[${this.role}] creating initial ${this.id}.hello`);
       await this.sftp.put(
         Buffer.from(new ArrayBuffer(0)),
         helloPath,
@@ -326,7 +328,7 @@ extends EventEmitter<Events, never>
             this.role = this.firstToParty ? 'starter' : 'joiner';
             this.peerId = otherFile.name.slice(0, -6);
 
-            this.log.debug(`${this.role}: parsed ${waveFile.name}`);
+            this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
 
             await this.sftp.safeDelete(`${this.path}/${waveFile.name}`);
             await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
@@ -362,7 +364,7 @@ extends EventEmitter<Events, never>
             this.peerId = otherFile.name.slice(0, -6);
 
             this.log.debug(
-              `${this.role} detected ${otherFile.name}; deleting it`
+              `[${this.role}] detected ${otherFile.name}; deleting it`
             );
 
             await this.sftp.safeDelete(otherPath);
@@ -394,7 +396,7 @@ extends EventEmitter<Events, never>
             const tempPath = `${this.path}/${this.id}.tmp.wave`
 
             this.log.debug(
-              `${this.role} attempting to create ${waveName}`
+              `[${this.role}] attempting to create ${waveName}`
             );
             await this.sftp.put(
               Buffer.from(new ArrayBuffer(0)),
@@ -432,7 +434,7 @@ extends EventEmitter<Events, never>
                 throw err;
 
               this.log.debug(
-                `${this.role} wave file creation failed, assuming race condition`
+                `[${this.role}] wave file creation failed, assuming race condition`
               );
 
               await this.sftp.safeDelete(wavePath);
@@ -445,7 +447,7 @@ extends EventEmitter<Events, never>
           }
         }
 
-        throw new Error(`${this.role}: synchronization has timed out`);
+        throw new Error(`[${this.role}] synchronization has timed out`);
       }
       try {
         await waitForPeer();
@@ -493,14 +495,14 @@ extends EventEmitter<Events, never>
         type,
         payload: data,
       });
-      this.log.info(`${this.role} writing message ${tempFile}`);
+      this.log.info(`[${this.role}] writing message ${tempFile}`);
       await this.sftp.put(
         Buffer.from(messsage),
         tempPath,
         { flags: 'w', encoding: null }
       );
 
-      this.log.info(`${this.role} renaming ${tempFile} to ${this.id}.json`);
+      this.log.info(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
       await this.sftp.rename(tempPath, outPath);
       this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: any) {
@@ -514,6 +516,8 @@ extends EventEmitter<Events, never>
   }
 
   private async poll() {
+    if (!this.pollerActive) return;
+
     if (!this.connected || this.path === undefined)
       throw new Error('not connected to sftp server');
 
@@ -524,44 +528,48 @@ extends EventEmitter<Events, never>
 
     try {
       const messageFile = await this.sftp.exists(inPath);
-      if (!messageFile) return;
+      if (messageFile) {
+        this.log.info(`[${this.role}] getting message from ${this.peerId}.json`);
 
-      this.log.info(`${this.role} getting message from ${this.peerId}.json`);
-      this.stop();
+        const message = await this.sftp.get(
+          inPath,
+          { encoding: 'utf-8' }
+        );
 
-      const message = await this.sftp.get(
-        inPath,
-        { encoding: 'utf-8' }
-      );
+        this.log.debug(`[${this.role}] deleting message ${this.peerId}.json`);
+        await this.sftp.safeDelete(inPath);
 
-      await this.sftp.safeDelete(inPath);
+        const validatedMessage = Message.parse(JSON.parse(message.toString()));
 
-      this.start();
-      const validatedMessage = Message.parse(JSON.parse(message.toString()));
+        if (validatedMessage.type === 'Uint8Array') {
+          // @ts-ignore type indicates that it will parse as a string
+          const binaryString = atob(validatedMessage.payload);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.codePointAt(i)!;
+          }
 
-      if (validatedMessage.type === 'Uint8Array') {
-        // @ts-ignore type indicates that it will parse as a string
-        const binaryString = atob(validatedMessage.payload);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.codePointAt(i)!;
+          this.emit('data', bytes);
+        } else {
+          this.emit('data', validatedMessage.payload);
         }
-
-        this.emit('data', bytes);
-      } else {
-        this.emit('data', validatedMessage.payload);
       }
     } catch (err: any) {
       this.emit('error', err.message);
+    } finally {
+      if (this.pollerActive) {
+        this.poller = setTimeout(() => this.poll(), this.options.pollingFrequency)
+      }
     }
   }
 
   start() {
-    this.poller = setInterval(() => this.poll(), this.options.pollingFrequency);
+    this.pollerActive = true;
+    this.poll();
   }
 
   stop() {
-    if (this.poller) clearInterval(this.poller);
-    this.poller = undefined;
+    this.pollerActive = false;
+    if (this.poller) clearTimeout(this.poller);
   }
 }
