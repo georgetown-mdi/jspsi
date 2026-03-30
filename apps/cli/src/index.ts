@@ -122,6 +122,11 @@ async function run() {
   const log = logLibrary.getLogger('root');
   setLogPrefixer(log);
 
+  if (!fs.existsSync(cliOptions.data.input)) {
+    log.error(`${cliOptions.data.input} does not exist`)
+    process.exit(69);
+  }
+
   const conn = new SFTPConnection(
     new SSH2SFTPClientAdapter(),
     { verbose: verbosity >= 2 ? 2 : (verbosity === 1 ? 1 : 0) }
