@@ -29,8 +29,7 @@ To link a file:
 ```sh
 docker pull vdorie/psi-link:latest
 docker run \
-  -it --rm \
-  --mount type=bind,src=PATH_TO_DATA_FILE,dst=/work \
+  --rm --mount type=bind,src=PATH_TO_DATA_FILE,dst=/work \
   vdorie/psi-link:latest \
   sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH \
   NAME_OF_DATA_FILE NAME_OF_OUTPUT_FILE
@@ -38,7 +37,7 @@ docker run \
 Replacing each of the following:
    * `PATH_TO_DATA_FILE` - relative or absolute path on your host machine where the file you wish to transfer is
    * `SFTP_USER`, `SFTP_PASSWORD`, `SFTP_HOST`, `SFTP_PORT` - standard SFTP connection information
-   * `SFTP_PATH` - path from the *root* of the SFTP server where both parties can read and write; the exchange will happen here
+   * `SFTP_PATH` - path from the **root** of the SFTP server where both parties can read and write; the exchange will happen here
    * `NAME_OF_DATA_FILE`, `NAME_OF_OUTPUT_FILE`
 
 The only content accessible to the container will be that in `PATH_TO_DATA_FILE`, so you are recommended to make a new directory and place it in the file you wish to transfer.
@@ -56,14 +55,14 @@ For more information, see [apps/cli](apps/cli/).
 Special characters in passwords can be interpretted incorrectly by your shell. To avoid this, encase the whole connection string in single-quotation marks or escape the problematic characters. As example exchange running from the current directory (indicated by mounting `$PWD`):
 
 ```sh
-docker run -it --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \ 
+docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \ 
    'sftp://user:passw!rd@example.org/psi' input.csv output.csv
 ```
 
 or
 
 ```sh
-docker run -it --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \ 
+docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \ 
    sftp://user:passw\!rd@example.org/psi input.csv output.csv
 ```
 
@@ -79,7 +78,7 @@ Connection parameters can also be specified individually as command line flags t
 `@path`s specify that the value should be read from a file. For example, to have the script read a password from the file `passwd` in the working directory, run:
 
 ```sh
-docker run -it --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \
+docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \
   sftp://user@example.org/psi \
   --server-password=@passwd \
   input.csv output.csv
@@ -102,7 +101,7 @@ The path is given to Docker using standard Windows-style back-slashes. One excep
 Additionally, the line-continuation markers given in the examples (the `\` at the end of each line) above do not parse correctly. Put commands all on one line instead. For example:
 
 ```sh
-docker run -it --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work vdorie/psi-link:latest sftp://user:password@example.org/psi input.csv output.csv
+docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work vdorie/psi-link:latest sftp://user:password@example.org/psi input.csv output.csv
 ```
 
 ## Docker run background
@@ -110,15 +109,14 @@ docker run -it --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/
 The `docker run` command above contains two parts. The first part includes instructions purely for Docker, telling it what to run and how:
 
 ```sh
-docker run -it --rm --mount type=bind,src=PATH_TO_DATA_FILE,dst=/work vdorie/psi-link:latest
+docker run --rm --mount type=bind,src=PATH_TO_DATA_FILE,dst=/work vdorie/psi-link:latest
 ```
 
 This instructs Docker to:
-   * *Run* a container
-      * In *i*nterative mode, opening a pseudo-*t*erminal
-      * *R*e*m*oving the container when finished
-      * *Mount*ing a path on the host computer inside the container, where it can be read from and written to
-   * Use the *latest* tag of the *vdorie/psi-link* image as the container
+   * **run** a container
+      * **r**e**m**oving the container when finished so any intermediate artifacts are deleted
+      * **mount**ing a path on the host computer inside the container, where it can be read from and written to
+   * Use the **latest** tag of the *vdorie/psi-link* image as the container
 
 The second part is the invocation of the psi-link script and includes any command line options you wish to use. In the above example it is:
 
@@ -129,7 +127,7 @@ sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH /work/NAME_OF_DATA_
 However, you can place anything here you wish. For example, to get help for the script execute:
 
 ```sh
-docker run -it --rm vdorie/psi-link:latest --help
+docker run --rm vdorie/psi-link:latest --help
 ```
 
 Anything you want to pass to the script goes to the right of `vdorie/psi-link:latest`.
