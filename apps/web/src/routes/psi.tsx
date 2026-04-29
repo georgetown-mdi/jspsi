@@ -153,8 +153,8 @@ function Home() {
           );
           conn.close()
 
-          const result = 'our_row_id,their_row_id' +
-            associationTable[0].map((ours, i) => `\n${ours},${associationTable[1][i]}`)
+          const result = 'our_row_id,their_row_id\n' +
+            associationTable[0].map((ours, i) => `${ours},${associationTable[1][i]}\n`)
             .join('');
           
           const fileData = new Blob([result], {type: 'text/plain'});
@@ -203,8 +203,8 @@ function Home() {
             );
             conn.close();
 
-            const result = 'our_row_id,their_row_id' +
-              associationTable[0].map((ours, i) => `\n${ours},${associationTable[1][i]}`)
+            const result = 'our_row_id,their_row_id\n' +
+              associationTable[0].map((ours, i) => `${ours},${associationTable[1][i]}\n`)
               .join('');
             
             const fileData = new Blob([result], {type: 'text/plain'});

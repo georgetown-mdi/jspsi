@@ -192,9 +192,9 @@ async function run() {
     ? fs.createWriteStream(cliOptions.data.output, {encoding: 'utf8'})
     : process.stdout;
 
-  out.write('our_row_id,their_row_id');
+  out.write('our_row_id,their_row_id\n');
   associationTable[0].forEach((ours, i) => {
-    out.write(`\n${ours},${associationTable[1][i]}`);
+    out.write(`${ours},${associationTable[1][i]}\n`);
   });
   // @ts-expect-error
   if (cliOptions.data.output) out.close();
