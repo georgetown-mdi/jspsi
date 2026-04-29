@@ -33,4 +33,6 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY --from=builder /build/apps/cli/dist/index.js ./psi-link
 RUN chmod +x ./psi-link
 
-ENTRYPOINT ["./psi-link"]
+WORKDIR /work
+
+ENTRYPOINT ["/app/psi-link"]
