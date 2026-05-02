@@ -14,22 +14,44 @@ The PPRL protocol involves the following components:
 
 ## PSI Primitive
 
-The PSI primitive is a lightly modified version of OpenMined's [PSI](https://github.com/OpenMined/PSI). That package implements private set intersection layering over Google's [Private Join and Compute](https://github.com/Google/private-join-and-compute), with a C++ implementation that is compiled into WebAssembly. The primitive protocol defines "server" and a "client" roles. The client initializes the exchange by encrypts their own data with their own private key using a commutative encryption algorithm and then sends it to the server. The server commutatively encrypts both their own data and the client's data with their own private key and then send both datasets to the client. The client can then remove their own key from their own data, leaving them with client and server datasets encrypted only by the server. A straightforward string comparison allows the client to see which elements they have in common. They can then choose to share the association table back with the server. If the server applies a permutation when sending back to the client the client's data with both sets of encryption keys, the client will no longer be able to determine the mapping between elements but can still learn its size, yielding the PSI-C protocol.
+The PSI primitive is a lightly modified version of OpenMined's [PSI](https://github.com/OpenMined/PSI). That package implements private set intersection layering over Google's [Private Join and Compute](https://github.com/Google/private-join-and-compute), with a C++ implementation that is compiled into WebAssembly. The primitive protocol defines "server" and a "client" roles. At a high level, the steps of the protocol are:
 
-The terminology of "server" and "client" is disfavored throughout the rest of this project as there will be many other instances of servers and mclients, and in this case OpenMined's PSI includes no actual server code. Often we will want to execute the protocol so that both parties learn the result, so that the roles they play are arbitrary.
+1. The client initializes the exchange by encrypting their own data with their own private key using a commutative encryption algorithm and then sends it to the server.
+2. The server commutatively encrypts both their own data and the client's data with their own private key and then send both datasets to the client.
+3. The client can then remove their own key from their own data, leaving them with client and server datasets encrypted only by the server.
+4. A straightforward string comparison allows the client to see which elements they have in common. They can then choose to share the association table back with the server.
+
+If the server applies a permutation when sending back to the client the client's data with both sets of encryption keys, the client will no longer be able to determine the mapping between elements but can still learn its size, yielding the PSI-C protocol.
+
+The terminology of "server" and "client" is disfavored throughout the rest of this project as there will be many other instances of servers and clients, and in this case OpenMined's PSI includes no actual server code. Often we will want to execute the protocol so that both parties learn the result, so that the roles they play are arbitrary.
 
 ## Linkage Keys
 
 By repeatedly executing the PSI primitive on statistical linkage keys generated from an input data set, two parties can run a fuzzy PPRL. The most common data elements for linkage keys are social security number, first name, last name, and date of birth. An example of a linkage key is the last four digits of the social security number concatenated with last name and date-of-birth as a character string.
 
+## Match Algorithm
+
+Linkage keys are applied in sequence using a cascade of deterministic linkages: keys are ordered from most to least precise, and at each round only records that match uniquely on that key are accepted as pairs and removed from the candidate set. Ambiguous matches carry forward to the next round. Keys must be designed to be precise enough that any match is definitive, preserving the guarantee that no information is revealed about individuals not in the intersection.
+
+For many-to-many linkage, both parties apply transitive closure to the resulting match graph, partitioning records into entity clusters. Because both parties observe the same graph in a symmetric exchange, they arrive at the same clusters independently.
+
+Unlike traditional PPRL, blocking is neither necessary nor appropriate here. PSI's computational complexity is O(n log n) in the total number of elements rather than quadratic in their product, so there is no cross-product comparison to reduce. Blocking would also compromise the privacy guarantee by revealing to each party how many of the other's records fall into each partition.
+
+The practical upper limit on the number of records for browser-based execution is determined by available memory rather than computation: each encrypted element occupies roughly 64 bytes, so holding both parties' encrypted sets simultaneously for the comparison step requires on the order of 1–2 GB for datasets in the tens of millions of rows — well within the capacity of a modern workstation.
+
+Note that PSI-C is incompatible with the deterministic cascade and one-to-one linkage: the cascade requires knowing which elements to remove from the candidate set after each round. PSI-C can be extended across multiple rounds of linkage keys by having the server apply a consistent permutation when returning the client's doubly-encrypted data.
+
 ## PSI Contract
 
-When two parties meet to exchange data, they must first agree on the protocol they will execute and thus enter into a contract. This includes:
+When two parties meet to exchange data, they must first agree on the protocol they will execute and thus enter into a contract. At the start of each exchange, the initiating party transmits their copy of the contract; if any field differs from the receiving party's copy, the exchange is cancelled. The contract includes:
+* A version number identifying the schema of the contract document.
 * Whether or not both parties will receive the output.
-* Which role either party will play. If the exchange of the result symmetric, this reduces to which partner will go first.
+* Which role either party will play. If the exchange of the result is symmetric, this reduces to which partner will go first.
 * If the output is the association table or the cardinality. If the output is the association table, parties may also indicate that they intend to send payloads that correspond to their matched elements.
-* The multiplicity of the linkage. If one party wants to connect each of their records to multiple of their partner's, their partner needs to ensure that all data elements are available for use for all keys. If the linkage is one-to-one, those sets can be filtered to just the elements that have not already been matched.
+* The multiplicity of the linkage: one-to-one, one-to-many, or many-to-many. For one-to-many, the contract must specify which party's records are the constrained side. Both parties must supply all data elements needed for all keys regardless of multiplicity.
 * The linkage keys themselves. This includes a descriptive name of the key, the semantic meaning of each combined data element, and any constraints those data elements must fulfill. For example, dates-of-birth fields have specific formats, social security numbers can be subject to validation, and names may have limited character sets and/or have titles and suffixes prohibited.
+* Whether or not additional data will be transferred for matched elements, and if so a data dictionary for the elements to be sent and to be received. Data exchange can be asymmetric, and parties can "discover" data after receiving it the first time.
+* An optional reference to the legal agreement enabling the data exchange and its expiration date. If the agreement has expired, the exchange will fail.
 
 ## Data Cleaning
 
@@ -41,16 +63,18 @@ As indicated, parties can choose to send data to their partner after common memb
 
 # Communication
 
-The linkage protocol requires active communication between partners.
+The protocol components above define what data parties exchange; this section describes how that exchange is carried over a network. This includes the channels available for transmission, how parties verify each other's identity, and how they coordinate the sequencing of protocol steps.
 
 ## Channels
 
-If the exchange is to be accomplished without additional infrastructure, it should utilize existing communication channels. At present, there are two solutions:
+If the exchange is to be accomplished without additional infrastructure, it should utilize existing communication channels. Two communication channels have been identified so far:
 
 * Peer-to-peer using WebRTC - this is a protocol that is primarily used by browsers to communicate with each other, for example when conducting video calls. Peer-to-peer connections can be difficult to establish when parties are behind corporate firewalls and using Network Address Translation (NAT). To facilitate these connections, a third-party server typically needs to be available to execute to either help establish the connection, or to explicitly route the traffic.
 * SFTP - for many exchanges, one partner already runs an SFTP server that is used for secure file transfers. SFTP is less-than-ideal for a communication protocol, as it is a file transfer protocol and not a direct connection.
 
-Other solutions may be added in the future.
+## Error Handling
+
+In the case of communication channel errors, messages are retried and parties will time-out while waiting to receive messages. As the communication channels in use guarantee message correctness, any message that fails to validate indicates a deviation from the protocol and will result in program termination.
 
 ## Authentication
 
@@ -60,13 +84,15 @@ Before establishing connections, clients need to ensure that they are communicat
 
 The protocol requires both parties to execute it at the same time. For a new exchange where one party may "invite" the other, the inviter can listen for the other partner to respond. For scheduled exchanges, which party shows up first is arbitrary and in order to execute the protocol there needs to be a way of resolving who will "speak" first and who will "listen".
 
-As an example for SFTP, both parties first look for "hello" files. If they fail to find one, they create a hello file of their own and wait. If they find one, they consume the "hello", say "hello" back, and an order has been established. If, however, both parties say "hello" at the same time, they must have a way of breaking the tie.
+For WebRTC, this is solved by a single-threaded peer-coordination service which ensures only one party can be "first".
 
-For WebRTC, this is solved by a single-threaded peer-matching service which ensures only one party can be "first".
+## Non-repudiation
+
+At the conclusion of a successful exchange, both parties sign a receipt recording the timestamp, a hash of the contract, the identities of both parties, and the size of the result, and exchange these signatures before closing the connection. Each party retains the other's signature as cryptographic evidence that the exchange occurred. Retention, access controls, and log integrity beyond this remain each party's internal compliance obligation.
 
 # Services
 
-As implied above, the project can require a number of micro-services to function fully.
+The communication channels described above each depend on supporting infrastructure. Rather than relying on persistent third-party servers, these services are intended to be ephemeral — instantiated on demand for a given exchange and torn down afterward — to minimize infrastructure burden. It should be possible to deploy these services in multiple ways so that IT departments can support the application using the platform they prefer. Our organization will provide them as a public resource, but agencies will be warned whenever their (encrypted) data has to flow through an unexpected source.
 
 ## STUN/TURN
 
@@ -84,46 +110,32 @@ Connecting peer-to-peer without knowing the address typically requires coordinat
 
 Although not entirely necessary for the project, it can be beneficial to have light-weight installations of SFTP servers for illustration purposes.
 
-# Architecture and deployment
+# Architecture
 
-## Present State
+The protocol, communication mechanisms, and supporting services described above are built into a single library whose functionality is exposed to users through two applications, one delivered in the web browser and one used through the command line.
 
-There are two applications that build off a base library.
+When adopting the software, program officers are likely to first conduct exchanges with the web application in order to establish the business case for using the software, either by operating on previously established data sharing agreements or running a PSI-C algorithm to measure the size of shared membership. The web application allows for setting and exporting exchange parameters, which can be handed off to IT professionals who can automate the procedure. The are likely to use the command line application as it can be more easily integrated with other data processes, such as exporting the data to be shared and ingesting the data received.
 
-### Base library
+## Web Application
 
-The base library:
-* Wraps OpenMined PSI into a PSI primitive that operates over a generic connection-style object.
-* Implements synchronization of participants over SFTP.
-* Has hard-coded linkage keys.
-* Implements a one-to-one PPRL for a set realized linkage keys and a object that conducts a PSI primitive on it.
-* Also contains some SFTP abstractions.
+The "web application" should be a management interface for exchanges. It should allow for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs.
 
-### Web Application
+A file containing the information necessary to execute an exchange should be downloadable from the web app for use by the command line application, so it would be of benefit if the web application had user-friendly ways of creating those files including a data-explorer and metadata labeler, linkage rule creator, and data cleaning pipeline creator.
 
-The web application:
-* Is a React website using TanStack Router.
-* It enables parties to invite each other to perform exchanges over WebRTC by single-use, ephemeral links that are tracked by a backend server.
-* Interfaces with the base library to perform a PSI link and generates a result data file.
-* It has a built-in PeerJS server to handle coordinating peer-to-peer connections and uses PeerJS's DataConnections to send messages.
-* Is deployed to AWS Elastic Beanstalk.
+If the browser window is left open, it should run scheduled exchanges at the appropriate time. Note that this is a sub-optimal experience, as it is easily to accidentially close the application.
 
-### Command Line Application
+The web application should enable invite exchanges. A user should be able to generate a shared secret for their partner, instantiate an ephemeral peer coordination server through a service like an AWS Lambda, generate a secret for use with that coordination server, and transfer the necessary information to the other party.
 
-The command line application:
-* Is a NodeJS script built into a Docker container that can conduct scheduled exchanges over SFTP.
-* Uses Docker for its ability to harden containers, limiting file-system access out of the box and having the possibility to restrict network endpoints.
-* Interfaces with the base library to perform a PSI link and generates a result data file.
-* Does not yet have WebRTC capability, as PeerJS needs to be tricked into running on NodeJS.
+It should be able to be built as an desktop Electron app, or possibly able to be saved as a progressive web app. These options can behave more like system services, but will likely require additional IT review.
 
-## Ideal State
+## Command Line Application
 
-### Web Application
+The command line application should enable the automation of all features of the web application through the use of a scheduler.
 
-In its current state, the web application only allows parties to conduct one-off exchanges by generating a link. Expanding on the discussion above, the "web application" should be a management interface for exchanges. It should allow for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It should also execute the exchanges, although that might be best suited as a distinct component. It should be able to be built as an desktop Electron app, or possibly able to be saved as a progressive web app.
+# Possible Extensions
 
-The part of the application that allows for generating links may be unnecessary. It is essentially serving a dual purpose of creating a shared secret (the session on the server) and relating between parties the identifiers to use on the peer coordination server. Instead, the one party who wishes to do the inviting can generate a shared secret for their partner, instantiate an ephemeral peer coordination server through a sevice like an AWS Lambda, generate a secret for use with that coordination server, and transfer the necessary information to the other party. This would align well with the ability to instantiate other services on demand, such as a STUN server or Websocket-to-TCP proxy.
+## Multiple Potential Matches
 
-### Command Line Application
+The waterfall requires that each linkage key be precise enough to produce only definitive matches. This is a deliberate constraint that preserves the core privacy guarantee of PSI, but it rules out pairing algorithms that score or threshold matches across multiple keys — doing so requires running PSI on keys that may produce non-definitive matches, revealing information about individuals who are not in the final intersection.
 
-The command line application is proceeding on the right track. It needs to be augmented with additional connection protocols, have its logging options expanded, and general debugged. It may be advantageous to build it as an executable in addition to distributing as a Docker image. Beyond that, it just needs the full PSI PPRL protocol to be developed.
+Threshold and weighted scoring approaches could be supported without this privacy cost using secure multi-party computation (MPC) to evaluate match scores over encrypted data, never exposing intermediate per-key match results. This would substantially increase protocol complexity and is left as a potential future extension.
