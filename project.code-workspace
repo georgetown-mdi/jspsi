@@ -6,7 +6,7 @@
     { "path": "packages/core" },
   ],
   "settings": {
-    "typescript.tsdk": "node_modules/typescript/lib",
+    "js/ts.tsdk.path": "node_modules/typescript/lib",
     "files.watcherExclude": {
       "apps/web/**/routeTree.gen.ts": true
     },
