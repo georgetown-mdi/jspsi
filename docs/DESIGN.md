@@ -42,7 +42,7 @@ The terminology of "server" and "client" derives from OpenMined's PSI implementa
 
 Statistical linkage keys are data elements that combine several other inputs into a single value that uniquely represents an individual with an extremely high probability. In this application, the most common data types for linkage keys are social security number, first name, last name, and date of birth. An example linkage key is the last four digits of the social security number concatenated with last name and date-of-birth as a character string.
 
-Linkage keys can be designed to produce links even in the place of data quality errors, for instance by exhaustively generating all transpositions of two digits in a Social Security Number or comparing all single-character edits of strings of a fixed length. By repeatedly executing the PSI base function on such keys, two parties execute a fuzzy PPRL. 
+Linkage keys can be designed to produce links even in the place of data quality errors, for instance by exhaustively generating all transpositions of two digits in a Social Security Number (SSN) or comparing all single-character edits of strings of a fixed length. By repeatedly executing the PSI base function on such keys, two parties execute a fuzzy PPRL. 
 
 In order to preserve the guarantee that no information is revealed about individuals not in the intersection, linkage keys must be designed to be precise enough (high positive-predictive value) that any match is definitive.
 
@@ -81,7 +81,7 @@ After authentication has taken place at the start of each exchange, both parties
 * If the algorithm is PSI or PSI-C.
 * Whether or not this party's records should be deduplicated, i.e. if the linkage is one-to-X or many-to-X.
 * The linkage keys themselves. This includes a descriptive name of the key, the semantic type of each combined data element (e.g. first name, SSN, phone number, etc), and any constraints those data elements must fulfill.
-  * Some examples: dates-of-birth fields have specific formats; Social Security Numbers can be subject to validation against Social Security Administration rules; names may have limited character sets, have titles and suffixes prohibited, or be truncated to a maximum length.
+  * Some examples: SSNs can be subject to validation against Social Security Administration rules; names may have limited character sets, have titles and suffixes prohibited, or be truncated to a maximum length. Dates of birth and SSNs have fixed canonical formats — `YYYYMMDD` and `XXXXXXXXX` (a nine-character string, not a number) respectively.
   * Linkage keys may also indicate that two elements must be swapped, in which case the role of each party implies who produces the swapped and who produces the un-swapped version. For instance, a key might involve matching first name swapped with last name, and receivers swap their data elements while senders do not.
 * Whether or not additional data will be transferred for matched elements, and if so the names of the elements to be sent and to be received.
 * An optional reference to the legal agreement enabling the data exchange and its expiration date. If the legal agreement has expired, the exchange will fail.
@@ -100,7 +100,7 @@ Parties can choose to supply metadata with their exchange specification that ind
 
 ## Data cleaning
 
-Before any PSI protocol executes, each party must prepare their input data as required by linkage keys. Data cleaning pipelines can be provided as part of an exchange specification in the form of compositions of cleaning functions applied to specific input fields, producing outputs which are combined to create linkage keys. For example, one party might take their first name input field, remove all punctuation, trim whitespace, and cast the result to upper-case. Linkage keys might use this "cleaned" name field wholesale, take substrings, or apply a phonetic algorithm, which can then be combined with other cleaned and mapped fields to form a distinct linkage key. A library of common cleaning functions is available and parties can always pre-clean their data if preferred. This functionality is intended as a convenience intended for parties who lack technical sophistication.
+Before any PSI protocol executes, each party must prepare their input data as required by linkage keys. Data cleaning pipelines can be provided as part of an exchange specification in the form of compositions of cleaning functions applied to specific input fields, producing outputs which are combined to create linkage keys. For example, one party might take their first name input field, remove all punctuation, trim whitespace, and cast the result to upper-case. Linkage keys might use this "cleaned" name field wholesale, take substrings, or apply a phonetic algorithm, which can then be combined with other cleaned and mapped fields to form a distinct linkage key. A library of common cleaning functions is available and parties can always pre-clean their data if preferred. This functionality is intended as a convenience intended for parties who lack technical sophistication. Normalizing dates to `YYYYMMDD` and SSNs to `XXXXXXXXX` are canonical examples of cleaning steps that must be completed before linkage key generation.
 
 # Communication
 

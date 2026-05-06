@@ -68,15 +68,15 @@ Date this Exchange Agreement was last modified. A mismatch produces a warning in
 ```yaml
 agreement:
   output:
-    expects_output: true     # whether this party expects to receive the result
+    expects_output: true       # whether this party expects to receive the result
     share_with_partner: false  # whether the other party should also receive the result
 ```
+
+If `share_with_partner` is `true`, the other party's agreement must also have `expects_output: true`; a mismatch aborts the exchange.
 
 `expects_output` must be `true` if this party's `multiplicity` is `many`.
 
 If exactly one party's `expects_output` is `true`, that party acts as the receiver and the other as the sender. If both parties declare `expects_output: true`, roles are assigned dynamically by exchanging dataset sizes and minimizing the total amount of data that needs to be transmitted.
-
-If `share_with_partner` is `true`, the other party's agreement must also have `expects_output: true`; a mismatch aborts the exchange.
 
 ### `agreement.multiplicity`
 
@@ -91,11 +91,9 @@ agreement:
   multiplicity: one
 ```
 
-Multiplicity determines how the cascade algorithm handles records after each round:
+Multiplicity determines how the cascade algorithm handles records after each round.
 
-- Both parties declare `one` — matched records on both sides are removed from the candidate set each round.
-- One party declares `one`, the other `many` — only the `one` party's matched records are removed each round; the `many` party's records may match again in a subsequent round.
-- Both parties declare `many` — transitive closure is applied to resolve entity clusters; both parties must have `expects_output: true`.
+Any party indicating `many` must have `expects_output: true`.
 
 ### `agreement.linkage_keys`
 
@@ -112,21 +110,19 @@ agreement:
       elements:
         - semantic_type: ssn_last4
           constraints:
-            ssa_valid: false
+            ssa_rules: false
         - semantic_type: last_name
           constraints:
             max_length: 10
             affixes_allowed: false
-            allowed_characters: A-Z
+            allowed_characters: 'A-Z '
         - semantic_type: date_of_birth
-          constraints:
-            format: "YYYY-MM-DD"
     - name: "SSN, all two-digit transpositions"
       elements:
         - semantic_type: ssn
           generate_combinations: transpositions
           constraints:
-            ssa_valid: true
+            ssa_rules: true
             exclude:
               - "123456789"  # common placeholder, not a valid assignment
               - "111111111"  # common placeholder, not a valid assignment
@@ -144,7 +140,7 @@ agreement:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `semantic_type` | string | yes | The type of PII (see Semantic Types) |
+| `semantic_type` | string | yes | The type of PII (see Semantic types) |
 | `name` | string | no | Optional name allowing the same `semantic_type` to be used in multiple elements within the same linkage rule |
 | `generate_combinations` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `deletions` generates all single-character deletions up to `max_length`, matching values within one edit distance |
 | `constraints` | object | no | Data standards this party commits to meeting when preparing their data |
@@ -167,10 +163,11 @@ TBD: Full enumeration of supported semantic types.
 
 Constraints are not enforced by the application — they are standards that both parties independently commit to meeting when preparing their data. The application will warn if a constraint is violated, but it will not transform the data to satisfy it. Each party is responsible for ensuring their data conforms before running the exchange.
 
+Dates of birth must be formatted as `YYYYMMDD` and Social Security Numbers as `XXXXXXXXX` (a nine-character string, not a number). Converting raw input to these formats is the responsibility of each party's data cleaning pipeline.
+
 | Field | Type | Applies to | Description |
 |-------|------|------------|-------------|
-| `format` | string | `date_of_birth`, `ssn` | Required date format (e.g., `YYYY-MM-DD`) or SSN format (e.g. `XXXXXXXXX` or `XXX-XX-XXXX`) |
-| `ssa_valid` | boolean | `ssn`, `ssn_last4` | Data must conform to Social Security Administration rules for valid SSNs (e.g., area, group, and serial numbers may not be all zeros) |
+| `ssa_rules` | boolean | `ssn`, `ssn_last4` | Data must conform to Social Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs) |
 | `exclude` | array of strings | any | Values that must not appear in the data; useful for filtering placeholder values such as `123456789` and `111111111` for SSNs |
 | `max_length` | integer | name fields | Field must be truncated to at most this length |
 | `allowed_characters` | string | name fields | Regex character class; characters outside it must have been removed |
