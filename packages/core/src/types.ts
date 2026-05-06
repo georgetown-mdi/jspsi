@@ -1,18 +1,27 @@
 export type AssociationTable = [Array<number>, Array<number>];
 
 export type Connection = {
-  on: (event: "data", fn: (data: unknown) => void, context?: undefined) => Connection
-  once: (event: "data", fn: (data: unknown) => void, context?: undefined) => Connection
+  on: (
+    event: "data",
+    fn: (data: unknown) => void,
+    context?: undefined,
+  ) => Connection;
+  once: (
+    event: "data",
+    fn: (data: unknown) => void,
+    context?: undefined,
+  ) => Connection;
   removeListener: (
     event: "data",
     fn?: ((data: unknown) => void) | undefined,
-    context?: undefined, once?: boolean
-  ) => Connection
-  send: (data: any, chunked?: boolean) => void | Promise<void>;
+    context?: undefined,
+    once?: boolean,
+  ) => Connection;
+  send: (data: unknown, chunked?: boolean) => void | Promise<void>;
   close: () => void;
 };
 
-export type Role = 'starter' | 'joiner' | 'either';
+export type Role = "starter" | "joiner" | "either";
 
 export interface Config {
   role: Role;
@@ -20,15 +29,15 @@ export interface Config {
 }
 
 export interface KeyAliases {
-  [key: string]: Array<string>
+  [key: string]: Array<string>;
 }
 
-export type Formatter = (x: any) => string;
+export type Formatter = (x: unknown) => string | undefined;
 
 export interface LinkageKeyFieldDefinition {
-  outputFieldName: string,
-  inputFieldName: string,
-  formatter: Formatter
+  outputFieldName: string;
+  inputFieldName: string;
+  formatter: Formatter;
 }
 
 export type LinkageKeyDefinition = Array<LinkageKeyFieldDefinition>;

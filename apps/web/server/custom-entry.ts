@@ -1,13 +1,12 @@
 import { Server as HttpServer } from "node:http";
 import { Server as HttpsServer } from "node:https";
 
-
 import {
   setupGracefulShutdown,
   startScheduleRunner,
   trapUnhandledNodeErrors,
-// @ts-ignore available at runtime
-} from "nitropack/runtime/internal"; 
+  // @ts-ignore available at runtime
+} from "nitropack/runtime/internal";
 
 // @ts-ignore available at runtime
 import "#nitro-internal-pollyfills";
@@ -18,15 +17,14 @@ import wsAdapter from "crossws/adapters/node";
 
 import logLibrary from "loglevel";
 
-import { ConfigManager } from '../src/utils/serverConfig';
+import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
-
 
 import type { AddressInfo } from "node:net";
 
 const { getLogger } = logLibrary;
 
-const log = getLogger('server-entry')
+const log = getLogger("server-entry");
 
 const configManager = new ConfigManager();
 const config = await configManager.load();
@@ -40,10 +38,10 @@ const nitroApp = useNitroApp();
 
 const server =
   cert && key
-// @ts-ignore part of preset
-    ? new HttpsServer({ key, cert }, toNodeListener(nitroApp.h3App))
-// @ts-ignore part of preset
-    : new HttpServer(toNodeListener(nitroApp.h3App));
+    ? // @ts-ignore part of preset
+      new HttpsServer({ key, cert }, toNodeListener(nitroApp.h3App))
+    : // @ts-ignore part of preset
+      new HttpServer(toNodeListener(nitroApp.h3App));
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 const port = (config.PORT || 3000) as number;
@@ -90,7 +88,6 @@ if (import.meta._tasks) {
   startScheduleRunner();
 }
 
-registerServer(
-  server)
+registerServer(server);
 
 export default {};

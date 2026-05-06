@@ -1,17 +1,17 @@
-/// <reference types="@vitest/browser/providers/playwright" />
+/// <reference types="@vitest/browser-playwright/context" />
 
 import { expect, test } from 'vitest'
 
 import Peer from "peerjs";
 
-import { PSIParticipant } from 'core';
+import { PSIParticipant } from '@psilink/core';
 // @ts-ignore this is really there
 import PSI from '@openmined/psi.js/psi_wasm_web'
 
 import { sortAssociationTable } from '../utils/associationTable.js';
 
 import type { DataConnection } from 'peerjs';
-import type { Config as PSIConfig } from "core"
+import type { Config as PSIConfig } from "@psilink/core"
 import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 
 interface AddressInfo {

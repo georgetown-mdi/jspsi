@@ -1,17 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    "nitro.config.ts",
-    "vite.config.ts"
-  ],
-  "exclude": [
-    "node_modules",
-  ],
-  "references": [
-    { "path": "../../packages/core" }
-  ],
+  "include": ["**/*.ts", "**/*.tsx", "nitro.config.ts", "vite.config.ts"],
+  "exclude": ["node_modules"],
+  "references": [{ "path": "../../packages/core" }],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
@@ -37,18 +28,10 @@
     "forceConsistentCasingInFileNames": true,
 
     "paths": {
-      "@components/*": [
-        "./src/components/*"
-      ],
-      "@utils/*": [
-        "./src/utils/*"
-      ],
-      "@peerjs-server/*": [
-        "./src/contrib/peerjs-server/*"
-      ],
-      "@*": [
-        "./src/*"
-      ]
+      "@components/*": ["./src/components/*"],
+      "@utils/*": ["./src/utils/*"],
+      "@peerjs-server/*": ["./src/contrib/peerjs-server/*"],
+      "@*": ["./src/*"]
     }
   }
 }

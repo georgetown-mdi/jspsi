@@ -6,11 +6,6 @@
     "declaration": true,
     "declarationMap": true
   },
-  "include": [
-    "src",
-    "rollup.config.ts"
-  ],
-  "references": [
-    { "path": "../../packages/core" }
-  ]
+  "include": ["src", "rollup.config.ts"],
+  "references": [{ "path": "../../packages/core" }]
 }

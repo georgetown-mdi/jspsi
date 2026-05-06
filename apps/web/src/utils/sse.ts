@@ -1,7 +1,7 @@
 export function createSSEStream() {
   let controller: ReadableStreamDefaultController | null = null;
   let closed = false;
-  const closedHandlers: Array<(() => void)> = [];
+  const closedHandlers: Array<() => void> = [];
 
   const encoder = new TextEncoder();
 
@@ -20,9 +20,9 @@ export function createSSEStream() {
       // Return a Response that uses the stream as its body
       return new Response(stream, {
         headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
         },
       });
     },

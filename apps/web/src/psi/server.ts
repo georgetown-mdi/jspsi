@@ -1,64 +1,70 @@
-import logLibrary from 'loglevel';
+import logLibrary from "loglevel";
 
-import Peer from 'peerjs';
+import Peer from "peerjs";
 
-import { ConfigManager } from '@utils/clientConfig';
+import { ConfigManager } from "@utils/clientConfig";
 
-import type { DataConnection } from 'peerjs';
+import type { DataConnection } from "peerjs";
 
 const { getLogger } = logLibrary;
-const log = getLogger('server');
+const log = getLogger("server");
 
 const configManager = new ConfigManager();
 const config = await configManager.load();
 
 export function waitForPeerId(uuid: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    log.info(`opening event source at: /api/psi/${uuid}/wait`)
-    const eventSource = new EventSource(
-      `/api/psi/${uuid}/wait`, { withCredentials: true }
-    );
-    log.info('created event source at', eventSource.url);
+    log.info(`opening event source at: /api/psi/${uuid}/wait`);
+    const eventSource = new EventSource(`/api/psi/${uuid}/wait`, {
+      withCredentials: true,
+    });
+    log.info("created event source at", eventSource.url);
 
-    eventSource.addEventListener('message', (event) => {
+    eventSource.addEventListener("message", (event) => {
       try {
         const messageData = event.data && JSON.parse(event.data);
         if (!("invitedPeerId" in messageData)) {
-          log.error("received unexpected message from server:", messageData, "; closing event source");
-  
+          log.error(
+            "received unexpected message from server:",
+            messageData,
+            "; closing event source",
+          );
+
           eventSource.close();
-          reject('unexpected message from server: ' + event.data);
+          reject("unexpected message from server: " + event.data);
         } else {
           const invitedPeerId = messageData["invitedPeerId"];
           log.info(`received peer id ${invitedPeerId}`);
-  
+
           eventSource.close();
           resolve(invitedPeerId);
         }
       } catch (err) {
-        log.error('error parsing message:', err);
+        log.error("error parsing message:", err);
         eventSource.close();
         reject(err);
       }
     });
 
-    eventSource.addEventListener('error', (event) => {
-      log.error('EventSource error: ', event);
+    eventSource.addEventListener("error", (event) => {
+      log.error("EventSource error: ", event);
       eventSource.close();
-      reject(new Error('EventSource connection error:' + event.type));
+      reject(new Error("EventSource connection error:" + event.type));
     });
   });
 }
 
-export function openPeerConnection(peerId: string): Promise<[Peer, DataConnection]> {
+export function openPeerConnection(
+  peerId: string,
+): Promise<[Peer, DataConnection]> {
   return new Promise((resolve, reject) => {
     let host = window.location.hostname;
-    if (host === 'localhost') host = '127.0.0.1'
+    if (host === "localhost") host = "127.0.0.1";
     log.info(`connecting to peer server at ${host} and getting peer id`);
-    
-    const port = parseInt(window.location.port) || (
-      window.location.protocol == 'http' ? 80 : 443
-    )
+
+    const port =
+      parseInt(window.location.port) ||
+      (window.location.protocol == "http" ? 80 : 443);
 
     const peer = new Peer({
       host: host,
@@ -68,10 +74,7 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
       config: {
         iceServers: [
           {
-            urls: [
-              "stun:stun.l.google.com:19302",
-              "stun:44.247.30.68:443"
-            ]
+            urls: ["stun:stun.l.google.com:19302", "stun:44.247.30.68:443"],
           },
           /* Explicitly disable TURN survers, since they relay data. This is
              mostly semantics since all data is relayed across servers on the
@@ -88,20 +91,22 @@ export function openPeerConnection(peerId: string): Promise<[Peer, DataConnectio
           },
           */
         ],
-        'sdpSemantics': 'unified-plan',
-        iceTransportPolicy: 'all',
-      }
+        sdpSemantics: "unified-plan",
+        iceTransportPolicy: "all",
+      },
     });
 
-    peer.once('open', (id) => {
-      log.info(`got peer id ${id} from peer server; connecting to peer ${peerId}`)
-      const conn = peer.connect(peerId, {reliable: true});
+    peer.once("open", (id) => {
+      log.info(
+        `got peer id ${id} from peer server; connecting to peer ${peerId}`,
+      );
+      const conn = peer.connect(peerId, { reliable: true });
       resolve([peer, conn]);
     });
 
-    peer.on('error', (err) => {
-      log.error('error getting peer connection:', err);
-      reject(err)}
-    );
+    peer.on("error", (err) => {
+      log.error("error getting peer connection:", err);
+      reject(err);
+    });
   });
 }

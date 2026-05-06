@@ -1,5 +1,5 @@
 {
-  "name": "core",
+  "name": "@psilink/core",
   "version": "1.0.0",
   "description": "Library for linkage with private set intersection",
   "license": "Apache-2.0",

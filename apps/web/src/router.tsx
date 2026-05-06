@@ -1,5 +1,5 @@
-import { Link, createRouter } from '@tanstack/react-router'
-import { routeTree } from './routeTree.gen'
+import { Link, createRouter } from "@tanstack/react-router";
+import { routeTree } from "./routeTree.gen";
 
 export function getRouter() {
   const router = createRouter({
@@ -11,8 +11,8 @@ export function getRouter() {
           <p>Not found!</p>
           <Link to="/">Go home</Link>
         </div>
-      )
-    }
+      );
+    },
   });
 
   return router;

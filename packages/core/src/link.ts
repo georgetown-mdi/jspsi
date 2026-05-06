@@ -1,38 +1,38 @@
-import * as z from 'zod';
+import * as z from "zod";
 
-import type { Connection } from './types';
+import type { Connection } from "./types";
 import type { PSIParticipant } from "./participant";
 
-import { getLoggerForVerbosity } from './utils/logger';
+import { getLoggerForVerbosity } from "./utils/logger";
 
 const associationAndIterationArray = z.array(
-  z.object({theirIndex: z.number(), iteration: z.number()})
+  z.object({ theirIndex: z.number(), iteration: z.number() }),
 );
 
 interface IndexIterationPair {
-  theirIndex: number
-  iteration: number
+  theirIndex: number;
+  iteration: number;
 }
 
-type IndexIterationMap = Array<IndexIterationPair | undefined>
-type IterationMap = Array<IndexIterationPair>
+type IndexIterationMap = Array<IndexIterationPair | undefined>;
+type IterationMap = Array<IndexIterationPair>;
 
 export interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
 }
 
 function getUnidentifiedIndices(
-  indexIterationMap: IndexIterationMap
+  indexIterationMap: IndexIterationMap,
 ): Array<number> {
-  return indexIterationMap.reduce(
-    (acc, x, i) => { if (!x) acc.push(i); return acc; },
-    [] as Array<number>
-  );
+  return indexIterationMap.reduce((acc, x, i) => {
+    if (!x) acc.push(i);
+    return acc;
+  }, [] as Array<number>);
 }
 
 function removeDuplicatesAndUndefineds(
   dataWithDuplicatesAndUndefineds: Array<string | undefined>,
-  permutation?: Array<number>
+  permutation?: Array<number>,
 ): [Array<string>, Array<number>] {
   const elementToIndexMap: Map<string, Array<number>> = new Map();
   dataWithDuplicatesAndUndefineds.forEach((value, i) => {
@@ -53,32 +53,30 @@ function removeDuplicatesAndUndefineds(
     }
   });
 
-  if (permutation)
-    return [data, originalIndices.map(i => permutation[i])];
+  if (permutation) return [data, originalIndices.map((i) => permutation[i])];
   return [data, originalIndices];
 }
 
 export async function linkViaPSI(
   protocol: {
-    cardinality: 'one-to-one' | 'one-to-many' | 'many-to-one' | 'many-to-many'
+    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
   },
   participant: PSIParticipant,
   conn: Connection,
   data: Array<IndexableIterable<string | undefined>>,
   verbose: number = 1,
   setStage?: (id: string) => void,
-)
-{
-  if (participant.config.role === 'either')
-    throw new Error('participants role is unresolved')
-  const sendFirst = participant.config.role === 'starter';
+) {
+  if (participant.config.role === "either")
+    throw new Error("participants role is unresolved");
+  const sendFirst = participant.config.role === "starter";
 
-  const log = getLoggerForVerbosity('psiLink', verbose);
+  const log = getLoggerForVerbosity("psiLink", verbose);
   setStage = setStage ?? (() => {});
 
   log.info(`${participant.id}: linking using ${data.length} keys via PSI`);
 
-  if (['one-to-one', 'many-to-one'].includes(protocol.cardinality)) {
+  if (["one-to-one", "many-to-one"].includes(protocol.cardinality)) {
     let indexIterationMap: IndexIterationMap = [];
     const unmappedIndicesByIter: Array<Array<number>> = [];
 
@@ -88,102 +86,112 @@ export async function linkViaPSI(
       let unidentifiedIndices: Array<number> | undefined;
       if (j === 0) {
         dataWithDuplicatesAndUndefineds = Array.from(data[j]);
-        indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(undefined);
+        indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(
+          undefined,
+        );
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
-        dataWithDuplicatesAndUndefineds = unidentifiedIndices.map(i => { return data[j][i]; });
+        dataWithDuplicatesAndUndefineds = unidentifiedIndices.map((i) => {
+          return data[j][i];
+        });
       }
       const [data_j, unmappedIndices] = removeDuplicatesAndUndefineds(
         dataWithDuplicatesAndUndefineds,
-        unidentifiedIndices
+        unidentifiedIndices,
       );
       unmappedIndicesByIter.push(unmappedIndices);
 
       if (data_j.length === 0) continue;
 
-      const [myIndices, theirIndices] =
-        await participant.identifyIntersection(conn, data_j);
+      const [myIndices, theirIndices] = await participant.identifyIntersection(
+        conn,
+        data_j,
+      );
 
       for (let ii = 0; ii < myIndices.length; ++ii) {
         const i = unmappedIndices[myIndices[ii]];
 
         indexIterationMap[i] = {
           theirIndex: theirIndices[ii],
-          iteration: j
+          iteration: j,
         };
       }
-
     }
 
-    log.info(`${participant.id}: completed link, getting original element indices`);
-
-    const [identifiedIndexIterationMap, originalIndices] = indexIterationMap.reduce(
-      (acc, x, i) => {
-        if (x) {
-          acc[0].push(x);
-          acc[1].push(i);
-        }
-        return acc;
-      },
-      [[], []] as [IterationMap, Array<number>]
+    log.info(
+      `${participant.id}: completed link, getting original element indices`,
     );
+
+    const [identifiedIndexIterationMap, originalIndices] =
+      indexIterationMap.reduce(
+        (acc, x, i) => {
+          if (x) {
+            acc[0].push(x);
+            acc[1].push(i);
+          }
+          return acc;
+        },
+        [[], []] as [IterationMap, Array<number>],
+      );
 
     const numMappedElements = identifiedIndexIterationMap.length;
 
-    const theirIdentifiedIndexIterationMap =
-      await exchangeMappedElements(
-        participant.id,
-        conn,
-        log,
-        sendFirst,
-        identifiedIndexIterationMap
-      );
+    const theirIdentifiedIndexIterationMap = await exchangeMappedElements(
+      participant.id,
+      conn,
+      log,
+      sendFirst,
+      identifiedIndexIterationMap,
+    );
 
     for (const e of theirIdentifiedIndexIterationMap) {
-      const i = unmappedIndicesByIter[e.iteration][
-        e.theirIndex
-      ];
+      const i = unmappedIndicesByIter[e.iteration][e.theirIndex];
       e.theirIndex = i;
     }
 
     const identifiedIndexMap = await exchangeMappedElements(
-        participant.id,
-        conn,
-        log,
-        sendFirst,
-        theirIdentifiedIndexIterationMap
-      );
+      participant.id,
+      conn,
+      log,
+      sendFirst,
+      theirIdentifiedIndexIterationMap,
+    );
 
     if (numMappedElements != identifiedIndexMap.length) {
       throw new Error(
-        `${participant.id} protocol error: returned, unmapped association `
-        + 'table of incorrect length');
+        `${participant.id} protocol error: returned, unmapped association ` +
+          "table of incorrect length",
+      );
     }
 
-    return identifiedIndexMap
-      .reduce((acc, x, i) => {
+    return identifiedIndexMap.reduce(
+      (acc, x, i) => {
         acc[0].push(originalIndices[i]);
         acc[1].push(x.theirIndex);
         return acc;
       },
-      [[], []] as [Array<number>, Array<number>]
+      [[], []] as [Array<number>, Array<number>],
     );
   } else {
-    throw new Error(`psi for cardinality '${protocol.cardinality}' not yet implemented`);
+    throw new Error(
+      `psi for cardinality '${protocol.cardinality}' not yet implemented`,
+    );
   }
 }
 
 async function exchangeMappedElements(
   id: string,
   conn: Connection,
-  log: { info: (...msg: Array<any>) => void, debug: (...msg: Array<any>) => void },
+  log: {
+    info: (...msg: Array<unknown>) => void;
+    debug: (...msg: Array<unknown>) => void;
+  },
   sendFirst: boolean,
-  values: IterationMap
-): Promise<IterationMap>
-{
+  values: IterationMap,
+): Promise<IterationMap> {
   if (sendFirst) {
     return new Promise(async (resolve) => {
-      conn.once('data', (rawData: unknown) => {
+      conn.once("data", (rawData: unknown) => {
         log.debug(`${id}: received other mapped elements`);
         resolve(associationAndIterationArray.parse(rawData));
       });
@@ -193,7 +201,7 @@ async function exchangeMappedElements(
     });
   } else {
     return new Promise((resolve) => {
-      conn.once('data', async (rawData: unknown) => {
+      conn.once("data", async (rawData: unknown) => {
         log.debug(`${id}: received other mapped elements`);
 
         log.debug(`${id}: sending own mapped elements`);

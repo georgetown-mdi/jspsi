@@ -1,8 +1,8 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from "node:crypto";
 
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from "uuid";
 
-const PASSWORD_HASH_ALGORITHM = 'sha256';
+const PASSWORD_HASH_ALGORITHM = "sha256";
 
 // import { ConfigManager } from '@utils/serverConfig'
 
@@ -36,24 +36,24 @@ interface PasswordSessionId {
 export type SessionId = LinkSessionId | PasswordSessionId;
 
 export type SessionProp = {
-  session: LinkSession
+  session: LinkSession;
 };
 
 class SessionManagerFactory {
   private static instance: SessionManagerFactory | undefined;
 
   private linkSessions: { [key: string]: LinkSession };
-  private passwordSessions: { [key: string] : PasswordSession }
+  private passwordSessions: { [key: string]: PasswordSession };
   private salt: string;
-  
+
   private constructor() {
     this.linkSessions = {};
     this.passwordSessions = {};
-    this.salt = randomBytes(16).toString('hex');
+    this.salt = randomBytes(16).toString("hex");
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
-  public static async getSessionManager() : Promise<SessionManagerFactory> {
+  public static async getSessionManager(): Promise<SessionManagerFactory> {
     if (!SessionManagerFactory.instance) {
       SessionManagerFactory.instance = new SessionManagerFactory();
     }
@@ -62,7 +62,7 @@ class SessionManagerFactory {
 
   public hash(password: string): string {
     const hash = createHmac(PASSWORD_HASH_ALGORITHM, this.salt);
-    return hash.update(password).digest('hex');
+    return hash.update(password).digest("hex");
   }
 
   public get(id: LinkSessionId): LinkSession;
@@ -74,14 +74,14 @@ class SessionManagerFactory {
     return this.passwordSessions[id.hashedPassword];
   }
 
-  has(id: SessionId) : boolean {
+  has(id: SessionId): boolean {
     if (id.uuid !== undefined) {
       return id.uuid in this.linkSessions;
     }
     return id.hashedPassword in this.passwordSessions;
   }
 
-  remove(id: SessionId) : void {
+  remove(id: SessionId): void {
     if (id.uuid !== undefined) {
       delete this.linkSessions[id.uuid];
       return;
@@ -89,43 +89,43 @@ class SessionManagerFactory {
     delete this.passwordSessions[id.hashedPassword];
   }
 
-  public set(sessionProperties: LinkSessionProperties) : LinkSession;
-  public set(sessionProperties: PasswordSession) : void;
-  set(sessionProperties: LinkSessionProperties | PasswordSession)
-  {
+  public set(sessionProperties: LinkSessionProperties): LinkSession;
+  public set(sessionProperties: PasswordSession): void;
+  set(sessionProperties: LinkSessionProperties | PasswordSession) {
     const delay = sessionProperties.timeToLive.getTime() - Date.now();
-    if (delay <= 0) throw new Error('cannot create session: has already expired')
+    if (delay <= 0)
+      throw new Error("cannot create session: has already expired");
 
     let result;
     let id: SessionId;
 
-    if ('initiatedName' in sessionProperties) {
+    if ("initiatedName" in sessionProperties) {
       const session: LinkSession = {
         uuid: uuidv4(),
-        ...sessionProperties
-      }
-      
+        ...sessionProperties,
+      };
+
       this.linkSessions[session.uuid] = session;
 
       result = session;
-      id = {uuid: session.uuid};
+      id = { uuid: session.uuid };
     } else {
-      this.passwordSessions[sessionProperties.hashedPassword] = sessionProperties;
-      id = {hashedPassword: sessionProperties.hashedPassword};
+      this.passwordSessions[sessionProperties.hashedPassword] =
+        sessionProperties;
+      id = { hashedPassword: sessionProperties.hashedPassword };
     }
 
-    setTimeout(
-      () => {if (this.has(id)) this.remove(id)},
-      delay
-    )
+    setTimeout(() => {
+      if (this.has(id)) this.remove(id);
+    }, delay);
 
     if (result) return result;
   }
 }
 
-export const useSessionManager = async function() {
+export const useSessionManager = async function () {
   return SessionManagerFactory.getSessionManager();
-}
+};
 
 /* 
 const configManager = new ConfigManager();

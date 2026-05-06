@@ -1,60 +1,58 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { json } from '@tanstack/react-start';
-import { setResponseStatus } from '@tanstack/react-start/server';
+import { createFileRoute } from "@tanstack/react-router";
+import { json } from "@tanstack/react-start";
+import { setResponseStatus } from "@tanstack/react-start/server";
 
-import { useSessionManager } from '@utils/sessions';
+import { useSessionManager } from "@utils/sessions";
 
 const DEFAULT_SESSION_DURATION_MS = 1000 * 60 * 15;
 const MAXIMUM_SESSION_DURATION_MS = 1000 * 60 * 60;
 
-export const Route = createFileRoute('/api/psi/create')({
+export const Route = createFileRoute("/api/psi/create")({
   server: {
     handlers: {
       POST: async ({ request }) => {
         const payload = await request.json();
-        if (!('initiatedName' in payload) || !payload['initiatedName']
-        ) {
+        if (!("initiatedName" in payload) || !payload["initiatedName"]) {
           setResponseStatus(400);
-          return new Response('missing name of person initiating PSI');
+          return new Response("missing name of person initiating PSI");
         }
-        if (!('invitedName' in payload) || !payload['invitedName']) {
+        if (!("invitedName" in payload) || !payload["invitedName"]) {
           setResponseStatus(400);
-          return new Response('missing name of person invited to PSI');
+          return new Response("missing name of person invited to PSI");
         }
         let timeToLive: Date;
-        if (!('valid_duration_minutes' in payload)
-            || typeof(payload['valid_duration_minutes']) !== "number"
-            || payload['valid_duration_minutes'] <= 0
-          ) {
+        if (
+          !("valid_duration_minutes" in payload) ||
+          typeof payload["valid_duration_minutes"] !== "number" ||
+          payload["valid_duration_minutes"] <= 0
+        ) {
           timeToLive = new Date(Date.now() + DEFAULT_SESSION_DURATION_MS);
         } else {
-          let duration = 1000 * 80 * payload['valid_duration_minutes'];
-          duration = 
+          let duration = 1000 * 80 * payload["valid_duration_minutes"];
+          duration =
             MAXIMUM_SESSION_DURATION_MS < duration
-            ? MAXIMUM_SESSION_DURATION_MS
-            : duration;
+              ? MAXIMUM_SESSION_DURATION_MS
+              : duration;
 
           timeToLive = new Date(Date.now() + duration);
         }
 
         const sessionManager = await useSessionManager();
 
-        const session = sessionManager.set(
-          {
-            initiatedName: payload['initiatedName'] as string,
-            invitedName: payload['invitedName'] as string,
-            description:
-              'description' in payload && payload['description']
-                ? (payload['description'] as string)
-                : '',
-            timeToLive: timeToLive,
-          }
-        );
-        
+        const session = sessionManager.set({
+          initiatedName: payload["initiatedName"] as string,
+          invitedName: payload["invitedName"] as string,
+          description:
+            "description" in payload && payload["description"]
+              ? (payload["description"] as string)
+              : "",
+          timeToLive: timeToLive,
+        });
+
         console.log(`POST /api/psi/create: session ${session.uuid} created`);
 
-        return json({uuid: session.uuid, timeToLive: timeToLive});
+        return json({ uuid: session.uuid, timeToLive: timeToLive });
       },
-    }
-  }
+    },
+  },
 });

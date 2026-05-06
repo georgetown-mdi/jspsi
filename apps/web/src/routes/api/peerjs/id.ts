@@ -1,29 +1,28 @@
 import {
   getResponseHeader,
-  setResponseHeader
-} from '@tanstack/react-start/server';
+  setResponseHeader,
+} from "@tanstack/react-start/server";
 
-import { createFileRoute } from '@tanstack/react-router';
-import { createMiddleware } from '@tanstack/react-start'
+import { createFileRoute } from "@tanstack/react-router";
+import { createMiddleware } from "@tanstack/react-start";
 
-import cors from 'cors'
+import cors from "cors";
 
-import { usePeerServer } from '@peerServer'
+import { usePeerServer } from "@peerServer";
 
-import type { CorsRequest } from 'cors';
+import type { CorsRequest } from "cors";
 
-const corsMiddleware = createMiddleware({ type: 'request' }).server(
+const corsMiddleware = createMiddleware({ type: "request" }).server(
   ({ next, request }) => {
-    
     const peerServer = usePeerServer();
-    const applyCors = cors(peerServer.config.corsOptions)
+    const applyCors = cors(peerServer.config.corsOptions);
 
     const corsRequest: CorsRequest = {
       method: request.method,
       headers: Object.fromEntries(request.headers.entries()),
-    }
+    };
 
-    let corsResult: 'next' | 'end' | any = undefined
+    let corsResult: "next" | "end" | any = undefined;
 
     applyCors(
       corsRequest,
@@ -32,29 +31,29 @@ const corsMiddleware = createMiddleware({ type: 'request' }).server(
         getHeader: getResponseHeader,
         setHeader: setResponseHeader,
         end: () => {
-          console.warn('end was called within cors');
-          corsResult = 'end';
+          console.warn("end was called within cors");
+          corsResult = "end";
+        },
+      },
+      (err) => {
+        if (err) {
+          console.warn("next was called and err is:", err);
+          corsResult = err;
+        } else {
+          corsResult = "next";
         }
       },
-      (err) => { 
-        if (err) {
-          console.warn('next was called and err is:', err)
-          corsResult = err
-        } else {
-          corsResult = 'next'
-        }
-      }
-    )
+    );
 
-    if (corsResult === 'next') return next();
+    if (corsResult === "next") return next();
 
-    if (corsResult === 'end') throw new Error('cors ended early');
+    if (corsResult === "end") throw new Error("cors ended early");
 
-    throw new Error('cors resulted in error: ' + corsResult.toString());
+    throw new Error("cors resulted in error: " + corsResult.toString());
   },
-)
+);
 
-export const Route = createFileRoute('/api/peerjs/id')({
+export const Route = createFileRoute("/api/peerjs/id")({
   server: {
     handlers: ({ createHandlers }) =>
       createHandlers({
@@ -64,10 +63,12 @@ export const Route = createFileRoute('/api/peerjs/id')({
             const peerServer = usePeerServer();
 
             return new Response(
-              peerServer.realm.generateClientId(peerServer.config.generateClientId)
+              peerServer.realm.generateClientId(
+                peerServer.config.generateClientId,
+              ),
             );
-          }
-        }
-      })
-  }
+          },
+        },
+      }),
+  },
 });

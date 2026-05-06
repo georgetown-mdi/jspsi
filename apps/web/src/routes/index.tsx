@@ -1,12 +1,11 @@
+import { Center, Group, Paper } from "@mantine/core";
+import { createFileRoute } from "@tanstack/react-router";
 
-import { Center, Group, Paper } from '@mantine/core';
-import { createFileRoute } from '@tanstack/react-router';
+import CreatePSIForm from "@components/CreatePSIForm";
+import JoinPSIForm from "@components/JoinPSIForm";
 
-import CreatePSIForm from '@components/CreatePSIForm';
-import JoinPSIForm from '@components/JoinPSIForm';
-
-export const Route = createFileRoute('/')({
-  component: Home
+export const Route = createFileRoute("/")({
+  component: Home,
 });
 
 function Home() {

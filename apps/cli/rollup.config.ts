@@ -1,19 +1,19 @@
-import { createRequire } from 'node:module';
-import { defineConfig } from 'rollup';
+import { createRequire } from "node:module";
+import { defineConfig } from "rollup";
 
 import resolve from "@rollup/plugin-node-resolve";
 import commonjs from "@rollup/plugin-commonjs";
-import json from '@rollup/plugin-json'
+import json from "@rollup/plugin-json";
 import typescript from "@rollup/plugin-typescript";
 
 const require = createRequire(import.meta.url);
-const pkg = require('./package.json');
+const pkg = require("./package.json");
 
 export default defineConfig({
   input: "src/index.ts",
   output: {
     file: "dist/index.js",
-    format: "cjs",         // CLI = CommonJS for Node
+    format: "cjs", // CLI = CommonJS for Node
     banner: "#!/usr/bin/env node", // shebang for execution
   },
   //external: ['ssh2'],

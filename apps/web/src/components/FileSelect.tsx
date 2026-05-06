@@ -1,23 +1,21 @@
+import { Button, Group, List, Paper, Stack, Text } from "@mantine/core";
+import { Dropzone, MIME_TYPES } from "@mantine/dropzone";
 import {
-  Button,
-  Group,
-  List,
-  Paper,
-  Stack,
-  Text
-} from '@mantine/core';
-import { Dropzone, MIME_TYPES } from '@mantine/dropzone';
-import { IconFile, IconFileDatabase, IconUpload, IconX  } from '@tabler/icons-react';
+  IconFile,
+  IconFileDatabase,
+  IconUpload,
+  IconX,
+} from "@tabler/icons-react";
 
-import log from 'loglevel';
+import log from "loglevel";
 
-import type { PaperProps } from '@mantine/core';
+import type { PaperProps } from "@mantine/core";
 
 interface FileSelectProps extends PaperProps {
-  handleSubmit: () => void
-  files: Array<File>
-  setFiles: (acceptedFiles: Array<File>) => void
-  submitted: boolean
+  handleSubmit: () => void;
+  files: Array<File>;
+  setFiles: (acceptedFiles: Array<File>) => void;
+  submitted: boolean;
 }
 
 export default function FileSelect(props: FileSelectProps) {
@@ -33,40 +31,62 @@ export default function FileSelect(props: FileSelectProps) {
         <Dropzone
           onDrop={handleDrop}
           onReject={(rejectedFiles) => {
-            log.warn('rejected file(s):', rejectedFiles)
+            log.warn("rejected file(s):", rejectedFiles);
           }}
           maxSize={10 * 1024 ** 2} // 10MB
           accept={[
-            'text/plain',
+            "text/plain",
             MIME_TYPES.csv,
-            'application/vnd.ms-excel',
+            "application/vnd.ms-excel",
             // MIME_TYPES.xls,
             // MIME_TYPES.xlsx,
             // 'application/vnd.apache.parquet'
           ]}
-          {...(submitted ? {
-              disabled: true,
-              style: {
-                cursor: 'not-allowed',
-                'backgroundColor': 'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
-                'borderColor': 'light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))',
-                color: 'light-dark(var(--mantine-color-gray-5), var(--mantine-color-dark-3))'
+          {...(submitted
+            ? {
+                disabled: true,
+                style: {
+                  cursor: "not-allowed",
+                  backgroundColor:
+                    "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))",
+                  borderColor:
+                    "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))",
+                  color:
+                    "light-dark(var(--mantine-color-gray-5), var(--mantine-color-dark-3))",
+                },
               }
-            }
-            : {}
-          )}
+            : {})}
         >
-          <Group justify="center" gap="xl" mih={220} style={{ pointerEvents: 'none' }}>
+          <Group
+            justify="center"
+            gap="xl"
+            mih={220}
+            style={{ pointerEvents: "none" }}
+          >
             <Dropzone.Accept>
-              <IconUpload size={52} color="var(--mantine-color-blue-6)" stroke={1.5} />
+              <IconUpload
+                size={52}
+                color="var(--mantine-color-blue-6)"
+                stroke={1.5}
+              />
             </Dropzone.Accept>
             <Dropzone.Reject>
-              <IconX size={52} color="var(--mantine-color-red-6)" stroke={1.5} />
+              <IconX
+                size={52}
+                color="var(--mantine-color-red-6)"
+                stroke={1.5}
+              />
             </Dropzone.Reject>
             <Dropzone.Idle>
-              <IconFileDatabase size={52} color="var(--mantine-color-dimmed)" stroke={1.5} />
+              <IconFileDatabase
+                size={52}
+                color="var(--mantine-color-dimmed)"
+                stroke={1.5}
+              />
             </Dropzone.Idle>
-            <Text mt="sm" inline>Drag files here or click to select</Text>
+            <Text mt="sm" inline>
+              Drag files here or click to select
+            </Text>
             <Text size="xs" c="dimmed" inline mt={7}>
               (Max file size: 10MB)
             </Text>

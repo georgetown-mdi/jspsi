@@ -1,10 +1,10 @@
-import handler from '@tanstack/react-start/server-entry';
+import handler from "@tanstack/react-start/server-entry";
 
 export default {
   fetch(request: Request) {
     return handler.fetch(request);
-  }
-}
+  },
+};
 
 // see: https://github.com/vitest-dev/vitest/issues/2334
 /* if (import.meta.hot) {

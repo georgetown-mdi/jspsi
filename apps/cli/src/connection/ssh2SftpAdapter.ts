@@ -1,5 +1,5 @@
-import Ssh2SftpClient from 'ssh2-sftp-client';
-import { FileInfo, GetOptions, PutOptions, SFTPClient } from 'core';
+import Ssh2SftpClient from "ssh2-sftp-client";
+import { FileInfo, GetOptions, PutOptions, SFTPClient } from "@psilink/core";
 
 export class SSH2SFTPClientAdapter implements SFTPClient {
   private client: Ssh2SftpClient;
@@ -11,7 +11,7 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
 
   connect(options: object): Promise<void> {
     this.options = options;
-    return this.client.connect(options).then(() => { });
+    return this.client.connect(options).then(() => {});
   }
 
   end(): Promise<void> {
@@ -23,34 +23,44 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
   }
 
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
-    return this.client.get(path, undefined, { readStreamOptions: options }) as Promise<Buffer<ArrayBufferLike>>;
+    return this.client.get(path, undefined, {
+      readStreamOptions: options,
+    }) as Promise<Buffer<ArrayBufferLike>>;
   }
 
-  put(src: string | Buffer | NodeJS.ReadableStream, dest: string, options?: PutOptions): Promise<unknown> {
+  put(
+    src: string | Buffer | NodeJS.ReadableStream,
+    dest: string,
+    options?: PutOptions,
+  ): Promise<unknown> {
     const maxRetries = this.options!.retries || 5;
 
-    const retryPromise = (fn: any, retries = 5, delay = 100) => {
+    const retryPromise = (
+      fn: () => Promise<unknown>,
+      retries = 5,
+      delay = 100,
+    ) => {
       return new Promise((resolve, reject) => {
         function attempt() {
           fn()
             .then(resolve)
-            .catch((error: any) => {
+            .catch((error: unknown) => {
               if (retries > 0) {
                 --retries;
                 setTimeout(attempt, delay);
               } else {
-                reject(error)
+                reject(error);
               }
             });
         }
         attempt();
       });
-    }
+    };
 
     return retryPromise(
       () => this.client.put(src, dest, { writeStreamOptions: options }),
       maxRetries,
-      100
+      100,
     );
   }
 
@@ -59,7 +69,10 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
   }
 
   safeDelete(path: string): Promise<void> {
-    return this.client.delete(path, true).then(() => {}, () => {});
+    return this.client.delete(path, true).then(
+      () => {},
+      () => {},
+    );
   }
 
   rename(fromPath: string, toPath: string): Promise<void> {

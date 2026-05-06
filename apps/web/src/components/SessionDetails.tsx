@@ -1,8 +1,8 @@
-import { Paper, Text, Title } from '@mantine/core';
+import { Paper, Text, Title } from "@mantine/core";
 
-import type { LinkSession } from '@utils/sessions'
+import type { LinkSession } from "@utils/sessions";
 
-import type { PaperProps } from '@mantine/core';
+import type { PaperProps } from "@mantine/core";
 
 interface SessionDetailProps extends PaperProps {
   session: LinkSession;
@@ -15,13 +15,13 @@ export default function SessionDetails(props: SessionDetailProps) {
     <Paper {...paperProps}>
       <Title order={2}>Session Details</Title>
       <Title order={3}>Initiated By:</Title>
-      <Text>{ session['initiatedName'] }</Text>
+      <Text>{session["initiatedName"]}</Text>
       <Title order={3}>Agency/Person Invited:</Title>
-      <Text>{ session['invitedName'] }</Text>
+      <Text>{session["invitedName"]}</Text>
       <Title order={3}>Description:</Title>
-      <Text>{ session['description'] }</Text>
+      <Text>{session["description"]}</Text>
       <Title order={3}>Session ID</Title>
-      <Text>{ session['uuid'] }</Text>
+      <Text>{session["uuid"]}</Text>
     </Paper>
-  )
+  );
 }

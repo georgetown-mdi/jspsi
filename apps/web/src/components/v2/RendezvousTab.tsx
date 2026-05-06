@@ -9,127 +9,132 @@ import {
   Stack,
   Text,
   TextInput,
-} from '@mantine/core';
-import { IconBrandSamsungpass, IconCloudLock, IconUsers } from '@tabler/icons-react';
-import { useForm } from '@tanstack/react-form';
+} from "@mantine/core";
+import {
+  IconBrandSamsungpass,
+  IconCloudLock,
+  IconUsers,
+} from "@tabler/icons-react";
+import { useForm } from "@tanstack/react-form";
 import { useState } from "react";
 
-type Credential = 'passcode' | 'none';
-type Channel = 'peer-to-peer' | 'server';
-
+type Credential = "passcode" | "none";
+type Channel = "peer-to-peer" | "server";
 
 export function RendezvousTab() {
   const form = useForm();
-  const [credential, setCredential] = useState<Credential>('passcode');
-  const [channel, setChannel] = useState<Channel>('peer-to-peer');
+  const [credential, setCredential] = useState<Credential>("passcode");
+  const [channel, setChannel] = useState<Channel>("peer-to-peer");
 
   return (
     <Paper>
-      <Text size='md'>Join a recurring exchange without needing an invitation</Text>
+      <Text size="md">
+        Join a recurring exchange without needing an invitation
+      </Text>
       <form>
         <Stack>
-          <Fieldset legend='Credentials'>
-            <Text size='sm' mb={3}>
+          <Fieldset legend="Credentials">
+            <Text size="sm" mb={3}>
               How you will ensure you can trust the other partner
             </Text>
             <SegmentedControl
               value={credential}
-              onChange={value => setCredential(value as Credential)}
+              onChange={(value) => setCredential(value as Credential)}
               mb="xs"
               data={[
                 {
                   label: (
                     <Center style={{ gap: 10 }}>
-                      <IconBrandSamsungpass size={14}/>
+                      <IconBrandSamsungpass size={14} />
                       Passcode
                     </Center>
                   ),
-                  value: 'passcode'
+                  value: "passcode",
                 },
                 {
                   label: (
                     <Center style={{ gap: 10 }}>
-                      <IconCloudLock size={14}/>
+                      <IconCloudLock size={14} />
                       Trusted server
                     </Center>
                   ),
-                  value: 'none'
+                  value: "none",
                 },
               ]}
             />
-            {
-              credential === 'passcode'
-              ? (<form.Field
-              name='secret'
-              children={() => (
-                <PasswordInput
-                  withAsterisk
-                  required
-                  description='Something you and your partner know'
-                />
-              )}
-              />)
-              : (<Text size="xs" c="dimmed">Enter connection information below</Text>)
-            }
+            {credential === "passcode" ? (
+              <form.Field
+                name="secret"
+                children={() => (
+                  <PasswordInput
+                    withAsterisk
+                    required
+                    description="Something you and your partner know"
+                  />
+                )}
+              />
+            ) : (
+              <Text size="xs" c="dimmed">
+                Enter connection information below
+              </Text>
+            )}
           </Fieldset>
-          <Fieldset legend='Connection'>
-            <Text size='sm' mb={3}>
+          <Fieldset legend="Connection">
+            <Text size="sm" mb={3}>
               How you will you communicate
             </Text>
             <SegmentedControl
               value={channel}
-              onChange={value => setChannel(value as Channel)}
+              onChange={(value) => setChannel(value as Channel)}
               mb="xs"
               data={[
                 {
                   label: (
                     <Center style={{ gap: 10 }}>
-                      <IconUsers size={14}/>
+                      <IconUsers size={14} />
                       Peer-to-peer
                     </Center>
                   ),
-                  value: 'peer-to-peer',
-                  disabled: credential === 'none'
+                  value: "peer-to-peer",
+                  disabled: credential === "none",
                 },
                 {
                   label: (
                     <Center style={{ gap: 10 }}>
-                      <IconCloudLock size={14}/>
+                      <IconCloudLock size={14} />
                       Trusted server
                     </Center>
                   ),
-                  value: 'trusted-server'
-                }
+                  value: "trusted-server",
+                },
               ]}
             />
-            {
-              channel === 'peer-to-peer'
-              ? (<Text size="xs" c="dimmed">Your browser will handle the connection</Text>)
-              : (<form.Field
-                name='connectionInfo'
+            {channel === "peer-to-peer" ? (
+              <Text size="xs" c="dimmed">
+                Your browser will handle the connection
+              </Text>
+            ) : (
+              <form.Field
+                name="connectionInfo"
                 children={() => (
                   <TextInput
                     withAsterisk
                     required
-                    description='Connection url'
+                    description="Connection url"
                   />
                 )}
-              />)
-            }
-            {
-              credential !== 'none' || channel !== 'peer-to-peer'
-              || (
-                <Alert variant='outline' color='red' mt="sm">
-                  Peer-to-peer connections cannot be used with no credentialing. Select another option.
-                </Alert>
-              )
-            }
+              />
+            )}
+            {credential !== "none" || channel !== "peer-to-peer" || (
+              <Alert variant="outline" color="red" mt="sm">
+                Peer-to-peer connections cannot be used with no credentialing.
+                Select another option.
+              </Alert>
+            )}
           </Fieldset>
-          <Button type="submit">
-            Join exchange
-          </Button>
+          <Button type="submit">Join exchange</Button>
         </Stack>
       </form>
     </Paper>
-  )
+  );
 }

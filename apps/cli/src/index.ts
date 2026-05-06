@@ -1,12 +1,17 @@
-import yargs from 'yargs';
-import { hideBin } from 'yargs/helpers';
-import { configSchema, flattenObject, schemaToYargs, unflattenObject } from './config';
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+import {
+  configSchema,
+  flattenObject,
+  schemaToYargs,
+  unflattenObject,
+} from "./config";
 
-import fs from 'node:fs';
-import logLibrary from 'loglevel';
-import YAML from 'yaml';
+import fs from "node:fs";
+import logLibrary from "loglevel";
+import YAML from "yaml";
 
-import PSI from '@openmined/psi.js'
+import PSI from "@openmined/psi.js";
 
 import {
   PSIParticipant,
@@ -16,24 +21,27 @@ import {
   keyAliases,
   linkViaPSI,
   secondToPartyLinkageKeyDefinitions,
-  setLogPrefixer
-} from "core"
+  setLogPrefixer,
+} from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
-
 
 async function run() {
   const { positionals, options, groups } = schemaToYargs(configSchema);
 
-  const positionalsForUsage = positionals.map((p) => { return !p.meta.demandOption ? '[' + p.key + ']' : p.key }).join(' ');
+  const positionalsForUsage = positionals
+    .map((p) => {
+      return !p.meta.demandOption ? "[" + p.key + "]" : p.key;
+    })
+    .join(" ");
 
   const cli = yargs()
-    .scriptName('psi-link')
-    .command('invite', 'Generate an invitation and wait to execute exchange')
-    .command('join', 'View details and choose to execute exchange')
+    .scriptName("psi-link")
+    .command("invite", "Generate an invitation and wait to execute exchange")
+    .command("join", "View details and choose to execute exchange")
     .command(
-      [`exchange`, '$0'],
-      'Link data using private set intersection',
+      [`exchange`, "$0"],
+      "Link data using private set intersection",
       (cmd) => {
         let numRequiredPositionals = 0;
         for (const { key, meta } of positionals) {
@@ -46,60 +54,74 @@ async function run() {
         for (const [key, groupName] of groups) {
           cmd = cmd.group(key, groupName);
         }
-        cmd = cmd.option('config', {type: 'string', describe: 'optional yaml config file'});
+        cmd = cmd.option("config", {
+          type: "string",
+          describe: "optional yaml config file",
+        });
 
         return cmd.demand(numRequiredPositionals);
-      }
+      },
     )
     .usage(`$0 <command> [options] ${positionalsForUsage}`)
-    .help('h')
-    .alias('h', 'help')
-    .alias('v', 'version')
-    .alias('p', 'passkey')
-    .alias('t', 'timeout');
+    .help("h")
+    .alias("h", "help")
+    .alias("v", "version")
+    .alias("p", "passkey")
+    .alias("t", "timeout");
 
-  const argv = cli.parseSync(hideBin(process.argv).map(arg => {
-    // capture --verbose and prevent it from consuming an argument
-    if (arg === '--verbose') {
-      return '--verbose=info';
-    }
-    return arg
-  }));
-  // @ts-ignore it does exists
+  const argv = cli.parseSync(
+    hideBin(process.argv).map((arg) => {
+      // capture --verbose and prevent it from consuming an argument
+      if (arg === "--verbose") {
+        return "--verbose=info";
+      }
+      return arg;
+    }),
+  );
+  // @ts-expect-error it does exists
   const newAliases = cli.parsed.newAliases as { [key: string]: boolean };
-  Object.entries(newAliases).forEach(([key, _value]) => {
+  Object.entries(newAliases).forEach(([key]) => {
     delete argv[key];
   });
-  ['h', 'v', 'p', 't'].forEach(key => {
+  ["h", "v", "p", "t"].forEach((key) => {
     delete argv[key];
   });
 
-  const positionalArgs = Object.fromEntries(argv._.map((x, i) => { return [positionals[i].key, x] }));
-  const optionPathMap = Object.fromEntries(options.map(x => [x.key, x.meta.optionPath]));
-  const otherArgs = Object.fromEntries(Object
-    .entries(argv)
-    .filter(([key]) => key !== '_' && key !== '$0')
-    .map(([key, value]) => {
-      return [ optionPathMap[key] || key, value  ]
-    }));
+  const positionalArgs = Object.fromEntries(
+    argv._.map((x, i) => {
+      return [positionals[i].key, x];
+    }),
+  );
+  const optionPathMap = Object.fromEntries(
+    options.map((x) => [x.key, x.meta.optionPath]),
+  );
+  const otherArgs = Object.fromEntries(
+    Object.entries(argv)
+      .filter(([key]) => key !== "_" && key !== "$0")
+      .map(([key, value]) => {
+        return [optionPathMap[key] || key, value];
+      }),
+  );
 
   let allArgs = { ...positionalArgs, ...otherArgs };
 
-  const configFile = allArgs['config'];
-  delete allArgs['config'];
+  const configFile = allArgs["config"];
+  delete allArgs["config"];
 
-  if (configFile && typeof configFile === 'string') {
-    const configOptions = Object.fromEntries(Object.entries(
-      flattenObject(YAML.parse(fs.readFileSync(configFile, 'utf8')), "", '-')
-    ).map(([key, value]) => {
-      return [ optionPathMap[key] || key, value  ]
-    }));
-    allArgs = {...allArgs, ...configOptions};
+  if (configFile && typeof configFile === "string") {
+    const configOptions = Object.fromEntries(
+      Object.entries(
+        flattenObject(YAML.parse(fs.readFileSync(configFile, "utf8")), "", "-"),
+      ).map(([key, value]) => {
+        return [optionPathMap[key] || key, value];
+      }),
+    );
+    allArgs = { ...allArgs, ...configOptions };
   }
 
-  let cliOptions = configSchema.safeParse(unflattenObject(allArgs));
+  const cliOptions = configSchema.safeParse(unflattenObject(allArgs));
   if (!cliOptions.success) {
-    console.error('unable to parse input:', cliOptions.error);
+    console.error("unable to parse input:", cliOptions.error);
     cli.showHelp();
     process.exit(64);
   }
@@ -119,84 +141,90 @@ async function run() {
     logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
   }
 
-  const log = logLibrary.getLogger('root');
+  const log = logLibrary.getLogger("root");
   setLogPrefixer(log);
 
   if (!fs.existsSync(cliOptions.data.input)) {
-    log.error(`${cliOptions.data.input} does not exist`)
+    log.error(`${cliOptions.data.input} does not exist`);
     process.exit(69);
   }
 
-  const conn = new SFTPConnection(
-    new SSH2SFTPClientAdapter(),
-    { verbose: verbosity >= 2 ? 2 : (verbosity === 1 ? 1 : 0) }
-  );
-  conn.on('error', (err: any) => {
-    log.error('sftp error:', err);
+  const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
+    verbose: verbosity >= 2 ? 2 : verbosity === 1 ? 1 : 0,
+  });
+  conn.on("error", (err: unknown) => {
+    log.error("sftp error:", err);
     process.exit(69);
   });
-  process.on('SIGINT', async function() {
-    log.info('caught SIGINT, exiting');
+  process.on("SIGINT", async function () {
+    log.info("caught SIGINT, exiting");
     if (conn.connected) {
       await conn.cleanup();
       await conn.close();
     }
-    
+
     process.exit(0);
   });
 
-  log.info('opening connection to', cliOptions.data.server, 'with options', cliOptions.data.serverOptions)
+  log.info(
+    "opening connection to",
+    cliOptions.data.server,
+    "with options",
+    cliOptions.data.serverOptions,
+  );
   await conn.open(cliOptions.data.server, cliOptions.data.serverOptions);
 
-  log.info('synchronizing')
+  log.info("synchronizing");
   await conn.synchronize();
 
-  log.info('synchronized to firstToParty', conn.firstToParty);
+  log.info("synchronized to firstToParty", conn.firstToParty);
 
   const data = await getLinkageKeys(
     fs.createReadStream(cliOptions.data.input),
-    conn.firstToParty ? firstToPartyLinkageKeyDefinitions : secondToPartyLinkageKeyDefinitions,
-    keyAliases
+    conn.firstToParty
+      ? firstToPartyLinkageKeyDefinitions
+      : secondToPartyLinkageKeyDefinitions,
+    keyAliases,
   );
 
-  log.info('starting polling')
+  log.info("starting polling");
   conn.start();
 
   const participant = new PSIParticipant(
-    conn.firstToParty ? 'server' : 'client',
+    conn.firstToParty ? "server" : "client",
     await PSI(),
     {
-      role: conn.firstToParty ? 'starter' : 'joiner',
-      verbose: verbosity >= 2 ? 2 : (verbosity === 1 ? 1 : 0)
-    }
-  )
-
-  log.info('exchanging roles')
-  await participant.exchangeRoles(conn, conn.firstToParty!);
-
-  log.info('identifying intersection')
-  const associationTable = await linkViaPSI(
-    {cardinality: 'one-to-one'},
-    participant,
-    conn,
-    data
+      role: conn.firstToParty ? "starter" : "joiner",
+      verbose: verbosity >= 2 ? 2 : verbosity === 1 ? 1 : 0,
+    },
   );
 
-  log.info('stopping polling')
+  log.info("exchanging roles");
+  await participant.exchangeRoles(conn, conn.firstToParty!);
+
+  log.info("identifying intersection");
+  const associationTable = await linkViaPSI(
+    { cardinality: "one-to-one" },
+    participant,
+    conn,
+    data,
+  );
+
+  log.info("stopping polling");
   conn.stop();
 
-  log.info('closing connection')
+  log.info("closing connection");
   conn.close();
 
   const out = cliOptions.data.output
-    ? fs.createWriteStream(cliOptions.data.output, {encoding: 'utf8'})
+    ? fs.createWriteStream(cliOptions.data.output, { encoding: "utf8" })
     : process.stdout;
 
-  out.write('our_row_id,their_row_id\n');
+  out.write("our_row_id,their_row_id\n");
   associationTable[0].forEach((ours, i) => {
     out.write(`${ours},${associationTable[1][i]}\n`);
   });
-  // @ts-expect-error
+  // @ts-expect-error it will be a write stream if data.output
   if (cliOptions.data.output) out.close();
 }
 
