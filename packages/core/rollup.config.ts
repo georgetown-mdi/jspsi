@@ -34,7 +34,7 @@ export default defineConfig([
     external: Object.keys(pkg.dependencies).filter(
       (name) => name !== "@openmined/psi.js",
     ),
-    plugins: [typescript()],
+    plugins: [typescript({ outputToFilesystem: true })],
     output: [
       { file: pkg.main, format: "cjs", entryFileNames: "[name].cjs" },
       { file: pkg.module, format: "es" },

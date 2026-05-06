@@ -6,7 +6,6 @@ import logLibrary from "loglevel";
 import { nitroV2Plugin } from "@tanstack/nitro-v2-vite-plugin";
 import { playwright } from "@vitest/browser-playwright";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import tsConfigPaths from "vite-tsconfig-paths";
 import viteReact from "@vitejs/plugin-react";
 
 import { ConfigManager } from "./src/utils/serverConfig";
@@ -66,12 +65,6 @@ export default defineConfig((_configEnv) => {
       ],
     },
     plugins: [
-      tsConfigPaths({
-        projects: ["./tsconfig.json"],
-        skip: (dir: string) => {
-          return [".netlify", ".nitro", ".tanstack", "dist"].includes(dir);
-        },
-      }),
       tanstackStart({
         srcDirectory: "src",
       }),
@@ -95,6 +88,7 @@ export default defineConfig((_configEnv) => {
       },
     ],
     resolve: {
+      tsconfigPaths: true,
       alias: {
         "@components": path.resolve(__dirname, "src/components"),
         "@util": path.resolve(__dirname, "src/util"),
