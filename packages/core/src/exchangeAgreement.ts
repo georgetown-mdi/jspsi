@@ -1,9 +1,6 @@
 import { z } from "zod";
-import {
-  AlgorithmSchema,
-  MultiplicitySchema,
-} from "./exchangeAgreementTypes.js";
-import type { Algorithm, Multiplicity } from "./exchangeAgreementTypes.js";
+import { AlgorithmSchema } from "./exchangeAgreementTypes.js";
+import type { Algorithm } from "./exchangeAgreementTypes.js";
 import { camelizeKeys } from "./utils/camelizeKeys.js";
 
 // ─── Output ──────────────────────────────────────────────────────────────────
@@ -36,8 +33,11 @@ const OutputSchema: z.ZodType<Output> = z.object({
 });
 
 // ─── Linkage key elements ────────────────────────────────────────────────────
-// TBD: EXCHANGE_SPEC.md marks the semantic type enumeration as incomplete.
-// The following covers the listed types; extend as new types are specified.
+/**
+ * TODO:
+ * * Semantic type enumeration is incomplete.
+ * * Add a generic type.
+ */
 
 /** Constraints on name fields. */
 interface NameConstraints {
@@ -61,7 +61,7 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   maxLength: z.number().int().positive().optional(),
   // Validated as a regex character class so consuming code can safely
   // interpolate it into new RegExp(`[${allowedCharacters}]`) without injection
-  // risk.
+  // risk. Note the brackets that get added.
   allowedCharacters: z
     .string()
     .refine(
@@ -82,11 +82,14 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
 
 /** Constraints on date-of-birth fields. */
 interface DateConstraints {
+  /** Dates must be able to be parsed as valid dates. */
+  onlyValid?: boolean;
   /** Values that must not appear in the data. */
   exclude?: string[];
 }
 
 const DateConstraintsSchema: z.ZodType<DateConstraints> = z.object({
+  onlyValid: z.boolean().optional(),
   exclude: z.array(z.string()).optional(),
 });
 
@@ -96,7 +99,7 @@ interface SSNConstraints {
    * Data must conform to SSA rules (area, group, and serial numbers may not be
    * all zeros, etc.).
    */
-  ssaValid?: boolean;
+  onlyValid?: boolean;
   /**
    * Values that must not appear in the data (e.g. "123456789", "111111111").
    */
@@ -104,7 +107,7 @@ interface SSNConstraints {
 }
 
 const SSNConstraintsSchema: z.ZodType<SSNConstraints> = z.object({
-  ssaValid: z.boolean().optional(),
+  onlyValid: z.boolean().optional(),
   exclude: z.array(z.string()).optional(),
 });
 
@@ -326,21 +329,19 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * - `algorithm` — mandatory. `psi` reveals matched identifiers; `psi-c` reveals
  *   only the count.
  * - `output` — mandatory.
- * - `multiplicity` — mandatory. Per-party; combined exchange multiplicity is
- *   inferred from both copies.
+ * - `deduplicate` — mandatory. Per-party; determines if multiple inputs can be
+ *   matched to the same output.
  * - `linkageKeys` — mandatory.
  * - `legalAgreement` — mandatory if present. Exchange fails if `expirationDate`
  *   has passed.
  * - `payload` — mandatory if present.
  *
- * Constraint: `multiplicity: 'many'` requires `output.expectsOutput: true`.
+ * Constraints:
+ * - `deduplicate: true` requires `output.expectsOutput: true`.
  *
- * TBD: versioning compatibility rules (migration paths between semver
+ * TODO: versioning compatibility rules (migration paths between semver
  * versions).
  *
- * This type covers the `agreement` key of an exchange specification document.
- * The full document also contains `connection`, `metadata`, and `cleaning`
- * components (see EXCHANGE_SPEC.md).
  */
 export interface ExchangeAgreement {
   /**
@@ -369,7 +370,7 @@ export interface ExchangeAgreement {
    * pairs. The combined exchange multiplicity is inferred when both agreements
    * are compared. Consistency: mandatory.
    */
-  multiplicity: Multiplicity;
+  deduplicate: boolean;
   /**
    * Ordered list of linkage keys applied in sequence, most to least precise.
    * Consistency: mandatory.
@@ -389,7 +390,7 @@ const ExchangeAgreementBaseSchema = z.object({
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   output: OutputSchema,
-  multiplicity: MultiplicitySchema,
+  deduplicate: z.boolean(),
   linkageKeys: z.array(LinkageKeySchema).min(1),
   payload: PayloadSchema.optional(),
   legalAgreement: LegalAgreementSchema.optional(),
@@ -397,9 +398,9 @@ const ExchangeAgreementBaseSchema = z.object({
 
 export const ExchangeAgreementSchema: z.ZodType<ExchangeAgreement> =
   ExchangeAgreementBaseSchema.refine(
-    (a) => a.multiplicity !== "many" || a.output.expectsOutput,
+    (a) => !a.deduplicate || a.output.expectsOutput,
     {
-      message: "expectsOutput must be true when multiplicity is many",
+      message: "expectsOutput must be true when deduplicate is true",
       path: ["output", "expectsOutput"],
     },
   );

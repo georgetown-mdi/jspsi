@@ -17,9 +17,9 @@
     }
   },
   "scripts": {
-    "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
+    "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
     "clean": "rimraf dist",
-    "dev": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript -w",
+    "dev": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\" -w",
     "pretest": "npm run build",
     "test": "vitest run"
   },

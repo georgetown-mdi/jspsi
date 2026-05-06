@@ -4,7 +4,11 @@ title: "Exchange Specification Reference"
 
 # Exchange specification reference
 
-Exchange specifications are JSON or YAML documents that fully describe a PSI-Link exchange between two parties. They are consumed by both the web application and the CLI application. The web application provides an interactive editor for creating them; the CLI application accepts them as configuration files.
+Exchange specifications are JSON or YAML documents that fully describe a
+PSI-Link exchange between two parties. They are consumed by both the web
+application and the CLI application. The web application provides an interactive
+editor for creating them; the CLI application accepts them as configuration
+files.
 
 An exchange specification has four top-level components:
 
@@ -19,7 +23,10 @@ An exchange specification has four top-level components:
 
 ## Exchange agreement
 
-The Exchange Agreement is verified by both parties at the start of every exchange. After authentication, both parties swap their copies; if any mandatory field differs, the exchange is cancelled. Fields marked as "soft" produce a warning and an updated agreement output rather than an error.
+The Exchange Agreement is verified by both parties at the start of every
+exchange. After authentication, both parties swap their copies; if any fields
+are inconsistent, the exchange is cancelled. Fields marked as "soft" produce a
+warning and an updated agreement output rather than an error.
 
 ### `agreement.version`
 
@@ -27,7 +34,9 @@ The Exchange Agreement is verified by both parties at the start of every exchang
 *Required:* yes  
 *Consistency:* mandatory
 
-A semver string identifying the schema of this Exchange Agreement. Two versions are incompatible if no migration path exists from the lower version to the higher; in that case the exchange fails before any data is transmitted.
+A semver string identifying the schema of this Exchange Agreement. Two versions
+are incompatible if no migration path exists from the lower version to the
+higher.
 
 ### `agreement.identity`
 
@@ -35,7 +44,9 @@ A semver string identifying the schema of this Exchange Agreement. Two versions 
 *Required:* yes  
 *Consistency:* none
 
-A free-text string identifying the party holding this agreement. Included verbatim in the non-repudiation receipt. Parties may format this however they wish; common contents include name, organization, and contact information.
+A free-text string identifying the party holding this agreement. Included
+verbatim in the non-repudiation receipt. Parties may format this however they
+wish; common contents include name, organization, and contact information.
 
 ```yaml
 agreement:
@@ -48,7 +59,8 @@ agreement:
 *Required:* yes  
 *Consistency:* soft
 
-Date this Exchange Agreement was last modified. A mismatch produces a warning indicating that one party may have a stale copy.
+Date this Exchange Agreement was last modified. A mismatch produces a warning
+indicating that one party may have a stale copy.
 
 ### `agreement.algorithm`
 
@@ -56,8 +68,10 @@ Date this Exchange Agreement was last modified. A mismatch produces a warning in
 *Required:* yes  
 *Consistency:* mandatory
 
-- `psi` — reveals the intersection (matched records and their identifiers). Intended for operational data exchange.
-- `psi-c` — reveals only the cardinality of the intersection (how many records match). Intended for research and program planning.
+- `psi` — reveals the intersection (matched records and their identifiers).
+Intended for operational data exchange.
+- `psi-c` — reveals only the cardinality of the intersection (how many records
+match). Intended for research and program planning.
 
 ### `agreement.output`
 
@@ -68,32 +82,31 @@ Date this Exchange Agreement was last modified. A mismatch produces a warning in
 ```yaml
 agreement:
   output:
-    expects_output: true       # whether this party expects to receive the result
-    share_with_partner: false  # whether the other party should also receive the result
+    expects_output: true       # this party expects to receive the result
+    share_with_partner: false  # the other party expects to receive the result
 ```
 
-If `share_with_partner` is `true`, the other party's agreement must also have `expects_output: true`; a mismatch aborts the exchange.
+If `share_with_partner` is `true`, the other party's agreement must also have
+`expects_output: true`; a mismatch aborts the exchange.
 
-`expects_output` must be `true` if this party's `multiplicity` is `many`.
+`expects_output` must be `true` if this party's `deduplicate` is `true`.
 
-If exactly one party's `expects_output` is `true`, that party acts as the receiver and the other as the sender. If both parties declare `expects_output: true`, roles are assigned dynamically by exchanging dataset sizes and minimizing the total amount of data that needs to be transmitted.
+### `agreement.deduplicate`
 
-### `agreement.multiplicity`
-
-*Type:* enum: `one` | `many`  
+*Type:* boolean
 *Required:* yes  
 *Consistency:* mandatory
 
-The multiplicity of links for the party holding this agreement. The combined multiplicity of the exchange is inferred when both agreements are compared.
+Whether or not to deduplicate the inputs of the party holding this agreement.
+Deduplication results in multiple inputs potentially being matched to the same
+output.
 
 ```yaml
 agreement:
-  multiplicity: one
+  deduplicate: false
 ```
 
-Multiplicity determines how the cascade algorithm handles records after each round.
-
-Any party indicating `many` must have `expects_output: true`.
+Any party indicating `true` must have `expects_output: true`.
 
 ### `agreement.linkage_keys`
 
@@ -101,7 +114,9 @@ Any party indicating `many` must have `expects_output: true`.
 *Required:* yes  
 *Consistency:* mandatory
 
-An ordered list of linkage keys applied in sequence from most to least precise. Each round of the PSI protocol matches only records not yet resolved in a prior round.
+An ordered list of linkage keys applied in sequence from most to least precise.
+Each round of the PSI protocol matches only records not yet resolved in a prior
+round.
 
 ```yaml
 agreement:
@@ -134,16 +149,23 @@ agreement:
 |-------|------|----------|-------------|
 | `name` | string | yes | Human-readable name for this key |
 | `elements` | array | yes | Data elements combined to form the key |
-| `swap` | array | no | An array of two elements by `semantic_type` or `name` for which the receiver or sender will swap their data elements for this key (see below) |
+| `swap` | array | no | An array of two elements by `semantic_type` or `name`
+for which the receiver or sender will swap their data elements for this key (see
+below) |
 
 #### Element fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `semantic_type` | string | yes | The type of PII (see Semantic types) |
-| `name` | string | no | Optional name allowing the same `semantic_type` to be used in multiple elements within the same linkage rule |
-| `generate_combinations` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `deletions` generates all single-character deletions up to `max_length`, matching values within one edit distance |
-| `constraints` | object | no | Data standards this party commits to meeting when preparing their data |
+| `name` | string | no | Optional name allowing the same `semantic_type` to be
+used in multiple elements within the same linkage rule |
+| `generate_combinations` | string | no | Method for generating additional
+values for fuzzy matching: `transpositions` generates all two-digit
+transpositions; `deletions` generates all single-character deletions up to
+`max_length`, matching values within one edit distance |
+| `constraints` | object | no | Data standards this party commits to meeting
+when preparing their data |
 
 #### Semantic types
 
@@ -157,27 +179,44 @@ agreement:
 | `phone_number` | Phone number |
 | `email_address` | Email Address |
 
-TBD: Full enumeration of supported semantic types.
+TODO: Full enumeration of supported semantic types.
 
 #### Constraints
 
-Constraints are not enforced by the application — they are standards that both parties independently commit to meeting when preparing their data. The application will warn if a constraint is violated, but it will not transform the data to satisfy it. Each party is responsible for ensuring their data conforms before running the exchange.
+Constraints are not enforced by the application — they are standards that both
+parties independently commit to meeting when preparing their data. The
+application will warn if a constraint is violated, but it will not transform the
+data to satisfy it. Each party is responsible for ensuring their data conforms
+before running the exchange.
 
-Dates of birth must be formatted as `YYYYMMDD` and Social Security Numbers as `XXXXXXXXX` (a nine-character string, not a number). Converting raw input to these formats is the responsibility of each party's data cleaning pipeline.
+Dates of birth must be formatted as `YYYYMMDD` and Social Security Numbers as
+`XXXXXXXXX` (a nine-character string, not a number). Converting raw input to
+these formats is the responsibility of each party's data cleaning pipeline.
 
 | Field | Type | Applies to | Description |
 |-------|------|------------|-------------|
-| `ssa_rules` | boolean | `ssn`, `ssn_last4` | Data must conform to Social Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs) |
-| `exclude` | array of strings | any | Values that must not appear in the data; useful for filtering placeholder values such as `123456789` and `111111111` for SSNs |
-| `max_length` | integer | name fields | Field must be truncated to at most this length |
-| `allowed_characters` | string | name fields | Regex character class; characters outside it must have been removed |
-| `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr., etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
+| `validOnly` | boolean | `ssn`, `ssn_last4` | Data must conform to Social
+Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf)
+for valid SSNs) |
+| `validOnly` | boolean | `date_of_birth` | Must be a valid date |
+| `exclude` | array of strings | any | Values that must not appear in the data;
+useful for filtering placeholder values such as `123456789` and `111111111` for
+SSNs |
+| `max_length` | integer | name fields | Field must be truncated to at most this
+length |
+| `allowed_characters` | string | name fields | Regex character class;
+characters outside it must have been removed |
+| `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr.,
+etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
 
-TBD: Full constraint schema with valid values for each field.
+TODO: Full constraint schema with valid values for each field.
 
 #### Swapped keys
 
-When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency.
+When a `swap` array is present, the receiver transmits a linkage key generated
+with the two named elements swapped, while the sender generates a linkage key
+with un-swapped elements. For example, a key might match first name swapped with
+last name to catch data entry errors where the names are reversed at one agency.
 
 ### `agreement.legal_agreement`
 
@@ -185,7 +224,8 @@ When a `swap` array is present, the receiver transmits a linkage key generated w
 *Required:* no  
 *Consistency:* mandatory if present
 
-Reference to the legal data sharing agreement authorizing this exchange. If `expiration_date` has passed, the exchange fails before any data is transmitted.
+Reference to the legal data sharing agreement authorizing this exchange. If
+`expiration_date` has passed, the exchange fails before any data is transmitted.
 
 ```yaml
 agreement:
@@ -200,7 +240,10 @@ agreement:
 *Required:* no  
 *Consistency:* mandatory if present
 
-Additional data columns transmitted after the intersection is identified, over the established encrypted channel. Each party independently specifies what they will send and what they expect to receive. Column descriptions sent to the partner constitute a data dictionary.
+Additional data columns transmitted after the intersection is identified, over
+the established encrypted channel. Each party independently specifies what they
+will send and what they expect to receive. Column descriptions sent to the
+partner constitute a data dictionary.
 
 ```yaml
 agreement:
@@ -219,7 +262,8 @@ agreement:
 
 ## Connection
 
-TBD: All of the Connection section is a sketch and shouldn't be referenced for implementation.
+NOTE: All of the Connection section is a sketch and shouldn't be referenced for
+implementation.
 
 Specifies the communication channel and any authentication material.
 
@@ -228,7 +272,9 @@ Specifies the communication channel and any authentication material.
 *Type:* enum: `webrtc` | `sftp`  
 *Required:* yes
 
-The communication channel for the exchange. See [DESCRIPTION.md](DESCRIPTION.md) and [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure requirements for each channel.
+The communication channel for the exchange. See [DESCRIPTION.md](DESCRIPTION.md)
+and [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure requirements for each
+channel.
 
 ### `connection.servers`
 
@@ -265,14 +311,17 @@ connection:
       path: /exchanges/agency-a-agency-b/
 ```
 
-TBD: Full schema for SFTP authentication methods (password, SSH key, certificate).
+TODO: Full schema for SFTP authentication methods (password, SSH key,
+certificate).
 
 ### `connection.authentication`
 
 *Type:* object  
 *Required:* no
 
-Shared PAKE token for SPAKE2 mutual authentication. If omitted for SFTP, trust is delegated to the SFTP server's access controls rather than establishing an independent encrypted session.
+Shared PAKE token for SPAKE2 mutual authentication. If omitted for SFTP, trust
+is delegated to the SFTP server's access controls rather than establishing an
+independent encrypted session.
 
 ```yaml
 connection:
@@ -280,13 +329,16 @@ connection:
     pake_token: "<base64-encoded shared secret>"
 ```
 
-TBD: Encoding, minimum entropy requirements, and generation procedure. The web application generates tokens using the browser's `crypto.getRandomValues`.
+TODO: Encoding, minimum entropy requirements, and generation procedure. The web
+application generates tokens using the browser's `crypto.getRandomValues`.
 
 ---
 
 ## Input metadata
 
-Optional field-level descriptions of the input dataset. If omitted, semantic types are inferred from column names. If no identifier columns are specified, output row indices reference positions in the input file.
+Optional field-level descriptions of the input dataset. If omitted, semantic
+types are inferred from column names. If no identifier columns are specified,
+output row indices reference positions in the input file.
 
 ```yaml
 metadata:
@@ -313,17 +365,24 @@ metadata:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Column name in the input CSV |
-| `semantic_type` | string | no | Semantic type (see Semantic Types above); inferred from name if omitted |
-| `role` | enum | no | `linkage`, `identifier`, `payload`, or `ignored`; inferred if omitted |
-| `description` | string | no | Human-readable description; shared with partner for payload columns |
+| `semantic_type` | string | no | Semantic type (see Semantic Types above);
+inferred from name if omitted |
+| `role` | enum | no | `linkage`, `identifier`, `payload`, or `ignored`;
+inferred if omitted |
+| `description` | string | no | Human-readable description; shared with partner
+for payload columns |
 
 ---
 
 ## Data cleaning pipelines
 
-TBD: This whole section is a sketch and shouldn't be referenced for implementation.
+NOTE: This whole section is a sketch and shouldn't be referenced for
+implementation.
 
-Optional per-column transformation pipelines applied before linkage key generation. Each pipeline takes one input column, applies a sequence of functions, and produces a named cleaned output. Linkage key elements reference cleaned outputs by name.
+Optional per-column transformation pipelines applied before linkage key
+generation. Each pipeline takes one input column, applies a sequence of
+functions, and produces a named cleaned output. Linkage key elements reference
+cleaned outputs by name.
 
 ```yaml
 cleaning:
@@ -361,13 +420,17 @@ cleaning:
 | `to_lower_case` | Convert to lowercase | — |
 | `parse_date` | Reformat a date string | `input_format`, `output_format` |
 | `substring` | Extract a substring | `start` (0-indexed), `length` |
-| `phonetic` | Apply a phonetic algorithm | `algorithm`: `soundex` \| `metaphone` \| TBD |
+| `phonetic` | Apply a phonetic algorithm | `algorithm`: `soundex` \|
+`metaphone` \| TBD |
 | `strip_titles` | Remove name prefixes and suffixes | TBD |
 
-TBD: Full function library with parameter schemas, error behavior (e.g., what happens when `parse_date` receives a value that does not match `input_format`), and examples.
+TODO: Full function library with parameter schemas, error behavior (e.g., what
+happens when `parse_date` receives a value that does not match `input_format`),
+and examples.
 
 ---
 
 ## Full example
 
-TBD: A complete, annotated exchange specification document in YAML and JSON covering all components and the most common configurations.
+TODO: A complete, annotated exchange specification document in YAML and JSON
+covering all components and the most common configurations.
