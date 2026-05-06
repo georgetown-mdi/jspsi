@@ -11,3 +11,4 @@ count.txt
 *.swp
 terraform.tfvars
 scratch
+*.csv
