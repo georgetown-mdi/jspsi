@@ -47,6 +47,10 @@ The output file will contain the association-table mapping between each partners
 
 For more information, see [apps/cli](apps/cli/).
 
+# Podman
+
+[Podman](https://podman.io/) can be used as a drop-in replacement for Docker. The only change needed is to replace calls to the `docker` executable with calls to `podman`.
+
 # CLI App
 
 ## SFTP parameters
