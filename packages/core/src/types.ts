@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type AssociationTable = [Array<number>, Array<number>];
 
 export type Connection = {
@@ -41,3 +43,9 @@ export interface LinkageKeyFieldDefinition {
 }
 
 export type LinkageKeyDefinition = Array<LinkageKeyFieldDefinition>;
+
+export const AlgorithmSchema = z.enum(["psi", "psi-c"]);
+export type Algorithm = z.infer<typeof AlgorithmSchema>;
+
+export const PsiRoleSchema = z.enum(["sender", "receiver"]);
+export type PsiRole = z.infer<typeof PsiRoleSchema>;

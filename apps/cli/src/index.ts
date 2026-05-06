@@ -38,7 +38,7 @@ async function run() {
   const cli = yargs()
     .scriptName("psi-link")
     .command("invite", "Generate an invitation and wait to execute exchange")
-    .command("join", "View details and choose to execute exchange")
+    .command("accept", "View details and choose to execute exchange")
     .command(
       [`exchange`, "$0"],
       "Link data using private set intersection",
@@ -56,7 +56,7 @@ async function run() {
         }
         cmd = cmd.option("config", {
           type: "string",
-          describe: "optional yaml config file",
+          describe: "optional config file",
         });
 
         return cmd.demand(numRequiredPositionals);
@@ -105,13 +105,20 @@ async function run() {
 
   let allArgs = { ...positionalArgs, ...otherArgs };
 
+  // If a config file exists, we read it but overwrite options with arguments
+  // given on the command line.
   const configFile = allArgs["config"];
   delete allArgs["config"];
 
   if (configFile && typeof configFile === "string") {
+    const configContent = fs.readFileSync(configFile, "utf8");
+    const parsed = configFile.toLowerCase().endsWith("json")
+      ? JSON.parse(configContent)
+      : YAML.parse(configContent);
+
     const configOptions = Object.fromEntries(
       Object.entries(
-        flattenObject(YAML.parse(fs.readFileSync(configFile, "utf8")), "", "-"),
+        flattenObject(parsed, "", "-"),
       ).map(([key, value]) => {
         return [optionPathMap[key] || key, value];
       }),
