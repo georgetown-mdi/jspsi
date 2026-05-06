@@ -7,7 +7,6 @@ import json from '@rollup/plugin-json'
 import typescript from "@rollup/plugin-typescript";
 
 const require = createRequire(import.meta.url);
-// eslint-disable-next-line import/no-commonjs
 const pkg = require('./package.json');
 
 export default defineConfig({
