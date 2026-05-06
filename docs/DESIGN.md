@@ -36,7 +36,7 @@ The PSI base function is a lightly modified version of OpenMined's [PSI](https:/
 4. The client can then remove their own key from their own data, leaving them with client and server datasets encrypted only by the server.
 5. A straightforward string comparison allows the client to see which elements they have in common. They can then choose to share the association table back with the server.
 
-The terminology of "server" and "client" derives from OpenMined's PSI implementation and is used here to be consistent with their documentation. However, "server" and "client" are disfavored throughout the rest of this project as there are many other instances of servers and clients, and OpenMined's PSI includes no networking coding. Most often we will want to execute the protocol so that both parties learn the outcome, making the roles they play arbitrary.
+The terminology of "server" and "client" derives from OpenMined's PSI implementation and is used here to be consistent with their documentation. However, "server" and "client" are disfavored throughout the rest of this project as there are many other instances of servers and clients, and OpenMined's PSI includes no networking coding. Most often we will want to execute the protocol so that both parties learn the outcome, making the roles they play arbitrary. When it is necessary to distinguish between the two roles, we will instead use *receiver* and *sender* respectively.
 
 ## Linkage keys
 
@@ -62,7 +62,7 @@ The practical upper limit on the number of records for browser-based execution i
 
 ### PSI-C
 
-PSI-C is also executed by sequentially executing deterministic linkages. Membership anonymity is granted by the server permuting the client's doubly-encrypted data before returning it to them. The results of multiple linkage keys can be combined so long as the server uses a consistent permutation algorithm for each round. The association map in the permuted space has the same size as one in the original space. This allows the cardinality to be measured without revealing which specific members are in common.
+PSI-C is also executed by sequentially executing deterministic linkages. Membership anonymity is granted by the sender permuting the receiver's doubly-encrypted data before returning it to them. The results of multiple linkage keys can be combined so long as the sender uses a consistent permutation algorithm for each round. The association map in the permuted space has the same size as one in the original space. This allows the cardinality to be measured without revealing which specific members are in common.
 
 # Exchange specification
 
@@ -73,23 +73,20 @@ The parameters necessary to execute an exchange are written down into a JSON or 
 When two parties meet to exchange data, they must first share and verify an *Exchange Agreement* that contains all of the particulars on what will be shared and what will be done with it. Exchange Agreements can be developed by hand or interactively using an application described below. They can be shared over conventional communication channels or become part of an invitation to exchange data relying on an ephemeral token.
 
 After authentication has taken place at the start of each exchange, both parties swap Exchange Agreements; if any field is inconsistent with their own copy (with exceptions noted below), the exchange is cancelled. The Exchange Agreement includes:
-* A version number identifying the schema of the Exchange Agreement document. If schema are incompatible, the exchange may fail.
-* Identity strings for both parties, typically containing the name, organization, and contact information for a person at each party.
+* A semantic versioning number identifying the schema of the Exchange Agreement document. If no schema migration exists, the exchange will fail.
+* An identity string, typically containing the name, organization, and contact information for a person executing the agreement.
 * A date field, indicating when the Exchange Agreement was last modified.
-* Whether or not both parties will receive the output.
-* Optionally, which role either party will play.
-  * Asymmetric data exchanges have roles implied by what the PSI protocol reveals.
-  * Symmetric exchanges will require less data to be transmitted if the party with the smaller dataset is the "client".
-  * If a specific role isn't given, the "server"/"client" distinction can be made arbitrarily by the order parties initiate connections, or parties can exchange the sizes of their datasets to decide what is optimal.
+* Whether or not the party expects to receive output.
+* Whether or not the party expects their partner to receive output.
 * If the algorithm is PSI or PSI-C.
-* The multiplicity of the linkage: one-to-one, one-to-many, or many-to-many. For one-to-many, the exchange agreement must specify which party's records are the constrained side.
+* Whether or not this party's records should be deduplicated, i.e. if the linkage is one-to-X or many-to-X.
 * The linkage keys themselves. This includes a descriptive name of the key, the semantic type of each combined data element (e.g. first name, SSN, phone number, etc), and any constraints those data elements must fulfill.
-  * Some examples: dates-of-birth fields have specific formats; social security numbers can be subject to validation; names may have limited character sets, have titles and suffixes prohibited, or be truncated to a maximum length.
-  * Linkage keys may also indicate that two elements must be transposed, in which case the role of each party implies who produces the transposed and who produces the un-transposed version. For instance, a key might involve matching first name swapped with last name and "clients" transpose their data elements while "servers" do not.
+  * Some examples: dates-of-birth fields have specific formats; Social Security Numbers can be subject to validation against Social Security Administration rules; names may have limited character sets, have titles and suffixes prohibited, or be truncated to a maximum length.
+  * Linkage keys may also indicate that two elements must be swapped, in which case the role of each party implies who produces the swapped and who produces the un-swapped version. For instance, a key might involve matching first name swapped with last name, and receivers swap their data elements while senders do not.
 * Whether or not additional data will be transferred for matched elements, and if so the names of the elements to be sent and to be received.
 * An optional reference to the legal agreement enabling the data exchange and its expiration date. If the legal agreement has expired, the exchange will fail.
 
-As noted, not all fields require strict consistency. Exchange Agreements that do not have the same version number, identity string, or dates by default cause a warning to be issued instead of raising an error. An Exchange Agreement with the updated values is output and the user can supply it in the future.
+As noted, not all fields require strict consistency. Exchange Agreements that do not have the same date by default cause a warning to be issued instead of raising an error. An Exchange Agreement with the updated value is output and the user can supply it in the future.
 
 Note that data cleaning is explicitly not part of the Exchange Agreement. It is up to each party to clean their own data to meet the standards required, and if they fail to do so they will simply degrade the quality of the match. Violation of linkage key constraints results in a warning, not an error. 
 
@@ -120,7 +117,7 @@ Additional channels will be selected based on infrastructure and deployment conv
 
 ## Authentication
 
-Before establishing connections, clients need to ensure that they are communicating with the correct partner. They can either share a secret that will be used to further encrypt their data, or they can "meet in a trusted spot".
+Before establishing connections, parties need to ensure that they are communicating with the correct partner. They can either share a secret that will be used to further encrypt their data, or they can "meet in a trusted spot".
 
 In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a Password Authenticated Key Exchange (PAKE) protocol, such as SPAKE2 with the shared token as the password input.
 
@@ -182,9 +179,9 @@ The linkage protocol, exchange agreements, and communication layer described in 
 
 When adopting the software, program officers are likely to first conduct exchanges with the web application in order to establish the business case for using the software, either by operating on previously established data sharing agreements or running a PSI-C algorithm to measure the size of shared membership. This bootstrapping process allows for setting and exporting exchange parameters, which can be handed off to IT professionals who can automate the procedure. They are likely to use the command line application as it can be more easily integrated with other data processes, such as exporting the data to be shared and ingesting the data received.
 
-## Base library
+## Core library
 
-The library includes the base PSI function, Exchange Agreement verification, input ingestion and cleaning, linkage key generation, the execution of the linkage algorithms over PSI, and the generation and signing of the receipt. The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, Exchange Agreement verification, input ingestion and cleaning, linkage key generation, the execution of the linkage algorithms over PSI, and the generation and signing of the receipt. The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
 
 ## Web application
 

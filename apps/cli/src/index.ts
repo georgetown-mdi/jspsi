@@ -17,7 +17,7 @@ import {
   linkViaPSI,
   secondToPartyLinkageKeyDefinitions,
   setLogPrefixer
-} from "base-lib"
+} from "core"
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 

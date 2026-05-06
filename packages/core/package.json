@@ -1,14 +1,14 @@
 {
-  "name": "base-lib",
+  "name": "core",
   "version": "1.0.0",
   "description": "Library for linkage with private set intersection",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
   "type": "module",
-  "main": "./dist/base-lib.cjs",
-  "module": "./dist/base-lib.esm.js",
+  "main": "./dist/core.cjs",
+  "module": "./dist/core.esm.js",
   "types": "./dist/index.d.ts",
-  "browser": "./dist/base-lib.umd.js",
+  "browser": "./dist/core.umd.js",
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin @rollup/plugin-typescript",
     "clean": "rimraf dist",

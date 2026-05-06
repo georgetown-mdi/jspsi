@@ -21,11 +21,11 @@ on:
       'apps/web/postcss.config.cjs',
       'apps/web/tsconfig.json',
       'apps/web/vite.config.ts',
-      'packages/base-lib/src/**',
-      # 'packages/base-lib/test/**',
-      'packages/base-lib/package.json',
-      'packages/base-lib/rollup.config.ts',
-      'packages/base-lib/tsconfig.json'
+      'packages/core/src/**',
+      # 'packages/core/test/**',
+      'packages/core/package.json',
+      'packages/core/rollup.config.ts',
+      'packages/core/tsconfig.json'
     ]
 
   workflow_call:
@@ -62,11 +62,11 @@ jobs:
             ${{runner.os}}-node-
       - name: Build server
         run: |
-          npm i . -w packages/base-lib -w apps/web
-          npm run -w packages/base-lib -w apps/web build
+          npm i . -w packages/core -w apps/web
+          npm run -w packages/core -w apps/web build
       - name: Run tests
         run: |
-          npm run -w packages/base-lib test
+          npm run -w packages/core test
       - name: Package for Elastic Beanstalk
         run: |
           cp -a apps/web/deploy/aws_eb/. apps/web/.output

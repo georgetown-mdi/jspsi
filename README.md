@@ -11,8 +11,8 @@ This repository contains two applications, a web-based one that allows peer-to-p
    * On a Mac: Install [Homebrew](https://brew.sh/) and execute `brew install node`
    * On Alpine Linux: `apk add nodejs npm`
    * On other Linux variants, see [here](https://nodejs.org/en/download/package-manager/all).
-2. Run `npm install . -w packages/base-lib -w apps/web`
-3. Run `npm run -w packages/base-lib build`
+2. Run `npm install . -w packages/core -w apps/web`
+3. Run `npm run -w packages/core build`
 4. Run `npm run -w apps/web dev`
 5. Visit [http://localhost:3000](http://localhost:3000)
 

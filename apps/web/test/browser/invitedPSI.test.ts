@@ -4,14 +4,14 @@ import { expect, test } from 'vitest'
 
 import Peer from "peerjs";
 
-import { PSIParticipant } from 'base-lib';
+import { PSIParticipant } from 'core';
 // @ts-ignore this is really there
 import PSI from '@openmined/psi.js/psi_wasm_web'
 
 import { sortAssociationTable } from '../utils/associationTable.js';
 
 import type { DataConnection } from 'peerjs';
-import type { Config as PSIConfig } from "base-lib"
+import type { Config as PSIConfig } from "core"
 import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 
 interface AddressInfo {

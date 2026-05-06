@@ -14,7 +14,7 @@ import {
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 
-import { ProcessState } from 'base-lib';
+import { ProcessState } from 'core';
 
 import type { PaperProps } from '@mantine/core';
 

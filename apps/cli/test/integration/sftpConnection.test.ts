@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { SFTPConnection } from 'base-lib'
+import { SFTPConnection } from 'core'
 
 import { SSH2SFTPClientAdapter } from '../../src/connection/ssh2SftpAdapter'
 

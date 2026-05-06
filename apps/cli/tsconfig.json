@@ -11,6 +11,6 @@
     "rollup.config.ts"
   ],
   "references": [
-    { "path": "../../packages/base-lib" }
+    { "path": "../../packages/core" }
   ]
 }

@@ -10,7 +10,7 @@
     "node_modules",
   ],
   "references": [
-    { "path": "../../packages/base-lib" }
+    { "path": "../../packages/core" }
   ],
   "compilerOptions": {
     "target": "ES2022",
@@ -33,7 +33,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "baseUrl": ".",
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,
 

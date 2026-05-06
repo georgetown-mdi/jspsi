@@ -4,8 +4,8 @@ Node and NPM must be installed.
 
 From the repository root, run:
 
-1. `npm i . -w packages/base-lib -w apps/cli`
-2. `npm run -w packages/base-lib build`
+1. `npm i . -w packages/core -w apps/cli`
+2. `npm run -w packages/core build`
 
 To connect:
 
@@ -54,7 +54,7 @@ docker build -t vdorie/psi-link:latest .
 
 ## Testing container
 
-This runs an SFTP server on localhost that can be used for testing. After starting it, you can connect via `sftp://usera:usera@localhost:2222/psi` and `sftp://userb:userb@localhost:2222/psi`. Files are "transfered" in `packages/base-lib/test/container/sftp/srv`.
+This runs an SFTP server on localhost that can be used for testing. After starting it, you can connect via `sftp://usera:usera@localhost:2222/psi` and `sftp://userb:userb@localhost:2222/psi`. Files are "transfered" in `packages/core/test/container/sftp/srv`.
 
 ### If on Mac OS or other ARM
 

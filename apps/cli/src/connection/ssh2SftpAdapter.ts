@@ -1,5 +1,5 @@
 import Ssh2SftpClient from 'ssh2-sftp-client';
-import { FileInfo, GetOptions, PutOptions, SFTPClient } from 'base-lib';
+import { FileInfo, GetOptions, PutOptions, SFTPClient } from 'core';
 
 export class SSH2SFTPClientAdapter implements SFTPClient {
   private client: Ssh2SftpClient;

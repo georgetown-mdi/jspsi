@@ -3,7 +3,7 @@
     { "path": "." },
     { "path": "apps/web" },
     { "path": "apps/cli" },
-    { "path": "packages/base-lib" },
+    { "path": "packages/core" },
   ],
   "settings": {
     "typescript.tsdk": "node_modules/typescript/lib",

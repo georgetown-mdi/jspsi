@@ -32,7 +32,7 @@ import {
   keyAliases,
   linkViaPSI,
   firstToPartyLinkageKeyDefinitions as serverLinkageKeyDefinitions,
-} from 'base-lib'
+} from 'core'
 import { openPeerConnection,  waitForPeerId } from '@psi/server';
 import { createAndSharePeerId } from '@psi/client';
 
@@ -42,7 +42,7 @@ import { StatusFactory } from '@components/Status';
 
 import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
 
-import type { Config as PSIConfig } from 'base-lib';
+import type { Config as PSIConfig } from 'core';
 
 import type { LinkSession } from '@utils/sessions';
 // import { sortAssociationTable } from 'test/utils/associationTable';

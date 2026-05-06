@@ -1,7 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/base-lib" },
+    { "path": "packages/core" },
     { "path": "apps/web" },
     { "path": "apps/cli" }
   ]
