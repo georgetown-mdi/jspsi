@@ -66,16 +66,14 @@ PSI-C is also executed by sequentially executing deterministic linkages. Members
 
 # Exchange specification
 
-The parameters necessary to execute an exchange are written down into a JSON or YAML documents which are supplied to an application. The components of an exchange specification include: an Exchange Agreement which describes what will be exchanged and how, connection information which describes where the exchange will take place, metadata the describes the fields and their roles, and data cleaning transformations which simply provide convenience for low-tech users.
+The parameters necessary to execute an exchange are written down into a JSON or YAML documents which are supplied to an application. The components of an exchange specification include: the linkage terms which describes what will be exchanged and how, connection information which describes where the exchange will take place, metadata the describes the fields and their roles, and data cleaning transformations which simply provide convenience for low-tech users.
 
-## Exchange Agreement
+## Linkage terms
 
-When two parties meet to exchange data, they must first share and verify an *Exchange Agreement* that contains all of the particulars on what will be shared and what will be done with it. Exchange Agreements can be developed by hand or interactively using an application described below. They can be shared over conventional communication channels or become part of an invitation to exchange data relying on an ephemeral token.
-
-After authentication has taken place at the start of each exchange, both parties swap Exchange Agreements; if any field is inconsistent with their own copy (with exceptions noted below), the exchange is cancelled. The Exchange Agreement includes:
-* A semantic versioning number identifying the schema of the Exchange Agreement document. If no schema migration exists, the exchange will fail.
+Every time two parties meet to exchange data and after authentication has taken place, both parties swap a document that describes their terms for the linkage, including what will be revealed and what will be done with it. If there is any disagreement or inconsistency , the exchange is cancelled. Linkage terms include:
+* A semantic versioning number identifying the schema of the linkage terms. If no schema migration exists, the exchange will fail.
 * An identity string, typically containing the name, organization, and contact information for a person executing the agreement.
-* A date field, indicating when the Exchange Agreement was last modified.
+* A date field, indicating when the linkage terms were last modified.
 * Whether or not the party expects to receive output.
 * Whether or not the party expects their partner to receive output.
 * If the algorithm is PSI or PSI-C.
@@ -86,9 +84,9 @@ After authentication has taken place at the start of each exchange, both parties
 * Whether or not additional data will be transferred for matched elements, and if so the names of the elements to be sent and to be received.
 * An optional reference to the legal agreement enabling the data exchange and its expiration date. If the legal agreement has expired, the exchange will fail.
 
-As noted, not all fields require strict consistency. Exchange Agreements that do not have the same date by default cause a warning to be issued instead of raising an error. An Exchange Agreement with the updated value is output and the user can supply it in the future.
+As noted, not all fields require strict consistency. Linkage terms that do not have the same date by default cause a warning to be issued instead of raising an error. A set of linkage terms with the updated value is output and the user can supply it in the future.
 
-Note that data cleaning is explicitly not part of the Exchange Agreement. It is up to each party to clean their own data to meet the standards required, and if they fail to do so they will simply degrade the quality of the match. Violation of linkage key constraints results in a warning, not an error. 
+Note that data cleaning is explicitly not part of the linkage terms. It is up to each party to clean their own data to meet the standards required, and if they fail to do so they will simply degrade the quality of the match. Violation of linkage key constraints results in a warning, not an error. 
 
 ## Communication
 
@@ -181,7 +179,11 @@ When adopting the software, program officers are likely to first conduct exchang
 
 ## Core library
 
-The core library includes the base PSI function, Exchange Agreement verification, input ingestion and cleaning, linkage key generation, the execution of the linkage algorithms over PSI, and the generation and signing of the receipt. The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, the execution of the linkage algorithms over PSI, and the generation and signing of the receipt. The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+
+## Command line application
+
+The command line application enables the automation of all exchange operations and can be integrated into data transformations. Recurring exchanges can be executed through external schedulers or orchestrators, making it the preferred interface for IT professionals operationalizing exchanges that program officers established via the web application.
 
 ## Web application
 
@@ -193,9 +195,9 @@ If the browser window is left open, it runs scheduled exchanges at the appropria
 
 The web application includes a feature to invite parties to conduct exchanges. Users can generate a shared secret for their partner, instantiate an ephemeral peer coordination server using a serverless compute platform, generate an additional secret for use with that coordination server, and transfer the necessary information to the other party using an existing communication channel.
 
-## Command line application
+# User journey
 
-The command line application enables the automation of all exchange operations and can be integrated into data transformations. Recurring exchanges can be executed through external schedulers or orchestrators, making it the preferred interface for IT professionals operationalizing exchanges that program officers established via the web application.
+A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save *output*. Rest TBD. 
 
 # Possible extensions
 

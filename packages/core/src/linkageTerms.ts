@@ -17,12 +17,12 @@ import { camelizeKeys } from "./utils/camelizeKeys.js";
 export interface Output {
   /**
    * Whether this party expects to receive the intersection result. Requires
-   * the partner's agreement to also have `shareWithPartner: true`.
+   * the partner's linkage terms to also have `shareWithPartner: true`.
    */
   expectsOutput: boolean;
   /**
    * Whether the other party should also receive the result. Requires the
-   * partner's agreement to also have `expectsOutput: true`.
+   * partner's linkage terms to also have `expectsOutput: true`.
    * */
   shareWithPartner: boolean;
 }
@@ -359,14 +359,14 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   expirationDate: z.iso.date(),
 });
 
-// ─── Exchange Agreement ──────────────────────────────────────────────────────
+// ─── Linkage Terms -----──────────────────────────────────────────────────────
 
 /**
- * The complete exchange agreement for one party. Each party holds their own
+ * The complete set of linkage terms for one party. Each party holds their own
  * copy; after authentication both parties swap copies and verify that all
- * mandatory fields match. A mismatch on a mandatory field cancels the exchange;
- * a mismatch on a soft field (currently only `date`) produces a warning and an
- * updated agreement output.
+ * mandatory fields are consistent. A mismatch on a mandatory field cancels the
+ * exchange; a mismatch on a soft field (currently only `date`) produces a
+ * warning and an updated set of terms being output.
  *
  * Fields and their consistency requirements:
  * - `version` — mandatory. Two versions are incompatible if no migration path
@@ -397,21 +397,21 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * versions).
  *
  */
-export interface ExchangeAgreement {
+export interface LinkageTerms {
   /**
    * Semver string identifying the schema version. Compatibility is checked at
    * exchange time.
    */
   version: string;
   /**
-   * Free-text string identifying the party holding this agreement (e.g. name,
-   * organization, contact info). Included verbatim in the non-repudiation
+   * Free-text string identifying the party holding these linkage terms (e.g.
+   * name organization, contact info). Included verbatim in the non-repudiation
    * receipt.
    * Consistency: none — parties may differ.
    */
   identity: string;
   /**
-   * Date this agreement was last modified (ISO 8601, YYYY-MM-DD).
+   * Date these linkage terms were last modified (ISO 8601, YYYY-MM-DD).
    * Consistency: soft — a mismatch warns rather than cancels the exchange.
    */
   date: string;
@@ -419,16 +419,13 @@ export interface ExchangeAgreement {
   algorithm: Algorithm;
   output: Output;
   /**
-   * Whether this party's records may match more than once. `one` means each
-   * record matches at most once; `many` means a record may appear in multiple
-   * pairs. The combined exchange multiplicity is inferred when both agreements
-   * are compared. Consistency: mandatory.
+   * Whether this party's records may match more than one of the partners'.
    */
   deduplicate: boolean;
   /**
-   * Canonical, normalized form of each PII element that participates in
-   * linkage. Linkage key elements and cleaning pipeline outputs reference
-   * these fields by name. Consistency: mandatory.
+   * Standardized form of each PII element that participates in linkage. Linkage
+   * key elements and cleaning pipeline outputs reference these fields by name.
+   * Consistency: mandatory.
    */
   linkageFields: LinkageField[];
   /**
@@ -440,9 +437,9 @@ export interface ExchangeAgreement {
   legalAgreement?: LegalAgreement;
 }
 
-// ExchangeAgreementBaseSchema is not annotated as ZodType<ExchangeAgreement>
+// LinkageTermsBaseSchema is not annotated as ZodType<LinkageTerms>
 // because the concrete ZodObject type is needed to chain .refine().
-const ExchangeAgreementBaseSchema = z.object({
+const LinkageTermsBaseSchema = z.object({
   version: z
     .string()
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
@@ -457,8 +454,8 @@ const ExchangeAgreementBaseSchema = z.object({
   legalAgreement: LegalAgreementSchema.optional(),
 });
 
-export const ExchangeAgreementSchema: z.ZodType<ExchangeAgreement> =
-  ExchangeAgreementBaseSchema.refine(
+export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
+  LinkageTermsBaseSchema.refine(
     (a) => !a.deduplicate || a.output.expectsOutput,
     {
       message: "expectsOutput must be true when deduplicate is true",
@@ -498,21 +495,21 @@ export const ExchangeAgreementSchema: z.ZodType<ExchangeAgreement> =
 // ─── Parse ──────────────────────────────────────────────────────────────────-
 
 /**
- * Parse and validate a raw value as an {@link ExchangeAgreement}.
+ * Parse and validate a raw value as an {@link LinkageTerms}.
  * Snake_case keys in the input are converted to camelCase before validation,
  * so JSON/YAML from disk can be passed directly.
  *
  * @throws {ZodError} if validation fails.
  */
-export function parseExchangeAgreement(raw: unknown): ExchangeAgreement {
-  return ExchangeAgreementSchema.parse(camelizeKeys(raw));
+export function parseLinkageTerms(raw: unknown): LinkageTerms {
+  return LinkageTermsSchema.parse(camelizeKeys(raw));
 }
 
 /**
- * Non-throwing version of {@link parseExchangeAgreement}.
+ * Non-throwing version of {@link parseLinkageTerms}.
  * Returns a Zod `SafeParseReturnType` with `success` and either `data` or
  * `error`.
  */
-export function safeParseExchangeAgreement(raw: unknown) {
-  return ExchangeAgreementSchema.safeParse(camelizeKeys(raw));
+export function safeParseLinkageTerms(raw: unknown) {
+  return LinkageTermsSchema.safeParse(camelizeKeys(raw));
 }

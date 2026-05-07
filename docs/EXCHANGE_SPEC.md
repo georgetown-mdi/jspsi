@@ -14,55 +14,55 @@ An exchange specification has four top-level components:
 
 | Component | Required | Description |
 |-----------|----------|-------------|
-| `agreement` | yes | What will be exchanged and how; verified by both parties |
+| `linkage_terms` | yes | What will be exchanged and how; verified by both
+parties |
 | `connection` | yes | Where and how the exchange will take place |
 | `metadata` | no | Descriptions of input fields and their roles |
 | `cleaning` | no | Data transformations applied before linkage |
 
 ---
 
-## Exchange agreement
+## Linkage terms
 
-The Exchange Agreement is verified by both parties at the start of every
-exchange. After authentication, both parties swap their copies; if any fields
-are inconsistent, the exchange is cancelled. Fields marked as "soft" produce a
-warning and an updated agreement output rather than an error.
+Linkage terms are verified by both parties at the start of every exchange. After authentication, both parties swap their terms; if any fields are inconsistent,
+the exchange is cancelled. Fields marked as "soft" produce a warning and an
+updated set of terms are written out rather than an error.
 
-### `agreement.version`
+### `linkage_terms.version`
 
 *Type:* string  
 *Required:* yes  
 *Consistency:* mandatory
 
-A semver string identifying the schema of this Exchange Agreement. Two versions
+A semver string identifying the schema of the linkage aggreement. Two versions
 are incompatible if no migration path exists from the lower version to the
 higher.
 
-### `agreement.identity`
+### `linkage_terms.identity`
 
 *Type:* string  
 *Required:* yes  
 *Consistency:* none
 
-A free-text string identifying the party holding this agreement. Included
+A free-text string identifying the party holding these terms. Included
 verbatim in the non-repudiation receipt. Parties may format this however they
 wish; common contents include name, organization, and contact information.
 
 ```yaml
-agreement:
+linkage_terms:
   identity: "Jane Smith, Agency A, jsmith@agency-a.gov"
 ```
 
-### `agreement.date`
+### `linkage_terms.date`
 
 *Type:* ISO 8601 date string  
 *Required:* yes  
 *Consistency:* soft
 
-Date this Exchange Agreement was last modified. A mismatch produces a warning
+Date these linkage terms were last modified. A mismatch produces a warning
 indicating that one party may have a stale copy.
 
-### `agreement.algorithm`
+### `linkage_terms.algorithm`
 
 *Type:* enum: `psi` | `psi-c`  
 *Required:* yes  
@@ -73,42 +73,42 @@ Intended for operational data exchange.
 - `psi-c` — reveals only the cardinality of the intersection (how many records
 match). Intended for research and program planning.
 
-### `agreement.output`
+### `linkage_terms.output`
 
 *Type:* object  
 *Required:* yes  
 *Consistency:* mandatory
 
 ```yaml
-agreement:
+linkage_terms:
   output:
     expects_output: true       # this party expects to receive the result
     share_with_partner: false  # the other party expects to receive the result
 ```
 
-If `share_with_partner` is `true`, the other party's agreement must also have
+If `share_with_partner` is `true`, the other party's terms must also have
 `expects_output: true`; a mismatch aborts the exchange.
 
 `expects_output` must be `true` if this party's `deduplicate` is `true`.
 
-### `agreement.deduplicate`
+### `linkage_terms.deduplicate`
 
 *Type:* boolean
 *Required:* yes  
 *Consistency:* mandatory
 
-Whether or not to deduplicate the inputs of the party holding this agreement.
+Whether or not to deduplicate the inputs of the party holding these terms.
 Deduplication results in multiple inputs potentially being matched to the same
 output.
 
 ```yaml
-agreement:
+linkage_terms:
   deduplicate: false
 ```
 
 Any party indicating `true` must have `expects_output: true`.
 
-### `agreement.linkage_fields`
+### `linkage_terms.fields`
 
 *Type:* array  
 *Required:* yes  
@@ -131,8 +131,8 @@ Converting raw input to these formats is the responsibility of each party's
 data cleaning transformations.
 
 ```yaml
-agreement:
-  linkage_fields:
+linkage_terms:
+  fields:
     - name: ssn
       semantic_type: ssn
       constraints:
@@ -158,7 +158,7 @@ agreement:
       semantic_type: date_of_birth
 ```
 
-#### Linkage field fields
+#### Fields fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -204,7 +204,7 @@ TODO: Full constraint schema with valid values for each field.
 
 ---
 
-### `agreement.linkage_keys`
+### `linkage_terms.keys`
 
 *Type:* array  
 *Required:* yes  
@@ -220,8 +220,8 @@ The name of each linkage key must be unique. The elements within any linkage
 must either reference a unique linkage field or have an alias that is unique.
 
 ```yaml
-agreement:
-  linkage_keys:
+linkage_terms:
+  keys:
     - name: "SSN4 + Last Name + DOB"
       elements:
         - field: ssn4
@@ -248,7 +248,7 @@ agreement:
           generate_combinations: transpositions
 ```
 
-#### Linkage key fields
+#### Key fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -262,7 +262,7 @@ for which the receiver swaps their data elements for this key (see below) |
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `field` | string | yes | Name of a linkage field from
-`agreement.linkage_fields` |
+`linkage_terms.linkage_fields` |
 | `name` | string | no | Optional alias for this element; used when the same
 field appears more than once in a key, or as the target of a `swap` |
 | `transform` | array | no | Sequence of transformation steps applied to the
@@ -293,7 +293,7 @@ values, then against `field` names. For example, a key might match first name
 swapped with last name to catch data entry errors where the names are reversed
 at one agency.
 
-### `agreement.legal_agreement`
+### `linkage_terms.legal_agreement`
 
 *Type:* object  
 *Required:* no  
@@ -303,13 +303,13 @@ Reference to the legal data sharing agreement authorizing this exchange. If
 `expiration_date` has passed, the exchange fails before any data is transmitted.
 
 ```yaml
-agreement:
+linkage_terms:
   legal_agreement:
     reference: "MOU-2025-0042"
     expiration_date: "2027-12-31"
 ```
 
-### `agreement.payload`
+### `linkage_terms.payload`
 
 *Type:* object  
 *Required:* no  
@@ -321,7 +321,7 @@ will send and what they expect to receive. Column descriptions sent to the
 partner constitute a data dictionary.
 
 ```yaml
-agreement:
+linkage_terms:
   payload:
     send:
       - name: "enrollment_date"
@@ -457,12 +457,12 @@ implementation.
 Optional per-column transformation applied before linkage key generation. Each
 transformation takes one input column, applies a sequence of functions, and
 produces a named output. The `output` name must match the `name` of a linkage
-field defined in `agreement.linkage_fields`; this is how the application knows
-which standardized field each transformation produces.
+field defined in `linkage_terms.linkage_fields`; this is how the application
+knows which standardized field each transformation produces.
 
 ```yaml
 cleaning:
-  - output: last_name      # matches agreement.linkage_fields[].name
+  - output: last_name      # matches linkage_terms.linkage_fields[].name
     input: LAST_NAME
     steps:
       - function: strip_titles

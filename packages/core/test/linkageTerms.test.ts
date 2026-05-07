@@ -2,11 +2,11 @@ import { ZodError } from "zod";
 import { expect, test } from "vitest";
 
 import {
-  parseExchangeAgreement,
-  safeParseExchangeAgreement,
-} from "../src/exchangeAgreement";
+  parseLinkageTerms,
+  safeParseLinkageTerms,
+} from "../src/linkageTerms";
 
-// Minimal valid agreement used as a base for individual tests.
+// Minimal valid set of terms used as a base for individual tests.
 const base = {
   version: "1.0.0",
   identity: "Test Party",
@@ -20,8 +20,8 @@ const base = {
 
 // ─── Happy path ──────────────────────────────────────────────────────────────
 
-test("parses a complete valid agreement", () => {
-  const result = parseExchangeAgreement({
+test("parses a complete valid set of terms", () => {
+  const result = parseLinkageTerms({
     version: "2.1.0",
     identity: "Jane Smith, Agency A, jsmith@agency-a.gov",
     date: "2025-06-01",
@@ -77,7 +77,7 @@ test("parses a complete valid agreement", () => {
 // ─── Cross-field constraint: deduplicate → expectsOutput ─────────────────────
 
 test("deduplicate: true with expectsOutput: true is valid", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     deduplicate: true,
     output: { expectsOutput: true, shareWithPartner: false },
@@ -86,7 +86,7 @@ test("deduplicate: true with expectsOutput: true is valid", () => {
 });
 
 test("deduplicate: true with expectsOutput: false is invalid", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     deduplicate: true,
     output: { expectsOutput: false, shareWithPartner: false },
@@ -98,7 +98,7 @@ test("deduplicate: true with expectsOutput: false is invalid", () => {
 });
 
 test("deduplicate: false with expectsOutput: false is valid", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     deduplicate: false,
     output: { expectsOutput: false, shareWithPartner: false },
@@ -109,7 +109,7 @@ test("deduplicate: false with expectsOutput: false is valid", () => {
 // ─── allowedCharacters regex validation ──────────────────────────────────────
 
 test("allowedCharacters accepts a valid character class", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
       {
@@ -124,7 +124,7 @@ test("allowedCharacters accepts a valid character class", () => {
 });
 
 test("allowedCharacters rejects an invalid character class", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
       {
@@ -143,14 +143,14 @@ test("allowedCharacters rejects an invalid character class", () => {
 
 // ─── parse vs safeParse ──────────────────────────────────────────────────────
 
-test("parseExchangeAgreement throws ZodError on invalid input", () => {
-  expect(() => parseExchangeAgreement({ version: "not-semver" })).toThrow(
+test("parseLinkageTerms throws ZodError on invalid input", () => {
+  expect(() => parseLinkageTerms({ version: "not-semver" })).toThrow(
     ZodError,
   );
 });
 
-test("safeParseExchangeAgreement returns success: false on invalid input", () => {
-  const result = safeParseExchangeAgreement({ version: "not-semver" });
+test("safeParseLinkageTerms returns success: false on invalid input", () => {
+  const result = safeParseLinkageTerms({ version: "not-semver" });
   expect(result.success).toBe(false);
 });
 
@@ -163,14 +163,14 @@ test.each([
   ["1.0.0", true],
   ["10.20.300", true],
 ])('version "%s" is %s', (version, valid) => {
-  const result = safeParseExchangeAgreement({ ...base, version });
+  const result = safeParseLinkageTerms({ ...base, version });
   expect(result.success).toBe(valid);
 });
 
 // ─── uniqueness constraints ───────────────────────────────────────────────────
 
 test("duplicate linkage field names are rejected", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
       { name: "ssn", semanticType: "ssn" },
@@ -183,7 +183,7 @@ test("duplicate linkage field names are rejected", () => {
 });
 
 test("duplicate linkage key names are rejected", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
       { name: "SSN", elements: [{ field: "ssn" }] },
@@ -196,7 +196,7 @@ test("duplicate linkage key names are rejected", () => {
 });
 
 test("duplicate element field references within a key are rejected", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
       {
@@ -211,7 +211,7 @@ test("duplicate element field references within a key are rejected", () => {
 });
 
 test("same field used twice with distinct names is valid", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
       { name: "firstName", semanticType: "firstName" },
@@ -236,17 +236,17 @@ test("same field used twice with distinct names is valid", () => {
 // ─── linkageFields and linkageKeys constraints ────────────────────────────────
 
 test("empty linkageFields array is rejected", () => {
-  const result = safeParseExchangeAgreement({ ...base, linkageFields: [] });
+  const result = safeParseLinkageTerms({ ...base, linkageFields: [] });
   expect(result.success).toBe(false);
 });
 
 test("empty linkageKeys array is rejected", () => {
-  const result = safeParseExchangeAgreement({ ...base, linkageKeys: [] });
+  const result = safeParseLinkageTerms({ ...base, linkageKeys: [] });
   expect(result.success).toBe(false);
 });
 
 test("linkage key with empty elements array is rejected", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [{ name: "Empty", elements: [] }],
   });
@@ -256,7 +256,7 @@ test("linkage key with empty elements array is rejected", () => {
 // ─── linkageField semanticType discriminated union ────────────────────────────
 
 test("unknown linkage field semanticType is rejected", () => {
-  const result = safeParseExchangeAgreement({
+  const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [{ name: "bad", semanticType: "favoriteColor" }],
   });
@@ -269,7 +269,7 @@ test("parses snake_case keys from disk", () => {
   // The spec uses snake_case keys (e.g. linkage_fields, expects_output);
   // camelizeKeys converts them before validation. SemanticType values and
   // field name values are not transformed since camelizeKeys only touches keys.
-  const result = parseExchangeAgreement({
+  const result = parseLinkageTerms({
     version: "1.0.0",
     identity: "Test Party",
     date: "2025-01-01",
@@ -292,7 +292,7 @@ test("parses snake_case keys from disk", () => {
       {
         name: "SSN + Last Name",
         elements: [
-          { field: "ssn", generate_combinations: "deletions" },
+          { field: "ssn", generate_combinations: "editDistances" },
           {
             field: "lastName",
             transform: [
