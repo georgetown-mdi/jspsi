@@ -119,6 +119,8 @@ Before establishing connections, parties need to ensure that they are communicat
 
 In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a Password Authenticated Key Exchange (PAKE) protocol, such as SPAKE2 with the shared token as the password input.
 
+The shared secret is automatically rotated after each successful exchange. The replacement secret is generated locally and transmitted to both parties over the established authenticated channel as part of the receipt step, taking effect only after the receipt has been confirmed by both parties. If the exchange fails before receipt confirmation, the existing secret remains valid and the next exchange can proceed normally. If a secret is lost after rotation, a new invitation can be generated from the existing configuration directory to re-establish a shared secret (see [Invitations](#invitations)).
+
 "Meeting in a trusted spot" really refers to already having a trusted form of communication which both parties want to reuse for the exchange. For an SFTP connection, user and path management on the server-side can ensure that no one else is able to listen in. This offloads trust to the SFTP server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall.
 
 ## Channel Security
@@ -183,7 +185,7 @@ The core library includes the base PSI function, linkage term verification, inpu
 
 ## Command line application
 
-The command line application enables the automation of all exchange operations and can be integrated into data transformations. Recurring exchanges can be executed through external schedulers or orchestrators, making it the preferred interface for IT professionals operationalizing exchanges that program officers established via the web application.
+The command line application enables the automation of all exchange operations and can be integrated into data transformations. Recurring exchanges can be executed through external schedulers or orchestrators, making it the preferred interface for IT professionals operationalizing exchanges that program officers established via the web application. The application is distributed as a Docker image with a default working directory of `/work`; users mount their exchange directory there so that configuration, credentials, and data files are all accessible within the container.
 
 ## Web application
 
@@ -197,7 +199,51 @@ The web application includes a feature to invite parties to conduct exchanges. U
 
 # User journey
 
-A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save *output*. Rest TBD. 
+A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save the *output*. As indicated above, linkage terms, connection details, metadata, and data cleaning transformations form further exchange parameters.
+
+For the rest of this section we describe use cases as in the command line application. Web application versions implement the same functionality with an appropriate graphical user interface.
+
+A typical first exchange begins with one party generating an invitation and securely transmitting it to their partner. The partner accepts, which immediately conducts the exchange. Subsequent exchanges between the same parties use the stored configuration and shared secret, requiring no further coordination.
+
+## Configuration
+
+Exchange configuration is stored in a directory designated by `--config-dir`, which defaults to `.psilink` in the current working directory. The directory holds two files: `config.yaml`, which records the exchange parameters, and `secret.key`, which holds the shared secret used for authentication. When this directory is first created, the application prints a notice identifying both files and warning that the secret key should be treated as private.
+
+Command line arguments take precedence over values in `config.yaml`, allowing scripted workflows to override specific parameters without modifying the stored configuration. Any argument value prefixed with `@` is read from the file at the given path rather than taken literally — for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk rather than embedding it in the command or configuration file. This convention applies both on the command line and inside `config.yaml`, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history.
+
+## Invitations
+
+```sh
+psilink invite URL INPUT_FILE [OUTPUT_FILE]
+```
+
+This generates a shareable invitation string that can be sent to a partner by a secure channel. Default values are used for the linkage terms and connection parameters, while metadata and cleaning transformations are inferred from the input file. The shareable string encodes connection information, linkage terms, and a shared secret as a base64 JSON string, and can be supplied directly to `psilink accept`.
+
+If `--set-config` is given, the user is interactively walked through setting exchange parameters before the invitation string is generated. Once generated, the application connects to the server and waits for the other party to respond; it times out or can be canceled if no response arrives.
+
+## Acceptance
+
+```sh
+psilink accept INVITATION_STRING INPUT_FILE [OUTPUT_FILE]
+```
+
+This decodes the invitation string, connects to the server specified in its parameters, and immediately conducts the exchange. If `--set-config` is specified, the user is interactively walked through modifying the configuration before connecting, with defaults drawn from the invitation and their data file.
+
+## Exchange
+
+The `exchange` subcommand is intended for automated, recurring exchanges:
+
+```sh
+psilink exchange --config-dir=CONFIG_DIR INPUT_FILE [OUTPUT_FILE]
+```
+
+It requires an existing config directory and issues no interactive prompts; the exchange proceeds entirely from the stored configuration and shared secret. The shared secret is rotated automatically on successful completion.
+
+## Recovery
+
+If `--config-dir` points to a directory that already contains a configuration when running `invite`, the user is prompted whether to reuse the existing exchange parameters with a newly generated secret or to start from defaults. This is the standard path when a shared secret must be re-established after a failed rotation.
+
+If files already exist in the target config directory when running `accept`, the user is prompted before any are overwritten and shown how to specify a different directory with `--config-dir`.
 
 # Possible extensions
 
