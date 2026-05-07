@@ -66,7 +66,7 @@ PSI-C is also executed by sequentially executing deterministic linkages. Members
 
 # Exchange specification
 
-The parameters necessary to execute an exchange are written down into a JSON or YAML documents which are supplied to an application. The components of an exchange specification include: an Exchange Agreement which describes what will be exchanged and how, connection information which describes where the exchange will take place, metadata the describes the fields and their roles, and data cleaning pipelines which simply provide convenience for low-tech users.
+The parameters necessary to execute an exchange are written down into a JSON or YAML documents which are supplied to an application. The components of an exchange specification include: an Exchange Agreement which describes what will be exchanged and how, connection information which describes where the exchange will take place, metadata the describes the fields and their roles, and data cleaning transformations which simply provide convenience for low-tech users.
 
 ## Exchange Agreement
 
@@ -80,8 +80,8 @@ After authentication has taken place at the start of each exchange, both parties
 * Whether or not the party expects their partner to receive output.
 * If the algorithm is PSI or PSI-C.
 * Whether or not this party's records should be deduplicated, i.e. if the linkage is one-to-X or many-to-X.
-* The linkage keys themselves. This includes a descriptive name of the key, the semantic type of each combined data element (e.g. first name, SSN, phone number, etc), and any constraints those data elements must fulfill.
-  * Some examples: SSNs can be subject to validation against Social Security Administration rules; names may have limited character sets, have titles and suffixes prohibited, or be truncated to a maximum length. Dates of birth and SSNs have fixed canonical formats — `YYYYMMDD` and `XXXXXXXXX` (a nine-character string, not a number) respectively.
+* Linkage fields and linkage keys. Linkage fields define the standardized form of each PII element that participates in linkage: their semantic type (e.g. first name, SSN, date of birth) and any constraints both parties commit to meeting for that field (e.g. character sets, SSA rules for SSNs, date validation). Linkage keys are built from linkage fields: each key element identifies a linkage field and optionally applies a transformation to its standardized value before concatenation (e.g. the first character of a name, or the first N digits of an SSN).
+  * Although format could be part of the linkage field schema, with the addition of data transformations it makes sense to use standardized formats. `YYYYMMDD` and `XXXXXXXXX` (a nine-character string, not a number) are used for dates and SSNs respectively.
   * Linkage keys may also indicate that two elements must be swapped, in which case the role of each party implies who produces the swapped and who produces the un-swapped version. For instance, a key might involve matching first name swapped with last name, and receivers swap their data elements while senders do not.
 * Whether or not additional data will be transferred for matched elements, and if so the names of the elements to be sent and to be received.
 * An optional reference to the legal agreement enabling the data exchange and its expiration date. If the legal agreement has expired, the exchange will fail.
@@ -100,7 +100,7 @@ Parties can choose to supply metadata with their exchange specification that ind
 
 ## Data cleaning
 
-Before any PSI protocol executes, each party must prepare their input data as required by linkage keys. Data cleaning pipelines can be provided as part of an exchange specification in the form of compositions of cleaning functions applied to specific input fields, producing outputs which are combined to create linkage keys. For example, one party might take their first name input field, remove all punctuation, trim whitespace, and cast the result to upper-case. Linkage keys might use this "cleaned" name field wholesale, take substrings, or apply a phonetic algorithm, which can then be combined with other cleaned and mapped fields to form a distinct linkage key. A library of common cleaning functions is available and parties can always pre-clean their data if preferred. This functionality is intended as a convenience intended for parties who lack technical sophistication. Normalizing dates to `YYYYMMDD` and SSNs to `XXXXXXXXX` are canonical examples of cleaning steps that must be completed before linkage key generation.
+Before any PSI protocol executes, each party must prepare their input data as required by linkage keys. Data cleaning transformations can be provided as part of an exchange specification in the form of compositions of cleaning functions applied to specific input fields, each producing a named output that corresponds to a linkage field defined in the exchange agreement. For example, one party might take their first name input field, remove all punctuation, trim whitespace, and cast the result to upper-case, producing the standardized `first_name` linkage field. Linkage key elements reference linkage fields by name and may apply further transformations — such as taking a substring or applying a phonetic algorithm — to derive the specific key component. A library of common cleaning functions is available and parties can always pre-clean their data if preferred. This functionality is intended as a convenience for parties who lack technical sophistication. Normalizing dates to `YYYYMMDD` and SSNs to `XXXXXXXXX` are canonical examples of cleaning steps that must be completed before linkage key generation.
 
 # Communication
 
@@ -187,7 +187,7 @@ The core library includes the base PSI function, Exchange Agreement verification
 
 The web application is a management interface for exchanges. It allows for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It also includes code to execute exchanges.
 
-Exchange specifications can be downloaded from the web app for use by the command line application, so the web application has user-friendly ways of creating those files. This includes a data explorer and metadata labeler, linkage rule creator, and data cleaning pipeline creator.
+Exchange specifications can be downloaded from the web app for use by the command line application, so the web application has user-friendly ways of creating those files. This includes a data explorer and metadata labeler, linkage rule creator, and data cleaning transformation creator.
 
 If the browser window is left open, it runs scheduled exchanges at the appropriate time. Note that this is a sub-optimal user experience, as it is easy to accidentally close the application.
 
@@ -195,7 +195,7 @@ The web application includes a feature to invite parties to conduct exchanges. U
 
 ## Command line application
 
-The command line application enables the automation of all exchange operations and can be integrated into data pipelines. Recurring exchanges can be executed through external schedulers or orchestrators, making it the preferred interface for IT professionals operationalizing exchanges that program officers established via the web application.
+The command line application enables the automation of all exchange operations and can be integrated into data transformations. Recurring exchanges can be executed through external schedulers or orchestrators, making it the preferred interface for IT professionals operationalizing exchanges that program officers established via the web application.
 
 # Possible extensions
 

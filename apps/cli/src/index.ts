@@ -8,6 +8,8 @@ import {
 } from "./config";
 
 import fs from "node:fs";
+import os from "node:os";
+import readline from "node:readline";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 
@@ -20,11 +22,39 @@ import {
   getLinkageKeys,
   keyAliases,
   linkViaPSI,
+  safeParseExchangeAgreement,
   secondToPartyLinkageKeyDefinitions,
   setLogPrefixer,
 } from "@psilink/core";
 
+import type { ExchangeAgreement } from "@psilink/core";
+
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
+import {
+  columnsToFieldNames,
+  getDefaultExchangeAgreement,
+} from "./defaultAgreement";
+
+// Reads and parses the first line of a CSV file as column names, normalized
+// to lowercase with surrounding whitespace stripped. Returns an empty array if
+// the file is empty or the first line cannot be read.
+
+// TODO: modify to also work with a connection so that data can come from stdin
+async function readCsvHeader(filePath: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: fs.createReadStream(filePath),
+      crlfDelay: Infinity,
+    });
+    rl.once("line", (line) => {
+      rl.close();
+      resolve(line.split(",").map((col) => col.trim().toLowerCase()));
+    });
+    rl.once("error", () => resolve([]));
+    // Fires after "close" if the file was empty.
+    rl.once("close", () => resolve([]));
+  });
+}
 
 async function run() {
   const { positionals, options, groups } = schemaToYargs(configSchema);
@@ -56,7 +86,13 @@ async function run() {
         }
         cmd = cmd.option("config", {
           type: "string",
-          describe: "optional config file",
+          describe: "optional config file (YAML or JSON)",
+        });
+        cmd = cmd.option("agreement", {
+          type: "string",
+          describe:
+            "path to an exchange agreement file (YAML or JSON); overrides " +
+            "any agreement specified in the config file",
         });
 
         return cmd.demand(numRequiredPositionals);
@@ -87,6 +123,10 @@ async function run() {
     delete argv[key];
   });
 
+  // Extract special options that are handled outside configSchema.
+  const configFile = argv["config"] as string | undefined;
+  const agreementFile = argv["agreement"] as string | undefined;
+
   const positionalArgs = Object.fromEntries(
     argv._.map((x, i) => {
       return [positionals[i].key, x];
@@ -95,43 +135,93 @@ async function run() {
   const optionPathMap = Object.fromEntries(
     options.map((x) => [x.key, x.meta.optionPath]),
   );
-  const otherArgs = Object.fromEntries(
-    Object.entries(argv)
-      .filter(([key]) => key !== "_" && key !== "$0")
-      .map(([key, value]) => {
-        return [optionPathMap[key] || key, value];
-      }),
+
+  // Build explicit CLI overrides, excluding special options and undefined
+  // values. Filtering undefined ensures that options not set on the command
+  // line don't shadow values from the config file.
+  const cliArgs: Record<string, unknown> = Object.fromEntries(
+    Object.entries({
+      ...positionalArgs,
+      ...Object.fromEntries(
+        Object.entries(argv)
+          .filter(
+            ([key]) =>
+              key !== "_" &&
+              key !== "$0" &&
+              key !== "config" &&
+              key !== "agreement",
+          )
+          .map(([key, value]) => [optionPathMap[key] || key, value]),
+      ),
+    }).filter(([, v]) => v !== undefined),
   );
 
-  let allArgs = { ...positionalArgs, ...otherArgs };
-
-  // If a config file exists, we read it but overwrite options with arguments
-  // given on the command line.
-  const configFile = allArgs["config"];
-  delete allArgs["config"];
+  // If a config file is provided, it forms the base; CLI args take precedence.
+  let rawAgreement: unknown = undefined;
+  let mergedArgs: Record<string, unknown> = cliArgs;
 
   if (configFile && typeof configFile === "string") {
     const configContent = fs.readFileSync(configFile, "utf8");
-    const parsed = configFile.toLowerCase().endsWith("json")
+    const parsed: unknown = configFile.toLowerCase().endsWith("json")
       ? JSON.parse(configContent)
       : YAML.parse(configContent);
 
-    const configOptions = Object.fromEntries(
-      Object.entries(
-        flattenObject(parsed, "", "-"),
-      ).map(([key, value]) => {
-        return [optionPathMap[key] || key, value];
-      }),
-    );
-    allArgs = { ...allArgs, ...configOptions };
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      const parsedRecord = parsed as Record<string, unknown>;
+
+      // Extract the agreement block before flattening so its nested structure
+      // is preserved for safeParseExchangeAgreement below. The config file's
+      // agreement key must be an inline object (YAML block); use --agreement
+      // to reference a standalone file.
+      if ("agreement" in parsedRecord) {
+        rawAgreement = parsedRecord["agreement"];
+        delete parsedRecord["agreement"];
+      }
+
+      const configOptions = Object.fromEntries(
+        Object.entries(flattenObject(parsedRecord, "", "-")).map(
+          ([key, value]) => [optionPathMap[key] || key, value],
+        ),
+      );
+
+      // Config file is the base; explicit CLI args override it.
+      mergedArgs = { ...configOptions, ...cliArgs };
+    }
   }
 
-  const cliOptions = configSchema.safeParse(unflattenObject(allArgs));
+  const cliOptions = configSchema.safeParse(unflattenObject(mergedArgs));
   if (!cliOptions.success) {
     console.error("unable to parse input:", cliOptions.error);
     cli.showHelp();
     process.exit(64);
   }
+
+  // server and input are optional in configSchema so they can come from a
+  // config file, but both are required to run an exchange.
+  if (!cliOptions.data.server) {
+    console.error(
+      "server URL is required: provide it as the first positional argument " +
+        "or set `server` in a config file",
+    );
+    cli.showHelp();
+    process.exit(64);
+  }
+  if (!cliOptions.data.input) {
+    console.error(
+      "input path is required: provide it as the second positional argument " +
+        "or set `input` in a config file",
+    );
+    cli.showHelp();
+    process.exit(64);
+  }
+
+  // TypeScript narrowing: both are confirmed present above.
+  const server = cliOptions.data.server;
+  const input = cliOptions.data.input;
 
   const verbosity = cliOptions.data.verbose;
   if (verbosity >= 4) {
@@ -151,9 +241,71 @@ async function run() {
   const log = logLibrary.getLogger("root");
   setLogPrefixer(log);
 
-  if (!fs.existsSync(cliOptions.data.input)) {
-    log.error(`${cliOptions.data.input} does not exist`);
+  if (!fs.existsSync(input)) {
+    log.error(`${input} does not exist`);
     process.exit(69);
+  }
+
+  // Load exchange agreement: --agreement flag > config file inline > default.
+  //
+  // The agreement is validated here but does not yet drive runtime behavior;
+  // see the PLACEHOLDER comments below and in defaultAgreement.ts. Once data
+  // pipelines are implemented, linkageKeys and algorithm will control key
+  // construction and PSI setup respectively.
+  let agreement: ExchangeAgreement;
+  if (agreementFile) {
+    const content = fs.readFileSync(agreementFile, "utf8");
+    const raw: unknown = agreementFile.toLowerCase().endsWith("json")
+      ? JSON.parse(content)
+      : YAML.parse(content);
+    const result = safeParseExchangeAgreement(raw);
+    if (!result.success) {
+      log.error("invalid exchange agreement in", agreementFile);
+      log.error(result.error);
+      process.exit(64);
+    }
+    agreement = result.data;
+    log.info("loaded exchange agreement from", agreementFile);
+  } else if (rawAgreement !== undefined) {
+    const result = safeParseExchangeAgreement(rawAgreement);
+    if (!result.success) {
+      log.error("invalid exchange agreement in config file");
+      log.error(result.error);
+      process.exit(64);
+    }
+    agreement = result.data;
+    log.info("loaded exchange agreement from config file");
+  } else {
+    // Read the CSV header to detect which semantic types are present and
+    // tailor the default linkage keys accordingly. Skipped for stdin ("-")
+    // since the stream cannot be rewound after header consumption.
+    let columns: string[] | undefined;
+    if (input !== "-") {
+      columns = await readCsvHeader(input);
+      if (columns.length === 0) {
+        log.warn(
+          "could not read CSV header; default agreement will include all" +
+            " linkage key templates",
+        );
+      } else {
+        const available = columnsToFieldNames(columns);
+        log.info(
+          "detected CSV columns:",
+          columns.join(", "),
+          "→ linkage fields:",
+          [...available].join(", "),
+        );
+      }
+    }
+    agreement = getDefaultExchangeAgreement(os.userInfo()["username"], columns);
+    log.info(
+      "no exchange agreement specified; using default (identity:",
+      agreement.identity + ")",
+    );
+    log.info(
+      "default agreement linkage keys:",
+      agreement.linkageKeys.map((k) => k.name).join(", "),
+    );
   }
 
   const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
@@ -175,19 +327,28 @@ async function run() {
 
   log.info(
     "opening connection to",
-    cliOptions.data.server,
+    server,
     "with options",
     cliOptions.data.serverOptions,
   );
-  await conn.open(cliOptions.data.server, cliOptions.data.serverOptions);
+  await conn.open(server, cliOptions.data.serverOptions);
 
   log.info("synchronizing");
   await conn.synchronize();
 
   log.info("synchronized to firstToParty", conn.firstToParty);
 
+  // PLACEHOLDER: getLinkageKeys currently uses hard-coded field definitions
+  // from fixedLinkageKeys.ts. Once data pipelines are implemented, the
+  // definitions will be derived from agreement.linkageKeys, and the role-based
+  // split (firstToParty vs secondToParty) will be replaced by pipeline-driven
+  // key construction that is symmetric between parties.
+  //
+  // The current definitions also include truncation variants (e.g. first 3
+  // characters of lastName) that are pipeline transformations and cannot yet
+  // be expressed in the LinkageKey schema.
   const data = await getLinkageKeys(
-    fs.createReadStream(cliOptions.data.input),
+    fs.createReadStream(input),
     conn.firstToParty
       ? firstToPartyLinkageKeyDefinitions
       : secondToPartyLinkageKeyDefinitions,
@@ -197,6 +358,9 @@ async function run() {
   log.info("starting polling");
   conn.start();
 
+  // PLACEHOLDER: agreement.algorithm ("psi" vs "psi-c") will eventually
+  // determine whether the full intersection or only its cardinality is
+  // revealed. Currently PSI is always used regardless of the algorithm field.
   const participant = new PSIParticipant(
     conn.firstToParty ? "server" : "client",
     await PSI(),
@@ -210,6 +374,10 @@ async function run() {
   await participant.exchangeRoles(conn, conn.firstToParty!);
 
   log.info("identifying intersection");
+  // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
+  // to agreement.deduplicate: true for both parties. When agreement
+  // cross-checking is added to the protocol, the combined cardinality will be
+  // derived from both parties' deduplicate fields.
   const associationTable = await linkViaPSI(
     { cardinality: "one-to-one" },
     participant,

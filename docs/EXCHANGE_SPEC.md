@@ -17,7 +17,7 @@ An exchange specification has four top-level components:
 | `agreement` | yes | What will be exchanged and how; verified by both parties |
 | `connection` | yes | Where and how the exchange will take place |
 | `metadata` | no | Descriptions of input fields and their roles |
-| `cleaning` | no | Data transformation pipelines applied before linkage |
+| `cleaning` | no | Data transformations applied before linkage |
 
 ---
 
@@ -108,6 +108,102 @@ agreement:
 
 Any party indicating `true` must have `expects_output: true`.
 
+### `agreement.linkage_fields`
+
+*Type:* array  
+*Required:* yes  
+*Consistency:* mandatory
+
+The linkage fields define the standardized form of each PII element that
+participates in linkage. Each field has a name, a semantic type, and optional
+constraints. The name is a unique identifier used by linkage key elements and
+data cleaning transformation outputs to refer to this field.
+
+Constraints are not enforced by the application — they are standards that both
+parties independently commit to meeting when preparing their data. The
+application will warn if a constraint is violated, but it will not transform the
+data to satisfy it. In the future, it may be an option to upgrade these warnings
+to errors.
+
+Social Security Numbers must be formatted as `XXXXXXXXX` (nine-character
+numeric string, no dashes). Dates of birth must be formatted as `YYYYMMDD`.
+Converting raw input to these formats is the responsibility of each party's
+data cleaning transformations.
+
+```yaml
+agreement:
+  linkage_fields:
+    - name: ssn
+      semantic_type: ssn
+      constraints:
+        valid_only: true
+        exclude:
+          - "123456789"
+          - "111111111"
+    - name: ssn4
+      semantic_type: ssn_last4
+    - name: first_name
+      semantic_type: first_name
+      constraints:
+        affixes_allowed: false
+        allowed_characters: 'A-Z '
+    - name: first_name_raw
+      semantic_type: first_name
+    - name: last_name
+      semantic_type: last_name
+      constraints:
+        affixes_allowed: false
+        allowed_characters: 'A-Z '
+    - name: date_of_birth
+      semantic_type: date_of_birth
+```
+
+#### Linkage field fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Identifier referenced by linkage key elements and
+cleaning transformation outputs |
+| `semantic_type` | string | yes | The type of PII this field represents (see
+Semantic types) |
+| `constraints` | object | no | Data standards both parties commit to meeting
+when preparing this field |
+
+#### Semantic types
+
+| Value | Description |
+|-------|-------------|
+| `ssn` | Social Security Number (9-character string) |
+| `ssn_last4` | Last four digits of SSN; distinct from `ssn` because some
+parties only possess the last four digits |
+| `first_name` | Given name |
+| `last_name` | Family name |
+| `date_of_birth` | Date of birth |
+| `phone_number` | Phone number |
+| `email_address` | Email address |
+
+TODO: Full enumeration of supported semantic types.
+
+#### Constraints
+
+| Field | Type | Applies to | Description |
+|-------|------|------------|-------------|
+| `valid_only` | boolean | `ssn`, `ssn_last4` | Data must conform to Social
+Security Administration
+[rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs |
+| `valid_only` | boolean | `date_of_birth` | Must be a valid date |
+| `exclude` | array of strings | any | Values that must not appear in the data;
+useful for filtering placeholder values such as `123456789` and `111111111` for
+SSNs |
+| `allowed_characters` | string | name fields | Regex character class;
+characters outside it must have been removed |
+| `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr.,
+etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
+
+TODO: Full constraint schema with valid values for each field.
+
+---
+
 ### `agreement.linkage_keys`
 
 *Type:* array  
@@ -116,31 +212,40 @@ Any party indicating `true` must have `expects_output: true`.
 
 An ordered list of linkage keys applied in sequence from most to least precise.
 Each round of the PSI protocol matches only records not yet resolved in a prior
-round.
+round. Each element references a linkage field by name and may optionally
+specify transformations applied to that field's canonical value before it is
+concatenated into the key.
+
+The name of each linkage key must be unique. The elements within any linkage
+must either reference a unique linkage field or have an alias that is unique.
 
 ```yaml
 agreement:
   linkage_keys:
     - name: "SSN4 + Last Name + DOB"
       elements:
-        - semantic_type: ssn_last4
-          constraints:
-            ssa_rules: false
-        - semantic_type: last_name
-          constraints:
-            max_length: 10
-            affixes_allowed: false
-            allowed_characters: 'A-Z '
-        - semantic_type: date_of_birth
+        - field: ssn4
+        - field: last_name
+        - field: date_of_birth
+    - name: "SSN + Last Name (4) + First Initial"
+      elements:
+        - field: ssn
+        - field: last_name
+          transform:
+            - function: substring
+              params:
+                start: 0
+                length: 4
+        - field: first_name
+          transform:
+            - function: substring
+              params:
+                start: 0
+                length: 1
     - name: "SSN, all two-digit transpositions"
       elements:
-        - semantic_type: ssn
+        - field: ssn
           generate_combinations: transpositions
-          constraints:
-            ssa_rules: true
-            exclude:
-              - "123456789"  # common placeholder, not a valid assignment
-              - "111111111"  # common placeholder, not a valid assignment
 ```
 
 #### Linkage key fields
@@ -149,74 +254,44 @@ agreement:
 |-------|------|----------|-------------|
 | `name` | string | yes | Human-readable name for this key |
 | `elements` | array | yes | Data elements combined to form the key |
-| `swap` | array | no | An array of two elements by `semantic_type` or `name`
-for which the receiver or sender will swap their data elements for this key (see
-below) |
+| `swap` | array | no | An array of two field names (or element `name` values)
+for which the receiver swaps their data elements for this key (see below) |
 
 #### Element fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `semantic_type` | string | yes | The type of PII (see Semantic types) |
-| `name` | string | no | Optional name allowing the same `semantic_type` to be
-used in multiple elements within the same linkage rule |
-| `generate_combinations` | string | no | Method for generating additional
+| `field` | string | yes | Name of a linkage field from
+`agreement.linkage_fields` |
+| `name` | string | no | Optional alias for this element; used when the same
+field appears more than once in a key, or as the target of a `swap` |
+| `transform` | array | no | Sequence of transformation steps applied to the
+canonical field value before concatenation into the key |
+| `generate_fuzzy_comparisons` | string | no | Method for generating additional
 values for fuzzy matching: `transpositions` generates all two-digit
-transpositions; `deletions` generates all single-character deletions up to
-`max_length`, matching values within one edit distance |
-| `constraints` | object | no | Data standards this party commits to meeting
-when preparing their data |
+transpositions; `edits` generates all single-character deletions up to
+`max_length`, matching values within one edit distance; `adjacent_years`
+generates dates +/- 1 year from the input. Applied after any transformation |
 
-#### Semantic types
+#### Transform steps
 
-| Value | Description |
-|-------|-------------|
-| `ssn` | Social Security Number (9 digits) |
-| `ssn_last4` | Last four digits of SSN |
-| `first_name` | Given name |
-| `last_name` | Family name |
-| `date_of_birth` | Date of birth |
-| `phone_number` | Phone number |
-| `email_address` | Email Address |
+Each step in a `transform` array applies one function from the cleaning
+function library. Steps are applied in order.
 
-TODO: Full enumeration of supported semantic types.
-
-#### Constraints
-
-Constraints are not enforced by the application — they are standards that both
-parties independently commit to meeting when preparing their data. The
-application will warn if a constraint is violated, but it will not transform the
-data to satisfy it. Each party is responsible for ensuring their data conforms
-before running the exchange.
-
-Dates of birth must be formatted as `YYYYMMDD` and Social Security Numbers as
-`XXXXXXXXX` (a nine-character string, not a number). Converting raw input to
-these formats is the responsibility of each party's data cleaning pipeline.
-
-| Field | Type | Applies to | Description |
-|-------|------|------------|-------------|
-| `validOnly` | boolean | `ssn`, `ssn_last4` | Data must conform to Social
-Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf)
-for valid SSNs) |
-| `validOnly` | boolean | `date_of_birth` | Must be a valid date |
-| `exclude` | array of strings | any | Values that must not appear in the data;
-useful for filtering placeholder values such as `123456789` and `111111111` for
-SSNs |
-| `max_length` | integer | name fields | Field must be truncated to at most this
-length |
-| `allowed_characters` | string | name fields | Regex character class;
-characters outside it must have been removed |
-| `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr.,
-etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
-
-TODO: Full constraint schema with valid values for each field.
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `function` | string | yes | Name of the function to apply (see Available
+functions in the Data cleaning section) |
+| `params` | object | no | Function-specific parameters |
 
 #### Swapped keys
 
 When a `swap` array is present, the receiver transmits a linkage key generated
 with the two named elements swapped, while the sender generates a linkage key
-with un-swapped elements. For example, a key might match first name swapped with
-last name to catch data entry errors where the names are reversed at one agency.
+with un-swapped elements. Element names are matched first against element `name`
+values, then against `field` names. For example, a key might match first name
+swapped with last name to catch data entry errors where the names are reversed
+at one agency.
 
 ### `agreement.legal_agreement`
 
@@ -374,36 +449,38 @@ for payload columns |
 
 ---
 
-## Data cleaning pipelines
+## Data cleaning transformations
 
 NOTE: This whole section is a sketch and shouldn't be referenced for
 implementation.
 
-Optional per-column transformation pipelines applied before linkage key
-generation. Each pipeline takes one input column, applies a sequence of
-functions, and produces a named cleaned output. Linkage key elements reference
-cleaned outputs by name.
+Optional per-column transformation applied before linkage key generation. Each
+transformation takes one input column, applies a sequence of functions, and
+produces a named output. The `output` name must match the `name` of a linkage
+field defined in `agreement.linkage_fields`; this is how the application knows
+which standardized field each transformation produces.
 
 ```yaml
 cleaning:
-  - output: "clean_last_name"
-    input: "LAST_NAME"
+  - output: last_name      # matches agreement.linkage_fields[].name
+    input: LAST_NAME
     steps:
+      - function: strip_titles
       - function: remove_punctuation
-      - function: trim_whitespace
       - function: to_upper_case
 
-  - output: "clean_dob"
-    input: "DOB"
+  - output: date_of_birth
+    input: DOB
     steps:
       - function: parse_date
         params:
           input_format: "MM/DD/YYYY"
-          output_format: "YYYY-MM-DD"
+          output_format: "YYYYMMDD"
 
-  - output: "ssn4"
-    input: "SSN"
+  - output: ssn4           # produced from full SSN when only ssn4 is needed
+    input: SSN
     steps:
+      - function: remove_dashes
       - function: substring
         params:
           start: 5

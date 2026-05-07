@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { AlgorithmSchema } from "./exchangeAgreementTypes.js";
-import type { Algorithm } from "./exchangeAgreementTypes.js";
+import { AlgorithmSchema } from "./types.js";
+import type { Algorithm } from "./types.js";
 import { camelizeKeys } from "./utils/camelizeKeys.js";
 
 // ─── Output ──────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ const OutputSchema: z.ZodType<Output> = z.object({
   shareWithPartner: z.boolean(),
 });
 
-// ─── Linkage key elements ────────────────────────────────────────────────────
+// ─── Linkage fields ──────────────────────────────────────────────────────────
 /**
  * TODO:
  * * Semantic type enumeration is incomplete.
@@ -41,8 +41,6 @@ const OutputSchema: z.ZodType<Output> = z.object({
 
 /** Constraints on name fields. */
 interface NameConstraints {
-  /** Field must be truncated to at most this many characters. */
-  maxLength?: number;
   /**
    * Regex character class; characters outside it are expected to have been
    * removed.
@@ -58,7 +56,6 @@ interface NameConstraints {
 }
 
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
-  maxLength: z.number().int().positive().optional(),
   // Validated as a regex character class so consuming code can safely
   // interpolate it into new RegExp(`[${allowedCharacters}]`) without injection
   // risk. Note the brackets that get added.
@@ -121,129 +118,180 @@ const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
   exclude: z.array(z.string()).optional(),
 });
 
-// TBD: 'deletions' generates all single-character deletions up to max_length.
-type GenerateCombinations = "transpositions" | "deletions";
+// Shared fields for all linkage field variants.
+const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
+  name: z.string().min(1),
+  constraints: constraints.optional(),
+});
 
-const GenerateCombinationsSchema: z.ZodType<GenerateCombinations> = z.enum([
-  "transpositions",
-  "deletions",
-]);
-
-// Base fields shared by every element variant.
-interface LinkageKeyElementBase {
-  /**
-   * Optional name allowing the same `semanticType` to appear more than once in
-   * a linkage key.
-   */
-  name?: string;
-  /**
-   * Expands a single value into multiple candidates before hashing.
-   * `transpositions`: all two-digit transpositions.
-   * `deletions`: all single-character deletions up to the constraint
-   * `maxLength`.
-   */
-  generateCombinations?: GenerateCombinations;
-}
-
-interface FirstNameElement extends LinkageKeyElementBase {
+interface FirstNameField {
+  name: string;
   semanticType: "firstName";
   constraints?: NameConstraints;
 }
-interface LastNameElement extends LinkageKeyElementBase {
+interface LastNameField {
+  name: string;
   semanticType: "lastName";
   constraints?: NameConstraints;
 }
-interface DateOfBirthElement extends LinkageKeyElementBase {
+interface DateOfBirthField {
+  name: string;
   semanticType: "dateOfBirth";
   constraints?: DateConstraints;
 }
-interface SsnElement extends LinkageKeyElementBase {
+interface SsnField {
+  name: string;
   semanticType: "ssn";
   constraints?: SSNConstraints;
 }
-interface SsnLast4Element extends LinkageKeyElementBase {
+/**
+ * Last four digits of SSN. Distinct from `ssn` because some parties only
+ * possess the last four digits; this is not a derived field.
+ */
+interface SsnLast4Field {
+  name: string;
   semanticType: "ssnLast4";
   constraints?: SSNConstraints;
 }
-interface PhoneNumberElement extends LinkageKeyElementBase {
+interface PhoneNumberField {
+  name: string;
   semanticType: "phoneNumber";
   constraints?: AnyConstraints;
 }
-interface EmailAddressElement extends LinkageKeyElementBase {
+interface EmailAddressField {
+  name: string;
   semanticType: "emailAddress";
   constraints?: AnyConstraints;
 }
 
 /**
- * A single PII data element contributing to a linkage key. The `semanticType`
- * discriminator determines which constraint fields are applicable.
+ * A standardized PII field that participates in linkage. Linkage key elements
+ * reference these fields by name; data cleaning pipelines produce them by name.
+ * Constraints are standards both parties commit to meeting — the application
+ * warns if violated but does not enforce them.
  */
-export type LinkageKeyElement =
-  | FirstNameElement
-  | LastNameElement
-  | DateOfBirthElement
-  | SsnElement
-  | SsnLast4Element
-  | PhoneNumberElement
-  | EmailAddressElement;
+export type LinkageField =
+  | FirstNameField
+  | LastNameField
+  | DateOfBirthField
+  | SsnField
+  | SsnLast4Field
+  | PhoneNumberField
+  | EmailAddressField;
 
-const elementFields = <C>(constraints: z.ZodType<C>) => ({
-  name: z.string().optional(),
-  generateCombinations: GenerateCombinationsSchema.optional(),
-  constraints: constraints.optional(),
-});
-
-const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> =
-  z.discriminatedUnion("semanticType", [
+const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
+  "semanticType",
+  [
     z.object({
       semanticType: z.literal("firstName"),
-      ...elementFields(NameConstraintsSchema),
+      ...linkageFieldBase(NameConstraintsSchema),
     }),
     z.object({
       semanticType: z.literal("lastName"),
-      ...elementFields(NameConstraintsSchema),
+      ...linkageFieldBase(NameConstraintsSchema),
     }),
     z.object({
       semanticType: z.literal("dateOfBirth"),
-      ...elementFields(DateConstraintsSchema),
+      ...linkageFieldBase(DateConstraintsSchema),
     }),
     z.object({
       semanticType: z.literal("ssn"),
-      ...elementFields(SSNConstraintsSchema),
+      ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({
       semanticType: z.literal("ssnLast4"),
-      ...elementFields(SSNConstraintsSchema),
+      ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({
       semanticType: z.literal("phoneNumber"),
-      ...elementFields(AnyConstraintsSchema),
+      ...linkageFieldBase(AnyConstraintsSchema),
     }),
     z.object({
       semanticType: z.literal("emailAddress"),
-      ...elementFields(AnyConstraintsSchema),
+      ...linkageFieldBase(AnyConstraintsSchema),
     }),
-  ]);
+  ],
+);
+
+// ─── Linkage key elements ────────────────────────────────────────────────────
+
+type GenerateFuzzyComparisons =
+  | "transpositions"
+  | "editDistances"
+  | "adjacentYears";
+
+const GenerateFuzzyComparisonsSchema: z.ZodType<GenerateFuzzyComparisons> =
+  z.enum(["transpositions", "editDistances", "adjacentYears"]);
+
+/**
+ * A single step in a linkage key element transform. Uses the same function
+ * names as the data cleaning pipeline.
+ */
+export interface TransformStep {
+  /** Name of the function to apply. */
+  function: string;
+  /** Function-specific parameters. */
+  params?: Record<string, unknown>;
+}
+
+const TransformStepSchema: z.ZodType<TransformStep> = z.object({
+  function: z.string().min(1),
+  params: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * A single element of a linkage key. References a linkage field by name and
+ * optionally applies transformations to its standardized value before
+ * concatenation.
+ */
+export interface LinkageKeyElement {
+  /** Name of the linkage field this element is derived from. */
+  field: string;
+  /**
+   * Optional alias for this element within the key; used when the same field
+   * appears more than once, or as the target of a `swap`.
+   */
+  name?: string;
+  /**
+   * Expands a single value into multiple candidates before hashing.
+   * - `transpositions`: all two-digit transpositions.
+   * - `editDistances`: all single-character deletions up to the constraint
+   *   `maxLength`.
+   * - `adjacentYears`: +/- 1 year from the date.
+   */
+  generateFuzzyComparisons?: GenerateFuzzyComparisons;
+  /**
+   * Transformations applied in order to the canonical field value before it
+   * is concatenated into the key.
+   */
+  transform?: TransformStep[];
+}
+
+const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
+  field: z.string().min(1),
+  name: z.string().optional(),
+  generateCombinations: GenerateFuzzyComparisonsSchema.optional(),
+  transform: z.array(TransformStepSchema).optional(),
+});
 
 // ─── Linkage keys ────────────────────────────────────────────────────────────
 
 /**
- * A single linkage key: one round of the PSI cascade. Keys are applied in
- * order from most to least precise; each round matches only records not yet
- * resolved in a prior round.
+ * A single linkage key: one round of matching with PSI. Keys should be ordered
+ * from most to least precise.
  *
- * When `swap` is present it names two elements (by `semanticType` or `name`)
- * that the receiver swaps when building this key; the sender uses the
+ * When `swap` is present it names two elements (by element `name` or `field`
+ * name) that the receiver swaps when building this key; the sender uses the
  * un-swapped order. This catches data entry errors where names are reversed.
  */
 export interface LinkageKey {
   /** Human-readable name for this linkage key. */
   name: string;
-  /** Ordered list of PII elements combined to form the key. */
+  /** Ordered list of field-derived elements combined to form the key. */
   elements: LinkageKeyElement[];
   /**
-   * Two element identifiers (semanticType or name) the receiver swaps; sender
-   * uses un-swapped order.
+   * Two element identifiers (element `name` or `field` name) the receiver
+   * swaps; sender uses un-swapped order.
    */
   swap?: [string, string];
 }
@@ -331,6 +379,7 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * - `output` — mandatory.
  * - `deduplicate` — mandatory. Per-party; determines if multiple inputs can be
  *   matched to the same output.
+ * - `linkageFields` — mandatory.
  * - `linkageKeys` — mandatory.
  * - `legalAgreement` — mandatory if present. Exchange fails if `expirationDate`
  *   has passed.
@@ -338,6 +387,11 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  *
  * Constraints:
  * - `deduplicate: true` requires `output.expectsOutput: true`.
+ * - `linkageFields[].name` must be unique across all linkage fields.
+ * - `linkageKeys[].name` must be unique across all linkage keys.
+ * - Within each linkage key, the effective element identifier (`element.name`
+ *   if present, otherwise `element.field`) must be unique so that `swap`
+ *   references are unambiguous.
  *
  * TODO: versioning compatibility rules (migration paths between semver
  * versions).
@@ -372,6 +426,12 @@ export interface ExchangeAgreement {
    */
   deduplicate: boolean;
   /**
+   * Canonical, normalized form of each PII element that participates in
+   * linkage. Linkage key elements and cleaning pipeline outputs reference
+   * these fields by name. Consistency: mandatory.
+   */
+  linkageFields: LinkageField[];
+  /**
    * Ordered list of linkage keys applied in sequence, most to least precise.
    * Consistency: mandatory.
    */
@@ -391,6 +451,7 @@ const ExchangeAgreementBaseSchema = z.object({
   algorithm: AlgorithmSchema,
   output: OutputSchema,
   deduplicate: z.boolean(),
+  linkageFields: z.array(LinkageFieldSchema).min(1),
   linkageKeys: z.array(LinkageKeySchema).min(1),
   payload: PayloadSchema.optional(),
   legalAgreement: LegalAgreementSchema.optional(),
@@ -403,7 +464,36 @@ export const ExchangeAgreementSchema: z.ZodType<ExchangeAgreement> =
       message: "expectsOutput must be true when deduplicate is true",
       path: ["output", "expectsOutput"],
     },
-  );
+  )
+    .refine(
+      (a) => {
+        const names = a.linkageFields.map((f) => f.name);
+        return names.length === new Set(names).size;
+      },
+      {
+        message: "linkage field names must be unique",
+        path: ["linkageFields"],
+      },
+    )
+    .refine(
+      (a) => {
+        const names = a.linkageKeys.map((k) => k.name);
+        return names.length === new Set(names).size;
+      },
+      { message: "linkage key names must be unique", path: ["linkageKeys"] },
+    )
+    .refine(
+      (a) =>
+        a.linkageKeys.every((key) => {
+          const ids = key.elements.map((el) => el.name ?? el.field);
+          return ids.length === new Set(ids).size;
+        }),
+      {
+        message:
+          "element identifiers (name if present, otherwise field) must be unique within each linkage key",
+        path: ["linkageKeys"],
+      },
+    );
 
 // ─── Parse ──────────────────────────────────────────────────────────────────-
 

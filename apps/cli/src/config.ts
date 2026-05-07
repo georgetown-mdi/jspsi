@@ -28,7 +28,7 @@ interface CliRegistryMeta
 
 const cliRegistry = z.registry<CliRegistryMeta>();
 
-const readAtFile = (val: unknown) => {
+const readAtSignFile = (val: unknown) => {
   if (typeof val === "string" && val.startsWith("@"))
     return fs.readFileSync(val.slice(1), "utf8").trim();
   return val;
@@ -53,7 +53,7 @@ const sftpConfigSchema = z.strictObject({
     describe:
       "password for password-based user authentication; use @path to read " +
       "from file",
-    coerce: readAtFile,
+    coerce: readAtSignFile,
   }),
   agent: z.optional(z.string()).register(cliRegistry, {
     describe:
@@ -65,13 +65,13 @@ const sftpConfigSchema = z.strictObject({
       "buffer or string that contains a private key for either key-based or " +
       "hostbased user authentication (OpenSSH format); use @path to read " +
       "from file",
-    coerce: readAtFile,
+    coerce: readAtSignFile,
   }),
   passphrase: z.optional(z.string()).register(cliRegistry, {
     describe:
       "for an encrypted private key, this is the passphrase used to decrypt " +
       "it; use @path to read from file",
-    coerce: readAtFile,
+    coerce: readAtSignFile,
   }),
   localHostname: z.optional(z.string()).register(cliRegistry, {
     describe:
@@ -135,11 +135,16 @@ const sftpConfigSchema = z.strictObject({
 });
 
 export const configSchema = z.strictObject({
-  server: z.url({ protocol: /^(https?)|(sftp)$/ }).register(cliRegistry, {
-    position: 0,
-    describe: "server URL",
-  }),
-  input: z.string().register(cliRegistry, {
+  // server and input are required for an exchange but may be supplied by a
+  // config file rather than as positional arguments, so they are optional at
+  // the schema level. Presence is validated after merging all sources.
+  server: z
+    .optional(z.url({ protocol: /^(https?)|(sftp)$/ }))
+    .register(cliRegistry, {
+      position: 0,
+      describe: "server URL",
+    }),
+  input: z.optional(z.string()).register(cliRegistry, {
     position: 1,
     describe: "input file path; if `-` will read from stdin",
   }),
@@ -149,7 +154,7 @@ export const configSchema = z.strictObject({
   }),
   passkey: z.optional(z.string()).register(cliRegistry, {
     describe: "passkey for authentication; use @path to read from file",
-    coerce: readAtFile,
+    coerce: readAtSignFile,
   }),
   timeout: z
     .optional(
