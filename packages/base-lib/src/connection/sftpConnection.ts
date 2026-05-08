@@ -485,7 +485,7 @@ extends EventEmitter<Events, never>
 
       let type = 'Object';
       if (data instanceof Uint8Array) {
-        data = btoa(String.fromCodePoint(...data));
+        data = Buffer.from(data).toString('base64');
         type = 'Uint8Array';
       }
 
@@ -542,13 +542,7 @@ extends EventEmitter<Events, never>
         const validatedMessage = Message.parse(JSON.parse(message.toString()));
 
         if (validatedMessage.type === 'Uint8Array') {
-          // @ts-ignore type indicates that it will parse as a string
-          const binaryString = atob(validatedMessage.payload);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.codePointAt(i)!;
-          }
-
+          const bytes = Buffer.from(validatedMessage.payload as string, 'base64');
           this.emit('data', bytes);
         } else {
           this.emit('data', validatedMessage.payload);
