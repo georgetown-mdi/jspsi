@@ -20,6 +20,20 @@ parties |
 | `metadata` | no | Descriptions of input fields and their roles |
 | `cleaning` | no | Data transformations applied before linkage |
 
+## File references
+
+Any string value in `config.yaml` that begins with `@` is read from the file at
+the given path rather than used literally. For example:
+
+```yaml
+connection:
+  authentication:
+    pake_token: "@secret.key"
+```
+
+This is the recommended approach for credentials to avoid embedding sensitive
+material in the configuration file itself.
+
 ---
 
 ## Linkage terms
@@ -337,57 +351,118 @@ linkage_terms:
 
 ## Connection
 
-NOTE: All of the Connection section is a sketch and shouldn't be referenced for
-implementation.
-
-Specifies the communication channel and any authentication material.
+Specifies the communication channel, server addresses, and authentication
+material.
 
 ### `connection.channel`
 
 *Type:* enum: `webrtc` | `sftp`  
 *Required:* yes
 
-The communication channel for the exchange. See [DESCRIPTION.md](DESCRIPTION.md)
-and [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure requirements for each
-channel.
+The communication channel for the exchange. See [DESIGN.md](DESIGN.md)
+and [DEPLOYMENT.md](DEPLOYMENT.md) (NOTE: doc TBD) for infrastructure
+requirements for each channel.
 
-### `connection.servers`
+### `connection.server`
 
-*Type:* array  
+*Type:* object  
 *Required:* yes
 
-Channel-specific server configuration.
+The primary server for the exchange. For WebRTC this is the PeerJS peer
+coordination server; for SFTP this is the SFTP host. A URL may be supplied as a
+convenience and will be decomposed into its component fields; the component
+fields are the authoritative form.
 
-#### WebRTC servers
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `host` | string | yes | Hostname or IP address |
+| `port` | integer | no | Port number; defaults to the protocol standard (443
+for HTTPS/WSS, 22 for SFTP) |
+| `path` | string | no | URL path for WebRTC signaling; remote working directory
+for SFTP |
+| `username` | string | no | Username for server authentication |
+| `key` | string | WebRTC only | PeerJS API key for private PeerJS servers; omit
+when using a public server |
+
+#### SFTP server authentication
+
+SFTP requires exactly one primary authentication method alongside `username`.
+`private_key_passphrase` and `certificate` are companions to `private_key` and
+are invalid without it.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `password` | string | Password authentication; `@`-file recommended |
+| `private_key` | string | Path to SSH private key; `@`-file recommended |
+| `private_key_passphrase` | string | Passphrase for an encrypted private key;
+only valid with `private_key` |
+| `certificate` | string | Path to SSH certificate; only valid with
+`private_key`; enables certificate-based authentication |
+| `host_key_fingerprint` | string | Optional expected server host key
+fingerprint for host verification |
+| `known_hosts` | string | Optional path to a `known_hosts` file; alternative to `host_key_fingerprint` |
 
 ```yaml
+# WebRTC example
 connection:
   channel: webrtc
-  servers:
-    - type: peer_coordination
-      url: "https://coord.example.org"
-    - type: stun
-      url: "stun:stun.example.org:3478"
-    - type: turn
-      url: "turn:turn.example.org:443"
-      username: "TBD"
-      credential: "TBD"
-```
+  server:
+    host: api.peerjs.com
+    port: 443
 
-#### SFTP servers
-
-```yaml
+# SFTP example
 connection:
   channel: sftp
-  servers:
-    - host: sftp.example.org
-      port: 22
-      username: psilink
-      path: /exchanges/agency-a-agency-b/
+  server:
+    host: sftp.example.org
+    port: 22
+    path: /exchanges/agency-a-agency-b/
+    username: psilink
+    private_key: "@/run/secrets/id_ed25519"
+    host_key_fingerprint: "SHA256:..."
 ```
 
-TODO: Full schema for SFTP authentication methods (password, SSH key,
-certificate).
+#### On-demand server provisioning
+
+When the primary server is allocated on demand rather than always running, a
+`provision` sub-object can be added to `server`. The application calls the
+provisioning endpoint before attempting to connect. There are two modes:
+
+**Lifecycle provisioning**: the server has a fixed, known address but is started
+on demand to avoid consuming resources between exchanges. The static `host` and
+other `server` fields are present alongside `provision` in both parties'
+configs; `provision` is the call that wakes the server. Both parties may call
+the same endpoint independently before connecting.
+
+**Address-returning provisioning**: the endpoint allocates a fresh resource and
+returns its address. Because the address is unknown until provisioning runs,
+this is asymmetric: the provisioning party (conventionally the invitor) calls
+the endpoint during exchange setup via the web application, and the resulting
+static `server` fields are written into the other party's config before either
+party runs the CLI. At run time the provisioning party's config retains
+`server.provision`; the other party's config has only static `server` fields.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `host` | string | yes | Hostname of the provisioning API |
+| `port` | integer | no | Port; defaults to 443 |
+| `path` | string | no | API path |
+| `auth` | object | no | Authentication credentials (see
+[HTTP service authentication](#http-service-authentication-auth)) |
+
+```yaml
+# Lifecycle provisioning: wake a serverless PeerJS instance before connecting
+connection:
+  channel: webrtc
+  server:
+    host: peerjs.example.org
+    port: 443
+    provision:
+      host: api.example.org
+      path: /peerjs/start
+      auth:
+        bearer: "@provision.key"
+```
 
 ### `connection.authentication`
 
@@ -398,14 +473,193 @@ Shared PAKE token for SPAKE2 mutual authentication. If omitted for SFTP, trust
 is delegated to the SFTP server's access controls rather than establishing an
 independent encrypted session.
 
+The token is automatically rotated after each successful exchange: a replacement
+is generated locally and transmitted to both parties over the authenticated
+channel during the receipt step, taking effect only after both parties confirm
+receipt. If the exchange fails before confirmation, the existing token remains
+valid. The replacement token carries no expiration; any expiration on the prior
+token is not inherited. The CLI stores the current token in `secret.key`
+alongside `config.yaml` and references it via the `@`-file convention; the value
+should not be edited manually.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pake_token` | string | yes | Shared SPAKE2 token; `@`-file recommended |
+| `role` | enum | WebRTC only | `invitor` \| `acceptor`; used to derive
+deterministic PeerJS peer IDs from the shared token so both parties know each
+other's address without out-of-band communication. Orthogonal to the PSI
+protocol roles, which are determined by `linkage_terms.output` |
+| `expires` | ISO 8601 datetime string | no | Expiration for this token; the
+exchange is aborted before the PAKE handshake begins if the current time is past
+this value. Tokens embedded in invitations carry a default expiration of 1
+hour; tokens generated by rotation carry none. |
+
 ```yaml
 connection:
   authentication:
-    pake_token: "<base64-encoded shared secret>"
+    pake_token: "@.psilink/secret.key"
+    role: invitor
+    expires: "2026-05-15T17:00:00Z"
 ```
 
 TODO: Encoding, minimum entropy requirements, and generation procedure. The web
 application generates tokens using the browser's `crypto.getRandomValues`.
+
+### `connection.stun`
+
+*Type:* array  
+*Required:* no  
+*Applies to:* `webrtc`
+
+STUN servers used for ICE candidate gathering. Each entry is a string in `stun:`
+or `stuns:` URI format. Mutually exclusive with `ice_provision`; if
+`ice_provision` is present, `stun` is invalid.
+
+```yaml
+connection:
+  stun:
+    - "stun:stun.example.org:3478"
+    - "stuns:stun2.example.org:5349"
+```
+
+### `connection.turn`
+
+*Type:* array  
+*Required:* no  
+*Applies to:* `webrtc`
+
+TURN servers used when a direct peer-to-peer connection cannot be established.
+Credential type `hmac-sha1` indicates time-limited credentials generated via a
+shared secret rather than a static password. Mutually exclusive with
+`ice_provision`; if `ice_provision` is present, `turn` is invalid.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | string | yes | TURN server URI (`turn:` or `turns:`) |
+| `username` | string | yes | TURN username |
+| `credential` | string | yes | TURN credential; `@`-file recommended |
+| `credential_type` | enum | no | `password` (default) \| `hmac-sha1` |
+
+```yaml
+connection:
+  turn:
+    - url: "turns:turn.example.org:443"
+      username: alice
+      credential: "@/run/secrets/turn.key"
+```
+
+### `connection.ice_provision`
+
+*Type:* object  
+*Required:* no  
+*Applies to:* `webrtc`
+
+A provisioning endpoint that returns a complete set of ICE servers — STUN and
+TURN combined — for the current exchange. Called at the start of each CLI run;
+both parties call the same endpoint independently and may receive different
+time-limited credentials pointing to the same infrastructure. This matches the
+API shape of commercial ICE credential services such as Twilio Network
+Traversal Service. Mutually exclusive with static `stun` and `turn`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `host` | string | yes | Hostname of the ICE credential API |
+| `port` | integer | no | Port; defaults to 443 |
+| `path` | string | no | API path |
+| `auth` | object | no | Authentication credentials
+(see [HTTP service authentication](#http-service-authentication-auth)) |
+
+```yaml
+connection:
+  ice_provision:
+    host: nts.twilio.com
+    path: /v1/credentials/ice
+    auth:
+      username: "@/run/secrets/twilio_sid"
+      password: "@/run/secrets/twilio.key"
+```
+
+### `connection.proxy`
+
+*Type:* object  
+*Required:* no  
+*Applies to:* `sftp`
+
+A WebSocket-to-TCP proxy that tunnels the SFTP connection through HTTPS. This
+field is determined by the client's network capabilities, not the server: a
+browser-based client requires it because browsers cannot open raw TCP
+connections, while a CLI client connects natively and omits this field. The two
+parties' configs will therefore differ here even when connecting to the same
+server.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `host` | string | yes | Proxy hostname |
+| `port` | integer | no | Port; defaults to 443 |
+| `path` | string | no | Proxy path |
+| `auth` | object | no | Authentication credentials (see
+[HTTP service authentication](#http-service-authentication-auth)) |
+
+### HTTP service authentication (`auth`)
+
+The `server.provision`, `ice_provision`, and `proxy` objects each accept an
+optional `auth` sub-object. Exactly one authentication method may be specified.
+`username` and `password` must appear together; neither is valid alone.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bearer` | string | Bearer token; `@`-file recommended |
+| `username` | string | Username for HTTP Basic authentication |
+| `password` | string | Password for HTTP Basic authentication;
+`@`-file recommended |
+
+```yaml
+connection:
+  server:
+    host: peerjs.example.org
+    provision:
+      host: api.example.org
+      path: /peerjs/start
+      auth:
+        bearer: "@/run/secrets/provision.key"
+```
+
+### `connection.options`
+
+*Type:* object  
+*Required:* no
+
+Protocol-specific tuning parameters. A configuration warning is made if fields
+for one channel are given when the other channel is active.
+
+#### WebRTC options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ice_timeout_ms` | integer | 5000 | Milliseconds to wait for ICE candidate
+gathering before failing |
+| `max_message_size` | integer | 65536 | Maximum data-channel message size in
+bytes |
+
+#### SFTP options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `poll_interval_ms` | integer | 30000 | Milliseconds between checks for the
+partner's uploaded file |
+| `poll_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the
+partner before giving up |
+| `compression` | boolean | false | Enable SSH compression |
+| `transfer_chunk_size` | integer | 32768 | Bytes per read/write chunk |
+
+### `connection.provider_options`
+
+*Type:* object  
+*Required:* no
+
+An opaque key-value map passed verbatim to the underlying transport library.
+Keys and values are defined by the package providing the connection
+implementation. `@`-file pathing is supported here as well.
 
 ---
 
