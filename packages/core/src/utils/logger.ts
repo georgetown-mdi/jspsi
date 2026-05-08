@@ -10,10 +10,10 @@ export const getLoggerForVerbosity = (
 ) => {
   const preferredLogLevel =
     verbose >= 2
-      ? logLevels.DEBUG
+      ? logLevels.TRACE
       : verbose === 1
-        ? logLevels.INFO
-        : logLevels.WARN;
+        ? logLevels.DEBUG
+        : logLevels.INFO;
 
   const result = logLibrary.getLogger(name);
   const currentLevel = getLevel();

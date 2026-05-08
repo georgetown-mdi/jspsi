@@ -130,8 +130,14 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       ...options,
     };
 
+    this.log.debug(
+      `[${this.role}] connecting to ${parsedUrl.hostname}` +
+        `${parsedUrl.port ? `:${parsedUrl.port}` : ""} as ` +
+        `${parsedUrl.username || "(default)"}, path: ${this.path}`,
+    );
     await this.sftp.connect(totalOptions);
     this.connected = true;
+    this.log.debug(`[${this.role}] connected`);
   }
 
   async openWithConfig(config: SFTPConnectionConfig) {
@@ -167,11 +173,22 @@ export class SFTPConnection extends EventEmitter<Events, never> {
     if (config.providerOptions !== undefined)
       Object.assign(connectOptions, config.providerOptions);
 
+    this.log.debug(
+      `[${this.role}] connecting to ${config.server.host}` +
+        `${config.server.port !== undefined ? `:${config.server.port}` : ""}` +
+        `${config.server.username !== undefined ? ` as ${config.server.username}` : ""}` +
+        `, path: ${this.path}`,
+    );
     await this.sftp.connect(connectOptions);
     this.connected = true;
+    this.log.debug(`[${this.role}] connected`);
   }
 
   async cleanup() {
+    this.log.debug(
+      `[${this.role}] cleaning up ${this.responsibleFiles.size} file(s)` +
+        `${this.responsibleFiles.size > 0 ? `: ${[...this.responsibleFiles].join(", ")}` : ""}`,
+    );
     return Promise.all(
       Array.from(this.responsibleFiles).map((filename) =>
         this.sftp.safeDelete(`${this.path}/${filename}`),
@@ -183,6 +200,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected to sftp server");
 
+    this.log.debug(`[${this.role}] closing connection`);
     const result = await this.sftp.end();
     this.connected = false;
     this.path = undefined;
@@ -205,6 +223,10 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       return;
     }
     const fileNames = files.map((file) => file.name);
+    this.log.trace(
+      `[${this.role}] found ${files.length} file(s)` +
+        `${files.length > 0 ? `: ${fileNames.join(", ")}` : ""}`,
+    );
     this.responsibleFiles.forEach((fileName) => {
       if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
     });
@@ -306,6 +328,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
           );
 
           if (otherFiles.length === 0) {
+            this.log.trace(`[${this.role}] no peer hello found; polling`);
             const delay = (ms: number) =>
               new Promise((resolve) => setTimeout(resolve, ms));
             await delay(this.options.pollingFrequency);
@@ -454,6 +477,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
               await this.sftp.rename(tempPath, wavePath);
               this.responsibleFiles.add(waveName);
               this.responsibleFiles.delete(`${this.id}.tmp.wave`);
+              this.log.debug(
+                `[${this.role}] created wave file ${waveName}; waiting for peer to finalize handshake`,
+              );
 
               /**
                * A ~ B list
@@ -543,13 +569,16 @@ export class SFTPConnection extends EventEmitter<Events, never> {
         type,
         payload: data,
       });
-      this.log.info(`[${this.role}] writing message ${tempFile}`);
+      this.log.trace(
+        `[${this.role}] message seq=${this.seq - 1}, type=${type}, ${messsage.length} bytes`,
+      );
+      this.log.debug(`[${this.role}] writing message ${tempFile}`);
       await this.sftp.put(Buffer.from(messsage), tempPath, {
         flags: "w",
         encoding: null,
       });
 
-      this.log.info(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
+      this.log.debug(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
       await this.sftp.rename(tempPath, outPath);
       this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: unknown) {
@@ -573,9 +602,10 @@ export class SFTPConnection extends EventEmitter<Events, never> {
     const inPath = `${this.path}/${this.peerId}.json`;
 
     try {
+      this.log.trace(`[${this.role}] polling for message from ${this.peerId}`);
       const messageFile = await this.sftp.exists(inPath);
       if (messageFile) {
-        this.log.info(
+        this.log.debug(
           `[${this.role}] getting message from ${this.peerId}.json`,
         );
 
@@ -600,6 +630,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
         }
 
         const validatedMessage = Message.parse(JSON.parse(message.toString()));
+        this.log.trace(
+          `[${this.role}] received message seq=${validatedMessage.seq}, type=${validatedMessage.type}`,
+        );
 
         if (validatedMessage.type === 'Uint8Array') {
           const bytes = Buffer.from(validatedMessage.payload as string, 'base64');
@@ -621,11 +654,13 @@ export class SFTPConnection extends EventEmitter<Events, never> {
   }
 
   start() {
+    this.log.debug(`[${this.role}] starting poller`);
     this.pollerActive = true;
     this.poll();
   }
 
   stop() {
+    this.log.debug(`[${this.role}] stopping poller`);
     this.pollerActive = false;
     if (this.poller) clearTimeout(this.poller);
   }
