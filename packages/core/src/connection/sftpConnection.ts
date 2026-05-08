@@ -3,6 +3,7 @@ import { default as EventEmitter } from "eventemitter3";
 import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
+import type { SFTPConnectionConfig } from "../config/connection";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -129,9 +130,45 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       ...options,
     };
 
-    const value = await this.sftp.connect(totalOptions);
+    await this.sftp.connect(totalOptions);
     this.connected = true;
-    return value;
+  }
+
+  async openWithConfig(config: SFTPConnectionConfig) {
+    this.path = config.server.path ?? "";
+    if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
+
+    if (config.options?.pollIntervalMs !== undefined)
+      this.options.pollingFrequency = config.options.pollIntervalMs;
+    if (config.options?.pollTimeoutMs !== undefined)
+      this.options.timeToLive = new Date(
+        Date.now() + config.options.pollTimeoutMs,
+      );
+
+    const connectOptions: Record<string, unknown> = {
+      host: config.server.host,
+    };
+    if (config.server.port !== undefined)
+      connectOptions["port"] = config.server.port;
+    if (config.server.username !== undefined)
+      connectOptions["username"] = config.server.username;
+    if (config.server.password !== undefined)
+      connectOptions["password"] = config.server.password;
+    if (config.server.privateKey !== undefined)
+      connectOptions["privateKey"] = config.server.privateKey;
+    if (config.server.privateKeyPassphrase !== undefined)
+      connectOptions["passphrase"] = config.server.privateKeyPassphrase;
+    if (config.options?.compression !== undefined)
+      connectOptions["compress"] = config.options.compression;
+    if (config.options?.transferChunkSize !== undefined)
+      connectOptions["chunkSize"] = config.options.transferChunkSize;
+    // providerOptions are spread last so they can override any of the above.
+    // certificate, hostKeyFingerprint, and knownHosts also belong here.
+    if (config.providerOptions !== undefined)
+      Object.assign(connectOptions, config.providerOptions);
+
+    await this.sftp.connect(connectOptions);
+    this.connected = true;
   }
 
   async cleanup() {

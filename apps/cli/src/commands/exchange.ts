@@ -1,0 +1,344 @@
+import type { Argv, Arguments } from "yargs";
+import fs from "node:fs";
+import logLibrary from "loglevel";
+import YAML from "yaml";
+import PSI from "@openmined/psi.js";
+
+import {
+  DEFAULT_FIELD_ALIASES,
+  PSIParticipant,
+  SFTPConnection,
+  firstToPartyLinkageKeyDefinitions,
+  getLinkageKeys,
+  linkViaPSI,
+  safeParseLinkageTerms,
+  secondToPartyLinkageKeyDefinitions,
+  setLogPrefixer,
+} from "@psilink/core";
+import type {
+  AssociationTable,
+  ExchangeSpec,
+  SFTPConnectionConfig,
+} from "@psilink/core";
+
+import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
+import { applyCliOverrides, readAtSignFile } from "../config";
+import { loadExchangeSpec, loadPakeToken } from "../configDir";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ExchangeArgs {
+  input: string;
+  output?: string;
+  configDir: string;
+  linkageTermsFile?: string;
+  /** Already @-file resolved. */
+  pakeToken?: string;
+  serverPort?: number;
+  serverUsername?: string;
+  /** Already @-file resolved. */
+  serverPassword?: string;
+  /** Already @-file resolved. */
+  serverPrivateKey?: string;
+  timeout?: number;
+  verbosity: number;
+}
+
+// ─── Builder ──────────────────────────────────────────────────────────────────
+
+export function builder(cmd: Argv): Argv {
+  return cmd
+    .positional("input", {
+      type: "string",
+      describe: "input file path; if `-` reads from stdin",
+      demandOption: true,
+    })
+    .positional("output", {
+      type: "string",
+      describe: "output file path; if absent, writes to stdout",
+    })
+    .option("config-dir", {
+      type: "string",
+      describe: "config directory (default: .psilink)",
+    })
+    .option("linkage-terms", {
+      type: "string",
+      describe:
+        "path to a linkage terms file (YAML or JSON); overrides " +
+        "linkageTerms in the config",
+    })
+    .option("pake-token", {
+      type: "string",
+      describe: "shared authentication token; use @path to read from file",
+    })
+    .option("server-port", {
+      type: "number",
+      describe: "server port; overrides connection.server.port in config",
+    })
+    .option("server-username", {
+      type: "string",
+      describe:
+        "server username; overrides connection.server.username in config",
+    })
+    .option("server-password", {
+      type: "string",
+      describe:
+        "server password; use @path to read from file; overrides " +
+        "connection.server.password in config",
+    })
+    .option("server-private-key", {
+      type: "string",
+      describe:
+        "SSH private key; use @path to read from file; overrides " +
+        "connection.server.privateKey in config",
+    })
+    .option("timeout", {
+      alias: "t",
+      type: "number",
+      describe: "seconds to wait for peer before giving up",
+    })
+    .option("verbose", {
+      type: "string",
+      describe:
+        "verbosity: silent | error | warn | info | debug | trace, or " +
+        "0-4; use --verbose as a flag for info",
+    })
+    .demand(1);
+}
+
+// ─── Arg extraction ───────────────────────────────────────────────────────────
+
+function extractArgs(argv: Arguments): ExchangeArgs {
+  const input = String(argv._[0]);
+  const output = argv._[1] !== undefined ? String(argv._[1]) : undefined;
+  const configDir = (argv["config-dir"] as string | undefined) ?? ".psilink";
+  const linkageTermsFile = argv["linkage-terms"] as string | undefined;
+  const pakeToken = readAtSignFile(argv["pake-token"] as string | undefined) as
+    | string
+    | undefined;
+  const serverPort = argv["server-port"] as number | undefined;
+  const serverUsername = argv["server-username"] as string | undefined;
+  const serverPassword = readAtSignFile(
+    argv["server-password"] as string | undefined,
+  ) as string | undefined;
+  const serverPrivateKey = readAtSignFile(
+    argv["server-private-key"] as string | undefined,
+  ) as string | undefined;
+  const timeout = argv["timeout"] as number | undefined;
+
+  const rawVerbose = argv["verbose"] as string | number | boolean | undefined;
+  let verbosity = 0;
+  if (rawVerbose !== undefined) {
+    if (typeof rawVerbose === "number") {
+      verbosity = rawVerbose;
+    } else {
+      const s = String(rawVerbose).toLowerCase();
+      if (s === "" || s === "true") verbosity = 2;
+      else if (s === "silent") verbosity = -1;
+      else if (s === "error") verbosity = 0;
+      else if (s === "warn") verbosity = 1;
+      else if (s === "info") verbosity = 2;
+      else if (s === "debug") verbosity = 3;
+      else if (s === "trace") verbosity = 4;
+      else {
+        const n = parseInt(s, 10);
+        verbosity = isNaN(n) ? 0 : n;
+      }
+    }
+  }
+
+  return {
+    input,
+    output,
+    configDir,
+    linkageTermsFile,
+    pakeToken,
+    serverPort,
+    serverUsername,
+    serverPassword,
+    serverPrivateKey,
+    timeout,
+    verbosity,
+  };
+}
+
+// ─── Config resolution ────────────────────────────────────────────────────────
+
+function resolveConfig(args: ExchangeArgs): ExchangeSpec {
+  let spec = loadExchangeSpec(args.configDir);
+
+  if (args.linkageTermsFile !== undefined) {
+    const content = fs.readFileSync(args.linkageTermsFile, "utf8");
+    const raw: unknown = args.linkageTermsFile.toLowerCase().endsWith("json")
+      ? JSON.parse(content)
+      : YAML.parse(content);
+    const result = safeParseLinkageTerms(raw);
+    if (!result.success)
+      throw new Error(
+        `invalid linkage terms in ${args.linkageTermsFile}: ${result.error.message}`,
+      );
+    spec = applyCliOverrides(spec, { linkageTerms: result.data });
+  }
+
+  const pakeToken = args.pakeToken ?? loadPakeToken(args.configDir);
+  spec = applyCliOverrides(spec, {
+    pakeToken,
+    timeout: args.timeout,
+    serverUsername: args.serverUsername,
+    serverPassword: args.serverPassword,
+    serverPrivateKey: args.serverPrivateKey,
+    serverPort: args.serverPort,
+  });
+
+  if (spec.connection.channel !== "sftp")
+    throw new Error("only the sftp channel is currently supported");
+
+  return spec;
+}
+
+// ─── Protocol ─────────────────────────────────────────────────────────────────
+
+async function runProtocol(
+  spec: ExchangeSpec,
+  args: ExchangeArgs,
+): Promise<void> {
+  const sftpConfig = spec.connection as SFTPConnectionConfig;
+  const log = logLibrary.getLogger("root");
+
+  if (!fs.existsSync(args.input)) {
+    log.error(`${args.input} does not exist`);
+    process.exit(69);
+  }
+
+  log.info(
+    "loaded exchange spec from",
+    args.configDir + "; identity:",
+    spec.linkageTerms.identity,
+  );
+  log.info(
+    "linkage keys:",
+    spec.linkageTerms.linkageKeys.map((k) => k.name).join(", "),
+  );
+
+  const connVerbosity = args.verbosity >= 2 ? 2 : args.verbosity === 1 ? 1 : 0;
+  const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
+    verbose: connVerbosity,
+  });
+  conn.on("error", (err: unknown) => {
+    log.error("sftp error:", err);
+    process.exit(69);
+  });
+  process.on("SIGINT", async function () {
+    log.info("caught SIGINT, exiting");
+    if (conn.connected) {
+      await conn.cleanup();
+      await conn.close();
+    }
+    process.exit(0);
+  });
+
+  log.info(
+    "opening connection to",
+    sftpConfig.server.host,
+    "with options",
+    sftpConfig.options,
+  );
+  await conn.openWithConfig(sftpConfig);
+
+  log.info("synchronizing");
+  await conn.synchronize();
+
+  log.info("synchronized to firstToParty", conn.firstToParty);
+
+  // PLACEHOLDER: getLinkageKeys currently uses hard-coded field definitions
+  // from fixedLinkageKeys.ts. Once data pipelines are implemented, the
+  // definitions will be derived from spec.linkageTerms.linkageKeys, and the
+  // role-based split (firstToParty vs secondToParty) will be replaced by
+  // pipeline-driven key construction that is symmetric between parties.
+  const data = await getLinkageKeys(
+    fs.createReadStream(args.input),
+    conn.firstToParty
+      ? firstToPartyLinkageKeyDefinitions
+      : secondToPartyLinkageKeyDefinitions,
+    DEFAULT_FIELD_ALIASES,
+  );
+
+  log.info("starting polling");
+  conn.start();
+
+  // PLACEHOLDER: spec.linkageTerms.algorithm ("psi" vs "psi-c") will eventually
+  // determine whether the full intersection or only its cardinality is revealed.
+  // Currently PSI is always used regardless of the algorithm field.
+  const participant = new PSIParticipant(
+    conn.firstToParty ? "server" : "client",
+    await PSI(),
+    { role: conn.firstToParty ? "starter" : "joiner", verbose: connVerbosity },
+  );
+
+  log.info("exchanging roles");
+  await participant.exchangeRoles(conn, conn.firstToParty!);
+
+  log.info("identifying intersection");
+  // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
+  // to spec.linkageTerms.deduplicate: true for both parties. When agreement
+  // cross-checking is added to the protocol, the combined cardinality will be
+  // derived from both parties' deduplicate fields.
+  const associationTable = await linkViaPSI(
+    { cardinality: "one-to-one" },
+    participant,
+    conn,
+    data,
+  );
+
+  log.info("stopping polling");
+  conn.stop();
+
+  log.info("closing connection");
+  conn.close();
+
+  writeOutput(args.output, associationTable);
+}
+
+function writeOutput(
+  output: string | undefined,
+  table: AssociationTable,
+): void {
+  const out = output
+    ? fs.createWriteStream(output, { encoding: "utf8" })
+    : process.stdout;
+  out.write("our_row_id,their_row_id\n");
+  table[0].forEach((ours, i) => {
+    out.write(`${ours},${table[1][i]}\n`);
+  });
+  if (output) (out as fs.WriteStream).close();
+}
+
+// ─── Handler ──────────────────────────────────────────────────────────────────
+
+export async function handler(argv: Arguments): Promise<void> {
+  const args = extractArgs(argv);
+
+  if (args.verbosity >= 4) logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
+  else if (args.verbosity === 3)
+    logLibrary.setDefaultLevel(logLibrary.levels.DEBUG);
+  else if (args.verbosity === 2)
+    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  else if (args.verbosity === 1)
+    logLibrary.setDefaultLevel(logLibrary.levels.WARN);
+  else if (args.verbosity === 0)
+    logLibrary.setDefaultLevel(logLibrary.levels.ERROR);
+  else logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
+
+  const log = logLibrary.getLogger("root");
+  setLogPrefixer(log);
+
+  let spec: ExchangeSpec;
+  try {
+    spec = resolveConfig(args);
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(64);
+  }
+
+  await runProtocol(spec, args);
+}
