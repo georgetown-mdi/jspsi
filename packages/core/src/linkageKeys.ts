@@ -4,12 +4,13 @@ import { ColumnsIterable } from "./columnIterable";
 
 import type { LocalFile } from "papaparse";
 
-import type { KeyAliases, LinkageKeyDefinition } from "./types";
+import type { LinkageKeyDefinition } from "./types";
+import type { FieldAliases } from './config/metadata'
 
 export async function getLinkageKeys(
   file: LocalFile,
   linkageKeyDefinitions: Array<LinkageKeyDefinition>,
-  keyAliases: KeyAliases,
+  fieldAliases: FieldAliases,
 ): Promise<Array<ColumnsIterable>> {
   const input = await loadCSVFile(file);
   const rawData = input.data as Array<Record<string, string>>;
@@ -18,7 +19,7 @@ export async function getLinkageKeys(
   const keys = Object.keys(rawData[0]);
   const lowerCaseKeys = keys.map((key) => key.toLowerCase());
 
-  Object.entries(keyAliases).forEach(([key, aliases]) => {
+  Object.entries(fieldAliases).forEach(([key, aliases]) => {
     let i;
     if ((i = lowerCaseKeys.indexOf(key)) >= 0) {
       keyAliasMap[key] = keys[i];

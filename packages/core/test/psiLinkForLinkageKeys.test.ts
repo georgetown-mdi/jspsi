@@ -10,7 +10,8 @@ import { linkViaPSI } from "../src/link";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
-import type { KeyAliases, LinkageKeyDefinition } from "../src/types";
+import type { LinkageKeyDefinition } from "../src/types";
+import type { FieldAliases } from "../src/config/metadata";
 
 const formatters = {
   ssn: (x: unknown) =>
@@ -25,7 +26,7 @@ const formatters = {
       : "",
 };
 
-const keyAliases: KeyAliases = {
+const fieldAliases: FieldAliases = {
   ssn: ["social_security_number", "social"],
   first_name: ["firstname", "fname"],
   last_name: ["lastname", "lname"],
@@ -103,7 +104,7 @@ test("rules match in order", async () => {
   const serverData = await getLinkageKeys(
     Readable.from(serverInputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   /* client input 0 matches rule 1, while input 1 matches rule 0 using rule 0
@@ -121,7 +122,7 @@ test("rules match in order", async () => {
   const clientData = await getLinkageKeys(
     Readable.from(clientInputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   const [serverResult, clientResult] = await (async () => {

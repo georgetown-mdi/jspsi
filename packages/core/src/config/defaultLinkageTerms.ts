@@ -1,9 +1,6 @@
-import { keyAliases } from "@psilink/core";
-import type {
-  ExchangeAgreement,
-  LinkageField,
-  LinkageKey,
-} from "@psilink/core";
+import { DEFAULT_FIELD_ALIASES } from "./metadata";
+
+import type { LinkageTerms, LinkageField, LinkageKey } from "./linkageTerms";
 
 // Maps standardized names (snake_case, as used in fixedLinkageKeys.ts and
 // keyAliases) to default linkage field names. ssnLast4 is excluded because
@@ -221,7 +218,9 @@ const TEMPLATE_KEYS: ReadonlyArray<LinkageKey> = [
 export function columnsToFieldNames(columns: string[]): Set<string> {
   // Build reverse alias map: any recognized name -> standardized name.
   const aliasToStandardizedName: Record<string, string> = {};
-  for (const [standardizedName, aliases] of Object.entries(keyAliases)) {
+  for (const [standardizedName, aliases] of Object.entries(
+    DEFAULT_FIELD_ALIASES,
+  )) {
     aliasToStandardizedName[standardizedName] = standardizedName;
     for (const alias of aliases) {
       aliasToStandardizedName[alias] = standardizedName;
@@ -242,8 +241,8 @@ export function columnsToFieldNames(columns: string[]): Set<string> {
 }
 
 /**
- * Returns a default {@link ExchangeAgreement} suitable for quick exchanges
- * when no agreement is specified explicitly.
+ * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
+ * linkage terms are specified explicitly.
  *
  * When `columns` are provided (the normalized header of the input CSV), only
  * linkage key templates whose elements can be satisfied by the present columns
@@ -251,17 +250,12 @@ export function columnsToFieldNames(columns: string[]): Set<string> {
  * satisfied, all templates are included as a fallback.
  *
  * Only the linkage fields referenced by the selected keys are included in the
- * returned agreement.
- *
- * PLACEHOLDER: The agreement is validated but does not yet drive runtime
- * behavior. See the PLACEHOLDER comments in index.ts and fixedLinkageKeys.ts.
- * When data pipelines are implemented, each linkage key element will also
- * carry its cleaning/transformation configuration.
+ * returned linkage terms.
  */
-export function getDefaultExchangeAgreement(
+export function getDefaultLinkageTerms(
   identity: string,
   columns?: string[],
-): ExchangeAgreement {
+): LinkageTerms {
   let linkageKeys: LinkageKey[];
 
   if (columns !== undefined && columns.length > 0) {
@@ -270,8 +264,8 @@ export function getDefaultExchangeAgreement(
       key.elements.every((el) => available.has(el.field)),
     );
     // Fall back to all templates if detection yields no usable keys, rather
-    // than producing an invalid agreement. This can happen when column names
-    // are unrecognized; the user will see a warning in the caller.
+    // than producing an invalid linkage terms. This can happen when column
+    // names are unrecognized; the user will see a warning in the caller.
     linkageKeys = filtered.length > 0 ? filtered : [...TEMPLATE_KEYS];
   } else {
     linkageKeys = [...TEMPLATE_KEYS];

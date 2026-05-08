@@ -4,7 +4,8 @@ import { expect, test } from "vitest";
 
 import { getLinkageKeys } from "../src/linkageKeys";
 
-import type { KeyAliases, LinkageKeyDefinition } from "../src/types";
+import type { LinkageKeyDefinition } from "../src/types";
+import type { FieldAliases } from "../src/config/metadata";
 
 const formatters = {
   ssn: (x: unknown) =>
@@ -19,7 +20,7 @@ const formatters = {
       : "",
 };
 
-const keyAliases: KeyAliases = {
+const fieldAliases: FieldAliases = {
   ssn: ["social_security_number", "social"],
   first_name: ["firstname", "fname"],
   last_name: ["lastname", "lname"],
@@ -74,7 +75,7 @@ test("handles trailing newline", async () => {
   const linkData = await getLinkageKeys(
     Readable.from(inputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(linkageKeyDefinitions.length);
@@ -89,7 +90,7 @@ test("handles no trailing newline", async () => {
   const linkData = await getLinkageKeys(
     Readable.from(inputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(linkageKeyDefinitions.length);
@@ -105,7 +106,7 @@ test("handles valid input", async () => {
   const linkData = await getLinkageKeys(
     Readable.from(inputData),
     [...linkageKeyDefinitions, ...extraLinkageKeyDefinitions],
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(
@@ -131,7 +132,7 @@ test("handles empty inputs", async () => {
   const linkData = await getLinkageKeys(
     Readable.from(inputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(linkageKeyDefinitions.length);
@@ -146,7 +147,7 @@ test("handles invalid dates", async () => {
   const linkData = await getLinkageKeys(
     Readable.from(inputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(linkageKeyDefinitions.length);
@@ -162,7 +163,7 @@ test("handles empty fields", async () => {
   const linkData = await getLinkageKeys(
     Readable.from(inputData),
     linkageKeyDefinitions,
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(linkageKeyDefinitions.length);
@@ -190,7 +191,7 @@ test("can return undefined", async () => {
         },
       ],
     ],
-    keyAliases,
+    fieldAliases,
   );
 
   expect(linkData.length).toBe(1);

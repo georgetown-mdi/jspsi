@@ -30,10 +30,6 @@ export interface Config {
   verbose?: number;
 }
 
-export interface KeyAliases {
-  [key: string]: Array<string>;
-}
-
 export type Formatter = (x: unknown) => string | undefined;
 
 export interface LinkageKeyFieldDefinition {

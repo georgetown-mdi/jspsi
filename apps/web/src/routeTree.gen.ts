@@ -74,14 +74,14 @@ const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/psi': typeof PsiRoute
-  '/v2/': typeof V2IndexRoute
+  '/v2': typeof V2IndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/psi/create': typeof ApiPsiCreateRoute
   '/api/psi/join': typeof ApiPsiJoinRoute
-  '/api/peerjs/': typeof ApiPeerjsIndexRoute
+  '/api/peerjs': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/psi/$uuid/wait': typeof ApiPsiUuidWaitRoute
-  '/api/psi/$uuid/': typeof ApiPsiUuidIndexRoute
+  '/api/psi/$uuid': typeof ApiPsiUuidIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -113,14 +113,14 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/psi'
-    | '/v2/'
+    | '/v2'
     | '/api/peerjs/id'
     | '/api/psi/create'
     | '/api/psi/join'
-    | '/api/peerjs/'
+    | '/api/peerjs'
     | '/api/peerjs/$key/peers'
     | '/api/psi/$uuid/wait'
-    | '/api/psi/$uuid/'
+    | '/api/psi/$uuid'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -179,14 +179,14 @@ declare module '@tanstack/react-router' {
     '/v2/': {
       id: '/v2/'
       path: '/v2'
-      fullPath: '/v2/'
+      fullPath: '/v2'
       preLoaderRoute: typeof V2IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/peerjs/': {
       id: '/api/peerjs/'
       path: '/api/peerjs'
-      fullPath: '/api/peerjs/'
+      fullPath: '/api/peerjs'
       preLoaderRoute: typeof ApiPeerjsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -214,7 +214,7 @@ declare module '@tanstack/react-router' {
     '/api/psi/$uuid/': {
       id: '/api/psi/$uuid/'
       path: '/api/psi/$uuid'
-      fullPath: '/api/psi/$uuid/'
+      fullPath: '/api/psi/$uuid'
       preLoaderRoute: typeof ApiPsiUuidIndexRouteImport
       parentRoute: typeof rootRouteImport
     }

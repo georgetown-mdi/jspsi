@@ -1,4 +1,4 @@
-import type { KeyAliases, LinkageKeyDefinition } from "./types";
+import type { LinkageKeyDefinition } from "./types";
 
 const formatters = {
   ssn: (x: unknown) =>
@@ -11,13 +11,6 @@ const formatters = {
     x instanceof Date && !isNaN(x.getDate())
       ? x.toISOString().substring(0, 10)
       : "",
-};
-
-export const keyAliases: KeyAliases = {
-  ssn: ["social_security_number", "social"],
-  first_name: ["firstname", "fname"],
-  last_name: ["lastname", "lname"],
-  date_of_birth: ["dateofbirth", "dob"],
 };
 
 export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [

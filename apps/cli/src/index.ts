@@ -20,20 +20,20 @@ import {
   SFTPConnection,
   firstToPartyLinkageKeyDefinitions,
   getLinkageKeys,
-  keyAliases,
+  DEFAULT_FIELD_ALIASES,
   linkViaPSI,
-  safeParseExchangeAgreement,
+  safeParseLinkageTerms,
   secondToPartyLinkageKeyDefinitions,
   setLogPrefixer,
 } from "@psilink/core";
 
-import type { ExchangeAgreement } from "@psilink/core";
+import {
+  type LinkageTerms,
+  columnsToFieldNames,
+  getDefaultLinkageTerms
+} from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
-import {
-  columnsToFieldNames,
-  getDefaultExchangeAgreement,
-} from "./defaultAgreement";
 
 // Reads and parses the first line of a CSV file as column names, normalized
 // to lowercase with surrounding whitespace stripped. Returns an empty array if
@@ -88,11 +88,11 @@ async function run() {
           type: "string",
           describe: "optional config file (YAML or JSON)",
         });
-        cmd = cmd.option("agreement", {
+        cmd = cmd.option("linkageTerms", {
           type: "string",
           describe:
-            "path to an exchange agreement file (YAML or JSON); overrides " +
-            "any agreement specified in the config file",
+            "path to an exchange linkageTerms file (YAML or JSON); overrides " +
+            "any linkageTerms specified in the config file",
         });
 
         return cmd.demand(numRequiredPositionals);
@@ -125,7 +125,7 @@ async function run() {
 
   // Extract special options that are handled outside configSchema.
   const configFile = argv["config"] as string | undefined;
-  const agreementFile = argv["agreement"] as string | undefined;
+  const linkageTermsFile = argv["linkageTerms"] as string | undefined;
 
   const positionalArgs = Object.fromEntries(
     argv._.map((x, i) => {
@@ -149,7 +149,7 @@ async function run() {
               key !== "_" &&
               key !== "$0" &&
               key !== "config" &&
-              key !== "agreement",
+              key !== "linkageTerms",
           )
           .map(([key, value]) => [optionPathMap[key] || key, value]),
       ),
@@ -157,7 +157,7 @@ async function run() {
   );
 
   // If a config file is provided, it forms the base; CLI args take precedence.
-  let rawAgreement: unknown = undefined;
+  let rawlinkageTerms: unknown = undefined;
   let mergedArgs: Record<string, unknown> = cliArgs;
 
   if (configFile && typeof configFile === "string") {
@@ -173,13 +173,13 @@ async function run() {
     ) {
       const parsedRecord = parsed as Record<string, unknown>;
 
-      // Extract the agreement block before flattening so its nested structure
-      // is preserved for safeParseExchangeAgreement below. The config file's
-      // agreement key must be an inline object (YAML block); use --agreement
+      // Extract the linkageTerms block before flattening so its nested structure
+      // is preserved for safeParseExchangelinkageTerms below. The config file's
+      // linkageTerms key must be an inline object (YAML block); use --linkageTerms
       // to reference a standalone file.
-      if ("agreement" in parsedRecord) {
-        rawAgreement = parsedRecord["agreement"];
-        delete parsedRecord["agreement"];
+      if ("linkageTerms" in parsedRecord) {
+        rawlinkageTerms = parsedRecord["linkageTerms"];
+        delete parsedRecord["linkageTerms"];
       }
 
       const configOptions = Object.fromEntries(
@@ -246,35 +246,35 @@ async function run() {
     process.exit(69);
   }
 
-  // Load exchange agreement: --agreement flag > config file inline > default.
+  // Load exchange linkageTerms: --linkageTerms flag > config file inline > default.
   //
-  // The agreement is validated here but does not yet drive runtime behavior;
-  // see the PLACEHOLDER comments below and in defaultAgreement.ts. Once data
+  // The linkageTerms is validated here but does not yet drive runtime behavior;
+  // see the PLACEHOLDER comments below and in defaultlinkageTerms.ts. Once data
   // pipelines are implemented, linkageKeys and algorithm will control key
   // construction and PSI setup respectively.
-  let agreement: ExchangeAgreement;
-  if (agreementFile) {
-    const content = fs.readFileSync(agreementFile, "utf8");
-    const raw: unknown = agreementFile.toLowerCase().endsWith("json")
+  let linkageTerms: LinkageTerms;
+  if (linkageTermsFile) {
+    const content = fs.readFileSync(linkageTermsFile, "utf8");
+    const raw: unknown = linkageTermsFile.toLowerCase().endsWith("json")
       ? JSON.parse(content)
       : YAML.parse(content);
-    const result = safeParseExchangeAgreement(raw);
+    const result = safeParseLinkageTerms(raw);
     if (!result.success) {
-      log.error("invalid exchange agreement in", agreementFile);
+      log.error("invalid exchange linkageTerms in", linkageTermsFile);
       log.error(result.error);
       process.exit(64);
     }
-    agreement = result.data;
-    log.info("loaded exchange agreement from", agreementFile);
-  } else if (rawAgreement !== undefined) {
-    const result = safeParseExchangeAgreement(rawAgreement);
+    linkageTerms = result.data;
+    log.info("loaded exchange linkageTerms from", linkageTermsFile);
+  } else if (rawlinkageTerms !== undefined) {
+    const result = safeParseLinkageTerms(rawlinkageTerms);
     if (!result.success) {
-      log.error("invalid exchange agreement in config file");
+      log.error("invalid exchange linkageTerms in config file");
       log.error(result.error);
       process.exit(64);
     }
-    agreement = result.data;
-    log.info("loaded exchange agreement from config file");
+    linkageTerms = result.data;
+    log.info("loaded exchange linkageTerms from config file");
   } else {
     // Read the CSV header to detect which semantic types are present and
     // tailor the default linkage keys accordingly. Skipped for stdin ("-")
@@ -284,7 +284,7 @@ async function run() {
       columns = await readCsvHeader(input);
       if (columns.length === 0) {
         log.warn(
-          "could not read CSV header; default agreement will include all" +
+          "could not read CSV header; default linkageTerms will include all" +
             " linkage key templates",
         );
       } else {
@@ -297,14 +297,14 @@ async function run() {
         );
       }
     }
-    agreement = getDefaultExchangeAgreement(os.userInfo()["username"], columns);
+    linkageTerms = getDefaultLinkageTerms(os.userInfo()["username"], columns);
     log.info(
-      "no exchange agreement specified; using default (identity:",
-      agreement.identity + ")",
+      "no exchange linkageTerms specified; using default (identity:",
+      linkageTerms.identity + ")",
     );
     log.info(
-      "default agreement linkage keys:",
-      agreement.linkageKeys.map((k) => k.name).join(", "),
+      "default linkageTerms linkage keys:",
+      linkageTerms.linkageKeys.map((k) => k.name).join(", "),
     );
   }
 
@@ -340,7 +340,7 @@ async function run() {
 
   // PLACEHOLDER: getLinkageKeys currently uses hard-coded field definitions
   // from fixedLinkageKeys.ts. Once data pipelines are implemented, the
-  // definitions will be derived from agreement.linkageKeys, and the role-based
+  // definitions will be derived from linkageTerms.linkageKeys, and the role-based
   // split (firstToParty vs secondToParty) will be replaced by pipeline-driven
   // key construction that is symmetric between parties.
   //
@@ -352,13 +352,13 @@ async function run() {
     conn.firstToParty
       ? firstToPartyLinkageKeyDefinitions
       : secondToPartyLinkageKeyDefinitions,
-    keyAliases,
+    DEFAULT_FIELD_ALIASES,
   );
 
   log.info("starting polling");
   conn.start();
 
-  // PLACEHOLDER: agreement.algorithm ("psi" vs "psi-c") will eventually
+  // PLACEHOLDER: linkageTerms.algorithm ("psi" vs "psi-c") will eventually
   // determine whether the full intersection or only its cardinality is
   // revealed. Currently PSI is always used regardless of the algorithm field.
   const participant = new PSIParticipant(
@@ -375,7 +375,7 @@ async function run() {
 
   log.info("identifying intersection");
   // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
-  // to agreement.deduplicate: true for both parties. When agreement
+  // to linkageTerms.deduplicate: true for both parties. When linkageTerms
   // cross-checking is added to the protocol, the combined cardinality will be
   // derived from both parties' deduplicate fields.
   const associationTable = await linkViaPSI(
