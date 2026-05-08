@@ -172,9 +172,11 @@ export class SFTPConnection extends EventEmitter<Events, never> {
   }
 
   async cleanup() {
-    this.responsibleFiles.forEach(async (filename) => {
-      await this.sftp.safeDelete(`${this.path}/${filename}`);
-    });
+    return Promise.all(
+      Array.from(this.responsibleFiles).map((filename) =>
+        this.sftp.safeDelete(`${this.path}/${filename}`),
+      ),
+    );
   }
 
   async close() {
@@ -446,10 +448,12 @@ export class SFTPConnection extends EventEmitter<Events, never> {
               flags: "w",
               encoding: "utf-8",
             });
+            this.responsibleFiles.add(`${this.id}.tmp.wave`);
 
             try {
               await this.sftp.rename(tempPath, wavePath);
               this.responsibleFiles.add(waveName);
+              this.responsibleFiles.delete(`${this.id}.tmp.wave`);
 
               /**
                * A ~ B list
@@ -472,12 +476,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
                * This is B
                */
               await this.sftp.safeDelete(tempPath);
+              const waveAlreadyExists = await this.sftp.exists(wavePath);
 
-              if (
-                !(err instanceof Error) ||
-                !err.message.toLowerCase().includes("rename")
-              )
-                throw err;
+              if (!(err instanceof Error) || !waveAlreadyExists) throw err;
 
               this.log.debug(
                 `[${this.role}] wave file creation failed, assuming race ` +
@@ -581,7 +582,22 @@ export class SFTPConnection extends EventEmitter<Events, never> {
         const message = await this.sftp.get(inPath, { encoding: "utf-8" });
 
         this.log.debug(`[${this.role}] deleting message ${this.peerId}.json`);
-        await this.sftp.safeDelete(inPath);
+        try {
+          await this.sftp.delete(inPath);
+        } catch {
+          await new Promise((resolve) =>
+            setTimeout(resolve, this.options.pollingFrequency),
+          );
+          try {
+            await this.sftp.delete(inPath);
+          } catch (deleteErr: unknown) {
+            this.log.warn(
+              `[${this.role}] failed to delete ${this.peerId}.json; ` +
+                `please notify the server administrator than manual cleanup may ` +
+                `be required: ${errMessage(deleteErr)}`,
+            );
+          }
+        }
 
         const validatedMessage = Message.parse(JSON.parse(message.toString()));
 

@@ -1,6 +1,6 @@
 import logLibrary from "loglevel";
 
-const { getLevel, getLogger } = logLibrary;
+const { getLevel } = logLibrary;
 
 const logLevels = logLibrary.levels;
 
@@ -15,7 +15,7 @@ export const getLoggerForVerbosity = (
         ? logLevels.INFO
         : logLevels.WARN;
 
-  const result = getLogger(name);
+  const result = logLibrary.getLogger(name);
   const currentLevel = getLevel();
 
   result.setLevel(
@@ -28,6 +28,16 @@ export const getLoggerForVerbosity = (
 
   return result;
 };
+
+export const getLogger = (
+  name: string | symbol,
+) => {
+  const result = logLibrary.getLogger(name);
+
+  setLogPrefixer(result);
+
+  return result;
+}
 
 export const setLogPrefixer = (logger: logLibrary.Logger) => {
   const originalFactory = logger.methodFactory;

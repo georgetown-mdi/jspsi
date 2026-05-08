@@ -1,5 +1,11 @@
 import Ssh2SftpClient from "ssh2-sftp-client";
-import { FileInfo, GetOptions, PutOptions, SFTPClient } from "@psilink/core";
+import {
+  FileInfo,
+  GetOptions,
+  PutOptions,
+  retryPromise,
+  SFTPClient,
+} from "@psilink/core";
 
 export class SSH2SFTPClientAdapter implements SFTPClient {
   private client: Ssh2SftpClient;
@@ -33,33 +39,9 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
     dest: string,
     options?: PutOptions,
   ): Promise<unknown> {
-    const maxRetries = this.options!.retries || 5;
-
-    const retryPromise = (
-      fn: () => Promise<unknown>,
-      retries = 5,
-      delay = 100,
-    ) => {
-      return new Promise((resolve, reject) => {
-        function attempt() {
-          fn()
-            .then(resolve)
-            .catch((error: unknown) => {
-              if (retries > 0) {
-                --retries;
-                setTimeout(attempt, delay);
-              } else {
-                reject(error);
-              }
-            });
-        }
-        attempt();
-      });
-    };
-
     return retryPromise(
       () => this.client.put(src, dest, { writeStreamOptions: options }),
-      maxRetries,
+      this.options!.retries || 5,
       100,
     );
   }
@@ -69,9 +51,14 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
   }
 
   safeDelete(path: string): Promise<void> {
-    return this.client.delete(path, true).then(
-      () => {},
-      () => {},
+    return retryPromise(
+      () =>
+        this.client.delete(path, true).then(
+          () => {},
+          () => {},
+        ),
+      1,
+      100,
     );
   }
 

@@ -41,6 +41,7 @@ interface ExchangeArgs {
   /** Already @-file resolved. */
   serverPrivateKey?: string;
   timeout?: number;
+  logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
 
@@ -92,16 +93,21 @@ export function builder(cmd: Argv): Argv {
         "SSH private key; use @path to read from file; overrides " +
         "connection.server.privateKey in config",
     })
-    .option("timeout", {
+    .option("connection-timeout", {
       alias: "t",
       type: "number",
       describe: "seconds to wait for peer before giving up",
     })
-    .option("verbose", {
+    .option("log-level", {
       type: "string",
+      describe: "silent | error | warn | info | debug | trace; default=info",
+    })
+    .option("verbose", {
+      alias: "v",
+      type: "count",
       describe:
-        "verbosity: silent | error | warn | info | debug | trace, or " +
-        "0-4; use --verbose as a flag for info",
+        "generate additional logging information for sub-libraries at all " +
+        "logging levels",
     })
     .demand(1);
 }
@@ -126,26 +132,22 @@ function extractArgs(argv: Arguments): ExchangeArgs {
   ) as string | undefined;
   const timeout = argv["timeout"] as number | undefined;
 
-  const rawVerbose = argv["verbose"] as string | number | boolean | undefined;
-  let verbosity = 0;
-  if (rawVerbose !== undefined) {
-    if (typeof rawVerbose === "number") {
-      verbosity = rawVerbose;
-    } else {
-      const s = String(rawVerbose).toLowerCase();
-      if (s === "" || s === "true") verbosity = 2;
-      else if (s === "silent") verbosity = -1;
-      else if (s === "error") verbosity = 0;
-      else if (s === "warn") verbosity = 1;
-      else if (s === "info") verbosity = 2;
-      else if (s === "debug") verbosity = 3;
-      else if (s === "trace") verbosity = 4;
-      else {
-        const n = parseInt(s, 10);
-        verbosity = isNaN(n) ? 0 : n;
-      }
-    }
+  const rawLogLevel = (
+    (argv["logLevel"] as string | undefined) || "info"
+  ).toLowerCase();
+
+  let logLevel: logLibrary.LogLevelNumbers;
+  if (rawLogLevel === "silent") logLevel = logLibrary.levels.SILENT;
+  else if (rawLogLevel === "error") logLevel = logLibrary.levels.ERROR;
+  else if (rawLogLevel === "warn") logLevel = logLibrary.levels.WARN;
+  else if (rawLogLevel === "info") logLevel = logLibrary.levels.INFO;
+  else if (rawLogLevel === "debug") logLevel = logLibrary.levels.DEBUG;
+  else if (rawLogLevel === "trace") logLevel = logLibrary.levels.TRACE;
+  else {
+    throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
   }
+
+  const verbosity = (argv["verbose"] as number | undefined) ?? 0;
 
   return {
     input,
@@ -158,6 +160,7 @@ function extractArgs(argv: Arguments): ExchangeArgs {
     serverPassword,
     serverPrivateKey,
     timeout,
+    logLevel,
     verbosity,
   };
 }
@@ -175,7 +178,8 @@ function resolveConfig(args: ExchangeArgs): ExchangeSpec {
     const result = safeParseLinkageTerms(raw);
     if (!result.success)
       throw new Error(
-        `invalid linkage terms in ${args.linkageTermsFile}: ${result.error.message}`,
+        `invalid linkage terms in ${args.linkageTermsFile}: ` +
+        `${result.error.message}`,
       );
     spec = applyCliOverrides(spec, { linkageTerms: result.data });
   }
@@ -196,7 +200,7 @@ function resolveConfig(args: ExchangeArgs): ExchangeSpec {
   return spec;
 }
 
-// ─── Protocol ─────────────────────────────────────────────────────────────────
+// ─── Protocol ────────────────────────────────────────────────────────────────
 
 async function runProtocol(
   spec: ExchangeSpec,
@@ -220,9 +224,8 @@ async function runProtocol(
     spec.linkageTerms.linkageKeys.map((k) => k.name).join(", "),
   );
 
-  const connVerbosity = args.verbosity >= 2 ? 2 : args.verbosity === 1 ? 1 : 0;
   const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
-    verbose: connVerbosity,
+    verbose: args.verbosity,
   });
   conn.on("error", (err: unknown) => {
     log.error("sftp error:", err);
@@ -272,7 +275,7 @@ async function runProtocol(
   const participant = new PSIParticipant(
     conn.firstToParty ? "server" : "client",
     await PSI(),
-    { role: conn.firstToParty ? "starter" : "joiner", verbose: connVerbosity },
+    { role: conn.firstToParty ? "starter" : "joiner", verbose: args.verbosity },
   );
 
   log.info("exchanging roles");
@@ -280,7 +283,7 @@ async function runProtocol(
 
   log.info("identifying intersection");
   // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
-  // to spec.linkageTerms.deduplicate: true for both parties. When agreement
+  // to spec.linkageTerms.deduplicate: true for both parties. When terms
   // cross-checking is added to the protocol, the combined cardinality will be
   // derived from both parties' deduplicate fields.
   const associationTable = await linkViaPSI(
@@ -294,7 +297,7 @@ async function runProtocol(
   conn.stop();
 
   log.info("closing connection");
-  conn.close();
+  await conn.close();
 
   writeOutput(args.output, associationTable);
 }
@@ -318,16 +321,7 @@ function writeOutput(
 export async function handler(argv: Arguments): Promise<void> {
   const args = extractArgs(argv);
 
-  if (args.verbosity >= 4) logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
-  else if (args.verbosity === 3)
-    logLibrary.setDefaultLevel(logLibrary.levels.DEBUG);
-  else if (args.verbosity === 2)
-    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-  else if (args.verbosity === 1)
-    logLibrary.setDefaultLevel(logLibrary.levels.WARN);
-  else if (args.verbosity === 0)
-    logLibrary.setDefaultLevel(logLibrary.levels.ERROR);
-  else logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
+  logLibrary.setDefaultLevel(args.logLevel);
 
   const log = logLibrary.getLogger("root");
   setLogPrefixer(log);
