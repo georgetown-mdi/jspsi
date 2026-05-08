@@ -29,7 +29,7 @@ import {
   ProcessState,
   secondToPartyLinkageKeyDefinitions as clientLinkageKeyDefinitions,
   getLinkageKeys,
-  keyAliases,
+  DEFAULT_FIELD_ALIASES,
   linkViaPSI,
   firstToPartyLinkageKeyDefinitions as serverLinkageKeyDefinitions,
 } from "@psilink/core";
@@ -153,7 +153,11 @@ function Home() {
         .then((peerId) => {
           Promise.all([
             PSI() as Promise<PSILibrary>,
-            getLinkageKeys(files[0], serverLinkageKeyDefinitions, keyAliases),
+            getLinkageKeys(
+              files[0],
+              serverLinkageKeyDefinitions,
+              DEFAULT_FIELD_ALIASES,
+            ),
             openPeerConnection(peerId),
           ]).then(async (values) => {
             const [psi, data, [peer, conn]] = values;
@@ -170,7 +174,7 @@ function Home() {
             );
 
             log.info(`${psiConfig.role}: exchanging config`);
-            await participant.exchangeRoles(conn, true);
+            await participant.exchangeRoles(conn, "responder");
             log.info(`${psiConfig.role}: identifying intersection`);
             const associationTable = await linkViaPSI(
               { cardinality: "one-to-one" },
@@ -206,7 +210,11 @@ function Home() {
       setStageById("before start");
       Promise.all([
         PSI() as PSILibrary,
-        getLinkageKeys(files[0], clientLinkageKeyDefinitions, keyAliases),
+        getLinkageKeys(
+          files[0],
+          clientLinkageKeyDefinitions,
+          DEFAULT_FIELD_ALIASES,
+        ),
       ]).then(async (values) => {
         const [psi, data] = values;
         const peer = await createAndSharePeerId(session);
@@ -226,7 +234,7 @@ function Home() {
             );
             log.info(`${psiConfig.role}: exchanging config`);
 
-            await participant.exchangeRoles(conn, false);
+            await participant.exchangeRoles(conn, "initiator");
             log.info(`${psiConfig.role}: identifying intersection`);
             const associationTable = await linkViaPSI(
               { cardinality: "one-to-one" },

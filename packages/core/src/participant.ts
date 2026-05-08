@@ -2,7 +2,13 @@ import * as z from "zod";
 
 import { EventHandlerQueue } from "./connection/eventHandlerQueue";
 
-import type { AssociationTable, Config, Connection, Role } from "./types";
+import type {
+  AssociationTable,
+  Config,
+  Connection,
+  HandshakeRole,
+  Role,
+} from "./types";
 
 import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -178,15 +184,18 @@ export class PSIParticipant {
     return this.stages;
   }
 
-  async exchangeRoles(conn: Connection, firstToParty: boolean): Promise<Role> {
+  async exchangeRoles(
+    conn: Connection,
+    handshakeRole: HandshakeRole,
+  ): Promise<Role> {
     this.log.info(
       `${this.id}: starting role exchange with role ${this.config.role}`,
     );
     this.setStage("confirming protocol");
 
-    if (!firstToParty) {
-      // last to party kicks things off by sending their role (see below)
-      // last to party will prefer to be the joiner
+    if (handshakeRole === "initiator") {
+      // last to arrive kicks things off by sending their role (see below)
+      // last to arrive will prefer to be the joiner
       this.log.debug(`${this.id}: sending role ${this.config.role}`);
       const sendRoleMessage = conn.send({ role: this.config.role });
       const rolePromise: Promise<Role> = new Promise((resolve) => {
@@ -227,8 +236,8 @@ export class PSIParticipant {
       return rolePromise;
     } else {
       return new Promise((resolve) => {
-        // first to party waits to receive role
-        // first to party will prefer to be the starter
+        // first to arrive waits to receive role
+        // first to arrive will prefer to be the starter
         const eventHandlerQueue = new EventHandlerQueue([
           async (rawData: unknown) => {
             const peerConfig = protocolMessage.parse(rawData);

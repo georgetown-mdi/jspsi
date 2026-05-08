@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
 import type { SFTPConnectionConfig } from "../config/connection";
+import type { HandshakeRole } from "../types";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -91,7 +92,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
   path: string | undefined;
 
   peerId: string | undefined;
-  firstToParty: boolean | undefined;
+  handshakeRole: HandshakeRole | undefined;
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
   private responsibleFiles: Set<string>;
@@ -260,7 +261,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       const otherFile = helloFiles[0];
       const otherPath = `${this.path}/${otherFile.name}`;
 
-      this.firstToParty = false;
+      // arrived second, and so should send the first message
+      this.handshakeRole = "initiator";
       this.role = "joiner";
       this.peerId = otherFile.name.slice(0, -6);
 
@@ -393,8 +395,11 @@ export class SFTPConnection extends EventEmitter<Events, never> {
             if (!waveMatches.some((x) => x === otherFile.name))
               throw new Error("wave file does not reference other connection");
 
-            this.firstToParty = waveMatches[1] === this.id;
-            this.role = this.firstToParty ? "starter" : "joiner";
+            // first to arrive => should wait for first message
+            this.handshakeRole =
+              waveMatches[1] === this.id ? "responder" : "initiator";
+            this.role =
+              this.handshakeRole === "initiator" ? "starter" : "joiner";
             this.peerId = otherFile.name.slice(0, -6);
 
             this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
@@ -429,7 +434,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
              */
             const otherPath = `${this.path}/${otherFile.name}`;
 
-            this.firstToParty = true;
+            // arrived first, should wait for a message
+            this.handshakeRole = "responder";
             this.role = "starter";
             this.peerId = otherFile.name.slice(0, -6);
 
@@ -453,16 +459,17 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
             const thisFile = theseFiles[0];
 
-            this.firstToParty =
+            const arrivedFirst =
               thisFile.modifyTime < otherFile.modifyTime ||
               (thisFile.modifyTime === otherFile.modifyTime &&
                 thisFile.name < otherFile.name);
-            this.role = this.firstToParty ? "starter" : "joiner";
+            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
+            this.role = arrivedFirst ? "starter" : "joiner";
             this.peerId = otherFile.name.slice(0, -6);
 
             const waveName =
-              `${this.firstToParty ? this.id : this.peerId}-` +
-              `${this.firstToParty ? this.peerId : this.id}.wave`;
+              `${arrivedFirst ? this.id : this.peerId}-` +
+              `${arrivedFirst ? this.peerId : this.id}.wave`;
             wavePath = `${this.path}/${waveName}`;
             const tempPath = `${this.path}/${this.id}.tmp.wave`;
 
@@ -559,8 +566,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
       let type = "Object";
       if (data instanceof Uint8Array) {
-        data = Buffer.from(data).toString('base64');
-        type = 'Uint8Array';
+        data = Buffer.from(data).toString("base64");
+        type = "Uint8Array";
       }
 
       const messsage = JSON.stringify({
@@ -634,9 +641,12 @@ export class SFTPConnection extends EventEmitter<Events, never> {
           `[${this.role}] received message seq=${validatedMessage.seq}, type=${validatedMessage.type}`,
         );
 
-        if (validatedMessage.type === 'Uint8Array') {
-          const bytes = Buffer.from(validatedMessage.payload as string, 'base64');
-          this.emit('data', bytes);
+        if (validatedMessage.type === "Uint8Array") {
+          const bytes = Buffer.from(
+            validatedMessage.payload as string,
+            "base64",
+          );
+          this.emit("data", bytes);
         } else {
           this.emit("data", validatedMessage.payload);
         }

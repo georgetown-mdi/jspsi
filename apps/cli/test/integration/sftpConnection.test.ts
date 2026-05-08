@@ -24,14 +24,14 @@ async function cleanServer() {
 
 function asynchronize(conn: SFTPConnection) {
   conn.peerId = undefined;
-  conn.firstToParty = undefined;
+  conn.handshakeRole = undefined;
   conn.role = "unknown";
 }
 
 const serverSFTP = new SSH2SFTPClientAdapter();
-const serverConn = new SFTPConnection(serverSFTP, { verbose: 0 });
+const serverConn = new SFTPConnection(serverSFTP, { verbose: -1 });
 const clientSFTP = new SSH2SFTPClientAdapter();
-const clientConn = new SFTPConnection(clientSFTP, { verbose: 0 });
+const clientConn = new SFTPConnection(clientSFTP, { verbose: -1 });
 
 serverConn.on("error", (err: unknown) => {
   throw new Error(String(err));
@@ -60,7 +60,7 @@ test("wave synchronization with race condition", async () => {
 
   expect(serverConn.peerId).toEqual(clientConn.id);
   expect(clientConn.peerId).toEqual(serverConn.id);
-  expect(serverConn.firstToParty !== clientConn.firstToParty).toBe(true);
+  expect(serverConn.handshakeRole !== clientConn.handshakeRole).toBe(true);
 
   expect(currentFiles.length).toEqual(0);
 
@@ -81,7 +81,7 @@ test("basic synchronization", async () => {
   await serverSFTP.safeDelete(`/psi/${serverConn.id}.hello`);
 
   expect(serverConn.peerId).toBe(clientConn.id);
-  expect(serverConn.firstToParty).toBe(false);
+  expect(serverConn.handshakeRole).toBe("initiator");
 
   expect(currentFiles.length).toBe(1);
   expect(currentFiles[0].name === `${serverConn.id}.hello`);

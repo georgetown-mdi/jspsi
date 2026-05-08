@@ -37,8 +37,8 @@ const clientData = ["Carol", "Elizabeth", "Henry"];
 
 await (async () => {
   await Promise.all([
-    server.exchangeRoles(serverConn, true),
-    client.exchangeRoles(clientConn, false),
+    server.exchangeRoles(serverConn, "responder"),
+    client.exchangeRoles(clientConn, "initiator"),
   ]);
 })();
 

@@ -179,7 +179,7 @@ function resolveConfig(args: ExchangeArgs): ExchangeSpec {
     if (!result.success)
       throw new Error(
         `invalid linkage terms in ${args.linkageTermsFile}: ` +
-        `${result.error.message}`,
+          `${result.error.message}`,
       );
     spec = applyCliOverrides(spec, { linkageTerms: result.data });
   }
@@ -251,16 +251,20 @@ async function runProtocol(
   log.info("synchronizing");
   await conn.synchronize();
 
-  log.info("synchronized to firstToParty", conn.firstToParty);
+  if (conn.handshakeRole === "responder") {
+    log.info("arrived first - will wait for message");
+  } else {
+    log.info("arrived second - will send first message message");
+  }
 
   // PLACEHOLDER: getLinkageKeys currently uses hard-coded field definitions
   // from fixedLinkageKeys.ts. Once data pipelines are implemented, the
   // definitions will be derived from spec.linkageTerms.linkageKeys, and the
-  // role-based split (firstToParty vs secondToParty) will be replaced by
+  // role-based split ("responder" / "initiator") will be replaced by
   // pipeline-driven key construction that is symmetric between parties.
   const data = await getLinkageKeys(
     fs.createReadStream(args.input),
-    conn.firstToParty
+    conn.handshakeRole === "responder"
       ? firstToPartyLinkageKeyDefinitions
       : secondToPartyLinkageKeyDefinitions,
     DEFAULT_FIELD_ALIASES,
@@ -273,13 +277,16 @@ async function runProtocol(
   // determine whether the full intersection or only its cardinality is revealed.
   // Currently PSI is always used regardless of the algorithm field.
   const participant = new PSIParticipant(
-    conn.firstToParty ? "server" : "client",
+    conn.handshakeRole === "responder" ? "server" : "client",
     await PSI(),
-    { role: conn.firstToParty ? "starter" : "joiner", verbose: args.verbosity },
+    {
+      role: conn.handshakeRole === "responder" ? "starter" : "joiner",
+      verbose: args.verbosity,
+    },
   );
 
   log.info("exchanging roles");
-  await participant.exchangeRoles(conn, conn.firstToParty!);
+  await participant.exchangeRoles(conn, conn.handshakeRole!);
 
   log.info("identifying intersection");
   // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
@@ -291,6 +298,7 @@ async function runProtocol(
     participant,
     conn,
     data,
+    args.verbosity
   );
 
   log.info("stopping polling");

@@ -24,6 +24,7 @@ export type Connection = {
 };
 
 export type Role = "starter" | "joiner" | "either";
+export type HandshakeRole = "initiator" | "responder";
 
 export interface Config {
   role: Role;

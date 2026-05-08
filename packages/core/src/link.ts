@@ -64,17 +64,17 @@ export async function linkViaPSI(
   participant: PSIParticipant,
   conn: Connection,
   data: Array<IndexableIterable<string | undefined>>,
-  verbose: number = 1,
+  verbosity: number = 0,
   setStage?: (id: string) => void,
 ) {
   if (participant.config.role === "either")
     throw new Error("participants role is unresolved");
   const sendFirst = participant.config.role === "starter";
 
-  const log = getLoggerForVerbosity("psiLink", verbose);
+  const log = getLoggerForVerbosity("psiLink", verbosity);
   setStage = setStage ?? (() => {});
 
-  log.info(`${participant.id}: linking using ${data.length} keys via PSI`);
+  log.info(`${participant.id}: linking using ${data.length} key(s) via PSI`);
 
   if (["one-to-one", "many-to-one"].includes(protocol.cardinality)) {
     let indexIterationMap: IndexIterationMap = [];
@@ -89,6 +89,7 @@ export async function linkViaPSI(
         indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(
           undefined,
         );
+        log.debug(`${participant.id}: ${indexIterationMap.length} total records`);
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
         dataWithDuplicatesAndUndefineds = unidentifiedIndices.map((i) => {
@@ -101,11 +102,20 @@ export async function linkViaPSI(
       );
       unmappedIndicesByIter.push(unmappedIndices);
 
+      log.debug(
+        `${participant.id}: key ${j + 1}/${data.length}: ${data_j.length} unique value(s)` +
+          `${j > 0 ? ` (${unidentifiedIndices!.length} unmatched)` : ""}`,
+      );
+
       if (data_j.length === 0) continue;
 
       const [myIndices, theirIndices] = await participant.identifyIntersection(
         conn,
         data_j,
+      );
+
+      log.debug(
+        `${participant.id}: key ${j + 1}/${data.length}: ${myIndices.length} match(es) found`,
       );
 
       for (let ii = 0; ii < myIndices.length; ++ii) {
@@ -117,10 +127,6 @@ export async function linkViaPSI(
         };
       }
     }
-
-    log.info(
-      `${participant.id}: completed link, getting original element indices`,
-    );
 
     const [identifiedIndexIterationMap, originalIndices] =
       indexIterationMap.reduce(
@@ -135,7 +141,11 @@ export async function linkViaPSI(
       );
 
     const numMappedElements = identifiedIndexIterationMap.length;
+    log.debug(
+      `${participant.id}: ${numMappedElements}/${indexIterationMap.length} record(s) matched`,
+    );
 
+    log.debug(`${participant.id}: exchanging matched indices (round 1 of 2)`);
     const theirIdentifiedIndexIterationMap = await exchangeMappedElements(
       participant.id,
       conn,
@@ -149,6 +159,7 @@ export async function linkViaPSI(
       e.theirIndex = i;
     }
 
+    log.debug(`${participant.id}: exchanging matched indices (round 2 of 2)`);
     const identifiedIndexMap = await exchangeMappedElements(
       participant.id,
       conn,
