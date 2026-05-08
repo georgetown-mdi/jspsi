@@ -1,97 +1,100 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { expect, test } from 'vitest'
+import { expect, test } from "vitest";
 
 import Peer from "peerjs";
 
-import { PSIParticipant } from '@psilink/core';
+import { PSIParticipant } from "@psilink/core";
 // @ts-ignore this is really there
-import PSI from '@openmined/psi.js/psi_wasm_web'
+import PSI from "@openmined/psi.js/psi_wasm_web";
 
-import { sortAssociationTable } from '../utils/associationTable.js';
+import { sortAssociationTable } from "../utils/associationTable.js";
 
-import type { DataConnection } from 'peerjs';
-import type { Config as PSIConfig } from "@psilink/core"
-import type { PSILibrary } from '@openmined/psi.js/implementation/psi.d.ts'
+import type { DataConnection } from "peerjs";
+import type { Config as PSIConfig } from "@psilink/core";
+import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 interface AddressInfo {
-	address: string;
-	family: string;
-	port: number;
+  address: string;
+  family: string;
+  port: number;
 }
 
 const addressInfo: AddressInfo = {
-	address: '127.0.0.1',
-	family: 'IpV4',
-  port: 3000
+  address: "127.0.0.1",
+  family: "IpV4",
+  port: 3000,
 };
-const protocol = 'http:';
+const protocol = "http:";
 
-const hostString = `${protocol}//${addressInfo.address}${addressInfo.port ? ':' + addressInfo.port.toString() : ''}`;
+const hostString = `${protocol}//${addressInfo.address}` +
+  `${addressInfo.port ? ":" + addressInfo.port.toString() : ""}`;
 
 const session = await (async () => {
-  const response = await fetch(
-		`${hostString}/api/psi/create`,
-		{
-			method: 'POST',
-			body: JSON.stringify({
-				initiatedName: 'Test Server',
-				invitedName: 'Test Code',
-				description: 'Testing invited'
-			})
-		}
-	);
-	return await response.json();
+  const response = await fetch(`${hostString}/api/psi/create`, {
+    method: "POST",
+    body: JSON.stringify({
+      initiatedName: "Test Server",
+      invitedName: "Test Code",
+      description: "Testing invited",
+    }),
+  });
+  return await response.json();
 })();
 
 const clientPeer: Peer = await (() => {
-	return new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const peer = new Peer({
       host: addressInfo.address,
       path: "/api/",
-			port: addressInfo.port,
-	  });
-		peer.on('open', (id: string) => {
-			fetch(`${hostString}/api/psi/${session['uuid']}`, {
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				method: 'POST',
-				body: JSON.stringify({
-					invitedPeerId: id
-				})
-			}).then((response) => {
-				if (!response.ok) {
-					reject(new Error(`error posting peer id: ${response.status}, text: ${response.statusText}`));
-				} else {
-					resolve(peer);
-				}
-			})
-		});
-	});
+      port: addressInfo.port,
+    });
+    peer.on("open", (id: string) => {
+      fetch(`${hostString}/api/psi/${session["uuid"]}`, {
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        body: JSON.stringify({
+          invitedPeerId: id,
+        }),
+      }).then((response) => {
+        if (!response.ok) {
+          reject(
+            new Error(
+              `error posting peer id: ${response.status}, text: ${response.statusText}`,
+            ),
+          );
+        } else {
+          resolve(peer);
+        }
+      });
+    });
+  });
 })();
 
 const clientConnPromise: Promise<DataConnection> = (() => {
-	return new Promise((resolve) => {
-    clientPeer.on('connection', (conn) => {
-      conn.on('open', () => {
-				resolve(conn);
-			});
-		});
-	});
+  return new Promise((resolve) => {
+    clientPeer.on("connection", (conn) => {
+      conn.on("open", () => {
+        resolve(conn);
+      });
+    });
+  });
 })();
 
 const clientPeerId: string = await (() => {
-	return new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const eventSource = new EventSource(
-      `${hostString}/api/psi/${session.uuid}/wait`, { withCredentials: false }
+      `${hostString}/api/psi/${session.uuid}/wait`,
+      { withCredentials: false },
     );
 
-    eventSource.addEventListener('message', (ev: MessageEvent<any>) => {
+    eventSource.addEventListener("message", (ev: MessageEvent<any>) => {
       try {
         const messageData = ev.data && JSON.parse(ev.data);
         if (!("invitedPeerId" in messageData)) {
-          throw new Error('unexpected message from server: ' + ev.data);
+          throw new Error("unexpected message from server: " + ev.data);
         } else {
           const invitedPeerId = messageData["invitedPeerId"];
           eventSource.close();
@@ -103,27 +106,27 @@ const clientPeerId: string = await (() => {
       }
     });
 
-    eventSource.addEventListener('error', (ev: Event) => {
+    eventSource.addEventListener("error", (ev: Event) => {
       eventSource.close();
-      reject(new Error('EventSource connection error:' + JSON.stringify(ev)));
+      reject(new Error("EventSource connection error:" + JSON.stringify(ev)));
     });
-	})
+  });
 })();
 
 const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
   return new Promise((resolve, reject) => {
-		const peer = new Peer({
+    const peer = new Peer({
       host: addressInfo.address,
       path: "/api/",
-			port: addressInfo.port
-	  });
-		peer.on('open', () => {
-      const conn = peer.connect(clientPeerId, {reliable: true});
+      port: addressInfo.port,
+    });
+    peer.on("open", () => {
+      const conn = peer.connect(clientPeerId, { reliable: true });
       resolve([peer, conn]);
     });
 
-    peer.on('error', (err) => reject(err));
-	})
+    peer.on("error", (err) => reject(err));
+  });
 })();
 
 const psiLibrary = await (PSI() as Promise<PSILibrary>);
@@ -131,40 +134,38 @@ const psiLibrary = await (PSI() as Promise<PSILibrary>);
 const clientConn = await clientConnPromise;
 
 const serverData = [
-	'Alice', 'Bob', 'Carol', 'David', 'Elizabeth', 'Frank', 'Greta'
+  "Alice",
+  "Bob",
+  "Carol",
+  "David",
+  "Elizabeth",
+  "Frank",
+  "Greta",
 ];
-const clientData = ['Carol', 'Elizabeth', 'Henry'];
+const clientData = ["Carol", "Elizabeth", "Henry"];
 
 const runServerPSI = async () => {
-  serverConn.once('data', () => serverPeer.disconnect());
+  serverConn.once("data", () => serverPeer.disconnect());
 
-	const psiConfig: PSIConfig = {role: 'starter', verbose: 0};
-	const participant = new PSIParticipant(
-		'server',
-		psiLibrary,
-		psiConfig
-	);
+  const psiConfig: PSIConfig = { role: "starter", verbose: 0 };
+  const participant = new PSIParticipant("server", psiLibrary, psiConfig);
 
-	await participant.exchangeRoles(serverConn, true);
-	return participant.identifyIntersection(serverConn, serverData);
-}
+  await participant.exchangeRoles(serverConn, "responder");
+  return participant.identifyIntersection(serverConn, serverData);
+};
 
 const runClientPSI = async () => {
-	clientConn.once('data', () => clientPeer.disconnect());
+  clientConn.once("data", () => clientPeer.disconnect());
 
-	const psiConfig: PSIConfig = {role: 'joiner', verbose: 0};
-	const participant = new PSIParticipant(
-		'client',
-		psiLibrary,
-		psiConfig,
-	);
-	await participant.exchangeRoles(clientConn, false);
-	return await participant.identifyIntersection(clientConn, clientData);
-}
+  const psiConfig: PSIConfig = { role: "joiner", verbose: 0 };
+  const participant = new PSIParticipant("client", psiLibrary, psiConfig);
+  await participant.exchangeRoles(clientConn, "initiator");
+  return await participant.identifyIntersection(clientConn, clientData);
+};
 
 let [serverResult, clientResult] = await Promise.all([
-	runServerPSI(),
-	runClientPSI()
+  runServerPSI(),
+  runClientPSI(),
 ]);
 
 serverConn.close();
@@ -173,13 +174,12 @@ clientConn.close();
 serverResult = sortAssociationTable(serverResult);
 clientResult = sortAssociationTable(clientResult, true);
 
-test('server and client yield identical results', () => {
+test("server and client yield identical results", () => {
   expect(serverResult[0]).toStrictEqual(clientResult[1]);
   expect(serverResult[1]).toStrictEqual(clientResult[0]);
 });
 
-test('psi yields correct results', () => {
+test("psi yields correct results", () => {
   expect(serverResult[0]).toStrictEqual([2, 4]);
   expect(serverResult[1]).toStrictEqual([0, 1]);
 });
-
