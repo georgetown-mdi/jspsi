@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import {
   parseLinkageTerms,
   safeParseLinkageTerms,
-} from "../src/linkageTerms";
+} from "../src/config/linkageTerms";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -54,7 +54,9 @@ test("parses a complete valid set of terms", () => {
       },
       {
         name: "SSN, transpositions",
-        elements: [{ field: "ssn", generateCombinations: "transpositions" }],
+        elements: [
+          { field: "ssn", generateFuzzyComparisons: "transpositions" },
+        ],
       },
     ],
     payload: {
@@ -144,9 +146,7 @@ test("allowedCharacters rejects an invalid character class", () => {
 // ─── parse vs safeParse ──────────────────────────────────────────────────────
 
 test("parseLinkageTerms throws ZodError on invalid input", () => {
-  expect(() => parseLinkageTerms({ version: "not-semver" })).toThrow(
-    ZodError,
-  );
+  expect(() => parseLinkageTerms({ version: "not-semver" })).toThrow(ZodError);
 });
 
 test("safeParseLinkageTerms returns success: false on invalid input", () => {
@@ -292,7 +292,7 @@ test("parses snake_case keys from disk", () => {
       {
         name: "SSN + Last Name",
         elements: [
-          { field: "ssn", generate_combinations: "editDistances" },
+          { field: "ssn", generate_fuzzy_comparisons: "editDistances" },
           {
             field: "lastName",
             transform: [

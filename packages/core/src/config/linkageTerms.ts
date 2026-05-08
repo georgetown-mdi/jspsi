@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { AlgorithmSchema } from "./types.js";
-import type { Algorithm } from "./types.js";
-import { camelizeKeys } from "./utils/camelizeKeys.js";
+import { AlgorithmSchema } from "../types.js";
+import type { Algorithm } from "../types.js";
+import { camelizeKeys } from "../utils/camelizeKeys.js";
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
@@ -270,7 +270,7 @@ export interface LinkageKeyElement {
 const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
   field: z.string().min(1),
   name: z.string().optional(),
-  generateCombinations: GenerateFuzzyComparisonsSchema.optional(),
+  generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
   transform: z.array(TransformStepSchema).optional(),
 });
 

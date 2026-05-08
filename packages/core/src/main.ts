@@ -10,4 +10,6 @@ export {
   secondToPartyLinkageKeyDefinitions,
 } from "./fixedLinkageKeys";
 export { setLogPrefixer } from "./utils/logger";
-export * from "./linkageTerms";
+export * from "./config/linkageTerms";
+export * from "./config/connection";
+export * from "./config/exchangeSpec";

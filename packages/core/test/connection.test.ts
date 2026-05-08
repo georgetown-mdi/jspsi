@@ -1,0 +1,342 @@
+import { ZodError } from "zod";
+import { expect, test } from "vitest";
+
+import {
+  parseConnectionConfig,
+  safeParseConnectionConfig,
+} from "../src/config/connection";
+
+// Minimal valid configs used as bases for individual tests.
+const webrtcBase = {
+  channel: "webrtc",
+  server: { host: "api.peerjs.com" },
+};
+
+const sftpBase = {
+  channel: "sftp",
+  server: { host: "sftp.example.org" },
+};
+
+// ─── Happy path ──────────────────────────────────────────────────────────────
+
+test("parses a minimal WebRTC connection", () => {
+  const result = parseConnectionConfig(webrtcBase);
+  expect(result.channel).toBe("webrtc");
+  expect(result.server.host).toBe("api.peerjs.com");
+});
+
+test("parses a minimal SFTP connection", () => {
+  const result = parseConnectionConfig(sftpBase);
+  expect(result.channel).toBe("sftp");
+});
+
+test("parses a full WebRTC connection with stun, turn, and authentication", () => {
+  const result = parseConnectionConfig({
+    channel: "webrtc",
+    server: { host: "peerjs.example.org", port: 443, key: "mykey" },
+    authentication: {
+      pakeToken: "abc123",
+      role: "invitor",
+      expires: "2027-01-01T00:00:00Z",
+    },
+    stun: ["stun:stun.example.org:3478", "stuns:stun2.example.org:5349"],
+    turn: [
+      {
+        url: "turns:turn.example.org:443",
+        username: "alice",
+        credential: "secret",
+        credentialType: "hmac-sha1",
+      },
+    ],
+    options: { iceTimeoutMs: 8000, maxMessageSize: 131072 },
+  });
+  expect(result.channel).toBe("webrtc");
+  if (result.channel !== "webrtc") return;
+  expect(result.stun).toHaveLength(2);
+  expect(result.turn).toHaveLength(1);
+  expect(result.authentication?.role).toBe("invitor");
+});
+
+test("parses a full SFTP connection with private key auth", () => {
+  const result = parseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      port: 22,
+      path: "/exchanges/",
+      username: "psilink",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      privateKeyPassphrase: "hunter2",
+      hostKeyFingerprint: "SHA256:abc",
+    },
+    options: { pollIntervalMs: 5000, compression: true },
+  });
+  expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.server.privateKey).toBeDefined();
+  expect(result.server.privateKeyPassphrase).toBeDefined();
+});
+
+// ─── Discriminated union ─────────────────────────────────────────────────────
+
+test("unknown channel is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "smoke-signal",
+    server: { host: "x" },
+  });
+  expect(result.success).toBe(false);
+});
+
+// ─── parse vs safeParse ──────────────────────────────────────────────────────
+
+test("parseConnectionConfig throws ZodError on invalid input", () => {
+  expect(() => parseConnectionConfig({ channel: "webrtc" })).toThrow(ZodError);
+});
+
+test("safeParseConnectionConfig returns success: false on invalid input", () => {
+  const result = safeParseConnectionConfig({ channel: "sftp" });
+  expect(result.success).toBe(false);
+});
+
+// ─── HttpAuth: username / password must appear together ──────────────────────
+
+test("HttpAuth with username but no password is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    proxy: { host: "proxy.example.org", auth: { username: "user" } },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("username and password"))).toBe(true);
+});
+
+test("HttpAuth with password but no username is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    proxy: { host: "proxy.example.org", auth: { password: "secret" } },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("username and password"))).toBe(true);
+});
+
+// ─── HttpAuth: at most one authentication method ─────────────────────────────
+
+test("HttpAuth with bearer token is valid", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    server: {
+      host: "api.peerjs.com",
+      provision: { host: "api.example.org", auth: { bearer: "tok" } },
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("HttpAuth with username and password is valid", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    iceProvision: {
+      host: "nts.twilio.com",
+      auth: { username: "sid", password: "key" },
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("HttpAuth with bearer and username together is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    iceProvision: {
+      host: "nts.twilio.com",
+      auth: { bearer: "tok", username: "sid", password: "key" },
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("at most one"))).toBe(true);
+});
+
+// ─── SFTPServer: at most one primary auth method ─────────────────────────────
+
+test("SFTP server with password and privateKey together is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      password: "hunter2",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("at most one"))).toBe(true);
+});
+
+// ─── SFTPServer: companion fields require privateKey ─────────────────────────
+
+test("SFTP server with privateKeyPassphrase but no privateKey is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      privateKeyPassphrase: "hunter2",
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("privateKeyPassphrase"))).toBe(true);
+});
+
+test("SFTP server with certificate but no privateKey is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      certificate: "/run/secrets/id_cert",
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("certificate"))).toBe(true);
+});
+
+test("SFTP server with certificate and privateKey together is valid", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      certificate: "/run/secrets/id_cert",
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("SFTP server with privateKeyPassphrase and privateKey together is valid", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      privateKeyPassphrase: "hunter2",
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
+// ─── WebRTC: iceProvision mutually exclusive with stun / turn ─────────────────
+
+test("iceProvision alone is valid", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    iceProvision: { host: "nts.twilio.com" },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("stun and turn without iceProvision is valid", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    stun: ["stun:stun.example.org"],
+    turn: [{ url: "turn:turn.example.org", username: "u", credential: "c" }],
+  });
+  expect(result.success).toBe(true);
+});
+
+test("iceProvision with stun is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    stun: ["stun:stun.example.org"],
+    iceProvision: { host: "nts.twilio.com" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("iceProvision"))).toBe(true);
+});
+
+test("iceProvision with turn is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url: "turn:turn.example.org", username: "u", credential: "c" }],
+    iceProvision: { host: "nts.twilio.com" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("iceProvision"))).toBe(true);
+});
+
+// ─── STUN URI format ─────────────────────────────────────────────────────────
+
+test.each([
+  ["stun:stun.example.org:3478", true],
+  ["stuns:stun.example.org:5349", true],
+  ["https://stun.example.org", false],
+  ["turn:stun.example.org", false],
+  ["", false],
+])('STUN URI "%s" is %s', (uri, valid) => {
+  const result = safeParseConnectionConfig({ ...webrtcBase, stun: [uri] });
+  expect(result.success).toBe(valid);
+});
+
+// ─── TURN URL format ─────────────────────────────────────────────────────────
+
+test.each([
+  ["turn:turn.example.org:3478", true],
+  ["turns:turn.example.org:443", true],
+  ["https://turn.example.org", false],
+  ["stun:turn.example.org", false],
+])('TURN URL "%s" is %s', (url, valid) => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url, username: "u", credential: "c" }],
+  });
+  expect(result.success).toBe(valid);
+});
+
+// ─── camelizeKeys integration ────────────────────────────────────────────────
+
+test("parses snake_case keys from disk", () => {
+  const result = parseConnectionConfig({
+    channel: "webrtc",
+    server: { host: "peerjs.example.org" },
+    authentication: {
+      pake_token: "abc123",
+      role: "acceptor",
+    },
+    ice_provision: {
+      host: "nts.twilio.com",
+      auth: { username: "sid", password: "key" },
+    },
+  });
+  expect(result.channel).toBe("webrtc");
+  if (result.channel !== "webrtc") return;
+  expect(result.authentication?.pakeToken).toBe("abc123");
+  expect(result.iceProvision?.host).toBe("nts.twilio.com");
+});
+
+test("parses snake_case SFTP server keys from disk", () => {
+  const result = parseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      private_key_passphrase: "hunter2",
+      host_key_fingerprint: "SHA256:abc",
+      known_hosts: "/etc/ssh/known_hosts",
+    },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.privateKey).toBeDefined();
+  expect(result.server.privateKeyPassphrase).toBeDefined();
+  expect(result.server.hostKeyFingerprint).toBe("SHA256:abc");
+  expect(result.server.knownHosts).toBe("/etc/ssh/known_hosts");
+});
