@@ -5,9 +5,10 @@ import { expect, test } from "vitest";
 import Peer from "peerjs";
 
 import {
+  PSIParticipant,
   exchangeTerms,
   getDefaultLinkageTerms,
-  PSIParticipant,
+  inferMetadata,
   resolveRole,
 } from "@psilink/core";
 // @ts-ignore this is really there
@@ -152,7 +153,7 @@ const clientData = ["Carol", "Elizabeth", "Henry"];
 
 const runServerPSI = async () => {
   serverConn.once("data", () => serverPeer.disconnect());
-  const localTerms = getDefaultLinkageTerms("server", ["first_name"]);
+  const localTerms = getDefaultLinkageTerms("server", inferMetadata(["first_name"]));
   localTerms.linkageKeys = [
     {
       name: "first_name",
@@ -168,8 +169,8 @@ const runServerPSI = async () => {
     throw new Error("test had exchange warnings: " + warnings.join(", "));
 
   const role = await resolveRole(
-    clientConn,
-    "initiator",
+    serverConn,
+    "responder",
     localTerms.output,
     partnerTerms.output,
     serverData.length,
@@ -185,7 +186,7 @@ const runServerPSI = async () => {
 
 const runClientPSI = async () => {
   clientConn.once("data", () => clientPeer.disconnect());
-  const localTerms = getDefaultLinkageTerms("client", ["first_name"]);
+  const localTerms = getDefaultLinkageTerms("client", inferMetadata(["first_name"]));
   localTerms.linkageKeys = [
     {
       name: "first_name",
@@ -193,8 +194,8 @@ const runClientPSI = async () => {
     },
   ];
   const { partnerTerms, warnings } = await exchangeTerms(
-    serverConn,
-    "responder",
+    clientConn,
+    "initiator",
     localTerms,
   );
   if (warnings.length !== 0)
@@ -205,7 +206,7 @@ const runClientPSI = async () => {
     "initiator",
     localTerms.output,
     partnerTerms.output,
-    serverData.length,
+    clientData.length,
   );
 
   const psiConfig: PSIConfig = {
