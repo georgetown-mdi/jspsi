@@ -530,3 +530,24 @@ test("matching payload send/receive columns are compatible", () => {
   );
   expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
 });
+
+// ─── deduplicate: no cross-party consistency check ───────────────────────────
+// Each party independently decides whether to deduplicate its own inputs.
+// The only related cross-party constraint is that a deduplicating party must
+// receive output, which is already enforced by the output cross-check.
+
+test("mismatched deduplicate values are not an error", () => {
+  const { errors } = validateCompatibility(
+    { ...termsA, deduplicate: true,  output: { expectsOutput: true, shareWithPartner: true } },
+    { ...termsB, deduplicate: false, output: { expectsOutput: true, shareWithPartner: true } },
+  );
+  expect(errors).toHaveLength(0);
+});
+
+test("both parties deduplicating is compatible when both expect output", () => {
+  const { errors } = validateCompatibility(
+    { ...termsA, deduplicate: true, output: { expectsOutput: true, shareWithPartner: true } },
+    { ...termsB, deduplicate: true, output: { expectsOutput: true, shareWithPartner: true } },
+  );
+  expect(errors).toHaveLength(0);
+});
