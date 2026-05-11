@@ -216,7 +216,7 @@ const IceProvisionSchema: z.ZodType<IceProvision> = z.object({
   auth: HttpAuthSchema.optional(),
 });
 
-// ─── SFTP proxy ───────────────────────────────────────────────────────────────
+// ─── SFTP proxy ──────────────────────────────────────────────────────────────
 
 /**
  * A WebSocket-to-TCP proxy tunneling the SFTP connection through HTTPS.
@@ -278,7 +278,7 @@ const SFTPOptionsSchema: z.ZodType<SFTPOptions> = z.object({
   transferChunkSize: z.int().positive().optional(),
 });
 
-// ─── Connection config ────────────────────────────────────────────────────────
+// ─── Connection config ───────────────────────────────────────────────────────
 
 /**
  * Connection configuration for a WebRTC exchange. `stun` and `turn` are
@@ -369,7 +369,7 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
     { message: "iceProvision is mutually exclusive with stun and turn" },
   );
 
-// ─── Parse ────────────────────────────────────────────────────────────────────
+// ─── Parse ───────────────────────────────────────────────────────────────────
 
 /**
  * Parse and validate a raw value as a {@link ConnectionConfig}.

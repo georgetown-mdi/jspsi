@@ -36,7 +36,7 @@ The PSI base function is a lightly modified version of OpenMined's [PSI](https:/
 4. The client can then remove their own key from their own data, leaving them with client and server datasets encrypted only by the server.
 5. A straightforward string comparison allows the client to see which elements they have in common. They can then choose to share the association table back with the server.
 
-The terminology of "server" and "client" derives from OpenMined's PSI implementation and is used here to be consistent with their documentation. However, "server" and "client" are disfavored throughout the rest of this project as there are many other instances of servers and clients, and OpenMined's PSI includes no networking coding. Most often we will want to execute the protocol so that both parties learn the outcome, making the roles they play arbitrary. When it is necessary to distinguish between the two roles, we will instead use *receiver* and *sender* respectively.
+The terminology of "server" and "client" derives from OpenMined's PSI implementation and is used here to be consistent with their documentation. However, "server" and "client" are disfavored throughout the rest of this project as there are many other instances of servers and clients, and OpenMined's PSI includes no networking coding. Most often we will want to execute the protocol so that both parties learn the outcome. When it is necessary to distinguish between the two roles, we will instead use *receiver* and *sender* respectively. When only one party receives output, that party's role is fixed as the receiver. When both parties receive output, roles are assigned dynamically: the party with the smaller dataset becomes the receiver (minimising data transmitted); ties are broken in favour of the initiator becoming the receiver.
 
 ## Linkage keys
 
@@ -70,7 +70,7 @@ The parameters necessary to execute an exchange are written down into a JSON or 
 
 ## Linkage terms
 
-Every time two parties meet to exchange data and after authentication has taken place, both parties swap a document that describes their terms for the linkage, including what will be revealed and what will be done with it. If there is any disagreement or inconsistency , the exchange is cancelled. Linkage terms include:
+Every time two parties meet to exchange data and after authentication has taken place, both parties swap a document that describes their terms for the linkage, including what will be revealed and what will be done with it. The exchange follows a three-message protocol: the initiator sends their terms first; the responder replies with their own terms and a proceed/abort decision; the initiator then confirms their final decision. If either party finds the terms incompatible, it sends an abort with its reasons and the exchange is cancelled. Linkage terms include:
 * A semantic versioning number identifying the schema of the linkage terms. If no schema migration exists, the exchange will fail.
 * An identity string, typically containing the name, organization, and contact information for a person executing the agreement.
 * A date field, indicating when the linkage terms were last modified.
@@ -94,7 +94,7 @@ Specific communication options are detailed below. Within the exchange specifica
 
 ## Input metadata
 
-Parties can choose to supply metadata with their exchange specification that indicates the semantic type of each column, descriptions and usage notes, and column roles, including data for linkage, unique identifier columns, and optional payload data that will be sent to their partner after common members have been identified. The description for payload columns is shared with partners as a data dictionary. If no metadata is supplied, it is inferred from column names. If not specified, payload data is not shared but identifiers are.
+Parties can choose to supply metadata with their exchange specification that indicates the semantic type of each column, descriptions and usage notes, and column roles. A column's role (`linkage`, `identifier`, or `payload`) describes its primary purpose in the protocol. Separately, any column — regardless of role — can be marked as payload, meaning it is transmitted to the partner for matched members after the intersection is identified. Linkage and identifier columns can therefore serve dual purposes: a phone number column, for instance, can participate in PSI linkage and also be delivered as payload. Columns that are not used for linkage or identification must be payload columns. The description for payload columns is shared with partners as a data dictionary. If no metadata is supplied, it is inferred from column names. If not specified, payload data is not shared but identifiers are.
 
 ## Data cleaning
 

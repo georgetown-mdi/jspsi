@@ -1,3 +1,9 @@
+/**
+ * NOTE: we want to move away from what is in this file in favor of the
+ * linkage keys in src/config. Once data transformations have been implemented
+ * we will hopefully be able to do so.
+ */
+
 import type { LinkageKeyDefinition } from "./types";
 
 const formatters = {
@@ -22,12 +28,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
@@ -39,12 +45,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "first_name_1",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: (x) => formatters["first_name"](x).substring(0, 1),
     },
   ],
@@ -56,12 +62,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name_3",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: (x) => formatters["last_name"](x).substring(0, 3),
     },
     {
       outputFieldName: "first_name_1",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: (x) => formatters["first_name"](x).substring(0, 1),
     },
   ],
@@ -73,12 +79,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name_4",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: (x) => formatters["last_name"](x).substring(0, 4),
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
@@ -90,12 +96,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name_4",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: (x) => formatters["last_name"](x).substring(0, 4),
     },
     {
       outputFieldName: "year_and_month_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: (x) => formatters["date_of_birth"](x).substring(0, 7),
     },
   ],
@@ -107,12 +113,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
     {
       outputFieldName: "last_name_3",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: (x) => formatters["last_name"](x).substring(0, 3),
     },
   ],
@@ -124,12 +130,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
     {
       outputFieldName: "first_name_3",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: (x) => formatters["first_name"](x).substring(0, 3),
     },
   ],
@@ -141,12 +147,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
@@ -158,46 +164,46 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name_4",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: (x) => formatters["last_name"](x).substring(0, 4),
     },
     {
       outputFieldName: "year_and_month_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: (x) => formatters["date_of_birth"](x).substring(0, 7),
     },
   ],
   [
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "first_name",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: formatters["first_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
   [
     {
       outputFieldName: "name_1",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "name_2",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: formatters["first_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
@@ -209,12 +215,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
     {
       outputFieldName: "first_name",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: formatters["first_name"],
     },
   ],
@@ -226,12 +232,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "year_and_month_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: (x) => formatters["date_of_birth"](x).substring(0, 7),
     },
     {
       outputFieldName: "first_name_3",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: (x) => formatters["first_name"](x).substring(0, 3),
     },
   ],
@@ -243,12 +249,12 @@ export const firstToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "first_name",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: formatters["first_name"],
     },
     {
       outputFieldName: "year_and_month_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: (x) => formatters["date_of_birth"](x).substring(0, 7),
     },
   ],
@@ -259,17 +265,17 @@ export const secondToPartyLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
   [
     {
       outputFieldName: "name_1",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: formatters["first_name"],
     },
     {
       outputFieldName: "name_2",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],

@@ -14,12 +14,12 @@ const clientConn = new PassthroughConnection(serverConn);
 serverConn.setOther(clientConn);
 
 const server = new PSIParticipant("server", psiLibrary, {
-  role: "either",
+  role: "starter",
   verbose: 0,
 });
 
 const client = new PSIParticipant("client", psiLibrary, {
-  role: "either",
+  role: "joiner",
   verbose: 0,
 });
 
@@ -34,13 +34,6 @@ const serverData = [
 ];
 
 const clientData = ["Carol", "Elizabeth", "Henry"];
-
-await (async () => {
-  await Promise.all([
-    server.exchangeRoles(serverConn, "responder"),
-    client.exchangeRoles(clientConn, "initiator"),
-  ]);
-})();
 
 let [serverResult, clientResult] = await (async () => {
   return await Promise.all([

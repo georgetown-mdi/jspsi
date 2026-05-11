@@ -513,3 +513,168 @@ export function parseLinkageTerms(raw: unknown): LinkageTerms {
 export function safeParseLinkageTerms(raw: unknown) {
   return LinkageTermsSchema.safeParse(camelizeKeys(raw));
 }
+
+// ─── Compatibility ───────────────────────────────────────────────────────────
+
+// Serialize with sorted object keys so that property-insertion order (which
+// differs between plain objects and Zod-parsed ones) does not affect equality.
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return "[" + value.map(stableStringify).join(",") + "]";
+  }
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const sorted = Object.keys(obj)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`);
+    return "{" + sorted.join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+
+export interface CompatibilityResult {
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Cross-party consistency check for a pair of {@link LinkageTerms}.
+ *
+ * Returns errors for mandatory mismatches that must cancel the exchange, and
+ * warnings for soft mismatches (currently only `date`) that produce a notice
+ * but allow the exchange to continue.
+ */
+export function validateCompatibility(
+  local: LinkageTerms,
+  partner: LinkageTerms,
+): CompatibilityResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (local.version !== partner.version) {
+    // TODO: implement migration when new versions exist
+    errors.push(
+      `version mismatch: local is ${local.version}, partner is ` +
+        `${partner.version}`,
+    );
+  }
+
+  if (local.algorithm !== partner.algorithm) {
+    errors.push(
+      `algorithm mismatch: local is ${local.algorithm}, partner is ` +
+        `${partner.algorithm}`,
+    );
+  }
+
+  if (local.output.shareWithPartner !== partner.output.expectsOutput) {
+    errors.push(
+      "output mismatch: local " +
+      (local.output.shareWithPartner ? "will" : "will not") +
+      " share with partner, but partner " + 
+      (partner.output.expectsOutput ? "expects" : "does not expect") +
+      "output",
+    );
+  }
+  if (local.output.expectsOutput !== partner.output.shareWithPartner) {
+    errors.push(
+      "output mismatch: local " +
+      (local.output.expectsOutput ? "expects" : "does not expect")+
+       " output, but partner " +
+       (partner.output.shareWithPartner ? "will" : "will not") +
+       " share",
+    );
+  }
+  if (!local.output.expectsOutput && !partner.output.expectsOutput) {
+    errors.push("neither party expects output");
+  }
+
+  if (local.date !== partner.date) {
+    warnings.push(
+      `date mismatch: local is ${local.date}, partner is ${partner.date}; ` +
+        "one party may have a stale copy of the linkage terms",
+    );
+  }
+
+  const localFields = [...local.linkageFields].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  const partnerFields = [...partner.linkageFields].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  if (stableStringify(localFields) !== stableStringify(partnerFields)) {
+    errors.push("linkage fields do not match");
+  }
+
+  if (
+    stableStringify(local.linkageKeys) !== stableStringify(partner.linkageKeys)
+  ) {
+    errors.push("linkage keys do not match");
+  }
+
+  if (
+    local.legalAgreement !== undefined ||
+    partner.legalAgreement !== undefined
+  ) {
+    if (local.legalAgreement === undefined) {
+      errors.push("partner has a legal agreement but local does not");
+    } else if (partner.legalAgreement === undefined) {
+      errors.push("local has a legal agreement but partner does not");
+    } else {
+      if (local.legalAgreement.reference !== partner.legalAgreement.reference) {
+        errors.push(
+          "legal agreement reference mismatch: local is " +
+            `"${local.legalAgreement.reference}", partner is ` +
+            `"${partner.legalAgreement.reference}"`,
+        );
+      }
+      if (
+        local.legalAgreement.expirationDate !==
+        partner.legalAgreement.expirationDate
+      ) {
+        errors.push(
+          "legal agreement expiration date mismatch: local is " +
+            `${local.legalAgreement.expirationDate}, partner is ` +
+            `${partner.legalAgreement.expirationDate}`,
+        );
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (local.legalAgreement.expirationDate < today) {
+        errors.push(
+          `legal agreement expired on ${local.legalAgreement.expirationDate}`,
+        );
+      }
+    }
+  }
+
+  const localSendNames = (local.payload?.send ?? [])
+    .map((c) => c.name)
+    .sort()
+    .join(",");
+  const partnerReceiveNames = (partner.payload?.receive ?? [])
+    .map((c) => c.name)
+    .sort()
+    .join(",");
+  if (localSendNames !== partnerReceiveNames) {
+    errors.push(
+      `payload mismatch: local send columns [${localSendNames}] do not match ` +
+        `partner receive columns [${partnerReceiveNames}]`,
+    );
+  }
+
+  const localReceiveNames = (local.payload?.receive ?? [])
+    .map((c) => c.name)
+    .sort()
+    .join(",");
+  const partnerSendNames = (partner.payload?.send ?? [])
+    .map((c) => c.name)
+    .sort()
+    .join(",");
+  if (localReceiveNames !== partnerSendNames) {
+    errors.push(
+      `payload mismatch: local receive columns [${localReceiveNames}] do not ` +
+      `match partner send columns [${partnerSendNames}]`,
+    );
+  }
+
+  return { errors, warnings };
+}

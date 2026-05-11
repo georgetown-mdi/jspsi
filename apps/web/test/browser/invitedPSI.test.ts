@@ -4,7 +4,12 @@ import { expect, test } from "vitest";
 
 import Peer from "peerjs";
 
-import { PSIParticipant } from "@psilink/core";
+import {
+  exchangeTerms,
+  getDefaultLinkageTerms,
+  PSIParticipant,
+  resolveRole,
+} from "@psilink/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -27,7 +32,8 @@ const addressInfo: AddressInfo = {
 };
 const protocol = "http:";
 
-const hostString = `${protocol}//${addressInfo.address}` +
+const hostString =
+  `${protocol}//${addressInfo.address}` +
   `${addressInfo.port ? ":" + addressInfo.port.toString() : ""}`;
 
 const session = await (async () => {
@@ -146,20 +152,67 @@ const clientData = ["Carol", "Elizabeth", "Henry"];
 
 const runServerPSI = async () => {
   serverConn.once("data", () => serverPeer.disconnect());
+  const localTerms = getDefaultLinkageTerms("server", ["first_name"]);
+  localTerms.linkageKeys = [
+    {
+      name: "first_name",
+      elements: [{ field: "first_name" }],
+    },
+  ];
+  const { partnerTerms, warnings } = await exchangeTerms(
+    serverConn,
+    "responder",
+    localTerms,
+  );
+  if (warnings.length !== 0)
+    throw new Error("test had exchange warnings: " + warnings.join(", "));
 
-  const psiConfig: PSIConfig = { role: "starter", verbose: 0 };
+  const role = await resolveRole(
+    clientConn,
+    "initiator",
+    localTerms.output,
+    partnerTerms.output,
+    serverData.length,
+  );
+
+  const psiConfig: PSIConfig = {
+    role: role === "sender" ? "starter" : "joiner",
+    verbose: 0,
+  };
   const participant = new PSIParticipant("server", psiLibrary, psiConfig);
-
-  await participant.exchangeRoles(serverConn, "responder");
   return participant.identifyIntersection(serverConn, serverData);
 };
 
 const runClientPSI = async () => {
   clientConn.once("data", () => clientPeer.disconnect());
+  const localTerms = getDefaultLinkageTerms("client", ["first_name"]);
+  localTerms.linkageKeys = [
+    {
+      name: "first_name",
+      elements: [{ field: "first_name" }],
+    },
+  ];
+  const { partnerTerms, warnings } = await exchangeTerms(
+    serverConn,
+    "responder",
+    localTerms,
+  );
+  if (warnings.length !== 0)
+    throw new Error("test had exchange warnings: " + warnings.join(", "));
 
-  const psiConfig: PSIConfig = { role: "joiner", verbose: 0 };
+  const role = await resolveRole(
+    clientConn,
+    "initiator",
+    localTerms.output,
+    partnerTerms.output,
+    serverData.length,
+  );
+
+  const psiConfig: PSIConfig = {
+    role: role === "sender" ? "starter" : "joiner",
+    verbose: 0,
+  };
   const participant = new PSIParticipant("client", psiLibrary, psiConfig);
-  await participant.exchangeRoles(clientConn, "initiator");
   return await participant.identifyIntersection(clientConn, clientData);
 };
 

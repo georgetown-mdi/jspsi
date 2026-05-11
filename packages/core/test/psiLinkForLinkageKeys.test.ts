@@ -4,14 +4,13 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import log from "loglevel";
 
-import { getLinkageKeys } from "../src/linkageKeys";
+import { getMetadataAndLinkageKeys } from "../src/linkageKeys";
 import { PSIParticipant } from "../src/participant";
 import { linkViaPSI } from "../src/link";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
 import type { LinkageKeyDefinition } from "../src/types";
-import type { FieldAliases } from "../src/config/metadata";
 
 const formatters = {
   ssn: (x: unknown) =>
@@ -26,13 +25,6 @@ const formatters = {
       : "",
 };
 
-const fieldAliases: FieldAliases = {
-  ssn: ["social_security_number", "social"],
-  first_name: ["firstname", "fname"],
-  last_name: ["lastname", "lname"],
-  date_of_birth: ["dateofbirth", "dob"],
-};
-
 const linkageKeyDefinitions: Array<LinkageKeyDefinition> = [
   [
     {
@@ -42,12 +34,12 @@ const linkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
@@ -59,12 +51,12 @@ const linkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "first_name_1",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: (x) => formatters["first_name"](x).substring(0, 1),
     },
   ],
@@ -77,23 +69,16 @@ const clientConn = new PassthroughConnection(serverConn);
 serverConn.setOther(clientConn);
 
 const server = new PSIParticipant("server", psiLibrary, {
-  role: "either",
+  role: "starter",
   verbose: -1,
 });
 
 const client = new PSIParticipant("client", psiLibrary, {
-  role: "either",
+  role: "joiner",
   verbose: -1,
 });
 
 log.setLevel("DEBUG");
-
-await (async () => {
-  await Promise.all([
-    server.exchangeRoles(serverConn, "responder"),
-    client.exchangeRoles(clientConn, "initiator"),
-  ]);
-})();
 
 test("rules match in order", async () => {
   const serverInputData = [
@@ -101,10 +86,9 @@ test("rules match in order", async () => {
     ["159859483,James,Heard,559-81-1301,7/16/1975\n"],
     ["165562801,Albert,Iorio,322-84-2281,8/17/1975"],
   ];
-  const serverData = await getLinkageKeys(
+  const serverData = await getMetadataAndLinkageKeys(
     Readable.from(serverInputData),
     linkageKeyDefinitions,
-    fieldAliases,
   );
 
   /* client input 0 matches rule 1, while input 1 matches rule 0 using rule 0
@@ -119,10 +103,9 @@ test("rules match in order", async () => {
     ["165562801,Albert,Iorio,322-84-2281,8/17/1976"], // wrong dob
   ];
 
-  const clientData = await getLinkageKeys(
+  const clientData = await getMetadataAndLinkageKeys(
     Readable.from(clientInputData),
     linkageKeyDefinitions,
-    fieldAliases,
   );
 
   const [serverResult, clientResult] = await (async () => {
@@ -131,14 +114,14 @@ test("rules match in order", async () => {
         { cardinality: "one-to-one" },
         server,
         serverConn,
-        serverData,
+        serverData.linkageKeys,
         -1,
       ),
       linkViaPSI(
         { cardinality: "one-to-one" },
         client,
         clientConn,
-        clientData,
+        clientData.linkageKeys,
         -1,
       ),
     ]);

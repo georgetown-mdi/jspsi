@@ -19,8 +19,6 @@ import {
 
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 
-import { getHostname as getHttpServerHostname } from "@httpServer";
-
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -28,9 +26,11 @@ import {
   PSIParticipant,
   ProcessState,
   secondToPartyLinkageKeyDefinitions as clientLinkageKeyDefinitions,
-  getLinkageKeys,
-  DEFAULT_FIELD_ALIASES,
+  exchangeTerms,
+  getDefaultLinkageTerms,
+  getMetadataAndLinkageKeys,
   linkViaPSI,
+  resolveRole,
   firstToPartyLinkageKeyDefinitions as serverLinkageKeyDefinitions,
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
@@ -42,7 +42,11 @@ import { StatusFactory } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { Config as PSIConfig } from "@psilink/core";
+import type {
+  HandshakeRole,
+  LinkageTerms,
+  Config as PSIConfig,
+} from "@psilink/core";
 
 import type { LinkSession } from "@utils/sessions";
 // import { sortAssociationTable } from 'test/utils/associationTable';
@@ -58,9 +62,8 @@ export const Route = createFileRoute("/psi")({
     };
   },
   loaderDeps: ({ search: { uuid } }) => ({ uuid }),
+  ssr: false,
   loader: async ({ deps: { uuid } }) => {
-    // as a curiosity, this sometimes runs on the server
-    // return sessions[id];
     const response = await fetch(`/api/psi/${uuid}`);
     if (!response.ok) {
       throw new Error(
@@ -153,17 +156,44 @@ function Home() {
         .then((peerId) => {
           Promise.all([
             PSI() as Promise<PSILibrary>,
-            getLinkageKeys(
-              files[0],
-              serverLinkageKeyDefinitions,
-              DEFAULT_FIELD_ALIASES,
-            ),
+            getMetadataAndLinkageKeys(files[0], serverLinkageKeyDefinitions),
             openPeerConnection(peerId),
           ]).then(async (values) => {
-            const [psi, data, [peer, conn]] = values;
+            const [psi, { metadata, linkageKeys }, [peer, conn]] = values;
             conn.once("data", () => peer.disconnect());
 
-            const psiConfig: PSIConfig = { role: "starter" };
+            const localTerms: LinkageTerms = getDefaultLinkageTerms(
+              session.initiatedName,
+              metadata,
+            );
+
+            const handshakeRole: HandshakeRole = "responder";
+            log.info("exchanging linkage terms");
+            const { partnerTerms, warnings } = await exchangeTerms(
+              conn,
+              handshakeRole,
+              localTerms,
+            );
+            for (const warning of warnings) log.warn(warning);
+            log.info("terms agreed, partner identity:", partnerTerms.identity);
+
+            log.info("resolving role");
+            /**
+             * Technically this isn't needed at the moment, but we go through
+             * the extra step to ensure that it works.
+             */
+            const resolvedRole = await resolveRole(
+              conn,
+              handshakeRole,
+              localTerms.output,
+              partnerTerms.output,
+              linkageKeys[0].length,
+            );
+            log.info("role will be:", role);
+
+            const psiConfig: PSIConfig = {
+              role: resolvedRole === "sender" ? "starter" : "joiner",
+            };
             const participant = new PSIParticipant(
               "server",
               psi,
@@ -173,20 +203,21 @@ function Home() {
               },
             );
 
-            log.info(`${psiConfig.role}: exchanging config`);
-            await participant.exchangeRoles(conn, "responder");
             log.info(`${psiConfig.role}: identifying intersection`);
             const associationTable = await linkViaPSI(
               { cardinality: "one-to-one" },
               participant,
               conn,
-              data,
+              linkageKeys,
               1,
               (id: any) => {
                 if (stagesById.hasOwnProperty(id)) setStageById(id);
               },
             );
             conn.close();
+            log.info(
+              `${psiConfig.role}: linkage complete, generating results file`,
+            );
 
             const result =
               "our_row_id,their_row_id\n" +
@@ -210,20 +241,44 @@ function Home() {
       setStageById("before start");
       Promise.all([
         PSI() as PSILibrary,
-        getLinkageKeys(
-          files[0],
-          clientLinkageKeyDefinitions,
-          DEFAULT_FIELD_ALIASES,
-        ),
+        getMetadataAndLinkageKeys(files[0], clientLinkageKeyDefinitions),
       ]).then(async (values) => {
-        const [psi, data] = values;
+        const [psi, { metadata, linkageKeys }] = values;
         const peer = await createAndSharePeerId(session);
 
         peer.on("connection", (conn) => {
           conn.on("open", async () => {
             conn.once("data", () => peer.disconnect());
 
-            const psiConfig: PSIConfig = { role: "joiner" };
+            const localTerms: LinkageTerms = getDefaultLinkageTerms(
+              session.initiatedName,
+              metadata,
+            );
+
+            const handshakeRole: HandshakeRole = "initiator";
+            log.info("exchanging linkage terms");
+            const { partnerTerms, warnings } = await exchangeTerms(
+              conn,
+              handshakeRole,
+              localTerms,
+            );
+            for (const warning of warnings) log.warn(warning);
+            log.info("terms agreed, partner identity:", partnerTerms.identity);
+
+            log.info("resolving role");
+            resolveRole;
+            const resolvedRole = await resolveRole(
+              conn,
+              handshakeRole,
+              localTerms.output,
+              partnerTerms.output,
+              linkageKeys[0].length,
+            );
+            log.info("role will be:", role);
+
+            const psiConfig: PSIConfig = {
+              role: resolvedRole === "sender" ? "starter" : "joiner",
+            };
             const participant = new PSIParticipant(
               "client",
               psi,
@@ -232,19 +287,20 @@ function Home() {
                 if (stagesById.hasOwnProperty(id)) setStageById(id);
               },
             );
-            log.info(`${psiConfig.role}: exchanging config`);
 
-            await participant.exchangeRoles(conn, "initiator");
             log.info(`${psiConfig.role}: identifying intersection`);
             const associationTable = await linkViaPSI(
               { cardinality: "one-to-one" },
               participant,
               conn,
-              data,
+              linkageKeys,
               1,
               (id: any) => {
                 if (stagesById.hasOwnProperty(id)) setStageById(id);
               },
+            );
+            log.info(
+              `${psiConfig.role}: linkage complete, generating results file`,
             );
             conn.close();
 
@@ -269,13 +325,9 @@ function Home() {
   let url: URL | undefined;
   if (role === "server") {
     const searchParams = new URLSearchParams({ uuid: session.uuid });
-    if (typeof window !== "undefined") {
-      url = new URL(
-        `${window.location.protocol}//${window.location.host}/psi?${searchParams}`,
-      );
-    } else {
-      url = new URL(`${getHttpServerHostname()}/psi?${searchParams}`);
-    }
+    url = new URL(
+      `${window.location.protocol}//${window.location.host}/psi?${searchParams}`,
+    );
   }
 
   return (

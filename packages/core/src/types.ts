@@ -31,6 +31,12 @@ export interface Config {
   verbose?: number;
 }
 
+/**
+ * NOTE: we want to move away from Formatter, LinkageKeyFieldDefinition,
+ * and LinkageKeyDefinition in favor of the linkage keys in src/config. Once
+ * data transformations have been implemented we will hopefully be able to do
+ * so.
+ */
 export type Formatter = (x: unknown) => string | undefined;
 
 export interface LinkageKeyFieldDefinition {

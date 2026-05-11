@@ -12,7 +12,6 @@ import {
 } from "@mantine/core";
 
 import { IconDownload } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 
 import { ProcessState } from "@psilink/core";
 
@@ -94,20 +93,15 @@ export function StatusFactory<
 
             <Group justify="center" gap="xs" component="span">
               <Text>Download result:</Text>
-              <Link
-                to={resultsFileURL}
-                download="results.txt"
-                disabled={!isCompleted}
-              >
+              <a href={resultsFileURL} download="results.txt">
                 <ActionIcon
-                  onClick={() => {}}
                   variant="light"
                   color="blue"
                   disabled={!isCompleted}
                 >
                   <IconDownload size={18} />
                 </ActionIcon>
-              </Link>
+              </a>
             </Group>
           </Stack>
         )}

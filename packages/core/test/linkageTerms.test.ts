@@ -4,7 +4,9 @@ import { expect, test } from "vitest";
 import {
   parseLinkageTerms,
   safeParseLinkageTerms,
+  validateCompatibility,
 } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTerms";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -316,4 +318,215 @@ test("parses snake_case keys from disk", () => {
     "substring",
   );
   expect(result.legalAgreement?.expirationDate).toBe("2027-01-01");
+});
+
+// ─── validateCompatibility ───────────────────────────────────────────────────
+
+const sharedFields: LinkageTerms["linkageFields"] = [
+  { name: "ssn", semanticType: "ssn" },
+];
+const sharedKeys: LinkageTerms["linkageKeys"] = [
+  { name: "SSN", elements: [{ field: "ssn" }] },
+];
+
+const termsA: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Party A",
+  date: "2025-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: sharedFields,
+  linkageKeys: sharedKeys,
+};
+
+const termsB: LinkageTerms = {
+  ...termsA,
+  identity: "Party B",
+};
+
+test("compatible terms produce no errors or warnings", () => {
+  const { errors, warnings } = validateCompatibility(termsA, termsB);
+  expect(errors).toHaveLength(0);
+  expect(warnings).toHaveLength(0);
+});
+
+test("date mismatch produces a warning, not an error", () => {
+  const { errors, warnings } = validateCompatibility(termsA, {
+    ...termsB,
+    date: "2025-06-01",
+  });
+  expect(errors).toHaveLength(0);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toMatch(/date mismatch/);
+});
+
+test("version mismatch is an error", () => {
+  const { errors } = validateCompatibility(termsA, {
+    ...termsB,
+    version: "2.0.0",
+  });
+  expect(errors.some((e) => e.includes("version mismatch"))).toBe(true);
+});
+
+test("algorithm mismatch is an error", () => {
+  const { errors } = validateCompatibility(termsA, {
+    ...termsB,
+    algorithm: "psi-c",
+  });
+  expect(errors.some((e) => e.includes("algorithm mismatch"))).toBe(true);
+});
+
+test("neither party expects output is an error", () => {
+  const noOutput = { expectsOutput: false, shareWithPartner: false };
+  const { errors } = validateCompatibility(
+    { ...termsA, output: noOutput },
+    { ...termsB, output: noOutput },
+  );
+  expect(errors.some((e) => e.includes("neither party expects output"))).toBe(
+    true,
+  );
+});
+
+test("output cross-check: I will share but partner does not expect is an error", () => {
+  const { errors } = validateCompatibility(
+    { ...termsA, output: { expectsOutput: false, shareWithPartner: true } },
+    { ...termsB, output: { expectsOutput: false, shareWithPartner: false } },
+  );
+  expect(errors.some((e) => e.includes("output mismatch"))).toBe(true);
+});
+
+test("output cross-check: I expect but partner will not share is an error", () => {
+  const { errors } = validateCompatibility(
+    { ...termsA, output: { expectsOutput: true, shareWithPartner: false } },
+    { ...termsB, output: { expectsOutput: false, shareWithPartner: false } },
+  );
+  expect(errors.some((e) => e.includes("output mismatch"))).toBe(true);
+});
+
+test("linkage fields mismatch is an error", () => {
+  const { errors } = validateCompatibility(termsA, {
+    ...termsB,
+    linkageFields: [{ name: "firstName", semanticType: "firstName" }],
+  });
+  expect(errors.some((e) => e.includes("linkage fields do not match"))).toBe(
+    true,
+  );
+});
+
+test("linkage fields in different order are still compatible", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      linkageFields: [
+        { name: "ssn", semanticType: "ssn" },
+        { name: "dob", semanticType: "dateOfBirth" },
+      ],
+      linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
+    },
+    {
+      ...termsB,
+      linkageFields: [
+        { name: "dob", semanticType: "dateOfBirth" },
+        { name: "ssn", semanticType: "ssn" },
+      ],
+      linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
+    },
+  );
+  expect(errors.filter((e) => e.includes("linkage fields"))).toHaveLength(0);
+});
+
+test("linkage keys mismatch is an error", () => {
+  const { errors } = validateCompatibility(termsA, {
+    ...termsB,
+    linkageKeys: [{ name: "Different", elements: [{ field: "ssn" }] }],
+  });
+  expect(errors.some((e) => e.includes("linkage keys do not match"))).toBe(
+    true,
+  );
+});
+
+test("legal agreement present on one side only is an error", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: { reference: "MOU-001", expirationDate: "2030-01-01" },
+    },
+    termsB,
+  );
+  expect(errors.some((e) => e.includes("legal agreement"))).toBe(true);
+});
+
+test("mismatched legal agreement reference is an error", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: { reference: "MOU-001", expirationDate: "2030-01-01" },
+    },
+    {
+      ...termsB,
+      legalAgreement: { reference: "MOU-002", expirationDate: "2030-01-01" },
+    },
+  );
+  expect(
+    errors.some((e) => e.includes("legal agreement reference mismatch")),
+  ).toBe(true);
+});
+
+test("mismatched legal agreement expiration date is an error", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: { reference: "MOU-001", expirationDate: "2030-01-01" },
+    },
+    {
+      ...termsB,
+      legalAgreement: { reference: "MOU-001", expirationDate: "2031-06-30" },
+    },
+  );
+  expect(
+    errors.some((e) => e.includes("legal agreement expiration date mismatch")),
+  ).toBe(true);
+});
+
+test("expired legal agreement is an error", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: { reference: "MOU-001", expirationDate: "2020-01-01" },
+    },
+    {
+      ...termsB,
+      legalAgreement: { reference: "MOU-001", expirationDate: "2020-01-01" },
+    },
+  );
+  expect(errors.some((e) => e.includes("expired"))).toBe(true);
+});
+
+test("payload send/receive mismatch is an error", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      payload: { send: [{ name: "enrollment_date" }], receive: [{ name: "case_id" }] },
+    },
+    {
+      ...termsB,
+      payload: { send: [{ name: "case_id" }], receive: [{ name: "wrong_column" }] },
+    },
+  );
+  expect(errors.some((e) => e.includes("payload mismatch"))).toBe(true);
+});
+
+test("matching payload send/receive columns are compatible", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      payload: { send: [{ name: "enrollment_date" }], receive: [{ name: "case_id" }] },
+    },
+    {
+      ...termsB,
+      payload: { send: [{ name: "case_id" }], receive: [{ name: "enrollment_date" }] },
+    },
+  );
+  expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
 });

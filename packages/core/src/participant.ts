@@ -2,13 +2,7 @@ import * as z from "zod";
 
 import { EventHandlerQueue } from "./connection/eventHandlerQueue";
 
-import type {
-  AssociationTable,
-  Config,
-  Connection,
-  HandshakeRole,
-  Role,
-} from "./types";
+import type { AssociationTable, Config, Connection } from "./types";
 
 import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -17,15 +11,8 @@ import type { Server as PSIServer } from "@openmined/psi.js/implementation/serve
 import { getLoggerForVerbosity } from "./utils/logger";
 import type { ServerSetup } from "@openmined/psi.js/implementation/proto/psi_pb";
 
-const protocolMessage = z.object({
-  role: z.literal(["starter", "joiner", "either"]),
-});
-
 const statusCompletedMessage = z.object({
   status: z.literal("completed"),
-});
-const statusOKMessage = z.object({
-  status: z.literal("ok"),
 });
 
 const numberArrayMessage = z.array(z.number());
@@ -48,11 +35,6 @@ function defineProtocol<
 type ProtocolStageId<T extends Array<{ id: string }>> = T[number]["id"];
 
 export const starterProtocolStages = defineProtocol([
-  {
-    id: "confirming protocol",
-    label: "Confirming protocol",
-    state: ProcessState.BeforeStart,
-  },
   {
     id: "sending startup message",
     label: "Sending my encrypted data",
@@ -87,11 +69,6 @@ export const starterProtocolStages = defineProtocol([
 ] as const);
 
 export const joinerProtocolStages = defineProtocol([
-  {
-    id: "confirming protocol",
-    label: "Confirming protocol",
-    state: ProcessState.BeforeStart,
-  },
   {
     id: "waiting for startup message",
     label: "Waiting for partner's encrypted data",
@@ -170,6 +147,8 @@ export class PSIParticipant {
     } else if (this.config.role === "joiner") {
       this.psi.client = library.client!.createWithNewKey(true);
     }
+
+    this.setStages();
   }
 
   private setStages() {
@@ -184,106 +163,9 @@ export class PSIParticipant {
     return this.stages;
   }
 
-  async exchangeRoles(
-    conn: Connection,
-    handshakeRole: HandshakeRole,
-  ): Promise<Role> {
-    this.log.info(
-      `${this.id}: starting role exchange with role ${this.config.role}`,
-    );
-    this.setStage("confirming protocol");
-
-    if (handshakeRole === "initiator") {
-      // last to arrive kicks things off by sending their role (see below)
-      // last to arrive will prefer to be the joiner
-      this.log.debug(`${this.id}: sending role ${this.config.role}`);
-      const sendRoleMessage = conn.send({ role: this.config.role });
-      const rolePromise: Promise<Role> = new Promise((resolve) => {
-        conn.once("data", async (rawData: unknown) => {
-          const peerConfig = protocolMessage.parse(rawData);
-
-          this.log.debug(`${this.id}: received peer role '${peerConfig.role}'`);
-          if (
-            peerConfig.role === this.config.role &&
-            this.config.role !== "either"
-          ) {
-            throw new Error(
-              `peer role '${peerConfig.role}' is incompatible with ` +
-                `own role '${this.config.role}'`,
-            );
-          }
-          if (this.config.role === "either") {
-            this.config.role =
-              peerConfig.role === "joiner" ? "starter" : "joiner";
-            this.log.debug(`${this.id}: setting role to '${this.config.role}'`);
-          }
-
-          if (!this.psi.server && !this.psi.client) {
-            if (this.config.role === "starter") {
-              this.psi.server = this.library.server!.createWithNewKey(true);
-            } else {
-              this.psi.client = this.library.client!.createWithNewKey(true);
-            }
-          }
-
-          await conn.send({ status: "ok" });
-
-          this.setStages();
-          resolve(this.config.role);
-        });
-      });
-      await sendRoleMessage;
-      return rolePromise;
-    } else {
-      return new Promise((resolve) => {
-        // first to arrive waits to receive role
-        // first to arrive will prefer to be the starter
-        const eventHandlerQueue = new EventHandlerQueue([
-          async (rawData: unknown) => {
-            const peerConfig = protocolMessage.parse(rawData);
-            this.log.debug(
-              `${this.id}: received peer role '${peerConfig.role}'`,
-            );
-            if (
-              peerConfig.role === this.config.role &&
-              this.config.role !== "either"
-            ) {
-              throw new Error(
-                `peer role '${peerConfig.role}' is incompatible with ` +
-                  `own role '${this.config.role}'`,
-              );
-            }
-            if (this.config.role === "either") {
-              this.config.role =
-                peerConfig.role === "either" ? "starter" : "joiner";
-            }
-
-            if (!this.psi.server && !this.psi.client) {
-              if (this.config.role === "starter") {
-                this.psi.server = this.library.server!.createWithNewKey(true);
-              } else {
-                this.psi.client = this.library.client!.createWithNewKey(true);
-              }
-            }
-
-            this.log.debug(`${this.id}: sending role '${this.config.role}'`);
-            await conn.send({ role: this.config.role });
-          },
-          (rawData: unknown) => {
-            statusOKMessage.parse(rawData);
-
-            conn.removeListener("data", eventHandlerQueue.handleEvent);
-
-            this.setStages();
-            resolve(this.config.role);
-          },
-        ]);
-        conn.on("data", eventHandlerQueue.handleEvent);
-      });
-    }
-  }
-
-  /** Returns an association table with elements [myIndices, theirIndices] */
+  /**
+   * Returns an association table with elements [localIndices, partnerIndices]
+   */
   public async identifyIntersection(
     conn: Connection,
     set: Array<string>,
@@ -331,10 +213,10 @@ export class PSIParticipant {
               this.log.debug(`${this.id}: received association table`);
               this.setStage("processing association table");
               // note: what we receive is backwards, so this is correct
-              const [theirIndices, myIndices] =
+              const [partnerIndices, localIndices] =
                 associationTableMessage.parse(rawData);
 
-              result = [myIndices, theirIndices];
+              result = [localIndices, partnerIndices];
               for (let i = 0; i < result[0].length; ++i) {
                 result[0][i] = sortingPermutation[result[0][i]];
               }
@@ -358,8 +240,10 @@ export class PSIParticipant {
         },
       );
 
-      this.log.info(`${this.id}: starting identify-intersection protocol`);
-      this.log.debug(`${this.id}: sending server data encrypted by server`);
+      this.log.debug(
+        `${this.id}: starting identify-intersection protocol; sending server ` +
+        " data encrypted by server",
+      );
       this.setStage("sending startup message");
       await conn.send(serverSetup.serializeBinary());
 
@@ -370,7 +254,7 @@ export class PSIParticipant {
     } else {
       return new Promise((resolve) => {
         let serverSetup: ServerSetup | undefined = undefined;
-        let myIndices: Array<number>;
+        let localIndices: Array<number>;
 
         this.setStage("waiting for startup message");
 
@@ -415,7 +299,7 @@ export class PSIParticipant {
                 serverSetup!,
                 serverResponse,
               );
-            myIndices = associationTable[0];
+            localIndices = associationTable[0];
 
             this.log.debug(
               `${this.id}: sending association table with permuted server ` +
@@ -436,11 +320,11 @@ export class PSIParticipant {
 
             conn.removeListener("data", eventHandlerQueue.handleEvent);
 
-            resolve([myIndices, numberArrayMessage.parse(rawData)]);
+            resolve([localIndices, numberArrayMessage.parse(rawData)]);
           },
         ]);
         conn.on("data", eventHandlerQueue.handleEvent);
-        this.log.info(`${this.id}: starting identify-intersection protocol`);
+        this.log.debug(`${this.id}: starting identify-intersection protocol`);
       });
     }
   }

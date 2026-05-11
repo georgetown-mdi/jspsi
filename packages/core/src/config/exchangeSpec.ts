@@ -43,7 +43,7 @@ export const ExchangeSpecSchema: z.ZodType<ExchangeSpec> = z.object({
   cleaning: z.unknown().optional(), // TODO: replace with typed schema
 });
 
-// ─── Parse ────────────────────────────────────────────────────────────────────
+// ─── Parse ───────────────────────────────────────────────────────────────────
 
 /**
  * Parse and validate a raw value as an {@link ExchangeSpec}.

@@ -2,10 +2,9 @@ import { Readable } from "node:stream";
 
 import { expect, test } from "vitest";
 
-import { getLinkageKeys } from "../src/linkageKeys";
+import { getMetadataAndLinkageKeys } from "../src/linkageKeys";
 
 import type { LinkageKeyDefinition } from "../src/types";
-import type { FieldAliases } from "../src/config/metadata";
 
 const formatters = {
   ssn: (x: unknown) =>
@@ -20,13 +19,6 @@ const formatters = {
       : "",
 };
 
-const fieldAliases: FieldAliases = {
-  ssn: ["social_security_number", "social"],
-  first_name: ["firstname", "fname"],
-  last_name: ["lastname", "lname"],
-  date_of_birth: ["dateofbirth", "dob"],
-};
-
 const linkageKeyDefinitions: Array<LinkageKeyDefinition> = [
   [
     {
@@ -36,12 +28,12 @@ const linkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "date_of_birth",
-      inputFieldName: "date_of_birth",
+      inputFieldName: "dateOfBirth",
       formatter: formatters["date_of_birth"],
     },
   ],
@@ -56,12 +48,12 @@ const extraLinkageKeyDefinitions: Array<LinkageKeyDefinition> = [
     },
     {
       outputFieldName: "last_name",
-      inputFieldName: "last_name",
+      inputFieldName: "lastName",
       formatter: formatters["last_name"],
     },
     {
       outputFieldName: "first_name_1",
-      inputFieldName: "first_name",
+      inputFieldName: "firstName",
       formatter: (x) => formatters["first_name"](x).substring(0, 1),
     },
   ],
@@ -72,14 +64,13 @@ test("handles trailing newline", async () => {
     ["id,first_name,last_name,ssn,date_of_birth\n"],
     ["159859483,James,Heard,559-81-1301,7/16/1975\n"],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys} = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
-    linkageKeyDefinitions,
-    fieldAliases,
+    linkageKeyDefinitions
   );
 
-  expect(linkData.length).toBe(linkageKeyDefinitions.length);
-  expect(linkData[0].length).toBe(1);
+  expect(linkageKeys.length).toBe(linkageKeyDefinitions.length);
+  expect(linkageKeys[0].length).toBe(1);
 });
 
 test("handles no trailing newline", async () => {
@@ -87,14 +78,13 @@ test("handles no trailing newline", async () => {
     ["id,first_name,last_name,ssn,date_of_birth\n"],
     ["159859483,James,Heard,559-81-1301,7/16/1975"],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
-    linkageKeyDefinitions,
-    fieldAliases,
+    linkageKeyDefinitions
   );
 
-  expect(linkData.length).toBe(linkageKeyDefinitions.length);
-  expect(linkData[0].length).toBe(1);
+  expect(linkageKeys.length).toBe(linkageKeyDefinitions.length);
+  expect(linkageKeys[0].length).toBe(1);
 });
 
 test("handles valid input", async () => {
@@ -103,24 +93,23 @@ test("handles valid input", async () => {
     ["159859483,James,Heard,559-81-1301,7/16/1975\n"],
     ["165562801,Albert,Iorio,322-84-2281,8/17/1975"],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
     [...linkageKeyDefinitions, ...extraLinkageKeyDefinitions],
-    fieldAliases,
   );
 
-  expect(linkData.length).toBe(
+  expect(linkageKeys.length).toBe(
     linkageKeyDefinitions.length + extraLinkageKeyDefinitions.length,
   );
-  expect(linkData[0].length).toBe(2);
-  expect(linkData[0][0]).toBe(
+  expect(linkageKeys[0].length).toBe(2);
+  expect(linkageKeys[0][0]).toBe(
     "ssn:559811301;last_name:HEARD;date_of_birth:1975-07-16",
   );
-  expect(linkData[0][1]).toBe(
+  expect(linkageKeys[0][1]).toBe(
     "ssn:322842281;last_name:IORIO;date_of_birth:1975-08-17",
   );
-  expect(linkData[1][0]).toBe("ssn:559811301;last_name:HEARD;first_name_1:J");
-  expect(linkData[1][1]).toBe("ssn:322842281;last_name:IORIO;first_name_1:A");
+  expect(linkageKeys[1][0]).toBe("ssn:559811301;last_name:HEARD;first_name_1:J");
+  expect(linkageKeys[1][1]).toBe("ssn:322842281;last_name:IORIO;first_name_1:A");
 });
 
 test("handles empty inputs", async () => {
@@ -129,14 +118,13 @@ test("handles empty inputs", async () => {
     ["159859483,James,Heard,559-81-1301,7/16/1975\n"],
     [],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
-    linkageKeyDefinitions,
-    fieldAliases,
+    linkageKeyDefinitions
   );
 
-  expect(linkData.length).toBe(linkageKeyDefinitions.length);
-  expect(linkData[0].length).toBe(1);
+  expect(linkageKeys.length).toBe(linkageKeyDefinitions.length);
+  expect(linkageKeys[0].length).toBe(1);
 });
 
 test("handles invalid dates", async () => {
@@ -144,15 +132,14 @@ test("handles invalid dates", async () => {
     ["id,first_name,last_name,ssn,date_of_birth\n"],
     ["159859483,James,Heard,559-81-1301,12/32/1975"],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
-    linkageKeyDefinitions,
-    fieldAliases,
+    linkageKeyDefinitions
   );
 
-  expect(linkData.length).toBe(linkageKeyDefinitions.length);
-  expect(linkData[0].length).toBe(1);
-  expect(linkData[0][0]).toBe("ssn:559811301;last_name:HEARD;date_of_birth:");
+  expect(linkageKeys.length).toBe(linkageKeyDefinitions.length);
+  expect(linkageKeys[0].length).toBe(1);
+  expect(linkageKeys[0][0]).toBe("ssn:559811301;last_name:HEARD;date_of_birth:");
 });
 
 test("handles empty fields", async () => {
@@ -160,15 +147,14 @@ test("handles empty fields", async () => {
     ["id,first_name,last_name,ssn,date_of_birth\n"],
     ["159859483,,,,"],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
-    linkageKeyDefinitions,
-    fieldAliases,
+    linkageKeyDefinitions
   );
 
-  expect(linkData.length).toBe(linkageKeyDefinitions.length);
-  expect(linkData[0].length).toBe(1);
-  expect(linkData[0][0]).toBe("ssn:;last_name:;date_of_birth:");
+  expect(linkageKeys.length).toBe(linkageKeyDefinitions.length);
+  expect(linkageKeys[0].length).toBe(1);
+  expect(linkageKeys[0][0]).toBe("ssn:;last_name:;date_of_birth:");
 });
 
 test("can return undefined", async () => {
@@ -176,7 +162,7 @@ test("can return undefined", async () => {
     ["id,first_name,last_name,ssn,date_of_birth\n"],
     ["159859483,James,Heard,,12/32/1975"],
   ];
-  const linkData = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     Readable.from(inputData),
     [
       [
@@ -190,11 +176,10 @@ test("can return undefined", async () => {
           },
         },
       ],
-    ],
-    fieldAliases,
+    ]
   );
 
-  expect(linkData.length).toBe(1);
-  expect(linkData[0].length).toBe(1);
-  expect(linkData[0][0]).toBeUndefined();
+  expect(linkageKeys.length).toBe(1);
+  expect(linkageKeys[0].length).toBe(1);
+  expect(linkageKeys[0][0]).toBeUndefined();
 });

@@ -105,6 +105,14 @@ If `share_with_partner` is `true`, the other party's terms must also have
 
 `expects_output` must be `true` if this party's `deduplicate` is `true`.
 
+PSI roles (sender / receiver) are derived from `output` after the terms
+exchange. If exactly one party has `expects_output: true`, that party
+becomes the PSI receiver. If both parties have `expects_output: true`,
+the application exchanges record counts over the established connection
+and assigns the party with the smaller dataset as the receiver
+(minimising data transmitted); ties are broken in favour of the initiator
+becoming the receiver.
+
 ### `linkage_terms.deduplicate`
 
 *Type:* boolean
@@ -696,10 +704,22 @@ metadata:
 | `name` | string | yes | Column name in the input CSV |
 | `semantic_type` | string | no | Semantic type (see Semantic Types above);
 inferred from name if omitted |
-| `role` | enum | no | `linkage`, `identifier`, `payload`, or `ignored`;
-inferred if omitted |
+| `role` | enum | no | `linkage`, `identifier`, or `payload`; inferred if
+omitted |
+| `is_payload` | boolean | no | Whether this column is transmitted as payload
+data after the intersection is identified; defaults to `true` when `role` is
+`payload`, `false` otherwise |
 | `description` | string | no | Human-readable description; shared with partner
 for payload columns |
+
+`role` and `is_payload` are partially independent. A column used for linkage or
+as an identifier can also carry `is_payload: true`, meaning it participates in
+the PSI protocol *and* is transmitted as payload for matched members.
+For example, a phone-number column can have `role: linkage` and
+`is_payload: true` so that it both links records and is delivered to the partner
+for matched rows. Any column that is not used for linkage or identification must
+have `is_payload: true`; the application will treat such a column as
+`role: payload` if no role is specified.
 
 ---
 

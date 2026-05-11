@@ -1,18 +1,5 @@
-import { DEFAULT_FIELD_ALIASES } from "./metadata";
-
 import type { LinkageTerms, LinkageField, LinkageKey } from "./linkageTerms";
-
-// Maps standardized names (snake_case, as used in fixedLinkageKeys.ts and
-// keyAliases) to default linkage field names. ssnLast4 is excluded because
-// detecting it requires a pipeline transformation from the full SSN column;
-// parties that only possess the last four digits will have a dedicated column
-// that they map themselves.
-const STANDARDIZED_TO_FIELD: Record<string, string> = {
-  ssn: "ssn",
-  first_name: "firstName",
-  last_name: "lastName",
-  date_of_birth: "dateOfBirth",
-};
+import type { ColumnMetadata, ColumnType } from "./metadata";
 
 const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   {
@@ -207,40 +194,6 @@ const TEMPLATE_KEYS: ReadonlyArray<LinkageKey> = [
 ];
 
 /**
- * Given a list of normalized CSV column names, returns the set of default
- * linkage field names that can be satisfied from those columns. Names are
- * matched against canonical standardized names and their registered aliases.
- *
- * Only fields that can be detected from a raw column name are returned;
- * fields that require pipeline transformations (e.g. ssnLast4 derived from a
- * full SSN column) are omitted even if the underlying column is present.
- */
-export function columnsToFieldNames(columns: string[]): Set<string> {
-  // Build reverse alias map: any recognized name -> standardized name.
-  const aliasToStandardizedName: Record<string, string> = {};
-  for (const [standardizedName, aliases] of Object.entries(
-    DEFAULT_FIELD_ALIASES,
-  )) {
-    aliasToStandardizedName[standardizedName] = standardizedName;
-    for (const alias of aliases) {
-      aliasToStandardizedName[alias] = standardizedName;
-    }
-  }
-
-  const result = new Set<string>();
-  for (const col of columns) {
-    const standardizedName = aliasToStandardizedName[col];
-    if (
-      standardizedName !== undefined &&
-      standardizedName in STANDARDIZED_TO_FIELD
-    ) {
-      result.add(STANDARDIZED_TO_FIELD[standardizedName]);
-    }
-  }
-  return result;
-}
-
-/**
  * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
  * linkage terms are specified explicitly.
  *
@@ -254,14 +207,13 @@ export function columnsToFieldNames(columns: string[]): Set<string> {
  */
 export function getDefaultLinkageTerms(
   identity: string,
-  columns?: string[],
+  metadata?: Array<ColumnMetadata>
 ): LinkageTerms {
   let linkageKeys: LinkageKey[];
-
-  if (columns !== undefined && columns.length > 0) {
-    const available = columnsToFieldNames(columns);
+  if (metadata !== undefined && metadata.length > 0) {
+    const availableTypes = new Set(metadata.map((m) => m.type));
     const filtered = TEMPLATE_KEYS.filter((key) =>
-      key.elements.every((el) => available.has(el.field)),
+      key.elements.every((el) => availableTypes.has(el.field as ColumnType)),
     );
     // Fall back to all templates if detection yields no usable keys, rather
     // than producing an invalid linkage terms. This can happen when column

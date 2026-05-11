@@ -89,7 +89,9 @@ export async function linkViaPSI(
         indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(
           undefined,
         );
-        log.debug(`${participant.id}: ${indexIterationMap.length} total records`);
+        log.debug(
+          `${participant.id}: ${indexIterationMap.length} total records`,
+        );
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
         dataWithDuplicatesAndUndefineds = unidentifiedIndices.map((i) => {
@@ -103,19 +105,24 @@ export async function linkViaPSI(
       unmappedIndicesByIter.push(unmappedIndices);
 
       log.debug(
-        `${participant.id}: key ${j + 1}/${data.length}: ${data_j.length} unique value(s)` +
+        `${participant.id}: key ${j + 1}/${data.length}: ${data_j.length} ` +
+          "unique value(s) " +
           `${j > 0 ? ` (${unidentifiedIndices!.length} unmatched)` : ""}`,
       );
 
       if (data_j.length === 0) continue;
 
+      log.info(
+        `${participant.id}: running psi on key ${j + 1} / ${data.length}:`,
+      );
       const [myIndices, theirIndices] = await participant.identifyIntersection(
         conn,
         data_j,
       );
 
       log.debug(
-        `${participant.id}: key ${j + 1}/${data.length}: ${myIndices.length} match(es) found`,
+        `${participant.id}: key ${j + 1}/${data.length}: ${myIndices.length} ` +
+          "match(es) found",
       );
 
       for (let ii = 0; ii < myIndices.length; ++ii) {

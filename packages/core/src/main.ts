@@ -1,5 +1,6 @@
 export * from "./participant";
 export * from "./link";
+export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/sftpConnection";
 export * from "./linkageKeys";
@@ -16,3 +17,4 @@ export * from "./config/defaultLinkageTerms";
 export * from "./config/exchangeSpec";
 export * from "./config/linkageTerms";
 export * from "./config/metadata";
+export { loadCSVFile } from "./file";

@@ -5,11 +5,12 @@ import YAML from "yaml";
 import PSI from "@openmined/psi.js";
 
 import {
-  DEFAULT_FIELD_ALIASES,
   PSIParticipant,
   SFTPConnection,
+  exchangeTerms,
+  resolveRole,
   firstToPartyLinkageKeyDefinitions,
-  getLinkageKeys,
+  getMetadataAndLinkageKeys,
   linkViaPSI,
   safeParseLinkageTerms,
   secondToPartyLinkageKeyDefinitions,
@@ -25,7 +26,7 @@ import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
 import { applyCliOverrides, readAtSignFile } from "../config";
 import { loadExchangeSpec, loadPakeToken } from "../configDir";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ExchangeArgs {
   input: string;
@@ -45,7 +46,7 @@ interface ExchangeArgs {
   verbosity: number;
 }
 
-// ─── Builder ──────────────────────────────────────────────────────────────────
+// ─── Builder ─────────────────────────────────────────────────────────────────
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -112,7 +113,7 @@ export function builder(cmd: Argv): Argv {
     .demand(1);
 }
 
-// ─── Arg extraction ───────────────────────────────────────────────────────────
+// ─── Arg extraction ──────────────────────────────────────────────────────────
 
 function extractArgs(argv: Arguments): ExchangeArgs {
   const input = String(argv._[0]);
@@ -262,31 +263,46 @@ async function runProtocol(
   // definitions will be derived from spec.linkageTerms.linkageKeys, and the
   // role-based split ("responder" / "initiator") will be replaced by
   // pipeline-driven key construction that is symmetric between parties.
-  const data = await getLinkageKeys(
+  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
     fs.createReadStream(args.input),
     conn.handshakeRole === "responder"
       ? firstToPartyLinkageKeyDefinitions
-      : secondToPartyLinkageKeyDefinitions,
-    DEFAULT_FIELD_ALIASES,
+      : secondToPartyLinkageKeyDefinitions
   );
 
   log.info("starting polling");
   conn.start();
 
+  log.info("exchanging linkage terms");
+  const { partnerTerms, warnings } = await exchangeTerms(
+    conn,
+    conn.handshakeRole!,
+    spec.linkageTerms,
+  );
+  for (const warning of warnings) log.warn(warning);
+  log.info("terms agreed, partner identity:", partnerTerms.identity);
+
+  log.info("resolving role");
+  const role = await resolveRole(
+    conn,
+    conn.handshakeRole!,
+    spec.linkageTerms.output,
+    partnerTerms.output,
+    linkageKeys[0].length,
+  );
+  log.info("role will be:", role);
+
   // PLACEHOLDER: spec.linkageTerms.algorithm ("psi" vs "psi-c") will eventually
-  // determine whether the full intersection or only its cardinality is revealed.
-  // Currently PSI is always used regardless of the algorithm field.
+  // determine whether the full intersection or only its cardinality is
+  // revealed. Currently PSI is always used regardless of the algorithm field.
   const participant = new PSIParticipant(
-    conn.handshakeRole === "responder" ? "server" : "client",
+    role === "receiver" ? "client" : "server",
     await PSI(),
     {
-      role: conn.handshakeRole === "responder" ? "starter" : "joiner",
+      role: role === "receiver" ? "joiner" : "starter",
       verbose: args.verbosity,
     },
   );
-
-  log.info("exchanging roles");
-  await participant.exchangeRoles(conn, conn.handshakeRole!);
 
   log.info("identifying intersection");
   // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
@@ -297,8 +313,8 @@ async function runProtocol(
     { cardinality: "one-to-one" },
     participant,
     conn,
-    data,
-    args.verbosity
+    linkageKeys,
+    args.verbosity,
   );
 
   log.info("stopping polling");
@@ -324,7 +340,7 @@ function writeOutput(
   if (output) (out as fs.WriteStream).close();
 }
 
-// ─── Handler ──────────────────────────────────────────────────────────────────
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handler(argv: Arguments): Promise<void> {
   const args = extractArgs(argv);
