@@ -80,13 +80,13 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
 /** Constraints on date-of-birth fields. */
 interface DateConstraints {
   /** Dates must be able to be parsed as valid dates. */
-  onlyValid?: boolean;
+  validOnly?: boolean;
   /** Values that must not appear in the data. */
   exclude?: string[];
 }
 
 const DateConstraintsSchema: z.ZodType<DateConstraints> = z.object({
-  onlyValid: z.boolean().optional(),
+  validOnly: z.boolean().optional(),
   exclude: z.array(z.string()).optional(),
 });
 
@@ -96,7 +96,7 @@ interface SSNConstraints {
    * Data must conform to SSA rules (area, group, and serial numbers may not be
    * all zeros, etc.).
    */
-  onlyValid?: boolean;
+  validOnly?: boolean;
   /**
    * Values that must not appear in the data (e.g. "123456789", "111111111").
    */
@@ -104,7 +104,7 @@ interface SSNConstraints {
 }
 
 const SSNConstraintsSchema: z.ZodType<SSNConstraints> = z.object({
-  onlyValid: z.boolean().optional(),
+  validOnly: z.boolean().optional(),
   exclude: z.array(z.string()).optional(),
 });
 

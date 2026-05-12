@@ -4,17 +4,13 @@ import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { ConnectionConfigSchema } from "./connection.js";
 import type { ConnectionConfig } from "./connection.js";
+import { CleaningSchema } from "./cleaning.js";
+import type { Cleaning } from "./cleaning.js";
 
 // ─── Metadata (stub) ─────────────────────────────────────────────────────────
 
 // TODO: Implement per EXCHANGE_SPEC.md §"Input metadata".
 export type Metadata = unknown;
-
-// ─── Cleaning (stub) ─────────────────────────────────────────────────────────
-
-// TODO: Implement per EXCHANGE_SPEC.md §"Data cleaning".
-// The spec marks this section as a sketch; do not implement until finalized.
-export type Cleaning = unknown;
 
 // ─── Exchange spec ────────────────────────────────────────────────────────────
 
@@ -40,7 +36,7 @@ export const ExchangeSpecSchema: z.ZodType<ExchangeSpec> = z.object({
   linkageTerms: LinkageTermsSchema,
   connection: ConnectionConfigSchema,
   metadata: z.unknown().optional(), // TODO: replace with typed schema
-  cleaning: z.unknown().optional(), // TODO: replace with typed schema
+  cleaning: CleaningSchema.optional(),
 });
 
 // ─── Parse ───────────────────────────────────────────────────────────────────

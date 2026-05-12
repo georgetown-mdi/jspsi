@@ -1,0 +1,745 @@
+import { expect, test, describe } from "vitest";
+
+import {
+  runPipeline,
+  buildStandardizedDataset,
+  buildKeyStrings,
+  validateCleaningAgainstTerms,
+  StandardizedField,
+  StandardizedDataset,
+} from "../src/cleaning";
+import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { ColumnMetadata } from "../src/config/metadata";
+import { CleaningSchema } from "../src/config/cleaning";
+
+// ─── runPipeline: string functions ───────────────────────────────────────────
+
+describe("runPipeline — string functions", () => {
+  test("to_upper_case", () => {
+    expect(runPipeline("smith", [{ function: "to_upper_case" }])).toBe("SMITH");
+  });
+
+  test("to_lower_case", () => {
+    expect(runPipeline("SMITH", [{ function: "to_lower_case" }])).toBe("smith");
+  });
+
+  test("trim_whitespace", () => {
+    expect(runPipeline("  Smith  ", [{ function: "trim_whitespace" }])).toBe(
+      "Smith",
+    );
+  });
+
+  test("remove_punctuation strips non-alphanumeric non-space characters", () => {
+    expect(
+      runPipeline("O'Brien-Smith!", [{ function: "remove_punctuation" }]),
+    ).toBe("OBrienSmith");
+  });
+
+  test("remove_punctuation preserves spaces", () => {
+    expect(runPipeline("O Brien", [{ function: "remove_punctuation" }])).toBe(
+      "O Brien",
+    );
+  });
+
+  test("remove_dashes", () => {
+    expect(runPipeline("123-45-6789", [{ function: "remove_dashes" }])).toBe(
+      "123456789",
+    );
+  });
+
+  test("remove_accents strips diacritics", () => {
+    expect(runPipeline("Héloïse", [{ function: "remove_accents" }])).toBe("Heloise");
+  });
+
+  test("remove_accents leaves plain ASCII unchanged", () => {
+    expect(runPipeline("SMITH", [{ function: "remove_accents" }])).toBe("SMITH");
+  });
+
+  test("strip_affixes removes prefix", () => {
+    expect(runPipeline("Dr. Jane Smith", [{ function: "strip_affixes" }])).toBe(
+      "Jane Smith",
+    );
+  });
+
+  test("strip_affixes removes suffix", () => {
+    expect(runPipeline("John Smith Jr.", [{ function: "strip_affixes" }])).toBe(
+      "John Smith",
+    );
+  });
+
+  test("strip_affixes leaves plain name unchanged", () => {
+    expect(runPipeline("Jane Smith", [{ function: "strip_affixes" }])).toBe(
+      "Jane Smith",
+    );
+  });
+
+  test("substring extracts the requested slice", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("SMI");
+  });
+
+  test("substring with negative start counts from end", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "substring", params: { start: -3, length: 3 } },
+      ]),
+    ).toBe("ITH");
+  });
+
+  test("substring returns null when start is beyond end", () => {
+    expect(
+      runPipeline("AB", [
+        { function: "substring", params: { start: 5, length: 3 } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("substring returns null when start is zero", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "substring", params: { start: 0, length: 3 } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("substring returns null when params are missing", () => {
+    expect(runPipeline("SMITH", [{ function: "substring" }])).toBeNull();
+  });
+});
+
+// ─── runPipeline: parse_date ─────────────────────────────────────────────────
+
+describe("runPipeline — parse_date", () => {
+  test("MM/DD/YYYY to YYYYMMDD", () => {
+    expect(
+      runPipeline("01/15/1990", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("19900115");
+  });
+
+  test("YYYY-MM-DD to YYYYMMDD", () => {
+    expect(
+      runPipeline("1990-01-15", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "YYYY-MM-DD", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("19900115");
+  });
+
+  test("DD/MM/YYYY to YYYYMMDD", () => {
+    expect(
+      runPipeline("15/01/1990", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "DD/MM/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("19900115");
+  });
+
+  test("single-digit month and day are zero-padded", () => {
+    expect(
+      runPipeline("1/5/1990", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("19900105");
+  });
+
+  test("unparseable date returns null", () => {
+    expect(
+      runPipeline("not-a-date", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  test("calendar-invalid date returns null", () => {
+    expect(
+      runPipeline("13/01/1990", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBeNull();
+  });
+});
+
+// ─── runPipeline: phonetic ───────────────────────────────────────────────────
+
+describe("runPipeline — phonetic (soundex)", () => {
+  test("SMITH -> S530", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "phonetic", params: { algorithm: "soundex" } },
+      ]),
+    ).toBe("S530");
+  });
+
+  test("ROBERT -> R163", () => {
+    expect(
+      runPipeline("ROBERT", [
+        { function: "phonetic", params: { algorithm: "soundex" } },
+      ]),
+    ).toBe("R163");
+  });
+
+  test("default algorithm is soundex", () => {
+    expect(runPipeline("JONES", [{ function: "phonetic" }])).toBe("J520");
+  });
+
+  test("empty string returns null", () => {
+    expect(
+      runPipeline("", [
+        { function: "phonetic", params: { algorithm: "soundex" } },
+      ]),
+    ).toBeNull();
+  });
+});
+
+// ─── runPipeline: null-producing functions ───────────────────────────────────
+
+describe("runPipeline — null-producing functions", () => {
+  test("null_if with value param", () => {
+    expect(
+      runPipeline("000000000", [
+        { function: "null_if", params: { value: "000000000" } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("null_if with values array", () => {
+    expect(
+      runPipeline("123456789", [
+        {
+          function: "null_if",
+          params: { values: ["000000000", "123456789", "111111111"] },
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  test("null_if passes through non-matching value", () => {
+    expect(
+      runPipeline("987654321", [
+        {
+          function: "null_if",
+          params: { values: ["000000000", "123456789"] },
+        },
+      ]),
+    ).toBe("987654321");
+  });
+
+  test("filter_regex passes through matching value", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "filter_regex", params: { pattern: "^[A-Z]+$" } },
+      ]),
+    ).toBe("SMITH");
+  });
+
+  test("filter_regex returns null on non-match", () => {
+    expect(
+      runPipeline("Smith123", [
+        { function: "filter_regex", params: { pattern: "^[A-Z]+$" } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("extract_regex returns first capture group", () => {
+    expect(
+      runPipeline("SMITH-JONES", [
+        { function: "extract_regex", params: { pattern: "^(\\w+)-" } },
+      ]),
+    ).toBe("SMITH");
+  });
+
+  test("extract_regex returns null on no match", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "extract_regex", params: { pattern: "^(\\w+)-" } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("replace_regex substitutes all matches", () => {
+    expect(
+      runPipeline("  A  B  ", [
+        { function: "replace_regex", params: { pattern: "\\s+", replacement: " " } },
+      ]),
+    ).toBe(" A B ");
+  });
+
+  test("replace_regex with no replacement param uses empty string", () => {
+    expect(
+      runPipeline("A1B2C3", [
+        { function: "replace_regex", params: { pattern: "\\d" } },
+      ]),
+    ).toBe("ABC");
+  });
+});
+
+// ─── runPipeline: coalesce ───────────────────────────────────────────────────
+
+describe("runPipeline — coalesce", () => {
+  test("coalesce replaces null with default", () => {
+    expect(
+      runPipeline("", [
+        { function: "null_if", params: { value: "" } },
+        { function: "coalesce", params: { default: "UNKNOWN" } },
+      ]),
+    ).toBe("UNKNOWN");
+  });
+
+  test("coalesce passes through non-null value unchanged", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "coalesce", params: { default: "UNKNOWN" } },
+      ]),
+    ).toBe("SMITH");
+  });
+
+  test("coalesce replaces empty set (all values nulled out)", () => {
+    expect(
+      runPipeline("SMITH-JONES", [
+        { function: "split_on", params: { delimiter: "-" } },
+        { function: "null_if", params: { values: ["SMITH", "JONES"] } },
+        { function: "coalesce", params: { default: "UNKNOWN" } },
+      ]),
+    ).toBe("UNKNOWN");
+  });
+});
+
+// ─── runPipeline: null propagation ───────────────────────────────────────────
+
+describe("runPipeline — null propagation", () => {
+  test("null propagates through subsequent steps", () => {
+    expect(
+      runPipeline("000", [
+        { function: "null_if", params: { value: "000" } },
+        { function: "to_upper_case" },
+        { function: "trim_whitespace" },
+      ]),
+    ).toBeNull();
+  });
+});
+
+// ─── runPipeline: unknown function ───────────────────────────────────────────
+
+test("unknown function name throws", () => {
+  expect(() =>
+    runPipeline("x", [{ function: "nonexistent_function" }]),
+  ).toThrow('unknown cleaning function: "nonexistent_function"');
+});
+
+// ─── runPipeline: fan-out ────────────────────────────────────────────────────
+
+describe("runPipeline — split_on fan-out", () => {
+  test("split_on on hyphen returns parts", () => {
+    expect(
+      runPipeline("SMITH-JONES", [{ function: "split_on", params: { delimiter: "-" } }]),
+    ).toEqual(new Set(["SMITH", "JONES"]));
+  });
+
+  test("split_on with include_original prepends the original", () => {
+    expect(
+      runPipeline("SMITH-JONES", [
+        {
+          function: "split_on",
+          params: { delimiter: "-", includeOriginal: true },
+        },
+      ]),
+    ).toEqual(new Set(["SMITH-JONES", "SMITH", "JONES"]));
+  });
+
+  test("split_on with no delimiter match returns single-element set", () => {
+    expect(
+      runPipeline("SMITH", [{ function: "split_on", params: { delimiter: "-" } }]),
+    ).toEqual(new Set(["SMITH"]));
+  });
+
+  test("steps after split_on apply element-wise", () => {
+    expect(
+      runPipeline("smith-jones", [
+        { function: "split_on", params: { delimiter: "-" } },
+        { function: "to_upper_case" },
+      ]),
+    ).toEqual(new Set(["SMITH", "JONES"]));
+  });
+
+  test("null_if after split_on filters matching elements", () => {
+    expect(
+      runPipeline("SMITH-UNKNOWN", [
+        { function: "split_on", params: { delimiter: "-" } },
+        { function: "null_if", params: { value: "UNKNOWN" } },
+      ]),
+    ).toEqual(new Set(["SMITH"]));
+  });
+
+  test("null_if after split_on returns null when all elements filtered", () => {
+    expect(
+      runPipeline("X-X", [
+        { function: "split_on", params: { delimiter: "-" } },
+        { function: "null_if", params: { value: "X" } },
+      ]),
+    ).toBeNull();
+  });
+});
+
+// ─── StandardizedField ───────────────────────────────────────────────────────
+
+describe("StandardizedField", () => {
+  const rows = [
+    { LAST_NAME: "smith", SSN: "123-45-6789" },
+    { LAST_NAME: "jones", SSN: "987-65-4321" },
+  ];
+
+  test("applies steps and returns a value set", () => {
+    const field = new StandardizedField(
+      "last_name", "LAST_NAME",
+      [{ function: "to_upper_case" }],
+      rows,
+    );
+    expect(field.get(0)).toEqual(["SMITH"]);
+    expect(field.get(1)).toEqual(["JONES"]);
+  });
+
+  test("returns empty array when pipeline produces null", () => {
+    const field = new StandardizedField(
+      "ssn", "SSN",
+      [{ function: "null_if", params: { value: "000000000" } }],
+      [{ SSN: "000000000" }],
+    );
+    expect(field.get(0)).toEqual([]);
+  });
+
+  test("returns multiple values from split_on fan-out", () => {
+    const field = new StandardizedField(
+      "last_name", "LAST_NAME",
+      [{ function: "split_on", params: { delimiter: "-" } }],
+      [{ LAST_NAME: "SMITH-JONES" }],
+    );
+    expect(field.get(0)).toEqual(["SMITH", "JONES"]);
+  });
+
+  test("caches result: returns the same array reference on repeated access", () => {
+    const field = new StandardizedField(
+      "last_name", "LAST_NAME",
+      [{ function: "to_upper_case" }],
+      rows,
+    );
+    expect(field.get(0)).toBe(field.get(0));
+  });
+
+  test("missing input column returns empty array (excluded from linkage)", () => {
+    const field = new StandardizedField("last_name", "MISSING", [], [{}]);
+    expect(field.get(0)).toEqual([]);
+  });
+
+  test("out-of-bounds index returns empty array (excluded from linkage)", () => {
+    const field = new StandardizedField(
+      "last_name", "LAST_NAME", [],
+      [{ LAST_NAME: "SMITH" }],
+    );
+    expect(field.get(99)).toEqual([]);
+  });
+});
+
+// ─── StandardizedDataset / buildStandardizedDataset ─────────────────────────
+
+const minimalTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "test",
+  date: "2025-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: false },
+  deduplicate: false,
+  linkageFields: [
+    { name: "last_name", semanticType: "lastName" },
+    { name: "date_of_birth", semanticType: "dateOfBirth" },
+  ],
+  linkageKeys: [
+    { name: "LN+DOB", elements: [{ field: "last_name" }, { field: "date_of_birth" }] },
+  ],
+};
+
+describe("buildStandardizedDataset", () => {
+  const rows = [{ LAST_NAME: "smith", DOB: "19900115" }];
+
+  test("explicit cleaning takes precedence over metadata", () => {
+    const cleaning = [
+      {
+        output: "last_name",
+        input: "LAST_NAME",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ];
+    const metadata: ColumnMetadata[] = [
+      { name: "LAST_NAME", type: "lastName", role: "linkage", isPayload: false },
+    ];
+    const dataset = buildStandardizedDataset(cleaning, rows, metadata, minimalTerms);
+    expect(dataset.getField("last_name")?.get(0)).toEqual(["SMITH"]);
+  });
+
+  test("metadata fallback resolves uncovered linkage fields", () => {
+    const metadata: ColumnMetadata[] = [
+      { name: "LN", type: "lastName", role: "linkage", isPayload: false },
+      { name: "DOB", type: "dateOfBirth", role: "linkage", isPayload: false },
+    ];
+    const dataset = buildStandardizedDataset(
+      undefined,
+      [{ LN: "SMITH", DOB: "19900115" }],
+      metadata,
+      minimalTerms,
+    );
+    expect(dataset.getField("last_name")?.get(0)).toEqual(["SMITH"]);
+    expect(dataset.getField("date_of_birth")?.get(0)).toEqual(["19900115"]);
+  });
+
+  test("field absent from both cleaning and metadata is not in dataset", () => {
+    const dataset = buildStandardizedDataset(undefined, rows, [], minimalTerms);
+    expect(dataset.getField("last_name")).toBeUndefined();
+  });
+
+  test("fieldNames lists all provided fields", () => {
+    const cleaning = [{ output: "last_name", input: "LAST_NAME", steps: [] }];
+    const dataset = buildStandardizedDataset(cleaning, rows, [], minimalTerms);
+    expect(dataset.fieldNames).toEqual(new Set(["last_name"]));
+  });
+
+  test("fields are lazily evaluated: accessing only one index does not compute others", () => {
+    let callCount = 0;
+    const trackingRows = new Proxy(
+      [{ LAST_NAME: "SMITH" }, { LAST_NAME: "JONES" }],
+      {
+        get(target, prop) {
+          if (typeof prop === "string" && !isNaN(Number(prop))) callCount++;
+          return Reflect.get(target, prop);
+        },
+      },
+    );
+    const cleaning = [{ output: "last_name", input: "LAST_NAME", steps: [] }];
+    const dataset = buildStandardizedDataset(cleaning, trackingRows, [], minimalTerms);
+    dataset.getField("last_name")?.get(0);
+    expect(callCount).toBe(1);
+  });
+});
+
+describe("StandardizedDataset", () => {
+  test("fieldNames reflects all fields passed to constructor", () => {
+    const rows = [{ A: "x", B: "y" }];
+    const dataset = new StandardizedDataset([
+      new StandardizedField("alpha", "A", [], rows),
+      new StandardizedField("beta", "B", [], rows),
+    ]);
+    expect(dataset.fieldNames).toEqual(new Set(["alpha", "beta"]));
+  });
+
+  test("getField returns undefined for unknown field", () => {
+    const dataset = new StandardizedDataset([]);
+    expect(dataset.getField("nonexistent")).toBeUndefined();
+  });
+});
+
+// ─── buildKeyStrings ─────────────────────────────────────────────────────────
+
+describe("buildKeyStrings", () => {
+  // Build a dataset from a single synthetic row where each entry in `fields`
+  // is either a plain string (identity) or a string already split on "|".
+  function makeDataset(fields: Record<string, string | string[]>): StandardizedDataset {
+    const standardizedFields = Object.entries(fields).map(([name, value]) => {
+      if (Array.isArray(value)) {
+        // Encode the array as a "|"-delimited raw value and split it back.
+        const raw = value.join("|");
+        return new StandardizedField(
+          name, name,
+          [{ function: "split_on", params: { delimiter: "\\|" } }],
+          [{ [name]: raw }],
+        );
+      }
+      return new StandardizedField(name, name, [], [{ [name]: value }]);
+    });
+    return new StandardizedDataset(standardizedFields);
+  }
+
+  const key = {
+    name: "LN+DOB",
+    elements: [{ field: "last_name" }, { field: "date_of_birth" }],
+  };
+
+  test("single-value fields concatenate", () => {
+    const dataset = makeDataset({ last_name: "SMITH", date_of_birth: "19900115" });
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set(["SMITH19900115"]));
+  });
+
+  test("empty field value set (null) returns null", () => {
+    const rows = [{ last_name: "SMITH", date_of_birth: "000" }];
+    const dataset = new StandardizedDataset([
+      new StandardizedField("last_name", "last_name", [], rows),
+      new StandardizedField("date_of_birth", "date_of_birth",
+        [{ function: "null_if", params: { value: "000" } }], rows),
+    ]);
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+  });
+
+  test("missing field in dataset returns null", () => {
+    const dataset = makeDataset({ last_name: "SMITH" });
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+  });
+
+  test("fan-out field produces cross-product with single-value field", () => {
+    const dataset = makeDataset({
+      last_name: ["SMITH", "JONES"],
+      date_of_birth: "19900115",
+    });
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set([
+      "SMITH19900115",
+      "JONES19900115",
+    ]));
+  });
+
+  test("cross-product over two fan-out fields", () => {
+    const dataset = makeDataset({
+      last_name: ["SMITH", "JONES"],
+      date_of_birth: ["19900115", "19900116"],
+    });
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set([
+      "SMITH19900115",
+      "SMITH19900116",
+      "JONES19900115",
+      "JONES19900116",
+    ]));
+  });
+
+  test("element transform is applied before concatenation", () => {
+    const keyWithTransform = {
+      name: "LN4+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "substring", params: { start: 1, length: 4 } }],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    const dataset = makeDataset({ last_name: "SMITH", date_of_birth: "19900115" });
+    expect(buildKeyStrings(keyWithTransform, dataset, 0)).toEqual(new Set(["SMIT19900115"]));
+  });
+
+  test("element transform returning null excludes the record", () => {
+    const keyWithNullTransform = {
+      name: "SSN+LN",
+      elements: [
+        {
+          field: "ssn",
+          transform: [{ function: "null_if", params: { value: "000000000" } }],
+        },
+        { field: "last_name" },
+      ],
+    };
+    const dataset = makeDataset({ ssn: "000000000", last_name: "SMITH" });
+    expect(buildKeyStrings(keyWithNullTransform, dataset, 0)).toBeNull();
+  });
+
+  test("swap is applied when isReceiver is true", () => {
+    const swapKey = {
+      name: "FN+LN swapped",
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+      swap: ["first_name", "last_name"] as [string, string],
+    };
+    const dataset = makeDataset({ first_name: "JANE", last_name: "SMITH" });
+    // Sender: first_name then last_name = "JANESMITH"
+    expect(buildKeyStrings(swapKey, dataset, 0, false)).toEqual(new Set(["JANESMITH"]));
+    // Receiver: swapped = last_name then first_name = "SMITHJANE"
+    expect(buildKeyStrings(swapKey, dataset, 0, true)).toEqual(new Set(["SMITHJANE"]));
+  });
+
+  test("uses the provided row index to look up field values", () => {
+    const rows = [
+      { last_name: "SMITH", date_of_birth: "19900115" },
+      { last_name: "JONES", date_of_birth: "19850701" },
+    ];
+    const dataset = new StandardizedDataset([
+      new StandardizedField("last_name", "last_name", [], rows),
+      new StandardizedField("date_of_birth", "date_of_birth", [], rows),
+    ]);
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set(["SMITH19900115"]));
+    expect(buildKeyStrings(key, dataset, 1)).toEqual(new Set(["JONES19850701"]));
+  });
+});
+
+// ─── validateCleaningAgainstTerms ────────────────────────────────────────────
+
+describe("validateCleaningAgainstTerms", () => {
+  test("valid cleaning returns no errors", () => {
+    const cleaning = [
+      { output: "last_name", input: "LN", steps: [{ function: "to_upper_case" }] },
+    ];
+    expect(validateCleaningAgainstTerms(cleaning, minimalTerms)).toEqual([]);
+  });
+
+  test("unknown output field is reported", () => {
+    const cleaning = [{ output: "nonexistent_field", input: "X" }];
+    const errors = validateCleaningAgainstTerms(cleaning, minimalTerms);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/nonexistent_field/);
+  });
+
+  test("unknown function name is reported", () => {
+    const cleaning = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "does_not_exist" }],
+      },
+    ];
+    const errors = validateCleaningAgainstTerms(cleaning, minimalTerms);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/does_not_exist/);
+  });
+
+  test("coalesce is not reported as unknown", () => {
+    const cleaning = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "coalesce", params: { default: "UNKNOWN" } }],
+      },
+    ];
+    expect(validateCleaningAgainstTerms(cleaning, minimalTerms)).toEqual([]);
+  });
+});
+
+// ─── CleaningSchema ───────────────────────────────────────────────────────────
+
+describe("CleaningSchema", () => {
+  test("parses a valid cleaning spec", () => {
+    const raw = [
+      { output: "last_name", input: "LN", steps: [{ function: "to_upper_case" }] },
+    ];
+    expect(() => CleaningSchema.parse(raw)).not.toThrow();
+  });
+
+  test("rejects duplicate output fields", () => {
+    const raw = [
+      { output: "last_name", input: "LN" },
+      { output: "last_name", input: "LAST_NAME" },
+    ];
+    expect(() => CleaningSchema.parse(raw)).toThrow();
+  });
+});

@@ -254,13 +254,13 @@ linkage_terms:
           transform:
             - function: substring
               params:
-                start: 0
+                start: 1
                 length: 4
         - field: first_name
           transform:
             - function: substring
               params:
-                start: 0
+                start: 1
                 length: 1
     - name: "SSN, all two-digit transpositions"
       elements:
@@ -704,7 +704,7 @@ cleaning:
   - output: last_name      # matches linkage_terms.fields[].name
     input: LAST_NAME
     steps:
-      - function: strip_titles
+      - function: strip_affixes
       - function: remove_punctuation
       - function: to_upper_case
 
@@ -724,7 +724,7 @@ cleaning:
         params:
           values: ["000000000", "123456789", "111111111"]
 
-  - output: last_name_variants   # fan-out: one row → multiple PSI entries
+  - output: last_name_variants   # fan-out: one row -> multiple PSI entries
     input: LAST_NAME
     steps:
       - function: to_upper_case
@@ -818,8 +818,8 @@ cleaning fan-out may all be meaningful.
 | `to_upper_case` | Convert to uppercase | — |
 | `to_lower_case` | Convert to lowercase | — |
 | `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text | — |
-| `strip_titles` | Remove name honorifics (Mr., Dr., …) and suffixes (Jr., III, …) | — |
-| `substring` | Extract a substring | `start` (0-indexed, required), `length` (required) |
+| `strip_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
+| `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
 | `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`); tokens: `YYYY`, `MM`, `DD` |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |
