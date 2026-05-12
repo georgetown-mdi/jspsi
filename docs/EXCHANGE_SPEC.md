@@ -117,18 +117,26 @@ becoming the receiver.
 
 *Type:* boolean
 *Required:* yes  
-*Consistency:* mandatory
+*Consistency:* none
 
 Whether or not to deduplicate the inputs of the party holding these terms.
 Deduplication results in multiple inputs potentially being matched to the same
-output.
+output. Each party independently decides whether to deduplicate its own records;
+the two values need not agree.
 
 ```yaml
 linkage_terms:
   deduplicate: false
 ```
 
-Any party indicating `true` must have `expects_output: true`.
+Any party indicating `true` must have `expects_output: true`. The requirement
+to receive output is already captured by the cross-party `output` consistency
+check, so no separate consistency check is applied to this field.
+
+In a many-to-one exchange where the "one" party has `expects_output: false`,
+the "many" party (with `deduplicate: true`) is additionally responsible for
+enforcing uniqueness on the "one" party's side, ensuring that each partner
+record is matched to at most one of its own records.
 
 ### `linkage_terms.fields`
 
@@ -203,8 +211,9 @@ parties only possess the last four digits |
 | `date_of_birth` | Date of birth |
 | `phone_number` | Phone number |
 | `email_address` | Email address |
+| `other` | Catch-all for other types |
 
-TODO: Full enumeration of supported semantic types.
+Additional types will be added as their use case arises.
 
 #### Constraints
 
@@ -267,7 +276,7 @@ linkage_terms:
     - name: "SSN, all two-digit transpositions"
       elements:
         - field: ssn
-          generate_combinations: transpositions
+          generate_fuzzy_comparisons: transpositions
 ```
 
 #### Key fields
@@ -284,7 +293,7 @@ for which the receiver swaps their data elements for this key (see below) |
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `field` | string | yes | Name of a linkage field from
-`linkage_terms.linkage_fields` |
+`linkage_terms.fields` |
 | `name` | string | no | Optional alias for this element; used when the same
 field appears more than once in a key, or as the target of a `swap` |
 | `transform` | array | no | Sequence of transformation steps applied to the
@@ -725,18 +734,17 @@ have `is_payload: true`; the application will treat such a column as
 
 ## Data cleaning transformations
 
-NOTE: This whole section is a sketch and shouldn't be referenced for
-implementation.
-
-Optional per-column transformation applied before linkage key generation. Each
-transformation takes one input column, applies a sequence of functions, and
-produces a named output. The `output` name must match the `name` of a linkage
-field defined in `linkage_terms.linkage_fields`; this is how the application
-knows which standardized field each transformation produces.
+Optional per-column transformations applied before linkage key generation.
+Conceptually, each transformation reads one input column, applies a sequence of
+steps, and writes the result under a linkage field name. In implementation, a
+transformation is a map between an input index and a set of output strings,
+which lazily computes values and caches results. The `output` name of a data
+cleaning transformation must match the `name` of a field in
+`linkage_terms.fields`.
 
 ```yaml
 cleaning:
-  - output: last_name      # matches linkage_terms.linkage_fields[].name
+  - output: last_name      # matches linkage_terms.fields[].name
     input: LAST_NAME
     steps:
       - function: strip_titles
@@ -751,33 +759,142 @@ cleaning:
           input_format: "MM/DD/YYYY"
           output_format: "YYYYMMDD"
 
-  - output: ssn4           # produced from full SSN when only ssn4 is needed
-    input: SSN
+  - output: ssn
+    input: SSN_RAW
     steps:
       - function: remove_dashes
-      - function: substring
+      - function: null_if
         params:
-          start: 5
-          length: 4
+          values: ["000000000", "123456789", "111111111"]
+
+  - output: last_name_variants   # fan-out: one row → multiple PSI entries
+    input: LAST_NAME
+    steps:
+      - function: to_upper_case
+      - function: split_on
+        params:
+          delimiter: "[-\\s]"
+          include_original: true  # keep "SMITH-JONES" as well as "SMITH", "JONES"
 ```
+
+Each linkage field may have at most one data cleaning transformation. Fields not
+covered by an explicit data cleaning transformation are given an identity transformation and connected to a linkage field by matching the field's semantic
+type against the input column's metadata.
+
+### Transformation fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `output` | string | yes | Name of a linkage field from
+`linkage_terms.fields` |
+| `input` | string | yes | Column name in the raw input CSV |
+| `steps` | array | no | Steps applied in order; if omitted the raw value is
+used unchanged |
+
+### Step fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `function` | string | yes | Name of the function to apply (see Available functions below) |
+| `params` | object | no | Function-specific parameters |
+
+### Null propagation
+
+A step may produce `null` to signal that the record has no valid value for this
+field. Once a step produces `null`, all subsequent steps are skipped and the
+field is absent from the record's PSI entry for any linkage key that references
+it. This is the intended mechanism for enforcing `exclude` constraints declared
+in a linkage field: a `null_if` step actively removes excluded values rather
+than merely warning.
+
+`coalesce` is the only function that acts on `null`: it substitutes a literal
+default, allowing a pipeline to recover from an earlier null-producing step.
+
+### Fan-out (multi-value fields)
+
+The `split_on` function produces `set<string>` instead of a single `string`.
+When a cleaning transformation ends with a set, the field carries multiple
+candidate values. Each value generates a separate PSI entry for the row, but all
+entries retain the original row identifier so that a match resolves back to the
+source row.
+
+**Cross-product**: when a linkage key references multiple fan-out fields, the
+key strings are the cartesian product of those fields' value lists. A
+`split_on` on both `first_name` and `last_name` with two parts each produces
+four key strings per row. The total count can grow quickly; a warning is issued
+when a single row generates more than 20 key strings for one linkage key.
+
+**Match resolution for fan-out**: when more than one PSI entry derived from the
+same original row appears in the intersection for a given linkage key round,
+the correct behavior depends on the output mode. In a single-party-output
+exchange the receiver can carry the row forward without informing the sender;
+no inconsistency arises because the sender never learns the intersection result.
+In a dual-party-output exchange utilizing a deterministic cascade and the
+filtering of candidate records, the parties must communicate to determine
+whether the multiple matches are distinct or conflated — that is, whether a
+third piece of evidence resolves the apparent link. This additional
+communication violates the protocol's privacy guarantee that nothing is learned
+about records outside the intersection. Users who employ fan-out transformations
+in a dual-party-output exchange are warned about this consequence.
+
+When exactly one fan-out entry matches, the original row is accepted and all
+its fan-out variants are removed from the candidate set for subsequent rounds.
+
+**Distinction from `generate_fuzzy_comparisons`**: fan-out at the cleaning
+stage and `generate_fuzzy_comparisons` on a key element both generate multiple
+PSI entries per row, but they serve different purposes. Cleaning fan-out
+reflects that a field legitimately has multiple canonical values (e.g. a
+hyphenated name and its parts). `generate_fuzzy_comparisons` generates
+approximate variants of a single canonical value to tolerate data entry errors
+(e.g. digit transpositions in an SSN). Only one match is expected from a
+`generate_fuzzy_comparisons` expansion; multiple matches from the same row in a
+cleaning fan-out may all be meaningful.
 
 ### Available functions
 
+#### String transformation
+
 | Function | Description | Parameters |
 |----------|-------------|------------|
-| `remove_punctuation` | Strip all punctuation characters | — |
+| `remove_punctuation` | Remove all non-alphanumeric, non-space characters | — |
+| `remove_dashes` | Remove `-` characters | — |
 | `trim_whitespace` | Remove leading and trailing whitespace | — |
 | `to_upper_case` | Convert to uppercase | — |
 | `to_lower_case` | Convert to lowercase | — |
-| `parse_date` | Reformat a date string | `input_format`, `output_format` |
-| `substring` | Extract a substring | `start` (0-indexed), `length` |
-| `phonetic` | Apply a phonetic algorithm | `algorithm`: `soundex` \|
-`metaphone` \| TBD |
-| `strip_titles` | Remove name prefixes and suffixes | TBD |
+| `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text | — |
+| `strip_titles` | Remove name honorifics (Mr., Dr., …) and suffixes (Jr., III, …) | — |
+| `substring` | Extract a substring | `start` (0-indexed, required), `length` (required) |
+| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`); tokens: `YYYY`, `MM`, `DD` |
+| `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |
+| `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |
+| `extract_regex` | Keep only the first capture group; produce `null` if no match | `pattern` (required) |
 
-TODO: Full function library with parameter schemas, error behavior (e.g., what
-happens when `parse_date` receives a value that does not match `input_format`),
-and examples.
+#### Null-producing (filter) functions
+
+| Function | Description | Parameters |
+|----------|-------------|------------|
+| `null_if` | Produce `null` if the value matches | `value` (single string) or `values` (array of strings) |
+| `filter_regex` | Produce `null` if the value does not match the pattern | `pattern` (required) |
+
+#### Recovery
+
+| Function | Description | Parameters |
+|----------|-------------|------------|
+| `coalesce` | Replace `null` (or an empty list after filtering) with a literal default | `default` (string) |
+
+#### Fan-out
+
+| Function | Description | Parameters |
+|----------|-------------|------------|
+| `split_on` | Split the value on a regex delimiter, producing `string[]` | `delimiter` (regex pattern, required), `include_original` (boolean, default `false`) |
+
+When `split_on` finds no delimiter the value is returned unchanged as a
+single-element list. When `include_original` is `true` the unsplit value
+is prepended to the parts.
+
+Steps following `split_on` are applied element-wise across all parts.
+Null-producing steps filter individual elements; if all elements are filtered
+the field becomes `null` and `coalesce` may recover it.
 
 ---
 
