@@ -842,7 +842,7 @@ cleaning fan-out may all be meaningful.
 
 | Function | Description | Parameters |
 |----------|-------------|------------|
-| `split_on` | Split the value on a regex delimiter, producing `string[]` | `delimiter` (regex pattern, required), `include_original` (boolean, default `false`) |
+| `split_on` | Split the value on a regex delimiter, producing `Set<string>` | `delimiter` (regex pattern, required), `include_original` (boolean, default `false`) |
 
 When `split_on` finds no delimiter the value is returned unchanged as a
 single-element list. When `include_original` is `true` the unsplit value
