@@ -14,8 +14,7 @@ An exchange specification has four top-level components:
 
 | Component | Required | Description |
 |-----------|----------|-------------|
-| `linkage_terms` | yes | What will be exchanged and how; verified by both
-parties |
+| `linkage_terms` | yes | What will be exchanged and how; verified by both parties |
 | `connection` | yes | Where and how the exchange will take place |
 | `metadata` | no | Descriptions of input fields and their roles |
 | `cleaning` | no | Data transformations applied before linkage |
@@ -192,20 +191,16 @@ linkage_terms:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Identifier referenced by linkage key elements and
-cleaning transformation outputs |
-| `semantic_type` | string | yes | The type of PII this field represents (see
-Semantic types) |
-| `constraints` | object | no | Data standards both parties commit to meeting
-when preparing this field |
+| `name` | string | yes | Identifier referenced by linkage key elements and cleaning transformation outputs |
+| `semantic_type` | string | yes | The type of PII this field represents (see Semantic types) |
+| `constraints` | object | no | Data standards both parties commit to meeting when preparing this field |
 
 #### Semantic types
 
 | Value | Description |
 |-------|-------------|
 | `ssn` | Social Security Number (9-character string) |
-| `ssn_last4` | Last four digits of SSN; distinct from `ssn` because some
-parties only possess the last four digits |
+| `ssn_last4` | Last four digits of SSN; distinct from `ssn` because some parties only possess the last four digits |
 | `first_name` | Given name |
 | `last_name` | Family name |
 | `date_of_birth` | Date of birth |
@@ -219,17 +214,11 @@ Additional types will be added as their use case arises.
 
 | Field | Type | Applies to | Description |
 |-------|------|------------|-------------|
-| `valid_only` | boolean | `ssn`, `ssn_last4` | Data must conform to Social
-Security Administration
-[rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs |
+| `valid_only` | boolean | `ssn`, `ssn_last4` | Data must conform to Social Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs |
 | `valid_only` | boolean | `date_of_birth` | Must be a valid date |
-| `exclude` | array of strings | any | Values that must not appear in the data;
-useful for filtering placeholder values such as `123456789` and `111111111` for
-SSNs |
-| `allowed_characters` | string | name fields | Regex character class;
-characters outside it must have been removed |
-| `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr.,
-etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
+| `exclude` | array of strings | any | Values that must not appear in the data; useful for filtering placeholder values such as `123456789` and `111111111` for SSNs |
+| `allowed_characters` | string | name fields | Regex character class; characters outside it must have been removed |
+| `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr., etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
 
 TODO: Full constraint schema with valid values for each field.
 
@@ -285,8 +274,7 @@ linkage_terms:
 |-------|------|----------|-------------|
 | `name` | string | yes | Human-readable name for this key |
 | `elements` | array | yes | Data elements combined to form the key |
-| `swap` | array | no | An array of two field names (or element `name` values)
-for which the receiver swaps their data elements for this key (see below) |
+| `swap` | array | no | An array of two field names (or element `name` values) for which the receiver swaps their data elements for this key (see below) |
 
 #### Element fields
 
@@ -294,15 +282,9 @@ for which the receiver swaps their data elements for this key (see below) |
 |-------|------|----------|-------------|
 | `field` | string | yes | Name of a linkage field from
 `linkage_terms.fields` |
-| `name` | string | no | Optional alias for this element; used when the same
-field appears more than once in a key, or as the target of a `swap` |
-| `transform` | array | no | Sequence of transformation steps applied to the
-canonical field value before concatenation into the key |
-| `generate_fuzzy_comparisons` | string | no | Method for generating additional
-values for fuzzy matching: `transpositions` generates all two-digit
-transpositions; `edits` generates all single-character deletions up to
-`max_length`, matching values within one edit distance; `adjacent_years`
-generates dates +/- 1 year from the input. Applied after any transformation |
+| `name` | string | no | Optional alias for this element; used when the same field appears more than once in a key, or as the target of a `swap` |
+| `transform` | array | no | Sequence of transformation steps applied to the canonical field value before concatenation into the key |
+| `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `edits` generates all single-character deletions up to `max_length`, matching values within one edit distance; `adjacent_years` generates dates +/- 1 year from the input. Applied after any transformation |
 
 #### Transform steps
 
@@ -311,8 +293,7 @@ function library. Steps are applied in order.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `function` | string | yes | Name of the function to apply (see Available
-functions in the Data cleaning section) |
+| `function` | string | yes | Name of the function to apply (see Available functions in the Data cleaning section) |
 | `params` | object | no | Function-specific parameters |
 
 #### Swapped keys
@@ -393,13 +374,10 @@ fields are the authoritative form.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `host` | string | yes | Hostname or IP address |
-| `port` | integer | no | Port number; defaults to the protocol standard (443
-for HTTPS/WSS, 22 for SFTP) |
-| `path` | string | no | URL path for WebRTC signaling; remote working directory
-for SFTP |
+| `port` | integer | no | Port number; defaults to the protocol standard (443 for HTTPS/WSS, 22 for SFTP) |
+| `path` | string | no | URL path for WebRTC signaling; remote working directory for SFTP |
 | `username` | string | no | Username for server authentication |
-| `key` | string | WebRTC only | PeerJS API key for private PeerJS servers; omit
-when using a public server |
+| `key` | string | WebRTC only | PeerJS API key for private PeerJS servers; omit when using a public server |
 
 #### SFTP server authentication
 
@@ -411,12 +389,9 @@ are invalid without it.
 |-------|------|-------------|
 | `password` | string | Password authentication; `@`-file recommended |
 | `private_key` | string | Path to SSH private key; `@`-file recommended |
-| `private_key_passphrase` | string | Passphrase for an encrypted private key;
-only valid with `private_key` |
-| `certificate` | string | Path to SSH certificate; only valid with
-`private_key`; enables certificate-based authentication |
-| `host_key_fingerprint` | string | Optional expected server host key
-fingerprint for host verification |
+| `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key` |
+| `certificate` | string | Path to SSH certificate; only valid with `private_key`; enables certificate-based authentication |
+| `host_key_fingerprint` | string | Optional expected server host key fingerprint for host verification |
 | `known_hosts` | string | Optional path to a `known_hosts` file; alternative to `host_key_fingerprint` |
 
 ```yaml
@@ -464,8 +439,7 @@ party runs the CLI. At run time the provisioning party's config retains
 | `host` | string | yes | Hostname of the provisioning API |
 | `port` | integer | no | Port; defaults to 443 |
 | `path` | string | no | API path |
-| `auth` | object | no | Authentication credentials (see
-[HTTP service authentication](#http-service-authentication-auth)) |
+| `auth` | object | no | Authentication credentials (see [HTTP service authentication](#http-service-authentication-auth)) |
 
 ```yaml
 # Lifecycle provisioning: wake a serverless PeerJS instance before connecting
@@ -502,14 +476,8 @@ should not be edited manually.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `pake_token` | string | yes | Shared SPAKE2 token; `@`-file recommended |
-| `role` | enum | WebRTC only | `invitor` \| `acceptor`; used to derive
-deterministic PeerJS peer IDs from the shared token so both parties know each
-other's address without out-of-band communication. Orthogonal to the PSI
-protocol roles, which are determined by `linkage_terms.output` |
-| `expires` | ISO 8601 datetime string | no | Expiration for this token; the
-exchange is aborted before the PAKE handshake begins if the current time is past
-this value. Tokens embedded in invitations carry a default expiration of 1
-hour; tokens generated by rotation carry none. |
+| `role` | enum | WebRTC only | `invitor` \| `acceptor`; used to derive deterministic PeerJS peer IDs from the shared token so both parties know each other's address without out-of-band communication. Orthogonal to the PSI protocol roles, which are determined by `linkage_terms.output` |
+| `expires` | ISO 8601 datetime string | no | Expiration for this token; the exchange is aborted before the PAKE handshake begins if the current time is past this value. Tokens embedded in invitations carry a default expiration of 1 hour; tokens generated by rotation carry none. |
 
 ```yaml
 connection:
@@ -614,8 +582,7 @@ server.
 | `host` | string | yes | Proxy hostname |
 | `port` | integer | no | Port; defaults to 443 |
 | `path` | string | no | Proxy path |
-| `auth` | object | no | Authentication credentials (see
-[HTTP service authentication](#http-service-authentication-auth)) |
+| `auth` | object | no | Authentication credentials (see [HTTP service authentication](#http-service-authentication-auth)) |
 
 ### HTTP service authentication (`auth`)
 
@@ -627,8 +594,7 @@ optional `auth` sub-object. Exactly one authentication method may be specified.
 |-------|------|-------------|
 | `bearer` | string | Bearer token; `@`-file recommended |
 | `username` | string | Username for HTTP Basic authentication |
-| `password` | string | Password for HTTP Basic authentication;
-`@`-file recommended |
+| `password` | string | Password for HTTP Basic authentication; `@`-file recommended |
 
 ```yaml
 connection:
@@ -653,19 +619,15 @@ for one channel are given when the other channel is active.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `ice_timeout_ms` | integer | 5000 | Milliseconds to wait for ICE candidate
-gathering before failing |
-| `max_message_size` | integer | 65536 | Maximum data-channel message size in
-bytes |
+| `ice_timeout_ms` | integer | 5000 | Milliseconds to wait for ICE candidate gathering before failing |
+| `max_message_size` | integer | 65536 | Maximum data-channel message size in bytes |
 
 #### SFTP options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `poll_interval_ms` | integer | 30000 | Milliseconds between checks for the
-partner's uploaded file |
-| `poll_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the
-partner before giving up |
+| `poll_interval_ms` | integer | 30000 | Milliseconds between checks for the partner's uploaded file |
+| `poll_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the partner before giving up |
 | `compression` | boolean | false | Enable SSH compression |
 | `transfer_chunk_size` | integer | 32768 | Bytes per read/write chunk |
 
@@ -711,15 +673,10 @@ metadata:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Column name in the input CSV |
-| `semantic_type` | string | no | Semantic type (see Semantic Types above);
-inferred from name if omitted |
-| `role` | enum | no | `linkage`, `identifier`, or `payload`; inferred if
-omitted |
-| `is_payload` | boolean | no | Whether this column is transmitted as payload
-data after the intersection is identified; defaults to `true` when `role` is
-`payload`, `false` otherwise |
-| `description` | string | no | Human-readable description; shared with partner
-for payload columns |
+| `semantic_type` | string | no | Semantic type (see Semantic Types above); inferred from name if omitted |
+| `role` | enum | no | `linkage`, `identifier`, or `payload`; inferred if omitted |
+| `is_payload` | boolean | no | Whether this column is transmitted as payload data after the intersection is identified; defaults to `true` when `role` is `payload`, `false` otherwise |
+| `description` | string | no | Human-readable description; shared with partner for payload columns |
 
 `role` and `is_payload` are partially independent. A column used for linkage or
 as an identifier can also carry `is_payload: true`, meaning it participates in
@@ -785,8 +742,7 @@ type against the input column's metadata.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `output` | string | yes | Name of a linkage field from
-`linkage_terms.fields` |
+| `output` | string | yes | Name of a linkage field from `linkage_terms.fields` |
 | `input` | string | yes | Column name in the raw input CSV |
 | `steps` | array | no | Steps applied in order; if omitted the raw value is
 used unchanged |
