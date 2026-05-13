@@ -170,7 +170,7 @@ linkage_terms:
           - "123456789"
           - "111111111"
     - name: ssn4
-      type: ssn_last4
+      type: ssn4
     - name: first_name
       type: first_name
       constraints:
@@ -200,7 +200,7 @@ linkage_terms:
 | Value | Description |
 |-------|-------------|
 | `ssn` | Social Security Number (9-character string) |
-| `ssn_last4` | Last four digits of SSN; distinct from `ssn` because some parties only possess the last four digits |
+| `ssn4` | Last four digits of SSN; distinct from `ssn` because some parties only possess the last four digits |
 | `first_name` | Given name |
 | `last_name` | Family name |
 | `date_of_birth` | Date of birth |
@@ -214,7 +214,7 @@ Additional types will be added as their use case arises.
 
 | Field | Type | Applies to | Description |
 |-------|------|------------|-------------|
-| `valid_only` | boolean | `ssn`, `ssn_last4` | Data must conform to Social Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs |
+| `valid_only` | boolean | `ssn`, `ssn4` | Data must conform to Social Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs |
 | `valid_only` | boolean | `date_of_birth` | Must be a valid date |
 | `exclude` | array of strings | any | Values that must not appear in the data; useful for filtering placeholder values such as `123456789` and `111111111` for SSNs |
 | `allowed_characters` | string | name fields | Regex character class; characters outside it must have been removed |

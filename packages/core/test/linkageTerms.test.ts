@@ -33,7 +33,7 @@ test("parses a complete valid set of terms", () => {
     linkageFields: [
       {
         name: "ssn4",
-        semanticType: "ssnLast4",
+        semanticType: "ssn4",
         constraints: { onlyValid: true, exclude: ["0000"] },
       },
       {

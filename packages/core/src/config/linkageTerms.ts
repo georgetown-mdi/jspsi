@@ -148,9 +148,9 @@ interface SsnField {
  * Last four digits of SSN. Distinct from `ssn` because some parties only
  * possess the last four digits; this is not a derived field.
  */
-interface SsnLast4Field {
+interface Ssn4Field {
   name: string;
-  semanticType: "ssnLast4";
+  semanticType: "ssn4";
   constraints?: SSNConstraints;
 }
 interface PhoneNumberField {
@@ -175,7 +175,7 @@ export type LinkageField =
   | LastNameField
   | DateOfBirthField
   | SsnField
-  | SsnLast4Field
+  | Ssn4Field
   | PhoneNumberField
   | EmailAddressField;
 
@@ -199,7 +199,7 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
       ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("ssnLast4"),
+      semanticType: z.literal("ssn4"),
       ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({

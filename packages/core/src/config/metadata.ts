@@ -5,7 +5,8 @@ import { SEMANTIC_TYPES } from "../types";
 import type { SemanticType } from "../types";
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
-export type ColumnRole = "linkage" | "identifier" | "payload";
+export const ColumnRoleSchema = z.enum(["linkage", "identifier", "payload"]);
+export type ColumnRole = z.infer<typeof ColumnRoleSchema>;
 
 /**
  * Information about a specific input column used to determine its possible
@@ -22,7 +23,7 @@ export interface ColumnMetadata {
 const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
   name: z.string(),
   type: z.enum(SEMANTIC_TYPES),
-  role: z.enum(["linkage", "identifier", "payload"]),
+  role: ColumnRoleSchema,
   isPayload: z.boolean(),
   description: z.string().optional(),
 });
@@ -39,11 +40,7 @@ interface TypeMeta {
   isPayload: boolean;
 }
 
-interface TypeMetaMapped {
-  type: SemanticType;
-  role: ColumnRole;
-  isPayload: boolean;
-}
+type TypeMetaMapped = Omit<TypeMeta, "aliases">;
 
 const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
   {

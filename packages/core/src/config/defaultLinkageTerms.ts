@@ -13,7 +13,7 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   },
   {
     name: "ssn4",
-    semanticType: "ssnLast4",
+    semanticType: "ssn4",
     constraints: { validOnly: true },
   },
   {
@@ -119,7 +119,7 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
     name: "SSN4 + LN + DOB",
     elements: [
-      { field: "ssnLast4" },
+      { field: "ssn4" },
       { field: "lastName" },
       { field: "dateOfBirth" },
     ],
@@ -127,7 +127,7 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
     name: "SSN4 + LN4 + YOB + MOB",
     elements: [
-      { field: "ssnLast4" },
+      { field: "ssn4" },
       {
         field: "lastName",
         transform: [{ function: "substring", params: { start: 1, length: 4 } }],

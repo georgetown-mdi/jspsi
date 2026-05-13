@@ -495,17 +495,6 @@ export class StandardizedDataset {
   }
 }
 
-// Maps linkage field semantic types to the ColumnType values used in metadata.
-const SEMANTIC_TO_METADATA: Record<string, string> = {
-  ssn: "ssn",
-  ssnLast4: "ssn4",
-  firstName: "firstName",
-  lastName: "lastName",
-  dateOfBirth: "dateOfBirth",
-  phoneNumber: "phoneNumber",
-  emailAddress: "emailAddress",
-};
-
 /**
  * Build a {@link StandardizedDataset} from:
  *
@@ -536,9 +525,7 @@ export function buildStandardizedDataset(
 
   for (const field of terms.linkageFields) {
     if (covered.has(field.name)) continue;
-    const metadataType = SEMANTIC_TO_METADATA[field.semanticType];
-    if (!metadataType) continue;
-    const col = metadata.find((c) => c.type === metadataType);
+    const col = metadata.find((c) => c.type === field.semanticType);
     if (!col) continue;
     // Identity transformation: pass the raw column value through unchanged.
     fields.push(new StandardizedField(field.name, col.name, [], rawRows));
