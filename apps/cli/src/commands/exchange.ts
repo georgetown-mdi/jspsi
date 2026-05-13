@@ -9,12 +9,15 @@ import {
   SFTPConnection,
   exchangeTerms,
   resolveRole,
-  firstToPartyLinkageKeyDefinitions,
-  getMetadataAndLinkageKeys,
   linkViaPSI,
   safeParseLinkageTerms,
-  secondToPartyLinkageKeyDefinitions,
   setLogPrefixer,
+  loadCSVFile,
+  inferMetadata,
+  buildStandardizedDataset,
+  StandardizedKeyIterable,
+  getDefaultLinkageTerms,
+  validateStandardizationAgainstTerms,
 } from "@psilink/core";
 import type {
   AssociationTable,
@@ -32,6 +35,7 @@ interface ExchangeArgs {
   input: string;
   output?: string;
   configDir: string;
+  identity?: string;
   linkageTermsFile?: string;
   /** Already @-file resolved. */
   pakeToken?: string;
@@ -62,6 +66,12 @@ export function builder(cmd: Argv): Argv {
     .option("config-dir", {
       type: "string",
       describe: "config directory (default: .psilink)",
+    })
+    .option("identity", {
+      type: "string",
+      describe:
+        "identity string for this party (name, org, contact); required " +
+        "when config omits linkageTerms",
     })
     .option("linkage-terms", {
       type: "string",
@@ -119,6 +129,7 @@ function extractArgs(argv: Arguments): ExchangeArgs {
   const input = String(argv._[0]);
   const output = argv._[1] !== undefined ? String(argv._[1]) : undefined;
   const configDir = (argv["config-dir"] as string | undefined) ?? ".psilink";
+  const identity = argv["identity"] as string | undefined;
   const linkageTermsFile = argv["linkage-terms"] as string | undefined;
   const pakeToken = readAtSignFile(argv["pake-token"] as string | undefined) as
     | string
@@ -154,6 +165,7 @@ function extractArgs(argv: Arguments): ExchangeArgs {
     input,
     output,
     configDir,
+    identity,
     linkageTermsFile,
     pakeToken,
     serverPort,
@@ -187,6 +199,7 @@ function resolveConfig(args: ExchangeArgs): ExchangeSpec {
 
   const pakeToken = args.pakeToken ?? loadPakeToken(args.configDir);
   spec = applyCliOverrides(spec, {
+    identity: args.identity,
     pakeToken,
     timeout: args.timeout,
     serverUsername: args.serverUsername,
@@ -215,15 +228,40 @@ async function runProtocol(
     process.exit(69);
   }
 
+  // ── Load and prepare data ─────────────────────────────────────────────────
+
+  const csvResult = await loadCSVFile(fs.createReadStream(args.input));
+  const rawRows = csvResult.data as Array<Record<string, string>>;
+  const metadata = inferMetadata(csvResult.meta.fields ?? []);
+
+  // Resolve linkage terms: use explicit terms from config, or generate
+  // defaults filtered to the columns present in the input file.
+  const linkageTerms =
+    spec.linkageTerms ?? getDefaultLinkageTerms(spec.identity!, metadata);
+
   log.info(
     "loaded exchange spec from",
     args.configDir + "; identity:",
-    spec.linkageTerms.identity,
+    linkageTerms.identity,
   );
   log.info(
     "linkage keys:",
-    spec.linkageTerms.linkageKeys.map((k) => k.name).join(", "),
+    linkageTerms.linkageKeys.map((k) => k.name).join(", "),
   );
+
+  const dataset = buildStandardizedDataset(
+    spec.standardization,
+    rawRows,
+    metadata,
+    linkageTerms,
+  );
+
+  if (spec.standardization !== undefined) {
+    for (const err of validateStandardizationAgainstTerms(spec.standardization, linkageTerms))
+      log.warn("cleaning configuration issue:", err);
+  }
+
+  // ── Connection ────────────────────────────────────────────────────────────
 
   const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
     verbose: args.verbosity,
@@ -258,26 +296,16 @@ async function runProtocol(
     log.info("arrived second - will send first message message");
   }
 
-  // PLACEHOLDER: getLinkageKeys currently uses hard-coded field definitions
-  // from fixedLinkageKeys.ts. Once data pipelines are implemented, the
-  // definitions will be derived from spec.linkageTerms.linkageKeys, and the
-  // role-based split ("responder" / "initiator") will be replaced by
-  // pipeline-driven key construction that is symmetric between parties.
-  const { metadata: _metadata, linkageKeys } = await getMetadataAndLinkageKeys(
-    fs.createReadStream(args.input),
-    conn.handshakeRole === "responder"
-      ? firstToPartyLinkageKeyDefinitions
-      : secondToPartyLinkageKeyDefinitions
-  );
-
   log.info("starting polling");
   conn.start();
+
+  // ── Protocol ──────────────────────────────────────────────────────────────
 
   log.info("exchanging linkage terms");
   const { partnerTerms, warnings } = await exchangeTerms(
     conn,
     conn.handshakeRole!,
-    spec.linkageTerms,
+    linkageTerms,
   );
   for (const warning of warnings) log.warn(warning);
   log.info("terms agreed, partner identity:", partnerTerms.identity);
@@ -286,13 +314,20 @@ async function runProtocol(
   const role = await resolveRole(
     conn,
     conn.handshakeRole!,
-    spec.linkageTerms.output,
+    linkageTerms.output,
     partnerTerms.output,
-    linkageKeys[0].length,
+    rawRows.length,
   );
   log.info("role will be:", role);
 
-  // PLACEHOLDER: spec.linkageTerms.algorithm ("psi" vs "psi-c") will eventually
+  // Build key iterables now that the PSI role (and therefore swap direction)
+  // is known. isReceiver determines whether swap-keyed rounds are applied.
+  const isReceiver = role === "receiver";
+  const linkageKeyIterables = linkageTerms.linkageKeys.map(
+    (key) => new StandardizedKeyIterable(key, dataset, rawRows.length, isReceiver),
+  );
+
+  // PLACEHOLDER: linkageTerms.algorithm ("psi" vs "psi-c") will eventually
   // determine whether the full intersection or only its cardinality is
   // revealed. Currently PSI is always used regardless of the algorithm field.
   const participant = new PSIParticipant(
@@ -305,15 +340,13 @@ async function runProtocol(
   );
 
   log.info("identifying intersection");
-  // PLACEHOLDER: cardinality is hard-coded to "one-to-one", which corresponds
-  // to spec.linkageTerms.deduplicate: true for both parties. When terms
-  // cross-checking is added to the protocol, the combined cardinality will be
-  // derived from both parties' deduplicate fields.
+  // PLACEHOLDER: cardinality is hard-coded to "one-to-one" (deduplicate: false
+  // for both parties). Many-to-X linkages are not yet in scope.
   const associationTable = await linkViaPSI(
     { cardinality: "one-to-one" },
     participant,
     conn,
-    linkageKeys,
+    linkageKeyIterables,
     args.verbosity,
   );
 

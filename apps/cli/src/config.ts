@@ -8,6 +8,8 @@ export const readAtSignFile = (val: unknown): unknown => {
 };
 
 export interface CliOverrides {
+  /** Maps to identity (used when generating default linkage terms). */
+  identity?: string;
   /** Maps to connection.authentication.pakeToken. */
   pakeToken?: string;
   /** Seconds to wait for peer; maps to connection.options.pollTimeoutMs. */
@@ -24,6 +26,8 @@ export function applyCliOverrides(
   overrides: CliOverrides,
 ): ExchangeSpec {
   const result = structuredClone(spec);
+
+  if (overrides.identity !== undefined) result.identity = overrides.identity;
 
   if (overrides.linkageTerms !== undefined)
     result.linkageTerms = overrides.linkageTerms;
