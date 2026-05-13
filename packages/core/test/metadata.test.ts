@@ -36,6 +36,35 @@ test("identifier alias 'id': identifier role, not linkage", () => {
   expect(col.isPayload).toBe(true);
 });
 
+// ─── inferMetadata: _id suffix ──────────────────────────────────────────────
+
+test("column ending in _id: inferred as identifier type, isPayload true", () => {
+  const [col] = inferMetadata(["client_id"]);
+  expect(col.type).toBe("identifier");
+  expect(col.isPayload).toBe(true);
+});
+
+test("single _id column: promoted to identifier role", () => {
+  const [col] = inferMetadata(["client_id"]);
+  expect(col.role).toBe("identifier");
+});
+
+test("multiple _id columns: no promotion, all remain payload role", () => {
+  const result = inferMetadata(["client_id", "member_id"]);
+  expect(result[0].type).toBe("identifier");
+  expect(result[0].role).toBe("payload");
+  expect(result[1].type).toBe("identifier");
+  expect(result[1].role).toBe("payload");
+});
+
+test("canonical id column alongside _id column: id keeps identifier role, _id stays payload", () => {
+  const result = inferMetadata(["id", "client_id"]);
+  const idCol = result.find((c) => c.name === "id");
+  const clientIdCol = result.find((c) => c.name === "client_id");
+  expect(idCol?.role).toBe("identifier");
+  expect(clientIdCol?.role).toBe("payload");
+});
+
 // ─── inferMetadata: unknown columns ──────────────────────────────────────────
 
 test("unknown column: payload role and isPayload true", () => {

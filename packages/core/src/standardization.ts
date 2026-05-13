@@ -46,7 +46,7 @@ function removeNonAscii(s: string): string {
 }
 
 function replaceSeparatorsWithSpaces(s: string): string {
-  return s.replace(/['&\/\\_]/g, " ")
+  return s.replace(/[-'&\/\\_]/g, " ")
 }
 
 function squashSpaces(s: string): string {

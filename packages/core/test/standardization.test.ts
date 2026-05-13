@@ -47,6 +47,44 @@ describe("runPipeline — string functions", () => {
     );
   });
 
+  test("remove_non_ascii removes non-ASCII characters", () => {
+    expect(runPipeline("café", [{ function: "remove_non_ascii" }])).toBe("caf");
+  });
+
+  test("remove_non_ascii removes emoji", () => {
+    expect(runPipeline("hello🌍", [{ function: "remove_non_ascii" }])).toBe("hello");
+  });
+
+  test("remove_non_ascii leaves plain ASCII unchanged", () => {
+    expect(runPipeline("SMITH", [{ function: "remove_non_ascii" }])).toBe("SMITH");
+  });
+
+  test("replace_separators_with_spaces replaces hyphens, apostrophes, ampersands, slashes, and underscores", () => {
+    expect(
+      runPipeline("O'Brien-Smith & Co/Inc_Ltd", [
+        { function: "replace_separators_with_spaces" },
+      ]),
+    ).toBe("O Brien Smith   Co Inc Ltd");
+  });
+
+  test("replace_separators_with_spaces leaves other characters unchanged", () => {
+    expect(
+      runPipeline("SMITH", [{ function: "replace_separators_with_spaces" }]),
+    ).toBe("SMITH");
+  });
+
+  test("squash_spaces collapses multiple spaces into one", () => {
+    expect(
+      runPipeline("SMITH  JONES", [{ function: "squash_spaces" }]),
+    ).toBe("SMITH JONES");
+  });
+
+  test("squash_spaces leaves single spaces unchanged", () => {
+    expect(
+      runPipeline("SMITH JONES", [{ function: "squash_spaces" }]),
+    ).toBe("SMITH JONES");
+  });
+
   test("remove_accents strips diacritics", () => {
     expect(runPipeline("Héloïse", [{ function: "remove_accents" }])).toBe(
       "Heloise",
