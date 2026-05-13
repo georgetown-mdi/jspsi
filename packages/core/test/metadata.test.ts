@@ -26,14 +26,14 @@ test("identifier canonical name: identifier role, not linkage", () => {
   const [col] = inferMetadata(["identifier"]);
   expect(col.type).toBe("identifier");
   expect(col.role).toBe("identifier");
-  expect(col.isPayload).toBe(false);
+  expect(col.isPayload).toBe(true);
 });
 
 test("identifier alias 'id': identifier role, not linkage", () => {
   const [col] = inferMetadata(["id"]);
   expect(col.type).toBe("identifier");
   expect(col.role).toBe("identifier");
-  expect(col.isPayload).toBe(false);
+  expect(col.isPayload).toBe(true);
 });
 
 // ─── inferMetadata: unknown columns ──────────────────────────────────────────

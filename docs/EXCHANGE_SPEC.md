@@ -17,7 +17,7 @@ An exchange specification has four top-level components:
 | `linkage_terms` | yes | What will be exchanged and how; verified by both parties |
 | `connection` | yes | Where and how the exchange will take place |
 | `metadata` | no | Descriptions of input fields and their roles |
-| `cleaning` | no | Data transformations applied before linkage |
+| `standardization` | no | Data cleaning and standardizing transformations applied before linkage |
 
 ## File references
 
@@ -146,7 +146,7 @@ record is matched to at most one of its own records.
 The linkage fields define the standardized form of each PII element that
 participates in linkage. Each field has a name, a semantic type, and optional
 constraints. The name is a unique identifier used by linkage key elements and
-data cleaning transformation outputs to refer to this field.
+data standardizing transformations.
 
 Constraints are not enforced by the application — they are standards that both
 parties independently commit to meeting when preparing their data. The
@@ -157,42 +157,42 @@ to errors.
 Social Security Numbers must be formatted as `XXXXXXXXX` (nine-character
 numeric string, no dashes). Dates of birth must be formatted as `YYYYMMDD`.
 Converting raw input to these formats is the responsibility of each party's
-data cleaning transformations.
+data standardization.
 
 ```yaml
 linkage_terms:
   fields:
     - name: ssn
-      semantic_type: ssn
+      type: ssn
       constraints:
         valid_only: true
         exclude:
           - "123456789"
           - "111111111"
     - name: ssn4
-      semantic_type: ssn_last4
+      type: ssn_last4
     - name: first_name
-      semantic_type: first_name
+      type: first_name
       constraints:
         affixes_allowed: false
         allowed_characters: 'A-Z '
     - name: first_name_raw
-      semantic_type: first_name
+      type: first_name
     - name: last_name
-      semantic_type: last_name
+      type: last_name
       constraints:
         affixes_allowed: false
         allowed_characters: 'A-Z '
     - name: date_of_birth
-      semantic_type: date_of_birth
+      type: date_of_birth
 ```
 
 #### Fields fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Identifier referenced by linkage key elements and cleaning transformation outputs |
-| `semantic_type` | string | yes | The type of PII this field represents (see Semantic types) |
+| `name` | string | yes | Identifier referenced by linkage key elements and standardization outputs |
+| `type` | string | yes | The type of PII this field represents (see [Semantic types](#semantic-types)) |
 | `constraints` | object | no | Data standards both parties commit to meeting when preparing this field |
 
 #### Semantic types
@@ -288,12 +288,12 @@ linkage_terms:
 
 #### Transform steps
 
-Each step in a `transform` array applies one function from the cleaning
-function library. Steps are applied in order.
+Each step in a `transform` array applies one function from the cleaning and
+standardizing function library. Steps are applied in order.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `function` | string | yes | Name of the function to apply (see Available functions in the Data cleaning section) |
+| `function` | string | yes | Name of the function to apply (see Available functions in the [Data standardization](#data-standardizing-transformations) section) |
 | `params` | object | no | Function-specific parameters |
 
 #### Swapped keys
@@ -652,11 +652,11 @@ output row indices reference positions in the input file.
 metadata:
   columns:
     - name: "LAST_NAME"
-      semantic_type: last_name
+      type: last_name
       role: linkage
       description: "Legal last name as recorded at enrollment"
     - name: "DOB"
-      semantic_type: date_of_birth
+      type: date_of_birth
       role: linkage
     - name: "CLIENT_ID"
       role: identifier
@@ -673,7 +673,7 @@ metadata:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Column name in the input CSV |
-| `semantic_type` | string | no | Semantic type (see Semantic Types above); inferred from name if omitted |
+| `type` | string | no | Semantic type (see [Semantic Types](#semantic-types) above); inferred from name if omitted |
 | `role` | enum | no | `linkage`, `identifier`, or `payload`; inferred if omitted |
 | `is_payload` | boolean | no | Whether this column is transmitted as payload data after the intersection is identified; defaults to `true` when `role` is `payload`, `false` otherwise |
 | `description` | string | no | Human-readable description; shared with partner for payload columns |
@@ -689,22 +689,22 @@ have `is_payload: true`; the application will treat such a column as
 
 ---
 
-## Data cleaning transformations
+## Data standardizing transformations
 
 Optional per-column transformations applied before linkage key generation.
 Conceptually, each transformation reads one input column, applies a sequence of
 steps, and writes the result under a linkage field name. In implementation, a
 transformation is a map between an input index and a set of output strings,
 which lazily computes values and caches results. The `output` name of a data
-cleaning transformation must match the `name` of a field in
+standardizing transformation must match the `name` of a field in
 `linkage_terms.fields`.
 
 ```yaml
-cleaning:
+standardization:
   - output: last_name      # matches linkage_terms.fields[].name
     input: LAST_NAME
     steps:
-      - function: strip_affixes
+      - function: remove_affixes
       - function: remove_punctuation
       - function: to_upper_case
 
@@ -734,8 +734,9 @@ cleaning:
           include_original: true  # keep "SMITH-JONES" as well as "SMITH", "JONES"
 ```
 
-Each linkage field may have at most one data cleaning transformation. Fields not
-covered by an explicit data cleaning transformation are given an identity transformation and connected to a linkage field by matching the field's semantic
+Each linkage field may have at most one data standardization transformation.
+Fields not covered by an explicit transformation are given an identity
+transformation and connected to a linkage field by matching the field's semantic
 type against the input column's metadata.
 
 ### Transformation fields
@@ -769,8 +770,8 @@ default, allowing a pipeline to recover from an earlier null-producing step.
 ### Fan-out (multi-value fields)
 
 The `split_on` function produces `set<string>` instead of a single `string`.
-When a cleaning transformation ends with a set, the field carries multiple
-candidate values. Each value generates a separate PSI entry for the row, but all
+When a transformation ends with a set, the field carries multiple candidate
+values. Each value generates a separate PSI entry for the row, but all
 entries retain the original row identifier so that a match resolves back to the
 source row.
 
@@ -796,15 +797,16 @@ in a dual-party-output exchange are warned about this consequence.
 When exactly one fan-out entry matches, the original row is accepted and all
 its fan-out variants are removed from the candidate set for subsequent rounds.
 
-**Distinction from `generate_fuzzy_comparisons`**: fan-out at the cleaning
-stage and `generate_fuzzy_comparisons` on a key element both generate multiple
-PSI entries per row, but they serve different purposes. Cleaning fan-out
-reflects that a field legitimately has multiple canonical values (e.g. a
-hyphenated name and its parts). `generate_fuzzy_comparisons` generates
-approximate variants of a single canonical value to tolerate data entry errors
-(e.g. digit transpositions in an SSN). Only one match is expected from a
-`generate_fuzzy_comparisons` expansion; multiple matches from the same row in a
-cleaning fan-out may all be meaningful.
+**Distinction from `generate_fuzzy_comparisons`**: fan-out at the
+standardization stage and `generate_fuzzy_comparisons` on a key element both
+generate multiple PSI entries per row, but they serve different purposes.
+Standardization fan-out reflects that a field legitimately has multiple
+canonical values (e.g. a hyphenated name and its parts).
+`generate_fuzzy_comparisons` generates approximate variants of a single
+canonical value to tolerate data entry errors (e.g. digit transpositions in an
+SSN). Only one match is expected from a `generate_fuzzy_comparisons` expansion;
+multiple matches from the same row in a standardization fan-out may all be
+meaningful.
 
 ### Available functions
 
@@ -812,13 +814,16 @@ cleaning fan-out may all be meaningful.
 
 | Function | Description | Parameters |
 |----------|-------------|------------|
-| `remove_punctuation` | Remove all non-alphanumeric, non-space characters | — |
-| `remove_dashes` | Remove `-` characters | — |
+| `remove_non_ascii` | Remove all characters outside of the ASCII set, including emojii and symbols | — |
+| `remove_punctuation` | Remove ASCII punctuation and symbols | — |
+| `remove_dashes` | Remove hyphens | — |
+| `replace_separators_with_spaces` | Replace hyphens, apostrophes, ampersands, slashes, and underscores with spaces | — |
+| `squash_spaces` | Replace instances of multiple space characters together with a single space | — |
 | `trim_whitespace` | Remove leading and trailing whitespace | — |
 | `to_upper_case` | Convert to uppercase | — |
 | `to_lower_case` | Convert to lowercase | — |
 | `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text | — |
-| `strip_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
+| `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
 | `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
 | `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`); tokens: `YYYY`, `MM`, `DD` |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |

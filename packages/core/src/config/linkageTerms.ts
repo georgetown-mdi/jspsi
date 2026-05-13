@@ -487,7 +487,8 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         }),
       {
         message:
-          "element identifiers (name if present, otherwise field) must be unique within each linkage key",
+          "element identifiers (name if present, otherwise field) must be " +
+          "unique within each linkage key",
         path: ["linkageKeys"],
       },
     );
@@ -569,19 +570,19 @@ export function validateCompatibility(
   if (local.output.shareWithPartner !== partner.output.expectsOutput) {
     errors.push(
       "output mismatch: local " +
-      (local.output.shareWithPartner ? "will" : "will not") +
-      " share with partner, but partner " + 
-      (partner.output.expectsOutput ? "expects" : "does not expect") +
-      "output",
+        (local.output.shareWithPartner ? "will" : "will not") +
+        " share with partner, but partner " +
+        (partner.output.expectsOutput ? "expects" : "does not expect") +
+        "output",
     );
   }
   if (local.output.expectsOutput !== partner.output.shareWithPartner) {
     errors.push(
       "output mismatch: local " +
-      (local.output.expectsOutput ? "expects" : "does not expect")+
-       " output, but partner " +
-       (partner.output.shareWithPartner ? "will" : "will not") +
-       " share",
+        (local.output.expectsOutput ? "expects" : "does not expect") +
+        " output, but partner " +
+        (partner.output.shareWithPartner ? "will" : "will not") +
+        " share",
     );
   }
   if (!local.output.expectsOutput && !partner.output.expectsOutput) {
@@ -672,7 +673,7 @@ export function validateCompatibility(
   if (localReceiveNames !== partnerSendNames) {
     errors.push(
       `payload mismatch: local receive columns [${localReceiveNames}] do not ` +
-      `match partner send columns [${partnerSendNames}]`,
+        `match partner send columns [${partnerSendNames}]`,
     );
   }
 

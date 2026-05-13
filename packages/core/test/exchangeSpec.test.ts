@@ -32,17 +32,17 @@ const minimalSpec = {
 
 test("parses a minimal valid ExchangeSpec", () => {
   const result = parseExchangeSpec(minimalSpec);
-  expect(result.linkageTerms.algorithm).toBe("psi");
+  expect(result.linkageTerms?.algorithm).toBe("psi");
   expect(result.connection.channel).toBe("webrtc");
   expect(result.metadata).toBeUndefined();
-  expect(result.cleaning).toBeUndefined();
+  expect(result.standardization).toBeUndefined();
 });
 
-test("metadata and cleaning are optional", () => {
+test("metadata and standardization are optional", () => {
   const result = safeParseExchangeSpec({
     ...minimalSpec,
-    metadata: { columns: [] },
-    cleaning: [{ output: "last_name", input: "LAST_NAME", steps: [] }],
+    metadata: [],
+    standardization: [{ output: "last_name", input: "LAST_NAME", steps: [] }],
   });
   expect(result.success).toBe(true);
 });
@@ -65,7 +65,19 @@ test("missing connection is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-test("missing linkageTerms is rejected", () => {
+test("missing linkageTerms with identity is accepted (defaults will be generated)", () => {
+  const result = safeParseExchangeSpec({
+    identity: "Jane Smith, Agency A",
+    connection: minimalConnection,
+  });
+  expect(result.success).toBe(true);
+  if (result.success) {
+    expect(result.data.linkageTerms).toBeUndefined();
+    expect(result.data.identity).toBe("Jane Smith, Agency A");
+  }
+});
+
+test("missing both linkageTerms and identity is rejected", () => {
   const result = safeParseExchangeSpec({ connection: minimalConnection });
   expect(result.success).toBe(false);
 });
@@ -103,8 +115,8 @@ test("parses snake_case top-level keys from disk", () => {
       authentication: { pake_token: "tok123", role: "invitor" },
     },
   });
-  expect(result.linkageTerms.output.expectsOutput).toBe(false);
-  expect(result.linkageTerms.linkageFields[0].semanticType).toBe("ssn");
+  expect(result.linkageTerms?.output.expectsOutput).toBe(false);
+  expect(result.linkageTerms?.linkageFields[0].semanticType).toBe("ssn");
   if (result.connection.channel !== "webrtc") return;
   expect(result.connection.authentication?.pakeToken).toBe("tok123");
 });

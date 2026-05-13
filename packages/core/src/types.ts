@@ -31,24 +31,22 @@ export interface Config {
   verbose?: number;
 }
 
-/**
- * NOTE: we want to move away from Formatter, LinkageKeyFieldDefinition,
- * and LinkageKeyDefinition in favor of the linkage keys in src/config. Once
- * data transformations have been implemented we will hopefully be able to do
- * so.
- */
-export type Formatter = (x: unknown) => string | undefined;
-
-export interface LinkageKeyFieldDefinition {
-  outputFieldName: string;
-  inputFieldName: string;
-  formatter: Formatter;
-}
-
-export type LinkageKeyDefinition = Array<LinkageKeyFieldDefinition>;
-
 export const AlgorithmSchema = z.enum(["psi", "psi-c"]);
 export type Algorithm = z.infer<typeof AlgorithmSchema>;
 
 export const PsiRoleSchema = z.enum(["sender", "receiver"]);
 export type PsiRole = z.infer<typeof PsiRoleSchema>;
+
+export const SEMANTIC_TYPES = [
+  "ssn",
+  "ssn4",
+  "firstName",
+  "lastName",
+  "dateOfBirth",
+  "identifier",
+  "phoneNumber",
+  "emailAddress",
+  "other",
+] as const;
+
+export type SemanticType = (typeof SEMANTIC_TYPES)[number];

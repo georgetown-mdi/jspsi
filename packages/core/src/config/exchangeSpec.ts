@@ -4,15 +4,12 @@ import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { ConnectionConfigSchema } from "./connection.js";
 import type { ConnectionConfig } from "./connection.js";
-import { CleaningSchema } from "./cleaning.js";
-import type { Cleaning } from "./cleaning.js";
+import { StandardizationSchema } from "./standardization.js";
+import type { Standardization } from "./standardization.js";
+import { MetadataSchema } from "./metadata.js";
+import type { Metadata } from "./metadata.js";
 
-// ─── Metadata (stub) ─────────────────────────────────────────────────────────
-
-// TODO: Implement per EXCHANGE_SPEC.md §"Input metadata".
-export type Metadata = unknown;
-
-// ─── Exchange spec ────────────────────────────────────────────────────────────
+// ─── Exchange spec ───────────────────────────────────────────────────────────
 
 /**
  * A complete PSI-Link exchange specification. Consumed by both the web
@@ -24,20 +21,36 @@ export type Metadata = unknown;
  * credential fields before parsing.
  */
 export interface ExchangeSpec {
-  linkageTerms: LinkageTerms;
+  /**
+   * Free-text string identifying this party (e.g. name, organization, contact
+   * info). Required when `linkageTerms` is absent so that default terms can be
+   * generated; included verbatim in the non-repudiation receipt otherwise.
+   */
+  identity?: string;
+  /**
+   * Linkage terms governing the exchange. When absent, defaults are generated
+   * at runtime from the input data columns. `identity` is then required.
+   */
+  linkageTerms?: LinkageTerms;
   connection: ConnectionConfig;
   /** Optional field-level descriptions of the input dataset. */
   metadata?: Metadata;
   /** Optional data transformations applied before linkage key generation. */
-  cleaning?: Cleaning;
+  standardization?: Standardization;
 }
 
-export const ExchangeSpecSchema: z.ZodType<ExchangeSpec> = z.object({
-  linkageTerms: LinkageTermsSchema,
-  connection: ConnectionConfigSchema,
-  metadata: z.unknown().optional(), // TODO: replace with typed schema
-  cleaning: CleaningSchema.optional(),
-});
+export const ExchangeSpecSchema: z.ZodType<ExchangeSpec> = z
+  .object({
+    identity: z.string().min(1).optional(),
+    linkageTerms: LinkageTermsSchema.optional(),
+    connection: ConnectionConfigSchema,
+    metadata: MetadataSchema.optional(),
+    standardization: StandardizationSchema.optional(),
+  })
+  .refine((s) => s.linkageTerms !== undefined || s.identity !== undefined, {
+    message: "identity is required when linkageTerms is not specified",
+    path: ["identity"],
+  });
 
 // ─── Parse ───────────────────────────────────────────────────────────────────
 

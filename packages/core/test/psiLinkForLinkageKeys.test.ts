@@ -1,66 +1,72 @@
-import { Readable } from "node:stream";
-
 import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import log from "loglevel";
 
-import { getMetadataAndLinkageKeys } from "../src/linkageKeys";
+import {
+  buildStandardizedDataset,
+  StandardizedKeyIterable,
+} from "../src/standardization";
 import { PSIParticipant } from "../src/participant";
 import { linkViaPSI } from "../src/link";
+import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { ColumnMetadata } from "../src/config/metadata";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
-import type { LinkageKeyDefinition } from "../src/types";
+// ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const formatters = {
-  ssn: (x: unknown) =>
-    typeof x === "string" && x ? x.replaceAll("-", "") : "",
-  first_name: (x: unknown) =>
-    typeof x === "string" && x ? x.toUpperCase() : "",
-  last_name: (x: unknown) =>
-    typeof x === "string" && x ? x.toUpperCase() : "",
-  date_of_birth: (x: unknown) =>
-    x instanceof Date && !isNaN(x.getDate())
-      ? x.toISOString().substring(0, 10)
-      : "",
+const metadata: ColumnMetadata[] = [
+  { name: "id",            type: "identifier",  role: "identifier", isPayload: false },
+  { name: "first_name",    type: "firstName",   role: "linkage",    isPayload: false },
+  { name: "last_name",     type: "lastName",    role: "linkage",    isPayload: false },
+  { name: "ssn",           type: "ssn",         role: "linkage",    isPayload: false },
+  { name: "date_of_birth", type: "dateOfBirth", role: "linkage",    isPayload: false },
+];
+
+// Two keys: SSN+LN+DOB (precise), then SSN+LN1+FN1 (looser). This replicates
+// the cascade tested in the original psiLinkForLinkageKeys.test.ts.
+const terms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "test",
+  date: "2026-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [
+    { name: "ssn",         semanticType: "ssn" },
+    { name: "lastName",    semanticType: "lastName" },
+    { name: "firstName",   semanticType: "firstName" },
+    { name: "dateOfBirth", semanticType: "dateOfBirth" },
+  ],
+  linkageKeys: [
+    {
+      name: "SSN + LN + DOB",
+      elements: [{ field: "ssn" }, { field: "lastName" }, { field: "dateOfBirth" }],
+    },
+    {
+      name: "SSN + LN1 + FN1",
+      elements: [
+        { field: "ssn" },
+        { field: "lastName",
+          transform: [{ function: "substring", params: { start: 1, length: 1 } }] },
+        { field: "firstName",
+          transform: [{ function: "substring", params: { start: 1, length: 1 } }] },
+      ],
+    },
+  ],
 };
 
-const linkageKeyDefinitions: Array<LinkageKeyDefinition> = [
-  [
-    {
-      outputFieldName: "ssn",
-      inputFieldName: "ssn",
-      formatter: formatters["ssn"],
-    },
-    {
-      outputFieldName: "last_name",
-      inputFieldName: "lastName",
-      formatter: formatters["last_name"],
-    },
-    {
-      outputFieldName: "date_of_birth",
-      inputFieldName: "dateOfBirth",
-      formatter: formatters["date_of_birth"],
-    },
-  ],
-  [
-    {
-      outputFieldName: "ssn",
-      inputFieldName: "ssn",
-      formatter: formatters["ssn"],
-    },
-    {
-      outputFieldName: "last_name",
-      inputFieldName: "lastName",
-      formatter: formatters["last_name"],
-    },
-    {
-      outputFieldName: "first_name_1",
-      inputFieldName: "firstName",
-      formatter: (x) => formatters["first_name"](x).substring(0, 1),
-    },
-  ],
-];
+function makeIterables(
+  rawRows: ReadonlyArray<Record<string, string>>,
+  isReceiver = false,
+): StandardizedKeyIterable[] {
+  const dataset = buildStandardizedDataset(undefined, rawRows, metadata, terms);
+  return terms.linkageKeys.map(
+    (key) => new StandardizedKeyIterable(key, dataset, rawRows.length, isReceiver),
+  );
+}
+
+// ─── PSI participants ─────────────────────────────────────────────────────────
 
 const psiLibrary = await PSI();
 
@@ -68,71 +74,38 @@ const serverConn = new PassthroughConnection();
 const clientConn = new PassthroughConnection(serverConn);
 serverConn.setOther(clientConn);
 
-const server = new PSIParticipant("server", psiLibrary, {
-  role: "starter",
-  verbose: -1,
-});
-
-const client = new PSIParticipant("client", psiLibrary, {
-  role: "joiner",
-  verbose: -1,
-});
+const server = new PSIParticipant("server", psiLibrary, { role: "starter",  verbose: -1 });
+const client = new PSIParticipant("client", psiLibrary, { role: "joiner",   verbose: -1 });
 
 log.setLevel("DEBUG");
 
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
 test("rules match in order", async () => {
-  const serverInputData = [
-    ["id,first_name,last_name,ssn,date_of_birth\n"],
-    ["159859483,James,Heard,559-81-1301,7/16/1975\n"],
-    ["165562801,Albert,Iorio,322-84-2281,8/17/1975"],
-  ];
-  const serverData = await getMetadataAndLinkageKeys(
-    Readable.from(serverInputData),
-    linkageKeyDefinitions,
-  );
-
-  /* client input 0 matches rule 1, while input 1 matches rule 0 using rule 0
-     should consume the potential client input so that it can't be used for the
-     first input.
-   */
-
-  const clientInputData = [
-    ["id,first_name,last_name,ssn,date_of_birth\n"],
-    ["159859483,Jim,Heard,559-81-1301,7/17/1975\n"], // wrong dob
-    ["159859483,Jim,Heard,559-81-1301,7/16/1975\n"],
-    ["165562801,Albert,Iorio,322-84-2281,8/17/1976"], // wrong dob
+  // Data is pre-cleaned: SSNs without dashes, DOBs in YYYYMMDD.
+  const serverRows = [
+    { id: "159859483", first_name: "James",  last_name: "HEARD", ssn: "559811301", date_of_birth: "19750716" },
+    { id: "165562801", first_name: "Albert", last_name: "IORIO", ssn: "322842281", date_of_birth: "19750817" },
   ];
 
-  const clientData = await getMetadataAndLinkageKeys(
-    Readable.from(clientInputData),
-    linkageKeyDefinitions,
-  );
+  // Client row 0 matches only by key 2 (SSN+LN1+FN1, wrong DOB).
+  // Client row 1 matches by key 1 (SSN+LN+DOB, exact match).
+  // Client row 2 matches only by key 2 (SSN+LN1+FN1, wrong DOB) — same SSN as
+  // server row 0, but key 1 consumed that server record already.
+  const clientRows = [
+    { id: "159859483", first_name: "Jim",   last_name: "HEARD", ssn: "559811301", date_of_birth: "19750717" }, // wrong DOB
+    { id: "159859483", first_name: "Jim",   last_name: "HEARD", ssn: "559811301", date_of_birth: "19750716" },
+    { id: "165562801", first_name: "Albert",last_name: "IORIO", ssn: "322842281", date_of_birth: "19750818" }, // wrong DOB
+  ];
 
-  const [serverResult, clientResult] = await (async () => {
-    return await Promise.all([
-      linkViaPSI(
-        { cardinality: "one-to-one" },
-        server,
-        serverConn,
-        serverData.linkageKeys,
-        -1,
-      ),
-      linkViaPSI(
-        { cardinality: "one-to-one" },
-        client,
-        clientConn,
-        clientData.linkageKeys,
-        -1,
-      ),
-    ]);
-  })();
+  const serverKeys = makeIterables(serverRows);
+  const clientKeys = makeIterables(clientRows);
 
-  expect(serverResult).toEqual([
-    [0, 1],
-    [1, 2],
+  const [serverResult, clientResult] = await Promise.all([
+    linkViaPSI({ cardinality: "one-to-one" }, server, serverConn, serverKeys, -1),
+    linkViaPSI({ cardinality: "one-to-one" }, client, clientConn, clientKeys, -1),
   ]);
-  expect(clientResult).toEqual([
-    [1, 2],
-    [0, 1],
-  ]);
+
+  expect(serverResult).toEqual([[0, 1], [1, 2]]);
+  expect(clientResult).toEqual([[1, 2], [0, 1]]);
 });

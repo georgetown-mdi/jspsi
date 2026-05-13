@@ -1,5 +1,6 @@
 import type { LinkageTerms, LinkageField, LinkageKey } from "./linkageTerms";
-import type { ColumnMetadata, ColumnType } from "./metadata";
+import type { Metadata } from "./metadata";
+import type { SemanticType } from "../types";
 
 const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   {
@@ -7,13 +8,13 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
     semanticType: "ssn",
     constraints: {
       exclude: ["111111111", "123456789"],
-      onlyValid: true,
+      validOnly: true,
     },
   },
   {
     name: "ssn4",
     semanticType: "ssnLast4",
-    constraints: { onlyValid: true },
+    constraints: { validOnly: true },
   },
   {
     name: "firstName",
@@ -28,17 +29,13 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   { name: "dateOfBirth", semanticType: "dateOfBirth" },
 ];
 
-// Template linkage key combinations for the default agreement. Keys are listed
-// from most precise (all PII) to least precise (name only). The filtering
-// logic below removes any key whose elements cannot be satisfied by the
-// columns present in the input.
-//
-// PLACEHOLDER: The hard-coded cascade in fixedLinkageKeys.ts also includes
-// truncation variants (e.g. first 3 chars of lastName, year-month of DOB) and
-// a first-4-digits-of-SSN key. Those are element transforms and cannot yet
-// drive runtime behavior until data pipelines are implemented. Once pipelines
-// exist, the template set should be expanded to cover the full cascade.
-const TEMPLATE_KEYS: ReadonlyArray<LinkageKey> = [
+/**
+ * Template linkage key combinations for the default agreement. Keys are listed
+ * from most precise (all PII) to least precise (name only). The filtering
+ * logic below removes any key whose elements cannot be satisfied by the
+ * columns present in the input.
+ */
+const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
     name: "SSN + LN + DOB",
     elements: [
@@ -167,24 +164,24 @@ const TEMPLATE_KEYS: ReadonlyArray<LinkageKey> = [
     ],
   },
   {
-    name: "SSN + YOB + MOB + FN3",
+    name: "SSN + FN + YOB + MOB", 
     elements: [
       { field: "ssn" },
+      { field: "firstName" },
       {
         field: "dateOfBirth",
         transform: [{ function: "substring", params: { start: 1, length: 6 } }],
       },
+    ],
+  },
+  {
+    name: "SSN + FN3 + YOB + MOB",
+    elements: [
+      { field: "ssn" },
       {
         field: "firstName",
         transform: [{ function: "substring", params: { start: 1, length: 3 } }],
       },
-    ],
-  },
-  {
-    name: "SSN + FN + YOB + MOB", // this rule here doesn't make sense
-    elements: [
-      { field: "ssn" },
-      { field: "firstName" },
       {
         field: "dateOfBirth",
         transform: [{ function: "substring", params: { start: 1, length: 6 } }],
@@ -197,30 +194,22 @@ const TEMPLATE_KEYS: ReadonlyArray<LinkageKey> = [
  * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
  * linkage terms are specified explicitly.
  *
- * When `columns` are provided (the normalized header of the input CSV), only
- * linkage key templates whose elements can be satisfied by the present columns
- * are included. If no columns are provided, or if no template can be
- * satisfied, all templates are included as a fallback.
- *
- * Only the linkage fields referenced by the selected keys are included in the
- * returned linkage terms.
+ * When metadata are provided, only linkage key templates whose elements can be
+ * satisfied by the present columns are included. If no metadata is provided,
+ * all templates are included as a fallback.
  */
 export function getDefaultLinkageTerms(
   identity: string,
-  metadata?: Array<ColumnMetadata>
+  metadata?: Metadata
 ): LinkageTerms {
   let linkageKeys: LinkageKey[];
   if (metadata !== undefined && metadata.length > 0) {
     const availableTypes = new Set(metadata.map((m) => m.type));
-    const filtered = TEMPLATE_KEYS.filter((key) =>
-      key.elements.every((el) => availableTypes.has(el.field as ColumnType)),
+    linkageKeys = DEFAULT_LINKAGE_KEYS.filter((key) =>
+      key.elements.every((el) => availableTypes.has(el.field as SemanticType)),
     );
-    // Fall back to all templates if detection yields no usable keys, rather
-    // than producing an invalid linkage terms. This can happen when column
-    // names are unrecognized; the user will see a warning in the caller.
-    linkageKeys = filtered.length > 0 ? filtered : [...TEMPLATE_KEYS];
   } else {
-    linkageKeys = [...TEMPLATE_KEYS];
+    linkageKeys = [...DEFAULT_LINKAGE_KEYS];
   }
 
   const referencedFields = new Set(

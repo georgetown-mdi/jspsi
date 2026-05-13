@@ -1,5 +1,5 @@
 import { getLogger } from "./utils/logger.js";
-import type { Cleaning, CleaningStep } from "./config/cleaning.js";
+import type { Standardization, StandardizationStep } from "./config/standardization.js";
 import type {
   LinkageKey,
   LinkageKeyElement,
@@ -13,7 +13,7 @@ const logger = getLogger("cleaning");
 // ─── Value types ─────────────────────────────────────────────────────────────
 
 /**
- * The result type for a single cleaning pipeline or step.
+ * The result type for a single standardization pipeline or step.
  *
  * - `string` — a single canonical value.
  * - `null` — no valid value; the record is excluded from any linkage key that
@@ -26,13 +26,35 @@ const logger = getLogger("cleaning");
  */
 export type FieldValue = string | null | Set<string>;
 
-// ─── Cleaning functions ──────────────────────────────────────────────────────
+// ─── Standardizing functions ─────────────────────────────────────────────────
 
 type Params = Record<string, unknown>;
-type CleaningFn = (value: string, params: Params) => FieldValue;
+
+// A compiled standardizing function: params are captured at construction time
+// via the factory, so per-row calls pay no param-parsing or regex-compilation cost.
+type StandardizingFn = (value: string) => FieldValue;
+
+// A factory pre-processes params once and returns a StandardizingFn closure.
+type StandardizingFnFactory = (params: Params) => StandardizingFn;
+
+function noParamFactory(fn: (s: string) => string): StandardizingFnFactory {
+  return (_params) => fn;
+}
+
+function removeNonAscii(s: string): string {
+  return s.replace(/[^\x00-\x7F]/g, "");
+}
+
+function replaceSeparatorsWithSpaces(s: string): string {
+  return s.replace(/['&\/\\_]/g, " ")
+}
+
+function squashSpaces(s: string): string {
+  return s.replace(/\s\s+/g, " ")
+}
 
 function removePunctuation(s: string): string {
-  return s.replace(/[^a-zA-Z0-9\s]/g, "");
+  return s.replace(/[!-/:-@[-`{-~]/g, "");
 }
 
 function removeDashes(s: string): string {
@@ -109,7 +131,7 @@ const titlePattern = new RegExp(
   "gi",
 );
 
-function stripAffixes(s: string): string {
+function removeAffixes(s: string): string {
   return s
     .replaceAll(suffixPattern, "")
     .replaceAll(titlePattern, "")
@@ -120,7 +142,7 @@ function stripAffixes(s: string): string {
 // Parse `input_format` -> YAML camelizes keys but not values, so format
 // string tokens YYYY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
-function parseDateFn(s: string, params: Params): string | null {
+function parseDateFactory(params: Params): StandardizingFn {
   const inputFormat =
     (params.inputFormat as string | undefined) ?? "MM/DD/YYYY";
   const outputFormat =
@@ -151,34 +173,48 @@ function parseDateFn(s: string, params: Params): string | null {
     }
   }
 
-  const m = s.match(new RegExp(`^${regexStr}$`));
-  if (!m) return null;
+  const re = new RegExp(`^${regexStr}$`);
 
-  const parts: Partial<Record<Token, string>> = {};
-  order.forEach((token, idx) => {
-    parts[token] = token === "YYYY" ? m[idx + 1] : m[idx + 1].padStart(2, "0");
-  });
+  return (s) => {
+    const m = s.match(re);
+    if (!m) return null;
 
-  if (!parts.YYYY || !parts.MM || !parts.DD) return null;
+    const parts: Partial<Record<Token, string>> = {};
+    order.forEach((token, idx) => {
+      parts[token] = token === "YYYY" ? m[idx + 1] : m[idx + 1].padStart(2, "0");
+    });
 
-  // Reject calendar-invalid dates (e.g. month 13).
-  const asDate = new Date(`${parts.YYYY}-${parts.MM}-${parts.DD}`);
-  if (isNaN(asDate.getTime())) return null;
+    if (!parts.YYYY || !parts.MM || !parts.DD) return null;
 
-  return outputFormat
-    .replace("YYYY", parts.YYYY)
-    .replace("MM", parts.MM)
-    .replace("DD", parts.DD);
+    // Reject calendar-invalid dates (e.g. month 13).
+    const asDate = new Date(`${parts.YYYY}-${parts.MM}-${parts.DD}`);
+    if (isNaN(asDate.getTime())) return null;
+
+    return outputFormat
+      .replace("YYYY", parts.YYYY)
+      .replace("MM", parts.MM)
+      .replace("DD", parts.DD);
+  };
 }
 
-function substringFn(s: string, params: Params): string | null {
+function substringFactory(params: Params): StandardizingFn {
   const start = params.start as number | undefined;
-  const length = params.length as number | undefined;
-  if (start === undefined || length === undefined || start === 0) return null;
-  // SQL SUBSTR convention: 1-indexed; negative start counts from the end.
-  const startIdx = start > 0 ? start - 1 : Math.max(0, s.length + start);
-  const result = s.slice(startIdx, startIdx + length);
-  return result.length > 0 ? result : null;
+  const len = params.length as number | undefined;
+  if (start === undefined || len === undefined || start === 0) return (_s) => null;
+  if (start > 0) {
+    // SQL SUBSTR convention: 1-indexed positive start — startIdx is fixed.
+    const startIdx = start - 1;
+    return (s) => {
+      const result = s.slice(startIdx, startIdx + len);
+      return result.length > 0 ? result : null;
+    };
+  }
+  // Negative start counts from the end — depends on string length at call time.
+  return (s) => {
+    const startIdx = Math.max(0, s.length + start);
+    const result = s.slice(startIdx, startIdx + len);
+    return result.length > 0 ? result : null;
+  };
 }
 
 // Soundex: standard US English encoding, 4-character result.
@@ -219,93 +255,113 @@ function soundex(s: string): string {
   return result.padEnd(4, "0");
 }
 
-function phoneticFn(s: string, params: Params): string | null {
+function phoneticFactory(params: Params): StandardizingFn {
   const algorithm = (params.algorithm as string | undefined) ?? "soundex";
   if (algorithm === "soundex") {
-    const result = soundex(s);
-    return result !== "0000" ? result : null;
+    return (s) => {
+      const result = soundex(s);
+      return result !== "0000" ? result : null;
+    };
   }
+  // TODO: metaphone
   throw new Error(`unsupported phonetic algorithm: "${algorithm}"`);
 }
 
-function nullIfFn(s: string, params: Params): string | null {
+function nullIfFactory(params: Params): StandardizingFn {
   const values =
     params.values !== undefined
       ? (params.values as string[])
       : params.value !== undefined
         ? [params.value as string]
         : [];
-  return values.includes(s) ? null : s;
+  const set = new Set(values);
+  return (s) => set.has(s) ? null : s;
 }
 
-function replaceRegexFn(s: string, params: Params): string {
+function replaceRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
   const replacement = (params.replacement as string | undefined) ?? "";
-  return s.replace(new RegExp(pattern, "g"), replacement);
+  const re = new RegExp(pattern, "g");
+  return (s) => s.replace(re, replacement);
 }
 
-function extractRegexFn(s: string, params: Params): string | null {
+function extractRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
-  const m = s.match(new RegExp(pattern));
-  if (!m) return null;
-  return (m[1] ?? m[0]) || null;
+  const re = new RegExp(pattern);
+  return (s) => {
+    const m = s.match(re);
+    if (!m) return null;
+    return (m[1] ?? m[0]) || null;
+  };
 }
 
-function filterRegexFn(s: string, params: Params): string | null {
+function filterRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
-  return new RegExp(pattern).test(s) ? s : null;
+  const re = new RegExp(pattern);
+  return (s) => re.test(s) ? s : null;
 }
 
-function splitOnFn(s: string, params: Params): Set<string> {
+function splitOnFactory(params: Params): StandardizingFn {
   const delimiter = params.delimiter as string;
   const includeOriginal =
     (params.includeOriginal as boolean | undefined) ?? false;
-  const parts = s.split(new RegExp(delimiter)).filter((p) => p.length > 0);
-  if (parts.length <= 1) return new Set([s]);
-  return includeOriginal ? new Set([s, ...parts]) : new Set(parts);
+  const re = new RegExp(delimiter);
+  return (s) => {
+    const parts = s.split(re).filter((p) => p.length > 0);
+    if (parts.length <= 1) return new Set([s]);
+    return includeOriginal ? new Set([s, ...parts]) : new Set(parts);
+  };
 }
 
-const CLEANING_FUNCTIONS: Record<string, CleaningFn> = {
-  remove_punctuation: removePunctuation,
-  remove_dashes: removeDashes,
-  trim_whitespace: trimWhitespace,
-  to_upper_case: toUpperCase,
-  to_lower_case: toLowerCase,
-  remove_accents: removeAccents,
-  strip_affixes: stripAffixes,
-  parse_date: parseDateFn,
-  substring: substringFn,
-  phonetic: phoneticFn,
-  null_if: nullIfFn,
-  replace_regex: replaceRegexFn,
-  extract_regex: extractRegexFn,
-  filter_regex: filterRegexFn,
-  split_on: splitOnFn,
+const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
+  remove_non_ascii: noParamFactory(removeNonAscii),
+  replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
+  squash_spaces: noParamFactory(squashSpaces),
+  remove_punctuation: noParamFactory(removePunctuation),
+  remove_dashes: noParamFactory(removeDashes),
+  trim_whitespace: noParamFactory(trimWhitespace),
+  to_upper_case: noParamFactory(toUpperCase),
+  to_lower_case: noParamFactory(toLowerCase),
+  remove_accents: noParamFactory(removeAccents),
+  remove_affixes: noParamFactory(removeAffixes),
+  parse_date: parseDateFactory,
+  substring: substringFactory,
+  phonetic: phoneticFactory,
+  null_if: nullIfFactory,
+  replace_regex: replaceRegexFactory,
+  extract_regex: extractRegexFactory,
+  filter_regex: filterRegexFactory,
+  split_on: splitOnFactory,
 };
+
+// ─── Step compilation ─────────────────────────────────────────────────────────
+
+type CompiledStep =
+  | { kind: "fn"; fn: StandardizingFn }
+  | { kind: "coalesce"; default: string | undefined };
+
+function compileStep(step: { function: string; params?: Params }): CompiledStep {
+  const params = step.params ?? {};
+  if (step.function === "coalesce") {
+    return { kind: "coalesce", default: params.default as string | undefined };
+  }
+  const factory = STANDARDIZING_FUNCTIONS[step.function];
+  if (!factory) throw new Error(`unknown standardization function: "${step.function}"`);
+  return { kind: "fn", fn: factory(params) };
+}
+
+function compileSteps(steps: Array<{ function: string; params?: Params }>): CompiledStep[] {
+  return steps.map(compileStep);
+}
 
 // ─── Step execution ──────────────────────────────────────────────────────────
 
-function applyStepToString(
-  value: string,
-  fn: string,
-  params: Params,
-): FieldValue {
-  const impl = CLEANING_FUNCTIONS[fn];
-  if (!impl) throw new Error(`unknown cleaning function: "${fn}"`);
-  return impl(value, params);
-}
-
 // `coalesce` is the only function that operates on null (or an empty array
 // produced by prior null-filtering). All other functions null-propagate.
-function applyStep(
-  current: FieldValue,
-  step: { function: string; params?: Params },
-): FieldValue {
-  const params = step.params ?? {};
-
-  if (step.function === "coalesce") {
+function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
+  if (step.kind === "coalesce") {
     if (current === null || (current instanceof Set && current.size === 0)) {
-      return (params.default as string | undefined) ?? null;
+      return step.default ?? null;
     }
     return current;
   }
@@ -315,7 +371,7 @@ function applyStep(
   if (current instanceof Set) {
     const out = new Set<string>();
     for (const v of current) {
-      const r = applyStepToString(v, step.function, params);
+      const r = step.fn(v);
       if (r === null) continue;
       if (r instanceof Set) {
         for (const sv of r) out.add(sv);
@@ -326,10 +382,18 @@ function applyStep(
     return out.size === 0 ? null : out;
   }
 
-  return applyStepToString(current, step.function, params);
+  return step.fn(current);
 }
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
+
+function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
+  let current: FieldValue = input;
+  for (const step of steps) {
+    current = applyStep(current, step);
+  }
+  return current;
+}
 
 /**
  * Apply a sequence of cleaning steps to a raw string value.
@@ -341,11 +405,7 @@ export function runPipeline(
   input: string,
   steps: Array<{ function: string; params?: Params }>,
 ): FieldValue {
-  let current: FieldValue = input;
-  for (const step of steps) {
-    current = applyStep(current, step);
-  }
-  return current;
+  return runCompiledPipeline(input, compileSteps(steps));
 }
 
 // Convert a pipeline result to a value set. An empty array means the record
@@ -370,19 +430,19 @@ function toValueSet(result: FieldValue): string[] {
 export class StandardizedField {
   readonly name: string;
   private readonly inputColumn: string;
-  private readonly steps: CleaningStep[];
+  private readonly compiledSteps: CompiledStep[];
   private readonly rawRows: ReadonlyArray<Record<string, string>>;
   private readonly cache = new Map<number, string[]>();
 
   constructor(
     name: string,
     inputColumn: string,
-    steps: CleaningStep[],
+    steps: StandardizationStep[],
     rawRows: ReadonlyArray<Record<string, string>>,
   ) {
     this.name = name;
     this.inputColumn = inputColumn;
-    this.steps = steps;
+    this.compiledSteps = compileSteps(steps);
     this.rawRows = rawRows;
   }
 
@@ -402,7 +462,7 @@ export class StandardizedField {
       this.cache.set(index, []);
       return [];
     }
-    const values = toValueSet(runPipeline(raw, this.steps));
+    const values = toValueSet(runCompiledPipeline(raw, this.compiledSteps));
     this.cache.set(index, values);
     return values;
   }
@@ -449,7 +509,7 @@ const SEMANTIC_TO_METADATA: Record<string, string> = {
 /**
  * Build a {@link StandardizedDataset} from:
  *
- * 1. Explicit `cleaning` transformations (when provided).
+ * 1. Explicit `standardizing` transformations (when provided).
  * 2. Identity transformations for linkage fields not covered by an explicit
  *    transformation, resolved by matching the field's semantic type against
  *    column metadata.
@@ -459,7 +519,7 @@ const SEMANTIC_TO_METADATA: Record<string, string> = {
  * corresponding linkage keys.
  */
 export function buildStandardizedDataset(
-  cleaning: Cleaning | undefined,
+  standardization: Standardization | undefined,
   rawRows: ReadonlyArray<Record<string, string>>,
   metadata: ColumnMetadata[],
   terms: LinkageTerms,
@@ -467,7 +527,7 @@ export function buildStandardizedDataset(
   const fields: StandardizedField[] = [];
   const covered = new Set<string>();
 
-  for (const t of cleaning ?? []) {
+  for (const t of standardization ?? []) {
     fields.push(
       new StandardizedField(t.output, t.input, t.steps ?? [], rawRows),
     );
@@ -502,8 +562,9 @@ function applyElementTransform(
   value: string,
   steps: TransformStep[],
 ): string | null {
+  const compiled = compileSteps(steps);
   let current: FieldValue = value;
-  for (const step of steps) {
+  for (const step of compiled) {
     current = applyStep(current, step);
     if (current instanceof Set) current = [...current].join("");
   }
@@ -587,37 +648,101 @@ export function buildKeyStrings(
   return result;
 }
 
+// ─── Standardized key iterable ──────────────────────────────────────────────
+
+/**
+ * An {@link IndexableIterable} over a single {@link LinkageKey} round,
+ * bridging the {@link StandardizedDataset} + {@link buildKeyStrings} pipeline
+ * to the `Array<IndexableIterable<string | undefined>>` interface required by
+ * `linkViaPSI`.
+ *
+ * Per-row behaviour:
+ * - `null` from {@link buildKeyStrings} -> `undefined` (record excluded).
+ * - Singleton `Set<string>` -> the one string.
+ * - Multi-value `Set<string>` (fan-out not yet in scope) -> `undefined`.
+ */
+export class StandardizedKeyIterable {
+  [index: number]: string | undefined;
+
+  readonly length: number;
+  private readonly key: LinkageKey;
+  private readonly dataset: StandardizedDataset;
+  private readonly isReceiver: boolean;
+
+  constructor(
+    key: LinkageKey,
+    dataset: StandardizedDataset,
+    rowCount: number,
+    isReceiver = false,
+  ) {
+    this.key = key;
+    this.dataset = dataset;
+    this.length = rowCount;
+    this.isReceiver = isReceiver;
+
+    return new Proxy(this, {
+      get: (target, prop, receiver) => {
+        if (prop === Symbol.iterator)
+          return target[Symbol.iterator].bind(target);
+        if (prop === "length") return target.length;
+        if (typeof prop === "string" && /^[0-9]+$/.test(prop))
+          return target.at(Number(prop));
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+  }
+
+  private valueAt(index: number): string | undefined {
+    const result = buildKeyStrings(this.key, this.dataset, index, this.isReceiver);
+    if (result === null || result.size === 0) return undefined;
+    if (result.size > 1) return undefined;
+    return result.values().next().value as string;
+  }
+
+  *[Symbol.iterator](): Iterator<string | undefined> {
+    for (let i = 0; i < this.length; i++) {
+      yield this.valueAt(i);
+    }
+  }
+
+  at(index: number): string | undefined {
+    if (index < 0 || index >= this.length) return undefined;
+    return this.valueAt(index);
+  }
+}
+
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
- * Validate that every cleaning transformation output name corresponds to a
- * linkage field defined in the provided terms, and that every step function
+ * Validate that every standardization transformation output name corresponds to
+ * a linkage field defined in the provided terms, and that every step function
  * name is known.
  *
- * Returns a list of error messages; an empty array means the cleaning spec is
- * consistent with these terms.
+ * Returns a list of error messages; an empty array means the standardization
+ * spec is consistent with these terms.
  */
-export function validateCleaningAgainstTerms(
-  cleaning: Cleaning,
+export function validateStandardizationAgainstTerms(
+  standardization: Standardization,
   terms: LinkageTerms,
 ): string[] {
   const errors: string[] = [];
   const fieldNames = new Set(terms.linkageFields.map((f) => f.name));
 
-  for (const t of cleaning) {
+  for (const t of standardization) {
     if (!fieldNames.has(t.output)) {
       errors.push(
-        `cleaning output "${t.output}" does not match any linkage field name`,
+        `standardization output "${t.output}" does not match any linkage ` +
+        "field name",
       );
     }
     for (const step of t.steps ?? []) {
       if (
         step.function !== "coalesce" &&
-        !(step.function in CLEANING_FUNCTIONS)
+        !(step.function in STANDARDIZING_FUNCTIONS)
       ) {
         errors.push(
-          `unknown cleaning function "${step.function}" in transformation ` +
-            `for "${t.output}"`,
+          `unknown standardization function "${step.function}" in ` +
+          `transformation for "${t.output}"`,
         );
       }
     }
