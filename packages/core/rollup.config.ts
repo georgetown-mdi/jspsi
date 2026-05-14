@@ -25,6 +25,7 @@ export default defineConfig([
         eventemitter3: "EventEmitter",
         uuid: "uuid",
         papaparse: "Papa",
+        luxon: "luxon"
       },
     },
     plugins: [resolve(), typescript({ outputToFilesystem: true }), commonjs()],

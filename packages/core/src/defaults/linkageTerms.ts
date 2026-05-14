@@ -1,5 +1,5 @@
-import type { LinkageTerms, LinkageField, LinkageKey } from "./linkageTerms";
-import type { Metadata } from "./metadata";
+import type { LinkageTerms, LinkageField, LinkageKey } from "../config/linkageTerms";
+import type { Metadata } from "../config/metadata";
 import type { SemanticType } from "../types";
 
 const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [

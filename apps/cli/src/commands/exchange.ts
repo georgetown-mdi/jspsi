@@ -20,6 +20,8 @@ import {
   buildStandardizedDataset,
   StandardizedKeyIterable,
   getDefaultLinkageTerms,
+  getDefaultStandardization,
+  inferDateFormat,
   validateStandardizationAgainstTerms,
 } from "@psilink/core";
 import type {
@@ -327,8 +329,19 @@ async function prepareDataset(
   const metadata = spec.metadata ?? inferMetadata(csvResult.meta.fields ?? []);
   const linkageTerms =
     spec.linkageTerms ?? getDefaultLinkageTerms(spec.identity!, metadata);
-  // TODO: implement default data standardization pipelines and install them
-  // here
+
+  let dateInputFormat: string | undefined;
+  if (spec.standardization === undefined) {
+    const dobCol = metadata.find((c) => c.type === "dateOfBirth");
+    if (dobCol !== undefined) {
+      dateInputFormat = inferDateFormat(rawRows.map((row) => row[dobCol.name] ?? ""));
+      if (dateInputFormat !== undefined)
+        log.info(`inferred date of birth format: ${dateInputFormat}`);
+    }
+  }
+
+  const standardization =
+    spec.standardization ?? getDefaultStandardization(metadata, linkageTerms, { dateInputFormat });
 
   log.info(
     "will link using keys:",
@@ -336,7 +349,7 @@ async function prepareDataset(
   );
 
   const dataset = buildStandardizedDataset(
-    spec.standardization,
+    standardization,
     rawRows,
     metadata,
     linkageTerms,

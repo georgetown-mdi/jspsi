@@ -8,9 +8,12 @@ export { retryPromise } from "./utils/promise";
 
 export * from "./config/standardization";
 export * from "./config/connection";
-export * from "./config/defaultLinkageTerms";
+export * from "./defaults/linkageTerms";
+export * from "./defaults/standardization";
 export * from "./config/exchangeSpec";
 export * from "./config/linkageTerms";
 export * from "./config/metadata";
 export * from "./standardization";
 export { loadCSVFile } from "./file";
+
+export { inferDateFormat } from "./utils/date.js";
