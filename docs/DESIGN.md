@@ -237,13 +237,13 @@ The web application includes a feature to invite parties to conduct exchanges. U
 
 A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save the *output*. As indicated above, linkage terms, connection details, metadata, and data cleaning transformations form further exchange parameters.
 
-For the rest of this section we describe use cases as in the command line application. Web application versions implement the same functionality with an appropriate graphical user interface.
+For the rest of this section we describe use cases as in the command line application. In this context, the user's intent to *accept* or *exchange* can be inferred from how the application is invoked, and thus they both use the generic `exchange` command. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
 
-A typical first exchange begins with one party generating an invitation and securely transmitting it to their partner. The partner accepts, which immediately conducts the exchange. Subsequent exchanges between the same parties use the stored configuration and shared secret, requiring no further coordination.
+A typical first exchange begins with one party generating an invitation and securely transmitting it to their partner. The partner accepts, which immediately conducts the exchange. Subsequent exchanges between the same parties use the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated.
 
 ## Configuration
 
-Exchange configuration is stored in a directory designated by `--config-dir`, which defaults to `.psilink` in the current working directory. The directory holds two files: `config.yaml`, which records the exchange parameters, and `secret.key`, which holds the shared secret used for authentication. When this directory is first created, the application prints a notice identifying both files and warning that the secret key should be treated as private.
+Exchange configuration is stored in a directory designated by `--config-dir`, which defaults to `.psilink` in the current working directory. The directory holds two files: `config.yaml`, which records the exchange parameters, and `secret.key`, which is the shared secret used for authentication. When this directory is first created, the application prints a notice identifying both files and warning that the secret key should be treated as private.
 
 Command line arguments take precedence over values in `config.yaml`, allowing scripted workflows to override specific parameters without modifying the stored configuration. Any argument value prefixed with `@` is read from the file at the given path rather than taken literally — for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk rather than embedding it in the command or configuration file. This convention applies both on the command line and inside `config.yaml`, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history.
 
@@ -253,33 +253,35 @@ Command line arguments take precedence over values in `config.yaml`, allowing sc
 psilink invite URL INPUT_FILE [OUTPUT_FILE]
 ```
 
-This generates a shareable invitation string that can be sent to a partner by a secure channel. Default values are used for the linkage terms and connection parameters, while metadata and cleaning transformations are inferred from the input file. The shareable string encodes connection information, linkage terms, and a shared secret as a base64 JSON string, and can be supplied directly to `psilink accept`.
+This generates a shareable invitation string that can be sent to a partner by a secure channel. Default values are used for the linkage terms and connection parameters, while metadata and cleaning transformations are inferred from the input file. The shareable string encodes connection information, linkage terms, and a shared secret as a base64 JSON string, and can be supplied directly to `psilink exchange`.
 
 If `--set-config` is given, the user is interactively walked through setting exchange parameters before the invitation string is generated. Once generated, the application connects to the server and waits for the other party to respond; it exits when the token expires, when the connection times out, or when the user cancels. In all three cases the token is invalidated and removed from the configuration directory, preventing a stale invitation from being accepted later.
 
 ## Acceptance
 
 ```sh
-psilink accept INVITATION_STRING INPUT_FILE [OUTPUT_FILE]
+psilink exchange INVITATION_STRING INPUT_FILE [OUTPUT_FILE]
 ```
 
 This decodes the invitation string, connects to the server specified in its parameters, and immediately conducts the exchange. If `--set-config` is specified, the user is interactively walked through modifying the configuration before connecting, with defaults drawn from the invitation and their data file.
 
 ## Exchange
 
-The `exchange` subcommand is intended for automated, recurring exchanges:
+The `exchange` subcommand supports automated, recurring exchanges as well as an "it just works" mode that can be used to establish recurring exchanges when two people are in direct communication. The two are selected based on the existence of a configuration directory and the ability to interpret the first positional argument as a URL or invitation string, or as a file.
 
 ```sh
-psilink exchange --config-dir=CONFIG_DIR INPUT_FILE [OUTPUT_FILE]
+psilink exchange [URL] INPUT_FILE [OUTPUT_FILE]
 ```
 
-It requires an existing config directory and issues no interactive prompts; the exchange proceeds entirely from the stored configuration and shared secret. The shared secret is rotated automatically on successful completion.
+- If the configuration directory does not exist, the first positional argument must be a URL or invitation string. At the end of the exchange, the user will be notified that a configuration directory was created and they will be instructed to invoke the command without a URL in the future.
+- If the configuration directory does exist and less than three positional arguments are given, the first positional argument will be checked to see if it is a file; if so it will be interpretted as the input and, if present, the second positional argument will be the output. Otherwise, it will be attempted to be interpretted as a URL. If a host is already specified in the exchange spec, it will override.
+- If the configuration directory does exist and three positional arguments are given, they will be interpretted as a URL, input file, and output file respectively.
 
 ## Recovery
 
 If `--config-dir` points to a directory that already contains a configuration when running `invite`, the user is prompted whether to reuse the existing exchange parameters with a newly generated secret or to start from defaults. This is the standard path when a shared secret must be re-established after a failed rotation.
 
-If files already exist in the target config directory when running `accept`, the user is prompted before any are overwritten, shown which values differ, and given instructions on how to specify a different directory with `--config-dir`. An interactive merging feature may be added in the future.
+If files already exist in the target config directory when running `exchange` with an invitation string, the user is prompted before any are overwritten, shown which values differ, and given instructions on how to specify a different directory with `--config-dir`. An interactive merging feature may be added in the future.
 
 # Possible extensions
 

@@ -1,8 +1,11 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
+import path from "node:path";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import PSI from "@openmined/psi.js";
+
+import { userInfo } from "node:os";
 
 import {
   PSIParticipant,
@@ -10,7 +13,7 @@ import {
   exchangeTerms,
   resolveRole,
   linkViaPSI,
-  safeParseLinkageTerms,
+  parseExchangeSpec,
   setLogPrefixer,
   loadCSVFile,
   inferMetadata,
@@ -23,20 +26,22 @@ import type {
   AssociationTable,
   ExchangeSpec,
   SFTPConnectionConfig,
+  LinkageTerms,
+  StandardizedDataset,
 } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
 import { applyCliOverrides, readAtSignFile } from "../config";
-import { loadExchangeSpec, loadPakeToken } from "../configDir";
+import { loadPakeToken } from "../configDir";
+
+import { resolveAtSignRefs } from "../util/atSignRefs";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ExchangeArgs {
-  input: string;
-  output?: string;
+  positionals: Array<string | number>;
   configDir: string;
-  identity?: string;
-  linkageTermsFile?: string;
+  identity: string;
   /** Already @-file resolved. */
   pakeToken?: string;
   serverPort?: number;
@@ -50,34 +55,40 @@ interface ExchangeArgs {
   verbosity: number;
 }
 
+interface SpecResolution {
+  spec: ExchangeSpec;
+  input: string;
+  output?: string;
+  isNew: boolean;
+}
+
+interface PreparedDataset {
+  readySpec: ExchangeSpec;
+  rawRows: Array<Record<string, string>>;
+  dataset: StandardizedDataset;
+  linkageTerms: LinkageTerms;
+}
+
 // ─── Builder ─────────────────────────────────────────────────────────────────
 
 export function builder(cmd: Argv): Argv {
   return cmd
-    .positional("input", {
-      type: "string",
-      describe: "input file path; if `-` reads from stdin",
-      demandOption: true,
-    })
-    .positional("output", {
-      type: "string",
-      describe: "output file path; if absent, writes to stdout",
-    })
+    .usage(
+      "Usage:\n" +
+        "  $0 exchange [options] URL INPUT_FILE [OUTPUT_FILE]\n" +
+        "  $0 exchange [options] INPUT_FILE [OUTPUT_FILE]\n\n" +
+        "Arguments:\n" +
+        "  URL          server URL; required when no config directory exists\n" +
+        "  INPUT_FILE   CSV to link; use `-` to read from stdin\n" +
+        "  OUTPUT_FILE  where to write results; defaults to stdout",
+    )
     .option("config-dir", {
       type: "string",
       describe: "config directory (default: .psilink)",
     })
     .option("identity", {
       type: "string",
-      describe:
-        "identity string for this party (name, org, contact); required " +
-        "when config omits linkageTerms",
-    })
-    .option("linkage-terms", {
-      type: "string",
-      describe:
-        "path to a linkage terms file (YAML or JSON); overrides " +
-        "linkageTerms in the config",
+      describe: "identity string for this party (name, org, contact)",
     })
     .option("pake-token", {
       type: "string",
@@ -125,12 +136,18 @@ export function builder(cmd: Argv): Argv {
 
 // ─── Arg extraction ──────────────────────────────────────────────────────────
 
+const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
+  silent: logLibrary.levels.SILENT,
+  error: logLibrary.levels.ERROR,
+  warn: logLibrary.levels.WARN,
+  info: logLibrary.levels.INFO,
+  debug: logLibrary.levels.DEBUG,
+  trace: logLibrary.levels.TRACE,
+};
+
 function extractArgs(argv: Arguments): ExchangeArgs {
-  const input = String(argv._[0]);
-  const output = argv._[1] !== undefined ? String(argv._[1]) : undefined;
   const configDir = (argv["config-dir"] as string | undefined) ?? ".psilink";
-  const identity = argv["identity"] as string | undefined;
-  const linkageTermsFile = argv["linkage-terms"] as string | undefined;
+  const identity = (argv["identity"] || userInfo().username) as string;
   const pakeToken = readAtSignFile(argv["pake-token"] as string | undefined) as
     | string
     | undefined;
@@ -147,26 +164,16 @@ function extractArgs(argv: Arguments): ExchangeArgs {
   const rawLogLevel = (
     (argv["logLevel"] as string | undefined) || "info"
   ).toLowerCase();
-
-  let logLevel: logLibrary.LogLevelNumbers;
-  if (rawLogLevel === "silent") logLevel = logLibrary.levels.SILENT;
-  else if (rawLogLevel === "error") logLevel = logLibrary.levels.ERROR;
-  else if (rawLogLevel === "warn") logLevel = logLibrary.levels.WARN;
-  else if (rawLogLevel === "info") logLevel = logLibrary.levels.INFO;
-  else if (rawLogLevel === "debug") logLevel = logLibrary.levels.DEBUG;
-  else if (rawLogLevel === "trace") logLevel = logLibrary.levels.TRACE;
-  else {
+  const logLevel = LOG_LEVELS[rawLogLevel];
+  if (logLevel === undefined)
     throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
-  }
 
   const verbosity = (argv["verbose"] as number | undefined) ?? 0;
 
   return {
-    input,
-    output,
+    positionals: argv._,
     configDir,
     identity,
-    linkageTermsFile,
     pakeToken,
     serverPort,
     serverUsername,
@@ -180,25 +187,113 @@ function extractArgs(argv: Arguments): ExchangeArgs {
 
 // ─── Config resolution ────────────────────────────────────────────────────────
 
-function resolveConfig(args: ExchangeArgs): ExchangeSpec {
-  let spec = loadExchangeSpec(args.configDir);
-
-  if (args.linkageTermsFile !== undefined) {
-    const content = fs.readFileSync(args.linkageTermsFile, "utf8");
-    const raw: unknown = args.linkageTermsFile.toLowerCase().endsWith("json")
-      ? JSON.parse(content)
-      : YAML.parse(content);
-    const result = safeParseLinkageTerms(raw);
-    if (!result.success)
+function parsePositionals(
+  positionals: Array<string | number>,
+  configExists: boolean,
+): { server?: URL; input: string; output?: string } {
+  if (configExists) {
+    const arg0 = String(positionals[0]);
+    if (fs.existsSync(arg0)) {
+      return {
+        input: arg0,
+        output:
+          positionals[1] !== undefined ? String(positionals[1]) : undefined,
+      };
+    }
+    let server: URL;
+    try {
+      server = new URL(arg0);
+    } catch {
+      // TODO: if is an invite string, do accept instead of exchange
       throw new Error(
-        `invalid linkage terms in ${args.linkageTermsFile}: ` +
-          `${result.error.message}`,
+        `the first argument must be a file, url, or invitation string; invalid value was: ${arg0}`,
       );
-    spec = applyCliOverrides(spec, { linkageTerms: result.data });
+    }
+    if (positionals[1] === undefined)
+      throw new Error("input file not specified");
+    return {
+      server,
+      input: String(positionals[1]),
+      output: positionals[2] !== undefined ? String(positionals[2]) : undefined,
+    };
   }
 
+  let server: URL;
+  try {
+    server = new URL(String(positionals[0]));
+  } catch {
+    // TODO: if is an invite string, do accept instead of exchange
+    throw new Error(
+      `unable to parse URL or invitation string: ${positionals[0]}`,
+    );
+  }
+  return {
+    server,
+    input: String(positionals[1]),
+    output: positionals[2] !== undefined ? String(positionals[2]) : undefined,
+  };
+}
+
+function loadOrBuildSpec(
+  configDir: string,
+  server: URL | undefined,
+  identity: string,
+): { spec: ExchangeSpec; isNew: boolean } {
+  const configPath = path.join(configDir, "config.yaml");
+  if (fs.existsSync(configPath)) {
+    const content = fs.readFileSync(configPath, "utf8");
+    const raw = YAML.parse(content) as unknown;
+    const spec = parseExchangeSpec(resolveAtSignRefs(raw));
+    if (server) {
+      spec.connection.server.host ??= server.hostname;
+      spec.connection.server.port ??= server.port
+        ? Number(server.port)
+        : undefined;
+      spec.connection.server.username ??= server.username || undefined;
+      if (spec.connection.channel === "sftp") {
+        spec.connection.server.password ??= server.password || undefined;
+      }
+    }
+    return { spec, isNew: false };
+  }
+
+  return {
+    spec: {
+      identity,
+      connection: {
+        channel: "sftp",
+        server: {
+          host: server!.hostname,
+          port: server!.port ? Number(server!.port) : undefined,
+          username: server!.username || undefined,
+          password: server!.password || undefined,
+        },
+      },
+    },
+    isNew: true,
+  };
+}
+
+function resolveArgumentsAndConfig(args: ExchangeArgs): SpecResolution {
+  const log = logLibrary.getLogger("exchange");
+  const configPath = path.join(args.configDir, "config.yaml");
+  const configExists = fs.existsSync(configPath);
+
+  const { server, input, output } = parsePositionals(
+    args.positionals,
+    configExists,
+  );
+  const { spec: baseSpec, isNew } = loadOrBuildSpec(
+    args.configDir,
+    server,
+    args.identity,
+  );
+
+  if (isNew) log.info("creating default configuration");
+  else log.info("loaded exchange spec from", args.configDir);
+
   const pakeToken = args.pakeToken ?? loadPakeToken(args.configDir);
-  spec = applyCliOverrides(spec, {
+  const spec = applyCliOverrides(baseSpec, {
     identity: args.identity,
     pakeToken,
     timeout: args.timeout,
@@ -211,41 +306,32 @@ function resolveConfig(args: ExchangeArgs): ExchangeSpec {
   if (spec.connection.channel !== "sftp")
     throw new Error("only the sftp channel is currently supported");
 
-  return spec;
+  return { spec, input, output, isNew };
 }
 
-// ─── Protocol ────────────────────────────────────────────────────────────────
+// ─── Data preparation ────────────────────────────────────────────────────────
 
-async function runProtocol(
+async function prepareDataset(
   spec: ExchangeSpec,
-  args: ExchangeArgs,
-): Promise<void> {
-  const sftpConfig = spec.connection as SFTPConnectionConfig;
-  const log = logLibrary.getLogger("root");
+  input: string,
+): Promise<PreparedDataset> {
+  const log = logLibrary.getLogger("exchange");
 
-  if (!fs.existsSync(args.input)) {
-    log.error(`${args.input} does not exist`);
+  if (!fs.existsSync(input)) {
+    log.error(`${input} does not exist`);
     process.exit(69);
   }
 
-  // ── Load and prepare data ─────────────────────────────────────────────────
-
-  const csvResult = await loadCSVFile(fs.createReadStream(args.input));
+  const csvResult = await loadCSVFile(fs.createReadStream(input));
   const rawRows = csvResult.data as Array<Record<string, string>>;
-  const metadata = inferMetadata(csvResult.meta.fields ?? []);
-
-  // Resolve linkage terms: use explicit terms from config, or generate
-  // defaults filtered to the columns present in the input file.
+  const metadata = spec.metadata ?? inferMetadata(csvResult.meta.fields ?? []);
   const linkageTerms =
     spec.linkageTerms ?? getDefaultLinkageTerms(spec.identity!, metadata);
+  // TODO: implement default data standardization pipelines and install them
+  // here
 
   log.info(
-    "loaded exchange spec from",
-    args.configDir + "; identity:",
-    linkageTerms.identity,
-  );
-  log.info(
-    "linkage keys:",
+    "will link using keys:",
     linkageTerms.linkageKeys.map((k) => k.name).join(", "),
   );
 
@@ -257,14 +343,36 @@ async function runProtocol(
   );
 
   if (spec.standardization !== undefined) {
-    for (const err of validateStandardizationAgainstTerms(spec.standardization, linkageTerms))
+    for (const err of validateStandardizationAgainstTerms(
+      spec.standardization,
+      linkageTerms,
+    ))
       log.warn("cleaning configuration issue:", err);
   }
 
-  // ── Connection ────────────────────────────────────────────────────────────
+  return {
+    readySpec: { ...spec, metadata, linkageTerms },
+    rawRows,
+    dataset,
+    linkageTerms,
+  };
+}
+
+// ─── Protocol ────────────────────────────────────────────────────────────────
+
+async function runProtocol(
+  prepared: PreparedDataset,
+  output: string | undefined,
+  verbosity: number,
+): Promise<void> {
+  const { readySpec, rawRows, dataset, linkageTerms } = prepared;
+  const sftpConfig = readySpec.connection as SFTPConnectionConfig;
+  const log = logLibrary.getLogger("exchange");
+
+  // ── Connection ─────────────────────────────────────────────────────────────
 
   const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
-    verbose: args.verbosity,
+    verbose: verbosity,
   });
   conn.on("error", (err: unknown) => {
     log.error("sftp error:", err);
@@ -324,7 +432,8 @@ async function runProtocol(
   // is known. isReceiver determines whether swap-keyed rounds are applied.
   const isReceiver = role === "receiver";
   const linkageKeyIterables = linkageTerms.linkageKeys.map(
-    (key) => new StandardizedKeyIterable(key, dataset, rawRows.length, isReceiver),
+    (key) =>
+      new StandardizedKeyIterable(key, dataset, rawRows.length, isReceiver),
   );
 
   // PLACEHOLDER: linkageTerms.algorithm ("psi" vs "psi-c") will eventually
@@ -335,7 +444,7 @@ async function runProtocol(
     await PSI(),
     {
       role: role === "receiver" ? "joiner" : "starter",
-      verbose: args.verbosity,
+      verbose: verbosity,
     },
   );
 
@@ -347,7 +456,7 @@ async function runProtocol(
     participant,
     conn,
     linkageKeyIterables,
-    args.verbosity,
+    verbosity,
   );
 
   log.info("stopping polling");
@@ -356,7 +465,7 @@ async function runProtocol(
   log.info("closing connection");
   await conn.close();
 
-  writeOutput(args.output, associationTable);
+  writeOutput(output, associationTable);
 }
 
 function writeOutput(
@@ -380,16 +489,31 @@ export async function handler(argv: Arguments): Promise<void> {
 
   logLibrary.setDefaultLevel(args.logLevel);
 
-  const log = logLibrary.getLogger("root");
+  const log = logLibrary.getLogger("exchange");
   setLogPrefixer(log);
 
-  let spec: ExchangeSpec;
+  let resolution: SpecResolution;
   try {
-    spec = resolveConfig(args);
+    resolution = resolveArgumentsAndConfig(args);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(64);
   }
 
-  await runProtocol(spec, args);
+  const { spec, input, output, isNew } = resolution;
+  const prepared = await prepareDataset(spec, input);
+
+  if (isNew) {
+    fs.mkdirSync(args.configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(args.configDir, "config.yaml"),
+      YAML.stringify(prepared.readySpec),
+    );
+    log.info(
+      `configuration saved to ${args.configDir};`,
+      "omit the URL in future exchanges",
+    );
+  }
+
+  await runProtocol(prepared, output, args.verbosity);
 }
