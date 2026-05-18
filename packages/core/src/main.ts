@@ -3,7 +3,7 @@ export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/sftpConnection";
-export { setLogPrefixer } from "./utils/logger";
+export { getLogger, setLogPrefixer } from "./utils/logger";
 export { retryPromise } from "./utils/promise";
 
 export * from "./config/standardization";
@@ -17,3 +17,4 @@ export * from "./standardization";
 export { loadCSVFile } from "./file";
 
 export { inferDateFormat } from "./utils/date.js";
+export * from "./exchange";

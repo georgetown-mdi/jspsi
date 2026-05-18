@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/psi/$uuid/wait")({
       GET: async ({ params }) => {
         if (!("uuid" in params) || typeof params["uuid"] !== "string") {
           setResponseStatus(400, "missing session uuid");
-          return new Response("missing session uuid");
+          return new Response("missing session uuid", { status: 400 });
         }
         const sessionId = { uuid: params["uuid"] };
 
@@ -29,6 +29,7 @@ export const Route = createFileRoute("/api/psi/$uuid/wait")({
           );
           return new Response(
             `session id: ${sessionId.uuid} does not exist or has expired`,
+            { status: 400 },
           );
         }
         const session = sessionManager.get(sessionId);
@@ -39,6 +40,7 @@ export const Route = createFileRoute("/api/psi/$uuid/wait")({
           );
           return new Response(
             `session id: ${sessionId.uuid} does not exist or has expired`,
+            { status: 400 },
           );
         }
 

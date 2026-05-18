@@ -50,3 +50,7 @@ export const SEMANTIC_TYPES = [
 ] as const;
 
 export type SemanticType = (typeof SEMANTIC_TYPES)[number];
+
+export type Prettify<T> = {
+  [K in keyof T]: T[K];
+} & {};

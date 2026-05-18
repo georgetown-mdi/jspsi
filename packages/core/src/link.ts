@@ -74,7 +74,7 @@ export async function linkViaPSI(
   const log = getLoggerForVerbosity("psiLink", verbosity);
   setStage = setStage ?? (() => {});
 
-  log.info(`${participant.id}: linking using ${data.length} key(s) via PSI`);
+  log.debug(`${participant.id}: linking using ${data.length} key(s) via PSI`);
 
   if (["one-to-one", "many-to-one"].includes(protocol.cardinality)) {
     let indexIterationMap: IndexIterationMap = [];
@@ -112,7 +112,7 @@ export async function linkViaPSI(
 
       if (data_j.length === 0) continue;
 
-      log.info(
+      log.debug(
         `${participant.id}: running psi on key ${j + 1} / ${data.length}:`,
       );
       const [myIndices, theirIndices] = await participant.identifyIntersection(

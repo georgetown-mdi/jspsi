@@ -6,7 +6,7 @@
     "psi-link": "./dist/index.js"
   },
   "scripts": {
-    "build": "rollup -c rollup.config.ts --configPlugin typescript",
+    "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
     "dev": "node --import=tsx src/index.ts",
     "test": "vitest run"
   },

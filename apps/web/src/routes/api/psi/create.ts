@@ -14,11 +14,15 @@ export const Route = createFileRoute("/api/psi/create")({
         const payload = await request.json();
         if (!("initiatedName" in payload) || !payload["initiatedName"]) {
           setResponseStatus(400);
-          return new Response("missing name of person initiating PSI");
+          return new Response("missing name of person initiating PSI", {
+            status: 400,
+          });
         }
         if (!("invitedName" in payload) || !payload["invitedName"]) {
           setResponseStatus(400);
-          return new Response("missing name of person invited to PSI");
+          return new Response("missing name of person invited to PSI", {
+            status: 400,
+          });
         }
         let timeToLive: Date;
         if (

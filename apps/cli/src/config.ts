@@ -1,15 +1,6 @@
-import fs from "node:fs";
-import type { ExchangeSpec, LinkageTerms } from "@psilink/core";
+import type { ConnectionConfig } from "@psilink/core";
 
-export const readAtSignFile = (val: unknown): unknown => {
-  if (typeof val === "string" && val.startsWith("@"))
-    return fs.readFileSync(val.slice(1), "utf8").trim();
-  return val;
-};
-
-export interface CliOverrides {
-  /** Maps to identity (used when generating default linkage terms). */
-  identity?: string;
+export interface ConnectionOverrides {
   /** Maps to connection.authentication.pakeToken. */
   pakeToken?: string;
   /** Seconds to wait for peer; maps to connection.options.pollTimeoutMs. */
@@ -18,28 +9,22 @@ export interface CliOverrides {
   serverPassword?: string;
   serverPrivateKey?: string;
   serverPort?: number;
-  linkageTerms?: LinkageTerms;
 }
 
-export function applyCliOverrides(
-  spec: ExchangeSpec,
-  overrides: CliOverrides,
-): ExchangeSpec {
-  const result = structuredClone(spec);
-
-  if (overrides.identity !== undefined) result.identity = overrides.identity;
-
-  if (overrides.linkageTerms !== undefined)
-    result.linkageTerms = overrides.linkageTerms;
+export function applyConnectionOverrides(
+  connection: ConnectionConfig,
+  overrides: ConnectionOverrides,
+): ConnectionConfig {
+  const result = structuredClone(connection);
 
   if (overrides.pakeToken !== undefined) {
-    if (result.connection.authentication === undefined)
-      result.connection.authentication = { pakeToken: overrides.pakeToken };
-    else result.connection.authentication.pakeToken = overrides.pakeToken;
+    if (result.authentication === undefined)
+      result.authentication = { pakeToken: overrides.pakeToken };
+    else result.authentication.pakeToken = overrides.pakeToken;
   }
 
-  if (result.connection.channel === "sftp") {
-    const { server } = result.connection;
+  if (result.channel === "sftp") {
+    const { server } = result;
     if (overrides.serverUsername !== undefined)
       server.username = overrides.serverUsername;
     if (overrides.serverPassword !== undefined)
@@ -49,8 +34,8 @@ export function applyCliOverrides(
     if (overrides.serverPort !== undefined) server.port = overrides.serverPort;
 
     if (overrides.timeout !== undefined) {
-      const opts = result.connection.options ?? {};
-      result.connection.options = {
+      const opts = result.options ?? {};
+      result.options = {
         ...opts,
         pollTimeoutMs: overrides.timeout * 1000,
       };

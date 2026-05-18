@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
       GET: async ({ params }) => {
         if (!("uuid" in params) || typeof params["uuid"] !== "string") {
           setResponseStatus(400, "missing session uuid");
-          return new Response("missing session uuid");
+          return new Response("missing session uuid", { status: 400 });
         }
         const sessionManager = await useSessionManager();
 
@@ -23,6 +23,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
           );
           return new Response(
             `session id: ${sessionId.uuid} does not exist or has expired`,
+            { status: 400 },
           );
         }
         const session = sessionManager.get(sessionId);
@@ -34,6 +35,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
           );
           return new Response(
             `session id: ${sessionId.uuid} does not exist or has expired`,
+            { status: 400 },
           );
         }
         console.log(`GET /api/psi/${sessionId.uuid}`);
@@ -43,7 +45,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
       POST: async ({ request, params }) => {
         if (!("uuid" in params) || typeof params["uuid"] !== "string") {
           setResponseStatus(400, "missing session uuid");
-          return new Response("missing session uuid");
+          return new Response("missing session uuid", { status: 400 });
         }
         const sessionId = { uuid: params["uuid"] };
 
@@ -56,6 +58,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
           );
           return new Response(
             `session id: ${sessionId.uuid} does not exist or has expired`,
+            { status: 400 },
           );
         }
         const session = sessionManager.get(sessionId);
@@ -67,6 +70,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
           );
           return new Response(
             `session id: ${sessionId.uuid} does not exist or has expired`,
+            { status: 400 },
           );
         }
 
@@ -84,6 +88,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
           );
           return new Response(
             `missing id of peer session for session ${sessionId.uuid}`,
+            { status: 400 },
           );
         }
         const invitedPeerId = requestJson["invitedPeerId"] as string;
@@ -91,7 +96,7 @@ export const Route = createFileRoute("/api/psi/$uuid/")({
         session["invitedPeerId"] = invitedPeerId;
 
         setResponseStatus(204);
-        return new Response();
+        return new Response(null, { status: 204 });
       },
     },
   },

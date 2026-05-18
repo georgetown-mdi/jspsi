@@ -4,20 +4,13 @@ import { expect, test } from "vitest";
 
 import Peer from "peerjs";
 
-import {
-  PSIParticipant,
-  exchangeTerms,
-  getDefaultLinkageTerms,
-  inferMetadata,
-  resolveRole,
-} from "@psilink/core";
+import { prepareForExchange, runExchange } from "@psilink/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { sortAssociationTable } from "../utils/associationTable.js";
 
 import type { DataConnection } from "peerjs";
-import type { Config as PSIConfig } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 interface AddressInfo {
@@ -140,81 +133,67 @@ const psiLibrary = await (PSI() as Promise<PSILibrary>);
 
 const clientConn = await clientConnPromise;
 
-const serverData = [
-  "Alice",
-  "Bob",
-  "Carol",
-  "David",
-  "Elizabeth",
-  "Frank",
-  "Greta",
+const serverRows = [
+  { first_name: "Alice" },
+  { first_name: "Bob" },
+  { first_name: "Carol" },
+  { first_name: "David" },
+  { first_name: "Elizabeth" },
+  { first_name: "Frank" },
+  { first_name: "Greta" },
 ];
-const clientData = ["Carol", "Elizabeth", "Henry"];
+const clientRows = [
+  { first_name: "Carol" },
+  { first_name: "Elizabeth" },
+  { first_name: "Henry" },
+];
+
+// The default linkage-key templates all require SSN/DOB/lastName combinations,
+// so none survive filtering for a firstName-only dataset. Provide one explicit
+// key so both parties produce valid, matching linkage terms.
+const firstNameOnlyTerms = {
+  version: "1.0.0",
+  date: "2026-01-01",
+  algorithm: "psi" as const,
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [{ name: "firstName", semanticType: "firstName" as const }],
+  linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
+};
+
+const serverPrepared = prepareForExchange(
+  { linkageTerms: { ...firstNameOnlyTerms, identity: "server" } },
+  "server",
+  serverRows,
+  ["first_name"],
+);
+const clientPrepared = prepareForExchange(
+  { linkageTerms: { ...firstNameOnlyTerms, identity: "client" } },
+  "client",
+  clientRows,
+  ["first_name"],
+);
 
 const runServerPSI = async () => {
   serverConn.once("data", () => serverPeer.disconnect());
-  const localTerms = getDefaultLinkageTerms("server", inferMetadata(["first_name"]));
-  localTerms.linkageKeys = [
-    {
-      name: "first_name",
-      elements: [{ field: "first_name" }],
-    },
-  ];
-  const { partnerTerms, warnings } = await exchangeTerms(
+  const { associationTable } = await runExchange(
     serverConn,
     "responder",
-    localTerms,
+    serverPrepared,
+    { psiLibrary },
   );
-  if (warnings.length !== 0)
-    throw new Error("test had exchange warnings: " + warnings.join(", "));
-
-  const role = await resolveRole(
-    serverConn,
-    "responder",
-    localTerms.output,
-    partnerTerms.output,
-    serverData.length,
-  );
-
-  const psiConfig: PSIConfig = {
-    role: role === "sender" ? "starter" : "joiner",
-    verbose: 0,
-  };
-  const participant = new PSIParticipant("server", psiLibrary, psiConfig);
-  return participant.identifyIntersection(serverConn, serverData);
+  return associationTable;
 };
 
 const runClientPSI = async () => {
   clientConn.once("data", () => clientPeer.disconnect());
-  const localTerms = getDefaultLinkageTerms("client", inferMetadata(["first_name"]));
-  localTerms.linkageKeys = [
-    {
-      name: "first_name",
-      elements: [{ field: "first_name" }],
-    },
-  ];
-  const { partnerTerms, warnings } = await exchangeTerms(
+  const { associationTable } = await runExchange(
     clientConn,
     "initiator",
-    localTerms,
+    clientPrepared,
+    { psiLibrary },
   );
-  if (warnings.length !== 0)
-    throw new Error("test had exchange warnings: " + warnings.join(", "));
-
-  const role = await resolveRole(
-    clientConn,
-    "initiator",
-    localTerms.output,
-    partnerTerms.output,
-    clientData.length,
-  );
-
-  const psiConfig: PSIConfig = {
-    role: role === "sender" ? "starter" : "joiner",
-    verbose: 0,
-  };
-  const participant = new PSIParticipant("client", psiLibrary, psiConfig);
-  return await participant.identifyIntersection(clientConn, clientData);
+  return associationTable;
 };
 
 let [serverResult, clientResult] = await Promise.all([

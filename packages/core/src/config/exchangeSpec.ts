@@ -1,13 +1,9 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { LinkageTermsSchema } from "./linkageTerms.js";
-import type { LinkageTerms } from "./linkageTerms.js";
 import { ConnectionConfigSchema } from "./connection.js";
-import type { ConnectionConfig } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
-import type { Standardization } from "./standardization.js";
 import { MetadataSchema } from "./metadata.js";
-import type { Metadata } from "./metadata.js";
 
 // ─── Exchange spec ───────────────────────────────────────────────────────────
 
@@ -20,37 +16,14 @@ import type { Metadata } from "./metadata.js";
  * path rather than used literally. Apply `readAtSignFile` (or equivalent) to
  * credential fields before parsing.
  */
-export interface ExchangeSpec {
-  /**
-   * Free-text string identifying this party (e.g. name, organization, contact
-   * info). Required when `linkageTerms` is absent so that default terms can be
-   * generated; included verbatim in the non-repudiation receipt otherwise.
-   */
-  identity?: string;
-  /**
-   * Linkage terms governing the exchange. When absent, defaults are generated
-   * at runtime from the input data columns. `identity` is then required.
-   */
-  linkageTerms?: LinkageTerms;
-  connection: ConnectionConfig;
-  /** Optional field-level descriptions of the input dataset. */
-  metadata?: Metadata;
-  /** Optional data transformations applied before linkage key generation. */
-  standardization?: Standardization;
-}
+export const ExchangeSpecSchema = z.object({
+  connection: ConnectionConfigSchema,
+  linkageTerms: LinkageTermsSchema,
+  metadata: MetadataSchema.optional(),
+  standardization: StandardizationSchema.optional(),
+});
 
-export const ExchangeSpecSchema: z.ZodType<ExchangeSpec> = z
-  .object({
-    identity: z.string().min(1).optional(),
-    linkageTerms: LinkageTermsSchema.optional(),
-    connection: ConnectionConfigSchema,
-    metadata: MetadataSchema.optional(),
-    standardization: StandardizationSchema.optional(),
-  })
-  .refine((s) => s.linkageTerms !== undefined || s.identity !== undefined, {
-    message: "identity is required when linkageTerms is not specified",
-    path: ["identity"],
-  });
+export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;
 
 // ─── Parse ───────────────────────────────────────────────────────────────────
 

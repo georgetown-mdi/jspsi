@@ -2,6 +2,8 @@ import logLibrary from "loglevel";
 
 const { getLevel } = logLibrary;
 
+const PREFIXED = Symbol("prefixed");
+
 const logLevels = logLibrary.levels;
 
 export const getLoggerForVerbosity = (
@@ -42,6 +44,8 @@ export const getLogger = (
 }
 
 export const setLogPrefixer = (logger: logLibrary.Logger) => {
+  if ((logger as unknown as Record<symbol, boolean>)[PREFIXED]) return;
+  (logger as unknown as Record<symbol, boolean>)[PREFIXED] = true;
   const originalFactory = logger.methodFactory;
   logger.methodFactory = (
     methodName: logLibrary.LogLevelNames,

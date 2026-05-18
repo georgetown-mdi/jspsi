@@ -557,11 +557,18 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
     try {
       if (await this.sftp.exists(outPath)) {
-        throw new Error(
-          `message from ${this.id} exists on server and has not yet been ` +
-            "consumed",
-          { cause: "usage" },
-        );
+        this.log.debug(`[${this.role}] waiting for previous message to be consumed`);
+        while (await this.sftp.exists(outPath)) {
+          if (Date.now() > this.options.timeToLive.getTime()) {
+            throw new Error(
+              `timed out waiting for message from ${this.id} to be consumed`,
+              { cause: "usage" },
+            );
+          }
+          await new Promise((resolve) =>
+            setTimeout(resolve, this.options.pollingFrequency),
+          );
+        }
       }
 
       let type = "Object";

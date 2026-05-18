@@ -23,39 +23,28 @@ import { IconCheck, IconCopy } from "@tabler/icons-react";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
-  PSIParticipant,
+  CONFIRMING_PROTOCOL_STAGE_ID,
   ProcessState,
-  secondToPartyLinkageKeyDefinitions as clientLinkageKeyDefinitions,
-  exchangeTerms,
-  getDefaultLinkageTerms,
-  getMetadataAndLinkageKeys,
-  linkViaPSI,
-  resolveRole,
-  firstToPartyLinkageKeyDefinitions as serverLinkageKeyDefinitions,
+  describeExchangeStages,
+  loadCSVFile,
+  prepareForExchange,
+  runExchange,
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
 
 import FileSelect from "@components/FileSelect";
 import SessionDetails from "@components/SessionDetails";
-import { StatusFactory } from "@components/Status";
+import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type {
-  HandshakeRole,
-  LinkageTerms,
-  Config as PSIConfig,
-} from "@psilink/core";
-
 import type { LinkSession } from "@utils/sessions";
-// import { sortAssociationTable } from 'test/utils/associationTable';
 
 export const Route = createFileRoute("/psi")({
   validateSearch: (
     search: Record<string, unknown>,
   ): { uuid: string; start?: boolean } => {
-    // validate and parse the search params into a typed state
     return {
       uuid: (search.uuid as string) || "",
       start: (search.start as boolean) || false,
@@ -75,6 +64,48 @@ export const Route = createFileRoute("/psi")({
   component: Home,
 });
 
+type StageDefinition = { id: string; label: string; state: ProcessState };
+
+const serverPreStages: Array<StageDefinition> = [
+  {
+    id: "before start",
+    label: "Before start",
+    state: ProcessState.BeforeStart,
+  },
+  {
+    id: "waiting for peer",
+    label: "Waiting for peer",
+    state: ProcessState.Waiting,
+  },
+];
+
+const clientPreStages: Array<StageDefinition> = [
+  {
+    id: "before start",
+    label: "Before start",
+    state: ProcessState.BeforeStart,
+  },
+];
+
+const doneStage: StageDefinition = {
+  id: "done",
+  label: "Done",
+  state: ProcessState.Done,
+};
+
+function buildInitialStages(role: "server" | "client"): Array<StageDefinition> {
+  const preStages = role === "server" ? serverPreStages : clientPreStages;
+  return [
+    ...preStages,
+    {
+      id: CONFIRMING_PROTOCOL_STAGE_ID,
+      label: "Confirming protocol",
+      state: ProcessState.Working,
+    },
+    doneStage,
+  ];
+}
+
 function Home() {
   const session = Route.useLoaderData();
   const role = useSearch({
@@ -84,67 +115,13 @@ function Home() {
     ? "server"
     : "client";
 
-  const stages =
-    role === "server"
-      ? [
-          ...[
-            {
-              id: "before start",
-              label: "Before start",
-              state: ProcessState.BeforeStart,
-            },
-            {
-              id: "waiting for peer",
-              label: "Waiting for peer",
-              state: ProcessState.Waiting,
-            },
-            {
-              id: "confirming protocol",
-              label: "Confirming protocol",
-              state: ProcessState.Working,
-            },
-            ...serverLinkageKeyDefinitions.map((_, i) => {
-              return {
-                id: `stage ${i + 1} / ${serverLinkageKeyDefinitions.length}`,
-                label: `Linking key ${i + 1} / ${serverLinkageKeyDefinitions.length}`,
-                state: ProcessState.Working,
-              };
-            }),
-            { id: "done", label: "Done", state: ProcessState.Done },
-          ],
-        ]
-      : [
-          ...[
-            {
-              id: "before start",
-              label: "Before start",
-              state: ProcessState.BeforeStart,
-            },
-            {
-              id: "confirming protocol",
-              label: "Confirming protocol",
-              state: ProcessState.Working,
-            },
-            ...clientLinkageKeyDefinitions.map((_, i) => {
-              return {
-                id: `stage ${i + 1} / ${clientLinkageKeyDefinitions.length}`,
-                label: `Linking key ${i + 1} / ${clientLinkageKeyDefinitions.length}`,
-                state: ProcessState.Working,
-              };
-            }),
-            { id: "done", label: "Done", state: ProcessState.Done },
-          ],
-        ];
-
-  const Status = StatusFactory(stages);
-  const stagesById = Object.fromEntries(
-    stages.map((value) => [value["id"], value]),
+  const [stages, setStages] = useState<Array<StageDefinition>>(() =>
+    buildInitialStages(role),
   );
 
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
-  const [stageId, setStageById] =
-    useState<(typeof stages)[number]["id"]>("before start");
+  const [stageId, setStageById] = useState<string>("before start");
   const [resultURL, setResultURL] = useState<string>();
 
   const handleSubmit = () => {
@@ -153,85 +130,50 @@ function Home() {
     if (role === "server") {
       setStageById("waiting for peer");
       waitForPeerId(session.uuid)
-        .then((peerId) => {
-          Promise.all([
+        .then(async (peerId) => {
+          const [psi, csvResult, [peer, conn]] = await Promise.all([
             PSI() as Promise<PSILibrary>,
-            getMetadataAndLinkageKeys(files[0], serverLinkageKeyDefinitions),
+            loadCSVFile(files[0]),
             openPeerConnection(peerId),
-          ]).then(async (values) => {
-            const [psi, { metadata, linkageKeys }, [peer, conn]] = values;
-            conn.once("data", () => peer.disconnect());
+          ]);
+          conn.once("data", () => peer.disconnect());
 
-            const localTerms: LinkageTerms = getDefaultLinkageTerms(
-              session.initiatedName,
-              metadata,
-            );
+          const rawRows = csvResult.data as Array<Record<string, string>>;
+          const prepared = prepareForExchange(
+            {}, // no explicit spec; infer from input
+            session.initiatedName,
+            rawRows,
+            csvResult.meta.fields ?? [],
+          );
+          setStages([
+            ...serverPreStages,
+            ...describeExchangeStages(prepared).map((s) => ({
+              ...s,
+              state: ProcessState.Working as const,
+            })),
+            doneStage,
+          ]);
 
-            const handshakeRole: HandshakeRole = "responder";
-            log.info("exchanging linkage terms");
-            const { partnerTerms, warnings } = await exchangeTerms(
-              conn,
-              handshakeRole,
-              localTerms,
-            );
-            for (const warning of warnings) log.warn(warning);
-            log.info("terms agreed, partner identity:", partnerTerms.identity);
+          const { associationTable } = await runExchange(
+            conn,
+            "responder",
+            prepared,
+            { psiLibrary: psi, onStage: setStageById },
+          );
+          conn.close();
+          log.info("linkage complete, generating results file");
 
-            log.info("resolving role");
-            /**
-             * Technically this isn't needed at the moment, but we go through
-             * the extra step to ensure that it works.
-             */
-            const resolvedRole = await resolveRole(
-              conn,
-              handshakeRole,
-              localTerms.output,
-              partnerTerms.output,
-              linkageKeys[0].length,
-            );
-            log.info("role will be:", role);
+          const result =
+            "our_row_id,their_row_id\n" +
+            associationTable[0]
+              .map((ours, i) => `${ours},${associationTable[1][i]}\n`)
+              .join("");
 
-            const psiConfig: PSIConfig = {
-              role: resolvedRole === "sender" ? "starter" : "joiner",
-            };
-            const participant = new PSIParticipant(
-              "server",
-              psi,
-              psiConfig,
-              (id: any) => {
-                if (stagesById.hasOwnProperty(id)) setStageById(id);
-              },
-            );
-
-            log.info(`${psiConfig.role}: identifying intersection`);
-            const associationTable = await linkViaPSI(
-              { cardinality: "one-to-one" },
-              participant,
-              conn,
-              linkageKeys,
-              1,
-              (id: any) => {
-                if (stagesById.hasOwnProperty(id)) setStageById(id);
-              },
-            );
-            conn.close();
-            log.info(
-              `${psiConfig.role}: linkage complete, generating results file`,
-            );
-
-            const result =
-              "our_row_id,their_row_id\n" +
-              associationTable[0]
-                .map((ours, i) => `${ours},${associationTable[1][i]}\n`)
-                .join("");
-
-            const fileData = new Blob([result], { type: "text/plain" });
-            const newResultURL = window.URL.createObjectURL(fileData);
-
-            if (resultURL !== undefined) window.URL.revokeObjectURL(resultURL);
-
-            setResultURL(newResultURL);
-          });
+          const fileData = new Blob([result], { type: "text/plain" });
+          const newResultURL = window.URL.createObjectURL(fileData);
+          if (resultURL !== undefined) window.URL.revokeObjectURL(resultURL);
+          setResultURL(newResultURL);
+          setStageById("done");
         })
         .catch((error) => {
           console.error(error);
@@ -239,86 +181,57 @@ function Home() {
     } else {
       // role is client
       setStageById("before start");
-      Promise.all([
-        PSI() as PSILibrary,
-        getMetadataAndLinkageKeys(files[0], clientLinkageKeyDefinitions),
-      ]).then(async (values) => {
-        const [psi, { metadata, linkageKeys }] = values;
-        const peer = await createAndSharePeerId(session);
+      Promise.all([PSI() as Promise<PSILibrary>, loadCSVFile(files[0])])
+        .then(async ([psi, csvResult]) => {
+          const rawRows = csvResult.data as Array<Record<string, string>>;
+          const prepared = prepareForExchange(
+            {}, // no explicit spec; infer from input
+            session.invitedName,
+            rawRows,
+            csvResult.meta.fields ?? [],
+          );
+          setStages([
+            ...clientPreStages,
+            ...describeExchangeStages(prepared).map((s) => ({
+              ...s,
+              state: ProcessState.Working as const,
+            })),
+            doneStage,
+          ]);
 
-        peer.on("connection", (conn) => {
-          conn.on("open", async () => {
-            conn.once("data", () => peer.disconnect());
+          const peer = await createAndSharePeerId(session);
 
-            const localTerms: LinkageTerms = getDefaultLinkageTerms(
-              session.initiatedName,
-              metadata,
-            );
+          peer.on("connection", (conn) => {
+            conn.on("open", async () => {
+              conn.once("data", () => peer.disconnect());
 
-            const handshakeRole: HandshakeRole = "initiator";
-            log.info("exchanging linkage terms");
-            const { partnerTerms, warnings } = await exchangeTerms(
-              conn,
-              handshakeRole,
-              localTerms,
-            );
-            for (const warning of warnings) log.warn(warning);
-            log.info("terms agreed, partner identity:", partnerTerms.identity);
+              const { associationTable } = await runExchange(
+                conn,
+                "initiator",
+                prepared,
+                { psiLibrary: psi, onStage: setStageById },
+              );
+              conn.close();
+              log.info("linkage complete, generating results file");
 
-            log.info("resolving role");
-            resolveRole;
-            const resolvedRole = await resolveRole(
-              conn,
-              handshakeRole,
-              localTerms.output,
-              partnerTerms.output,
-              linkageKeys[0].length,
-            );
-            log.info("role will be:", role);
+              const result =
+                "our_row_id,their_row_id\n" +
+                associationTable[0]
+                  .map((ours, i) => `${ours},${associationTable[1][i]}\n`)
+                  .join("");
 
-            const psiConfig: PSIConfig = {
-              role: resolvedRole === "sender" ? "starter" : "joiner",
-            };
-            const participant = new PSIParticipant(
-              "client",
-              psi,
-              psiConfig,
-              (id: any) => {
-                if (stagesById.hasOwnProperty(id)) setStageById(id);
-              },
-            );
-
-            log.info(`${psiConfig.role}: identifying intersection`);
-            const associationTable = await linkViaPSI(
-              { cardinality: "one-to-one" },
-              participant,
-              conn,
-              linkageKeys,
-              1,
-              (id: any) => {
-                if (stagesById.hasOwnProperty(id)) setStageById(id);
-              },
-            );
-            log.info(
-              `${psiConfig.role}: linkage complete, generating results file`,
-            );
-            conn.close();
-
-            const result =
-              "our_row_id,their_row_id\n" +
-              associationTable[0]
-                .map((ours, i) => `${ours},${associationTable[1][i]}\n`)
-                .join("");
-
-            const fileData = new Blob([result], { type: "text/plain" });
-            const newResultURL = window.URL.createObjectURL(fileData);
-
-            if (resultURL !== undefined) window.URL.revokeObjectURL(resultURL);
-
-            setResultURL(newResultURL);
+              const fileData = new Blob([result], { type: "text/plain" });
+              const newResultURL = window.URL.createObjectURL(fileData);
+              if (resultURL !== undefined)
+                window.URL.revokeObjectURL(resultURL);
+              setResultURL(newResultURL);
+              setStageById("done");
+            });
           });
+        })
+        .catch((error) => {
+          console.error(error);
         });
-      });
     }
   };
 
@@ -336,7 +249,7 @@ function Home() {
         <Group justify="space-between" align="stretch" grow>
           <SessionDetails session={session} />
           <Status
-            session={session}
+            stages={stages}
             stageId={stageId}
             resultsFileURL={resultURL}
           />
