@@ -50,7 +50,7 @@ In order to preserve the guarantee that no information is revealed about individ
 
 ### PSI
 
-The way in which links are decided depends on whether or not both parties will receive output. If so, then they can communicate directly with each other and optimize the procedure. For one-to-one mappings, linkage keys are applied in sequence forming a cascade of deterministic matches: keys are ordered from most to least precise, and at each round only records that match uniquely on that key are accepted as pairs and removed from the candidate set — the pool of records not yet definitively matched. Inputs without a match or without a unique linkage key carry forward to the next round. If only one party receives the output, then that party must send and receive all of both datasets every round in order to avoid leaking information about the number of matched elements. It must also keep track of the association map on its own in order to enforce a one-to-one mapping.
+The way in which links are decided depends on whether or not both parties will receive output. If so, then they can communicate directly with each other and optimize the procedure. For one-to-one mappings, linkage keys are applied in sequence forming a cascade of deterministic matches: keys are ordered from most to least precise, and at each round only records that match uniquely on that key are accepted as pairs and removed from the candidate set - the pool of records not yet definitively matched. Inputs without a match or without a unique linkage key carry forward to the next round. If only one party receives the output, then that party must send and receive all of both datasets every round in order to avoid leaking information about the number of matched elements. It must also keep track of the association map on its own in order to enforce a one-to-one mapping.
 
 In linkages that involve multiple links - either many-to-one or many-to-many - the multiplicity is resolved into single entity clusters by applying a transitive closure algorithm. Transitive closure may create scenarios where two members are linked through a third record without a rule linking them directly, so careful consideration of linkage keys and their consequences is required. Having an output that includes multiple links per input implies that some meaning is imparted to the data holder through entity resolution; as such, these exchanges require that the "many" parties receive the output. In order to communicate this effectively to users, rather than describe the multiplicity of the exchange they are asked if they want to *deduplicate* their data, as they effectively use their partner's data to group their own.
 
@@ -58,7 +58,7 @@ In a many-to-one exchange where both parties receive the output, the "many" part
 
 Crucially, unlike traditional PPRL, blocking when using PSI is neither necessary nor appropriate. The PSI base function's computational complexity is O(n log n) in the total number of elements rather than quadratic in their product, so there is no cross-product comparison to reduce. Blocking would also compromise the privacy guarantee by revealing to each party how many of the other's records fall into each partition.
 
-The practical upper limit on the number of records for browser-based execution is determined by available memory rather than computation: each encrypted element occupies roughly 64 bytes, so holding both parties' encrypted sets simultaneously for the comparison step requires on the order of 1–2 GB for datasets in the tens of millions of rows — well within the capacity of a modern workstation. The only part of the algorithm that requires WebAssembly is the application of the commutative encryption algorithm, which can be streamed and parallelized over the data.
+The practical upper limit on the number of records for browser-based execution is determined by available memory rather than computation: each encrypted element occupies roughly 64 bytes, so holding both parties' encrypted sets simultaneously for the comparison step requires on the order of 1-2 GB for datasets in the tens of millions of rows - well within the capacity of a modern workstation. The only part of the algorithm that requires WebAssembly is the application of the commutative encryption algorithm, which can be streamed and parallelized over the data.
 
 ### PSI-C
 
@@ -94,11 +94,11 @@ Specific communication options are detailed below. Within the exchange specifica
 
 ## Input metadata
 
-Parties can choose to supply metadata with their exchange specification that indicates the semantic type of each column, descriptions and usage notes, and column roles. A column's role (`linkage`, `identifier`, or `payload`) describes its primary purpose in the protocol. Separately, any column — regardless of role — can be marked as payload, meaning it is transmitted to the partner for matched members after the intersection is identified. Linkage and identifier columns can therefore serve dual purposes: a phone number column, for instance, can participate in PSI linkage and also be delivered as payload. Columns that are not used for linkage or identification must be payload columns. The description for payload columns is shared with partners as a data dictionary. If no metadata is supplied, it is inferred from column names. If not specified, payload data is not shared but identifiers are.
+Parties can choose to supply metadata with their exchange specification that indicates the semantic type of each column, descriptions and usage notes, and column roles. A column's role (`linkage`, `identifier`, or `payload`) describes its primary purpose in the protocol. Separately, any column - regardless of role - can be marked as payload, meaning it is transmitted to the partner for matched members after the intersection is identified. Linkage and identifier columns can therefore serve dual purposes: a phone number column, for instance, can participate in PSI linkage and also be delivered as payload. Columns that are not used for linkage or identification must be payload columns. The description for payload columns is shared with partners as a data dictionary. If no metadata is supplied, it is inferred from column names. If not specified, payload data is not shared but identifiers are.
 
 ## Data standardization
 
-Before any PSI protocol executes, each party must prepare their input data as required by linkage keys. Data cleaning and standardizing transformations can be included in an exchange specification in the form of compositions of functions applied to specific input fields, each producing a named output that corresponds to a linkage field defined in the exchange agreement. Normalizing dates to `YYYYMMDD` and SSNs to `XXXXXXXXX` are canonical examples of standardizing steps that must be completed before linkage key generation. In a more complicated example, one party might take their last name input field, strip titles and suffixes, remove punctuation, convert to upper-case, and replace placeholders like `NONE` with a null value, producing the standardized `last_name` linkage field. A standardization step may additionally produce multiple values from a single input — for example, splitting a hyphenated last name into its component parts. A library of common cleaning and standardizing functions is available and parties can always prepare their data if preferred. See [Datasets](#datasets) for more details on how the standardized data is used in the linkage protocol.
+Before any PSI protocol executes, each party must prepare their input data as required by linkage keys. Data cleaning and standardizing transformations can be included in an exchange specification in the form of compositions of functions applied to specific input fields, each producing a named output that corresponds to a linkage field defined in the exchange agreement. Normalizing dates to `YYYYMMDD` and SSNs to `XXXXXXXXX` are canonical examples of standardizing steps that must be completed before linkage key generation. In a more complicated example, one party might take their last name input field, strip titles and suffixes, remove punctuation, convert to upper-case, and replace placeholders like `NONE` with a null value, producing the standardized `last_name` linkage field. A standardization step may additionally produce multiple values from a single input - for example, splitting a hyphenated last name into its component parts. A library of common cleaning and standardizing functions is available and parties can always prepare their data if preferred. See [Datasets](#datasets) for more details on how the standardized data is used in the linkage protocol.
 
 # Datasets
 
@@ -133,19 +133,38 @@ Additional channels will be selected based on infrastructure and deployment conv
 
 ## Authentication
 
-Before establishing connections, parties need to ensure that they are communicating with the correct partner. They can either share a secret that will be used to further encrypt their data, or they can "meet in a trusted spot".
+Before establishing connections, parties need to ensure that they are communicating with the correct partner. Config-based exchanges (`psilink invite` / `psilink accept` / recurring; see [User journey](#user-journey)) use a pre-shared secret and PAKE for application-layer authentication. Zero-setup exchanges (`psilink URL`) rely instead on transport-layer authentication and are described below as "meeting in a trusted spot".
+
+### Config-based authentication
 
 In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a Password Authenticated Key Exchange (PAKE) protocol, such as SPAKE2 with the shared token as the password input.
 
-The shared secret is automatically rotated after each successful exchange. The replacement secret is generated locally and transmitted to both parties over the established authenticated channel as part of the receipt step, taking effect only after the receipt has been confirmed by both parties. If the exchange fails before receipt confirmation, the existing secret remains valid and the next exchange can proceed normally. If a secret is lost after rotation, a new invitation can be generated from the existing configuration directory to re-establish a shared secret (see [Invitations](#invitations)).
+The shared secret is automatically rotated after each successful exchange. The replacement secret is generated locally and transmitted to both parties over the established authenticated channel as part of the receipt step, taking effect only after the receipt has been confirmed by both parties. If the exchange fails before receipt confirmation, the existing secret remains valid and the next exchange can proceed normally. If a secret is lost after rotation, a new invitation can be generated from the existing configuration to re-establish a shared secret (see [Recovery](#recovery)).
 
 Tokens generated for invitations carry a bounded lifetime. A default expiration window of 1 hour is used if none is provided by the inviting party. Because the invitation token is rotated on first use, it functions as a one-time setup credential: its window of validity is the period between generation and acceptance. Replacement tokens generated by rotation carry no expiration by default, making them suitable for recurring scheduled exchanges without further coordination.
 
-"Meeting in a trusted spot" really refers to already having a trusted form of communication which both parties want to reuse for the exchange. For an SFTP connection, user and path management on the server-side can ensure that no one else is able to listen in. This offloads trust to the SFTP server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall. Upon connecting with each other, parties create a shared secret and shift to an end-to-end encrypted channel. If they conduct a successful exchange, they rotate to a new shared secret in the standard way.
+### Transport-layer authentication
 
-## Channel Security
+"Meeting in a trusted spot" really refers to already having a trusted form of communication which both parties want to reuse for the exchange. For an SFTP connection, user and path management on the server-side can ensure that no one else is able to listen in. This offloads trust to the SFTP server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall.
 
-WebRTC connections use a DTLS layer and provide an encrypted end-to-end communication channel. Connections made over SFTP assume an honest-but-curious server administrator and use an Authenticated Encryption with Associated Data (AEAD) ciphers to encrypt messages using HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive an encryption key from the PAKE session key. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
+Transport-layer authentication is only applicable to [zero-setup exchanges](#zero-setup-exchange). Users who wish to establish a persistent shared secret are encouraged to bootstrap one (see [Bootstrapping a shared secret](#bootstrapping-a-shared-secret)).
+
+### Bootstrapping a shared secret
+
+Parties wishing to transition from a zero-setup exchange to a config-based relationship may pass `--save` to the zero-setup invocation (see [Zero-setup exchange](#zero-setup-exchange)). Because this intent affects key generation, each party advertises it to the other at the start of the exchange.
+
+| Party A | Party B | Outcome |
+|---|---|---|
+| `--save` | `--save` | Initiator generates a fresh shared secret and transmits it to both; both save it as the basis for future config-based exchanges. |
+| `--save` | *(none)* | No secret generated. A's configuration is saved; A is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a config-based relationship. |
+| *(none)* | `--save` | No secret generated. B's configuration is saved; B is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a config-based relationship. |
+| *(none)* | *(none)* | Standard zero-setup exchange; no configuration is saved. |
+
+The party that did not signal `--save` is notified that their partner is trying to establish a recurring exchange, that nothing is being saved on their end, and that they can either wait for a `psilink invite` from their partner or coordinate to run the exchange again with `--save`.
+
+## Channel security
+
+Zero-setup exchanges rely on transport-layer security only: WebRTC connections use DTLS, and SFTP exchanges rely on SSH transport encryption and assume an honest-but-curious server administrator. Config-based SFTP exchanges additionally provide application-layer encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
 
 ## Synchronization
 
@@ -153,9 +172,9 @@ The protocol requires both parties to execute it at the same time. For a new exc
 
 For WebRTC, this is solved by a single-threaded peer-coordination service which ensures only one party can be "first". For SFTP, an implementation has been written that utilizes the uniqueness of file handles and catching server errors to handle rare race conditions.
 
-When using a public coordination server, WebRTC additionally requires both parties to know each other's peer IDs before a connection can be established. These IDs are derived from the shared cryptographic token: each party holds a role of either invitor or acceptor, and each independently computes both IDs from the token and their role. This makes peer discovery self-contained and requires no out-of-band address exchange. The invitor and acceptor roles, the PSI protocol's sender and receiver roles, and the initiator and responder roles from the linkage terms handshake (see [Linkage terms](#linkage-terms)) are all independent of one another and each operate in a distinct phase of the exchange. For a private peer coordination server, directory listings can be used.
+When using a public coordination server, WebRTC additionally requires both parties to know each other's peer IDs before a connection can be established. These IDs are derived from the shared cryptographic token: each party holds a role of either inviter or acceptor, and each independently computes both IDs from the token and their role. This makes peer discovery self-contained and requires no out-of-band address exchange. The inviter and acceptor roles, the PSI protocol's sender and receiver roles, and the initiator and responder roles from the linkage terms handshake (see [Linkage terms](#linkage-terms)) are all independent of one another and each operate in a distinct phase of the exchange. For a private peer coordination server, directory listings can be used.
 
-## Error Handling
+## Error handling
 
 In the case of communication channel errors, messages that fail to transmit are retried. Dropped connections are attempted to be reopened up to a user-specified limit. As the communication channels in use guarantee message correctness, any message that fails to validate indicates a deviation from the protocol and results in program termination.
 
@@ -165,7 +184,7 @@ The communication channels described above each depend on supporting infrastruct
 
 **Lifecycle provisioning**: the service has a fixed, permanent address but is started on demand before each exchange and stopped afterward. Both parties know the address statically and may independently trigger startup. This is the preferred model for most supporting services and maps well to serverless compute platforms.
 
-**Address-returning provisioning**: a fresh resource is allocated for each exchange and its address is not known in advance. This is inherently asymmetric — the inviting party allocates the resource during the invitation flow, and the resulting address is communicated to the other party as part of the invitation. By the time either party runs the CLI, both have the static address in their configuration.
+**Address-returning provisioning**: a fresh resource is allocated for each exchange and its address is not known in advance. This is inherently asymmetric - the inviting party allocates the resource during the invitation flow, and the resulting address is communicated to the other party as part of the invitation. By the time either party runs the CLI, both have the static address in their configuration.
 
 Some services support **symmetric provisioning**: both parties call the same provisioning endpoint independently at the start of each exchange and receive their own credentials without needing to coordinate the result with each other. ICE credential services operate this way.
 
@@ -175,7 +194,7 @@ Public fallback instances of each supporting service are provided. When a party 
 
 For parties behind Network Address Translation (NAT) or corporate firewalls, an Internet Connectivity Establishment (ICE) protocol assists in establishing peer-to-peer WebRTC connections. STUN servers help each party discover their public address; TURN servers relay traffic when no direct path can be found.
 
-STUN and TURN servers can be configured statically or their credentials can be obtained on demand from an ICE credential API. Commercial services such as Twilio Network Traversal Service return time-limited credentials at the start of each exchange. Both parties call the same endpoint independently — this is a symmetric provisioning operation requiring no coordination.
+STUN and TURN servers can be configured statically or their credentials can be obtained on demand from an ICE credential API. Commercial services such as Twilio Network Traversal Service return time-limited credentials at the start of each exchange. Both parties call the same endpoint independently - this is a symmetric provisioning operation requiring no coordination.
 
 ### WebSocket-to-TCP proxy
 
@@ -187,7 +206,7 @@ This proxy is a property of the client's runtime environment rather than the ser
 
 Establishing a WebRTC connection requires a signaling step in which both parties exchange session descriptions and ICE candidates before a direct channel can be opened. The project uses PeerJS for this: each party registers with a PeerJS-compatible server under a token-derived peer ID and then locates their partner using the complementary ID. PeerJS also provides the data channel implementation used for chunked data transfer over the established connection; signaling and data transport are therefore not independently separable in the current design.
 
-The peer coordination server is well-suited to lifecycle provisioning. It is only needed during the brief signaling phase before the WebRTC data channel is established, after which the two peers communicate directly. Hosting it as a serverless WebSocket function — for example on AWS Lambda with API Gateway or Cloudflare Workers — allows it to cold-start on demand and go idle between exchanges with no standing cost.
+The peer coordination server is well-suited to lifecycle provisioning. It is only needed during the brief signaling phase before the WebRTC data channel is established, after which the two peers communicate directly. Hosting it as a serverless WebSocket function - for example on AWS Lambda with API Gateway or Cloudflare Workers - allows it to cold-start on demand and go idle between exchanges with no standing cost.
 
 ### SFTP
 
@@ -197,7 +216,7 @@ A lightweight SFTP server may be operated as a drop zone for exchanges between p
 
 ## Non-repudiation
 
-At the conclusion of a successful exchange but before the association map is shared, both parties sign a receipt recording the timestamp, a hash of the exchange agreement, the identities of both parties, and the size of the result if that information was learned by both parties. They then exchange these signatures. Each party retains the other's signature as cryptographic evidence that the exchange occurred. Each party can sign the exchange receipt using either a session-derived key — sufficient for the parties' own records but not independently verifiable by outsiders — or a certificate-authority-backed private key, which allows auditors or legal bodies to verify the signatures without any prior knowledge of the exchange.
+At the conclusion of a successful exchange but before the association map is shared, both parties sign a receipt recording the timestamp, a hash of the exchange agreement, the identities of both parties, and the size of the result if that information was learned by both parties. They then exchange these signatures. Each party retains the other's signature as cryptographic evidence that the exchange occurred. Each party can sign the exchange receipt using either a session-derived key - sufficient for the parties' own records but not independently verifiable by outsiders - or a certificate-authority-backed private key, which allows auditors or legal bodies to verify the signatures without any prior knowledge of the exchange.
 
 Catastrophic failure to exchange receipts results in termination of the program and the exchange must be restarted. As above, dropped connections are retried and undelivered messages are attempted again.
 
@@ -237,51 +256,108 @@ The web application includes a feature to invite parties to conduct exchanges. U
 
 A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save the *output*. As indicated above, linkage terms, connection details, metadata, and data cleaning transformations form further exchange parameters.
 
-For the rest of this section we describe use cases as in the command line application. In this context, the user's intent to *accept* or *exchange* can be inferred from how the application is invoked, and thus they both use the generic `exchange` command. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
+For the rest of this section we describe use cases as in the command line application. The application provides four explicit subcommands - `init`, `invite`, `accept`, and `exchange` - alongside a zero-setup mode in which both parties run the same command against a shared server URL without specifying a subcommand. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
 
-A typical first exchange begins with one party generating an invitation and securely transmitting it to their partner. The partner accepts, which immediately conducts the exchange. Subsequent exchanges between the same parties use the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated.
+A typical config-based first exchange begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides; both applications then exit. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. Where both parties are simultaneously available and wish to exchange in one step, `psilink invite --exchange` combines the setup and exchange.
+
+| Intent | Invocation |
+|---|---|
+| Zero-setup exchange (both parties) | `psilink URL input.csv` |
+| Generate a config file for editing | `psilink init [input.csv]` |
+| Start a config-based relationship | `psilink invite URL input.csv`, then share the invitation string |
+| ...and exchange immediately | `psilink invite --exchange URL input.csv` |
+| Accept a partner's invitation | `psilink accept INVITATION` |
+| Recurring exchange | `psilink exchange input.csv` |
+| Zero-setup exchange, establish recurring relationship (both parties) | `psilink --save URL input.csv` |
+| Re-establish after lost secret | `psilink invite URL input.csv` with an existing config; user deletes `.psilink.key` or sets `--key-file` |
+
+If only one party uses `--save`, no shared secret is established; see [Bootstrapping a shared secret](#bootstrapping-a-shared-secret) for the full set of outcomes.
 
 ## Configuration
 
-Exchange configuration is stored in a directory designated by `--config-dir`, which defaults to `.psilink` in the current working directory. The directory holds two files: `config.yaml`, which records the exchange parameters, and `secret.key`, which is the shared secret used for authentication. When this directory is first created, the application prints a notice identifying both files and warning that the secret key should be treated as private.
+Exchange configuration is stored in two files in the working directory: `psilink.yaml`, which records the exchange parameters, and `.psilink.key`, which holds the shared secret used for authentication. The `--config-file` command line argument points to the yaml file and defaults to `./psilink.yaml`; the `--key-file` argument points to the key file and defaults to `.psilink.key`. When these files are first created, the application prints a notice identifying both and gives a warning that the key file should be treated as private. For Docker deployments, agencies are expected to mount one directory per exchange partner, so the working directory itself provides isolation and no subdirectory is needed.
 
-Command line arguments take precedence over values in `config.yaml`, allowing scripted workflows to override specific parameters without modifying the stored configuration. Any argument value prefixed with `@` is read from the file at the given path rather than taken literally — for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk rather than embedding it in the command or configuration file. This convention applies both on the command line and inside `config.yaml`, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history.
+`psilink.yaml` is not intended to contain secrets and is safe to commit to version control. The PAKE token and its expiration are stored in `.psilink.key` instead; they never appear in `psilink.yaml` and are not user-editable because the application rotates them automatically. `.psilink.key` is intentionally named with a leading dot so that it is hidden from default directory listings and less likely to be accidentally copied or included in an archive; it should be added to `.gitignore`. All other credential fields use the `@path` convention described below.
 
-## Invitations
+Command line arguments take precedence over values in `psilink.yaml`, allowing scripted workflows to override specific parameters without modifying the stored configuration. Credential and opaque string fields support `@`-file references: a value beginning with `@` is read from the file at the given path rather than used literally - for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk. This convention applies both on the command line and in `psilink.yaml`, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
+
+## Initialization
 
 ```sh
-psilink invite URL INPUT_FILE [OUTPUT_FILE]
+psilink init [INPUT_FILE]
 ```
 
-This generates a shareable invitation string that can be sent to a partner by a secure channel. Default values are used for the linkage terms and connection parameters, while metadata and cleaning transformations are inferred from the input file. The shareable string encodes connection information, linkage terms, and a shared secret as a base64 JSON string, and can be supplied directly to `psilink exchange`.
+This creates `psilink.yaml` in the working directory and then exits - no exchange or invitation is generated. `psilink.yaml` is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. If the file already exists, the user is prompted before overwriting. The `--config-file` flag specifies where to create the configuration file.
 
-If `--set-config` is given, the user is interactively walked through setting exchange parameters before the invitation string is generated. Once generated, the application connects to the server and waits for the other party to respond; it exits when the token expires, when the connection times out, or when the user cancels. In all three cases the token is invalidated and removed from the configuration directory, preventing a stale invitation from being accepted later.
+## Zero-setup exchange
+
+```sh
+psilink [--save] URL INPUT_FILE [OUTPUT_FILE]
+```
+
+Both parties run this command against the same server URL. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer - SSH credentials for SFTP, DTLS for WebRTC - rather than a PAKE-derived shared secret.
+
+For SFTP, since no configuration file is available, SSH credentials must be supplied in the URL or as command-line arguments. Embedding credentials in the URL is not recommended as URLs may appear in shell history and process listings. When used, a warning is issued and users are instructed to use the `@path` convention instead - see [Configuration](#configuration).
+
+Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
+
+If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a configuration-based relationship. `--save` usage can be discussed during onboarding.
+
+If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](#bootstrapping-a-shared-secret). The `--config-file` and `--key-file` flags can specify non-default paths for the saved configuration and key file respectively.
+
+## Invitation
+
+```sh
+psilink invite [--exchange] [--accept-timeout=N] URL INPUT_FILE [OUTPUT_FILE]
+```
+
+This generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it for the user to forward to their partner by a secure channel. The application connects to the server and waits for the partner to respond. It exits when the token expires, when the connection times out, when the user cancels, or when the `--accept-timeout` (default 10 minutes) is reached; in all four cases the token is revoked or has expired, preventing a stale invitation from being accepted later. Accept-timeout is the maximum time the inviter will wait for the entire acceptance handshake to complete - from the moment the invitation is printed to the moment an acceptance message is received. Connection timeouts govern how long the application waits for individual protocol messages to arrive over the network and vary by channel.
+
+On acceptance, a fresh shared secret is generated and exchanged, configuration and key are saved on both sides (where applicable), and both applications exit. The user is notified that this was a setup step and instructed to run `psilink exchange` when ready.
+
+If a `psilink.yaml` file exists, such as one generated by `psilink init`, it will be used to set the exchange details. Whether or not the partner accepts the invitation, the pre-existing configuration file persists. If a configuration file does not exist, default values are used for connection parameters and linkage keys, metadata, and cleaning transformations are inferred from the input file. If the partner accepts the invitation then this default configuration is saved as `psilink.yaml`; otherwise it is discarded because the partner did not accept.
+
+If the `--exchange` flag is specified, the inviter signals readiness to exchange immediately. The inviter must wait while the acceptor makes their decision. If the acceptor also chooses to proceed, the exchange is conducted before both exit. If the acceptor instead saves-and-quits (see [Acceptance](#acceptance)), they communicate their choice to the inviter and both parties exit without exchanging, saving their copies of the persistent secret. Each party is instructed to run `psilink exchange` when ready.
+
+The `--config-file` flag can point to an existing configuration file to use as a base; `--key-file` can point to an existing key file. If `--key-file` is not used and a `.psilink.key` file exists, the user is warned about its existence and told to either delete it or specify a different key file in case reusing that secret was not their intention.
+
+### Invitation strings
+
+Invitation strings are base64url encoded, unpadded representations of the information necessary to conduct an exchange. In particular they contain:
+- Connection information
+- Linkage terms
+- Invitation authentication token (short-lived; rotated to a persistent secret on acceptance)
+- A 4-byte hash of the above, used to check for transcription errors
+
+Invitation strings beginning with `-` may be misinterpreted as option flags by argument parsers. All positional arguments and unrecognized flags are validated against the invitation string schema, so the string is identified unambiguously regardless of its position or leading character.
 
 ## Acceptance
 
 ```sh
-psilink exchange INVITATION_STRING INPUT_FILE [OUTPUT_FILE]
+psilink accept INVITATION [INPUT_FILE]
 ```
 
-This decodes the invitation string, connects to the server specified in its parameters, and immediately conducts the exchange. If `--set-config` is specified, the user is interactively walked through modifying the configuration before connecting, with defaults drawn from the invitation and their data file.
+The `INVITATION` argument is either a base64url string or an `@path` reference to a file containing one. This decodes the invitation string and displays top-level information, including the identity of the inviting party, the PSI algorithm, which parties will receive data, and the linkage keys that will be used. The user can abort or accept. Accepting saves the configuration and the newly-generated persistent keys on both sides and both applications exit; users are notified that this was a configuration and key exchange only and are instructed to run `psilink exchange` to conduct the data exchange. This two-step design is intentional: the config-based path is meant to be methodical, giving each party time to review the saved configuration and prepare their data independently before the exchange begins. If `INPUT_FILE` is provided, it is used to infer the acceptor's column metadata and data standardizing transformations, which are merged with the invitation's linkage terms and saved into `psilink.yaml`.
 
-## Exchange
+If a configuration file already exists, it is compared against the connection information and linkage terms to see if there are any disagreements. If so, the acceptance fails without being rejected and without notifying the inviter. The user is shown which values differ and instructed to delete the file or use the `--config-file` option (see below) if they want to proceed. After this, the program exits. After addressing the conflict, the user can run `psilink accept` with the same invitation string to try again. The presence of a pre-existing `.psilink.key` file produces a similar error state. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
 
-The `exchange` subcommand supports automated, recurring exchanges as well as an "it just works" mode that can be used to establish recurring exchanges when two people are in direct communication. The two are selected based on the existence of a configuration directory and the ability to interpret the first positional argument as a URL or invitation string, or as a file.
+If the inviter used the `--exchange` option (see [Invitation](#invitation)), the acceptor is offered the additional choice to proceed immediately with an exchange or to save the configuration and key but quit for the moment. If they choose to proceed, the output path is requested at the prompt before the exchange begins. The save-and-quit option is for acceptors who agree to the linkage terms but need to prepare first - for example, to add their own data standardizing transformations or adjust other local configuration in `psilink.yaml`. If they choose to save-and-quit, this is communicated back to the inviter whose program will indicate that their partner needs time to prepare and that they can run `psilink exchange` in the future; their application will then exit. The key is saved so the shared secret is not lost; when ready, the acceptor also runs `psilink exchange`.
+
+The `--config-file` and `--key-file` flags can specify non-default paths for the saved configuration and key file respectively, which is useful when managing multiple exchange partners.
+
+## Recurring exchange
 
 ```sh
-psilink exchange [URL] INPUT_FILE [OUTPUT_FILE]
+psilink exchange INPUT_FILE [OUTPUT_FILE]
 ```
 
-- If the configuration directory does not exist, the first positional argument must be a URL or invitation string. At the end of the exchange, the user will be notified that a configuration directory was created and they will be instructed to invoke the command without a URL in the future.
-- If the configuration directory does exist and less than three positional arguments are given, the first positional argument will be checked to see if it is a file; if so it will be interpretted as the input and, if present, the second positional argument will be the output. Otherwise, it will be attempted to be interpretted as a URL. If a host is already specified in the exchange spec, it will override.
-- If the configuration directory does exist and three positional arguments are given, they will be interpretted as a URL, input file, and output file respectively.
+The application loads configuration from `psilink.yaml` and conducts the exchange without further coordination. The `--config-file` and `--key-file` flags can point to different configuration and key files respectively. The shared secret is rotated after each successful exchange.
 
 ## Recovery
 
-If `--config-dir` points to a directory that already contains a configuration when running `invite`, the user is prompted whether to reuse the existing exchange parameters with a newly generated secret or to start from defaults. This is the standard path when a shared secret must be re-established after a failed rotation.
+In case the shared secrets ever get out-of-sync - for example if one party crashes between key rotation and writing - the recovery path is for both parties to delete their existing secret files. Because there is no way to determine which party holds the newer secret, both must reset regardless of which side failed; reusing an older key may also violate key rotation policies. One party should then generate a new invitation using `psilink invite` which the other should accept.
 
-If files already exist in the target config directory when running `exchange` with an invitation string, the user is prompted before any are overwritten, shown which values differ, and given instructions on how to specify a different directory with `--config-dir`. An interactive merging feature may be added in the future.
+To recognize failed rotations, the error messages for exchanges that fail PAKE authentication include recovery instructions.
 
 # Possible extensions
 
