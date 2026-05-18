@@ -17,14 +17,12 @@ import wsAdapter from "crossws/adapters/node";
 
 import logLibrary from "loglevel";
 
+import { getLogger } from "@psilink/core";
+
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
 
 import type { AddressInfo } from "node:net";
-
-const { getLogger } = logLibrary;
-
-const log = getLogger("server-entry");
 
 const configManager = new ConfigManager();
 const config = await configManager.load();
@@ -32,7 +30,9 @@ const config = await configManager.load();
 const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
 
-log.setLevel(config.LOG_LEVEL);
+logLibrary.setDefaultLevel(config.LOG_LEVEL);
+
+const log = getLogger("server-entry");
 
 const nitroApp = useNitroApp();
 

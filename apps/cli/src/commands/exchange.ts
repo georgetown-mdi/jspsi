@@ -205,7 +205,7 @@ function loadOrCreateConfigAndApplyOverrides(
   server: URL | undefined,
   options: ExchangeOptions,
 ): { connection: ConnectionConfig } & ExchangeDataSpec {
-  const log = logLibrary.getLogger("exchange");
+  const log = getLogger("exchange");
 
   const configPath = path.join(options.configDir, "config.yaml");
 
@@ -271,7 +271,7 @@ async function prepareDataset(
   identity: string,
   input: string,
 ): Promise<PreparedExchange> {
-  const log = logLibrary.getLogger("exchange");
+  const log = getLogger("exchange");
 
   if (!fs.existsSync(input)) {
     log.error(`${input} does not exist`);
@@ -300,7 +300,7 @@ async function runProtocol(
   verbosity: number,
 ): Promise<void> {
   const sftpConfig = connection as SFTPConnectionConfig;
-  const log = logLibrary.getLogger("exchange");
+  const log = getLogger("exchange");
 
   const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
     verbose: verbosity,

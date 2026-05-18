@@ -1,12 +1,11 @@
-import logLibrary from "loglevel";
-
 import Peer from "peerjs";
+
+import { getLogger } from "@psilink/core";
 
 import { ConfigManager } from "@utils/clientConfig";
 
 import type { LinkSession } from "@utils/sessions";
 
-const { getLogger } = logLibrary;
 const log = getLogger("client");
 
 const configManager = new ConfigManager();

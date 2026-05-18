@@ -1,12 +1,11 @@
-import logLibrary from "loglevel";
-
 import Peer from "peerjs";
+
+import { getLogger } from "@psilink/core";
 
 import { ConfigManager } from "@utils/clientConfig";
 
 import type { DataConnection } from "peerjs";
 
-const { getLogger } = logLibrary;
 const log = getLogger("server");
 
 const configManager = new ConfigManager();
