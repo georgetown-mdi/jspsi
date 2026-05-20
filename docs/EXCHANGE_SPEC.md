@@ -4,6 +4,15 @@ title: "Exchange Specification Reference"
 
 # Exchange specification reference
 
+This document is the complete field-level reference for PSI-Link exchange
+specifications. It covers all fields in the four components - linkage terms,
+connection, metadata, and data standardization - including types, valid values,
+consistency rules, and examples. It does not cover how the PSI protocol uses
+these parameters (see [PROTOCOL.md](PROTOCOL.md)), the threat model or
+authentication design (see [SECURITY.md](SECURITY.md)), or the CLI commands
+that consume this file (see [CLI.md](CLI.md)). Intended for anyone configuring
+an exchange.
+
 Exchange specifications are JSON or YAML documents that fully describe a
 PSI-Link exchange between two parties. They are consumed by both the web
 application and the CLI application. The web application provides an interactive
@@ -360,9 +369,9 @@ material.
 *Type:* enum: `webrtc` | `sftp`  
 *Required:* yes
 
-The communication channel for the exchange. See [DESIGN.md](DESIGN.md)
-and [DEPLOYMENT.md](DEPLOYMENT.md) (NOTE: doc TBD) for infrastructure
-requirements for each channel.
+The communication channel for the exchange. See [COMMUNICATION.md](COMMUNICATION.md)
+and [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure requirements for each
+channel.
 
 ### `connection.server`
 
@@ -865,3 +874,11 @@ the field becomes `null` and `coalesce` may recover it.
 
 TODO: A complete, annotated exchange specification document in YAML and JSON
 covering all components and the most common configurations.
+
+## See also
+
+- [DESIGN.md](DESIGN.md) - overview of exchange specification purpose and its four components
+- [PROTOCOL.md](PROTOCOL.md) - how linkage terms parameterize the PSI protocol
+- [COMMUNICATION.md](COMMUNICATION.md) - how `connection` fields map to channel infrastructure
+- [DEPLOYMENT.md](DEPLOYMENT.md) - operating the supporting services referenced in `connection` fields
+- [CLI.md](CLI.md) - CLI commands and configuration files that consume this specification
