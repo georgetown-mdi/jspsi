@@ -17,7 +17,7 @@ The system is designed to be utilized by partner agencies with signed data shari
 
 For each successive use of the base PSI function, information is revealed to each party. For PSI, this includes the key that links individual members. For PSI-C, the cardinality of that key can be learned. This implies that linkage keys could be chosen to reveal sensitive information through a differencing attack in order to reveal membership, so it is crucial that both parties review the linkage keys before agreeing to use them.
 
-A malicious adversary cannot learn anything beyond what the PSI protocol reveals, but they can attempt a membership attack using specific inputs. For instance, if a statistical linkage key included only social security numbers, it would be easy to brute-force. To protect against this, it is recommended that keys combine multiple elements of personally identifiable information (PII). Even with complex linkage keys, membership attacks are still possible but only if a target's PII is already known.
+A malicious adversary cannot learn anything beyond what the PSI protocol reveals, but they can attempt a membership attack using specific inputs. For instance, if a statistical linkage key included only social security numbers, it would be easy to brute-force. To protect against this, it is recommended that keys combine multiple elements of personally identifiable information (PII). Even with complex linkage keys, membership attacks are still possible, but only if a target's PII is already known.
 
 Separately from adversarial attacks, note that the PSI base function used inherently leaks the size of each parties' sets. This is considered acceptable for the use-case of linking administrative data, as it is individual membership and identifying information that is considered sensitive and not the size of the database. 
 
@@ -25,11 +25,11 @@ When using public services to facilitate scheduled exchanges, some metadata arou
 
 # Authentication
 
-Before establishing connections, parties need to ensure that they are communicating with the correct partner. Config-based exchanges (`psilink invite` / `psilink accept` / recurring; see [User journey](DESIGN.md#user-journey)) use a pre-shared secret and PAKE for application-layer authentication. Zero-setup exchanges (`psilink URL`) rely instead on transport-layer authentication and are described below as "meeting in a trusted spot".
+Before establishing connections, parties need to ensure that they are communicating with the correct partner. Recurring exchanges (see [User journey](DESIGN.md#user-journey)) use a pre-shared secret and a Password Authenticated Key Exchange (PAKE) for application-layer authentication. Zero-setup exchanges rely instead on transport-layer authentication and are described below as "meeting in a trusted spot".
 
-## Config-based authentication
+## Recurring exchange authentication
 
-In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a Password Authenticated Key Exchange (PAKE) protocol, such as SPAKE2 with the shared token as the password input. We call the execution of an exchange under a config-based, authenticated relationship a *recurring* exchange.
+In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a PAKE protocol, such as SPAKE2 with the shared token as the password input.
 
 The shared secret is automatically rotated after each successful exchange. The replacement secret is generated locally and transmitted to both parties over the established authenticated channel as part of the receipt step, taking effect only after the receipt has been confirmed by both parties. If the exchange fails before receipt confirmation, the existing secret remains valid and the next exchange can proceed normally. If a secret is lost after rotation, a new invitation can be generated from the existing configuration to re-establish a shared secret (see [Recovery](CLI.md#recovery)).
 
@@ -37,22 +37,21 @@ Tokens generated for invitations carry a bounded lifetime. A default expiration 
 
 ## Transport-layer authentication
 
-"Meeting in a trusted spot" really refers to already having a trusted form of communication which both parties want to reuse for the exchange. For an SFTP connection, user and path management on the server-side can ensure that no one else is able to listen in. This offloads trust to the SFTP server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall.
+"Meeting in a trusted spot" refers to already having a trusted form of communication which both parties want to reuse for the exchange. For an SFTP connection, user and path management on the server-side limit who is able to listen in. This offloads trust to the SFTP server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall.
 
 Transport-layer authentication is only applicable to [zero-setup exchanges](CLI.md#zero-setup-exchange). Users who wish to establish a persistent shared secret are encouraged to bootstrap one (see [Bootstrapping a shared secret](#bootstrapping-a-shared-secret)).
 
 ## Bootstrapping a shared secret
 
-Parties wishing to transition from a zero-setup exchange to a recurring exchange may pass `--save` to the zero-setup invocation (see [Zero-setup exchange](CLI.md#zero-setup-exchange)). Because this intent affects key generation, each party advertises it to the other at the start of the exchange.
+Parties wishing to transition from a zero-setup exchange to a recurring exchange may save the parameters from the zero-setup invocation (see [Zero-setup exchange](CLI.md#zero-setup-exchange)). Because this intent affects key generation, each party advertises it to the other at the start of the exchange.
 
 | Party A | Party B | Outcome |
 |---|---|---|
-| `--save` | `--save` | Initiator generates a fresh shared secret and transmits it to both; both save it as the basis for future recurring exchanges. |
-| `--save` | *(none)* | No secret generated. A's configuration is saved; A is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a recurring exchange. |
-| *(none)* | `--save` | No secret generated. B's configuration is saved; B is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a recurring exchange. |
-| *(none)* | *(none)* | Standard zero-setup exchange; no configuration is saved. |
+| *save* | *save* | Initiator generates a fresh shared secret and transmits it to both; both save it as the basis for future recurring exchanges. Both also save their configuration files. |
+| *save* | *none* | No secret generated. A's configuration is saved; A is notified that their partner did not also choose to save and instructed to invite B to establish a recurring exchange. |
+| *none* | *none* | Standard zero-setup exchange; no configuration is saved. |
 
-The party that did not signal `--save` is notified that their partner is trying to establish a recurring exchange, that nothing is being saved on their end, and that they can either wait for a `psilink invite` from their partner or coordinate to run the exchange again with `--save`.
+The party that did not signal an intent to save the exchange parameters is notified that their partner is trying to establish a recurring exchange, that nothing is being saved on their end, and that they can either wait for an invitation from their partner or coordinate to run the exchange again and save the parameters.
 
 # Channel security
 
