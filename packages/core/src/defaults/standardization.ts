@@ -1,8 +1,11 @@
-import type { Standardization, StandardizationStep } from "../config/standardization.js";
+import type {
+  Standardization,
+  StandardizationStep,
+} from "../config/standardization.js";
 import type { ColumnMetadata } from "../config/metadata.js";
 import type { LinkageTerms } from "../config/linkageTerms.js";
 
-// ─── Step arrays ──────────────────────────────────────────────────────────────
+// --- Step arrays -------------------------------------------------------------
 
 // Explicitly allow invalid SSNs for now.
 const SSN_STEPS: StandardizationStep[] = [
@@ -11,9 +14,14 @@ const SSN_STEPS: StandardizationStep[] = [
   { function: "remove_dashes" },
   // Remove any remaining non-digit characters (spaces, dots, parens).
   { function: "replace_regex", params: { pattern: "[^0-9]", replacement: "" } },
+  // Zero-pad to 9 digits for SSNs stored without a leading zero.
+  { function: "pad_left", params: { length: 9 } },
   // Reject anything that isn't exactly 9 digits.
   { function: "filter_regex", params: { pattern: "^\\d{9}$" } },
-  { function: "null_if", params: { values: ["111111111", "123456789"] }}
+  {
+    function: "null_if",
+    params: { values: ["000000000", "111111111", "123456789"] },
+  },
 ];
 
 // SSN4 accepts either a bare 4-digit value or a full 9-digit SSN and extracts
@@ -23,8 +31,11 @@ const SSN4_STEPS: StandardizationStep[] = [
   { function: "remove_non_ascii" },
   { function: "remove_dashes" },
   { function: "replace_regex", params: { pattern: "[^0-9]", replacement: "" } },
+  // Zero-pad to 4 digits for SSN4 values stored without a leading zero.
+  { function: "pad_left", params: { length: 4 } },
   { function: "extract_regex", params: { pattern: "(\\d{4})$" } },
   { function: "filter_regex", params: { pattern: "^\\d{4}$" } },
+  { function: "null_if", params: { values: ["0000"] } },
 ];
 
 // Shared pipeline for first and last names. Produces uppercase letters and
@@ -51,7 +62,10 @@ function dateOfBirthSteps(inputFormat: string): StandardizationStep[] {
   return [
     { function: "trim_whitespace" },
     { function: "remove_non_ascii" },
-    { function: "parse_date", params: { inputFormat, outputFormat: "YYYYMMDD" } },
+    {
+      function: "parse_date",
+      params: { inputFormat, outputFormat: "YYYYMMDD" },
+    },
   ];
 }
 
@@ -61,7 +75,10 @@ const PHONE_NUMBER_STEPS: StandardizationStep[] = [
   { function: "trim_whitespace" },
   { function: "remove_non_ascii" },
   { function: "replace_regex", params: { pattern: "[^0-9]", replacement: "" } },
-  { function: "replace_regex", params: { pattern: "^1(\\d{10})$", replacement: "$1" } },
+  {
+    function: "replace_regex",
+    params: { pattern: "^1(\\d{10})$", replacement: "$1" },
+  },
   { function: "filter_regex", params: { pattern: "^\\d{10}$" } },
 ];
 
@@ -69,10 +86,13 @@ const EMAIL_ADDRESS_STEPS: StandardizationStep[] = [
   { function: "trim_whitespace" },
   { function: "remove_non_ascii" },
   { function: "to_lower_case" },
-  { function: "filter_regex", params: { pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" } },
+  {
+    function: "filter_regex",
+    params: { pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
+  },
 ];
 
-// ─── Default standardization ──────────────────────────────────────────────────
+// --- Default standardization -------------------------------------------------
 
 export interface DefaultStandardizationOptions {
   /**
@@ -88,14 +108,22 @@ function stepsForType(
   opts: DefaultStandardizationOptions,
 ): StandardizationStep[] | undefined {
   switch (semanticType) {
-    case "ssn":           return SSN_STEPS;
-    case "ssn4":          return SSN4_STEPS;
-    case "firstName":     return NAME_STEPS;
-    case "lastName":      return NAME_STEPS;
-    case "dateOfBirth":   return dateOfBirthSteps(opts.dateInputFormat ?? "MM/DD/YYYY");
-    case "phoneNumber":   return PHONE_NUMBER_STEPS;
-    case "emailAddress":  return EMAIL_ADDRESS_STEPS;
-    default:              return undefined;
+    case "ssn":
+      return SSN_STEPS;
+    case "ssn4":
+      return SSN4_STEPS;
+    case "firstName":
+      return NAME_STEPS;
+    case "lastName":
+      return NAME_STEPS;
+    case "dateOfBirth":
+      return dateOfBirthSteps(opts.dateInputFormat ?? "MM/DD/YYYY");
+    case "phoneNumber":
+      return PHONE_NUMBER_STEPS;
+    case "emailAddress":
+      return EMAIL_ADDRESS_STEPS;
+    default:
+      return undefined;
   }
 }
 

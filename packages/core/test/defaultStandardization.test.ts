@@ -10,7 +10,7 @@ import { runPipeline } from "../src/standardization";
 import type { ColumnMetadata } from "../src/config/metadata";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// --- Fixtures ----------------------------------------------------------------
 
 const minimalTerms: LinkageTerms = {
   version: "1.0.0",
@@ -46,7 +46,7 @@ const fullMetadata: ColumnMetadata[] = [
   { name: "EMAIL", type: "emailAddress", role: "linkage", isPayload: false },
 ];
 
-// ─── getDefaultStandardization ───────────────────────────────────────────────
+// --- getDefaultStandardization -----------------------------------------------
 
 describe("getDefaultStandardization — structure", () => {
   test("returns one transformation per matching linkage field", () => {
@@ -124,7 +124,7 @@ describe("getDefaultStandardization — structure", () => {
   });
 });
 
-// ─── SSN pipeline ────────────────────────────────────────────────────────────
+// --- SSN pipeline ------------------------------------------------------------
 
 describe("default SSN pipeline", () => {
   function run(input: string) {
@@ -158,12 +158,16 @@ describe("default SSN pipeline", () => {
     expect(run("987654321")).toBe("987654321");
   });
 
-  test("returns null for fewer than 9 digits", () => {
-    expect(run("1234")).toBeNull();
+  test("zero-pads an 8-digit SSN missing a leading zero", () => {
+    expect(run("23456789")).toBe("023456789");
   });
 
   test("returns null for more than 9 digits", () => {
     expect(run("1234567890")).toBeNull();
+  });
+
+  test("returns null for empty input", () => {
+    expect(run("")).toBeNull();
   });
 
   test("returns null for alphabetic input", () => {
@@ -175,7 +179,7 @@ describe("default SSN pipeline", () => {
   });
 });
 
-// ─── SSN4 pipeline ───────────────────────────────────────────────────────────
+// --- SSN4 pipeline -----------------------------------------------------------
 
 describe("default SSN4 pipeline", () => {
   function run(input: string) {
@@ -205,8 +209,12 @@ describe("default SSN4 pipeline", () => {
     expect(run("12 34")).toBe("1234");
   });
 
-  test("returns null for fewer than 4 digits", () => {
-    expect(run("123")).toBeNull();
+  test("zero-pads a 3-digit SSN4 missing a leading zero", () => {
+    expect(run("123")).toBe("0123");
+  });
+
+  test("returns null for empty input", () => {
+    expect(run("")).toBeNull();
   });
 
   test("returns null for alphabetic input", () => {
@@ -214,7 +222,7 @@ describe("default SSN4 pipeline", () => {
   });
 });
 
-// ─── Name pipelines ───────────────────────────────────────────────────────────
+// --- Name pipelines ----------------------------------------------------------
 
 describe("default name pipeline (firstName / lastName)", () => {
   function runFirst(input: string) {
@@ -284,7 +292,7 @@ describe("default name pipeline (firstName / lastName)", () => {
   });
 });
 
-// ─── Date of birth pipeline ──────────────────────────────────────────────────
+// --- Date of birth pipeline --------------------------------------------------
 
 describe("default dateOfBirth pipeline", () => {
   function run(input: string) {
@@ -324,7 +332,7 @@ describe("default dateOfBirth pipeline", () => {
   });
 });
 
-// ─── Phone number pipeline ───────────────────────────────────────────────────
+// --- Phone number pipeline ---------------------------------------------------
 
 describe("default phoneNumber pipeline", () => {
   function run(input: string) {
@@ -386,7 +394,7 @@ describe("default phoneNumber pipeline", () => {
   });
 });
 
-// ─── Email address pipeline ──────────────────────────────────────────────────
+// --- Email address pipeline --------------------------------------------------
 
 describe("default emailAddress pipeline", () => {
   function run(input: string) {
@@ -428,7 +436,7 @@ describe("default emailAddress pipeline", () => {
   });
 });
 
-// ─── inferDateFormat ──────────────────────────────────────────────────────────
+// --- inferDateFormat ---------------------------------------------------------
 
 describe("inferDateFormat — format identification", () => {
   test("identifies MM/DD/YYYY", () => {
@@ -518,7 +526,8 @@ describe("inferDateFormat — edge cases", () => {
   });
 
   test("YYYYMMDD requires exactly 8 digits — 7-digit values do not match", () => {
-    // Would ambiguously match if variable-width tokens were used for adjacent tokens.
+    // Would ambiguously match if variable-width tokens were used for adjacent
+    // tokens.
     expect(inferDateFormat(["1990115", "2000631"])).toBeUndefined();
   });
 });
@@ -547,7 +556,8 @@ describe("inferDateFormat — scanning", () => {
   });
 
   test("covers all formats in CANDIDATE_DATE_FORMATS", () => {
-    // Smoke-test that every exported candidate can be identified from clean data.
+    // Smoke-test that every exported candidate can be identified from clean
+    // data.
     const samples: Record<string, string[]> = {
       "MM/DD/YYYY": ["01/15/1990", "06/28/1975", "12/31/2000"],
       "YYYY-MM-DD": ["1990-01-15", "1975-06-28", "2000-12-31"],
@@ -564,7 +574,7 @@ describe("inferDateFormat — scanning", () => {
   });
 });
 
-// ─── getDefaultStandardization — dateInputFormat option ──────────────────────
+// --- getDefaultStandardization — dateInputFormat option ----------------------
 
 describe("getDefaultStandardization — dateInputFormat option", () => {
   const dobTerms: LinkageTerms = {

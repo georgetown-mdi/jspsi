@@ -12,7 +12,7 @@ import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 import { StandardizationSchema } from "../src/config/standardization";
 
-// ─── runPipeline: string functions ───────────────────────────────────────────
+// --- runPipeline: string functions -------------------------------------------
 
 describe("runPipeline — string functions", () => {
   test("to_upper_case", () => {
@@ -52,11 +52,15 @@ describe("runPipeline — string functions", () => {
   });
 
   test("remove_non_ascii removes emoji", () => {
-    expect(runPipeline("hello🌍", [{ function: "remove_non_ascii" }])).toBe("hello");
+    expect(runPipeline("hello🌍", [{ function: "remove_non_ascii" }])).toBe(
+      "hello",
+    );
   });
 
   test("remove_non_ascii leaves plain ASCII unchanged", () => {
-    expect(runPipeline("SMITH", [{ function: "remove_non_ascii" }])).toBe("SMITH");
+    expect(runPipeline("SMITH", [{ function: "remove_non_ascii" }])).toBe(
+      "SMITH",
+    );
   });
 
   test("replace_separators_with_spaces replaces hyphens, apostrophes, ampersands, slashes, and underscores", () => {
@@ -74,15 +78,15 @@ describe("runPipeline — string functions", () => {
   });
 
   test("squash_spaces collapses multiple spaces into one", () => {
-    expect(
-      runPipeline("SMITH  JONES", [{ function: "squash_spaces" }]),
-    ).toBe("SMITH JONES");
+    expect(runPipeline("SMITH  JONES", [{ function: "squash_spaces" }])).toBe(
+      "SMITH JONES",
+    );
   });
 
   test("squash_spaces leaves single spaces unchanged", () => {
-    expect(
-      runPipeline("SMITH JONES", [{ function: "squash_spaces" }]),
-    ).toBe("SMITH JONES");
+    expect(runPipeline("SMITH JONES", [{ function: "squash_spaces" }])).toBe(
+      "SMITH JONES",
+    );
   });
 
   test("remove_accents strips diacritics", () => {
@@ -98,15 +102,15 @@ describe("runPipeline — string functions", () => {
   });
 
   test("remove_affixes removes prefix", () => {
-    expect(runPipeline("Dr. Jane Smith", [{ function: "remove_affixes" }])).toBe(
-      "Jane Smith",
-    );
+    expect(
+      runPipeline("Dr. Jane Smith", [{ function: "remove_affixes" }]),
+    ).toBe("Jane Smith");
   });
 
   test("remove_affixes removes suffix", () => {
-    expect(runPipeline("John Smith Jr.", [{ function: "remove_affixes" }])).toBe(
-      "John Smith",
-    );
+    expect(
+      runPipeline("John Smith Jr.", [{ function: "remove_affixes" }]),
+    ).toBe("John Smith");
   });
 
   test("remove_affixes leaves plain name unchanged", () => {
@@ -150,9 +154,85 @@ describe("runPipeline — string functions", () => {
   test("substring returns null when params are missing", () => {
     expect(runPipeline("SMITH", [{ function: "substring" }])).toBeNull();
   });
+
+  test("pad_left pads a short string with zeros", () => {
+    expect(
+      runPipeline("123", [{ function: "pad_left", params: { length: 9 } }]),
+    ).toBe("000000123");
+  });
+
+  test("pad_left leaves a string at the target length unchanged", () => {
+    expect(
+      runPipeline("123456789", [
+        { function: "pad_left", params: { length: 9 } },
+      ]),
+    ).toBe("123456789");
+  });
+
+  test("pad_left leaves a string longer than the target length unchanged", () => {
+    expect(
+      runPipeline("1234567890", [
+        { function: "pad_left", params: { length: 9 } },
+      ]),
+    ).toBe("1234567890");
+  });
+
+  test("pad_left pads an empty string", () => {
+    expect(
+      runPipeline("", [{ function: "pad_left", params: { length: 9 } }]),
+    ).toBe("000000000");
+  });
+
+  test("pad_left uses a custom pad character when specified", () => {
+    expect(
+      runPipeline("AB", [
+        { function: "pad_left", params: { length: 4, char: "X" } },
+      ]),
+    ).toBe("XXAB");
+  });
+
+  test("pad_left throws when length is missing", () => {
+    expect(() =>
+      runPipeline("123", [{ function: "pad_left", params: {} }]),
+    ).toThrow('pad_left: "length" must be a positive integer');
+  });
+
+  test("pad_left throws when char is not a single character", () => {
+    expect(() =>
+      runPipeline("123", [
+        { function: "pad_left", params: { length: 9, char: "AB" } },
+      ]),
+    ).toThrow('pad_left: "char" must be exactly one character');
+  });
+
+  test("pad_left throws when length is zero", () => {
+    expect(() =>
+      runPipeline("123", [{ function: "pad_left", params: { length: 0 } }]),
+    ).toThrow('pad_left: "length" must be a positive integer');
+  });
+
+  test("pad_left throws when length is negative", () => {
+    expect(() =>
+      runPipeline("123", [{ function: "pad_left", params: { length: -1 } }]),
+    ).toThrow('pad_left: "length" must be a positive integer');
+  });
+
+  test("pad_left throws when length is a non-integer", () => {
+    expect(() =>
+      runPipeline("123", [{ function: "pad_left", params: { length: 1.5 } }]),
+    ).toThrow('pad_left: "length" must be a positive integer');
+  });
+
+  test("pad_left throws when length is not a number", () => {
+    expect(() =>
+      runPipeline("123", [
+        { function: "pad_left", params: { length: "9" } },
+      ]),
+    ).toThrow('pad_left: "length" must be a positive integer');
+  });
 });
 
-// ─── runPipeline: parse_date ─────────────────────────────────────────────────
+// --- runPipeline: parse_date -------------------------------------------------
 
 describe("runPipeline — parse_date", () => {
   test("MM/DD/YYYY to YYYYMMDD", () => {
@@ -222,7 +302,7 @@ describe("runPipeline — parse_date", () => {
   });
 });
 
-// ─── runPipeline: phonetic ───────────────────────────────────────────────────
+// --- runPipeline: phonetic ---------------------------------------------------
 
 describe("runPipeline — phonetic (soundex)", () => {
   test("SMITH -> S530", () => {
@@ -254,7 +334,7 @@ describe("runPipeline — phonetic (soundex)", () => {
   });
 });
 
-// ─── runPipeline: null-producing functions ───────────────────────────────────
+// --- runPipeline: null-producing functions -----------------------------------
 
 describe("runPipeline — null-producing functions", () => {
   test("null_if with value param", () => {
@@ -339,7 +419,7 @@ describe("runPipeline — null-producing functions", () => {
   });
 });
 
-// ─── runPipeline: coalesce ───────────────────────────────────────────────────
+// --- runPipeline: coalesce ---------------------------------------------------
 
 describe("runPipeline — coalesce", () => {
   test("coalesce replaces null with default", () => {
@@ -370,7 +450,7 @@ describe("runPipeline — coalesce", () => {
   });
 });
 
-// ─── runPipeline: null propagation ───────────────────────────────────────────
+// --- runPipeline: null propagation -------------------------------------------
 
 describe("runPipeline — null propagation", () => {
   test("null propagates through subsequent steps", () => {
@@ -384,7 +464,7 @@ describe("runPipeline — null propagation", () => {
   });
 });
 
-// ─── runPipeline: unknown function ───────────────────────────────────────────
+// --- runPipeline: unknown function -------------------------------------------
 
 test("unknown function name throws", () => {
   expect(() =>
@@ -392,7 +472,7 @@ test("unknown function name throws", () => {
   ).toThrow('unknown standardization function: "nonexistent_function"');
 });
 
-// ─── runPipeline: fan-out ────────────────────────────────────────────────────
+// --- runPipeline: fan-out ----------------------------------------------------
 
 describe("runPipeline — split_on fan-out", () => {
   test("split_on on hyphen returns parts", () => {
@@ -450,7 +530,7 @@ describe("runPipeline — split_on fan-out", () => {
   });
 });
 
-// ─── StandardizedField ───────────────────────────────────────────────────────
+// --- StandardizedField -------------------------------------------------------
 
 describe("StandardizedField", () => {
   const rows = [
@@ -515,7 +595,7 @@ describe("StandardizedField", () => {
   });
 });
 
-// ─── StandardizedDataset / buildStandardizedDataset ─────────────────────────
+// --- StandardizedDataset / buildStandardizedDataset --------------------------
 
 const minimalTerms: LinkageTerms = {
   version: "1.0.0",
@@ -638,7 +718,7 @@ describe("StandardizedDataset", () => {
   });
 });
 
-// ─── buildKeyStrings ─────────────────────────────────────────────────────────
+// --- buildKeyStrings ---------------------------------------------------------
 
 describe("buildKeyStrings", () => {
   // Build a dataset from a single synthetic row where each entry in `fields`
@@ -793,7 +873,7 @@ describe("buildKeyStrings", () => {
   });
 });
 
-// ─── validateStandardizationAgainstTerms ────────────────────────────────────────────
+// --- validateStandardizationAgainstTerms -------------------------------------
 
 describe("validateStandardizationAgainstTerms", () => {
   test("valid standardization returns no errors", () => {
@@ -849,7 +929,7 @@ describe("validateStandardizationAgainstTerms", () => {
   });
 });
 
-// ─── StandardizationSchema ───────────────────────────────────────────────────
+// --- StandardizationSchema ---------------------------------------------------
 
 describe("StandardizationSchema", () => {
   test("parses a valid standardization spec", () => {

@@ -1,5 +1,8 @@
 import { getLogger } from "./utils/logger.js";
-import type { Standardization, StandardizationStep } from "./config/standardization.js";
+import type {
+  Standardization,
+  StandardizationStep,
+} from "./config/standardization.js";
 import type {
   LinkageKey,
   LinkageKeyElement,
@@ -10,7 +13,7 @@ import type { ColumnMetadata } from "./config/metadata.js";
 
 const logger = getLogger("cleaning");
 
-// ─── Value types ─────────────────────────────────────────────────────────────
+// --- Value types -------------------------------------------------------------
 
 /**
  * The result type for a single standardization pipeline or step.
@@ -26,12 +29,13 @@ const logger = getLogger("cleaning");
  */
 export type FieldValue = string | null | Set<string>;
 
-// ─── Standardizing functions ─────────────────────────────────────────────────
+// --- Standardizing functions -------------------------------------------------
 
 type Params = Record<string, unknown>;
 
 // A compiled standardizing function: params are captured at construction time
-// via the factory, so per-row calls pay no param-parsing or regex-compilation cost.
+// via the factory, so per-row calls pay no param-parsing or regex-compilation
+// cost.
 type StandardizingFn = (value: string) => FieldValue;
 
 // A factory pre-processes params once and returns a StandardizingFn closure.
@@ -46,11 +50,11 @@ function removeNonAscii(s: string): string {
 }
 
 function replaceSeparatorsWithSpaces(s: string): string {
-  return s.replace(/[-'&\/\\_]/g, " ")
+  return s.replace(/[-'&\/\\_]/g, " ");
 }
 
 function squashSpaces(s: string): string {
-  return s.replace(/\s\s+/g, " ")
+  return s.replace(/\s\s+/g, " ");
 }
 
 function removePunctuation(s: string): string {
@@ -181,7 +185,8 @@ function parseDateFactory(params: Params): StandardizingFn {
 
     const parts: Partial<Record<Token, string>> = {};
     order.forEach((token, idx) => {
-      parts[token] = token === "YYYY" ? m[idx + 1] : m[idx + 1].padStart(2, "0");
+      parts[token] =
+        token === "YYYY" ? m[idx + 1] : m[idx + 1].padStart(2, "0");
     });
 
     if (!parts.YYYY || !parts.MM || !parts.DD) return null;
@@ -200,7 +205,8 @@ function parseDateFactory(params: Params): StandardizingFn {
 function substringFactory(params: Params): StandardizingFn {
   const start = params.start as number | undefined;
   const len = params.length as number | undefined;
-  if (start === undefined || len === undefined || start === 0) return (_s) => null;
+  if (start === undefined || len === undefined || start === 0)
+    return (_s) => null;
   if (start > 0) {
     // SQL SUBSTR convention: 1-indexed positive start — startIdx is fixed.
     const startIdx = start - 1;
@@ -267,6 +273,16 @@ function phoneticFactory(params: Params): StandardizingFn {
   throw new Error(`unsupported phonetic algorithm: "${algorithm}"`);
 }
 
+function padLeftFactory(params: Params): StandardizingFn {
+  const length = params.length as number | undefined;
+  if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
+    throw new Error(`pad_left: "length" must be a positive integer`);
+  const char = (params.char as string | undefined) ?? "0";
+  if (char.length !== 1)
+    throw new Error(`pad_left: "char" must be exactly one character`);
+  return (s) => s.padStart(length, char);
+}
+
 function nullIfFactory(params: Params): StandardizingFn {
   const values =
     params.values !== undefined
@@ -275,7 +291,7 @@ function nullIfFactory(params: Params): StandardizingFn {
         ? [params.value as string]
         : [];
   const set = new Set(values);
-  return (s) => set.has(s) ? null : s;
+  return (s) => (set.has(s) ? null : s);
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
@@ -298,7 +314,7 @@ function extractRegexFactory(params: Params): StandardizingFn {
 function filterRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
   const re = new RegExp(pattern);
-  return (s) => re.test(s) ? s : null;
+  return (s) => (re.test(s) ? s : null);
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
@@ -313,6 +329,8 @@ function splitOnFactory(params: Params): StandardizingFn {
   };
 }
 
+// Each entry here must also be documented in
+// docs/EXCHANGE_SPEC.md § "Available functions".
 const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   remove_non_ascii: noParamFactory(removeNonAscii),
   replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
@@ -324,8 +342,9 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   to_lower_case: noParamFactory(toLowerCase),
   remove_accents: noParamFactory(removeAccents),
   remove_affixes: noParamFactory(removeAffixes),
-  parse_date: parseDateFactory,
   substring: substringFactory,
+  parse_date: parseDateFactory,
+  pad_left: padLeftFactory,
   phonetic: phoneticFactory,
   null_if: nullIfFactory,
   replace_regex: replaceRegexFactory,
@@ -334,27 +353,33 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   split_on: splitOnFactory,
 };
 
-// ─── Step compilation ─────────────────────────────────────────────────────────
+// --- Step compilation --------------------------------------------------------
 
 type CompiledStep =
   | { kind: "fn"; fn: StandardizingFn }
   | { kind: "coalesce"; default: string | undefined };
 
-function compileStep(step: { function: string; params?: Params }): CompiledStep {
+function compileStep(step: {
+  function: string;
+  params?: Params;
+}): CompiledStep {
   const params = step.params ?? {};
   if (step.function === "coalesce") {
     return { kind: "coalesce", default: params.default as string | undefined };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];
-  if (!factory) throw new Error(`unknown standardization function: "${step.function}"`);
+  if (!factory)
+    throw new Error(`unknown standardization function: "${step.function}"`);
   return { kind: "fn", fn: factory(params) };
 }
 
-function compileSteps(steps: Array<{ function: string; params?: Params }>): CompiledStep[] {
+function compileSteps(
+  steps: Array<{ function: string; params?: Params }>,
+): CompiledStep[] {
   return steps.map(compileStep);
 }
 
-// ─── Step execution ──────────────────────────────────────────────────────────
+// --- Step execution ----------------------------------------------------------
 
 // `coalesce` is the only function that operates on null (or an empty array
 // produced by prior null-filtering). All other functions null-propagate.
@@ -385,7 +410,7 @@ function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
   return step.fn(current);
 }
 
-// ─── Pipeline ────────────────────────────────────────────────────────────────
+// --- Pipeline ----------------------------------------------------------------
 
 function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
   let current: FieldValue = input;
@@ -416,7 +441,7 @@ function toValueSet(result: FieldValue): string[] {
   return [result];
 }
 
-// ─── Standardized field ──────────────────────────────────────────────────────
+// --- Standardized field ------------------------------------------------------
 
 /**
  * A lazily-evaluated, cached mapping from a raw dataset row index to the set
@@ -468,7 +493,7 @@ export class StandardizedField {
   }
 }
 
-// ─── Standardized dataset ────────────────────────────────────────────────────
+// --- Standardized dataset ----------------------------------------------------
 
 /**
  * A collection of {@link StandardizedField}s that bridge between a raw dataset
@@ -534,7 +559,7 @@ export function buildStandardizedDataset(
   return new StandardizedDataset(fields);
 }
 
-// ─── Key building ────────────────────────────────────────────────────────────
+// --- Key building ------------------------------------------------------------
 
 function cartesianProduct(arrays: string[][]): string[][] {
   return arrays.reduce<string[][]>(
@@ -566,7 +591,8 @@ function swapElements(
   const idB = elements.findIndex((e) => (e.name ?? e.field) === nameB);
   if (idA === -1 || idB === -1) return elements;
   const swapped = [...elements];
-  // Swap the field references while keeping each element's own name and transforms.
+  // Swap the field references while keeping each element's own name and
+  // transforms.
   swapped[idA] = { ...elements[idA], field: elements[idB].field };
   swapped[idB] = { ...elements[idB], field: elements[idA].field };
   return swapped;
@@ -635,7 +661,7 @@ export function buildKeyStrings(
   return result;
 }
 
-// ─── Standardized key iterable ──────────────────────────────────────────────
+// --- Standardized key iterable ----------------------------------------------
 
 /**
  * An {@link IndexableIterable} over a single {@link LinkageKey} round,
@@ -680,7 +706,12 @@ export class StandardizedKeyIterable {
   }
 
   private valueAt(index: number): string | undefined {
-    const result = buildKeyStrings(this.key, this.dataset, index, this.isReceiver);
+    const result = buildKeyStrings(
+      this.key,
+      this.dataset,
+      index,
+      this.isReceiver,
+    );
     if (result === null || result.size === 0) return undefined;
     if (result.size > 1) return undefined;
     return result.values().next().value as string;
@@ -698,7 +729,7 @@ export class StandardizedKeyIterable {
   }
 }
 
-// ─── Validation ──────────────────────────────────────────────────────────────
+// --- Validation --------------------------------------------------------------
 
 /**
  * Validate that every standardization transformation output name corresponds to
@@ -719,7 +750,7 @@ export function validateStandardizationAgainstTerms(
     if (!fieldNames.has(t.output)) {
       errors.push(
         `standardization output "${t.output}" does not match any linkage ` +
-        "field name",
+          "field name",
       );
     }
     for (const step of t.steps ?? []) {
@@ -729,7 +760,7 @@ export function validateStandardizationAgainstTerms(
       ) {
         errors.push(
           `unknown standardization function "${step.function}" in ` +
-          `transformation for "${t.output}"`,
+            `transformation for "${t.output}"`,
         );
       }
     }
