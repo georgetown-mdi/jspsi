@@ -49,7 +49,10 @@ const NAME_STEPS: StandardizationStep[] = [
   { function: "to_upper_case" },
   // Convert hyphens, apostrophes, and similar word separators to spaces so
   // O'Brien→O BRIEN and Mary-Jane→MARY JANE are treated as multi-token names.
-  { function: "replace_separators_with_spaces" },
+
+  // NOTE: commenting this out as of 2026-05-20 until the linkage protocol can
+  // handle more than one record corresponding to a single iput row
+  // { function: "replace_separators_with_spaces" },
   { function: "remove_affixes" },
   { function: "remove_punctuation" },
   { function: "squash_spaces" },
