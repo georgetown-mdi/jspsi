@@ -28,7 +28,7 @@ const minimalSpec = {
   connection: minimalConnection,
 };
 
-// ─── Happy path ──────────────────────────────────────────────────────────────
+// --- Happy path --------------------------------------------------------------
 
 test("parses a minimal valid ExchangeSpec", () => {
   const result = parseExchangeSpec(minimalSpec);
@@ -58,7 +58,7 @@ test("parses an ExchangeSpec with an SFTP connection", () => {
   expect(result.connection.channel).toBe("sftp");
 });
 
-// ─── Required fields ─────────────────────────────────────────────────────────
+// --- Required fields ---------------------------------------------------------
 
 test("missing connection is rejected", () => {
   const result = safeParseExchangeSpec({ linkageTerms: minimalLinkageTerms });
@@ -70,7 +70,7 @@ test("missing linkageTerms is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-// ─── parse vs safeParse ──────────────────────────────────────────────────────
+// --- parse vs safeParse ------------------------------------------------------
 
 test("parseExchangeSpec throws ZodError on invalid input", () => {
   expect(() => parseExchangeSpec({})).toThrow(ZodError);
@@ -81,7 +81,7 @@ test("safeParseExchangeSpec returns success: false on invalid input", () => {
   expect(result.success).toBe(false);
 });
 
-// ─── camelizeKeys integration ────────────────────────────────────────────────
+// --- camelizeKeys integration ------------------------------------------------
 
 test("parses snake_case top-level keys from disk", () => {
   // camelizeKeys is applied once at the ExchangeSpec level and propagates
@@ -100,11 +100,11 @@ test("parses snake_case top-level keys from disk", () => {
     connection: {
       channel: "webrtc",
       server: { host: "api.peerjs.com" },
-      authentication: { pake_token: "tok123", role: "invitor" },
+      authentication: { role: "inviter" },
     },
   });
   expect(result.linkageTerms.output.expectsOutput).toBe(false);
   expect(result.linkageTerms.linkageFields[0].semanticType).toBe("ssn");
   if (result.connection.channel !== "webrtc") return;
-  expect(result.connection.authentication?.pakeToken).toBe("tok123");
+  expect(result.connection.authentication?.role).toBe("inviter");
 });

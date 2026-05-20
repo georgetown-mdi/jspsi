@@ -1,14 +1,12 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import logLibrary from "loglevel";
-import YAML from "yaml";
 import PSI from "@openmined/psi.js";
 
 import { userInfo } from "node:os";
 
 import {
   SFTPConnection,
-  parseExchangeSpec,
   getLogger,
   loadCSVFile,
   prepareForExchange,
@@ -17,36 +15,46 @@ import {
 } from "@psilink/core";
 import type {
   ConnectionConfig,
-  ExchangeDataSpec,
   SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
 import { applyConnectionOverrides } from "../config";
-import { loadKeyFile, type KeyFile } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile, writeOutput } from "../util/cli";
 
 export function builder(cmd: Argv): Argv {
   return cmd
-    .usage("Usage: $0 exchange [options] INPUT_FILE [OUTPUT_FILE]")
-    .positional("input", {
-      type: "string",
-      describe: "CSV to link; use `-` to read from stdin",
-      demandOption: true,
-    })
-    .positional("output", {
-      type: "string",
-      describe: "where to write results; defaults to stdout",
+    .usage(
+      "Usage:\n" +
+        "  $0 [--save] [options] URL INPUT_FILE [OUTPUT_FILE]\n\n" +
+        "Arguments:\n" +
+        "  URL          server URL (sftp:// or ws://)\n" +
+        "  INPUT_FILE   CSV to link; use `-` to read from stdin\n" +
+        "  OUTPUT_FILE  where to write results; defaults to stdout\n\n" +
+        "Both parties run this command against the same server URL. Linkage\n" +
+        "terms are inferred from each party's input file. No configuration\n" +
+        "files are required or written by default.",
+    )
+    .option("save", {
+      type: "boolean",
+      default: false,
+      describe:
+        "save exchange config and establish a shared secret for future " +
+        "recurring exchanges",
     })
     .option("config-file", {
       type: "string",
-      describe: "exchange configuration file (default: ./psilink.yaml)",
+      describe:
+        "where to write psilink.yaml when --save is given (default: " +
+        "./psilink.yaml)",
     })
     .option("key-file", {
       type: "string",
-      describe: "shared key file (default: ./.psilink.key)",
+      describe:
+        "where to write .psilink.key when --save is given (default: " +
+        "./.psilink.key)",
     })
     .option("identity", {
       type: "string",
@@ -54,24 +62,21 @@ export function builder(cmd: Argv): Argv {
     })
     .option("server-port", {
       type: "number",
-      describe: "server port; overrides connection.server.port in config",
+      describe: "server port; overrides the port in URL",
     })
     .option("server-username", {
       type: "string",
-      describe:
-        "server username; overrides connection.server.username in config",
+      describe: "server username; overrides the username in URL",
     })
     .option("server-password", {
       type: "string",
       describe:
-        "server password; use @path to read from file; overrides " +
-        "connection.server.password in config",
+        "server password; use @path to read from file; overrides the " +
+        "password in URL",
     })
     .option("server-private-key", {
       type: "string",
-      describe:
-        "SSH private key; use @path to read from file; overrides " +
-        "connection.server.privateKey in config",
+      describe: "SSH private key; use @path to read from file",
     })
     .option("connection-timeout", {
       type: "number",
@@ -96,14 +101,15 @@ export function builder(cmd: Argv): Argv {
       describe:
         "generate additional logging information for sub-libraries at all " +
         "logging levels",
-    });
+    })
+    .demand(1);
 }
 
 // --- Argument parsing --------------------------------------------------------
 
-interface ExchangeArgs {
-  input: string;
-  output?: string;
+interface ZeroSetupArgs {
+  positionals: Array<string | number>;
+  save: boolean;
   configFile: string;
   keyFile: string;
   identity?: string;
@@ -118,12 +124,12 @@ interface ExchangeArgs {
   verbosity: number;
 }
 
-type ExchangeOptions = Omit<
-  ExchangeArgs,
-  "input" | "output" | "logLevel" | "verbosity"
+type ZeroSetupOptions = Omit<
+  ZeroSetupArgs,
+  "positionals" | "logLevel" | "verbosity"
 >;
 
-function parseArgs(argv: Arguments): ExchangeArgs {
+function parseArgs(argv: Arguments): ZeroSetupArgs {
   const rawLogLevel = (
     (argv["log-level"] as string | undefined) || "info"
   ).toLowerCase();
@@ -132,8 +138,8 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
 
   return {
-    input: argv["input"] as string,
-    output: argv["output"] as string | undefined,
+    positionals: argv._,
+    save: (argv["save"] as boolean | undefined) ?? false,
     configFile: (argv["config-file"] as string | undefined) ?? "./psilink.yaml",
     keyFile: (argv["key-file"] as string | undefined) ?? "./.psilink.key",
     identity: argv["identity"] as string | undefined,
@@ -153,34 +159,97 @@ function parseArgs(argv: Arguments): ExchangeArgs {
   };
 }
 
-// --- Config loading ----------------------------------------------------------
+// --- Positional parsing ------------------------------------------------------
 
-/** @internal exported for testing */
-export function loadConfig(
-  options: ExchangeOptions,
-): { connection: ConnectionConfig } & ExchangeDataSpec {
-  const log = getLogger("exchange");
-
-  let rawConfig: unknown;
+function tryParseURL(raw: string, errorMsg: string): URL {
   try {
-    rawConfig = YAML.parse(fs.readFileSync(options.configFile, "utf8"));
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT")
-      throw Object.assign(
-        new Error(
-          `config file ${options.configFile} does not exist; ` +
-            "to create one, run 'psilink invite URL ...' first",
-        ),
-        { code: "ENOENT" },
-      );
-    throw err;
+    return new URL(raw);
+  } catch {
+    throw new Error(errorMsg);
   }
-  const { connection: baseConn, ...exchangeDataSpec } = parseExchangeSpec(
-    resolveAtSignRefs(rawConfig),
-  );
-  log.info("loaded exchange spec from", options.configFile);
+}
 
-  const connection = applyConnectionOverrides(baseConn, {
+/**
+ * Resolves the positional CLI arguments to a server URL, input path, and
+ * optional output path. Throws with a user-facing message on bad input.
+ * @internal exported for testing
+ */
+export function resolvePositionals(positionals: Array<unknown>): {
+  server: URL;
+  input: string;
+  output: string | undefined;
+} {
+  const arg0 = String(positionals[0]);
+  const arg1 =
+    positionals[1] !== undefined ? String(positionals[1]) : undefined;
+  const arg2 =
+    positionals[2] !== undefined ? String(positionals[2]) : undefined;
+
+  if (arg1 === undefined) {
+    // Single positional: might be a file (user forgot the subcommand) or a URL
+    // with no input file.
+    if (fs.existsSync(arg0)) {
+      throw new Error(
+        "input file provided without a server URL; " +
+          "did you mean 'psilink exchange INPUT_FILE'?",
+      );
+    }
+    throw new Error(
+      "input file not specified; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+    );
+  }
+
+  const server = tryParseURL(
+    arg0,
+    `unable to parse server URL: ${arg0}; ` +
+      "usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+  );
+  return { server, input: arg1, output: arg2 };
+}
+
+// --- Connection config from URL ----------------------------------------------
+
+/**
+ * Maps a server URL protocol to a connection channel identifier.
+ * @internal exported for testing
+ */
+export function channelFromURL(url: URL): ConnectionConfig["channel"] {
+  switch (url.protocol) {
+    case "sftp:":
+    case "ssh:":
+      return "sftp";
+    case "ws:":
+    case "wss:":
+      return "webrtc";
+    default:
+      throw new Error(
+        `unsupported URL scheme: ${url.protocol}; expected sftp://, ` +
+          "ssh://, ws://, or wss://",
+      );
+  }
+}
+
+function createConnection(
+  server: URL,
+  options: ZeroSetupOptions,
+): ConnectionConfig {
+  const channel = channelFromURL(server);
+
+  if (channel !== "sftp")
+    throw new Error(`${channel} channel not yet supported in the CLI`);
+
+  const base: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: server.hostname,
+      port: server.port ? Number(server.port) : undefined,
+      username: server.username || undefined,
+      password: server.password || undefined,
+      path: server.pathname || undefined,
+    },
+  };
+
+  return applyConnectionOverrides(base, {
     connectionTimeout: options.connectionTimeout,
     peerTimeout: options.peerTimeout,
     maxReconnectAttempts: options.maxReconnectAttempts,
@@ -189,52 +258,22 @@ export function loadConfig(
     serverPrivateKey: options.serverPrivateKey,
     serverPort: options.serverPort,
   });
-
-  let keyData: KeyFile | undefined;
-  try {
-    keyData = loadKeyFile(options.keyFile);
-  } catch (err) {
-    throw new Error(
-      `key file at ${options.keyFile} is malformed: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
-  }
-  if (keyData === undefined)
-    throw new Error(
-      `key file ${options.keyFile} does not exist; ` +
-        "to create one, run 'psilink URL INPUT_FILE --save' first",
-    );
-  if (connection.authentication === undefined) {
-    connection.authentication = {
-      pakeToken: keyData.pakeToken,
-      expires: keyData.expires,
-    };
-  } else {
-    connection.authentication.pakeToken = keyData.pakeToken;
-    connection.authentication.expires = keyData.expires;
-  }
-
-  if (connection.channel !== "sftp")
-    throw new Error("only the sftp channel is currently supported");
-
-  return { connection, ...exchangeDataSpec };
 }
 
 // --- Data preparation --------------------------------------------------------
 
 async function prepareDataset(
-  exchangeDataSpec: ExchangeDataSpec,
   identity: string,
   input: string,
 ): Promise<PreparedExchange> {
-  const log = getLogger("exchange");
+  const log = getLogger("psilink");
 
   validateInputFile(input);
 
   const csvResult = await loadCSVFile(fs.createReadStream(input));
   const rawRows = csvResult.data as Array<Record<string, string>>;
   const prepared = prepareForExchange(
-    exchangeDataSpec,
+    {},
     identity,
     rawRows,
     csvResult.meta.fields ?? [],
@@ -253,7 +292,7 @@ async function runProtocol(
   verbosity: number,
 ): Promise<void> {
   const sftpConfig = connection as SFTPConnectionConfig;
-  const log = getLogger("exchange");
+  const log = getLogger("psilink");
 
   const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
     verbose: verbosity,
@@ -325,35 +364,41 @@ async function runProtocol(
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  const { input, output, logLevel, verbosity, ...options } = parseArgs(argv);
+  const { positionals, logLevel, verbosity, ...options } = parseArgs(argv);
 
   logLibrary.setDefaultLevel(logLevel);
-  const log = getLogger("exchange");
+  const log = getLogger("psilink");
 
-  let configResult: ReturnType<typeof loadConfig>;
+  log.warn(
+    "WARNING: this exchange relies on transport-layer authentication only. " +
+      "You must trust the server administrator. " +
+      "Run 'psilink invite' / 'psilink accept' to establish a recurring " +
+      "exchange with application-layer encryption.",
+  );
+
+  let resolved: ReturnType<typeof resolvePositionals>;
   try {
-    configResult = loadConfig(options);
+    resolved = resolvePositionals(positionals);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit((err as NodeJS.ErrnoException).code === "ENOENT" ? 64 : 69);
-  }
-  const { connection, ...exchangeDataSpec } = configResult;
-
-  let identity: string;
-  if (options.identity) {
-    identity = options.identity;
-    if (exchangeDataSpec.linkageTerms)
-      exchangeDataSpec.linkageTerms = {
-        ...exchangeDataSpec.linkageTerms,
-        identity,
-      };
-  } else {
-    identity = exchangeDataSpec.linkageTerms?.identity ?? userInfo().username;
+    process.exit(64);
   }
 
+  const { server, input, output } = resolved;
+
+  if (options.save) {
+    log.warn(
+      "--save: bootstrapping a shared secret is not yet implemented; " +
+        "proceeding with a standard zero-setup exchange",
+    );
+  }
+
+  let connection: ConnectionConfig;
   let prepared: PreparedExchange;
   try {
-    prepared = await prepareDataset(exchangeDataSpec, identity, input);
+    connection = createConnection(server, options);
+    const identity = options.identity ?? userInfo().username;
+    prepared = await prepareDataset(identity, input);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit((err as { exitCode?: number }).exitCode ?? 69);
@@ -364,5 +409,13 @@ export async function handler(argv: Arguments): Promise<void> {
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(69);
+  }
+
+  if (!options.save) {
+    log.info(
+      "To establish a recurring exchange with this partner, run 'psilink " +
+        "invite URL INPUT_FILE' and share the invitation string, or " +
+        "coordinate with your partner to re-run with --save.",
+    );
   }
 }

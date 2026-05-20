@@ -2,28 +2,59 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import {
+  builder as zeroSetupBuilder,
+  handler as zeroSetupHandler,
+} from "./commands/zeroSetup";
+import {
   builder as exchangeBuilder,
   handler as exchangeHandler,
 } from "./commands/exchange";
 
-yargs(
-  hideBin(process.argv).map((arg) =>
-    arg === "--verbose" ? "--verbose=info" : arg,
-  ),
-)
-  .scriptName("psi-link")
-  .command("invite", "Generate an invitation and wait to execute exchange")
-  .command("accept", "View details and choose to execute exchange")
+yargs(hideBin(process.argv))
+  .scriptName("psilink")
   .command(
-    ["exchange", "$0"],
-    "Link data using private set intersection",
+    "$0",
+    "Quick exchange: psilink [--save] URL INPUT_FILE [OUTPUT_FILE]",
+    zeroSetupBuilder,
+    zeroSetupHandler,
+  )
+  .command(
+    "init [input]",
+    "Generate a configuration template",
+    () => {},
+    () => {
+      console.error("psilink init: not yet implemented");
+      process.exit(1);
+    },
+  )
+  .command(
+    "invite",
+    "Generate an invitation",
+    () => {},
+    () => {
+      console.error("psilink invite: not yet implemented");
+      process.exit(1);
+    },
+  )
+  .command(
+    "accept",
+    "Accept a partner invitation",
+    () => {},
+    () => {
+      console.error("psilink accept: not yet implemented");
+      process.exit(1);
+    },
+  )
+  .command(
+    "exchange <input> [output]",
+    "Execute a recurring exchange",
     exchangeBuilder,
     exchangeHandler,
   )
-  .usage("$0 <command> [options] input [output]")
+  .usage("$0 [command] [options]")
   .help("h")
   .alias("h", "help")
-  .alias("v", "version")
+  .alias("V", "version")
   .parseAsync()
   .catch((err: unknown) => {
     console.error(err);

@@ -1,9 +1,9 @@
 {
-  "name": "psi-link",
+  "name": "psilink",
   "version": "1.0.0",
   "private": true,
   "bin": {
-    "psi-link": "./dist/index.js"
+    "psilink": "./dist/index.js"
   },
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",

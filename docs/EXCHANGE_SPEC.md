@@ -39,7 +39,8 @@ descriptions. It does not apply to free-text or structured fields such as
 
 ## Linkage terms
 
-Linkage terms are verified by both parties at the start of every exchange. After authentication, both parties swap their terms; if any fields are inconsistent,
+Linkage terms are verified by both parties at the start of every exchange. After
+authentication, both parties swap their terms; if any fields are inconsistent,
 the exchange is cancelled. Fields marked as "soft" produce a warning and an
 updated set of terms are written out rather than an error.
 
@@ -614,24 +615,23 @@ connection:
 *Type:* object  
 *Required:* no
 
-Protocol-specific tuning parameters. A configuration warning is made if fields
-for one channel are given when the other channel is active.
+Channel-agnostic and channel-specific tuning parameters. A configuration warning
+is made if SFTP-specific fields are given when the WebRTC channel is active, and
+vice versa.
 
-#### WebRTC options
+#### Shared options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `ice_timeout_ms` | integer | 5000 | Milliseconds to wait for ICE candidate gathering before failing |
-| `max_message_size` | integer | 65536 | Maximum data-channel message size in bytes |
+| `peer_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the partner before giving up; the effective limit is the minimum of this and the remaining PAKE token lifetime |
+| `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait when connecting to the primary exchange server |
+| `max_reconnect_attempts` | integer | 3 | Maximum number of times to attempt reopening a dropped connection before giving up |
 
 #### SFTP options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `poll_interval_ms` | integer | 30000 | Milliseconds between checks for the partner's uploaded file |
-| `poll_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the partner before giving up |
-| `compression` | boolean | false | Enable SSH compression |
-| `transfer_chunk_size` | integer | 32768 | Bytes per read/write chunk |
 
 ### `connection.provider_options`
 

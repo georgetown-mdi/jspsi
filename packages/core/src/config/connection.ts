@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 
-// ─── HTTP service authentication ─────────────────────────────────────────────
+// --- HTTP service authentication ---------------------------------------------
 
 /**
  * Authentication credentials for an HTTP service (`server.provision`,
@@ -31,7 +31,7 @@ const HttpAuthSchema: z.ZodType<HttpAuth> = z
     { message: "at most one authentication method may be specified" },
   );
 
-// ─── Server provisioning ─────────────────────────────────────────────────────
+// --- Server provisioning -----------------------------------------------------
 
 /**
  * An HTTP endpoint that provisions or wakes a supporting service before the
@@ -52,7 +52,7 @@ const ServerProvisionSchema: z.ZodType<ServerProvision> = z.object({
   auth: HttpAuthSchema.optional(),
 });
 
-// ─── Servers ─────────────────────────────────────────────────────────────────
+// --- Servers -----------------------------------------------------------------
 
 /** PeerJS peer-coordination server for a WebRTC exchange. */
 export interface WebRTCServer {
@@ -141,23 +141,26 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     path: ["certificate"],
   });
 
-// ─── Authentication ──────────────────────────────────────────────────────────
+// --- Authentication ----------------------------------------------------------
 
 /**
- * Shared PAKE token for SPAKE2 mutual authentication. The token is
- * automatically rotated after each successful exchange; @-file recommended for
- * `pakeToken`.
+ * Shared PAKE token for SPAKE2 mutual authentication. The token and its
+ * expiration are stored in `.psilink.key` and injected at runtime; they never
+ * appear in `psilink.yaml`.
  */
 export interface Authentication {
-  /** Shared SPAKE2 token; @-file recommended. */
-  pakeToken: string;
   /**
-   * WebRTC only. `invitor` or `acceptor`; used to derive deterministic PeerJS
+   * Shared SPAKE2 token; loaded from `.psilink.key` at runtime and injected
+   * into the connection config. Never written to `psilink.yaml`.
+   */
+  pakeToken?: string;
+  /**
+   * WebRTC only. `inviter` or `acceptor`; used to derive deterministic PeerJS
    * peer IDs from the shared token so both parties know each other's address
    * without out-of-band communication. Orthogonal to the PSI sender/receiver
    * roles.
    */
-  role?: "invitor" | "acceptor";
+  role?: "inviter" | "acceptor";
   /**
    * Expiration for this token (ISO 8601 datetime). The exchange is aborted
    * before the PAKE handshake if the current time is past this value.
@@ -167,12 +170,12 @@ export interface Authentication {
 }
 
 const AuthenticationSchema: z.ZodType<Authentication> = z.object({
-  pakeToken: z.string().min(1),
-  role: z.enum(["invitor", "acceptor"]).optional(),
+  pakeToken: z.string().min(1).optional(),
+  role: z.enum(["inviter", "acceptor"]).optional(),
   expires: z.iso.datetime().optional(),
 });
 
-// ─── TURN and ICE (WebRTC only) ───────────────────────────────────────────────
+// --- TURN and ICE (WebRTC only) ----------------------------------------------
 
 /**
  * A TURN server used when a direct peer-to-peer connection cannot be
@@ -216,7 +219,7 @@ const IceProvisionSchema: z.ZodType<IceProvision> = z.object({
   auth: HttpAuthSchema.optional(),
 });
 
-// ─── SFTP proxy ──────────────────────────────────────────────────────────────
+// --- SFTP proxy --------------------------------------------------------------
 
 /**
  * A WebSocket-to-TCP proxy tunneling the SFTP connection through HTTPS.
@@ -238,47 +241,51 @@ const SFTPProxySchema: z.ZodType<SFTPProxy> = z.object({
   auth: HttpAuthSchema.optional(),
 });
 
-// ─── Options ─────────────────────────────────────────────────────────────────
+// --- Options -----------------------------------------------------------------
 
-/** WebRTC-specific tuning parameters. */
-export interface WebRTCOptions {
-  /** Milliseconds to wait for ICE candidate gathering; default: 5000. */
-  iceTimeoutMs?: number;
-  /** Maximum data-channel message size in bytes; default: 65536. */
-  maxMessageSize?: number;
+/**
+ * Channel-agnostic tuning parameters shared by all connection types.
+ */
+export interface SharedOptions {
+  /**
+   * Total milliseconds to wait for the partner before giving up; default:
+   * 3600000. The effective limit is the minimum of this and the remaining PAKE
+   * token lifetime.
+   */
+  peerTimeoutMs?: number;
+  /**
+   * Milliseconds to wait when connecting to the primary exchange server;
+   * default: 30000.
+   */
+  serverConnectTimeoutMs?: number;
+  /** Maximum reconnect attempts before giving up; default: 3. */
+  maxReconnectAttempts?: number;
 }
 
-const WebRTCOptionsSchema: z.ZodType<WebRTCOptions> = z.object({
-  iceTimeoutMs: z.int().nonnegative().optional(),
-  maxMessageSize: z.int().positive().optional(),
-});
+const sharedOptionsFields = {
+  peerTimeoutMs: z.int().nonnegative().optional(),
+  serverConnectTimeoutMs: z.int().nonnegative().optional(),
+  maxReconnectAttempts: z.int().nonnegative().optional(),
+};
+
+const SharedOptionsSchema: z.ZodType<SharedOptions> =
+  z.object(sharedOptionsFields);
 
 /** SFTP-specific tuning parameters. */
-export interface SFTPOptions {
+export interface SFTPOptions extends SharedOptions {
   /**
    * Milliseconds between checks for the partner's uploaded file; default:
    * 30000.
    */
   pollIntervalMs?: number;
-  /**
-   * Total milliseconds to wait for the partner before giving up;
-   * default: 3600000.
-   */
-  pollTimeoutMs?: number;
-  /** Enable SSH compression; default: false. */
-  compression?: boolean;
-  /** Bytes per read/write chunk; default: 32768. */
-  transferChunkSize?: number;
 }
 
 const SFTPOptionsSchema: z.ZodType<SFTPOptions> = z.object({
+  ...sharedOptionsFields,
   pollIntervalMs: z.int().nonnegative().optional(),
-  pollTimeoutMs: z.int().nonnegative().optional(),
-  compression: z.boolean().optional(),
-  transferChunkSize: z.int().positive().optional(),
 });
 
-// ─── Connection config ───────────────────────────────────────────────────────
+// --- Connection config -------------------------------------------------------
 
 /**
  * Connection configuration for a WebRTC exchange. `stun` and `turn` are
@@ -300,7 +307,7 @@ export interface WebRTCConnectionConfig {
    * Mutually exclusive with `stun` and `turn`.
    */
   iceProvision?: IceProvision;
-  options?: WebRTCOptions;
+  options?: SharedOptions;
   /**
    * Opaque key-value map passed verbatim to the underlying transport library.
    * Keys and values are defined by the connection implementation package.
@@ -341,7 +348,7 @@ const WebRTCConnectionConfigSchema = z.object({
     .optional(),
   turn: z.array(TurnServerSchema).optional(),
   iceProvision: IceProvisionSchema.optional(),
-  options: WebRTCOptionsSchema.optional(),
+  options: SharedOptionsSchema.optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -369,7 +376,7 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
     { message: "iceProvision is mutually exclusive with stun and turn" },
   );
 
-// ─── Parse ───────────────────────────────────────────────────────────────────
+// --- Parse -------------------------------------------------------------------
 
 /**
  * Parse and validate a raw value as a {@link ConnectionConfig}.

@@ -137,7 +137,7 @@ Before establishing connections, parties need to ensure that they are communicat
 
 ### Config-based authentication
 
-In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a Password Authenticated Key Exchange (PAKE) protocol, such as SPAKE2 with the shared token as the password input.
+In order to share secrets, one party generates a random cryptographic token using an available cryptography library and shares it with their partner using a trusted, existing communication channel such as secure email. At the start of the exchange, both parties must execute a Password Authenticated Key Exchange (PAKE) protocol, such as SPAKE2 with the shared token as the password input. We call the execution of an exchange under a config-based, authenticated relationship a *recurring* exchange.
 
 The shared secret is automatically rotated after each successful exchange. The replacement secret is generated locally and transmitted to both parties over the established authenticated channel as part of the receipt step, taking effect only after the receipt has been confirmed by both parties. If the exchange fails before receipt confirmation, the existing secret remains valid and the next exchange can proceed normally. If a secret is lost after rotation, a new invitation can be generated from the existing configuration to re-establish a shared secret (see [Recovery](#recovery)).
 
@@ -151,20 +151,20 @@ Transport-layer authentication is only applicable to [zero-setup exchanges](#zer
 
 ### Bootstrapping a shared secret
 
-Parties wishing to transition from a zero-setup exchange to a config-based relationship may pass `--save` to the zero-setup invocation (see [Zero-setup exchange](#zero-setup-exchange)). Because this intent affects key generation, each party advertises it to the other at the start of the exchange.
+Parties wishing to transition from a zero-setup exchange to a recurring exchange may pass `--save` to the zero-setup invocation (see [Zero-setup exchange](#zero-setup-exchange)). Because this intent affects key generation, each party advertises it to the other at the start of the exchange.
 
 | Party A | Party B | Outcome |
 |---|---|---|
-| `--save` | `--save` | Initiator generates a fresh shared secret and transmits it to both; both save it as the basis for future config-based exchanges. |
-| `--save` | *(none)* | No secret generated. A's configuration is saved; A is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a config-based relationship. |
-| *(none)* | `--save` | No secret generated. B's configuration is saved; B is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a config-based relationship. |
+| `--save` | `--save` | Initiator generates a fresh shared secret and transmits it to both; both save it as the basis for future recurring exchanges. |
+| `--save` | *(none)* | No secret generated. A's configuration is saved; A is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a recurring exchange. |
+| *(none)* | `--save` | No secret generated. B's configuration is saved; B is notified that their partner did not also choose to save and instructed to use `psilink invite` to establish a recurring exchange. |
 | *(none)* | *(none)* | Standard zero-setup exchange; no configuration is saved. |
 
 The party that did not signal `--save` is notified that their partner is trying to establish a recurring exchange, that nothing is being saved on their end, and that they can either wait for a `psilink invite` from their partner or coordinate to run the exchange again with `--save`.
 
 ## Channel security
 
-Zero-setup exchanges rely on transport-layer security only: WebRTC connections use DTLS, and SFTP exchanges rely on SSH transport encryption and assume an honest-but-curious server administrator. Config-based SFTP exchanges additionally provide application-layer encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
+Zero-setup exchanges rely on transport-layer security only: WebRTC connections use DTLS, and SFTP exchanges rely on SSH transport encryption and assume an honest-but-curious server administrator. Recurring SFTP exchanges additionally provide application-layer encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
 
 ## Synchronization
 
@@ -258,13 +258,13 @@ A user should be able to *invite* someone to conduct an exchange, *accept* an ex
 
 For the rest of this section we describe use cases as in the command line application. The application provides four explicit subcommands - `init`, `invite`, `accept`, and `exchange` - alongside a zero-setup mode in which both parties run the same command against a shared server URL without specifying a subcommand. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
 
-A typical config-based first exchange begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides; both applications then exit. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. Where both parties are simultaneously available and wish to exchange in one step, `psilink invite --exchange` combines the setup and exchange.
+A typical first exchange of a recurring relationship begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides; both applications then exit. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. Where both parties are simultaneously available and wish to exchange in one step, `psilink invite --exchange` combines the setup and exchange.
 
 | Intent | Invocation |
 |---|---|
 | Zero-setup exchange (both parties) | `psilink URL input.csv` |
 | Generate a config file for editing | `psilink init [input.csv]` |
-| Start a config-based relationship | `psilink invite URL input.csv`, then share the invitation string |
+| Start a recurring exchange relationship | `psilink invite URL input.csv`, then share the invitation string |
 | ...and exchange immediately | `psilink invite --exchange URL input.csv` |
 | Accept a partner's invitation | `psilink accept INVITATION` |
 | Recurring exchange | `psilink exchange input.csv` |

@@ -147,10 +147,12 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
     if (config.options?.pollIntervalMs !== undefined)
       this.options.pollingFrequency = config.options.pollIntervalMs;
-    if (config.options?.pollTimeoutMs !== undefined)
+    if (config.options?.peerTimeoutMs !== undefined)
       this.options.timeToLive = new Date(
-        Date.now() + config.options.pollTimeoutMs,
+        Date.now() + config.options.peerTimeoutMs,
       );
+    // TODO: implement reconnection on dropped connection using
+    //   config.options.maxReconnectAttempts (default: 3).
 
     const connectOptions: Record<string, unknown> = {
       host: config.server.host,
@@ -165,20 +167,23 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       connectOptions["privateKey"] = config.server.privateKey;
     if (config.server.privateKeyPassphrase !== undefined)
       connectOptions["passphrase"] = config.server.privateKeyPassphrase;
-    if (config.options?.compression !== undefined)
-      connectOptions["compress"] = config.options.compression;
-    if (config.options?.transferChunkSize !== undefined)
-      connectOptions["chunkSize"] = config.options.transferChunkSize;
+    // ssh2 uses readyTimeout for the SSH handshake deadline.
+    if (config.options?.serverConnectTimeoutMs !== undefined)
+      connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
     // providerOptions are spread last so they can override any of the above.
     // certificate, hostKeyFingerprint, and knownHosts also belong here.
     if (config.providerOptions !== undefined)
       Object.assign(connectOptions, config.providerOptions);
 
+    const portString =
+      config.server.port !== undefined ? `:${config.server.port}` : "";
+    const usernameString =
+      config.server.username !== undefined
+        ? ` as ${config.server.username}`
+        : "";
     this.log.debug(
       `[${this.role}] connecting to ${config.server.host}` +
-        `${config.server.port !== undefined ? `:${config.server.port}` : ""}` +
-        `${config.server.username !== undefined ? ` as ${config.server.username}` : ""}` +
-        `, path: ${this.path}`,
+        `${portString}${usernameString}, path: ${this.path}`,
     );
     await this.sftp.connect(connectOptions);
     this.connected = true;
@@ -186,9 +191,13 @@ export class SFTPConnection extends EventEmitter<Events, never> {
   }
 
   async cleanup() {
+    const responsibleFilesString =
+      this.responsibleFiles.size > 0
+        ? `: ${[...this.responsibleFiles].join(", ")}`
+        : "";
     this.log.debug(
       `[${this.role}] cleaning up ${this.responsibleFiles.size} file(s)` +
-        `${this.responsibleFiles.size > 0 ? `: ${[...this.responsibleFiles].join(", ")}` : ""}`,
+        `${responsibleFilesString}`,
     );
     return Promise.all(
       Array.from(this.responsibleFiles).map((filename) =>
@@ -485,7 +494,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
               this.responsibleFiles.add(waveName);
               this.responsibleFiles.delete(`${this.id}.tmp.wave`);
               this.log.debug(
-                `[${this.role}] created wave file ${waveName}; waiting for peer to finalize handshake`,
+                `[${this.role}] created wave file ${waveName}; waiting for ` +
+                  "peer to finalize handshake",
               );
 
               /**
@@ -557,7 +567,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
     try {
       if (await this.sftp.exists(outPath)) {
-        this.log.debug(`[${this.role}] waiting for previous message to be consumed`);
+        this.log.debug(
+          `[${this.role}] waiting for previous message to be consumed`,
+        );
         while (await this.sftp.exists(outPath)) {
           if (Date.now() > this.options.timeToLive.getTime()) {
             throw new Error(
@@ -577,17 +589,18 @@ export class SFTPConnection extends EventEmitter<Events, never> {
         type = "Uint8Array";
       }
 
-      const messsage = JSON.stringify({
+      const message = JSON.stringify({
         ts: Date.now(),
         seq: this.seq++,
         type,
         payload: data,
       });
       this.log.trace(
-        `[${this.role}] message seq=${this.seq - 1}, type=${type}, ${messsage.length} bytes`,
+        `[${this.role}] message seq=${this.seq - 1}, type=${type}, ` +
+          `${message.length} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
-      await this.sftp.put(Buffer.from(messsage), tempPath, {
+      await this.sftp.put(Buffer.from(message), tempPath, {
         flags: "w",
         encoding: null,
       });
@@ -637,15 +650,16 @@ export class SFTPConnection extends EventEmitter<Events, never> {
           } catch (deleteErr: unknown) {
             this.log.warn(
               `[${this.role}] failed to delete ${this.peerId}.json; ` +
-                `please notify the server administrator than manual cleanup may ` +
-                `be required: ${errMessage(deleteErr)}`,
+                "please notify the server administrator than manual cleanup " +
+                `may be required: ${errMessage(deleteErr)}`,
             );
           }
         }
 
         const validatedMessage = Message.parse(JSON.parse(message.toString()));
         this.log.trace(
-          `[${this.role}] received message seq=${validatedMessage.seq}, type=${validatedMessage.type}`,
+          `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+            `type=${validatedMessage.type}`,
         );
 
         if (validatedMessage.type === "Uint8Array") {

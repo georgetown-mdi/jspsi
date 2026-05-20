@@ -1,10 +1,9 @@
 import type { ConnectionConfig } from "@psilink/core";
 
 export interface ConnectionOverrides {
-  /** Maps to connection.authentication.pakeToken. */
-  pakeToken?: string;
-  /** Seconds to wait for peer; maps to connection.options.pollTimeoutMs. */
-  timeout?: number;
+  connectionTimeout?: number;
+  peerTimeout?: number;
+  maxReconnectAttempts?: number;
   serverUsername?: string;
   serverPassword?: string;
   serverPrivateKey?: string;
@@ -17,12 +16,6 @@ export function applyConnectionOverrides(
 ): ConnectionConfig {
   const result = structuredClone(connection);
 
-  if (overrides.pakeToken !== undefined) {
-    if (result.authentication === undefined)
-      result.authentication = { pakeToken: overrides.pakeToken };
-    else result.authentication.pakeToken = overrides.pakeToken;
-  }
-
   if (result.channel === "sftp") {
     const { server } = result;
     if (overrides.serverUsername !== undefined)
@@ -32,14 +25,25 @@ export function applyConnectionOverrides(
     if (overrides.serverPrivateKey !== undefined)
       server.privateKey = overrides.serverPrivateKey;
     if (overrides.serverPort !== undefined) server.port = overrides.serverPort;
+  }
 
-    if (overrides.timeout !== undefined) {
-      const opts = result.options ?? {};
-      result.options = {
-        ...opts,
-        pollTimeoutMs: overrides.timeout * 1000,
-      };
-    }
+  if (
+    overrides.peerTimeout !== undefined ||
+    overrides.connectionTimeout !== undefined ||
+    overrides.maxReconnectAttempts !== undefined
+  ) {
+    result.options = {
+      ...result.options,
+      ...(overrides.peerTimeout !== undefined && {
+        peerTimeoutMs: overrides.peerTimeout * 1000,
+      }),
+      ...(overrides.connectionTimeout !== undefined && {
+        serverConnectTimeoutMs: overrides.connectionTimeout * 1000,
+      }),
+      ...(overrides.maxReconnectAttempts !== undefined && {
+        maxReconnectAttempts: overrides.maxReconnectAttempts,
+      }),
+    };
   }
 
   return result;

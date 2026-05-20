@@ -55,7 +55,46 @@ function makeConnectedConn(
   return conn;
 }
 
-// ─── Happy path ───────────────────────────────────────────────────────────────
+// --- openWithConfig -----------------------------------------------------------
+
+test("openWithConfig connects and sets path from config", async () => {
+  const { sftp } = makeMockSftp();
+  const conn = new SFTPConnection(sftp, { verbose: -1 });
+  await conn.openWithConfig({
+    channel: "sftp",
+    server: { host: "sftp.example.org", path: "/exchanges" },
+  });
+  expect(conn.connected).toBe(true);
+  expect(conn.path).toBe("/exchanges");
+});
+
+test("openWithConfig maps peerTimeoutMs to timeToLive", async () => {
+  const { sftp } = makeMockSftp();
+  const conn = new SFTPConnection(sftp, { verbose: -1 });
+  const before = Date.now();
+  await conn.openWithConfig({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { peerTimeoutMs: 60_000 },
+  });
+  const after = Date.now();
+  const ttl = conn.options.timeToLive.getTime();
+  expect(ttl).toBeGreaterThanOrEqual(before + 60_000);
+  expect(ttl).toBeLessThanOrEqual(after + 60_000);
+});
+
+test("openWithConfig maps pollIntervalMs to pollingFrequency", async () => {
+  const { sftp } = makeMockSftp();
+  const conn = new SFTPConnection(sftp, { verbose: -1 });
+  await conn.openWithConfig({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { pollIntervalMs: 15_000 },
+  });
+  expect(conn.options.pollingFrequency).toBe(15_000);
+});
+
+// --- Happy path --------------------------------------------------------------
 
 test("send writes the message file to the server", async () => {
   const { sftp, files } = makeMockSftp();
@@ -66,7 +105,7 @@ test("send writes the message file to the server", async () => {
   expect(files.has(`/test/${conn.id}.json`)).toBe(true);
 });
 
-// ─── Race condition: consecutive sends ────────────────────────────────────────
+// --- Race condition: consecutive sends ---------------------------------------
 
 test("send waits for a previous unconsumed message before writing the next", async () => {
   const { sftp, files } = makeMockSftp();
@@ -93,7 +132,10 @@ test("send waits for a previous unconsumed message before writing the next", asy
 test("send times out when the previous message is never consumed", async () => {
   const { sftp, files } = makeMockSftp();
   // Short TTL so the test doesn't take long.
-  const conn = makeConnectedConn(sftp, { timeToLiveMs: 150, pollingFrequency: 10 });
+  const conn = makeConnectedConn(sftp, {
+    timeToLiveMs: 150,
+    pollingFrequency: 10,
+  });
 
   // Plant a stale message that nobody will ever delete.
   const outPath = `/test/${conn.id}.json`;

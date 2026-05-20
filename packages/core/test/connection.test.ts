@@ -17,7 +17,7 @@ const sftpBase = {
   server: { host: "sftp.example.org" },
 };
 
-// ─── Happy path ──────────────────────────────────────────────────────────────
+// --- Happy path --------------------------------------------------------------
 
 test("parses a minimal WebRTC connection", () => {
   const result = parseConnectionConfig(webrtcBase);
@@ -35,8 +35,7 @@ test("parses a full WebRTC connection with stun, turn, and authentication", () =
     channel: "webrtc",
     server: { host: "peerjs.example.org", port: 443, key: "mykey" },
     authentication: {
-      pakeToken: "abc123",
-      role: "invitor",
+      role: "inviter",
       expires: "2027-01-01T00:00:00Z",
     },
     stun: ["stun:stun.example.org:3478", "stuns:stun2.example.org:5349"],
@@ -48,13 +47,13 @@ test("parses a full WebRTC connection with stun, turn, and authentication", () =
         credentialType: "hmac-sha1",
       },
     ],
-    options: { iceTimeoutMs: 8000, maxMessageSize: 131072 },
+    options: { peerTimeoutMs: 120000, serverConnectTimeoutMs: 10000 },
   });
   expect(result.channel).toBe("webrtc");
   if (result.channel !== "webrtc") return;
   expect(result.stun).toHaveLength(2);
   expect(result.turn).toHaveLength(1);
-  expect(result.authentication?.role).toBe("invitor");
+  expect(result.authentication?.role).toBe("inviter");
 });
 
 test("parses a full SFTP connection with private key auth", () => {
@@ -69,7 +68,7 @@ test("parses a full SFTP connection with private key auth", () => {
       privateKeyPassphrase: "hunter2",
       hostKeyFingerprint: "SHA256:abc",
     },
-    options: { pollIntervalMs: 5000, compression: true },
+    options: { pollIntervalMs: 5000 },
   });
   expect(result.channel).toBe("sftp");
   if (result.channel !== "sftp") return;
@@ -77,7 +76,23 @@ test("parses a full SFTP connection with private key auth", () => {
   expect(result.server.privateKeyPassphrase).toBeDefined();
 });
 
-// ─── Discriminated union ─────────────────────────────────────────────────────
+test("parses shared options including maxReconnectAttempts on an SFTP config", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: {
+      peerTimeoutMs: 7200000,
+      serverConnectTimeoutMs: 15000,
+      maxReconnectAttempts: 5,
+    },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.peerTimeoutMs).toBe(7200000);
+  expect(result.data.options?.serverConnectTimeoutMs).toBe(15000);
+  expect(result.data.options?.maxReconnectAttempts).toBe(5);
+});
+
+// --- Discriminated union -----------------------------------------------------
 
 test("unknown channel is rejected", () => {
   const result = safeParseConnectionConfig({
@@ -87,7 +102,7 @@ test("unknown channel is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-// ─── parse vs safeParse ──────────────────────────────────────────────────────
+// --- parse vs safeParse ------------------------------------------------------
 
 test("parseConnectionConfig throws ZodError on invalid input", () => {
   expect(() => parseConnectionConfig({ channel: "webrtc" })).toThrow(ZodError);
@@ -98,7 +113,7 @@ test("safeParseConnectionConfig returns success: false on invalid input", () => 
   expect(result.success).toBe(false);
 });
 
-// ─── HttpAuth: username / password must appear together ──────────────────────
+// --- HttpAuth: username / password must appear together ----------------------
 
 test("HttpAuth with username but no password is rejected", () => {
   const result = safeParseConnectionConfig({
@@ -122,7 +137,7 @@ test("HttpAuth with password but no username is rejected", () => {
   expect(messages.some((m) => m.includes("username and password"))).toBe(true);
 });
 
-// ─── HttpAuth: at most one authentication method ─────────────────────────────
+// --- HttpAuth: at most one authentication method -----------------------------
 
 test("HttpAuth with bearer token is valid", () => {
   const result = safeParseConnectionConfig({
@@ -160,7 +175,7 @@ test("HttpAuth with bearer and username together is rejected", () => {
   expect(messages.some((m) => m.includes("at most one"))).toBe(true);
 });
 
-// ─── SFTPServer: at most one primary auth method ─────────────────────────────
+// --- SFTPServer: at most one primary auth method -----------------------------
 
 test("SFTP server with password and privateKey together is rejected", () => {
   const result = safeParseConnectionConfig({
@@ -177,7 +192,7 @@ test("SFTP server with password and privateKey together is rejected", () => {
   expect(messages.some((m) => m.includes("at most one"))).toBe(true);
 });
 
-// ─── SFTPServer: companion fields require privateKey ─────────────────────────
+// --- SFTPServer: companion fields require privateKey -------------------------
 
 test("SFTP server with privateKeyPassphrase but no privateKey is rejected", () => {
   const result = safeParseConnectionConfig({
@@ -231,7 +246,7 @@ test("SFTP server with privateKeyPassphrase and privateKey together is valid", (
   expect(result.success).toBe(true);
 });
 
-// ─── WebRTC: iceProvision mutually exclusive with stun / turn ─────────────────
+// --- WebRTC: iceProvision mutually exclusive with stun / turn -----------------
 
 test("iceProvision alone is valid", () => {
   const result = safeParseConnectionConfig({
@@ -274,7 +289,7 @@ test("iceProvision with turn is rejected", () => {
   expect(messages.some((m) => m.includes("iceProvision"))).toBe(true);
 });
 
-// ─── STUN URI format ─────────────────────────────────────────────────────────
+// --- STUN URI format ---------------------------------------------------------
 
 test.each([
   ["stun:stun.example.org:3478", true],
@@ -287,7 +302,7 @@ test.each([
   expect(result.success).toBe(valid);
 });
 
-// ─── TURN URL format ─────────────────────────────────────────────────────────
+// --- TURN URL format ---------------------------------------------------------
 
 test.each([
   ["turn:turn.example.org:3478", true],
@@ -302,14 +317,13 @@ test.each([
   expect(result.success).toBe(valid);
 });
 
-// ─── camelizeKeys integration ────────────────────────────────────────────────
+// --- camelizeKeys integration ------------------------------------------------
 
 test("parses snake_case keys from disk", () => {
   const result = parseConnectionConfig({
     channel: "webrtc",
     server: { host: "peerjs.example.org" },
     authentication: {
-      pake_token: "abc123",
       role: "acceptor",
     },
     ice_provision: {
@@ -319,7 +333,7 @@ test("parses snake_case keys from disk", () => {
   });
   expect(result.channel).toBe("webrtc");
   if (result.channel !== "webrtc") return;
-  expect(result.authentication?.pakeToken).toBe("abc123");
+  expect(result.authentication?.role).toBe("acceptor");
   expect(result.iceProvision?.host).toBe("nts.twilio.com");
 });
 
