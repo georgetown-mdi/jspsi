@@ -44,22 +44,25 @@ The web application includes a feature to invite parties to conduct exchanges. U
 
 A user should be able to *invite* someone to conduct an exchange, *accept* an extended invitation, and *exchange* data for previously arranged details. The bare minimum necessary to conduct an exchange is an *input* file and a *location*, although most exchanges will also use a *shared secret* and want to save the *output*. As indicated above, linkage terms, connection details, metadata, and data cleaning transformations form further exchange parameters.
 
-For the rest of this section we describe use cases as in the command line application. The application provides four explicit subcommands - `init`, `invite`, `accept`, and `exchange` - alongside a zero-setup mode in which both parties run the same command against a shared server URL without specifying a subcommand. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
+For the rest of this section we describe use cases as in the command line application. The application provides four explicit subcommands - `init`, `invite`, `accept`, and `exchange` - alongside a zero-setup mode in which both parties run the same command against a shared server without specifying a subcommand. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
 
-A typical first exchange of a recurring relationship begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides; both applications then exit. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. Where both parties are simultaneously available and wish to exchange in one step, `psilink invite --exchange` combines the setup and exchange.
+A typical first exchange of a recurring relationship begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner out-of-band. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. As a one-step alternative, parties can run `invite` and `accept` with a server URL as an argument, in which case acceptance leads to immediately conducting an exchange.
+
+Two invitation flows are supported: an offline flow where no server is involved and a server-coordinated flow where a server address is used for coordination and is given to both parties. In the server-coordinated flow, setup and exchange happen in one step: the inviter waits for the acceptor to respond, and both parties exchange immediately on acceptance.
 
 | Intent | Invocation |
 |---|---|
 | Zero-setup exchange (both parties) | `psilink URL input.csv` |
 | Generate a config file for editing | `psilink init [input.csv]` |
-| Start a recurring exchange relationship | `psilink invite URL input.csv`, then share the invitation string |
-| ...and exchange immediately | `psilink invite --exchange URL input.csv` |
-| Accept a partner's invitation | `psilink accept INVITATION` |
+| Start a recurring exchange relationship (offline) | `psilink invite [input.csv]`, then share the invitation string out-of-band |
+| Start a recurring exchange relationship and exchange (server-coordinated) | `psilink invite URL input.csv`, then share the invitation string; the exchange runs on acceptance |
+| Accept an offline invitation | `psilink accept INVITATION [input.csv]` |
+| Accept a server-coordinated invitation and exchange | `psilink accept URL INVITATION input.csv` |
 | Recurring exchange | `psilink exchange input.csv` |
 | Zero-setup exchange, establish recurring relationship (both parties) | `psilink --save URL input.csv` |
-| Re-establish after lost secret | `psilink invite URL input.csv` with an existing config; user deletes `.psilink.key` or sets `--key-file` |
+| Re-establish after lost secret | Delete key file on both sides; re-run `psilink invite` and `psilink accept` |
 
-If only one party uses `--save`, no shared secret is established; see [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret) for the full set of outcomes.
+If only one party uses `--save` during a zero-setup exchange, no shared secret is established; see [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret) for the full set of outcomes.
 
 For full documentation of each subcommand, configuration files, invitation strings, and recovery procedures, see [CLI.md](CLI.md).
 

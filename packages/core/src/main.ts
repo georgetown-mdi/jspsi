@@ -12,6 +12,7 @@ export * from "./defaults/linkageTerms";
 export * from "./defaults/standardization";
 export * from "./config/exchangeSpec";
 export * from "./config/linkageTerms";
+export * from "./config/invitation";
 export * from "./config/metadata";
 export * from "./standardization";
 export { loadCSVFile } from "./file";

@@ -12,11 +12,13 @@ and recovery procedures for PSI-Link. It does not cover the PSI protocol (see
 
 ## Configuration
 
-Exchange configuration is stored in two files in the working directory: `psilink.yaml`, which records the exchange parameters, and `.psilink.key`, which holds the shared secret used for authentication. The `--config-file` command line argument points to the yaml file and defaults to `./psilink.yaml`; the `--key-file` argument points to the key file and defaults to `.psilink.key`. When these files are first created, the application prints a notice identifying both and gives a warning that the key file should be treated as private. For Docker deployments, agencies are expected to mount one directory per exchange partner, so the working directory itself provides isolation and no subdirectory is needed.
+Exchange details are stored in two files: a configuration file and an authentication key file. The default file names and paths are `./psilink.yaml` and `./.psilink.key`, while command line arguments to override are `--config-file` and `--key-file` respectively. When these files are first created, the application prints a notice identifying both and gives a warning that the key file should be treated as private. For Docker deployments, agencies are expected to mount one directory per exchange partner, so the working directory itself provides isolation and no subdirectory is needed.
 
-`psilink.yaml` is not intended to contain secrets and is safe to commit to version control. The PAKE token and its expiration are stored in `.psilink.key` instead; they never appear in `psilink.yaml` and are not user-editable because the application rotates them automatically. `.psilink.key` is intentionally named with a leading dot so that it is hidden from default directory listings and less likely to be accidentally copied or included in an archive; it should be added to `.gitignore`. All other credential fields use the `@path` convention described below.
+The configuration file is not intended to contain secrets and is safe to commit to version control. The PAKE token and its expiration are stored in the key file instead; they never appear in the configuration file and are not user-editable because the application rotates them automatically. By default, the key file is intentionally named with a leading dot (`.psilink.key`) so that it is hidden from default directory listings and less likely to be accidentally copied or included in an archive; it should be added to `.gitignore`. All other credential fields use the `@path` convention described below.
 
-Command line arguments take precedence over values in `psilink.yaml`, allowing scripted workflows to override specific parameters without modifying the stored configuration. Credential and opaque string fields support `@`-file references: a value beginning with `@` is read from the file at the given path rather than used literally - for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk. This convention applies both on the command line and in `psilink.yaml`, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
+Command line arguments take precedence over values in the configuration file, allowing scripted workflows to override specific parameters without modifying the stored configuration. Credential and opaque string fields support `@`-file references: a value beginning with `@` is read from the file at the given path rather than used literally - for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk. This convention applies both on the command line and in the configuration file, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
+
+The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
 
 ## Initialization
 
@@ -24,7 +26,7 @@ Command line arguments take precedence over values in `psilink.yaml`, allowing s
 psilink init [INPUT_FILE]
 ```
 
-This creates `psilink.yaml` in the working directory and then exits - no exchange or invitation is generated. `psilink.yaml` is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. If the file already exists, the user is prompted before overwriting. The `--config-file` flag specifies where to create the configuration file.
+This creates a configuration file and then exits - no exchange or invitation is generated. The file is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. If a file already exists at the output path, the user is prompted before overwriting.
 
 ## Zero-setup exchange
 
@@ -32,55 +34,88 @@ This creates `psilink.yaml` in the working directory and then exits - no exchang
 psilink [--save] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
-Both parties run this command against the same server URL. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer - SSH credentials for SFTP, DTLS for WebRTC - rather than a PAKE-derived shared secret.
+Both parties run this command against the same server. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer - SSH credentials for SFTP, DTLS for WebRTC - rather than a PAKE-derived shared secret.
 
-For SFTP, since no configuration file is available, SSH credentials must be supplied in the URL or as command-line arguments. Embedding credentials in the URL is not recommended as URLs may appear in shell history and process listings. When used, a warning is issued and users are instructed to use the `@path` convention instead - see [Configuration](#configuration).
+For SFTP, SSH credentials must be supplied in the URL or as command-line arguments. Embedding credentials in the URL is not recommended as URLs may appear in shell history and process listings. When used, a warning is issued and users are instructed to use the `@path` convention instead - see [Configuration](#configuration).
 
 Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
 
-If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a configuration-based relationship. `--save` usage can be discussed during onboarding.
+If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
-If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret). The `--config-file` and `--key-file` flags can specify non-default paths for the saved configuration and key file respectively.
+If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret).
 
-## Invitation
-
-```sh
-psilink invite [--exchange] [--accept-timeout=N] URL INPUT_FILE [OUTPUT_FILE]
-```
-
-This generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it for the user to forward to their partner by a secure channel. The application connects to the server and waits for the partner to respond. It exits when the token expires, when the connection times out, when the user cancels, or when the `--accept-timeout` (default 10 minutes) is reached; in all four cases the token is revoked or has expired, preventing a stale invitation from being accepted later. Accept-timeout is the maximum time the inviter will wait for the entire acceptance handshake to complete - from the moment the invitation is printed to the moment an acceptance message is received. Connection timeouts govern how long the application waits for individual protocol messages to arrive over the network and vary by channel.
-
-On acceptance, a fresh shared secret is generated and exchanged, configuration and key are saved on both sides (where applicable), and both applications exit. The user is notified that this was a setup step and instructed to run `psilink exchange` when ready.
-
-If a `psilink.yaml` file exists, such as one generated by `psilink init`, it will be used to set the exchange details. Whether or not the partner accepts the invitation, the pre-existing configuration file persists. If a configuration file does not exist, default values are used for connection parameters and linkage keys, metadata, and cleaning transformations are inferred from the input file. If the partner accepts the invitation then this default configuration is saved as `psilink.yaml`; otherwise it is discarded because the partner did not accept.
-
-If the `--exchange` flag is specified, the inviter signals readiness to exchange immediately. The inviter must wait while the acceptor makes their decision. If the acceptor also chooses to proceed, the exchange is conducted before both exit. If the acceptor instead saves-and-quits (see [Acceptance](#acceptance)), they communicate their choice to the inviter and both parties exit without exchanging, saving their copies of the persistent secret. Each party is instructed to run `psilink exchange` when ready.
-
-The `--config-file` flag can point to an existing configuration file to use as a base; `--key-file` can point to an existing key file. If `--key-file` is not used and a `.psilink.key` file exists, the user is warned about its existence and told to either delete it or specify a different key file in case reusing that secret was not their intention.
+If a zero-setup exchange is started with configuration and/or key files already present, the user is warned that they will be ignored and that if their intent was to use those files, the user should use `psilink exchange` instead. If `--save` was specified, this is upgraded to an error and the user is also informed that they can delete those files if they wish to proceed.
 
 ## Invitation strings
 
-Invitation strings are base64url encoded, unpadded representations of the information necessary to conduct an exchange. In particular they contain:
-- Connection information
+Subsequent commands involve agreeing to exchanges through the use of invitation strings. Invitation strings are base64url encoded, unpadded representations of the information necessary to agree on an exchange. In particular they contain:
 - Linkage terms
 - Invitation authentication token (short-lived; rotated to a persistent secret on acceptance)
 - A 4-byte hash of the above, used to check for transcription errors
 
+Connection information is not included; each party configures their own `connection` block in their configuration file independently.
+
 Invitation strings beginning with `-` may be misinterpreted as option flags by argument parsers. All positional arguments and unrecognized flags are validated against the invitation string schema, so the string is identified unambiguously regardless of its position or leading character.
 
-## Acceptance
+## Offline invitation
+
+When both parties are not simultaneously available or prefer not to use a coordination server, invite and accept can be performed without any server connection.
+
+```sh
+psilink invite [INPUT_FILE]
+```
+
+This generates a PAKE token, saves the `pakeToken` and an `expires` field to a key file, prints an invitation string (see [Invitation strings](#invitation-strings)) and instructions for its use, and then exits immediately. The invitation should be forwarded to the user's partner using a trusted out-of-band channel (see [SECURITY.md](SECURITY.md)).
+
+Generating an invitation requires either a pre-existing configuration file or an `INPUT_FILE` from which linkage terms are inferred. If both types of files are present the content of the configuration file is checked against the input. A conflict occurs if the columns in the input cannot be transformed through available data standardizations to produce the linkage fields defined in the configuration file, meaning the file cannot satisfy the linkage keys the partner will expect. In this case, an error is raised and the reason why an invite cannot be generated is given.
+
+If only an `INPUT_FILE` is given, the inferred linkage terms, metadata, and data standardizations are written to a configuration file. The user is notified that they must fill in the connection block of the configuration file in order to conduct exchanges.
+
+## Offline acceptance
 
 ```sh
 psilink accept INVITATION [INPUT_FILE]
 ```
 
-The `INVITATION` argument is either a base64url string or an `@path` reference to a file containing one. This decodes the invitation string and displays top-level information, including the identity of the inviting party, the PSI algorithm, which parties will receive data, and the linkage keys that will be used. The user can abort or accept. Accepting saves the configuration and the newly-generated persistent keys on both sides and both applications exit; users are notified that this was a configuration and key exchange only and are instructed to run `psilink exchange` to conduct the data exchange. This two-step design is intentional: the config-based path is meant to be methodical, giving each party time to review the saved configuration and prepare their data independently before the exchange begins. If `INPUT_FILE` is provided, it is used to infer the acceptor's column metadata and data standardizing transformations, which are merged with the invitation's linkage terms and saved into `psilink.yaml`.
+The `INVITATION` argument is either a base64url string or an `@path` reference to a file containing one. This command decodes the invitation token, displays the linkage terms, and prompts the user to accept. If they accept, configuration and key files are created (with exceptions noted below) and the user is notified that they must fill in their connection parameters in order to conduct exchanges. Coordination with the partner happens out-of-band, for example if the linkage terms are unacceptable or if the invitation expires.
 
-If a configuration file already exists, it is compared against the connection information and linkage terms to see if there are any disagreements. If so, the acceptance fails without being rejected and without notifying the inviter. The user is shown which values differ and instructed to delete the file or use the `--config-file` option (see below) if they want to proceed. After this, the program exits. After addressing the conflict, the user can run `psilink accept` with the same invitation string to try again. The presence of a pre-existing `.psilink.key` file produces a similar error state. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
+If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's; any disagreement causes acceptance to fail. The user is shown which values differ and instructed to resolve the conflict before retrying with the same invitation string or to supply an alternative configuration file path.
 
-If the inviter used the `--exchange` option (see [Invitation](#invitation)), the acceptor is offered the additional choice to proceed immediately with an exchange or to save the configuration and key but quit for the moment. If they choose to proceed, the output path is requested at the prompt before the exchange begins. The save-and-quit option is for acceptors who agree to the linkage terms but need to prepare first - for example, to add their own data standardizing transformations or adjust other local configuration in `psilink.yaml`. If they choose to save-and-quit, this is communicated back to the inviter whose program will indicate that their partner needs time to prepare and that they can run `psilink exchange` in the future; their application will then exit. The key is saved so the shared secret is not lost; when ready, the acceptor also runs `psilink exchange`.
+If `--key-file` is not used and there is a pre-existing key file at the default path, a similar error and instructions are generated. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
 
-The `--config-file` and `--key-file` flags can specify non-default paths for the saved configuration and key file respectively, which is useful when managing multiple exchange partners.
+If `INPUT_FILE` is provided, its columns are inspected to infer metadata and to see if default data standardizing transformations can satisfy the linkage keys in the invitation. If the linkage terms can be satisfied, they are written to a configuration file together with the inferred metadata and the standardizing transformations. If terms cannot be satisfied, a warning is issued that the user may need to modify their data to satisfy the terms. The configuration file is then written without the metadata or standardizing transformations.
+
+After acceptance, both parties run `psilink exchange` at their convenience.
+
+## Online invitation
+
+```sh
+psilink invite [--accept-timeout=N] URL INPUT_FILE [OUTPUT_FILE]
+```
+
+Similar to [offline invitation](#offline-invitation), this generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it and instructions for the user to forward to their partner by a secure, out-of-band channel. Those instructions include copy/pasteable templates for the invocation of `psilink accept` that reference the shared server. After printing the invitation information, the program connects to the server and waits for the partner to respond.
+
+The application exits when the token expires, when the connection times out, when the user cancels, or when the `--accept-timeout` (default 15 minutes) is reached; in all four cases the token is revoked or has expired, preventing a stale invitation from being accepted later. Accept-timeout is the maximum time the inviter will wait for the entire acceptance handshake to complete - from the moment the invitation is printed to the moment an acceptance message is received.
+
+On acceptance the two parties engage in direct communication. After successfully accomplishing a PAKE, a fresh shared secret is generated and exchanged. Clients using communication channels without end-to-end encryption shift to an application-layer channel. The configuration and key files are saved on both sides (where applicable), and the exchange is conducted before output is written and both applications exit. If `OUTPUT_FILE` is given, it is used as the destination; otherwise, output is written to `stdout`.
+
+If a configuration file exists, such as one generated by `psilink init`, it will be used to set the exchange details. Similar to the offline case, the input file is checked against the configuration to make sure that it can meet the linkage terms. Whether or not the partner accepts the invitation, the pre-existing configuration file persists.
+
+If a configuration file does not exist, default values are inferred from the input file for linkage keys, metadata, and cleaning transformations. If the partner accepts the invitation then this default configuration is saved; otherwise it is discarded because the partner did not accept.
+
+If `--key-file` is not used and a key file exists at the default path, the user is warned about its existence and told to either delete it or specify a different key file in case reusing that secret was not their intention.
+
+## Online acceptance
+
+```sh
+psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]
+```
+
+This command is similar to [offline acceptance](#offline-acceptance), however it coordinates with the other party and executes an exchange. It decodes the invitation string and displays top-level information, including the identity of the inviting party, the PSI algorithm, which parties will receive data, and the linkage keys that will be used. The user can abort or accept. Accepting saves the configuration and newly-generated persistent keys on both sides and immediately conducts the exchange; both applications exit when complete.
+
+If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's and its connection block is compared against the URL's explicit fields (scheme, hostname, port, path, and username/password if present; absence of credentials in the URL is not treated as a conflict). Any disagreement causes acceptance to fail without being rejected and without notifying the inviter. The user is shown which values differ and instructed to delete the file or use the `--config-file` option (see [Configuration](#configuration)) if they want to proceed. After this, the program exits. After addressing the conflict, the user can run `psilink accept` with the same URL and invitation string to try again.
+
+If `--key-file` is not used and there is a pre-existing key file at the default path, a similar error and instructions are generated. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
 
 ## Recurring exchange
 
@@ -88,13 +123,13 @@ The `--config-file` and `--key-file` flags can specify non-default paths for the
 psilink exchange INPUT_FILE [OUTPUT_FILE]
 ```
 
-The application loads configuration from `psilink.yaml` and conducts the exchange without further coordination. The `--config-file` and `--key-file` flags can point to different configuration and key files respectively. The shared secret is rotated after each successful exchange.
+The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful exchange. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`.
 
 ## Recovery
 
-In case the shared secrets ever get out-of-sync - for example if one party crashes between key rotation and writing - the recovery path is for both parties to delete their existing secret files. Because there is no way to determine which party holds the newer secret, both must reset regardless of which side failed; reusing an older key may also violate key rotation policies. One party should then generate a new invitation using `psilink invite` which the other should accept.
+In case the shared secrets ever get out-of-sync - for example if one party crashes between key rotation and writing - the recovery path is for both parties to delete their existing secret files. Because there is no way to determine which party holds the newer secret, both must reset regardless of which side failed; reusing an older key may also violate key rotation policies.
 
-To recognize failed rotations, the error messages for exchanges that fail PAKE authentication include recovery instructions.
+To recognize failed rotations, the error messages for exchanges that fail PAKE authentication instruct users how they can generate and accept new invitation strings, and encourage them to contact their partners out-of-band. Since connection information has already been shared, the recommended commands are `psilink invite URL` followed by `psilink accept URL INVITATION`.
 
 ## See also
 
