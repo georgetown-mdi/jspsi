@@ -57,6 +57,35 @@ function removeDuplicatesAndUndefineds(
   return [data, originalIndices];
 }
 
+/**
+ * Runs the PSI linkage protocol over one or more linkage keys and returns the
+ * matched row indices.
+ *
+ * Keys are tried in order. Records matched on key `j` are excluded from all
+ * subsequent key rounds, so each record appears in the result at most once.
+ * Within a given key round, records whose key value is duplicated across the
+ * local dataset are excluded from that round entirely (ambiguous matches cannot
+ * be attributed to a single record). They may still match on a later key.
+ *
+ * Only `"one-to-one"` and `"many-to-one"` cardinalities are currently
+ * supported; other values throw.
+ *
+ * @param protocol - Exchange protocol settings; only `cardinality` is used
+ *   here.
+ * @param participant - Must have a resolved role (`"starter"` or `"joiner"`);
+ *   throws if `role` is still `"either"`.
+ * @param conn - Open connection to the exchange partner.
+ * @param data - One entry per linkage key. Each entry is an iterable over all
+ *   local records (indexed by row position) yielding the record's value for
+ *   that key, or `undefined` if the record has no value for it.
+ * @param verbosity - Log verbosity level (default 0).
+ * @param setStage - Optional callback invoked with a progress label at each
+ *   key round.
+ * @returns An {@link AssociationTable} whose first element (`[0]`) contains
+ *   the local matched row indices in strictly ascending order, and whose second
+ *   element (`[1]`) contains the corresponding partner row indices in the same
+ *   pairing order.
+ */
 export async function linkViaPSI(
   protocol: {
     cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
@@ -149,10 +178,14 @@ export async function linkViaPSI(
 
     const numMappedElements = identifiedIndexIterationMap.length;
     log.debug(
-      `${participant.id}: ${numMappedElements}/${indexIterationMap.length} record(s) matched`,
+      `${participant.id}: ${numMappedElements}/${indexIterationMap.length} ` +
+        "record(s) matched",
     );
 
-    log.debug(`${participant.id}: exchanging matched indices (round 1 of 2)`);
+    log.debug(
+      `${participant.id}: sending match map indexed by round, receiving ` +
+        "partner's",
+    );
     const theirIdentifiedIndexIterationMap = await exchangeMappedElements(
       participant.id,
       conn,
@@ -166,7 +199,10 @@ export async function linkViaPSI(
       e.theirIndex = i;
     }
 
-    log.debug(`${participant.id}: exchanging matched indices (round 2 of 2)`);
+    log.debug(
+      `${participant.id}: returning partner's map with original indices, ` +
+        "receiving ours",
+    );
     const identifiedIndexMap = await exchangeMappedElements(
       participant.id,
       conn,

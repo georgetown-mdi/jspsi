@@ -109,7 +109,7 @@ export function Status(props: StatusProps) {
 
           <Group justify="center" gap="xs" component="span">
             <Text>Download result:</Text>
-            <a href={resultsFileURL} download="results.txt">
+            <a href={resultsFileURL} download="results.csv">
               <ActionIcon variant="light" color="blue" disabled={!isCompleted}>
                 <IconDownload size={18} />
               </ActionIcon>

@@ -5,6 +5,7 @@ import {
   getLogger,
   describeExchangeStages,
   runExchange,
+  buildOutputTable,
 } from "@psilink/core";
 import type {
   ConnectionConfig,
@@ -67,7 +68,7 @@ export async function runProtocol(
   const stageLabels = Object.fromEntries(
     describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
   );
-  const { associationTable } = await runExchange(
+  const { associationTable, partnerPayload } = await runExchange(
     conn,
     conn.handshakeRole!,
     prepared,
@@ -92,5 +93,11 @@ export async function runProtocol(
   log.info("closing connection");
   await conn.close();
 
-  writeOutput(output, associationTable);
+  const { headers, rows } = buildOutputTable(
+    associationTable,
+    prepared.rawRows,
+    prepared.metadata,
+    partnerPayload,
+  );
+  writeOutput(output, headers, rows);
 }

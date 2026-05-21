@@ -11,6 +11,7 @@ import { inferDateFormat } from "./utils/date.js";
 import { PSIParticipant } from "./participant.js";
 import { exchangeTerms, resolveRole } from "./protocolSetup.js";
 import { linkViaPSI } from "./link.js";
+import { preparePayload, exchangePayloads } from "./payloadExchange.js";
 
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -24,6 +25,7 @@ import type {
 } from "./types.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
+import type { PartnerPayload } from "./payloadExchange.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -43,6 +45,16 @@ export interface PreparedExchange {
   metadata: Metadata;
   linkageTerms: LinkageTerms;
   dataset: StandardizedDataset;
+  /**
+   * The original parsed CSV rows, retained for payload extraction after
+   * linkage.
+   *
+   * All rows are held in memory from ingestion through the end of
+   * {@link runExchange}. This roughly doubles peak memory usage relative to
+   * holding only the standardized dataset. If streaming over input data is
+   * ever supported, this field will need to be revisited.
+   */
+  rawRows: Array<Record<string, string>>;
   rowCount: number;
   /**
    * Non-fatal issues detected during preparation (e.g. unknown standardization
@@ -129,6 +141,7 @@ export function prepareForExchange(
     metadata,
     linkageTerms,
     dataset,
+    rawRows,
     rowCount: rawRows.length,
     warnings,
   };
@@ -177,6 +190,8 @@ export interface ExchangeResult {
   partnerTerms: LinkageTerms;
   /** The PSI role assigned to this party (sender or receiver). */
   resolvedRole: PsiRole;
+  /** Payload data received from the partner after linkage. */
+  partnerPayload: PartnerPayload;
 }
 
 export interface RunExchangeOptions {
@@ -270,5 +285,16 @@ export async function runExchange(
     onStage,
   );
 
-  return { associationTable, partnerTerms, resolvedRole };
+  const localPayload = preparePayload(
+    prepared.rawRows,
+    prepared.metadata,
+    associationTable,
+  );
+  const partnerPayload = await exchangePayloads(
+    conn,
+    handshakeRole,
+    localPayload,
+  );
+
+  return { associationTable, partnerTerms, resolvedRole, partnerPayload };
 }

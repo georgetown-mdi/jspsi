@@ -25,6 +25,7 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
   ProcessState,
+  buildOutputTable,
   describeExchangeStages,
   loadCSVFile,
   prepareForExchange,
@@ -39,6 +40,8 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
+import type { ExchangeResult, PreparedExchange } from "@psilink/core";
+import type { DataConnection } from "peerjs";
 import type { LinkSession } from "@utils/sessions";
 
 export const Route = createFileRoute("/psi")({
@@ -56,7 +59,8 @@ export const Route = createFileRoute("/psi")({
     const response = await fetch(`/api/psi/${uuid}`);
     if (!response.ok) {
       throw new Error(
-        `failed to lookup PSI with id ${uuid} with error: ${response.statusText}`,
+        `failed to lookup PSI with id ${uuid} with error: ` +
+          response.statusText,
       );
     }
     return (await response.json()) as LinkSession;
@@ -127,6 +131,28 @@ function Home() {
   const handleSubmit = () => {
     setSubmitted(true);
 
+    const finishExchange = (
+      conn: DataConnection,
+      { associationTable, partnerPayload }: ExchangeResult,
+      prepared: PreparedExchange,
+    ) => {
+      conn.close();
+      log.info("linkage complete, generating results file");
+      const { headers, rows } = buildOutputTable(
+        associationTable,
+        prepared.rawRows,
+        prepared.metadata,
+        partnerPayload,
+      );
+      const csv =
+        headers.join(",") + "\n" + rows.map((r) => r.join(",") + "\n").join("");
+      const fileData = new Blob([csv], { type: "text/csv" });
+      const newResultURL = window.URL.createObjectURL(fileData);
+      if (resultURL !== undefined) window.URL.revokeObjectURL(resultURL);
+      setResultURL(newResultURL);
+      setStageById("done");
+    };
+
     if (role === "server") {
       setStageById("waiting for peer");
       waitForPeerId(session.uuid)
@@ -154,26 +180,16 @@ function Home() {
             doneStage,
           ]);
 
-          const { associationTable } = await runExchange(
+          const exchangeResult = await runExchange(
             conn,
             "responder",
             prepared,
-            { psiLibrary: psi, onStage: setStageById },
+            {
+              psiLibrary: psi,
+              onStage: setStageById,
+            },
           );
-          conn.close();
-          log.info("linkage complete, generating results file");
-
-          const result =
-            "our_row_id,their_row_id\n" +
-            associationTable[0]
-              .map((ours, i) => `${ours},${associationTable[1][i]}\n`)
-              .join("");
-
-          const fileData = new Blob([result], { type: "text/plain" });
-          const newResultURL = window.URL.createObjectURL(fileData);
-          if (resultURL !== undefined) window.URL.revokeObjectURL(resultURL);
-          setResultURL(newResultURL);
-          setStageById("done");
+          finishExchange(conn, exchangeResult, prepared);
         })
         .catch((error) => {
           console.error(error);
@@ -204,28 +220,17 @@ function Home() {
           peer.on("connection", (conn) => {
             conn.on("open", async () => {
               conn.once("data", () => peer.disconnect());
-
-              const { associationTable } = await runExchange(
-                conn,
-                "initiator",
-                prepared,
-                { psiLibrary: psi, onStage: setStageById },
-              );
-              conn.close();
-              log.info("linkage complete, generating results file");
-
-              const result =
-                "our_row_id,their_row_id\n" +
-                associationTable[0]
-                  .map((ours, i) => `${ours},${associationTable[1][i]}\n`)
-                  .join("");
-
-              const fileData = new Blob([result], { type: "text/plain" });
-              const newResultURL = window.URL.createObjectURL(fileData);
-              if (resultURL !== undefined)
-                window.URL.revokeObjectURL(resultURL);
-              setResultURL(newResultURL);
-              setStageById("done");
+              try {
+                const exchangeResult = await runExchange(
+                  conn,
+                  "initiator",
+                  prepared,
+                  { psiLibrary: psi, onStage: setStageById },
+                );
+                finishExchange(conn, exchangeResult, prepared);
+              } catch (error) {
+                console.error(error);
+              }
             });
           });
         })

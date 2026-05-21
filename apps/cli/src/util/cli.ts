@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import logLibrary from "loglevel";
-import type { AssociationTable } from "@psilink/core";
 
 /** Mapping from log-level name to loglevel numeric constant. */
 export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
@@ -28,17 +27,16 @@ export function validateInputFile(input: string): void {
     throw Object.assign(new Error(`${input} does not exist`), { exitCode: 69 });
 }
 
-/** Write the PSI association table to a file or stdout. */
+/** Write formatted exchange results to a file or stdout as CSV. */
 export function writeOutput(
   output: string | undefined,
-  table: AssociationTable,
+  headers: string[],
+  rows: Array<Array<string>>,
 ): void {
   const out = output
     ? fs.createWriteStream(output, { encoding: "utf8" })
     : process.stdout;
-  out.write("our_row_id,their_row_id\n");
-  table[0].forEach((ours, i) => {
-    out.write(`${ours},${table[1][i]}\n`);
-  });
+  out.write(headers.join(",") + "\n");
+  for (const row of rows) out.write(row.join(",") + "\n");
   if (output) (out as fs.WriteStream).close();
 }

@@ -10,6 +10,7 @@ The core library:
 - Implements a one-to-one PPRL for a set of realized linkage keys and a object that can conduct a PSI primitive.
 - Infers metadata, linkage keys, and standardization based on input columns.
 - Also contains some SFTP abstractions.
+- Prepares data payloads.
 
 # Web Application
 
@@ -38,7 +39,6 @@ The command line application:
 
 - PAKE authentication
 - AEAD encryption for PAKE authenticated SFTP connections
-- Data payloads - currently part of metadata but not yet transmitted
 - Invite and accept for CLI
 - Path way to migrate from zero-setup to recurring exchange for CLI
 - File system as a connection type
