@@ -1,28 +1,19 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import logLibrary from "loglevel";
-import PSI from "@openmined/psi.js";
-
 import { userInfo } from "node:os";
 
-import {
-  SFTPConnection,
-  getLogger,
-  loadCSVFile,
-  prepareForExchange,
-  describeExchangeStages,
-  runExchange,
-} from "@psilink/core";
+import { getLogger, loadCSVFile, prepareForExchange } from "@psilink/core";
 import type {
   ConnectionConfig,
   SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
 
-import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
 import { applyConnectionOverrides } from "../config";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import { LOG_LEVELS, validateInputFile, writeOutput } from "../util/cli";
+import { LOG_LEVELS, validateInputFile } from "../util/cli";
+import { runProtocol } from "../protocol";
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -283,84 +274,6 @@ async function prepareDataset(
   return prepared;
 }
 
-// --- Protocol ----------------------------------------------------------------
-
-async function runProtocol(
-  connection: ConnectionConfig,
-  prepared: PreparedExchange,
-  output: string | undefined,
-  verbosity: number,
-): Promise<void> {
-  const sftpConfig = connection as SFTPConnectionConfig;
-  const log = getLogger("psilink");
-
-  const conn = new SFTPConnection(new SSH2SFTPClientAdapter(), {
-    verbose: verbosity,
-  });
-  conn.on("error", (err: unknown) => {
-    log.error("sftp error:", err);
-    process.exit(69);
-  });
-  process.on("SIGINT", async function () {
-    log.info("caught SIGINT, exiting");
-    if (conn.connected) {
-      await conn.cleanup();
-      await conn.close();
-    }
-    process.exit(0);
-  });
-
-  log.info(
-    "opening connection to",
-    sftpConfig.server.host,
-    "with options",
-    sftpConfig.options,
-  );
-  await conn.openWithConfig(sftpConfig);
-
-  log.info("synchronizing");
-  await conn.synchronize();
-
-  if (conn.handshakeRole === "responder") {
-    log.info("arrived first - will wait for message");
-  } else {
-    log.info("arrived second - will send first message");
-  }
-
-  log.info("starting polling");
-  conn.start();
-
-  const stageLabels = Object.fromEntries(
-    describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
-  );
-  const { associationTable } = await runExchange(
-    conn,
-    conn.handshakeRole!,
-    prepared,
-    {
-      psiLibrary: await PSI(),
-      verbosity,
-      onStage: (id: string) => {
-        const label = stageLabels[id] ?? id;
-        log.info(label.charAt(0).toLowerCase() + label.slice(1));
-      },
-      onWarning: (msg: string) => log.warn("terms exchange:", msg),
-      onProtocolConfirmed: (partnerTerms, resolvedRole) => {
-        log.info("terms agreed, partner identity:", partnerTerms.identity);
-        log.info("role:", resolvedRole);
-      },
-    },
-  );
-
-  log.info("stopping polling");
-  conn.stop();
-
-  log.info("closing connection");
-  await conn.close();
-
-  writeOutput(output, associationTable);
-}
-
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -405,7 +318,7 @@ export async function handler(argv: Arguments): Promise<void> {
   }
 
   try {
-    await runProtocol(connection, prepared, output, verbosity);
+    await runProtocol(connection, prepared, output, verbosity, "psilink");
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(69);
