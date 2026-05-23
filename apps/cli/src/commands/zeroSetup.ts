@@ -1,11 +1,13 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
 import { getLogger, loadCSVFile, prepareForExchange } from "@psilink/core";
 import type {
   ConnectionConfig,
+  FileDropConnectionConfig,
   SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
@@ -212,19 +214,40 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
     case "ws:":
     case "wss:":
       return "webrtc";
+    case "file:":
+      return "filedrop";
     default:
       throw new Error(
         `unsupported URL scheme: ${url.protocol}; expected sftp://, ` +
-          "ssh://, ws://, or wss://",
+          "ssh://, ws://, wss://, or file://",
       );
   }
 }
 
-function createConnection(
+/** @internal */
+export function createConnection(
   server: URL,
   options: ZeroSetupOptions,
 ): ConnectionConfig {
   const channel = channelFromURL(server);
+
+  if (channel === "filedrop") {
+    if (server.hostname && server.hostname !== "localhost") {
+      throw new Error(
+        `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
+          `or file://localhost/path; got: ${server.href}`,
+      );
+    }
+    const base: FileDropConnectionConfig = {
+      channel: "filedrop",
+      path: fileURLToPath(server),
+    };
+    return applyConnectionOverrides(base, {
+      connectionTimeout: options.connectionTimeout,
+      peerTimeout: options.peerTimeout,
+      maxReconnectAttempts: options.maxReconnectAttempts,
+    });
+  }
 
   if (channel !== "sftp")
     throw new Error(`${channel} channel not yet supported in the CLI`);

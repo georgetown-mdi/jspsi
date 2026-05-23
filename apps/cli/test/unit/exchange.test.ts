@@ -26,6 +26,11 @@ const minimalSFTPConfig = {
   linkageTerms: minimalLinkageTerms,
 };
 
+const minimalFiledropConfig = {
+  connection: { channel: "filedrop", path: "/mnt/share/drop" },
+  linkageTerms: minimalLinkageTerms,
+};
+
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-exchange-test-"));
   configFile = path.join(dir, "psilink.yaml");
@@ -141,4 +146,32 @@ test("applies peerTimeout override and converts to milliseconds", () => {
   saveKeyFile(keyFile, { pakeToken: "tok" });
   const result = loadConfig({ ...baseOptions(), peerTimeout: 60 });
   expect(result.connection.options?.peerTimeoutMs).toBe(60_000);
+});
+
+// --- filedrop channel --------------------------------------------------------
+
+test("filedrop config injects pakeToken from key file", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { pakeToken: "tok" });
+  const result = loadConfig(baseOptions());
+  expect(result.connection.channel).toBe("filedrop");
+  expect(result.connection.authentication?.pakeToken).toBe("tok");
+});
+
+test("filedrop config throws when key file is absent", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  expect(() => loadConfig(baseOptions())).toThrow("does not exist");
+});
+
+// --- webrtc channel ----------------------------------------------------------
+
+test("webrtc config throws 'not yet supported' error", () => {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      connection: { channel: "webrtc", server: { host: "api.peerjs.com" } },
+      linkageTerms: minimalLinkageTerms,
+    }),
+  );
+  expect(() => loadConfig(baseOptions())).toThrow("not yet supported");
 });

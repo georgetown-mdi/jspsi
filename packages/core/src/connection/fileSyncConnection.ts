@@ -3,7 +3,10 @@ import { default as EventEmitter } from "eventemitter3";
 import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
-import type { SFTPConnectionConfig } from "../config/connection";
+import type {
+  SFTPConnectionConfig,
+  FileDropConnectionConfig,
+} from "../config/connection";
 import type { HandshakeRole } from "../types";
 
 const errMessage = (err: unknown) =>
@@ -58,8 +61,17 @@ export interface GetOptions {
   handle?: null | string;
 }
 
-export interface SFTPClient {
-  connect: (options: object) => Promise<void>;
+/**
+ * Abstract file transport used by {@link FileSyncConnection}. Implemented by
+ * {@link SSH2SFTPClientAdapter} for real SFTP servers and by `LocalFSClient`
+ * for locally-mounted network folders.
+ */
+export interface FileTransportClient {
+  /**
+   * Options are defined by transport providers and must match their expected
+   * names and types.
+   */
+  connect: (options: Record<string, unknown>) => Promise<void>;
   end: () => Promise<void>;
   list: (path: string) => Promise<Array<FileInfo>>;
   get: (path: string, options?: GetOptions) => Promise<Buffer<ArrayBufferLike>>;
@@ -68,20 +80,21 @@ export interface SFTPClient {
     dest: string,
     options?: PutOptions,
   ) => Promise<unknown>;
-  /** */
   delete: (path: string) => Promise<void>;
   safeDelete: (path: string) => Promise<void>;
   rename: (fromPath: string, toPath: string) => Promise<void>;
-  exists: (remotePath: string) => Promise<boolean | string>;
+  exists: (remotePath: string) => Promise<boolean>;
 }
 
 /**
- * Catches and emits SFTP errors, throws errors related to improper usage such
- * as connections not being initialized or the remote path containing files it
- * should not.
+ * File-based rendezvous and message-passing connection. Implements the
+ * `.hello`/`.wave` handshake and `.json` polling protocol over any
+ * {@link FileTransportClient} — an SFTP server via
+ * {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
+ * `LocalFSClient`.
  */
-export class SFTPConnection extends EventEmitter<Events, never> {
-  private sftp: SFTPClient;
+export class FileSyncConnection extends EventEmitter<Events, never> {
+  private client: FileTransportClient;
   id: string;
   role: string;
   options: Options;
@@ -97,9 +110,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
   private pollerActive: boolean;
   private responsibleFiles: Set<string>;
 
-  constructor(sftp: SFTPClient, options?: Partial<Options>) {
+  constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
-    this.sftp = sftp;
+    this.client = client;
     this.id = uuidv4();
     this.role = "unknown role";
     this.pollerActive = false;
@@ -107,86 +120,83 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
     this.options = { ...getDefaultOptions(), ...options } as Options;
     this.log = getLoggerForVerbosity(
-      `sftp-${this.id.substring(0, 8)}`,
+      `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
   }
 
-  async open(url: string, options?: object) {
-    if (!url.startsWith("sftp://")) url = "sftp://" + url;
-
-    const parsedUrl = new URL(url);
-    this.path = parsedUrl.pathname || "";
-    if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
-
-    const urlOptions = {
-      host: parsedUrl.hostname,
-      username: parsedUrl.username,
-      password: parsedUrl.password,
-      port: parsedUrl.port ? parseInt(parsedUrl.port) : undefined,
-    };
-
-    const totalOptions = {
-      ...urlOptions,
-      ...options,
-    };
-
-    this.log.debug(
-      `[${this.role}] connecting to ${parsedUrl.hostname}` +
-        `${parsedUrl.port ? `:${parsedUrl.port}` : ""} as ` +
-        `${parsedUrl.username || "(default)"}, path: ${this.path}`,
-    );
-    await this.sftp.connect(totalOptions);
-    this.connected = true;
-    this.log.debug(`[${this.role}] connected`);
-  }
-
-  async openWithConfig(config: SFTPConnectionConfig) {
-    this.path = config.server.path ?? "";
-    if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
-
+  /** Opens a connection from a typed config. Dispatches on `config.channel`. */
+  async open(
+    config: SFTPConnectionConfig | FileDropConnectionConfig,
+  ): Promise<void> {
     if (config.options?.pollIntervalMs !== undefined)
       this.options.pollingFrequency = config.options.pollIntervalMs;
+    // timeToLive is set after a successful connect so the full peerTimeoutMs
+    // budget is available for peer-waiting rather than being eaten by retries.
+
+    if (config.channel === "filedrop") {
+      // Normalize backslashes to forward slashes so ${this.path}/${name}
+      // constructions work on Windows (fs accepts forward slashes there).
+      const normalized = config.path.replace(/\\/g, "/");
+      // Strip trailing slashes but preserve root-like paths: Unix "/" stays
+      // "/", Windows drive root "C:/" stays "C:/" (stripped form "C:" is not
+      // a valid path argument on Windows).
+      const stripped = normalized.replace(/\/+$/, "");
+      const dirPath = /^[A-Za-z]:$/.test(stripped)
+        ? stripped + "/"
+        : stripped || "/";
+      this.log.debug(`[${this.role}] opening local path ${dirPath}`);
+      await this.client.connect({
+        path: dirPath,
+        connectTimeoutMs: config.options?.serverConnectTimeoutMs,
+        maxReconnectAttempts: config.options?.maxReconnectAttempts ?? 3,
+      });
+      this.path = dirPath;
+    } else {
+      this.path = config.server.path ?? "";
+      if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
+
+      const connectOptions: Record<string, unknown> = {
+        host: config.server.host,
+        maxReconnectAttempts: config.options?.maxReconnectAttempts ?? 3,
+      };
+      if (config.server.port !== undefined)
+        connectOptions["port"] = config.server.port;
+      if (config.server.username !== undefined)
+        connectOptions["username"] = config.server.username;
+      if (config.server.password !== undefined)
+        connectOptions["password"] = config.server.password;
+      if (config.server.privateKey !== undefined)
+        connectOptions["privateKey"] = config.server.privateKey;
+      if (config.server.privateKeyPassphrase !== undefined)
+        connectOptions["passphrase"] = config.server.privateKeyPassphrase;
+      // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout,
+      // not a Promise.race wrapper — the per-attempt deadline is equivalent.
+      if (config.options?.serverConnectTimeoutMs !== undefined)
+        connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
+      // providerOptions are spread last so they can override any of the above.
+      // certificate, hostKeyFingerprint, and knownHosts also belong here.
+      if (config.providerOptions !== undefined)
+        Object.assign(connectOptions, config.providerOptions);
+
+      const portString =
+        config.server.port !== undefined ? `:${config.server.port}` : "";
+      const usernameString =
+        config.server.username !== undefined
+          ? ` as ${config.server.username}`
+          : "";
+      this.log.debug(
+        `[${this.role}] connecting to ${config.server.host}` +
+          `${portString}${usernameString}, path: ${this.path}`,
+      );
+      await this.client.connect(connectOptions);
+    }
+
+    this.connected = true;
     if (config.options?.peerTimeoutMs !== undefined)
       this.options.timeToLive = new Date(
         Date.now() + config.options.peerTimeoutMs,
       );
-    // TODO: implement reconnection on dropped connection using
-    //   config.options.maxReconnectAttempts (default: 3).
-
-    const connectOptions: Record<string, unknown> = {
-      host: config.server.host,
-    };
-    if (config.server.port !== undefined)
-      connectOptions["port"] = config.server.port;
-    if (config.server.username !== undefined)
-      connectOptions["username"] = config.server.username;
-    if (config.server.password !== undefined)
-      connectOptions["password"] = config.server.password;
-    if (config.server.privateKey !== undefined)
-      connectOptions["privateKey"] = config.server.privateKey;
-    if (config.server.privateKeyPassphrase !== undefined)
-      connectOptions["passphrase"] = config.server.privateKeyPassphrase;
-    // ssh2 uses readyTimeout for the SSH handshake deadline.
-    if (config.options?.serverConnectTimeoutMs !== undefined)
-      connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
-    // providerOptions are spread last so they can override any of the above.
-    // certificate, hostKeyFingerprint, and knownHosts also belong here.
-    if (config.providerOptions !== undefined)
-      Object.assign(connectOptions, config.providerOptions);
-
-    const portString =
-      config.server.port !== undefined ? `:${config.server.port}` : "";
-    const usernameString =
-      config.server.username !== undefined
-        ? ` as ${config.server.username}`
-        : "";
-    this.log.debug(
-      `[${this.role}] connecting to ${config.server.host}` +
-        `${portString}${usernameString}, path: ${this.path}`,
-    );
-    await this.sftp.connect(connectOptions);
-    this.connected = true;
     this.log.debug(`[${this.role}] connected`);
   }
 
@@ -201,17 +211,17 @@ export class SFTPConnection extends EventEmitter<Events, never> {
     );
     return Promise.all(
       Array.from(this.responsibleFiles).map((filename) =>
-        this.sftp.safeDelete(`${this.path}/${filename}`),
+        this.client.safeDelete(`${this.path}/${filename}`),
       ),
     );
   }
 
   async close() {
     if (!this.connected || this.path === undefined)
-      throw new Error("not connected to sftp server");
+      throw new Error("not connected");
 
     this.log.debug(`[${this.role}] closing connection`);
-    const result = await this.sftp.end();
+    const result = await this.client.end();
     this.connected = false;
     this.path = undefined;
     return result;
@@ -219,15 +229,15 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
   async synchronize() {
     if (!this.connected || this.path === undefined)
-      throw new Error("not connected to sftp server");
+      throw new Error("not connected");
 
     if (this.peerId) throw new Error("already synchronized");
 
-    this.log.info(`[${this.role}] synchronizing at remote path ${this.path}`);
+    this.log.info(`[${this.role}] synchronizing at path ${this.path}`);
 
     let files: Array<FileInfo>;
     try {
-      files = await this.sftp.list(this.path);
+      files = await this.client.list(this.path);
     } catch (err: unknown) {
       this.emit("error", errMessage(err));
       return;
@@ -247,8 +257,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       files.some((file) => file.name.endsWith(".wave"))
     ) {
       throw new Error(
-        `path ${this.path} on server had preexisting hello or wave files; ` +
-          `must be empty to execute protocol`,
+        `path ${this.path} had preexisting hello or wave files; must be ` +
+          "empty to execute protocol",
       );
     }
 
@@ -281,9 +291,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
       );
 
       try {
-        await this.sftp.delete(otherPath);
+        await this.client.delete(otherPath);
 
-        await this.sftp.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
+        await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
           flags: "w",
           encoding: "utf-8",
         });
@@ -310,7 +320,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
        */
 
       this.log.debug(`[${this.role}] creating initial ${this.id}.hello`);
-      await this.sftp.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
+      await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
         flags: "w",
         encoding: "utf-8",
       });
@@ -319,7 +329,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
       const waitForPeer = async () => {
         while (Date.now() <= this.options.timeToLive.getTime()) {
-          const currentFiles = await this.sftp.list(this.path!);
+          const currentFiles = await this.client.list(this.path!);
 
           const fileNames = currentFiles.map((file) => file.name);
           this.responsibleFiles.forEach((fileName) => {
@@ -360,21 +370,21 @@ export class SFTPConnection extends EventEmitter<Events, never> {
             if (waveFiles.length > 1) {
               throw new Error(
                 "more than one wave file - are there other sessions using " +
-                  "this remote path?",
+                  "this path?",
                 { cause: "usage" },
               );
             }
             if (otherFiles.length !== 1) {
               throw new Error(
                 "wave file detected but no peer hello - are there other " +
-                  "sessions using this remote path?",
+                  "sessions using this path?",
                 { cause: "usage" },
               );
             }
             if (theseFiles.length !== 1) {
               throw new Error(
                 "wave file detected but no self hello - are there other " +
-                  "sessions using this remote path?",
+                  "sessions using this path?",
                 { cause: "usage" },
               );
             }
@@ -413,9 +423,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
             this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
 
-            await this.sftp.safeDelete(`${this.path}/${waveFile.name}`);
-            await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
-            await this.sftp.safeDelete(helloPath);
+            await this.client.safeDelete(`${this.path}/${waveFile.name}`);
+            await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+            await this.client.safeDelete(helloPath);
 
             this.responsibleFiles.clear();
 
@@ -424,8 +434,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
           if (otherFiles.length > 1) {
             throw new Error(
-              `more than one peer hello file in ${this.path} - are there " +
-              "other sessions using this remote path?`,
+              `more than one peer hello file in ${this.path} - are there ` +
+                "other sessions using this path?",
               { cause: "usage" },
             );
           }
@@ -452,7 +462,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
               `[${this.role}] detected ${otherFile.name}; deleting it`,
             );
 
-            await this.sftp.safeDelete(otherPath);
+            await this.client.safeDelete(otherPath);
 
             this.responsibleFiles.clear();
 
@@ -460,8 +470,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
           } else {
             if (theseFiles.length > 1) {
               throw new Error(
-                `more than one self hello file in ${this.path} - are there " +
-                "other sessions using this remote path?`,
+                `more than one self hello file in ${this.path} - are there ` +
+                  "other sessions using this path?",
                 { cause: "usage" },
               );
             }
@@ -483,14 +493,14 @@ export class SFTPConnection extends EventEmitter<Events, never> {
             const tempPath = `${this.path}/${this.id}.tmp.wave`;
 
             this.log.debug(`[${this.role}] attempting to create ${waveName}`);
-            await this.sftp.put(Buffer.from(new ArrayBuffer(0)), tempPath, {
+            await this.client.put(Buffer.from(new ArrayBuffer(0)), tempPath, {
               flags: "w",
               encoding: "utf-8",
             });
             this.responsibleFiles.add(`${this.id}.tmp.wave`);
 
             try {
-              await this.sftp.rename(tempPath, wavePath);
+              await this.client.rename(tempPath, wavePath);
               this.responsibleFiles.add(waveName);
               this.responsibleFiles.delete(`${this.id}.tmp.wave`);
               this.log.debug(
@@ -518,8 +528,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
                *
                * This is B
                */
-              await this.sftp.safeDelete(tempPath);
-              const waveAlreadyExists = await this.sftp.exists(wavePath);
+              await this.client.safeDelete(tempPath);
+              const waveAlreadyExists = await this.client.exists(wavePath);
 
               if (!(err instanceof Error) || !waveAlreadyExists) throw err;
 
@@ -528,9 +538,9 @@ export class SFTPConnection extends EventEmitter<Events, never> {
                   "condition",
               );
 
-              await this.sftp.safeDelete(wavePath);
-              await this.sftp.safeDelete(`${this.path}/${otherFile.name}`);
-              await this.sftp.safeDelete(helloPath);
+              await this.client.safeDelete(wavePath);
+              await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+              await this.client.safeDelete(helloPath);
 
               this.responsibleFiles.clear();
             }
@@ -545,8 +555,8 @@ export class SFTPConnection extends EventEmitter<Events, never> {
         this.responsibleFiles.clear();
         return;
       } catch (err: unknown) {
-        if (wavePath) await this.sftp.safeDelete(wavePath);
-        await this.sftp.safeDelete(helloPath);
+        if (wavePath) await this.client.safeDelete(wavePath);
+        await this.client.safeDelete(helloPath);
         if (err instanceof Error && err.cause === "usage") {
           delete err.cause;
           throw err;
@@ -559,18 +569,18 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
   async send(data: unknown) {
     if (!this.connected || this.path === undefined)
-      throw new Error("not connected to sftp server");
+      throw new Error("not connected");
 
     const outPath = `${this.path}/${this.id}.json`;
     const tempFile = `temp-${uuidv4()}.json`;
     const tempPath = `${this.path}/${tempFile}`;
 
     try {
-      if (await this.sftp.exists(outPath)) {
+      if (await this.client.exists(outPath)) {
         this.log.debug(
           `[${this.role}] waiting for previous message to be consumed`,
         );
-        while (await this.sftp.exists(outPath)) {
+        while (await this.client.exists(outPath)) {
           if (Date.now() > this.options.timeToLive.getTime()) {
             throw new Error(
               `timed out waiting for message from ${this.id} to be consumed`,
@@ -600,16 +610,16 @@ export class SFTPConnection extends EventEmitter<Events, never> {
           `${message.length} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
-      await this.sftp.put(Buffer.from(message), tempPath, {
+      await this.client.put(Buffer.from(message), tempPath, {
         flags: "w",
         encoding: null,
       });
 
       this.log.debug(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
-      await this.sftp.rename(tempPath, outPath);
+      await this.client.rename(tempPath, outPath);
       this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: unknown) {
-      await this.sftp.safeDelete(tempPath);
+      await this.client.safeDelete(tempPath);
       if (err instanceof Error && err.cause === "usage") {
         delete err.cause;
         throw err;
@@ -622,7 +632,7 @@ export class SFTPConnection extends EventEmitter<Events, never> {
     if (!this.pollerActive) return;
 
     if (!this.connected || this.path === undefined)
-      throw new Error("not connected to sftp server");
+      throw new Error("not connected");
 
     if (!this.peerId) throw new Error("not synchronized");
 
@@ -630,27 +640,27 @@ export class SFTPConnection extends EventEmitter<Events, never> {
 
     try {
       this.log.trace(`[${this.role}] polling for message from ${this.peerId}`);
-      const messageFile = await this.sftp.exists(inPath);
+      const messageFile = await this.client.exists(inPath);
       if (messageFile) {
         this.log.debug(
           `[${this.role}] getting message from ${this.peerId}.json`,
         );
 
-        const message = await this.sftp.get(inPath, { encoding: "utf-8" });
+        const message = await this.client.get(inPath, { encoding: "utf-8" });
 
         this.log.debug(`[${this.role}] deleting message ${this.peerId}.json`);
         try {
-          await this.sftp.delete(inPath);
+          await this.client.delete(inPath);
         } catch {
           await new Promise((resolve) =>
             setTimeout(resolve, this.options.pollingFrequency),
           );
           try {
-            await this.sftp.delete(inPath);
+            await this.client.delete(inPath);
           } catch (deleteErr: unknown) {
             this.log.warn(
               `[${this.role}] failed to delete ${this.peerId}.json; ` +
-                "please notify the server administrator than manual cleanup " +
+                "please notify the administrator that manual cleanup " +
                 `may be required: ${errMessage(deleteErr)}`,
             );
           }

@@ -1,13 +1,13 @@
 import Ssh2SftpClient from "ssh2-sftp-client";
 import {
   FileInfo,
+  FileTransportClient,
   GetOptions,
   PutOptions,
   retryPromise,
-  SFTPClient,
 } from "@psilink/core";
 
-export class SSH2SFTPClientAdapter implements SFTPClient {
+export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
 
@@ -15,9 +15,20 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
     this.client = new Ssh2SftpClient();
   }
 
-  connect(options: object): Promise<void> {
-    this.options = options;
-    return this.client.connect(options).then(() => {});
+  connect(options: Record<string, unknown>): Promise<void> {
+    const maxReconnects =
+      (options["maxReconnectAttempts"] as number | undefined) ?? 3;
+    // Exclude the psilink-specific key before handing options to ssh2.
+    // FileTransportClient uses Record<string,unknown> so the interface stays
+    // transport-agnostic; cast here is intentional.
+    const { maxReconnectAttempts: _, ...rest } = options;
+    const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
+    this.options = connectOptions;
+    return retryPromise(
+      () => this.client.connect(connectOptions).then(() => {}),
+      maxReconnects,
+      1_000,
+    );
   }
 
   end(): Promise<void> {
@@ -66,7 +77,7 @@ export class SSH2SFTPClientAdapter implements SFTPClient {
     return this.client.rename(fromPath, toPath).then(() => {});
   }
 
-  exists(remotePath: string): Promise<boolean | string> {
-    return this.client.exists(remotePath);
+  exists(remotePath: string): Promise<boolean> {
+    return this.client.exists(remotePath).then(Boolean);
   }
 }

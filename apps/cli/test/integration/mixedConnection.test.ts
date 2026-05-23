@@ -1,0 +1,161 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import { afterAll, beforeAll, expect, test } from "vitest";
+import { FileSyncConnection } from "@psilink/core";
+
+import { LocalFSClient } from "../../src/connection/localFSClient";
+import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+
+import log from "loglevel";
+
+log.setLevel(log.levels.DEBUG);
+
+// compose.yaml mounts apps/cli/test/container/sftp/srv/ as /home/{user}/psi
+// inside the container, so subdirectories of srv/ are served as subdirectories
+// of /psi via SFTP. beforeAll creates SFTP_LOCAL_DIRECTORY with { recursive:
+// true } before opening connections, so the host directory exists when the
+// server needs it. Relative path used for cleanup; LocalFSClient requires
+// absolute.
+const SFTP_LOCAL_DIRECTORY = "test/container/sftp/srv/mixed";
+const SFTP_PATH = "/psi/mixed";
+const LOCAL_DIRECTORY = path.resolve(SFTP_LOCAL_DIRECTORY);
+
+async function cleanServer() {
+  for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {
+    try {
+      await fs.unlink(path.join(SFTP_LOCAL_DIRECTORY, file));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function desynchronize(conn: FileSyncConnection) {
+  conn.peerId = undefined;
+  conn.handshakeRole = undefined;
+  conn.role = "unknown";
+}
+
+const sftpAdapter = new SSH2SFTPClientAdapter();
+const sftpConn = new FileSyncConnection(sftpAdapter, { verbose: -1 });
+const localConn = new FileSyncConnection(new LocalFSClient(), { verbose: -1 });
+
+sftpConn.on("error", (err: unknown) => {
+  throw new Error(String(err));
+});
+localConn.on("error", (err: unknown) => {
+  throw new Error(String(err));
+});
+
+beforeAll(async () => {
+  await fs.mkdir(SFTP_LOCAL_DIRECTORY, { recursive: true });
+  await cleanServer();
+  await Promise.all([
+    sftpConn.open({
+      channel: "sftp",
+      server: {
+        host: "localhost",
+        port: 2222,
+        username: "usera",
+        password: "usera",
+        path: SFTP_PATH,
+      },
+    }),
+    localConn.open({ channel: "filedrop", path: LOCAL_DIRECTORY }),
+  ]);
+});
+
+// to test race condition, Promise.all is used when synchronizing
+// to set an explicit order, one party is delayed a tick by using setImmediate
+
+afterAll(async () => {
+  await Promise.all([sftpConn.close(), localConn.close()]);
+  await cleanServer();
+});
+
+test("wave synchronization with race condition", async () => {
+  await Promise.all([sftpConn.synchronize(), localConn.synchronize()]);
+
+  expect(sftpConn.peerId).toEqual(localConn.id);
+  expect(localConn.peerId).toEqual(sftpConn.id);
+  expect(sftpConn.handshakeRole !== localConn.handshakeRole).toBe(true);
+
+  const currentFiles = await sftpAdapter.list(SFTP_PATH);
+  expect(currentFiles.length).toEqual(0);
+
+  desynchronize(sftpConn);
+  desynchronize(localConn);
+});
+
+test("basic synchronization", async () => {
+  await sftpAdapter.put(
+    Buffer.from(new ArrayBuffer(0)),
+    `${SFTP_PATH}/${localConn.id}.hello`,
+  );
+
+  await sftpConn.synchronize();
+
+  const currentFiles = await sftpAdapter.list(SFTP_PATH);
+  await sftpAdapter.safeDelete(`${SFTP_PATH}/${sftpConn.id}.hello`);
+
+  expect(sftpConn.peerId).toBe(localConn.id);
+  expect(sftpConn.handshakeRole).toBe("initiator");
+
+  expect(currentFiles.length).toBe(1);
+  expect(currentFiles[0].name).toBe(`${sftpConn.id}.hello`);
+
+  desynchronize(sftpConn);
+});
+
+test("sftp sends, local receives", async () => {
+  const sftpSyncPromise = sftpConn.synchronize();
+  const localSyncPromise = new Promise<void>((resolve, reject) => {
+    setImmediate(() => void localConn.synchronize().then(resolve, reject));
+  });
+  await Promise.all([sftpSyncPromise, localSyncPromise]);
+
+  localConn.start();
+
+  const messagePromise = new Promise((resolve) => {
+    localConn.once("data", (data: unknown) => {
+      resolve(data);
+    });
+  });
+
+  await sftpConn.send({ message: "hello from sftp" });
+  const message = await messagePromise;
+
+  localConn.stop();
+
+  desynchronize(sftpConn);
+  desynchronize(localConn);
+
+  expect(message).toEqual({ message: "hello from sftp" });
+});
+
+test("local sends, sftp receives", async () => {
+  const sftpSyncPromise = sftpConn.synchronize();
+  const localSyncPromise = new Promise<void>((resolve, reject) => {
+    setImmediate(() => void localConn.synchronize().then(resolve, reject));
+  });
+  await Promise.all([sftpSyncPromise, localSyncPromise]);
+
+  sftpConn.start();
+
+  const messagePromise = new Promise((resolve) => {
+    sftpConn.once("data", (data: unknown) => {
+      resolve(data);
+    });
+  });
+
+  await localConn.send({ message: "hello from local" });
+  const message = await messagePromise;
+
+  sftpConn.stop();
+
+  desynchronize(sftpConn);
+  desynchronize(localConn);
+
+  expect(message).toEqual({ message: "hello from local" });
+});

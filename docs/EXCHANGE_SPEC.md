@@ -366,17 +366,40 @@ material.
 
 ### `connection.channel`
 
-*Type:* enum: `webrtc` | `sftp`  
+*Type:* enum: `webrtc` | `sftp` | `filedrop`  
 *Required:* yes
 
 The communication channel for the exchange. See [COMMUNICATION.md](COMMUNICATION.md)
 and [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure requirements for each
 channel.
 
+| Value | Description |
+|-------|-------------|
+| `sftp` | Parties connect to a shared SFTP server and exchange files there |
+| `webrtc` | Both parties connect via a PeerJS peer-coordination server and exchange data over a WebRTC data channel |
+| `filedrop` | Parties exchange files through a locally-mounted directory (e.g. a network folder backed by an SFTP server, to which their partner connects directly) |
+
+### `connection.path`
+
+*Type:* string  
+*Required:* yes (filedrop only)  
+*Applies to:* `filedrop`
+
+Absolute path to the shared directory on the local filesystem. Both parties
+must be able to read and write files in this directory. Use `file://` URLs
+with the CLI for zero-setup exchanges.
+
+```yaml
+connection:
+  channel: filedrop
+  path: /mnt/sftp-share/exchanges/agency-a-agency-b
+```
+
 ### `connection.server`
 
 *Type:* object  
-*Required:* yes
+*Required:* yes (webrtc and sftp only)  
+*Applies to:* `webrtc`, `sftp`
 
 The primary server for the exchange. For WebRTC this is the PeerJS peer
 coordination server; for SFTP this is the SFTP host. A URL may be supplied as a
@@ -424,6 +447,11 @@ connection:
     username: psilink
     private_key: "@/run/secrets/id_ed25519"
     host_key_fingerprint: "SHA256:..."
+
+# File-drop example (network-mounted folder)
+connection:
+  channel: filedrop
+  path: /mnt/sftp-share/exchanges/agency-a-agency-b
 ```
 
 #### On-demand server provisioning
@@ -471,26 +499,29 @@ connection:
 
 *Type:* object  
 *Required:* no  
-*Applies to:* `webrtc`
+*Applies to:* `webrtc`, `sftp`, `filedrop`
 
-Used in WebRTC config-based exchanges to specify the peer role. SFTP
-config-based exchanges omit this block because there are no fields to set; the
-PAKE token is loaded from `.psilink.key` regardless. Zero-setup exchanges omit
-it as well, relying on transport-layer authentication instead.
+Authentication settings for the exchange. What belongs in `psilink.yaml` depends
+on the channel:
 
-The token and its expiration are stored together in `.psilink.key` and loaded
-directly from the path specified by `--key-file` (default `.psilink.key`); they
-never appear in `psilink.yaml`. The values should not be edited manually.
+- **`webrtc`**: set `role` to identify the inviter and acceptor.
+- **`sftp` and `filedrop`**: no fields are user-settable here.
 
-The token is automatically rotated after each successful exchange: a replacement
-is generated locally and transmitted to both parties over the authenticated
-channel during the receipt step, taking effect only after both parties confirm
-receipt. If the exchange fails before confirmation, the existing token remains
-valid. Invitation tokens carry a default expiration of 1 hour; rotation tokens
-carry none.
+The PAKE token and its expiration are loaded from a key file and added to the
+in-memory representation before the exchange runs; they never appear in
+`psilink.yaml` and should not be edited manually.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
+The PAKE token is automatically rotated after each successful exchange: a
+replacement is generated locally and transmitted to both parties over the
+authenticated channel during the receipt step, taking effect only after both
+parties confirm receipt. If the exchange fails before confirmation, the existing
+token remains valid. Invitation tokens carry a default expiration of 1 hour;
+persistent tokens carry none.
+
+| Field | Type | In `psilink.yaml` | Description |
+|-------|------|-------------------|-------------|
+| `pake_token` | string | never; loaded from `.psilink.key` | PAKE shared secret. Do not set manually. |
+| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `pake_token`; absent for persistent tokens. Do not set manually. |
 | `role` | enum | WebRTC only | `inviter` \| `acceptor`; used to derive deterministic PeerJS peer IDs from the shared token so both parties know each other's address without out-of-band communication. Orthogonal to the PSI protocol roles, which are determined by `linkage_terms.output` |
 
 ```yaml
@@ -498,9 +529,6 @@ connection:
   authentication:
     role: inviter
 ```
-
-TODO: Encoding, minimum entropy requirements, and generation procedure. The web
-application generates tokens using the browser's `crypto.getRandomValues`.
 
 ### `connection.stun`
 
@@ -625,18 +653,20 @@ connection:
 *Required:* no
 
 Channel-agnostic and channel-specific tuning parameters. A configuration warning
-is made if SFTP-specific fields are given when the WebRTC channel is active, and
-vice versa.
+is made if fields specific to a channel are given that do not apply to the
+active one.
 
 #### Shared options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `peer_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the partner before giving up; the effective limit is the minimum of this and the remaining PAKE token lifetime |
-| `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait when connecting to the primary exchange server |
+| `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait during each connection attempt to the primary exchange server |
 | `max_reconnect_attempts` | integer | 3 | Maximum number of times to attempt reopening a dropped connection before giving up |
 
-#### SFTP options
+#### SFTP and file-drop options
+
+These options apply to both `sftp` and `filedrop` channels.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

@@ -22,12 +22,64 @@ const sftpBase = {
 test("parses a minimal WebRTC connection", () => {
   const result = parseConnectionConfig(webrtcBase);
   expect(result.channel).toBe("webrtc");
+  if (result.channel !== "webrtc") return;
   expect(result.server.host).toBe("api.peerjs.com");
+});
+
+test("parses a minimal file-drop connection", () => {
+  const result = parseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+  });
+  expect(result.channel).toBe("filedrop");
+  if (result.channel !== "filedrop") return;
+  expect(result.path).toBe("/mnt/share/drop");
+});
+
+test("file-drop connection with empty path is rejected", () => {
+  const result = safeParseConnectionConfig({ channel: "filedrop", path: "" });
+  expect(result.success).toBe(false);
+});
+
+test("file-drop connection with relative path is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "relative/path",
+  });
+  expect(result.success).toBe(false);
+});
+
+test("file-drop connection with Windows drive path is accepted", () => {
+  const result = parseConnectionConfig({
+    channel: "filedrop",
+    path: "C:/Users/shared/drop",
+  });
+  expect(result.channel).toBe("filedrop");
+  if (result.channel !== "filedrop") return;
+  expect(result.path).toBe("C:/Users/shared/drop");
+});
+
+test("file-drop connection with Windows backslash drive path is accepted", () => {
+  const result = parseConnectionConfig({
+    channel: "filedrop",
+    path: "C:\\Users\\shared\\drop",
+  });
+  expect(result.channel).toBe("filedrop");
+});
+
+test("file-drop connection with Windows UNC path is accepted", () => {
+  const result = parseConnectionConfig({
+    channel: "filedrop",
+    path: "\\\\server\\share\\drop",
+  });
+  expect(result.channel).toBe("filedrop");
 });
 
 test("parses a minimal SFTP connection", () => {
   const result = parseConnectionConfig(sftpBase);
   expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.server.host).toBe("sftp.example.org");
 });
 
 test("parses a full WebRTC connection with stun, turn, and authentication", () => {

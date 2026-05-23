@@ -184,6 +184,11 @@ export function loadConfig(
     serverPort: options.serverPort,
   });
 
+  if (connection.channel !== "sftp" && connection.channel !== "filedrop")
+    throw new Error(
+      `the ${connection.channel} channel is not yet supported in the CLI`,
+    );
+
   let keyData: KeyFile | undefined;
   try {
     keyData = loadKeyFile(options.keyFile);
@@ -207,9 +212,6 @@ export function loadConfig(
     connection.authentication.pakeToken = keyData.pakeToken;
     connection.authentication.expires = keyData.expires;
   }
-
-  if (connection.channel !== "sftp")
-    throw new Error("only the sftp channel is currently supported");
 
   return { connection, ...exchangeDataSpec };
 }

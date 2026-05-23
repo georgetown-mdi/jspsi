@@ -254,8 +254,11 @@ export interface SharedOptions {
    */
   peerTimeoutMs?: number;
   /**
-   * Milliseconds to wait when connecting to the primary exchange server;
-   * default: 30000.
+   * Milliseconds to wait per connection attempt to the primary exchange server;
+   * default: 30000. For channels that retry (e.g. `sftp` and `filedrop`), this
+   * limit applies to each attempt individually, not to the total across all
+   * attempts. Retry delays between attempts are not counted against this
+   * budget.
    */
   serverConnectTimeoutMs?: number;
   /** Maximum reconnect attempts before giving up; default: 3. */
@@ -271,8 +274,8 @@ const sharedOptionsFields = {
 const SharedOptionsSchema: z.ZodType<SharedOptions> =
   z.object(sharedOptionsFields);
 
-/** SFTP-specific tuning parameters. */
-export interface SFTPOptions extends SharedOptions {
+/** Tuning parameters shared by file-based channels (`sftp` and `filedrop`). */
+export interface FileSyncOptions extends SharedOptions {
   /**
    * Milliseconds between checks for the partner's uploaded file; default:
    * 30000.
@@ -280,7 +283,7 @@ export interface SFTPOptions extends SharedOptions {
   pollIntervalMs?: number;
 }
 
-const SFTPOptionsSchema: z.ZodType<SFTPOptions> = z.object({
+const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z.object({
   ...sharedOptionsFields,
   pollIntervalMs: z.int().nonnegative().optional(),
 });
@@ -326,7 +329,7 @@ export interface SFTPConnectionConfig {
    * connect natively.
    */
   proxy?: SFTPProxy;
-  options?: SFTPOptions;
+  options?: FileSyncOptions;
   /**
    * Opaque key-value map passed verbatim to the underlying transport library.
    * @-file pathing is supported.
@@ -334,9 +337,39 @@ export interface SFTPConnectionConfig {
   providerOptions?: Record<string, unknown>;
 }
 
-/** Connection configuration for an exchange. Discriminated by `channel`. */
-export type ConnectionConfig = WebRTCConnectionConfig | SFTPConnectionConfig;
+/**
+ * Connection configuration for an exchange over a locally-mounted folder.
+ * Both parties must have read/write access to the same directory (e.g. a
+ * network share mounted by IT that is backed by an SFTP server). The
+ * `.hello`/`.wave`/`.json` rendezvous protocol is identical to the SFTP
+ * channel; no SSH connection is made. Use `file://` URLs with the CLI.
+ *
+ * PAKE authentication applies in the same way as the `sftp` channel: the
+ * shared token in `.psilink.key` authenticates the exchange partner. This
+ * matters because the remote end may be accessing the same storage over SFTP
+ * rather than a local mount, so filesystem permissions alone do not guarantee
+ * the partner's identity.
+ */
+export interface FileDropConnectionConfig {
+  channel: "filedrop";
+  /** Absolute path to the shared directory (Unix or Windows). */
+  path: string;
+  authentication?: Authentication;
+  options?: FileSyncOptions;
+  // No providerOptions: LocalFSClient has no underlying transport library to
+  // pass opaque options to, unlike SSH2SFTPClientAdapter.
+}
 
+/** Connection configuration for an exchange. Discriminated by `channel`. */
+export type ConnectionConfig =
+  | WebRTCConnectionConfig
+  | SFTPConnectionConfig
+  | FileDropConnectionConfig;
+
+// These intermediate schemas are intentionally left without z.ZodType<T>
+// annotations: z.discriminatedUnion requires a concrete ZodObject, and the
+// explicit annotation would widen the type to ZodType<T>, breaking it.
+// Type safety is enforced at the ConnectionConfigSchema level instead.
 const WebRTCConnectionConfigSchema = z.object({
   channel: z.literal("webrtc"),
   server: WebRTCServerSchema,
@@ -357,14 +390,31 @@ const SFTPConnectionConfigSchema = z.object({
   server: SFTPServerSchema,
   authentication: AuthenticationSchema.optional(),
   proxy: SFTPProxySchema.optional(),
-  options: SFTPOptionsSchema.optional(),
+  options: FileSyncOptionsSchema.optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
+});
+
+const FileDropConnectionConfigSchema = z.object({
+  channel: z.literal("filedrop"),
+  path: z
+    .string()
+    .min(1)
+    .refine(
+      (p) =>
+        p.startsWith("/") || // Unix or UNC with forward slashes
+        /^[A-Za-z]:[/\\]/.test(p) || // Windows drive letter (C:\ or C:/)
+        p.startsWith("\\\\"), // Windows UNC (\\server\share)
+      { message: "path must be an absolute path" },
+    ),
+  authentication: AuthenticationSchema.optional(),
+  options: FileSyncOptionsSchema.optional(),
 });
 
 export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
   .discriminatedUnion("channel", [
     WebRTCConnectionConfigSchema,
     SFTPConnectionConfigSchema,
+    FileDropConnectionConfigSchema,
   ])
   .refine(
     (conn) =>

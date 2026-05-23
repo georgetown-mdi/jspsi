@@ -34,9 +34,25 @@ This creates a configuration file and then exits - no exchange or invitation is 
 psilink [--save] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
-Both parties run this command against the same server. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer - SSH credentials for SFTP, DTLS for WebRTC - rather than a PAKE-derived shared secret.
+Both parties run this command against the same server. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer and file system controls rather than a PAKE-derived shared secret. If there is no end-to-end encryption (e.g. SFTP or file-drop), then implicitly trust is placed in the server administrator.
+
+The URL scheme determines the transport channel:
+
+| Scheme | Channel | Description |
+|--------|---------|-------------|
+| `sftp://` or `ssh://` | `sftp` | SFTP server; SSH credentials required |
+| `ws://` or `wss://` | `webrtc` | WebRTC via PeerJS peer-coordination server (not yet available in CLI) |
+| `file://` | `filedrop` | Locally-mounted shared directory (e.g. NFS or SMB share) |
 
 For SFTP, SSH credentials must be supplied in the URL or as command-line arguments. Embedding credentials in the URL is not recommended as URLs may appear in shell history and process listings. When used, a warning is issued and users are instructed to use the `@path` convention instead - see [Configuration](#configuration).
+
+```sh
+# SFTP example
+psilink sftp://user@sftp.example.org/exchanges/drop input.csv output.csv
+
+# File-drop example (network-mounted folder)
+psilink file:///mnt/sftp-share/drop input.csv output.csv
+```
 
 Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
 
@@ -124,6 +140,14 @@ psilink exchange INPUT_FILE [OUTPUT_FILE]
 ```
 
 The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful exchange. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`.
+
+The `sftp` and `filedrop` channels are currently supported; `webrtc` is not yet available in the CLI. For file-drop exchanges, the `psilink.yaml` configuration uses `channel: filedrop` and `path` in place of `channel: sftp` and `server`:
+
+```yaml
+connection:
+  channel: filedrop
+  path: /mnt/sftp-share/exchanges/agency-a-agency-b
+```
 
 ## Recovery
 

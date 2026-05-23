@@ -9,6 +9,7 @@ import {
 import fs from "node:fs";
 import {
   channelFromURL,
+  createConnection,
   resolvePositionals,
 } from "../../src/commands/zeroSetup";
 
@@ -38,6 +39,10 @@ test("ws: maps to webrtc channel", () => {
 
 test("wss: maps to webrtc channel", () => {
   expect(channelFromURL(new URL("wss://example.org/path"))).toBe("webrtc");
+});
+
+test("file: maps to filedrop channel", () => {
+  expect(channelFromURL(new URL("file:///mnt/share/drop"))).toBe("filedrop");
 });
 
 test("unsupported URL scheme throws", () => {
@@ -90,4 +95,54 @@ test("invalid server URL with two positionals throws a parse error", () => {
   expect(() => resolvePositionals(["not-a-url", "input.csv"])).toThrow(
     "unable to parse server URL",
   );
+});
+
+// --- createConnection --------------------------------------------------------
+
+const baseOptions = {
+  save: false,
+  configFile: "./psilink.yaml",
+  keyFile: "./.psilink.key",
+};
+
+test("createConnection filedrop: channel and path are set", () => {
+  const result = createConnection(
+    new URL("file:///mnt/share/drop"),
+    baseOptions,
+  );
+  expect(result.channel).toBe("filedrop");
+  if (result.channel !== "filedrop") return;
+  expect(result.path).toBe("/mnt/share/drop");
+});
+
+test("createConnection filedrop: non-localhost authority throws", () => {
+  expect(() =>
+    createConnection(new URL("file://host/mnt/share"), baseOptions),
+  ).toThrow("three slashes");
+});
+
+test("createConnection filedrop: file://localhost/path is accepted", () => {
+  const result = createConnection(
+    new URL("file://localhost/mnt/share/drop"),
+    baseOptions,
+  );
+  expect(result.channel).toBe("filedrop");
+  if (result.channel !== "filedrop") return;
+  expect(result.path).toBe("/mnt/share/drop");
+});
+
+test("createConnection filedrop: peerTimeout is converted to ms", () => {
+  const result = createConnection(new URL("file:///mnt/share/drop"), {
+    ...baseOptions,
+    peerTimeout: 60,
+  });
+  expect(result.options?.peerTimeoutMs).toBe(60_000);
+});
+
+test("createConnection filedrop: connectionTimeout is converted to ms", () => {
+  const result = createConnection(new URL("file:///mnt/share/drop"), {
+    ...baseOptions,
+    connectionTimeout: 10,
+  });
+  expect(result.options?.serverConnectTimeoutMs).toBe(10_000);
 });

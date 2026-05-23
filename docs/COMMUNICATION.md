@@ -18,12 +18,11 @@ The protocol components above define what data parties exchange; this section de
 
 ## Channels
 
-If the exchange is to be accomplished without additional infrastructure, it must utilize existing communication channels. Two communication channels have been identified so far:
+If the exchange is to be accomplished without additional infrastructure, it must utilize existing communication channels. Three communication channels are currently supported:
 
 * Peer-to-peer using WebRTC - this is a protocol that is primarily used by browsers to communicate with each other, for example when conducting video calls. Peer-to-peer connections can be difficult to establish when parties are behind corporate firewalls and using Network Address Translation (NAT). To facilitate these connections, a third-party server typically needs to be available to execute to either help establish the connection, or to explicitly route the traffic.
 * SFTP - for many exchanges, one partner already runs an SFTP server that is used for secure file transfers. SFTP is less-than-ideal for a communication protocol, as it is a file transfer protocol and not a direct connection. That said, with frequent polling and strategies to resolve synchronization, it can be treated as a message passing channel with slight delays for each message. As the number of messages is independent of the size of the datasets, this represents a fixed, tolerable time cost.
-
-Additional channels will be selected based on infrastructure and deployment conversations with potential users.
+* File-drop - transfers can be made through directories that both parties can access, for example an NFS or SMB network share provisioned by IT, or a folder backed by an SFTP server and mounted locally. The same file-based polling and synchronization protocol used for SFTP is applied directly to the mounted path. This is the simplest deployment option when shared storage already exists. No additional supporting services are required beyond read/write access to the shared directory. It is possible to conduct an exchange where one party utilizes a file-drop that is synchronized to a directory that is served by an SFTP server to which the other party connects.
 
 ## Synchronization
 

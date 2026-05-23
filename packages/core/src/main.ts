@@ -2,9 +2,9 @@ export * from "./participant";
 export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";
-export * from "./connection/sftpConnection";
+export * from "./connection/fileSyncConnection";
 export { getLogger, setLogPrefixer } from "./utils/logger";
-export { retryPromise } from "./utils/promise";
+export { retryPromise, withTimeout } from "./utils/promise";
 
 export * from "./config/standardization";
 export * from "./config/connection";

@@ -4,12 +4,12 @@ PSI-Link currently consists of a core library and two applications that build of
 
 The core library:
 - Wraps OpenMined PSI into a PSI primitive that operates over a generic connection-style object.
-- Implements synchronization of participants over SFTP.
+- Implements synchronization of participants over a file-based transport (SFTP or locally-mounted directory).
 - Has user-defined linkage keys.
 - Has user-defined data standardization.
 - Implements a one-to-one PPRL for a set of realized linkage keys and a object that can conduct a PSI primitive.
 - Infers metadata, linkage keys, and standardization based on input columns.
-- Also contains some SFTP abstractions.
+- Contains file transport abstractions (`FileTransportClient`, `FileSyncConnection`) used by both the SFTP and file-drop channels.
 - Prepares data payloads.
 
 # Web Application
@@ -41,7 +41,7 @@ The command line application:
 - AEAD encryption for PAKE authenticated SFTP connections
 - Invite and accept for CLI
 - Path way to migrate from zero-setup to recurring exchange for CLI
-- File system as a connection type
+- ~~File system as a connection type~~ (done: `filedrop` channel)
 - Web application
 
 ## Version 1.0
