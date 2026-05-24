@@ -12,7 +12,7 @@ import type { Authentication } from "./config/connection.js";
  */
 export interface AuthResult {
   /**
-   * 16-byte SPAKE2 session key (`Ke`).  Both parties hold the same value after
+   * 32-byte SPAKE2 session key (`Ke`).  Both parties hold the same value after
    * a successful handshake.  Callers that need application-layer encryption
    * (e.g. `sftp` and `filedrop` channels) should pass this to
    * {@link deriveAeadKey} to obtain a full-strength AES-GCM key; callers

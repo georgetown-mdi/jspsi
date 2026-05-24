@@ -94,11 +94,6 @@ function bytesToHex(bytes: Uint8Array<ArrayBuffer>): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function sha256(
-  data: Uint8Array<ArrayBuffer>,
-): Promise<Uint8Array<ArrayBuffer>> {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-}
 
 async function hmacSha256(
   key: Uint8Array<ArrayBuffer>,
@@ -184,6 +179,11 @@ function randomScalar(): bigint {
  * scalar serialized as a 32-byte big-endian integer, which is the encoding
  * RFC 9382 §3.3 specifies.  See `SECURITY.md` §"Key derivation" for the
  * interoperability note on M and N.
+ *
+ * Deviation from RFC 9382 §3.4: instead of SHA-256-hashing the transcript
+ * and splitting as `Ka||Ke`, each key is derived directly from the transcript
+ * via HKDF-SHA-256 (info strings `"psilink-spake2-ka-v1"` and
+ * `"psilink-spake2-ke-v1"`), expanding to 32 bytes each.
  */
 async function deriveKeys(
   T: Uint8Array<ArrayBuffer>,
@@ -206,9 +206,9 @@ async function deriveKeys(
     encodeLen(wBytes),
     wBytes,
   );
-  const hash = await sha256(TT);
-  // SHA-256 produces 32 bytes: Ka = first 16, Ke = last 16.
-  return { ka: hash.slice(0, 16), ke: hash.slice(16, 32) };
+  const ka = await hkdfDerive(TT, "psilink-spake2-ka-v1", 32);
+  const ke = await hkdfDerive(TT, "psilink-spake2-ke-v1", 32);
+  return { ka, ke };
 }
 
 // --- Receive helper ----------------------------------------------------------

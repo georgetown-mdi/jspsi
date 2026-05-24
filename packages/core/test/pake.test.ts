@@ -83,14 +83,14 @@ test("different tokens produce different session keys", async () => {
   expect(a.value.sessionKey).not.toEqual(b.value.sessionKey);
 });
 
-test("session key is always a 16-byte Uint8Array", async () => {
+test("session key is always a 32-byte Uint8Array", async () => {
   const [r1] = await runPair(TOKEN_ALPHA, TOKEN_ALPHA);
   const [r2] = await runPair(TOKEN_ALPHA, TOKEN_ALPHA);
   if (r1.status !== "fulfilled" || r2.status !== "fulfilled") throw new Error();
   expect(r1.value.sessionKey).toBeInstanceOf(Uint8Array);
-  expect(r1.value.sessionKey.length).toBe(16);
+  expect(r1.value.sessionKey.length).toBe(32);
   expect(r2.value.sessionKey).toBeInstanceOf(Uint8Array);
-  expect(r2.value.sessionKey.length).toBe(16);
+  expect(r2.value.sessionKey.length).toBe(32);
 });
 
 test("listeners are removed after a successful handshake", async () => {
@@ -248,7 +248,7 @@ test("authenticateConnection accepts a token that has not yet expired", async ()
 // --- deriveAeadKey -----------------------------------------------------------
 
 test("deriveAeadKey returns 32 bytes", async () => {
-  const key = await deriveAeadKey(new Uint8Array(16), "sftp-aead");
+  const key = await deriveAeadKey(new Uint8Array(32), "sftp-aead");
   expect(key).toHaveLength(32);
 });
 
