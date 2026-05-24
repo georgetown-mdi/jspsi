@@ -20,3 +20,7 @@ export { loadCSVFile } from "./file";
 export { inferDateFormat } from "./utils/date.js";
 export * from "./exchange";
 export * from "./payloadExchange";
+export { authenticateConnection, deriveAeadKey } from "./auth";
+export type { AuthResult } from "./auth";
+export { runSpake2 } from "./pake";
+export type { Spake2Result } from "./pake";
