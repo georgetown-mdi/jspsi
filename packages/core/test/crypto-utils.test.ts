@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { bytesEqual } from "../src/crypto-utils";
+import { bytesEqual } from "../src/utils/crypto";
 
 test("bytesEqual returns true for equal arrays", () => {
   const a = new Uint8Array([1, 2, 3]);

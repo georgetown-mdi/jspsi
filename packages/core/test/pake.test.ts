@@ -84,13 +84,13 @@ test("different tokens produce different session keys", async () => {
 });
 
 test("session key is always a 32-byte Uint8Array", async () => {
-  const [r1] = await runPair(TOKEN_ALPHA, TOKEN_ALPHA);
-  const [r2] = await runPair(TOKEN_ALPHA, TOKEN_ALPHA);
-  if (r1.status !== "fulfilled" || r2.status !== "fulfilled") throw new Error();
-  expect(r1.value.sessionKey).toBeInstanceOf(Uint8Array);
-  expect(r1.value.sessionKey.length).toBe(32);
-  expect(r2.value.sessionKey).toBeInstanceOf(Uint8Array);
-  expect(r2.value.sessionKey.length).toBe(32);
+  const [initiator, responder] = await runPair(TOKEN_ALPHA, TOKEN_ALPHA);
+  if (initiator.status !== "fulfilled" || responder.status !== "fulfilled")
+    throw new Error();
+  expect(initiator.value.sessionKey).toBeInstanceOf(Uint8Array);
+  expect(initiator.value.sessionKey.length).toBe(32);
+  expect(responder.value.sessionKey).toBeInstanceOf(Uint8Array);
+  expect(responder.value.sessionKey.length).toBe(32);
 });
 
 test("listeners are removed after a successful handshake", async () => {
@@ -206,6 +206,20 @@ test("authenticateConnection: sessionKey is identical on both sides", async () =
   expect(a.sessionKey).toEqual(b.sessionKey);
 });
 
+test("authenticateConnection fails when tokens differ", async () => {
+  const [connA, connB] = makeConnections();
+  const [a, b] = await Promise.allSettled([
+    authenticateConnection(connA, { pakeToken: TOKEN_ALPHA }, "initiator"),
+    authenticateConnection(connB, { pakeToken: TOKEN_BETA }, "responder"),
+  ]);
+  expect(a.status).toBe("rejected");
+  expect(b.status).toBe("rejected");
+  const msgs = [a, b].map(
+    (r) => (r as PromiseRejectedResult).reason.message as string,
+  );
+  expect(msgs.every((m) => m === "PAKE authentication failed")).toBe(true);
+});
+
 test("authenticateConnection throws when pakeToken is absent", async () => {
   const [connA] = makeConnections();
   await expect(authenticateConnection(connA, {}, "initiator")).rejects.toThrow(
@@ -253,22 +267,22 @@ test("deriveAeadKey returns 32 bytes", async () => {
 });
 
 test("deriveAeadKey is deterministic for the same inputs", async () => {
-  const sessionKey = new Uint8Array(16).fill(0x42);
+  const sessionKey = new Uint8Array(32).fill(0x42);
   const k1 = await deriveAeadKey(sessionKey, "test");
   const k2 = await deriveAeadKey(sessionKey, "test");
   expect(k1).toEqual(k2);
 });
 
 test("deriveAeadKey differs for different context strings", async () => {
-  const sessionKey = new Uint8Array(16).fill(0x01);
+  const sessionKey = new Uint8Array(32).fill(0x01);
   const k1 = await deriveAeadKey(sessionKey, "ctx-a");
   const k2 = await deriveAeadKey(sessionKey, "ctx-b");
   expect(k1).not.toEqual(k2);
 });
 
 test("deriveAeadKey differs for different session keys", async () => {
-  const k1 = await deriveAeadKey(new Uint8Array(16).fill(0x01), "ctx");
-  const k2 = await deriveAeadKey(new Uint8Array(16).fill(0x02), "ctx");
+  const k1 = await deriveAeadKey(new Uint8Array(32).fill(0x01), "ctx");
+  const k2 = await deriveAeadKey(new Uint8Array(32).fill(0x02), "ctx");
   expect(k1).not.toEqual(k2);
 });
 

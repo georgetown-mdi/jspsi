@@ -46,6 +46,8 @@ const GENERIC_ALL = 0x10000000;
 //      display names are locale-dependent; skipping inherited ACEs (the (I)
 //      flag) covers their normal case -- see EXEMPT_SIDS above.
 function warnIfWindowsAclOverPermissive(keyFilePath: string): void {
+  // path is caller-supplied; '' escaping suffices because the user controls the
+  // key file path
   const escaped = keyFilePath.replace(/'/g, "''");
   const cmd =
     `$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;` +

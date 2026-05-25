@@ -1,3 +1,7 @@
+ // NOTE: `hexToBytes`, `bytesToHex`, and `hmacSha256` in `pake.ts`
+ // are also candidates to move here once the AEAD layer provides a second
+ // caller for them.
+
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();
 
@@ -47,10 +51,6 @@ export function fromBase64Url(str: string): Uint8Array<ArrayBuffer> {
  * zero-padded prefix of the other would XOR `(undefined??0)` against `0` for
  * the extra iterations, contributing nothing to the accumulator and returning
  * `true` incorrectly.
- *
- * Note: `hexToBytes`, `bytesToHex`, and `hmacSha256` in `pake.ts`
- * are also candidates to move here once the AEAD layer provides a second
- * caller for them.
  */
 export function bytesEqual(
   a: Uint8Array<ArrayBuffer>,

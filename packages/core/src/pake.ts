@@ -7,7 +7,7 @@ import {
   toBase64Url,
   fromBase64Url,
   bytesEqual,
-} from "./crypto-utils.js";
+} from "./utils/crypto.js";
 import type { Connection, HandshakeRole } from "./types.js";
 
 // Blinding points M and N for SPAKE2 over P-256. They are derived via
@@ -93,7 +93,6 @@ function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
 function bytesToHex(bytes: Uint8Array<ArrayBuffer>): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
-
 
 async function hmacSha256(
   key: Uint8Array<ArrayBuffer>,
@@ -248,12 +247,12 @@ function receive(conn: Connection): Promise<unknown> {
 /**
  * Result of a completed SPAKE2 handshake.
  *
- * `sessionKey` is the 16-byte Ke from the SPAKE2 transcript, suitable for
+ * `sessionKey` is the 32-byte Ke from the SPAKE2 transcript, suitable for
  * passing to {@link deriveAeadKey} to derive a channel encryption key.
  * Both parties hold the same value after a successful handshake.
  */
 export interface Spake2Result {
-  /** 16-byte SPAKE2 session key (Ke). */
+  /** 32-byte SPAKE2 session key (Ke). */
   sessionKey: Uint8Array<ArrayBuffer>;
 }
 

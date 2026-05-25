@@ -1,4 +1,4 @@
-import { hkdfDerive, toBase64Url } from "./crypto-utils.js";
+import { hkdfDerive, toBase64Url } from "./utils/crypto.js";
 import { runSpake2 } from "./pake.js";
 
 import type { Connection, HandshakeRole } from "./types.js";
