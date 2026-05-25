@@ -35,10 +35,20 @@ export function fromBase64Url(str: string): Uint8Array<ArrayBuffer> {
 
 /**
  * Constant-time byte comparison.  Returns `true` iff `a` and `b` have equal
- * length and identical contents.  Uses a bitwise-OR accumulator to avoid
- * timing oracles.
+ * length and identical contents.
  *
- * Note: `hexToBytes`, `bytesToHex`, `sha256`, and `hmacSha256` in `pake.ts`
+ * The comparison is unconditionally constant-time with respect to content: the
+ * loop always runs over `Math.max(a.length, b.length)` iterations regardless
+ * of content or length.  Loop count does reveal `max(len_a, len_b)` from
+ * timing, but this is unavoidable for variable-length inputs and is not a
+ * concern when comparing fixed-length values (e.g. MACs or session keys).
+ * The accumulator is seeded with a length-mismatch flag so that unequal-length
+ * inputs always return `false` — without the seed, an input that is a
+ * zero-padded prefix of the other would XOR `(undefined??0)` against `0` for
+ * the extra iterations, contributing nothing to the accumulator and returning
+ * `true` incorrectly.
+ *
+ * Note: `hexToBytes`, `bytesToHex`, and `hmacSha256` in `pake.ts`
  * are also candidates to move here once the AEAD layer provides a second
  * caller for them.
  */
@@ -46,9 +56,13 @@ export function bytesEqual(
   a: Uint8Array<ArrayBuffer>,
   b: Uint8Array<ArrayBuffer>,
 ): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  const len = Math.max(a.length, b.length);
+  let diff = a.length === b.length ? 0 : 1;
+  for (let i = 0; i < len; i++)
+    // Uint8Array index is typed as `number` but returns undefined out-of-
+    // bounds; cast makes the ?? 0 fallback explicit.
+    diff |=
+      ((a[i] as number | undefined) ?? 0) ^ ((b[i] as number | undefined) ?? 0);
   return diff === 0;
 }
 
