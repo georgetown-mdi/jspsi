@@ -81,7 +81,9 @@ After a successful handshake both parties independently derive the next token fr
 
 ## Transport-layer authentication
 
-Parties can reuse trusted communication channels to conduct [zero-setup exchanges](CLI.md#zero-setup-exchange) by relying on transport-layer authentication (DTLS for WebRTC, SSH for SFTP, and commonly SMB or krb5p for file-drops). For an SFTP connection or a network-mounted file-drop, user and path management on the server-side limit who is able to listen in. This offloads trust to the server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall. Users who wish to establish a persistent shared secret are encouraged to bootstrap one (see [Bootstrapping a shared secret](#bootstrapping-a-shared-secret)).
+Transport-layer authentication is the defined path for zero-setup exchanges only. It is not an option for recurring exchanges: the `exchange` command requires a key file (`.psilink.key`) and will abort if one is absent.
+
+For zero-setup exchanges, parties rely on transport-layer authentication (DTLS for WebRTC, SSH for SFTP, and commonly SMB or krb5p for file-drops). For an SFTP connection or a network-mounted file-drop, user and path management on the server-side limit who is able to listen in. This offloads trust to the server's administrator to ensure that the directory is specific to the exchange and cannot be accessed by other users. This method may be preferable if managing an additional encryption key is perceived as too burdensome, even though it is less secure overall. Users who wish to establish a persistent shared secret are encouraged to bootstrap one (see [Bootstrapping a shared secret](#bootstrapping-a-shared-secret)).
 
 ## Bootstrapping a shared secret
 

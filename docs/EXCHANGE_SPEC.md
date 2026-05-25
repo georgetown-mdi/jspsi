@@ -498,7 +498,7 @@ connection:
 ### `connection.authentication`
 
 *Type:* object  
-*Required:* no  
+*Required:* no (see note below) 
 *Applies to:* `webrtc`, `sftp`, `filedrop`
 
 Authentication settings for the exchange. What belongs in `psilink.yaml` depends
@@ -510,6 +510,15 @@ on the channel:
 The PAKE token and its expiration are loaded from a key file and added to the
 in-memory representation before the exchange runs; they never appear in
 `psilink.yaml` and should not be edited manually.
+
+`pakeToken` is required for recurring exchanges run via the `exchange` command.
+If the key file (`.psilink.key`) is absent, the CLI aborts before any connection
+is attempted. Zero-setup exchanges (the `zero-setup` command) rely on
+transport-layer authentication instead and do not use a key file.
+
+Taken together, this implies that `connection.authentication` is never required
+in a configuration file. It is required for in-memory objects used for recurring
+exchanges, and it is optional for zero-setup exchanges.
 
 The PAKE token is automatically rotated after each successful exchange: both
 parties independently derive the replacement from the SPAKE2 session key using
