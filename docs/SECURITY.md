@@ -95,6 +95,60 @@ Parties wishing to transition from a zero-setup exchange to a recurring exchange
 
 The party that did not signal an intent to save the exchange parameters is notified that their partner is trying to establish a recurring exchange, that nothing is being saved on their end, and that they can either wait for an invitation from their partner or coordinate to run the exchange again and save the parameters.
 
+# Key file security
+
+`.psilink.key` contains the PAKE token that authenticates recurring exchanges. It must be treated as a credential with the same care as a private key or password.
+
+## Required permissions
+
+**Unix**: The CLI writes `.psilink.key` with mode `0600` (owner-read-only). If an existing key file has any group or world permission bits set (i.e. `mode & 0o077` is non-zero), the CLI emits a warning on load. Correct the permissions before running further exchanges:
+
+```sh
+chmod 0600 .psilink.key
+```
+
+**Windows**: The CLI enforces ACLs on write: it creates an empty placeholder file, narrows its ACL with `icacls /inheritance:r /grant:r` to grant Modify (`M`) to the current user only, then writes the token into the already-protected file. This ensures the token is never on disk while the file still carries inherited ACEs (e.g. the default `BUILTIN\Users` read). If the `icacls` call fails (for example in a restricted container environment), the placeholder is deleted and an error is raised; no key material is written.
+
+On load, the CLI first attempts to use PowerShell's `Get-Acl` with SID translation, which checks both inherited and explicit ACEs in a locale-independent way; SYSTEM (`S-1-5-18`) and Administrators (`S-1-5-32-544`) are not flagged. If PowerShell is unavailable -- for example in Nano Server containers or environments with strict application control policies -- the CLI falls back to `icacls`, which checks only explicit (non-inherited) non-owner ACEs. `fs.statSync` is not used for either check because it returns simulated POSIX mode bits that do not reflect the actual ACL. To correct over-permissive ACLs:
+
+```cmd
+icacls .psilink.key /inheritance:r /grant:r "%USERDOMAIN%\%USERNAME%":(M)
+```
+
+`%USERDOMAIN%\%USERNAME%` produces the domain-qualified name (e.g. `CORP\alice` or `COMPUTER\alice`) that `icacls` requires to resolve domain accounts unambiguously. This matches the value the CLI obtains internally via `whoami`. On a standalone (non-domain) machine `%USERDOMAIN%` equals the computer name, which is correct.
+
+## What not to do
+
+- Never commit `.psilink.key` to version control. Add it to `.gitignore`:
+  ```
+  /.psilink.key
+  ```
+- Never transmit the token over an unencrypted channel. If the token must be
+  copied between machines, use an encrypted transfer (for example, `scp`,
+  SFTP, or a secrets manager API).
+- Never log or display the token value in plaintext. Avoid including
+  `--key-file` content in bug reports or support tickets.
+- Never store the token in environment variables that are visible to child
+  processes or appear in process listings.
+
+## Backup
+
+Tokens may be backed up to a secrets manager or encrypted store (for example, HashiCorp Vault, AWS Secrets Manager, or an encrypted filesystem). Any backup must carry the same access restrictions as the original file: owner-read-only or the equivalent ACL. If no backup exists and a token is lost, re-invitation is the correct recovery path (see [Recovery](CLI.md#recovery)).
+
+## Compromise response
+
+If a token is believed compromised -- for example, it was observed in a log, a process listing, a shared filesystem, or in transit on an unencrypted channel -- treat it as invalid immediately and take the following steps:
+
+1. Notify the partner out-of-band before any further exchanges are attempted; the partner's copy may also have been exposed.
+2. Both parties delete their key files (`.psilink.key` on each side).
+3. Re-invite over a channel known to be uncompromised. An observed token remains valid until the next successful exchange rotates it out, so the window between observation and deletion must be closed as quickly as possible.
+
+## Token age and rotation policy
+
+Tokens are rotated automatically on every successful exchange. There is no system-enforced maximum age. Organizations with their own key-rotation policies should treat each exchange as the rotation event.
+
+If an exchange partnership goes dormant for an extended period, organizations may choose to establish a local policy that triggers re-invitation after a maximum idle interval (for example, 90 days without a successful exchange). This is a deployment policy decision and is not enforced by the CLI.
+
 # Channel security
 
 As noted in [Transport-layer authentication](#transport-layer-authentication), server administrators have visibility into exchanges conducted over SFTP and file-drops. When using these channels, PAKE-authenticated, recurring exchanges provide an additional application-layer of encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
