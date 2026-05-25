@@ -27,6 +27,7 @@
     "dist"
   ],
   "dependencies": {
+    "@noble/curves": "^2.2.0",
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6.tgz",
     "eventemitter3": "^5.0.1",
     "loglevel": "^1.9.2",

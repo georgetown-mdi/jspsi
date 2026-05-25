@@ -152,6 +152,10 @@ export interface Authentication {
   /**
    * Shared SPAKE2 token; loaded from `.psilink.key` at runtime and injected
    * into the connection config. Never written to `psilink.yaml`.
+   *
+   * Must be a base64url-encoded 32-byte value (exactly 43 characters from
+   * `[A-Za-z0-9_-]`).  Both invitation tokens and persistent (rotation) tokens
+   * use this format; they differ only in whether `expires` is set.
    */
   pakeToken?: string;
   /**
@@ -170,7 +174,14 @@ export interface Authentication {
 }
 
 const AuthenticationSchema: z.ZodType<Authentication> = z.object({
-  pakeToken: z.string().min(1).optional(),
+  pakeToken: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9_-]{43}$/,
+      "pakeToken must be a base64url-encoded 32-byte value (43 base64url " +
+        "characters)",
+    )
+    .optional(),
   role: z.enum(["inviter", "acceptor"]).optional(),
   expires: z.iso.datetime().optional(),
 });

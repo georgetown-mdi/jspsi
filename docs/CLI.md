@@ -60,7 +60,9 @@ If `--save` is not specified, after running users are instructed how to use `psi
 
 If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret).
 
-If a zero-setup exchange is started with configuration and/or key files already present, the user is warned that they will be ignored and that if their intent was to use those files, the user should use `psilink exchange` instead. If `--save` was specified, this is upgraded to an error and the user is also informed that they can delete those files if they wish to proceed.
+If a zero-setup exchange is started with configuration and/or key files already present, the user is warned that they will be ignored and that if their intent was to use those files, the user should use `psilink exchange` instead.
+
+If `--save` was specified, the `--config-file` and `--key-file` arguments can be used to specify output paths. If the relevant argument is not used and a configuration or key file exists at the default path, the user warning that the file exists is upgraded to an error. The user is also informed that they can delete the file or specify a different destination if they wish to proceed.
 
 ## Invitation strings
 
@@ -151,9 +153,60 @@ connection:
 
 ## Recovery
 
-In case the shared secrets ever get out-of-sync - for example if one party crashes between key rotation and writing - the recovery path is for both parties to delete their existing secret files. Because there is no way to determine which party holds the newer secret, both must reset regardless of which side failed; reusing an older key may also violate key rotation policies.
+### Key lifecycle
 
-To recognize failed rotations, the error messages for exchanges that fail PAKE authentication instruct users how they can generate and accept new invitation strings, and encourage them to contact their partners out-of-band. Since connection information has already been shared, the recommended commands are `psilink invite URL` followed by `psilink accept URL INVITATION`.
+A key file passes through four stages:
+
+1. **Creation** -- `psilink invite` or `psilink accept` writes a fresh
+   `.psilink.key` with a short-lived invitation token. The file is written
+   owner-read-only (`0600` on Unix).
+2. **Rotation** -- `psilink exchange` rotates the token automatically after
+   every successful exchange. The new token replaces the previous one in the
+   same file. No manual action is required.
+3. **Loss** -- if the key file is deleted or otherwise unrecoverable, both
+   parties must re-invite (see below). If a backup exists in a secrets manager
+   or encrypted store, restore from the backup and retry the exchange; confirm
+   with the partner out-of-band that the backup reflects the same exchange they
+   last completed -- if in doubt, re-invite rather than risk an out-of-sync
+   token that silently fails the PAKE handshake.
+4. **Compromise** -- if the token is believed to have been observed by a third
+   party, follow the procedure in
+   [Compromise response](SECURITY.md#compromise-response).
+
+### Out-of-sync tokens
+
+If one party crashes or loses power between token rotation and writing the new
+key file, the two sides will hold different tokens and the next PAKE handshake
+will fail. Because there is no way to determine which party holds the newer
+token, both must reset regardless of which side failed; reusing an older token
+may also violate key-rotation policies.
+
+To recognize failed rotations, the error messages for exchanges that fail PAKE
+authentication instruct users how they can generate and accept new invitation
+strings, and encourage them to contact their partners out-of-band. Since
+connection information has already been shared, the recommended commands are
+`psilink invite URL` followed by `psilink accept URL INVITATION`. The
+pre-existing `psilink.yaml` configuration file is reused; only the key file
+needs to be recreated.
+
+### Token loss
+
+If a key file is lost and no backup is available:
+
+1. Contact the partner out-of-band to coordinate the reset.
+2. Both parties delete their existing key files.
+3. The inviting party runs `psilink invite URL INPUT_FILE` and shares the
+   invitation string with the partner.
+4. The accepting party runs `psilink accept URL INVITATION INPUT_FILE`.
+
+The pre-existing `psilink.yaml` configuration file is reused; only the key
+file needs to be recreated.
+
+### Token compromise
+
+See [Compromise response](SECURITY.md#compromise-response) for the full
+procedure. In summary: notify the partner out-of-band, both parties delete
+their key files, and re-invite over a channel known to be uncompromised.
 
 ## See also
 

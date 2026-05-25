@@ -498,7 +498,7 @@ connection:
 ### `connection.authentication`
 
 *Type:* object  
-*Required:* no  
+*Required:* no (see note below) 
 *Applies to:* `webrtc`, `sftp`, `filedrop`
 
 Authentication settings for the exchange. What belongs in `psilink.yaml` depends
@@ -511,16 +511,25 @@ The PAKE token and its expiration are loaded from a key file and added to the
 in-memory representation before the exchange runs; they never appear in
 `psilink.yaml` and should not be edited manually.
 
-The PAKE token is automatically rotated after each successful exchange: a
-replacement is generated locally and transmitted to both parties over the
-authenticated channel during the receipt step, taking effect only after both
-parties confirm receipt. If the exchange fails before confirmation, the existing
-token remains valid. Invitation tokens carry a default expiration of 1 hour;
-persistent tokens carry none.
+`pakeToken` is required for recurring exchanges run via the `exchange` command.
+If the key file (`.psilink.key`) is absent, the CLI aborts before any connection
+is attempted. Zero-setup exchanges (the `zero-setup` command) rely on
+transport-layer authentication instead and do not use a key file.
+
+Taken together, this implies that `connection.authentication` is never required
+in a configuration file. It is required for in-memory objects used for recurring
+exchanges, and it is optional for zero-setup exchanges.
+
+The PAKE token is automatically rotated after each successful exchange: both
+parties independently derive the replacement from the SPAKE2 session key using
+HKDF, so no extra round-trip is required. The caller is responsible for
+persisting the new token to `.psilink.key`. If the exchange fails before a
+successful handshake, the existing token remains valid. Invitation tokens carry
+a default expiration of 1 hour; persistent tokens carry none.
 
 | Field | Type | In `psilink.yaml` | Description |
 |-------|------|-------------------|-------------|
-| `pake_token` | string | never; loaded from `.psilink.key` | PAKE shared secret. Do not set manually. |
+| `pake_token` | string | never; loaded from `.psilink.key` | PAKE shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
 | `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `pake_token`; absent for persistent tokens. Do not set manually. |
 | `role` | enum | WebRTC only | `inviter` \| `acceptor`; used to derive deterministic PeerJS peer IDs from the shared token so both parties know each other's address without out-of-band communication. Orthogonal to the PSI protocol roles, which are determined by `linkage_terms.output` |
 
