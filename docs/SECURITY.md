@@ -155,7 +155,14 @@ If an exchange partnership goes dormant for an extended period, organizations ma
 
 As noted in [Transport-layer authentication](#transport-layer-authentication), server administrators have visibility into exchanges conducted over SFTP and file-drops. When using these channels, PAKE-authenticated, recurring exchanges provide an additional application-layer of encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
 
-For the vast majority of exchanges, WebRTC connections use DTLS which provides end-to-end encryption and thus do not share this concern - the peer-coordination server never sees the data channel. This holds true even if a TURN server is used to tunnel traffic, as it forwards the encrypted packets without reading them. However, if one or both parties need a WebSocket relay, transport encryption is terminated by the relay and application-layer encryption must be added. This can happen if a firewall prevents the use of a TURN server through deep-packet-inspection. The mechanism for application-layer encryption is the same as above.
+WebRTC connections use DTLS which provides end-to-end encryption, so the peer-coordination server never sees data-channel traffic. A TURN relay, when used to traverse NAT or firewall restrictions, preserves this property: it forwards encrypted DTLS packets without terminating the session.
+
+A WebSocket relay is a distinct and rarer fallback that arises when a firewall blocks TURN through deep-packet inspection of the DTLS handshake. Unlike a TURN relay, a WebSocket relay terminates DTLS and sees plaintext. When a WebSocket relay is in use, the exchange policy follows its authentication state:
+
+- If PAKE authentication is active (a recurring exchange), the exchange proceeds with application-layer AEAD encryption, the same mechanism used for SFTP and file-drop channels.
+- If PAKE is absent (a zero-setup exchange), the exchange aborts. Application-layer encryption cannot be applied without a shared session key, and proceeding without transport protection would expose data to the relay.
+
+Zero-setup WebRTC is already constrained in practice: it requires a peer-coordination server accessible to both parties, which is an uncommon deployment. The WebSocket relay scenario therefore applies almost exclusively to recurring exchanges, where PAKE is always active. (This policy will be enforced when WebSocket relay support is added; relays are not yet a supported transport option.)
 
 ## See also
 
