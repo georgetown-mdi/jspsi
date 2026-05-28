@@ -27,9 +27,14 @@ async function makeEncryptedPair(): Promise<
   ]);
 }
 
+// First byte of the pre-encryption plaintext; mirrors the tags in
+// EncryptedConnection (0 = JSON object, 1 = Uint8Array).
+const TYPE_JSON = 0;
+
 /**
- * Build a valid AES-GCM envelope for `data` at the given sequence number.
- * Derives the send key for `role` from SESSION_KEY, matching EncryptedConnection.
+ * Build a valid AES-GCM envelope for the JSON object `data` at the given
+ * sequence number. Derives the send key for `role` from SESSION_KEY and applies
+ * the same `TYPE_JSON`-tagged plaintext framing as EncryptedConnection.
  */
 async function buildEnvelope(
   role: HandshakeRole,
@@ -50,12 +55,13 @@ async function buildEnvelope(
   const iv = new Uint8Array(12) as Uint8Array<ArrayBuffer>;
   new DataView(iv.buffer).setBigUint64(4, BigInt(seq), false);
 
+  const json = new TextEncoder().encode(JSON.stringify(data));
+  const plaintext = new Uint8Array(1 + json.length) as Uint8Array<ArrayBuffer>;
+  plaintext[0] = TYPE_JSON;
+  plaintext.set(json, 1);
+
   const cipher = new Uint8Array(
-    await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv },
-      key,
-      new TextEncoder().encode(JSON.stringify(data)),
-    ),
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext),
   );
   const envelope = new Uint8Array(12 + cipher.length) as Uint8Array<ArrayBuffer>;
   envelope.set(iv);
@@ -95,6 +101,48 @@ test("multiple messages all decrypt correctly", async () => {
     await encA.send(msg);
     expect(await received).toEqual(msg);
   }
+});
+
+// --- Binary payloads ----------------------------------------------------------
+// The PSI protocol sends raw Uint8Array protobuf frames (serializeBinary());
+// these must round-trip as Uint8Array, not as a JSON-stringified object.
+
+test("Uint8Array payload survives encrypt/decrypt as binary", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  const payload = new Uint8Array([0x03, 0xdf, 0x00, 0xff, 0x10, 0x7f]);
+
+  const received = new Promise<unknown>((resolve) => encB.once("data", resolve));
+  await encA.send(payload);
+
+  const got = await received;
+  expect(got).toBeInstanceOf(Uint8Array);
+  expect(Array.from(got as Uint8Array)).toEqual(Array.from(payload));
+});
+
+test("empty Uint8Array payload round-trips as a zero-length Uint8Array", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  const payload = new Uint8Array(0);
+
+  const received = new Promise<unknown>((resolve) => encB.once("data", resolve));
+  await encA.send(payload);
+
+  const got = await received;
+  expect(got).toBeInstanceOf(Uint8Array);
+  expect((got as Uint8Array).length).toBe(0);
+});
+
+test("binary and JSON payloads interleave over one connection", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+
+  const r1 = new Promise<unknown>((resolve) => encB.once("data", resolve));
+  await encA.send(new Uint8Array([1, 2, 3]));
+  const got1 = await r1;
+  expect(got1).toBeInstanceOf(Uint8Array);
+  expect(Array.from(got1 as Uint8Array)).toEqual([1, 2, 3]);
+
+  const r2 = new Promise<unknown>((resolve) => encB.once("data", resolve));
+  await encA.send({ status: "completed" });
+  expect(await r2).toEqual({ status: "completed" });
 });
 
 // --- Authentication tag failure -----------------------------------------------
@@ -214,6 +262,20 @@ test("out-of-order: seq <= last accepted is rejected", async () => {
 
 // --- Counter overflow ---------------------------------------------------------
 
+test("send succeeds at the boundary sendSeq === MAX_SAFE_INTEGER", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+
+  // MAX_SAFE_INTEGER is the last sequence number that can be used without
+  // ambiguity, so the send at exactly this value must succeed (guards against
+  // an off-by-one regression turning the `>` guard into `>=`).
+  (encA as unknown as { sendSeq: number }).sendSeq = Number.MAX_SAFE_INTEGER;
+
+  const message = { boundary: true };
+  const received = new Promise<unknown>((resolve) => encB.once("data", resolve));
+  await expect(encA.send(message)).resolves.toBeUndefined();
+  expect(await received).toEqual(message);
+});
+
 test("send throws before sequence number exceeds MAX_SAFE_INTEGER", async () => {
   const conn = new PassthroughConnection();
   const enc = await EncryptedConnection.create(conn, SESSION_KEY, "initiator");
@@ -222,4 +284,51 @@ test("send throws before sequence number exceeds MAX_SAFE_INTEGER", async () => 
   (enc as unknown as { sendSeq: number }).sendSeq = Number.MAX_SAFE_INTEGER + 1;
 
   await expect(enc.send({ overflow: true })).rejects.toThrow(/overflow/i);
+});
+
+// --- buffered error draining --------------------------------------------------
+
+test("takeBufferedError drains the inner connection's buffered error", async () => {
+  const conn = new PassthroughConnection();
+  // A transport error buffered on the inner connection before the wrapper
+  // attaches its inner.on("error") listener must still be observable via the
+  // wrapper, or fail-fast behavior regresses to a stall against a dead
+  // transport until the peer timeout fires.
+  const innerErr = new Error("pre-wrapper transport failure");
+  conn.emit("error", innerErr);
+
+  const enc = await EncryptedConnection.create(conn, SESSION_KEY, "responder");
+
+  expect(enc.takeBufferedError()).toBe(innerErr);
+  // Draining clears it on the inner connection too.
+  expect(enc.takeBufferedError()).toBeUndefined();
+});
+
+// --- close --------------------------------------------------------------------
+
+test("close() detaches inner listeners so late inner events are inert", async () => {
+  const conn = new PassthroughConnection();
+  const enc = await EncryptedConnection.create(conn, SESSION_KEY, "responder");
+
+  let dataFired = false;
+  let errorFired = false;
+  enc.on("data", () => {
+    dataFired = true;
+  });
+  enc.on("error", () => {
+    errorFired = true;
+  });
+
+  await enc.close();
+
+  // After close, neither a valid inbound frame nor a transport error on the
+  // inner connection should reach the wrapper.
+  conn.emit("data", await buildEnvelope("initiator", 0, { x: 1 }));
+  conn.emit("error", new Error("late transport error"));
+
+  // Allow any (incorrectly) scheduled async handleInbound to run.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  expect(dataFired).toBe(false);
+  expect(errorFired).toBe(false);
 });

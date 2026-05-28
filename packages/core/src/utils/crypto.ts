@@ -5,6 +5,9 @@
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();
 
+/** Shared `TextDecoder` instance for decoding UTF-8 bytes to strings. */
+export const dec = new TextDecoder();
+
 /**
  * Encode a byte array as a base64url string (no padding).
  */

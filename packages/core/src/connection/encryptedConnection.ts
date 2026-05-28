@@ -1,16 +1,20 @@
 import * as z from "zod";
-import { default as EventEmitter } from "eventemitter3";
 
 import { deriveAeadKey } from "../auth.js";
-import { toBase64Url, fromBase64Url } from "../utils/crypto.js";
+import { toBase64Url, fromBase64Url, enc, dec } from "../utils/crypto.js";
+import { BufferedErrorEmitter } from "./bufferedErrorEmitter.js";
 import type { Connection, HandshakeRole } from "../types.js";
 
-type Events = {
-  data: (data: unknown) => void;
-  error: (err: unknown) => void;
-};
-
 const Envelope = z.object({ enc: z.string() });
+
+// First byte of the pre-encryption plaintext, preserving the original payload's
+// type across the wire. The transport underneath only ever sees the JSON
+// envelope `{ enc }`, so without this tag a Uint8Array would round-trip as a
+// plain object and the protobuf deserialize step in the PSI protocol would
+// fail. `TYPE_JSON` payloads are UTF-8 JSON; `TYPE_BINARY` payloads are the raw
+// bytes of a Uint8Array.
+const TYPE_JSON = 0;
+const TYPE_BINARY = 1;
 
 /**
  * Wraps any {@link Connection} and transparently encrypts all outbound messages
@@ -23,21 +27,37 @@ const Envelope = z.object({ enc: z.string() });
  *
  * Wire format: `{ enc: base64url(IV || ciphertext || 16-byte GCM tag) }` where
  * IV is 12 bytes: 4 zero bytes (reserved) followed by an 8-byte big-endian
- * sequence number. The sequence number is monotonically increasing per sender.
- * Any inbound message whose sequence number is not strictly greater than the
- * last accepted sequence number, or whose GCM authentication tag fails, is
- * rejected: an `error` event is emitted and the wrapper is permanently dead.
+ * sequence number. The encrypted plaintext is a 1-byte type tag (`0` = JSON
+ * object, `1` = Uint8Array) followed by the payload (UTF-8 JSON or raw bytes
+ * respectively); the tag preserves the distinction between protobuf binary
+ * frames and JSON control messages that the underlying transport's own
+ * serialization would otherwise collapse. The sequence number is monotonically
+ * increasing per sender. Any inbound message whose sequence number is not
+ * strictly greater than the last accepted sequence number, or whose GCM
+ * authentication tag fails, is rejected: an `error` event is emitted and the
+ * wrapper is permanently dead.
  *
  * Construct via the static {@link EncryptedConnection.create} factory.
  */
-export class EncryptedConnection extends EventEmitter<Events, never> {
+export class EncryptedConnection extends BufferedErrorEmitter {
   private readonly inner: Connection;
   private readonly sendKey: CryptoKey;
   private readonly recvKey: CryptoKey;
   private sendSeq = 0;
   private recvSeq = -1;
   private failed = false;
-  private bufferedError: unknown;
+
+  // Stored so close() can detach them; the constructor registers them on the
+  // inner connection and without removal they would keep decrypting/emitting
+  // into a logically-closed wrapper.
+  private readonly onInnerData = (data: unknown): void => {
+    void this.handleInbound(data).catch((err) => {
+      this.markFailed(err instanceof Error ? err : new Error(String(err)));
+    });
+  };
+  private readonly onInnerError = (err: unknown): void => {
+    this.emit("error", err);
+  };
 
   private constructor(
     inner: Connection,
@@ -49,12 +69,8 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
     this.sendKey = sendKey;
     this.recvKey = recvKey;
 
-    this.inner.on("data", (data) => {
-      void this.handleInbound(data).catch((err) => {
-        this.markFailed(err instanceof Error ? err : new Error(String(err)));
-      });
-    });
-    this.inner.on("error", (err) => this.emit("error", err));
+    this.inner.on("data", this.onInnerData);
+    this.inner.on("error", this.onInnerError);
   }
 
   static async create(
@@ -90,7 +106,7 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
     return iv;
   }
 
-  async send(data: unknown): Promise<void> {
+  async send(data: unknown, chunked?: boolean): Promise<void> {
     if (this.failed) {
       throw new Error(
         "EncryptedConnection: wrapper is permanently dead after a security failure",
@@ -106,18 +122,32 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
     const seq = this.sendSeq++;
     const iv = this.seqToIv(seq);
 
+    let plaintext: Uint8Array<ArrayBuffer>;
+    if (data instanceof Uint8Array) {
+      plaintext = new Uint8Array(1 + data.length) as Uint8Array<ArrayBuffer>;
+      plaintext[0] = TYPE_BINARY;
+      plaintext.set(data, 1);
+    } else {
+      const json = enc.encode(JSON.stringify(data));
+      plaintext = new Uint8Array(1 + json.length) as Uint8Array<ArrayBuffer>;
+      plaintext[0] = TYPE_JSON;
+      plaintext.set(json, 1);
+    }
+
     const cipherBuffer = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv },
       this.sendKey,
-      new TextEncoder().encode(JSON.stringify(data)),
+      plaintext,
     );
 
     const cipher = new Uint8Array(cipherBuffer);
-    const envelope = new Uint8Array(12 + cipher.length) as Uint8Array<ArrayBuffer>;
+    const envelope = new Uint8Array(
+      12 + cipher.length,
+    ) as Uint8Array<ArrayBuffer>;
     envelope.set(iv);
     envelope.set(cipher, 12);
 
-    await this.inner.send({ enc: toBase64Url(envelope) });
+    await this.inner.send({ enc: toBase64Url(envelope) }, chunked);
   }
 
   private async handleInbound(data: unknown): Promise<void> {
@@ -125,7 +155,9 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
 
     const parsed = Envelope.safeParse(data);
     if (!parsed.success) {
-      this.markFailed(new Error("EncryptedConnection: received invalid envelope"));
+      this.markFailed(
+        new Error("EncryptedConnection: received invalid envelope"),
+      );
       return;
     }
 
@@ -162,6 +194,14 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
       return;
     }
 
+    // Reserve the sequence number synchronously, before the await below: two
+    // inbound frames delivered before the first decrypt resolves would
+    // otherwise both read the same stale recvSeq and both pass the guard
+    // above. A frame that subsequently fails decryption still advances
+    // recvSeq, but markFailed makes the wrapper permanently dead, so no later
+    // frame is observed and the advance has no effect.
+    this.recvSeq = seq;
+
     let plainBuffer: ArrayBuffer;
     try {
       plainBuffer = await crypto.subtle.decrypt(
@@ -178,14 +218,30 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
       return;
     }
 
-    this.recvSeq = seq;
-
-    let message: unknown;
-    try {
-      message = JSON.parse(new TextDecoder().decode(plainBuffer));
-    } catch {
+    const plain = new Uint8Array(plainBuffer);
+    if (plain.length < 1) {
       this.markFailed(
-        new Error("EncryptedConnection: decrypted payload is not valid JSON"),
+        new Error("EncryptedConnection: decrypted payload is empty"),
+      );
+      return;
+    }
+
+    const tag = plain[0];
+    let message: unknown;
+    if (tag === TYPE_BINARY) {
+      message = plain.slice(1);
+    } else if (tag === TYPE_JSON) {
+      try {
+        message = JSON.parse(dec.decode(plain.subarray(1)));
+      } catch {
+        this.markFailed(
+          new Error("EncryptedConnection: decrypted payload is not valid JSON"),
+        );
+        return;
+      }
+    } else {
+      this.markFailed(
+        new Error(`EncryptedConnection: unknown payload type tag ${tag}`),
       );
       return;
     }
@@ -199,22 +255,18 @@ export class EncryptedConnection extends EventEmitter<Events, never> {
   }
 
   close(): void | Promise<void> {
+    this.inner.removeListener("data", this.onInnerData);
+    this.inner.removeListener("error", this.onInnerError);
     return this.inner.close();
   }
 
-  // Override emit to buffer unhandled errors, mirroring FileSyncConnection.
-  emit<E extends keyof Events>(
-    event: E,
-    ...args: Parameters<Events[E]>
-  ): boolean {
-    const hadListeners = super.emit(event, ...args);
-    if (event === "error" && !hadListeners) this.bufferedError = args[0];
-    return hadListeners;
-  }
-
+  // Drain the wrapper's own buffered error first; if it has none, fall through
+  // to the inner connection so a transport failure buffered before this
+  // wrapper attached its inner.on("error") listener (e.g. a poll error in the
+  // window between authentication and wrapper construction) is not stranded.
   takeBufferedError(): unknown {
-    const e = this.bufferedError;
-    this.bufferedError = undefined;
-    return e;
+    const own = super.takeBufferedError();
+    if (own !== undefined) return own;
+    return this.inner.takeBufferedError();
   }
 }
