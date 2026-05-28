@@ -47,6 +47,7 @@ describe("waitForConnectionOpen", () => {
     fake.emit("open");
     await p;
     expect(fake.listenerCount("error")).toBe(0);
+    expect(fake.listenerCount("close")).toBe(0);
   });
 
   test("open listener is removed after 'error' fires", async () => {
@@ -56,6 +57,7 @@ describe("waitForConnectionOpen", () => {
     fake.emit("error", err);
     await p.catch(() => {});
     expect(fake.listenerCount("open")).toBe(0);
+    expect(fake.listenerCount("close")).toBe(0);
   });
 
   test("rejects when 'close' fires before 'open'", async () => {

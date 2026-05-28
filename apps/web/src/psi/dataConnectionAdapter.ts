@@ -20,7 +20,8 @@ interface Events {
  *
  * A `close` event from the underlying connection (remote peer closed or network
  * drop) is forwarded as an `error` so protocol-layer receives fail immediately
- * rather than waiting for the handshake timeout. Intentional closure via
+ * rather than waiting for the handshake timeout; the adapter then seals itself
+ * so subsequent {@link send} calls are no-ops. Intentional closure via
  * {@link close} removes the `close` listener before calling
  * `DataConnection.close()`, so only unilateral remote closes surface as errors.
  */
@@ -48,6 +49,7 @@ export class DataConnectionAdapter
     };
     this.onClose = () => {
       this.emit("error", new Error("peer connection closed unexpectedly"));
+      this.close();
     };
 
     conn.on("data", this.onData);

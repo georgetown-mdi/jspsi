@@ -190,6 +190,9 @@ const runServerPSI = async () => {
       { psiLibrary },
     );
     return associationTable;
+  } catch (error) {
+    serverPeer.disconnect();
+    throw error;
   } finally {
     adapter.close();
   }
@@ -206,6 +209,9 @@ const runClientPSI = async () => {
       { psiLibrary },
     );
     return associationTable;
+  } catch (error) {
+    clientPeer.disconnect();
+    throw error;
   } finally {
     adapter.close();
   }

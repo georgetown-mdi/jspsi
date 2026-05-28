@@ -229,6 +229,23 @@ describe("DataConnectionAdapter", () => {
     expect((buffered as Error).message).toBe("peer connection closed unexpectedly");
   });
 
+  test("remote close seals the adapter: conn.close() is invoked", () => {
+    const { fake } = makeAdapter();
+
+    fake.emit("close");
+
+    expect(fake.close).toHaveBeenCalledTimes(1);
+  });
+
+  test("send() after underlying conn fires close does not delegate to underlying DataConnection", () => {
+    const { fake, adapter } = makeAdapter();
+
+    fake.emit("close");
+    adapter.send("post-remote-close payload");
+
+    expect(fake.send).not.toHaveBeenCalled();
+  });
+
   test("close event after adapter.close() does not emit an error", () => {
     const { fake, adapter } = makeAdapter();
     const received: Array<unknown> = [];
