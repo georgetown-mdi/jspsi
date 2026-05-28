@@ -5,6 +5,7 @@ dist
 count.txt
 .env
 .env.development
+cosign.key
 .nitro
 .tanstack
 .output

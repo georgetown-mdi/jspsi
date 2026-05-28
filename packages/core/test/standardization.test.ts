@@ -605,8 +605,8 @@ const minimalTerms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
   linkageFields: [
-    { name: "last_name", semanticType: "lastName" },
-    { name: "date_of_birth", semanticType: "dateOfBirth" },
+    { name: "last_name", type: "lastName" },
+    { name: "date_of_birth", type: "dateOfBirth" },
   ],
   linkageKeys: [
     {

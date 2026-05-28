@@ -325,7 +325,7 @@ const SharedOptionsSchema: z.ZodType<SharedOptions> =
 export interface FileSyncOptions extends SharedOptions {
   /**
    * Milliseconds between checks for the partner's uploaded file; default:
-   * 30000.
+   * 100.
    */
   pollIntervalMs?: number;
 }

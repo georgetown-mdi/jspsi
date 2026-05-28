@@ -8,7 +8,7 @@ import { PassthroughConnection } from "./utils/passthroughConnection";
 // --- Test fixtures -----------------------------------------------------------
 
 const sharedFields: LinkageTerms["linkageFields"] = [
-  { name: "ssn", semanticType: "ssn" },
+  { name: "ssn", type: "ssn" },
 ];
 const sharedKeys: LinkageTerms["linkageKeys"] = [
   { name: "SSN", elements: [{ field: "ssn" }] },

@@ -3,7 +3,7 @@ PSI Link
 
 ***Secure record linkage and data transfer using private set intersection.***
 
-This repository contains two applications, a web-based one that allows peer-to-peer exchanges and a command line one that uses SFTP as an intermediary.
+This repository contains two applications, a web-based one that allows peer-to-peer exchanges and a command line one that uses SFTP or a file-drop connection as an intermediary.
 
 # Web App Quickstart
 
@@ -136,3 +136,14 @@ However, you can place anything here you wish to pass on to the program. For exa
 ```sh
 docker run --rm vdorie/psi-link:latest --help
 ```
+
+# Documentation
+
+The full documentation set lives in [docs/](docs/README.md) and covers the protocol, threat model, exchange specification, deployment, and operations. The role-based reading guide there points each audience (program officers, security reviewers, IT staff, contributors, partner agencies) to the most relevant documents.
+
+Repository-level resources:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) - development setup, code conventions, and pull request process
+- [SECURITY.md](SECURITY.md) - vulnerability reporting and supported versions
+- [SUPPORT.md](SUPPORT.md) - bug reports, questions, and evaluation help
+- [CHANGELOG.md](CHANGELOG.md) - release history

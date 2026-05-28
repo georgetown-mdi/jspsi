@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # Workspace root and all npm packages
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      # Cryptographic dependencies are grouped separately so they are reviewed
+      # together and subject to the security review requirement in CONTRIBUTING.md.
+      cryptographic:
+        patterns:
+          - "@openmined/psi.js"
+          - "@noble/curves"
+          - "node-forge"
+          - "ssh2"
+          - "ssh2-sftp-client"
+      # Batch routine dependency bumps to reduce noise.
+      non-critical:
+        update-types:
+          - "minor"
+          - "patch"
+        exclude-patterns:
+          - "@openmined/psi.js"
+          - "@noble/curves"
+          - "node-forge"
+          - "ssh2"
+          - "ssh2-sftp-client"
+    ignore:
+      # The OpenMined PSI module is vendored; updates require manual review
+      # of the tarball and NOTICE file before the lock file is updated.
+      - dependency-name: "@openmined/psi.js"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+
+  # CLI Dockerfile base image
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

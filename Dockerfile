@@ -1,4 +1,4 @@
-FROM node:current-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /build
 
@@ -16,7 +16,7 @@ COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
 COPY apps/cli/src apps/cli/src/
 RUN npm run build -w packages/core -w apps/cli
 
-FROM node:current-alpine
+FROM node:26-alpine
 
 WORKDIR /app
 COPY --from=builder /build/apps/cli/package.json .

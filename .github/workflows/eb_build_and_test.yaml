@@ -5,28 +5,27 @@ name: Build and Test for Elastic Beanstalk
 
 on:
   pull_request:
-    branches: [ main, staging ]
+    branches: [main, staging]
 
   push:
-    branches-ignore: [ main, staging ]
-    paths: [
-      'package-lock.json',
-      'apps/web/deploy/aws_eb/**',
-      'apps/web/public/**',
-      'apps/web/server/**',
-      'apps/web/src/**',
-      #'apps/web/test/**',
-      'apps/web/nitro.config.ts',
-      'apps/web/package.json',
-      'apps/web/postcss.config.cjs',
-      'apps/web/tsconfig.json',
-      'apps/web/vite.config.ts',
-      'packages/core/src/**',
-      # 'packages/core/test/**',
-      'packages/core/package.json',
-      'packages/core/rollup.config.ts',
-      'packages/core/tsconfig.json'
-    ]
+    branches-ignore: [main, staging]
+    paths:
+      - "lib/**"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - "apps/web/deploy/aws_eb/**"
+      - "apps/web/public/**"
+      - "apps/web/server/**"
+      - "apps/web/src/**"
+      - "apps/web/nitro.config.ts"
+      - "apps/web/package.json"
+      - "apps/web/postcss.config.cjs"
+      - "apps/web/tsconfig.json"
+      - "apps/web/vite.config.ts"
+      - "packages/core/src/**"
+      - "packages/core/package.json"
+      - "packages/core/rollup.config.ts"
+      - "packages/core/tsconfig.json"
 
   workflow_call:
     outputs:
@@ -44,11 +43,11 @@ jobs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Setup NodeJS
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
-          node-version: '>=24.0.0'
+          node-version: "24"
       - name: Get npm cache directory
         id: npm-cache-dir
         shell: bash
@@ -73,7 +72,7 @@ jobs:
           touch apps/web/.output/.env
           (cd apps/web/.output && zip -r ../../../${{github.sha}}.zip .)
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: ${{github.sha}}.zip

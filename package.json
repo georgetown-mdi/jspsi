@@ -1,6 +1,6 @@
 {
   "name": "jspsi",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "JavaScript implementation of private set intersection for record linkage.",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",

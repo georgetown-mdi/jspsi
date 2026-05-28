@@ -550,7 +550,7 @@ export function buildStandardizedDataset(
 
   for (const field of terms.linkageFields) {
     if (covered.has(field.name)) continue;
-    const col = metadata.find((c) => c.type === field.semanticType);
+    const col = metadata.find((c) => c.type === field.type);
     if (!col) continue;
     // Identity transformation: pass the raw column value through unchanged.
     fields.push(new StandardizedField(field.name, col.name, [], rawRows));

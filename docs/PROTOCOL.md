@@ -4,13 +4,7 @@ title: "PSI-Link Protocol"
 
 # PSI-Link protocol
 
-This document describes the PSI and PSI-C algorithms and how they are composed
-to produce a privacy-preserving record linkage. It does not cover the exchange
-agreement format that parameterizes the protocol (see
-[EXCHANGE_SPEC.md](EXCHANGE_SPEC.md)), the threat model (see
-[SECURITY.md](SECURITY.md)), or the network layer over which the protocol runs
-(see [COMMUNICATION.md](COMMUNICATION.md)). Intended readers are security
-auditors, external implementors, and developers.
+This document describes the PSI and PSI-C algorithms, how they are composed to produce a privacy-preserving record linkage, and the wire-level SPAKE2 authentication protocol. It does not cover the exchange agreement format that parameterizes the protocol (see [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md)), the threat model and authentication design (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), or the network layer over which the protocol runs (see [COMMUNICATION.md](COMMUNICATION.md)). Intended readers are security auditors, external implementors, and developers.
 
 # Privacy preserving record linkage
 
@@ -52,6 +46,8 @@ The practical upper limit on the number of records for browser-based execution i
 
 ### PSI-C
 
+> **Not yet implemented:** PSI-C is not yet fully implemented. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
+
 PSI-C is also executed by sequentially executing deterministic linkages. Membership anonymity is granted by the sender permuting the receiver's doubly-encrypted data before returning it to them. The results of multiple linkage keys can be combined so long as the sender uses a consistent permutation algorithm for each round. The association map in the permuted space has the same size as one in the original space. This allows the cardinality to be measured without revealing which specific members are in common.
 
 # Datasets
@@ -76,6 +72,8 @@ This extra communication step violates the threat model which guarantees that no
 
 ## Non-repudiation
 
+> **Not yet implemented:** Receipt generation and signing are not yet wired up. They are targeted for the 1.0 release; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
+
 At the conclusion of a successful exchange but before the association map is shared, both parties sign a receipt recording the timestamp, a hash of the exchange agreement, the identities of both parties, and the size of the result if that information was learned by both parties. They then exchange these signatures. Each party retains the other's signature as cryptographic evidence that the exchange occurred. Each party can sign the exchange receipt using either a session-derived key - sufficient for the parties' own records but not independently verifiable by outsiders - or a certificate-authority-backed private key, which allows auditors or legal bodies to verify the signatures without any prior knowledge of the exchange.
 
 Catastrophic failure to exchange receipts results in termination of the program and the exchange must be restarted. As above, dropped connections are retried and undelivered messages are attempted again.
@@ -88,9 +86,45 @@ The basic output is an association table between each party's element. As noted 
 
 If parties elected to transmit payload data, the relevant columns for the appropriate rows will be transmitted in-band over the secure connection and appended to the output in-the-clear.
 
+# SPAKE2 authentication protocol
+
+PSI-Link uses a 3-message SPAKE2 handshake ([RFC 9382](https://www.rfc-editor.org/rfc/rfc9382)) over P-256 (NIST's 256-bit prime-order elliptic curve, also known as secp256r1) with mutual MAC confirmation.
+
+The SPAKE2 protocol logic is implemented directly against RFC 9382 rather than through a dedicated SPAKE2 library. This is a deliberate choice: no production-ready, audited SPAKE2 library with dual Node.js/browser support exists in the JavaScript ecosystem. The underlying cryptographic primitives are not hand-written: elliptic-curve scalar multiplication is provided by [`@noble/curves`](https://github.com/paulmillr/noble-curves), an independently audited library, and all symmetric operations (SHA-256, HMAC-SHA-256, HKDF) use the platform `crypto.subtle` API. The hand-written layer is limited to wire-message framing, transcript assembly, and key derivation, all of which are fully specified by RFC 9382.
+
+**Blinding points M and N** (fixed group elements that mask the password in each message) are derived via hash-to-curve ([RFC 9380](https://www.rfc-editor.org/rfc/rfc9380), SSWU for P-256) with psilink-specific domain separation so that no discrete-log relationship with the generator G is publicly known:
+
+```
+DST   = "psilink-SPAKE2-P256-SHA256-SSWU-v1"
+msg_M = "psilink-SPAKE2-M"
+msg_N = "psilink-SPAKE2-N"
+M     = 03df561bdb8d6bc4d7e4355bac1c376a6e53d5e0c2c3df07e059ed857b811f7693
+N     = 03969a544c8e21a0a99b6816d63c99746a82b72513d9ac2907749ef6b1bc08b0eb
+```
+
+**Password scalar derivation**: the PAKE token is expanded to a 48-byte value via HKDF-SHA-256 (HMAC-based Key Derivation Function with SHA-256; info string `"psilink-spake2-password-v1"`) and reduced modulo the P-256 group order. The 48-byte expansion reduces the bias from the mod-reduction to below 2^-128. After the modular reduction, the scalar is shifted into the range `[1, ORDER-1]` (excluding 0). RFC 9382 §3.3 specifies `w` in `{0, ..., p-1}`; the exclusion of 0 is a deliberate tightening because a zero password scalar would make `M*w = identity`, degrading SPAKE2's blinding to a plain Diffie-Hellman. The chance of HKDF output reducing to exactly 0 is ~2^-256, so the deviation is observable only by a chosen-token attacker, and against such an attacker the tightening is strictly safer than RFC-conforming behavior.
+
+**Message flow** (initiator sends first; all messages are JSON objects):
+
+1. Initiator -> Responder: `{ pakeMsg: "1", point: T }` where `T = M*w + G*x_A` (base64url-encoded compressed P-256 point)
+2. Responder -> Initiator: `{ pakeMsg: "2", point: S, mac: MAC_B }` where `S = N*w + G*x_B`; `MAC_B = HMAC-SHA-256(Ka, "psilink-spake2-confirm-B")` (Ka is the confirmation key defined in Key derivation below)
+3. Initiator -> Responder: `{ pakeMsg: "3", mac: MAC_A }` or `{ pakeMsg: "abort" }` if MAC_B is invalid
+
+Here `w` is the password scalar, `x_A` (initiator) and `x_B` (responder) are fresh random ephemeral scalars (48 bytes from `crypto.getRandomValues`, reduced mod order), and the shared key `K = (T - M*w)*x_B = (S - N*w)*x_A`.
+
+**Key derivation**: the SPAKE2 transcript is assembled per RFC 9382 §3.3 with 8-byte little-endian length prefixes. Rather than SHA-256-hashing the transcript and splitting as Ka||Ke per RFC 9382 §3.4, psilink derives each key independently via HKDF-SHA-256 with the raw transcript as the input keying material: Ka uses info string `"psilink-spake2-ka-v1"` (32 bytes) and Ke uses info string `"psilink-spake2-ke-v1"` (32 bytes). This gives independently derived 256-bit keys from the same entropy. The final transcript field is `w`, the password scalar, serialized as a 32-byte big-endian integer. This is the encoding RFC 9382 §3.3 specifies: the RFC defines `w` as a scalar in the range `{0, ..., p-1}` and states that it "is encoded as a big-endian number padded to the length of p."
+
+**Note on interoperability and external test vectors**: psilink uses custom blinding points M and N derived via hash-to-curve (RFC 9380) with psilink-specific domain separation, rather than the P-256 values fixed in RFC 9382 §4. Because the protocol messages T and S embed M and N implicitly (T = M*w + G*x_A, S = N*w + G*x_B), different blinding points produce different transcripts and session keys even when the rest of the protocol is identical — including the scalar encoding of `w`. This is why the RFC 9382 appendix test vectors and test vectors from other SPAKE2 implementations do not apply to psilink; the divergence is in M and N, not in the transcript encoding. The custom blinding points are intentional: they add a second layer of domain separation at the message level. If an adversary with routing control forwarded a psilink session message into another SPAKE2 application that uses the RFC §4 P-256 blinding points (or vice versa), the recipient would compute its shared key K from a blinded point derived with different M or N, producing a wrong K and a MAC failure. The transcript identity strings (`"psilink-initiator"` and `"psilink-responder"`), the A and B identity fields in the RFC 9382 §3.3 transcript that bind the session key to the psilink application and each party's role, enforce the same separation at the key-derivation level. Custom M and N add defense-in-depth: the handshake fails for two independent reasons rather than one. Correctness of psilink's M and N is verified by the `"M and N match their hash-to-curve derivation"` test in `packages/core/test/pake.test.ts`, which re-derives them from the DST and message inputs and compares against the hardcoded hex values.
+
+## Regenerating M and N
+
+If different identity strings are desired, update the DST and message inputs in the comment block at the top of `packages/core/src/pake.ts` and recompute the hex values. The test named `"M and N match their hash-to-curve derivation"` in `packages/core/test/pake.test.ts` already contains the derivation code using `p256_hasher.hashToCurve`; replace the `expect(...)` assertions with `console.log(M.toHex(true))` calls, run the test, and paste the output back into `pake.ts`.
+
+When renaming, also update every other domain-separation string in the codebase: the HKDF info strings in `pake.ts` (`"psilink-spake2-password-v1"`, `"psilink-spake2-ka-v1"`, `"psilink-spake2-ke-v1"`), `auth.ts` (`"psilink-aead-v1:..."`, `"psilink-token-rotation-v1"`), and the MAC label strings in `pake.ts` (`"psilink-spake2-confirm-A"`, `"psilink-spake2-confirm-B"`).
+
 ## See also
 
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - exchange agreement format that parameterizes the protocol described here
-- [SECURITY.md](SECURITY.md) - threat model and security properties of the protocol
+- [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model and security properties of the protocol
 - [COMMUNICATION.md](COMMUNICATION.md) - network channels over which the protocol runs
 - [DESIGN.md](DESIGN.md) - high-level overview, architecture, and possible extensions

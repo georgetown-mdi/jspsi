@@ -1,16 +1,16 @@
 ---
 title: "PSI-Link"
-author: "Georgetown Massive Data Institute"
+author: "Vincent Dorie"
 date: 2026-05-04
 ---
 
 # Overview
 
-The goal of this project is to facilitate secure inter-agency data sharing of administrative records. This is accomplished by executing a privacy-preserving record linkage (PPRL) protocol based on private set intersection (PSI). A base implementation of PSI executes a cryptographic protocol between two parties who each have lists of strings and reveals to one or both parties the elements they have in common. This base function can be used repeatedly by two parties to identify which of several statistical linkage keys they share, generating an association map between each party's matched elements. Those parties can then exchange additional data elements for their common members. Alternatively, the parties can run a private set intersection cardinality (PSI-C) protocol to determine the number of members they have in common without revealing their identities, which may provide motivation for high-level program discussions about data sharing. The PPRL using PSI is intended for operational use, while PSI-C is intended only for research.
+The goal of this project is to facilitate secure inter-agency data sharing of administrative records. This is accomplished by executing a privacy-preserving record linkage (PPRL) protocol based on private set intersection (PSI). A base implementation of PSI executes a cryptographic protocol between two parties who each have lists of strings and reveals to one or both parties the elements they have in common. This base function can be used repeatedly by two parties to identify which of several statistical linkage keys they share, generating an association map between each party's matched elements. Those parties can then exchange additional data elements for their common members. Alternatively, the parties can run a private set intersection cardinality (PSI-C) protocol to determine the number of members they have in common without revealing their identities, which may provide motivation for high-level program discussions about data sharing. The PPRL using PSI is intended for operational use, while PSI-C is intended only for research. (PSI-C is not yet fully implemented; it is targeted for a release after 1.0 - see [ROADMAP.md](ROADMAP.md).)
 
-Running a PSI linkage protocol and using it operationally can be challenging for organizations with limited techincal resources and requires deliberate attention to usability and deployment frictions. Within organizations it is often the case that a program officer would benefit from exchanging data and even has a signed data sharing agreement in hand, yet the exchange stalls while other stakeholders' requirements are satisfied: security teams may require that any new software undergo a formal audit, compliance officers need explicit assurance about what data is disclosed and to whom, and IT departments must vet software against their own technology requirements. In contrast, smaller organizations may have fewer procedural hurdles but they often lack the technical sophistication to perform regular data linking and sharing. In order to useful to these two audiences, the project is designed to first work locally in a browser without requiring additional software to be installed and restricting data to flow through trusted channels. For ease-of-use, browser-based solutions have have modern, user-centered interfaces. Users willing to install software can use a containerized, command line application to perform all the same functionality which is easily hardened and integrates with a variety of infrastructures.
+Running a PSI linkage protocol and using it operationally can be challenging for organizations with limited technical resources and requires deliberate attention to usability and deployment frictions. Within organizations it is often the case that a program officer would benefit from exchanging data and even has a signed data sharing agreement in hand, yet the exchange stalls while other stakeholders' requirements are satisfied: security teams may require that any new software undergo a formal audit, compliance officers need explicit assurance about what data is disclosed and to whom, and IT departments must vet software against their own technology requirements. In contrast, smaller organizations may have fewer procedural hurdles but they often lack the technical sophistication to perform regular data linking and sharing. In order to useful to these two audiences, the project is designed to first work locally in a browser without requiring additional software to be installed and restricting data to flow through trusted channels. For ease-of-use, browser-based solutions have have modern, user-centered interfaces. Users willing to install software can use a containerized, command line application to perform all the same functionality which is easily hardened and integrates with a variety of infrastructures.
 
-This document covers the project overview, architecture, exchange specification summary, and high-level user journey. It does not cover the PSI protocol details (see [PROTOCOL.md](PROTOCOL.md)), the threat model and authentication design (see [SECURITY.md](SECURITY.md)), network communication and supporting services (see [COMMUNICATION.md](COMMUNICATION.md)), or the CLI command reference (see [CLI.md](CLI.md)). Intended readers are program officers, evaluators, and new contributors.
+This document covers the project overview, architecture, exchange specification summary, and high-level user journey. It does not cover the PSI protocol details (see [PROTOCOL.md](PROTOCOL.md)), the threat model and authentication design (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), network communication and supporting services (see [COMMUNICATION.md](COMMUNICATION.md)), or the CLI command reference (see [CLI.md](CLI.md)). Intended readers are program officers, evaluators, and new contributors.
 
 # Exchange specification
 
@@ -24,7 +24,7 @@ When adopting the software, program officers are likely to first conduct exchang
 
 ## Core library
 
-The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, the execution of the linkage algorithms over PSI, and the generation and signing of the receipt. The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. Receipt generation and signing are part of the intended design but are not yet implemented; they are targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
 
 ## Command line application
 
@@ -46,6 +46,8 @@ A user should be able to *invite* someone to conduct an exchange, *accept* an ex
 
 For the rest of this section we describe use cases as in the command line application. The application provides four explicit subcommands - `init`, `invite`, `accept`, and `exchange` - alongside a zero-setup mode in which both parties run the same command against a shared server without specifying a subcommand. Web application versions implement the same functionality with an appropriate graphical user interface and use browser storage instead of the file system.
 
+> **Not yet implemented:** Today only `exchange` and the zero-setup mode are functional. The `init`, `invite`, and `accept` subcommands and the `--save` flag are stubbed and targeted for the 1.0 release; see [CLI.md](CLI.md) and [ROADMAP.md](ROADMAP.md). The command table and flows below describe the intended behavior.
+
 A typical first exchange of a recurring relationship begins with one party generating an invitation with `psilink invite` and securely transmitting it to their partner out-of-band. The partner accepts with `psilink accept`, which establishes the shared configuration and key on both sides. Both parties then run `psilink exchange` to conduct the data exchange. Subsequent exchanges use `psilink exchange` with the stored configuration and shared secret, requiring no further coordination. After any successful exchange the shared secret is rotated. As a one-step alternative, parties can run `invite` and `accept` with a server URL as an argument, in which case acceptance leads to immediately conducting an exchange.
 
 Two invitation flows are supported: an offline flow where no server is involved and a server-coordinated flow where a server address is used for coordination and is given to both parties. In the server-coordinated flow, setup and exchange happen in one step: the inviter waits for the acceptor to respond, and both parties exchange immediately on acceptance.
@@ -62,7 +64,7 @@ Two invitation flows are supported: an offline flow where no server is involved 
 | Zero-setup exchange, establish recurring relationship (both parties) | `psilink --save URL input.csv` |
 | Re-establish after lost secret | Delete key file on both sides; re-run `psilink invite` and `psilink accept` |
 
-If only one party uses `--save` during a zero-setup exchange, no shared secret is established; see [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret) for the full set of outcomes.
+If only one party uses `--save` during a zero-setup exchange, no shared secret is established; see [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret) for the full set of outcomes.
 
 For full documentation of each subcommand, configuration files, invitation strings, and recovery procedures, see [CLI.md](CLI.md).
 
@@ -97,7 +99,14 @@ It may be beneficial to be able to build the web application as a desktop Electr
 ## See also
 
 - [PROTOCOL.md](PROTOCOL.md) - PSI and PSI-C algorithm details and post-linkage steps
-- [SECURITY.md](SECURITY.md) - threat model, authentication design, and channel security
+- [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, and channel security
 - [COMMUNICATION.md](COMMUNICATION.md) - communication channels and supporting services
 - [CLI.md](CLI.md) - full CLI command reference and configuration guide
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - complete exchange specification reference
+- [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, data classification, and compliance considerations
+
+# License and disclaimer
+
+PSI-Link is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
+
+Agencies evaluating PSI-Link for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation — including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) — is intended to support those reviews, not to substitute for them.

@@ -14,7 +14,7 @@ const minimalLinkageTerms = {
   algorithm: "psi",
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
-  linkageFields: [{ name: "ssn", semanticType: "ssn" }],
+  linkageFields: [{ name: "ssn", type: "ssn" }],
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
@@ -94,7 +94,7 @@ test("parses snake_case top-level keys from disk", () => {
       algorithm: "psi",
       output: { expects_output: false, share_with_partner: false },
       deduplicate: false,
-      linkage_fields: [{ name: "ssn", semantic_type: "ssn" }],
+      linkage_fields: [{ name: "ssn", type: "ssn" }],
       linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
     },
     connection: {
@@ -104,7 +104,7 @@ test("parses snake_case top-level keys from disk", () => {
     },
   });
   expect(result.linkageTerms.output.expectsOutput).toBe(false);
-  expect(result.linkageTerms.linkageFields[0].semanticType).toBe("ssn");
+  expect(result.linkageTerms.linkageFields[0].type).toBe("ssn");
   if (result.connection.channel !== "webrtc") return;
   expect(result.connection.authentication?.role).toBe("inviter");
 });

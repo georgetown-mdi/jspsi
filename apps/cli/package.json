@@ -1,6 +1,6 @@
 {
   "name": "psilink",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "bin": {
     "psilink": "./dist/index.js"

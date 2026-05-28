@@ -285,7 +285,7 @@ export function loadConfig(
         "land, the key file must be created out-of-band - a base64url-" +
         'encoded 32-byte token under "pakeToken" - and copied to both ' +
         "parties via a trusted channel. See " +
-        "docs/SECURITY.md#recurring-exchange-authentication.",
+        "docs/SECURITY_DESIGN.md#recurring-exchange-authentication.",
     );
   const authPersist: AuthPersist = {
     pakeToken: keyData.pakeToken,

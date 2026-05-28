@@ -5,7 +5,7 @@ import { ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
 import { MetadataSchema } from "./metadata.js";
 
-// ─── Exchange spec ───────────────────────────────────────────────────────────
+// --- Exchange spec -----------------------------------------------------------
 
 /**
  * A complete PSI-Link exchange specification. Consumed by both the web
@@ -25,7 +25,7 @@ export const ExchangeSpecSchema = z.object({
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;
 
-// ─── Parse ───────────────────────────────────────────────────────────────────
+// --- Parse -------------------------------------------------------------------
 
 /**
  * Parse and validate a raw value as an {@link ExchangeSpec}.

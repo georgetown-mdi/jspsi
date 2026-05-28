@@ -18,7 +18,7 @@ import type { Connection, HandshakeRole } from "./types.js";
 // alongside the transcript identity strings: a message forwarded from a
 // different SPAKE2 deployment uses different blinding points, producing a wrong
 // shared key and a MAC failure independent of the identity-string check.
-// See SECURITY.md §"Key derivation" for details. The DST and input strings are:
+// See PROTOCOL.md §"Key derivation" for details. The DST and input strings are:
 //   DST   = "psilink-SPAKE2-P256-SHA256-SSWU-v1"
 //   msg_M = "psilink-SPAKE2-M"
 //   msg_N = "psilink-SPAKE2-N"
@@ -191,7 +191,7 @@ function randomScalar(): bigint {
  * (https://www.rfc-editor.org/rfc/rfc9382): each element is length-prefixed
  * with an 8-byte little-endian integer.  The final field `w` is the password
  * scalar serialized as a 32-byte big-endian integer, which is the encoding
- * RFC 9382 §3.3 specifies.  See `SECURITY.md` §"Key derivation" for the
+ * RFC 9382 §3.3 specifies.  See `PROTOCOL.md` §"Key derivation" for the
  * interoperability note on M and N.
  *
  * Deviation from RFC 9382 §3.4: instead of SHA-256-hashing the transcript

@@ -11,7 +11,7 @@ const baseTerms = {
   algorithm: "psi" as const,
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
-  linkageFields: [{ name: "ssn", semanticType: "ssn" as const }],
+  linkageFields: [{ name: "ssn", type: "ssn" as const }],
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
@@ -64,8 +64,8 @@ test("round-trips full linkage terms including all fields", async () => {
     linkageTerms: {
       ...baseTerms,
       linkageFields: [
-        { name: "firstName", semanticType: "firstName" },
-        { name: "dob", semanticType: "dateOfBirth" },
+        { name: "firstName", type: "firstName" },
+        { name: "dob", type: "dateOfBirth" },
       ],
       linkageKeys: [
         {

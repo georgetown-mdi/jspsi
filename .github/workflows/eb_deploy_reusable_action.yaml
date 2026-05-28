@@ -18,7 +18,6 @@ on:
 
 env:
   ENVIRONMENT_NAME: ${{inputs.environmentName || (inputs.branchName == 'main' && 'Production') || (inputs.branchName == 'staging' && 'Staging') || 'Development'}}
-  VERSION_NAME: ${{(startsWith(github.event.ref, 'refs/tags') && github.ref) || github.sha}}
 
 jobs:
   deploy:
@@ -26,25 +25,34 @@ jobs:
     environment: ${{inputs.environmentName || (inputs.branchName == 'main' && 'Production') || (inputs.branchName == 'staging' && 'Staging') || 'Development'}}
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: ${{inputs.artifactName}}
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{vars.AWS_REGION_NAME}}
           role-to-assume: ${{secrets.AWS_DEPLOY_ROLE_ARN}}
           role-session-name: ${{github.run_id}}
       - name: Deploy
+        # use commit-based deployment so labeling with github.sha is correct and
+        # not env.VERSION_NAME
         run: |
-          aws s3 cp \
-            ${{github.sha}}.zip \
-            s3://elasticbeanstalk-${{vars.AWS_REGION_NAME}}-${{secrets.AWS_ACCOUNT_ID}}/
-          aws elasticbeanstalk create-application-version \
-              --application-name ${{vars.EB_APPLICATION_NAME}} \
-              --version-label ${{env.VERSION_NAME}} \
-              --description "${{env.ENVIRONMENT_NAME}}-${{github.sha}}" \
-              --source-bundle S3Bucket="elasticbeanstalk-${{vars.AWS_REGION_NAME}}-${{secrets.AWS_ACCOUNT_ID}}",S3Key="${{github.sha}}.zip"
+          existing=$(aws elasticbeanstalk describe-application-versions \
+            --application-name ${{vars.EB_APPLICATION_NAME}} \
+            --version-labels ${{github.sha}} \
+            --query 'length(ApplicationVersions)' \
+            --output text)
+          if [ "$existing" = "0" ]; then
+            aws s3 cp \
+              ${{github.sha}}.zip \
+              s3://elasticbeanstalk-${{vars.AWS_REGION_NAME}}-${{secrets.AWS_ACCOUNT_ID}}/
+            aws elasticbeanstalk create-application-version \
+                --application-name ${{vars.EB_APPLICATION_NAME}} \
+                --version-label ${{github.sha}} \
+                --description "${{env.ENVIRONMENT_NAME}}-${{github.sha}}" \
+                --source-bundle S3Bucket="elasticbeanstalk-${{vars.AWS_REGION_NAME}}-${{secrets.AWS_ACCOUNT_ID}}",S3Key="${{github.sha}}.zip"
+          fi
           aws elasticbeanstalk update-environment \
               --application-name ${{vars.EB_APPLICATION_NAME}} \
               --environment-name ${{secrets.EB_ENVIRONMENT_NAME}} \

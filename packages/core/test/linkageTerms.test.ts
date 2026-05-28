@@ -16,7 +16,7 @@ const base = {
   algorithm: "psi",
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
-  linkageFields: [{ name: "ssn", semanticType: "ssn" }],
+  linkageFields: [{ name: "ssn", type: "ssn" }],
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
@@ -33,16 +33,16 @@ test("parses a complete valid set of terms", () => {
     linkageFields: [
       {
         name: "ssn4",
-        semanticType: "ssn4",
+        type: "ssn4",
         constraints: { onlyValid: true, exclude: ["0000"] },
       },
       {
         name: "lastName",
-        semanticType: "lastName",
+        type: "lastName",
         constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
       },
-      { name: "dateOfBirth", semanticType: "dateOfBirth" },
-      { name: "ssn", semanticType: "ssn" },
+      { name: "dateOfBirth", type: "dateOfBirth" },
+      { name: "ssn", type: "ssn" },
     ],
     linkageKeys: [
       {
@@ -118,7 +118,7 @@ test("allowedCharacters accepts a valid character class", () => {
     linkageFields: [
       {
         name: "lastName",
-        semanticType: "lastName",
+        type: "lastName",
         constraints: { allowedCharacters: "A-Z " },
       },
     ],
@@ -133,7 +133,7 @@ test("allowedCharacters rejects an invalid character class", () => {
     linkageFields: [
       {
         name: "lastName",
-        semanticType: "lastName",
+        type: "lastName",
         // "z-a" is a reversed range and throws when interpolated into /[z-a]/
         constraints: { allowedCharacters: "z-a" },
       },
@@ -175,8 +175,8 @@ test("duplicate linkage field names are rejected", () => {
   const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
-      { name: "ssn", semanticType: "ssn" },
-      { name: "ssn", semanticType: "ssn" },
+      { name: "ssn", type: "ssn" },
+      { name: "ssn", type: "ssn" },
     ],
   });
   expect(result.success).toBe(false);
@@ -216,9 +216,9 @@ test("same field used twice with distinct names is valid", () => {
   const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
-      { name: "firstName", semanticType: "firstName" },
-      { name: "lastName", semanticType: "lastName" },
-      { name: "dateOfBirth", semanticType: "dateOfBirth" },
+      { name: "firstName", type: "firstName" },
+      { name: "lastName", type: "lastName" },
+      { name: "dateOfBirth", type: "dateOfBirth" },
     ],
     linkageKeys: [
       {
@@ -255,12 +255,12 @@ test("linkage key with empty elements array is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-// ─── linkageField semanticType discriminated union ────────────────────────────
+// ─── linkageField type discriminated union ────────────────────────────
 
-test("unknown linkage field semanticType is rejected", () => {
+test("unknown linkage field type is rejected", () => {
   const result = safeParseLinkageTerms({
     ...base,
-    linkageFields: [{ name: "bad", semanticType: "favoriteColor" }],
+    linkageFields: [{ name: "bad", type: "favoriteColor" }],
   });
   expect(result.success).toBe(false);
 });
@@ -281,12 +281,12 @@ test("parses snake_case keys from disk", () => {
     linkage_fields: [
       {
         name: "ssn",
-        semantic_type: "ssn",
+        type: "ssn",
         constraints: { only_valid: true, exclude: ["123456789"] },
       },
       {
         name: "lastName",
-        semantic_type: "lastName",
+        type: "lastName",
         constraints: { affixes_allowed: false },
       },
     ],
@@ -312,7 +312,7 @@ test("parses snake_case keys from disk", () => {
 
   expect(result.output.expectsOutput).toBe(true);
   expect(result.output.shareWithPartner).toBe(false);
-  expect(result.linkageFields[0].semanticType).toBe("ssn");
+  expect(result.linkageFields[0].type).toBe("ssn");
   expect(result.linkageKeys[0].elements[0].field).toBe("ssn");
   expect(result.linkageKeys[0].elements[1].transform?.[0].function).toBe(
     "substring",
@@ -323,7 +323,7 @@ test("parses snake_case keys from disk", () => {
 // ─── validateCompatibility ───────────────────────────────────────────────────
 
 const sharedFields: LinkageTerms["linkageFields"] = [
-  { name: "ssn", semanticType: "ssn" },
+  { name: "ssn", type: "ssn" },
 ];
 const sharedKeys: LinkageTerms["linkageKeys"] = [
   { name: "SSN", elements: [{ field: "ssn" }] },
@@ -407,7 +407,7 @@ test("output cross-check: I expect but partner will not share is an error", () =
 test("linkage fields mismatch is an error", () => {
   const { errors } = validateCompatibility(termsA, {
     ...termsB,
-    linkageFields: [{ name: "firstName", semanticType: "firstName" }],
+    linkageFields: [{ name: "firstName", type: "firstName" }],
   });
   expect(errors.some((e) => e.includes("linkage fields do not match"))).toBe(
     true,
@@ -419,16 +419,16 @@ test("linkage fields in different order are still compatible", () => {
     {
       ...termsA,
       linkageFields: [
-        { name: "ssn", semanticType: "ssn" },
-        { name: "dob", semanticType: "dateOfBirth" },
+        { name: "ssn", type: "ssn" },
+        { name: "dob", type: "dateOfBirth" },
       ],
       linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
     },
     {
       ...termsB,
       linkageFields: [
-        { name: "dob", semanticType: "dateOfBirth" },
-        { name: "ssn", semanticType: "ssn" },
+        { name: "dob", type: "dateOfBirth" },
+        { name: "ssn", type: "ssn" },
       ],
       linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
     },

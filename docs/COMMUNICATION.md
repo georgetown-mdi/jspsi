@@ -4,17 +4,11 @@ title: "PSI-Link Communication"
 
 # PSI-Link communication
 
-This document covers the communication channels available for PSI-Link
-exchanges, how parties synchronize protocol steps, how errors are handled, and
-what supporting services are required. Authentication and channel security are
-not covered here - see [SECURITY.md](SECURITY.md) for those topics. It does not
-cover the PSI protocol itself (see [PROTOCOL.md](PROTOCOL.md)) or CLI
-configuration (see [CLI.md](CLI.md)). Intended readers are IT staff and
-developers.
+This document covers the communication channels available for PSI-Link exchanges, how parties synchronize protocol steps, how errors are handled, and what supporting services are required. Authentication and channel security are not covered here - see [SECURITY_DESIGN.md](SECURITY_DESIGN.md) for those topics. It does not cover the PSI protocol itself (see [PROTOCOL.md](PROTOCOL.md)) or CLI configuration (see [CLI.md](CLI.md)). Intended readers are IT staff and developers.
 
 # Communication
 
-The protocol components above define what data parties exchange; this section describes how that exchange is carried over a network. This includes the channels available for transmission, how parties verify each other's identity, and how they coordinate the sequencing of protocol steps. Authentication and channel security are covered in [SECURITY.md](SECURITY.md).
+The protocol components above define what data parties exchange; this section describes how that exchange is carried over a network. This includes the channels available for transmission, how parties verify each other's identity, and how they coordinate the sequencing of protocol steps. Authentication and channel security are covered in [SECURITY_DESIGN.md](SECURITY_DESIGN.md).
 
 ## Channels
 
@@ -72,7 +66,7 @@ A lightweight SFTP server may be operated as a drop zone for exchanges between p
 
 ## See also
 
-- [SECURITY.md](SECURITY.md) - threat model and security properties of the channels described here
+- [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model and security properties of the channels described here
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - `connection` block reference for configuring the channels described here
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating the supporting services described here
 - [CLI.md](CLI.md) - CLI commands for configuring and running exchanges over these channels

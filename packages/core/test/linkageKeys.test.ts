@@ -30,10 +30,10 @@ const terms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [
-    { name: "ssn", semanticType: "ssn" },
-    { name: "lastName", semanticType: "lastName" },
-    { name: "firstName", semanticType: "firstName" },
-    { name: "dateOfBirth", semanticType: "dateOfBirth" },
+    { name: "ssn", type: "ssn" },
+    { name: "lastName", type: "lastName" },
+    { name: "firstName", type: "firstName" },
+    { name: "dateOfBirth", type: "dateOfBirth" },
   ],
   linkageKeys: [
     {

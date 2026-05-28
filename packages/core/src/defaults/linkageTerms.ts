@@ -5,7 +5,7 @@ import type { SemanticType } from "../types";
 const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   {
     name: "ssn",
-    semanticType: "ssn",
+    type: "ssn",
     constraints: {
       exclude: ["111111111", "123456789"],
       validOnly: true,
@@ -13,20 +13,20 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   },
   {
     name: "ssn4",
-    semanticType: "ssn4",
+    type: "ssn4",
     constraints: { validOnly: true },
   },
   {
     name: "firstName",
-    semanticType: "firstName",
+    type: "firstName",
     constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
   },
   {
     name: "lastName",
-    semanticType: "lastName",
+    type: "lastName",
     constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
   },
-  { name: "dateOfBirth", semanticType: "dateOfBirth" },
+  { name: "dateOfBirth", type: "dateOfBirth" },
 ];
 
 /**

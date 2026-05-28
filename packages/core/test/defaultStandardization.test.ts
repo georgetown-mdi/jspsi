@@ -20,13 +20,13 @@ const minimalTerms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
   linkageFields: [
-    { name: "ssn", semanticType: "ssn" },
-    { name: "ssn4", semanticType: "ssn4" },
-    { name: "firstName", semanticType: "firstName" },
-    { name: "lastName", semanticType: "lastName" },
-    { name: "dateOfBirth", semanticType: "dateOfBirth" },
-    { name: "phoneNumber", semanticType: "phoneNumber" },
-    { name: "emailAddress", semanticType: "emailAddress" },
+    { name: "ssn", type: "ssn" },
+    { name: "ssn4", type: "ssn4" },
+    { name: "firstName", type: "firstName" },
+    { name: "lastName", type: "lastName" },
+    { name: "dateOfBirth", type: "dateOfBirth" },
+    { name: "phoneNumber", type: "phoneNumber" },
+    { name: "emailAddress", type: "emailAddress" },
   ],
   linkageKeys: [
     {
@@ -92,7 +92,7 @@ describe("getDefaultStandardization — structure", () => {
   test("skips identifier and other semantic types", () => {
     const terms: LinkageTerms = {
       ...minimalTerms,
-      linkageFields: [{ name: "ssn", semanticType: "ssn" }],
+      linkageFields: [{ name: "ssn", type: "ssn" }],
     };
     const metadata: ColumnMetadata[] = [
       { name: "SSN", type: "ssn", role: "linkage", isPayload: false },
@@ -106,7 +106,7 @@ describe("getDefaultStandardization — structure", () => {
   test("uses the linkage field name, not the semantic type, as output", () => {
     const terms: LinkageTerms = {
       ...minimalTerms,
-      linkageFields: [{ name: "social_security", semanticType: "ssn" }],
+      linkageFields: [{ name: "social_security", type: "ssn" }],
     };
     const result = getDefaultStandardization(
       [{ name: "SSN", type: "ssn", role: "linkage", isPayload: false }],
@@ -132,7 +132,7 @@ describe("default SSN pipeline", () => {
       [{ name: "SSN", type: "ssn", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "ssn", semanticType: "ssn" }],
+        linkageFields: [{ name: "ssn", type: "ssn" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -187,7 +187,7 @@ describe("default SSN4 pipeline", () => {
       [{ name: "SSN4", type: "ssn4", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "ssn4", semanticType: "ssn4" }],
+        linkageFields: [{ name: "ssn4", type: "ssn4" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -230,7 +230,7 @@ describe("default name pipeline (firstName / lastName)", () => {
       [{ name: "FN", type: "firstName", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "firstName", semanticType: "firstName" }],
+        linkageFields: [{ name: "firstName", type: "firstName" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -241,7 +241,7 @@ describe("default name pipeline (firstName / lastName)", () => {
       [{ name: "LN", type: "lastName", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "lastName", semanticType: "lastName" }],
+        linkageFields: [{ name: "lastName", type: "lastName" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -300,7 +300,7 @@ describe("default dateOfBirth pipeline", () => {
       [{ name: "DOB", type: "dateOfBirth", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "dateOfBirth", semanticType: "dateOfBirth" }],
+        linkageFields: [{ name: "dateOfBirth", type: "dateOfBirth" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -347,7 +347,7 @@ describe("default phoneNumber pipeline", () => {
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "phoneNumber", semanticType: "phoneNumber" }],
+        linkageFields: [{ name: "phoneNumber", type: "phoneNumber" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -409,7 +409,7 @@ describe("default emailAddress pipeline", () => {
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "emailAddress", semanticType: "emailAddress" }],
+        linkageFields: [{ name: "emailAddress", type: "emailAddress" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -579,7 +579,7 @@ describe("inferDateFormat — scanning", () => {
 describe("getDefaultStandardization — dateInputFormat option", () => {
   const dobTerms: LinkageTerms = {
     ...minimalTerms,
-    linkageFields: [{ name: "dateOfBirth", semanticType: "dateOfBirth" }],
+    linkageFields: [{ name: "dateOfBirth", type: "dateOfBirth" }],
   };
   const dobMeta = [
     {
@@ -614,7 +614,7 @@ describe("getDefaultStandardization — dateInputFormat option", () => {
   test("non-date types are unaffected by dateInputFormat", () => {
     const terms: LinkageTerms = {
       ...minimalTerms,
-      linkageFields: [{ name: "ssn", semanticType: "ssn" }],
+      linkageFields: [{ name: "ssn", type: "ssn" }],
     };
     const meta = [
       {

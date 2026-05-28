@@ -154,9 +154,9 @@ export function getDefaultStandardization(
   const result: Standardization = [];
 
   for (const field of terms.linkageFields) {
-    const steps = stepsForType(field.semanticType, options);
+    const steps = stepsForType(field.type, options);
     if (steps === undefined) continue;
-    const col = metadata.find((c) => c.type === field.semanticType);
+    const col = metadata.find((c) => c.type === field.type);
     if (!col) continue;
     result.push({ output: field.name, input: col.name, steps });
   }

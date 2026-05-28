@@ -1,0 +1,62 @@
+Copyright 2025-2026 Vincent Dorie
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+This product includes or depends on the following open-source components:
+
+---
+
+OpenMined PSI
+Copyright The OpenMined Contributors
+Licensed under the Apache License, Version 2.0
+Source: https://github.com/OpenMined/PSI
+
+The OpenMined PSI WebAssembly module is vendored in this repository at
+lib/openmined-psi.js-2.0.6.tgz. It is a JavaScript/WASM binding for the
+Google Private Join and Compute library.
+
+---
+
+Google Private Join and Compute
+Copyright Google LLC
+Licensed under the Apache License, Version 2.0
+Source: https://github.com/google/private-join-and-compute
+
+This library is the underlying C++ implementation of the PSI protocol used
+by OpenMined PSI.
+
+---
+
+BoringSSL
+Copyright The BoringSSL Authors and the OpenSSL Project Authors
+Copyright 1995-1998 Eric A. Young, Tim J. Hudson
+Licensed under the OpenSSL License, SSLeay License, and ISC License
+Source: https://boringssl.googlesource.com/boringssl/
+
+BoringSSL is Google's fork of OpenSSL, embedded in the Google Private Join and
+Compute library and compiled into the OpenMined PSI WebAssembly module. BoringSSL
+does not use numbered releases; the specific commit is determined by the OpenMined
+PSI build configuration. The openmined-psi.js-2.0.6.tgz package ships no NOTICE
+file of its own.
+
+This product includes software developed by the OpenSSL Project for use in the
+OpenSSL Toolkit (https://www.openssl.org/).
+
+---
+
+All other npm dependencies were audited for NOTICE files. The three packages
+that ship a NOTICE file (bare-path, playwright, playwright-core) are
+development or build-time only dependencies and are not redistributed to end
+users. No further entries are required.

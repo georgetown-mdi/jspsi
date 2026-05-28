@@ -2,7 +2,24 @@ name: Deploy to Elastic Beanstalk
 
 on:
   push:
-    branches: [ main, staging, dev ]
+    branches: [main, staging, dev]
+    paths:
+      - "lib/**"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - "apps/web/deploy/aws_eb/**"
+      - "apps/web/public/**"
+      - "apps/web/server/**"
+      - "apps/web/src/**"
+      - "apps/web/nitro.config.ts"
+      - "apps/web/package.json"
+      - "apps/web/postcss.config.cjs"
+      - "apps/web/tsconfig.json"
+      - "apps/web/vite.config.ts"
+      - "packages/core/src/**"
+      - "packages/core/package.json"
+      - "packages/core/rollup.config.ts"
+      - "packages/core/tsconfig.json"
 
   workflow_dispatch:
 

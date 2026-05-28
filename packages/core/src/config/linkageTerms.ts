@@ -3,7 +3,7 @@ import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 
-// ─── Output ──────────────────────────────────────────────────────────────────
+// --- Output ------------------------------------------------------------------
 
 /**
  * Per-party output preferences. Each party independently declares whether they
@@ -32,7 +32,7 @@ const OutputSchema: z.ZodType<Output> = z.object({
   shareWithPartner: z.boolean(),
 });
 
-// ─── Linkage fields ──────────────────────────────────────────────────────────
+// --- Linkage fields ----------------------------------------------------------
 /**
  * TODO:
  * * Semantic type enumeration is incomplete.
@@ -126,22 +126,22 @@ const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
 
 interface FirstNameField {
   name: string;
-  semanticType: "firstName";
+  type: "firstName";
   constraints?: NameConstraints;
 }
 interface LastNameField {
   name: string;
-  semanticType: "lastName";
+  type: "lastName";
   constraints?: NameConstraints;
 }
 interface DateOfBirthField {
   name: string;
-  semanticType: "dateOfBirth";
+  type: "dateOfBirth";
   constraints?: DateConstraints;
 }
 interface SsnField {
   name: string;
-  semanticType: "ssn";
+  type: "ssn";
   constraints?: SSNConstraints;
 }
 /**
@@ -150,17 +150,17 @@ interface SsnField {
  */
 interface Ssn4Field {
   name: string;
-  semanticType: "ssn4";
+  type: "ssn4";
   constraints?: SSNConstraints;
 }
 interface PhoneNumberField {
   name: string;
-  semanticType: "phoneNumber";
+  type: "phoneNumber";
   constraints?: AnyConstraints;
 }
 interface EmailAddressField {
   name: string;
-  semanticType: "emailAddress";
+  type: "emailAddress";
   constraints?: AnyConstraints;
 }
 
@@ -180,40 +180,40 @@ export type LinkageField =
   | EmailAddressField;
 
 const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
-  "semanticType",
+  "type",
   [
     z.object({
-      semanticType: z.literal("firstName"),
+      type: z.literal("firstName"),
       ...linkageFieldBase(NameConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("lastName"),
+      type: z.literal("lastName"),
       ...linkageFieldBase(NameConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("dateOfBirth"),
+      type: z.literal("dateOfBirth"),
       ...linkageFieldBase(DateConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("ssn"),
+      type: z.literal("ssn"),
       ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("ssn4"),
+      type: z.literal("ssn4"),
       ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("phoneNumber"),
+      type: z.literal("phoneNumber"),
       ...linkageFieldBase(AnyConstraintsSchema),
     }),
     z.object({
-      semanticType: z.literal("emailAddress"),
+      type: z.literal("emailAddress"),
       ...linkageFieldBase(AnyConstraintsSchema),
     }),
   ],
 );
 
-// ─── Linkage key elements ────────────────────────────────────────────────────
+// --- Linkage key elements ----------------------------------------------------
 
 type GenerateFuzzyComparisons =
   | "transpositions"
@@ -274,7 +274,7 @@ const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
   transform: z.array(TransformStepSchema).optional(),
 });
 
-// ─── Linkage keys ────────────────────────────────────────────────────────────
+// --- Linkage keys ------------------------------------------------------------
 
 /**
  * A single linkage key: one round of matching with PSI. Keys should be ordered
@@ -302,7 +302,7 @@ const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
   swap: z.tuple([z.string(), z.string()]).optional(),
 });
 
-// ─── Payload ─────────────────────────────────────────────────────────────────
+// --- Payload -----------------------------------------------------------------
 
 interface PayloadColumn {
   /** Column name in the output. */
@@ -340,7 +340,7 @@ const PayloadSchema: z.ZodType<Payload> = z.object({
   receive: z.array(PayloadColumnSchema).optional(),
 });
 
-// ─── Legal agreement ─────────────────────────────────────────────────────────
+// --- Legal agreement ---------------------------------------------------------
 
 /**
  * Reference to the legal data-sharing agreement authorizing this exchange.
@@ -359,7 +359,7 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   expirationDate: z.iso.date(),
 });
 
-// ─── Linkage Terms -----──────────────────────────────────────────────────────
+// --- Linkage Terms -----------------------------------------------------------
 
 /**
  * The complete set of linkage terms for one party. Each party holds their own
@@ -493,7 +493,7 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
       },
     );
 
-// ─── Parse ──────────────────────────────────────────────────────────────────-
+// --- Parse -------------------------------------------------------------------
 
 /**
  * Parse and validate a raw value as an {@link LinkageTerms}.
@@ -515,7 +515,7 @@ export function safeParseLinkageTerms(raw: unknown) {
   return LinkageTermsSchema.safeParse(camelizeKeys(raw));
 }
 
-// ─── Compatibility ───────────────────────────────────────────────────────────
+// --- Compatibility -----------------------------------------------------------
 
 // Serialize with sorted object keys so that property-insertion order (which
 // differs between plain objects and Zod-parsed ones) does not affect equality.

@@ -29,10 +29,10 @@ const terms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [
-    { name: "ssn",          semanticType: "ssn" },
-    { name: "lastName",     semanticType: "lastName" },
-    { name: "firstName",    semanticType: "firstName" },
-    { name: "dateOfBirth",  semanticType: "dateOfBirth" },
+    { name: "ssn",          type: "ssn" },
+    { name: "lastName",     type: "lastName" },
+    { name: "firstName",    type: "firstName" },
+    { name: "dateOfBirth",  type: "dateOfBirth" },
   ],
   linkageKeys: [
     {
@@ -121,7 +121,7 @@ describe("StandardizedKeyIterable — field absent from dataset", () => {
     ...terms,
     linkageFields: [
       ...terms.linkageFields,
-      { name: "phoneNumber", semanticType: "phoneNumber" },
+      { name: "phoneNumber", type: "phoneNumber" },
     ],
     linkageKeys: [
       {

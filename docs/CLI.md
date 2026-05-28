@@ -4,11 +4,7 @@ title: "PSI-Link CLI"
 
 # PSI-Link CLI
 
-This document covers the CLI commands, configuration files, invitation strings,
-and recovery procedures for PSI-Link. It does not cover the PSI protocol (see
-[PROTOCOL.md](PROTOCOL.md)), the security and authentication model (see
-[SECURITY.md](SECURITY.md)), or deployment of supporting services (see
-[DEPLOYMENT.md](DEPLOYMENT.md)). Intended readers are IT staff and power users.
+This document covers the CLI commands, configuration files, invitation strings, and recovery procedures for PSI-Link. It does not cover the PSI protocol (see [PROTOCOL.md](PROTOCOL.md)), the security and authentication model (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), or deployment of supporting services (see [DEPLOYMENT.md](DEPLOYMENT.md)). Intended readers are IT staff and power users.
 
 ## Configuration
 
@@ -16,7 +12,7 @@ Exchange details are stored in two files: a configuration file and an authentica
 
 The configuration file is not intended to contain secrets and is safe to commit to version control. The PAKE token and its expiration are stored in the key file instead; they never appear in the configuration file and are not user-editable because the application rotates them automatically. By default, the key file is intentionally named with a leading dot (`.psilink.key`) so that it is hidden from default directory listings and less likely to be accidentally copied or included in an archive; it should be added to `.gitignore`. All other credential fields use the `@path` convention described below.
 
-Command line arguments take precedence over values in the configuration file, allowing scripted workflows to override specific parameters without modifying the stored configuration. Credential and opaque string fields support `@`-file references: a value beginning with `@` is read from the file at the given path rather than used literally - for example, `--sftp-key=@/run/secrets/id_rsa` reads the private key from disk. This convention applies both on the command line and in the configuration file, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
+Command line arguments take precedence over values in the configuration file, allowing scripted workflows to override specific parameters without modifying the stored configuration. Credential and opaque string fields support `@`-file references: a value beginning with `@` is read from the file at the given path rather than used literally - for example, `--server-private-key=@/run/secrets/id_rsa` reads the private key from disk. This convention applies both on the command line and in the configuration file, and is the recommended approach for any credential to avoid exposing sensitive material in process listings or shell history. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
 
 The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
 
@@ -25,6 +21,8 @@ The `--config-file` and `--key-file` arguments are expected to be available for 
 ```sh
 psilink init [INPUT_FILE]
 ```
+
+> **Not yet implemented:** `psilink init` is stubbed; it currently prints a "not yet implemented" message and exits. It is targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The behavior below is the intended design.
 
 This creates a configuration file and then exits - no exchange or invitation is generated. The file is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. If a file already exists at the output path, the user is prompted before overwriting.
 
@@ -58,9 +56,9 @@ Before running, users are warned about the limitations of the security model, na
 
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
-> **Not yet implemented:** `--save`, `psilink invite`, and `psilink accept` are reserved for the bootstrapping workflow but are not yet wired up in the CLI. The `--save` flag currently emits a warning and proceeds with a standard zero-setup exchange. Until these commands land, recurring exchanges require a key file (`.psilink.key`) provisioned out-of-band - see [Required permissions](SECURITY.md#required-permissions) for the file format.
+> **Not yet implemented:** `psilink init`, `psilink invite`, `psilink accept`, and the `--save` flag are reserved for the configuration and bootstrapping workflow but are not yet wired up in the CLI; they are targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The `init`, `invite`, and `accept` commands currently print a "not yet implemented" message and exit; the `--save` flag emits a warning and proceeds with a standard zero-setup exchange. Until these commands land, recurring exchanges require a key file (`.psilink.key`) provisioned out-of-band - see [Required permissions](SECURITY_DESIGN.md#required-permissions) for the file format.
 
-If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret).
+If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret).
 
 If a zero-setup exchange is started with configuration and/or key files already present, the user is warned that they will be ignored and that if their intent was to use those files, the user should use `psilink exchange` instead.
 
@@ -85,7 +83,7 @@ When both parties are not simultaneously available or prefer not to use a coordi
 psilink invite [INPUT_FILE]
 ```
 
-This generates a PAKE token, saves the `pakeToken` and an `expires` field to a key file, prints an invitation string (see [Invitation strings](#invitation-strings)) and instructions for its use, and then exits immediately. The invitation should be forwarded to the user's partner using a trusted out-of-band channel (see [SECURITY.md](SECURITY.md)).
+This generates a PAKE token, saves the `pakeToken` and an `expires` field to a key file, prints an invitation string (see [Invitation strings](#invitation-strings)) and instructions for its use, and then exits immediately. The invitation should be forwarded to the user's partner using a trusted out-of-band channel (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
 
 Generating an invitation requires either a pre-existing configuration file or an `INPUT_FILE` from which linkage terms are inferred. If both types of files are present the content of the configuration file is checked against the input. A conflict occurs if the columns in the input cannot be transformed through available data standardizations to produce the linkage fields defined in the configuration file, meaning the file cannot satisfy the linkage keys the partner will expect. In this case, an error is raised and the reason why an invite cannot be generated is given.
 
@@ -159,43 +157,16 @@ connection:
 
 A key file passes through four stages:
 
-1. **Creation** - `psilink invite` or `psilink accept` writes a fresh
-   `.psilink.key` with a short-lived invitation token. The file is written
-   owner-read-only (`0600` on Unix).
-2. **Rotation** - `psilink exchange` rotates the token automatically after
-   each successful authentication handshake, before the data exchange begins. The
-   new token replaces the previous one in the same file. No manual action is
-   required. If the key file write fails, an error is reported immediately; both
-   parties must re-invite because the partner may already hold the rotated token,
-   making the old token invalid (see [Out-of-sync tokens](#out-of-sync-tokens)).
-3. **Loss** - if the key file is deleted or otherwise unrecoverable, both
-   parties must re-invite (see below). If a backup exists in a secrets manager
-   or encrypted store, restore from the backup and retry the exchange; confirm
-   with the partner out-of-band that the backup reflects the same exchange they
-   last completed - if in doubt, re-invite rather than risk an out-of-sync
-   token that silently fails the PAKE handshake.
-4. **Compromise** - if the token is believed to have been observed by a third
-   party, follow the procedure in
-   [Compromise response](SECURITY.md#compromise-response).
+1. **Creation** - `psilink invite` or `psilink accept` writes a fresh `.psilink.key` with a short-lived invitation token. The file is written owner-read-only (`0600` on Unix).
+2. **Rotation** - `psilink exchange` rotates the token automatically after each successful authentication handshake, before the data exchange begins. The new token replaces the previous one in the same file. No manual action is required. If the key file write fails, an error is reported immediately; both parties must re-invite because the partner may already hold the rotated token, making the old token invalid (see [Out-of-sync tokens](#out-of-sync-tokens)).
+3. **Loss** - if the key file is deleted or otherwise unrecoverable, both parties must re-invite (see below). If a backup exists in a secrets manager or encrypted store, restore from the backup and retry the exchange; confirm with the partner out-of-band that the backup reflects the same exchange they last completed - if in doubt, re-invite rather than risk an out-of-sync token that silently fails the PAKE handshake.
+4. **Compromise** - if the token is believed to have been observed by a third party, follow the procedure in [Compromise response](SECURITY_DESIGN.md#compromise-response).
 
 ### Out-of-sync tokens
 
-If one party fails to write the rotated token to its key file - whether due to a
-crash, power loss, or a disk error - the two sides will hold different tokens
-and the next PAKE handshake will fail. Clock skew can produce the same result:
-if one party's clock lags and a token expires between the SPAKE2 round-trip
-messages, that party fails the post-handshake expiry check and discards the new
-token while the other party saves it successfully. Because there is no way to
-determine which party holds the newer token, both must reset regardless of which
-side failed; reusing an older token may also violate key-rotation policies.
+If one party fails to write the rotated token to its key file - whether due to a crash, power loss, or a disk error - the two sides will hold different tokens and the next PAKE handshake will fail. Clock skew can produce the same result: if one party's clock lags and a token expires between the SPAKE2 round-trip messages, that party fails the post-handshake expiry check and discards the new token while the other party saves it successfully. Because there is no way to determine which party holds the newer token, both must reset regardless of which side failed; reusing an older token may also violate key-rotation policies.
 
-To recognize failed rotations, the error messages for exchanges that fail PAKE
-authentication instruct users how they can generate and accept new invitation
-strings, and encourage them to contact their partners out-of-band. Since
-connection information has already been shared, the recommended commands are
-`psilink invite URL` followed by `psilink accept URL INVITATION`. The
-pre-existing `psilink.yaml` configuration file is reused; only the key file
-needs to be recreated.
+To recognize failed rotations, the error messages for exchanges that fail PAKE authentication instruct users how they can generate and accept new invitation strings, and encourage them to contact their partners out-of-band. Since connection information has already been shared, the recommended commands are `psilink invite URL` followed by `psilink accept URL INVITATION`. The pre-existing `psilink.yaml` configuration file is reused; only the key file needs to be recreated.
 
 ### Token loss
 
@@ -203,22 +174,19 @@ If a key file is lost and no backup is available:
 
 1. Contact the partner out-of-band to coordinate the reset.
 2. Both parties delete their existing key files.
-3. The inviting party runs `psilink invite URL INPUT_FILE` and shares the
-   invitation string with the partner.
+3. The inviting party runs `psilink invite URL INPUT_FILE` and shares the invitation string with the partner.
 4. The accepting party runs `psilink accept URL INVITATION INPUT_FILE`.
 
-The pre-existing `psilink.yaml` configuration file is reused; only the key
-file needs to be recreated.
+The pre-existing `psilink.yaml` configuration file is reused; only the key file needs to be recreated.
 
 ### Token compromise
 
-See [Compromise response](SECURITY.md#compromise-response) for the full
-procedure. In summary: notify the partner out-of-band, both parties delete
-their key files, and re-invite over a channel known to be uncompromised.
+See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full procedure. In summary: notify the partner out-of-band, both parties delete their key files, and re-invite over a channel known to be uncompromised.
 
 ## See also
 
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - exchange specification format consumed by the CLI
-- [SECURITY.md](SECURITY.md) - authentication model underlying the invitation and recurring exchange flow
+- [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - authentication model underlying the invitation and recurring exchange flow
+- [COMMUNICATION.md](COMMUNICATION.md) - communication channels (WebRTC, SFTP, filedrop) and supporting services
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating the supporting services used by the CLI
 - [DESIGN.md](DESIGN.md) - overview of the user journey and command table

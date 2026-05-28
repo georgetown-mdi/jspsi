@@ -38,7 +38,7 @@ const minimalLinkageTerms = {
   algorithm: "psi",
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
-  linkageFields: [{ name: "ssn", semanticType: "ssn" }],
+  linkageFields: [{ name: "ssn", type: "ssn" }],
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
