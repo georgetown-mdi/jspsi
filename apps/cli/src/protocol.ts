@@ -6,6 +6,7 @@ import PSI from "@openmined/psi.js";
 
 import {
   FileSyncConnection,
+  EncryptedConnection,
   getLogger,
   describeExchangeStages,
   runExchange,
@@ -14,6 +15,7 @@ import {
 } from "@psilink/core";
 import type {
   Authentication,
+  Connection,
   ConnectionConfig,
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -517,16 +519,17 @@ export async function runProtocol(
     conn.start();
     started = true;
 
+    // activeConn is the connection used for runExchange. When authentication
+    // succeeds, it is replaced with an EncryptedConnection that wraps conn so
+    // all subsequent messages are protected by AES-256-GCM. Without auth,
+    // activeConn stays as conn (no AEAD).
+    let activeConn: Connection = conn;
+
     if (auth) {
       log.info("authenticating");
       // conn.start() must precede authenticateConnection: the SPAKE2 receive()
       // helper registers conn.once("data", ...) listeners driven by the polling
       // loop.
-      // NOTE: there is an open ticket to extract sessionKey from the
-      // authentication result and use it set up AEAD encryption. It is
-      // currently blocked by integrating PAKE into the protocol and having the
-      // ability to generate invitation keys. For now, sessionKey is silently
-      // being dropped.
       // Discard the (possibly whitespace-padded) keyFilePath from auth;
       // saveKeyFile below uses trimmedKeyFilePath, which was captured and
       // trimmed during pre-flight without mutating the caller-supplied
@@ -540,7 +543,11 @@ export async function runProtocol(
       // "handshake may have completed on the partner side" case from the
       // "handshake never started" case.
       authStarted = true;
-      const { newToken } = await authenticateConnection(conn, pakeAuth, role);
+      const { newToken, sessionKey } = await authenticateConnection(
+        conn,
+        pakeAuth,
+        role,
+      );
       try {
         // saveKeyFile is synchronous; the assignment below runs in the same
         // microtask tick. A signal cannot interleave between them, so any
@@ -575,13 +582,14 @@ export async function runProtocol(
           { psilinkRecoveryHintEmitted: true },
         );
       }
+      activeConn = await EncryptedConnection.create(conn, sessionKey, role);
     }
 
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
     const { associationTable, partnerPayload } = await runExchange(
-      conn,
+      activeConn,
       role,
       prepared,
       {

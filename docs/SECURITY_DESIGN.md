@@ -110,7 +110,17 @@ If an exchange partnership goes dormant for an extended period, organizations ma
 
 # Channel security
 
-As noted in [Transport-layer authentication](#transport-layer-authentication), server administrators have visibility into exchanges conducted over SFTP and file-drops. When using these channels, PAKE-authenticated, recurring exchanges provide an additional application-layer of encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
+As noted in [Transport-layer authentication](#transport-layer-authentication), server administrators have visibility into exchanges conducted over SFTP and file-drops. When using these channels, PAKE-authenticated, recurring exchanges provide an additional application-layer of encryption via `EncryptedConnection`, an `AES-256-GCM` wrapper built on the Web Crypto API.
+
+**Two directional keys** are derived from the SPAKE2 session key using HKDF:
+- initiator → responder: `deriveAeadKey(sessionKey, "initiator-to-responder")`
+- responder → initiator: `deriveAeadKey(sessionKey, "responder-to-initiator")`
+
+Each sender encrypts exclusively with its own outbound key, so the two directions never share a `(key, nonce)` pair — a design that avoids the catastrophic nonce-reuse vulnerability that a single shared key would introduce when both sides start their sequence counter at 0.
+
+**Wire format** for one encrypted message: `{ enc: base64url(IV ‖ ciphertext ‖ 16-byte GCM tag) }`, where IV is 12 bytes: 4 reserved zero bytes followed by an 8-byte big-endian sequence number. The sequence number is not transmitted separately; the receiver extracts it from the decrypted IV and rejects any message whose sequence number is not strictly greater than the last accepted sequence number, preventing replay and out-of-order delivery.
+
+The server admin sees only opaque ciphertext objects. If they tamper with a file, the AES-GCM authentication tag fails and the exchange aborts — any tag failure or replay permanently disables the `EncryptedConnection` wrapper.
 
 WebRTC connections use DTLS which provides end-to-end encryption, so the peer-coordination server never sees data-channel traffic. A TURN relay, when used to traverse NAT or firewall restrictions, preserves this property: it forwards encrypted DTLS packets without terminating the session.
 
