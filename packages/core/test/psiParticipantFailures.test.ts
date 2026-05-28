@@ -1,47 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { default as EventEmitter } from "eventemitter3";
-
 import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
+import { StubConnection } from "./utils/stubConnection";
 
 import type { Connection } from "../src/types";
 
 const psiLibrary = await PSI();
-
-type Events = {
-  data: (data: unknown) => void;
-  error: (err: unknown) => void;
-};
-
-// A connection that records sends and lets a test drive failures. Its `send`
-// neither delivers data nor (by default) throws, so a started exchange stalls
-// awaiting a reply unless the test emits an error or advances the clock.
-class StubConnection extends EventEmitter<Events, never> {
-  sentMessages: Array<unknown> = [];
-  sendImpl: (data: unknown) => void | Promise<void> = () => {};
-  private bufferedError: unknown;
-
-  send(data: unknown): void | Promise<void> {
-    this.sentMessages.push(data);
-    return this.sendImpl(data);
-  }
-  close() {}
-  emit<E extends keyof Events>(
-    event: E,
-    ...args: Parameters<Events[E]>
-  ): boolean {
-    const hadListeners = super.emit(event, ...args);
-    if (event === "error" && !hadListeners) this.bufferedError = args[0];
-    return hadListeners;
-  }
-  takeBufferedError(): unknown {
-    const e = this.bufferedError;
-    this.bufferedError = undefined;
-    return e;
-  }
-}
 
 function startStarterExchange(conn: StubConnection): Promise<unknown> {
   const participant = new PSIParticipant("starter", psiLibrary, {

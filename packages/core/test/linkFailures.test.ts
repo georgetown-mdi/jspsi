@@ -1,43 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { default as EventEmitter } from "eventemitter3";
-
 import { exchangeMappedElements } from "../src/link";
+import { StubConnection } from "./utils/stubConnection";
 
 import type { Connection } from "../src/types";
 import type { IterationMap } from "../src/link";
-
-type Events = {
-  data: (data: unknown) => void;
-  error: (err: unknown) => void;
-};
-
-// Same stub as psiParticipantFailures.test.ts: records sends, lets tests
-// drive failures, and mirrors the buffering semantics of production transports.
-class StubConnection extends EventEmitter<Events, never> {
-  sentMessages: Array<unknown> = [];
-  sendImpl: (data: unknown) => void | Promise<void> = () => {};
-  private bufferedError: unknown;
-
-  send(data: unknown): void | Promise<void> {
-    this.sentMessages.push(data);
-    return this.sendImpl(data);
-  }
-  close() {}
-  emit<E extends keyof Events>(
-    event: E,
-    ...args: Parameters<Events[E]>
-  ): boolean {
-    const hadListeners = super.emit(event, ...args);
-    if (event === "error" && !hadListeners) this.bufferedError = args[0];
-    return hadListeners;
-  }
-  takeBufferedError(): unknown {
-    const e = this.bufferedError;
-    this.bufferedError = undefined;
-    return e;
-  }
-}
 
 const noopLog = { info: () => {}, debug: () => {} };
 const emptyValues: IterationMap = [];
@@ -102,7 +69,7 @@ describe("exchangeMappedElements failure handling", () => {
 
       await vi.advanceTimersByTimeAsync(120_000);
 
-      await expect(p).rejects.toThrow("PSI mapped-element exchange timed out");
+      await expect(p).rejects.toThrow("PSI exchange timed out");
     } finally {
       vi.useRealTimers();
     }
