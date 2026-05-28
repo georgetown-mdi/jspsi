@@ -24,6 +24,7 @@ export class DataConnectionAdapter
 {
   private conn: DataConnection;
   private bufferedError: unknown;
+  private closed = false;
   private onData: (data: unknown) => void;
   private onError: (err: unknown) => void;
 
@@ -90,6 +91,8 @@ export class DataConnectionAdapter
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.conn.off("data", this.onData);
     this.conn.off("error", this.onError);
     this.conn.close();

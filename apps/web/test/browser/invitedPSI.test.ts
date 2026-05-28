@@ -8,8 +8,8 @@ import { prepareForExchange, runExchange } from "@psilink/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
-import { sortAssociationTable } from "../utils/associationTable.js";
 import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
+import { sortAssociationTable } from "../utils/associationTable.js";
 
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -123,7 +123,8 @@ const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
     });
     peer.on("open", () => {
       const conn = peer.connect(clientPeerId, { reliable: true });
-      resolve([peer, conn]);
+      conn.on("open", () => resolve([peer, conn]));
+      conn.on("error", (err) => reject(err));
     });
 
     peer.on("error", (err) => reject(err));

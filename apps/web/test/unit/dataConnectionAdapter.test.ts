@@ -156,4 +156,43 @@ describe("DataConnectionAdapter", () => {
 
     expect(fake.close).toHaveBeenCalled();
   });
+
+  test("close() is idempotent: second call does not invoke conn.close() again", () => {
+    const { fake, adapter } = makeAdapter();
+
+    adapter.close();
+    adapter.close();
+
+    expect(fake.close).toHaveBeenCalledTimes(1);
+  });
+
+  test("non-Error value is buffered when no listener is registered", () => {
+    const { fake, adapter } = makeAdapter();
+
+    fake.emit("error", "transport error string");
+
+    expect(adapter.takeBufferedError()).toBe("transport error string");
+  });
+
+  test("Error superseding a buffered non-Error value chains the non-Error as cause", () => {
+    const { fake, adapter } = makeAdapter();
+    const second = new Error("second");
+
+    fake.emit("error", "first string error");
+    fake.emit("error", second);
+
+    const buffered = adapter.takeBufferedError();
+    expect(buffered).toBe(second);
+    expect((buffered as Error).cause).toBe("first string error");
+  });
+
+  test("non-Error superseding a buffered Error updates the buffer without cause chain", () => {
+    const { fake, adapter } = makeAdapter();
+    const first = new Error("first");
+
+    fake.emit("error", first);
+    fake.emit("error", "second string");
+
+    expect(adapter.takeBufferedError()).toBe("second string");
+  });
 });
