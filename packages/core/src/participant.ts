@@ -236,7 +236,10 @@ export class PSIParticipant {
             this.setStage("done");
           },
         ],
-        () => conn.send(serverSetup.serializeBinary()),
+        async () => {
+          await conn.send(serverSetup.serializeBinary());
+          this.setStage("waiting for client request");
+        },
       );
 
       if (result === undefined)

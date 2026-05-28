@@ -86,7 +86,12 @@ export function runReceiveSequence(
         fail(err);
         return;
       }
-      Promise.resolve(sendResult).catch(fail);
+      Promise.resolve(sendResult).then(
+        () => { if (handlers.length === 0) succeed(); },
+        fail,
+      );
+    } else if (handlers.length === 0) {
+      succeed();
     }
   });
 }

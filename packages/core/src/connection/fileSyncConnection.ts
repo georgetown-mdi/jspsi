@@ -3,6 +3,7 @@ import { default as EventEmitter } from "eventemitter3";
 import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
+import { chainAsCause } from "./chainAsCause";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -182,17 +183,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `[${this.role}] superseding earlier buffered error: ` +
             errMessage(this.bufferedError),
         );
-        if (
-          incoming instanceof Error &&
-          incoming.cause === undefined &&
-          incoming !== this.bufferedError
-        ) {
-          try {
-            incoming.cause = this.bufferedError;
-          } catch {
-            /* error object is frozen; chain is best-effort. */
-          }
-        }
+        chainAsCause(incoming, this.bufferedError);
       }
       this.bufferedError = incoming;
     }

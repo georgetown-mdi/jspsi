@@ -2,6 +2,8 @@ import log from "loglevel";
 
 import { default as EventEmitter } from "eventemitter3";
 
+import { chainAsCause } from "@psilink/core";
+
 import type { Connection } from "@psilink/core";
 import type { DataConnection } from "peerjs";
 
@@ -82,17 +84,7 @@ export class DataConnectionAdapter
           "DataConnectionAdapter: superseding buffered error:",
           this.bufferedError,
         );
-        if (
-          incoming instanceof Error &&
-          incoming.cause === undefined &&
-          incoming !== this.bufferedError
-        ) {
-          try {
-            incoming.cause = this.bufferedError;
-          } catch {
-            /* error object is frozen; chain is best-effort. */
-          }
-        }
+        chainAsCause(incoming, this.bufferedError);
       }
       this.bufferedError = incoming;
     }

@@ -104,7 +104,7 @@ export function openPeerConnection(
       const conn = peer.connect(peerId, { reliable: true });
       waitForConnectionOpen(conn)
         .then(() => resolve([peer, conn]))
-        .catch(reject);
+        .catch((err) => { peer.destroy(); reject(err); });
     });
 
     peer.on("error", (err) => {
