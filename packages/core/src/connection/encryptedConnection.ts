@@ -168,11 +168,17 @@ export class EncryptedConnection extends BufferedErrorEmitter {
       plaintext.set(json, 1);
     }
 
-    const cipherBuffer = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv },
-      this.sendKey,
-      plaintext,
-    );
+    let cipherBuffer: ArrayBuffer;
+    try {
+      cipherBuffer = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        this.sendKey,
+        plaintext,
+      );
+    } catch (err) {
+      this.markFailed(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    }
 
     if (this.failed) {
       throw new Error(

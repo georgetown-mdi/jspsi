@@ -188,6 +188,24 @@ test("after tag failure: subsequent send throws", async () => {
   await expect(enc.send({ test: true })).rejects.toThrow(/permanently dead/i);
 });
 
+test("encrypt failure: wrapper is permanently dead", async () => {
+  const [encA] = await makeEncryptedPair();
+
+  const spy = vi
+    .spyOn(crypto.subtle, "encrypt")
+    .mockRejectedValueOnce(new Error("forced encrypt failure"));
+
+  try {
+    await expect(encA.send({ test: true })).rejects.toThrow(
+      "forced encrypt failure",
+    );
+
+    await expect(encA.send({ test: true })).rejects.toThrow(/permanently dead/i);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 test("after tag failure: further data events are suppressed", async () => {
   const conn = new PassthroughConnection();
   const enc = await EncryptedConnection.create(conn, SESSION_KEY, "responder");
