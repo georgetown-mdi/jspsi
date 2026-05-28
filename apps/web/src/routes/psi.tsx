@@ -246,6 +246,7 @@ function Home() {
                 }
               })
               .catch((error) => {
+                peer.disconnect();
                 console.error(error);
               });
           });

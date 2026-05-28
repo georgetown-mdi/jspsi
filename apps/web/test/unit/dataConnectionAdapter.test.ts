@@ -240,4 +240,15 @@ describe("DataConnectionAdapter", () => {
     expect(received).toHaveLength(0);
     expect(adapter.takeBufferedError()).toBeUndefined();
   });
+
+  test("emit() after close() does not deliver events to registered listeners", () => {
+    const { adapter } = makeAdapter();
+    const received: Array<unknown> = [];
+    adapter.on("data", (d) => received.push(d));
+
+    adapter.close();
+    adapter.emit("data", "after-close");
+
+    expect(received).toHaveLength(0);
+  });
 });

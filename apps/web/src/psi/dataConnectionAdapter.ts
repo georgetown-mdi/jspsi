@@ -63,6 +63,7 @@ export class DataConnectionAdapter
     event: TEvent,
     ...args: Parameters<Events[TEvent]>
   ): boolean {
+    if (this.closed) return false;
     const hadListeners = super.emit(event, ...args);
     if (event === "error" && !hadListeners) {
       // Only the most recent unhandled error is retained; a subsequent error
