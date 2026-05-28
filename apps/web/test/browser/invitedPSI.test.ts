@@ -127,7 +127,7 @@ const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
         conn.off("error", onConnError);
         reject(err);
       };
-      conn.on("open", () => {
+      conn.once("open", () => {
         conn.off("error", onConnError);
         resolve([peer, conn]);
       });

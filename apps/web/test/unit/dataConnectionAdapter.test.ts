@@ -166,6 +166,15 @@ describe("DataConnectionAdapter", () => {
     expect(fake.close).toHaveBeenCalledTimes(1);
   });
 
+  test("send() after close() does not delegate to the underlying DataConnection", () => {
+    const { fake, adapter } = makeAdapter();
+
+    adapter.close();
+    adapter.send("post-close payload");
+
+    expect(fake.send).not.toHaveBeenCalled();
+  });
+
   test("non-Error value is buffered when no listener is registered", () => {
     const { fake, adapter } = makeAdapter();
 

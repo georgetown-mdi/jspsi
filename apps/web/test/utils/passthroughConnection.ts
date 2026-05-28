@@ -11,6 +11,7 @@ export class PassthroughConnection extends EventEmitter<Events, never> {
   private closed = false;
 
   send(data: unknown) {
+    if (this.closed) return;
     setImmediate(() => {
       this.other!.emit("data", data);
     });
@@ -31,9 +32,9 @@ export class PassthroughConnection extends EventEmitter<Events, never> {
 
   // Mirrors DataConnectionAdapter's emit override so tests exercising the
   // protocol-layer takeBufferedError() path see the same buffering semantics
-  // as the production transport. The closed guard mirrors DataConnectionAdapter
-  // removing its forwarding handlers on close() so events from the peer no
-  // longer reach this connection's listeners.
+  // as the production transport. The closed guards on send() and emit() mirror
+  // DataConnectionAdapter's behavior after close(): no outbound data is sent
+  // and no inbound events reach listeners.
   emit<TEvent extends keyof Events>(
     event: TEvent,
     ...args: Parameters<Events[TEvent]>
