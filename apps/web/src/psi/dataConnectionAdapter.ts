@@ -1,8 +1,8 @@
 import log from "loglevel";
 
-import { default as EventEmitter } from "eventemitter3";
+import { BufferingEventEmitter } from "@psilink/core";
 
-import { chainAsCause } from "@psilink/core";
+import { waitForConnectionOpen } from "./waitForOpen";
 
 import type { Connection } from "@psilink/core";
 import type { DataConnection } from "peerjs";
@@ -14,11 +14,10 @@ interface Events {
 
 /**
  * Wraps a PeerJS {@link DataConnection} to satisfy the core {@link Connection}
- * interface. Provides `takeBufferedError` semantics: an `error` emitted while
- * no listener is registered is retained so the next protocol-layer receive
- * can detect failures that arrived in the gap between listener-registration
- * cycles. Reading the buffer clears it; only the most recent unhandled error
- * is retained.
+ * interface. Provides `takeBufferedError` semantics via {@link BufferingEventEmitter}:
+ * an `error` emitted while no listener is registered is retained so the next
+ * protocol-layer receive can detect failures that arrived in the gap between
+ * listener-registration cycles.
  *
  * A `close` event from the underlying connection (remote peer closed or network
  * drop) is forwarded as an `error` so protocol-layer receives fail immediately
@@ -28,13 +27,15 @@ interface Events {
  * does not call `DataConnection.close()` (the connection is already closing)
  * and preserves the buffered close-as-error so the protocol layer can observe
  * it via {@link takeBufferedError}.
+ *
+ * Use the static {@link open} factory rather than the constructor when the
+ * connection may not yet be open; the constructor does not wait.
  */
 export class DataConnectionAdapter
-  extends EventEmitter<Events, never>
+  extends BufferingEventEmitter<Events>
   implements Connection
 {
   private conn: DataConnection;
-  private bufferedError: unknown;
   private closed = false;
   private onData: (data: unknown) => void;
   private onError: (err: unknown) => void;
@@ -43,7 +44,6 @@ export class DataConnectionAdapter
   constructor(conn: DataConnection) {
     super();
     this.conn = conn;
-    this.bufferedError = undefined;
 
     this.onData = (data: unknown) => {
       this.emit("data", data);
@@ -64,42 +64,39 @@ export class DataConnectionAdapter
     conn.on("close", this.onClose);
   }
 
-  // Override emit so that an error fired with no listener is retained rather
-  // than dropped. EventEmitter3 silently discards unhandled errors; buffering
-  // them lets the next protocol-layer receive observe failures that occurred
-  // in the gap between listener-registration cycles.
+  /**
+   * Waits for `conn` to open, then returns a new {@link DataConnectionAdapter}
+   * wrapping it. Prefer this over `new DataConnectionAdapter(conn)` for any
+   * connection that may not be open yet so that both the outgoing (initiator)
+   * and incoming (responder) paths go through the same open-wait before the
+   * adapter is used.
+   */
+  static open(
+    conn: DataConnection,
+    timeoutMs?: number,
+  ): Promise<DataConnectionAdapter> {
+    return waitForConnectionOpen(conn, timeoutMs).then(
+      () => new DataConnectionAdapter(conn),
+    );
+  }
+
+  // Adds the closed guard before delegating to BufferingEventEmitter. Reads
+  // bufferedError before super.emit updates it so the log can show which prior
+  // error was superseded.
   emit<TEvent extends keyof Events>(
     event: TEvent,
     ...args: Parameters<Events[TEvent]>
   ): boolean {
     if (this.closed) return false;
+    const prevBuffered = this.bufferedError;
     const hadListeners = super.emit(event, ...args);
-    if (event === "error" && !hadListeners) {
-      // Only the most recent unhandled error is retained; a subsequent error
-      // supersedes the first as the proximate cause. Chain the prior error as
-      // `cause` when possible so downstream diagnostics can still surface it.
-      const incoming = args[0];
-      if (this.bufferedError !== undefined) {
-        log.warn(
-          "DataConnectionAdapter: superseding buffered error:",
-          this.bufferedError,
-        );
-        chainAsCause(incoming, this.bufferedError);
-      }
-      this.bufferedError = incoming;
+    if (event === "error" && !hadListeners && prevBuffered !== undefined) {
+      log.warn(
+        "DataConnectionAdapter: superseding buffered error:",
+        prevBuffered,
+      );
     }
     return hadListeners;
-  }
-
-  /**
-   * Returns the most recent error buffered while no listener was registered,
-   * clearing it; returns `undefined` if none is buffered. See the class
-   * description for the buffering semantics.
-   */
-  takeBufferedError(): unknown {
-    const e = this.bufferedError;
-    this.bufferedError = undefined;
-    return e;
   }
 
   /**

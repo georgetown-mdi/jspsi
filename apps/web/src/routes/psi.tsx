@@ -40,7 +40,6 @@ import SessionDetails from "@components/SessionDetails";
 import { Status } from "@components/Status";
 
 import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
-import { waitForConnectionOpen } from "@psi/waitForOpen";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -170,7 +169,7 @@ function Home() {
             loadCSVFile(files[0]),
             openPeerConnection(peerId),
           ]);
-          const adapter = new DataConnectionAdapter(conn);
+          const adapter = await DataConnectionAdapter.open(conn);
           adapter.once("data", () => peer.disconnect());
 
           const rawRows = csvResult.data as Array<Record<string, string>>;
@@ -234,9 +233,8 @@ function Home() {
           const peer = await createAndSharePeerId(session);
 
           peer.on("connection", (conn) => {
-            waitForConnectionOpen(conn)
-              .then(async () => {
-                const adapter = new DataConnectionAdapter(conn);
+            DataConnectionAdapter.open(conn)
+              .then(async (adapter) => {
                 adapter.once("data", () => peer.disconnect());
                 try {
                   const exchangeResult = await runExchange(

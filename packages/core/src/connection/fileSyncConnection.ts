@@ -1,9 +1,8 @@
 import * as z from "zod";
-import { default as EventEmitter } from "eventemitter3";
 import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
-import { chainAsCause } from "./chainAsCause";
+import { BufferingEventEmitter } from "./bufferingEventEmitter";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -115,7 +114,7 @@ export interface FileTransportClient {
  * {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
  * `LocalFSClient`.
  */
-export class FileSyncConnection extends EventEmitter<Events, never> {
+export class FileSyncConnection extends BufferingEventEmitter<Events> {
   private client: FileTransportClient;
   id: string;
   role: string;
@@ -132,12 +131,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private pollerActive: boolean;
   private responsibleFiles: Set<string>;
   private consecutiveEnoentCount = 0;
-  // An `error` emitted while no listener is registered is held here so the
-  // next protocol-layer receive can detect failures that arrived in the gap
-  // between listener-registration cycles. Reading clears the value; only the
-  // most recent unhandled error is retained, since a subsequent error would
-  // supersede the first as the proximate cause.
-  private bufferedError: unknown;
 
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
@@ -154,46 +147,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
   }
 
-  // Override emit so that an error fired with no listener is retained rather
-  // than dropped. EventEmitter3 silently discards unhandled errors (unlike
-  // Node's EventEmitter, which throws); buffering them lets the next
-  // protocol-layer receive observe failures that occurred in the gap between
-  // listener-registration cycles. `eventNames()` returns the events that
-  // currently have listeners; an error-with-no-listener has the event absent.
-  emit<E extends keyof Events>(
-    event: E,
-    ...args: Parameters<Events[E]>
-  ): boolean {
+  emit<E extends keyof Events>(event: E, ...args: Parameters<Events[E]>): boolean {
+    const prevBuffered = this.bufferedError;
     const hadListeners = super.emit(event, ...args);
-    if (event === "error" && !hadListeners) {
-      // Only the most recent unhandled error is retained because a subsequent
-      // error usually supersedes the first as the proximate cause. Surface a
-      // log line when this happens so a chained failure is not invisible.
-      // When both the prior and new errors are Error instances and the new
-      // one has no `cause` set, chain the prior error as its cause so
-      // downstream diagnostic output (e.g. an "Error: ... { cause: ... }"
-      // formatter) can still surface the earlier failure rather than losing
-      // it entirely. Mutation is gated on `cause === undefined` so we never
-      // overwrite a cause the caller already set, and on `incoming !==
-      // bufferedError` so a re-emit of the same Error reference cannot create
-      // a self-referential cause chain that loops a downstream walker.
-      const incoming = args[0];
-      if (this.bufferedError !== undefined) {
-        this.log.warn(
-          `[${this.role}] superseding earlier buffered error: ` +
-            errMessage(this.bufferedError),
-        );
-        chainAsCause(incoming, this.bufferedError);
-      }
-      this.bufferedError = incoming;
+    if (event === "error" && !hadListeners && prevBuffered !== undefined) {
+      this.log.warn(
+        `[${this.role}] superseding earlier buffered error: ` +
+          errMessage(prevBuffered),
+      );
     }
     return hadListeners;
-  }
-
-  takeBufferedError(): unknown {
-    const e = this.bufferedError;
-    this.bufferedError = undefined;
-    return e;
   }
 
   /** Opens a connection from a typed config. Dispatches on `config.channel`. */

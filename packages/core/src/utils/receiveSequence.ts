@@ -34,18 +34,15 @@ export function runReceiveSequence(
       conn.removeListener("data", dataListener);
       conn.removeListener("error", onError, undefined, true);
     };
-    const fail = (err: unknown) => {
+    const settle = (fn: () => void) => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(err instanceof Error ? err : new Error(String(err)));
+      fn();
     };
-    const succeed = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve();
-    };
+    const fail = (err: unknown) =>
+      settle(() => reject(err instanceof Error ? err : new Error(String(err))));
+    const succeed = () => settle(resolve);
     const onError = (err: unknown) => fail(err);
     const resetTimer = () => {
       clearTimeout(timer);
@@ -55,17 +52,10 @@ export function runReceiveSequence(
       );
     };
 
-    const lastIndex = handlers.length - 1;
-    const queue = new EventHandlerQueue(
-      handlers.map((handler, index) => async (rawData: unknown) => {
-        await handler(rawData);
-        if (index === lastIndex) succeed();
-      }),
-      fail,
-    );
+    const queue = new EventHandlerQueue(handlers, fail, succeed);
     const dataListener = (rawData: unknown) => {
-      resetTimer();
       queue.handleEvent(rawData);
+      if (!queue.isEmpty) resetTimer();
     };
 
     resetTimer();
