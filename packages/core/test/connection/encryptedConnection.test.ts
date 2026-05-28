@@ -1,6 +1,10 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
-import { EncryptedConnection } from "../../src/connection/encryptedConnection";
+import {
+  EncryptedConnection,
+  IV_SEQ_OFFSET,
+  TYPE_JSON,
+} from "../../src/connection/encryptedConnection";
 import { deriveAeadKey } from "../../src/auth";
 import { toBase64Url } from "../../src/utils/crypto";
 import { PassthroughConnection } from "../utils/passthroughConnection";
@@ -27,10 +31,6 @@ async function makeEncryptedPair(): Promise<
   ]);
 }
 
-// First byte of the pre-encryption plaintext; mirrors the tags in
-// EncryptedConnection (0 = JSON object, 1 = Uint8Array).
-const TYPE_JSON = 0;
-
 /**
  * Build a valid AES-GCM envelope for the JSON object `data` at the given
  * sequence number. Derives the send key for `role` from SESSION_KEY and applies
@@ -53,7 +53,7 @@ async function buildEnvelope(
   );
 
   const iv = new Uint8Array(12) as Uint8Array<ArrayBuffer>;
-  new DataView(iv.buffer).setBigUint64(4, BigInt(seq), false);
+  new DataView(iv.buffer).setBigUint64(IV_SEQ_OFFSET, BigInt(seq), false);
 
   const json = new TextEncoder().encode(JSON.stringify(data));
   const plaintext = new Uint8Array(1 + json.length) as Uint8Array<ArrayBuffer>;
@@ -331,4 +331,53 @@ test("close() detaches inner listeners so late inner events are inert", async ()
 
   expect(dataFired).toBe(false);
   expect(errorFired).toBe(false);
+});
+
+test("send() after close() throws permanently-dead", async () => {
+  const [encA] = await makeEncryptedPair();
+  await encA.close();
+  await expect(encA.send({ test: true })).rejects.toThrow(/permanently dead/i);
+});
+
+// --- Sequence number bounds ---------------------------------------------------
+
+test("inbound seq > MAX_SAFE_INTEGER is rejected before AES-GCM", async () => {
+  const conn = new PassthroughConnection();
+  const enc = await EncryptedConnection.create(conn, SESSION_KEY, "responder");
+
+  const error = new Promise<unknown>((resolve) => enc.once("error", resolve));
+
+  // Craft an envelope whose IV encodes seq = 2^53 (one above MAX_SAFE_INTEGER).
+  const iv = new Uint8Array(12) as Uint8Array<ArrayBuffer>;
+  new DataView(iv.buffer).setBigUint64(IV_SEQ_OFFSET, 2n ** 53n, false);
+  const garbage = new Uint8Array(32).fill(0xff) as Uint8Array<ArrayBuffer>;
+  const bytes = new Uint8Array(44) as Uint8Array<ArrayBuffer>;
+  bytes.set(iv);
+  bytes.set(garbage, 12);
+
+  conn.emit("data", { enc: toBase64Url(bytes) });
+
+  const err = await error;
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toMatch(/safe integer range/i);
+});
+
+// --- create() error cleanup ---------------------------------------------------
+
+test("create() removes the buffer listener when key derivation fails", async () => {
+  const conn = new PassthroughConnection();
+  const spy = vi
+    .spyOn(crypto.subtle, "importKey")
+    .mockRejectedValueOnce(new Error("forced failure"));
+
+  try {
+    await expect(
+      EncryptedConnection.create(conn, SESSION_KEY, "initiator"),
+    ).rejects.toThrow("forced failure");
+
+    // bufferData must have been removed; no 'data' listener remains on conn.
+    expect(conn.listenerCount("data")).toBe(0);
+  } finally {
+    spy.mockRestore();
+  }
 });

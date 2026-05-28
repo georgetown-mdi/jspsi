@@ -585,7 +585,45 @@ export async function runProtocol(
           { psilinkRecoveryHintEmitted: true },
         );
       }
-      activeConn = await EncryptedConnection.create(conn, sessionKey, role);
+      try {
+        activeConn = await EncryptedConnection.create(conn, sessionKey, role);
+      } catch (err) {
+        // saveKeyFile already ran (tokenRotated=true), so the token state on
+        // disk must be communicated even when the subsequent key setup fails
+        // for an unrelated reason (e.g. a crypto environment issue). Tag the
+        // wrapped error so the generic token-rotation advisory in the outer
+        // catch is suppressed in favour of this more specific message.
+        if (tokenRotated) {
+          throw Object.assign(
+            new Error(
+              `the PAKE token was already rotated and saved, but encryption ` +
+                `key setup failed: ` +
+                (err instanceof Error ? err.message : String(err)) +
+                ` Retry the exchange without re-inviting; if this error ` +
+                `recurs, investigate whether your environment supports ` +
+                `AES-GCM (WebCrypto). If PAKE authentication fails on ` +
+                `retry, both parties must re-invite.`,
+            ),
+            { psilinkRecoveryHintEmitted: true },
+          );
+        }
+        throw err;
+      }
+      if (signalReceived !== undefined) {
+        // A signal fired during EncryptedConnection.create(): doCleanup
+        // already ran against the raw conn (activeConn at that time). Now
+        // that create() has resolved, close the wrapper explicitly so its
+        // listeners are detached, then bail so the signal handler owns the
+        // exit code.
+        try {
+          await activeConn.close();
+        } catch (err) {
+          log.debug("post-create signal close failed:", err);
+        }
+        throw new Error(
+          `interrupted by ${signalReceived} during key derivation`,
+        );
+      }
     }
 
     const stageLabels = Object.fromEntries(

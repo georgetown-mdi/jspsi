@@ -32,7 +32,7 @@ export abstract class BufferedErrorEmitter extends EventEmitter<
   ConnectionEvents,
   never
 > {
-  protected bufferedError: unknown;
+  private bufferedError: unknown;
 
   // Override emit so that an error fired with no listener is retained rather
   // than dropped. `super.emit` returns false when the event had no listeners.

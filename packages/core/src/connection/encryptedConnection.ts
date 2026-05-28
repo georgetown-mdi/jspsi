@@ -13,13 +13,16 @@ const Envelope = z.object({ enc: z.string() });
 // plain object and the protobuf deserialize step in the PSI protocol would
 // fail. `TYPE_JSON` payloads are UTF-8 JSON; `TYPE_BINARY` payloads are the raw
 // bytes of a Uint8Array.
-const TYPE_JSON = 0;
-const TYPE_BINARY = 1;
+/** @internal */
+export const TYPE_JSON = 0;
+/** @internal */
+export const TYPE_BINARY = 1;
 
 // Byte offset within the 12-byte IV where the 8-byte big-endian sequence
 // number is written (preceded by 4 reserved zero bytes). Both the encode path
 // (seqToIv) and the decode path (handleInbound) must agree on this offset.
-const IV_SEQ_OFFSET = 4;
+/** @internal */
+export const IV_SEQ_OFFSET = 4;
 
 /**
  * Wraps any {@link Connection} and transparently encrypts all outbound messages
@@ -94,27 +97,39 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     };
     inner.on("data", bufferData);
 
-    const [initiatorBytes, responderBytes] = await Promise.all([
-      deriveAeadKey(sessionKey, "initiator-to-responder"),
-      deriveAeadKey(sessionKey, "responder-to-initiator"),
-    ]);
+    let sendKey: CryptoKey;
+    let recvKey: CryptoKey;
+    try {
+      const [initiatorBytes, responderBytes] = await Promise.all([
+        deriveAeadKey(sessionKey, "initiator-to-responder"),
+        deriveAeadKey(sessionKey, "responder-to-initiator"),
+      ]);
 
-    const [sendBytes, recvBytes] =
-      role === "initiator"
-        ? [initiatorBytes, responderBytes]
-        : [responderBytes, initiatorBytes];
+      const [sendBytes, recvBytes] =
+        role === "initiator"
+          ? [initiatorBytes, responderBytes]
+          : [responderBytes, initiatorBytes];
 
-    const [sendKey, recvKey] = await Promise.all([
-      crypto.subtle.importKey("raw", sendBytes, { name: "AES-GCM" }, false, [
-        "encrypt",
-      ]),
-      crypto.subtle.importKey("raw", recvBytes, { name: "AES-GCM" }, false, [
-        "decrypt",
-      ]),
-    ]);
+      [sendKey, recvKey] = await Promise.all([
+        crypto.subtle.importKey("raw", sendBytes, { name: "AES-GCM" }, false, [
+          "encrypt",
+        ]),
+        crypto.subtle.importKey("raw", recvBytes, { name: "AES-GCM" }, false, [
+          "decrypt",
+        ]),
+      ]);
+    } catch (err) {
+      inner.removeListener("data", bufferData);
+      throw err;
+    }
 
-    inner.removeListener("data", bufferData);
+    // Construct before removeListener: the constructor's inner.on("data",
+    // onInnerData) runs synchronously, so there is never a window where inner
+    // has zero 'data' listeners. A Connection that drains queued events on
+    // removeListener would otherwise drop a message that arrived during key
+    // derivation.
     const conn = new EncryptedConnection(inner, sendKey, recvKey);
+    inner.removeListener("data", bufferData);
     for (const msg of pendingMessages) conn.onInnerData(msg);
     return conn;
   }
@@ -159,6 +174,12 @@ export class EncryptedConnection extends BufferedErrorEmitter {
       plaintext,
     );
 
+    if (this.failed) {
+      throw new Error(
+        "EncryptedConnection: wrapper is permanently dead after a security failure",
+      );
+    }
+
     const cipher = new Uint8Array(cipherBuffer);
     const envelope = new Uint8Array(
       12 + cipher.length,
@@ -199,9 +220,23 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     const iv = bytes.slice(0, 12) as Uint8Array<ArrayBuffer>;
     const cipherWithTag = bytes.slice(12) as Uint8Array<ArrayBuffer>;
 
-    const seq = Number(
-      new DataView(iv.buffer, iv.byteOffset).getBigUint64(IV_SEQ_OFFSET, false),
+    const seqBig = new DataView(iv.buffer, iv.byteOffset).getBigUint64(
+      IV_SEQ_OFFSET,
+      false,
     );
+    // A legitimate sender caps its counter at Number.MAX_SAFE_INTEGER, so any
+    // higher value is proof of injection. Comparing as BigInt avoids Number()
+    // precision loss above 2^53 that would let a crafted IV slip past the
+    // replay guard below.
+    if (seqBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+      this.markFailed(
+        new Error(
+          "EncryptedConnection: inbound sequence number exceeds safe integer range",
+        ),
+      );
+      return;
+    }
+    const seq = Number(seqBig);
 
     if (seq <= this.recvSeq) {
       this.markFailed(
@@ -236,6 +271,10 @@ export class EncryptedConnection extends BufferedErrorEmitter {
       );
       return;
     }
+
+    // Re-check after the await: a concurrent handleInbound that failed auth
+    // may have called markFailed while this one was in decrypt.
+    if (this.failed) return;
 
     const plain = new Uint8Array(plainBuffer);
     if (plain.length < 1) {
@@ -274,6 +313,7 @@ export class EncryptedConnection extends BufferedErrorEmitter {
   }
 
   close(): void | Promise<void> {
+    this.failed = true;
     this.inner.removeListener("data", this.onInnerData);
     this.inner.removeListener("error", this.onInnerError);
     return this.inner.close();
