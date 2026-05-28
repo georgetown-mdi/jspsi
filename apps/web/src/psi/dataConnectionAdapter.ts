@@ -94,17 +94,33 @@ export class DataConnectionAdapter
     return hadListeners;
   }
 
+  /**
+   * Returns the most recent error buffered while no listener was registered,
+   * clearing it; returns `undefined` if none is buffered. See the class
+   * description for the buffering semantics.
+   */
   takeBufferedError(): unknown {
     const e = this.bufferedError;
     this.bufferedError = undefined;
     return e;
   }
 
+  /**
+   * Sends `data` over the underlying connection. Throws synchronously if the
+   * adapter is closed, matching the {@link Connection} contract that
+   * synchronous send failures throw, so a send to a peer that has already
+   * dropped fails fast rather than being silently discarded.
+   */
   send(data: unknown, chunked?: boolean): void | Promise<void> {
-    if (this.closed) return;
+    if (this.closed) throw new Error("connection closed");
     return this.conn.send(data, chunked);
   }
 
+  /**
+   * Detaches the forwarding listeners and closes the underlying connection.
+   * Idempotent: a second call is a no-op. The `close` listener is removed first
+   * so an intentional close does not surface as an error.
+   */
   close(): void {
     if (this.closed) return;
     this.closed = true;

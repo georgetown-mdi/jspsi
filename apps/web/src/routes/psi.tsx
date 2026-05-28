@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import {
   ActionIcon,
+  Alert,
   Code,
   Container,
   CopyButton,
@@ -129,9 +130,16 @@ function Home() {
   const [submitted, setSubmitted] = useState(false);
   const [stageId, setStageById] = useState<string>("before start");
   const [resultURL, setResultURL] = useState<string>();
+  const [errorMessage, setErrorMessage] = useState<string>();
 
   const handleSubmit = () => {
     setSubmitted(true);
+    setErrorMessage(undefined);
+
+    const handleFailure = (error: unknown) => {
+      console.error(error);
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    };
 
     const finishExchange = (
       { associationTable, partnerPayload }: ExchangeResult,
@@ -194,13 +202,13 @@ function Home() {
             finishExchange(exchangeResult, prepared);
           } catch (error) {
             peer.disconnect();
-            throw error;
+            handleFailure(error);
           } finally {
             adapter.close();
           }
         })
         .catch((error) => {
-          console.error(error);
+          handleFailure(error);
         });
     } else {
       // role is client
@@ -240,19 +248,19 @@ function Home() {
                   finishExchange(exchangeResult, prepared);
                 } catch (error) {
                   peer.disconnect();
-                  console.error(error);
+                  handleFailure(error);
                 } finally {
                   adapter.close();
                 }
               })
               .catch((error) => {
                 peer.disconnect();
-                console.error(error);
+                handleFailure(error);
               });
           });
         })
         .catch((error) => {
-          console.error(error);
+          handleFailure(error);
         });
     }
   };
@@ -276,6 +284,11 @@ function Home() {
             resultsFileURL={resultURL}
           />
         </Group>
+        {errorMessage && (
+          <Alert color="red" title="Exchange failed">
+            {errorMessage}
+          </Alert>
+        )}
         {url && (
           <Paper>
             <Title order={2}>Sharable Link</Title>

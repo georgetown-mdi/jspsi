@@ -233,7 +233,12 @@ export async function linkViaPSI(
   }
 }
 
-async function exchangeMappedElements(
+// Coarse backstop for a single mapped-element round trip: if the peer neither
+// responds nor surfaces a transport error within this window it is treated as
+// gone. Sized generously so per-message work on large match sets is not cut off.
+const MAPPED_EXCHANGE_TIMEOUT_MS = 120_000;
+
+function exchangeMappedElements(
   id: string,
   conn: Connection,
   log: {
@@ -243,26 +248,79 @@ async function exchangeMappedElements(
   sendFirst: boolean,
   values: IterationMap,
 ): Promise<IterationMap> {
-  if (sendFirst) {
-    return new Promise(async (resolve) => {
-      conn.once("data", (rawData: unknown) => {
-        log.debug(`${id}: received other mapped elements`);
-        resolve(associationAndIterationArray.parse(rawData));
-      });
+  return new Promise<IterationMap>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      conn.removeListener("data", onData, undefined, true);
+      conn.removeListener("error", onError, undefined, true);
+    };
+    const fail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    const succeed = (map: IterationMap) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(map);
+    };
+
+    function onError(err: unknown) {
+      fail(err);
+    }
+    function onData(rawData: unknown) {
+      log.debug(`${id}: received other mapped elements`);
+      let parsed: IterationMap;
+      try {
+        parsed = associationAndIterationArray.parse(rawData);
+      } catch (err) {
+        fail(err);
+        return;
+      }
+      if (sendFirst) {
+        succeed(parsed);
+        return;
+      }
+      // Receive-first: send our own values, then resolve once the send settles.
       log.debug(`${id}: sending own mapped elements`);
-      await conn.send(values);
+      let sendResult: void | Promise<void>;
+      try {
+        sendResult = conn.send(values);
+      } catch (err) {
+        fail(err);
+        return;
+      }
+      Promise.resolve(sendResult).then(() => succeed(parsed), fail);
+    }
+
+    const timer = setTimeout(
+      () => fail(new Error("PSI mapped-element exchange timed out")),
+      MAPPED_EXCHANGE_TIMEOUT_MS,
+    );
+    conn.once("error", onError);
+    conn.once("data", onData);
+
+    const buffered = conn.takeBufferedError();
+    if (buffered !== undefined) {
+      fail(buffered);
+      return;
+    }
+
+    if (sendFirst) {
+      log.debug(`${id}: sending own mapped elements`);
+      let sendResult: void | Promise<void>;
+      try {
+        sendResult = conn.send(values);
+      } catch (err) {
+        fail(err);
+        return;
+      }
+      Promise.resolve(sendResult).catch(fail);
       log.debug(`${id}: waiting for response`);
-    });
-  } else {
-    return new Promise((resolve) => {
-      conn.once("data", async (rawData: unknown) => {
-        log.debug(`${id}: received other mapped elements`);
-
-        log.debug(`${id}: sending own mapped elements`);
-        await conn.send(values);
-
-        resolve(associationAndIterationArray.parse(rawData));
-      });
-    });
-  }
+    }
+  });
 }

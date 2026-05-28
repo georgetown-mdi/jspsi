@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
@@ -74,5 +74,36 @@ describe("waitForConnectionOpen", () => {
     await p.catch(() => {});
     expect(fake.listenerCount("open")).toBe(0);
     expect(fake.listenerCount("error")).toBe(0);
+  });
+
+  test("rejects and removes all listeners after the timeout elapses", async () => {
+    vi.useFakeTimers();
+    try {
+      const { fake, conn } = makeConn();
+      const p = waitForConnectionOpen(conn, 5000);
+      p.catch(() => {});
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(p).rejects.toThrow("connection open timed out");
+      expect(fake.listenerCount("open")).toBe(0);
+      expect(fake.listenerCount("error")).toBe(0);
+      expect(fake.listenerCount("close")).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not reject after the timeout once 'open' has fired", async () => {
+    vi.useFakeTimers();
+    try {
+      const { fake, conn } = makeConn();
+      const p = waitForConnectionOpen(conn, 5000);
+      fake.emit("open");
+      await expect(p).resolves.toBeUndefined();
+      // Advancing past the timeout must not produce a late rejection: the
+      // timer is cleared when 'open' fires.
+      await vi.advanceTimersByTimeAsync(10000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

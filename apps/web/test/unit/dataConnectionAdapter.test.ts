@@ -166,12 +166,14 @@ describe("DataConnectionAdapter", () => {
     expect(fake.close).toHaveBeenCalledTimes(1);
   });
 
-  test("send() after close() does not delegate to the underlying DataConnection", () => {
+  test("send() after close() throws and does not delegate to the underlying DataConnection", () => {
     const { fake, adapter } = makeAdapter();
 
     adapter.close();
-    adapter.send("post-close payload");
 
+    expect(() => adapter.send("post-close payload")).toThrow(
+      "connection closed",
+    );
     expect(fake.send).not.toHaveBeenCalled();
   });
 
@@ -226,7 +228,9 @@ describe("DataConnectionAdapter", () => {
 
     const buffered = adapter.takeBufferedError();
     expect(buffered).toBeInstanceOf(Error);
-    expect((buffered as Error).message).toBe("peer connection closed unexpectedly");
+    expect((buffered as Error).message).toBe(
+      "peer connection closed unexpectedly",
+    );
   });
 
   test("remote close seals the adapter: conn.close() is invoked", () => {
@@ -237,12 +241,14 @@ describe("DataConnectionAdapter", () => {
     expect(fake.close).toHaveBeenCalledTimes(1);
   });
 
-  test("send() after underlying conn fires close does not delegate to underlying DataConnection", () => {
+  test("send() after underlying conn fires close throws and does not delegate to underlying DataConnection", () => {
     const { fake, adapter } = makeAdapter();
 
     fake.emit("close");
-    adapter.send("post-remote-close payload");
 
+    expect(() => adapter.send("post-remote-close payload")).toThrow(
+      "connection closed",
+    );
     expect(fake.send).not.toHaveBeenCalled();
   });
 
