@@ -146,3 +146,25 @@ test("createConnection filedrop: connectionTimeout is converted to ms", () => {
   });
   expect(result.options?.serverConnectTimeoutMs).toBe(10_000);
 });
+
+// --- authentication invariant ------------------------------------------------
+// The handler passes authentication: null to runProtocol to explicitly opt out
+// of PAKE. These tests guard against createConnection inadvertently setting
+// authentication, which would require the handler to override it.
+
+test("createConnection filedrop never produces a config with authentication set", () => {
+  const result = createConnection(
+    new URL("file:///mnt/share/drop"),
+    baseOptions,
+  );
+  expect(
+    (result as unknown as Record<string, unknown>).authentication,
+  ).toBeUndefined();
+});
+
+test("createConnection sftp never produces a config with authentication set", () => {
+  const result = createConnection(new URL("sftp://host/path"), baseOptions);
+  expect(
+    (result as unknown as Record<string, unknown>).authentication,
+  ).toBeUndefined();
+});

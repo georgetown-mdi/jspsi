@@ -8,7 +8,9 @@
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
     "dev": "node --import=tsx src/index.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@psilink/core": "file:../../packages/core",

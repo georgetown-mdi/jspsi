@@ -230,6 +230,7 @@ test("exchangePayloads: send rejection rejects the initiator", async () => {
     removeListener: () => conn,
     send: () => Promise.reject(sendError),
     close: () => {},
+    takeBufferedError: () => undefined,
   };
   await expect(
     exchangePayloads(conn, "initiator", { hasData: false }),
@@ -241,13 +242,14 @@ test("exchangePayloads: send rejection rejects the responder", async () => {
   let dataHandler: ((data: unknown) => void) | undefined;
   const conn: Connection = {
     on: () => conn,
-    once: (_event: "data", fn: (data: unknown) => void) => {
-      dataHandler = fn;
+    once: (event, fn) => {
+      if (event === "data") dataHandler = fn as (data: unknown) => void;
       return conn;
     },
     removeListener: () => conn,
     send: () => Promise.reject(sendError),
     close: () => {},
+    takeBufferedError: () => undefined,
   };
   const promise = exchangePayloads(conn, "responder", { hasData: false });
   dataHandler!({ hasData: false });

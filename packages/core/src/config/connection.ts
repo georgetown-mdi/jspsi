@@ -144,9 +144,35 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
 // --- Authentication ----------------------------------------------------------
 
 /**
+ * Regex that a PAKE token must match: 43 base64url characters encoding exactly
+ * 32 bytes. The final character encodes 4 data bits and 2 zero padding bits
+ * (256 bits ÷ 6 = 42 full characters + 4 remaining data bits), constraining it
+ * to the 16-character set `[AEIMQUYcgkosw048]`.
+ */
+export const PAKE_TOKEN_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+// Shared Zod schema for the `pakeToken` field; reused by both Authentication
+// and WebRTCAuthentication so the regex and error message stay in sync.
+const pakeTokenSchema = z
+  .string()
+  .regex(
+    PAKE_TOKEN_REGEX,
+    "pakeToken must be a base64url-encoded 32-byte value (43 base64url " +
+      "characters; final character must be in [AEIMQUYcgkosw048])",
+  )
+  .optional();
+
+/**
  * Shared PAKE token for SPAKE2 mutual authentication. The token and its
  * expiration are stored in `.psilink.key` and injected at runtime; they never
  * appear in `psilink.yaml`.
+ *
+ * IMPORTANT: This type is the parse-time representation. `pakeToken` is
+ * optional because a configuration file parsed in isolation may not yet
+ * include a token. Before calling {@link authenticateConnection}, the caller
+ * MUST populate `pakeToken` with a value matching {@link PAKE_TOKEN_REGEX};
+ * the runtime check there rejects missing or malformed tokens with a tagged
+ * recovery error, but the compile-time type does not enforce this.
  */
 export interface Authentication {
   /**
@@ -154,17 +180,18 @@ export interface Authentication {
    * into the connection config. Never written to `psilink.yaml`.
    *
    * Must be a base64url-encoded 32-byte value (exactly 43 characters from
-   * `[A-Za-z0-9_-]`).  Both invitation tokens and persistent (rotation) tokens
-   * use this format; they differ only in whether `expires` is set.
+   * `[A-Za-z0-9_-]`, with the final character constrained to
+   * `[AEIMQUYcgkosw048]`).  Both invitation tokens and persistent (rotation)
+   * tokens use this format; they differ only in whether `expires` is set.
+   *
+   * REQUIRED at the moment {@link authenticateConnection} is invoked, even
+   * though the type marks it optional. The optionality exists only so that
+   * intermediate parse states (config file loaded but key file not yet
+   * injected) typecheck. Callers that bypass the CLI must ensure they
+   * populate this field before calling the runtime API; otherwise
+   * {@link authenticateConnection} throws a tagged validation error.
    */
   pakeToken?: string;
-  /**
-   * WebRTC only. `inviter` or `acceptor`; used to derive deterministic PeerJS
-   * peer IDs from the shared token so both parties know each other's address
-   * without out-of-band communication. Orthogonal to the PSI sender/receiver
-   * roles.
-   */
-  role?: "inviter" | "acceptor";
   /**
    * Expiration for this token (ISO 8601 datetime). The exchange is aborted
    * before the PAKE handshake if the current time is past this value.
@@ -174,16 +201,25 @@ export interface Authentication {
 }
 
 const AuthenticationSchema: z.ZodType<Authentication> = z.object({
-  pakeToken: z
-    .string()
-    .regex(
-      /^[A-Za-z0-9_-]{43}$/,
-      "pakeToken must be a base64url-encoded 32-byte value (43 base64url " +
-        "characters)",
-    )
-    .optional(),
-  role: z.enum(["inviter", "acceptor"]).optional(),
+  pakeToken: pakeTokenSchema,
   expires: z.iso.datetime().optional(),
+});
+
+/**
+ * WebRTC-specific authentication settings. Extends {@link Authentication} with
+ * `role`, which is used to derive deterministic PeerJS peer IDs from the shared
+ * token so both parties know each other's address without out-of-band
+ * communication. Orthogonal to the PSI sender/receiver roles.
+ */
+export interface WebRTCAuthentication extends Authentication {
+  /** `inviter` | `acceptor`; WebRTC only. */
+  role?: "inviter" | "acceptor";
+}
+
+const WebRTCAuthenticationSchema: z.ZodType<WebRTCAuthentication> = z.object({
+  pakeToken: pakeTokenSchema,
+  expires: z.iso.datetime().optional(),
+  role: z.enum(["inviter", "acceptor"]).optional(),
 });
 
 // --- TURN and ICE (WebRTC only) ----------------------------------------------
@@ -308,7 +344,7 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z.object({
 export interface WebRTCConnectionConfig {
   channel: "webrtc";
   server: WebRTCServer;
-  authentication?: Authentication;
+  authentication?: WebRTCAuthentication;
   /**
    * STUN servers for ICE candidate gathering; each entry is a `stun:` or
    * `stuns:` URI.
@@ -384,7 +420,7 @@ export type ConnectionConfig =
 const WebRTCConnectionConfigSchema = z.object({
   channel: z.literal("webrtc"),
   server: WebRTCServerSchema,
-  authentication: AuthenticationSchema.optional(),
+  authentication: WebRTCAuthenticationSchema.optional(),
   stun: z
     .array(
       z.string().regex(/^stuns?:/, "STUN URI must begin with stun: or stuns:"),

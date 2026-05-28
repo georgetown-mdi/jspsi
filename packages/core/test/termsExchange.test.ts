@@ -5,7 +5,7 @@ import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
-// ─── Test fixtures ───────────────────────────────────────────────────────────
+// --- Test fixtures -----------------------------------------------------------
 
 const sharedFields: LinkageTerms["linkageFields"] = [
   { name: "ssn", semanticType: "ssn" },
@@ -61,7 +61,7 @@ async function runRoleResolution(
   ]);
 }
 
-// ─── Happy path ──────────────────────────────────────────────────────────────
+// --- Happy path --------------------------------------------------------------
 
 test("compatible terms resolve for both parties", async () => {
   const [a, b] = await runExchange(termsA, termsB);
@@ -92,7 +92,7 @@ test("date mismatch produces a warning but exchange proceeds", async () => {
   expect(b.value.warnings.some((w) => w.includes("date mismatch"))).toBe(true);
 });
 
-// ─── Role determination ──────────────────────────────────────────────────────
+// --- Role determination ------------------------------------------------------
 
 test("only initiator expects output -> initiator is receiver", async () => {
   const outA = { expectsOutput: true, shareWithPartner: false };
@@ -143,7 +143,7 @@ test("both parties compute the same role independently", async () => {
   expect(a.value).not.toBe(b.value);
 });
 
-// ─── Incompatible terms ──────────────────────────────────────────────────────
+// --- Incompatible terms ------------------------------------------------------
 
 test("algorithm mismatch -> both parties reject", async () => {
   const results = await runExchange(termsA, { ...termsB, algorithm: "psi-c" });
@@ -182,7 +182,7 @@ test("neither party expects output -> both parties reject", async () => {
   expect(results[1].status).toBe("rejected");
 });
 
-// ─── Listener cleanup ────────────────────────────────────────────────────────
+// --- Listener cleanup --------------------------------------------------------
 
 test("exchangeTerms: listeners are removed after a successful exchange", async () => {
   const [connA, connB] = makeConnections();
@@ -213,4 +213,33 @@ test("resolveRole: listeners are removed after a count exchange", async () => {
   ]);
   expect(connA.listenerCount("data")).toBe(0);
   expect(connB.listenerCount("data")).toBe(0);
+});
+
+// --- Abort-send failure on the responder -------------------------------------
+
+test("exchangeTerms responder: rejects (does not hang) when abort send fails on incompatible terms", async () => {
+  // Regression guard: previously, the responder's incompatible-terms branch
+  // awaited `conn.send({...abort})` without a try/catch. If the send rejected
+  // (transport error coinciding with terms incompatibility), the resulting
+  // unhandled rejection inside the once("data") handler left the
+  // exchangeTerms promise pending indefinitely. The fix wraps the abort send
+  // in a try/catch so the local "linkage terms are incompatible" rejection
+  // is always observed.
+  const [connA, connB] = makeConnections();
+  // Replace connB's send with one that rejects, simulating a transport-layer
+  // failure on the responder side. connA is left intact so msg1 (terms) is
+  // delivered to connB normally; the responder then detects incompatible
+  // terms and attempts to send the abort, which fails.
+  (connB as unknown as { send: (data: unknown) => Promise<void> }).send = () =>
+    Promise.reject(new Error("simulated transport failure"));
+
+  const responder = exchangeTerms(connB, "responder", {
+    ...termsB,
+    algorithm: "psi-c",
+  });
+  // Inject msg1 directly from the initiator side. Running the initiator's
+  // exchangeTerms is not possible here because the responder's reply (the
+  // failed abort send) never reaches connA, and the initiator would hang.
+  connA.send({ linkageTerms: termsA });
+  await expect(responder).rejects.toThrow("linkage terms are incompatible");
 });

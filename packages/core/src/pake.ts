@@ -39,16 +39,23 @@ const ORDER =
   0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 
 // --- Wire message schemas ----------------------------------------------------
+//
+// All schemas use `.strict()` so extra keys cause a parse failure rather than
+// being silently stripped. The SPAKE2 wire format is fixed; a message arriving
+// with unexpected fields indicates either a peer bug or a malicious actor
+// fuzzing the parser, and either case should fail fast.
 
 interface Spake2Msg1 {
   pakeMsg: "1";
   point: string; // base64url-encoded compressed point (33 bytes)
 }
 
-const Spake2Msg1Schema: z.ZodType<Spake2Msg1> = z.object({
-  pakeMsg: z.literal("1"),
-  point: z.string(),
-});
+const Spake2Msg1Schema: z.ZodType<Spake2Msg1> = z
+  .object({
+    pakeMsg: z.literal("1"),
+    point: z.string(),
+  })
+  .strict();
 
 interface Spake2Msg2 {
   pakeMsg: "2";
@@ -56,29 +63,35 @@ interface Spake2Msg2 {
   mac: string; // base64url-encoded HMAC-SHA-256 (32 bytes)
 }
 
-const Spake2Msg2Schema: z.ZodType<Spake2Msg2> = z.object({
-  pakeMsg: z.literal("2"),
-  point: z.string(),
-  mac: z.string(),
-});
+const Spake2Msg2Schema: z.ZodType<Spake2Msg2> = z
+  .object({
+    pakeMsg: z.literal("2"),
+    point: z.string(),
+    mac: z.string(),
+  })
+  .strict();
 
 interface Spake2Msg3 {
   pakeMsg: "3";
   mac: string;
 }
 
-const Spake2Msg3Schema: z.ZodType<Spake2Msg3> = z.object({
-  pakeMsg: z.literal("3"),
-  mac: z.string(),
-});
+const Spake2Msg3Schema: z.ZodType<Spake2Msg3> = z
+  .object({
+    pakeMsg: z.literal("3"),
+    mac: z.string(),
+  })
+  .strict();
 
 interface Spake2Abort {
   pakeMsg: "abort";
 }
 
-const Spake2AbortSchema: z.ZodType<Spake2Abort> = z.object({
-  pakeMsg: z.literal("abort"),
-});
+const Spake2AbortSchema: z.ZodType<Spake2Abort> = z
+  .object({
+    pakeMsg: z.literal("abort"),
+  })
+  .strict();
 
 // --- Helpers -----------------------------------------------------------------
 
@@ -128,13 +141,15 @@ function concat(
   return out;
 }
 
-// Normalize base64url decode errors from peer messages so the error type does
-// not reveal which specific check failed.
-function safeDecode(str: string): Uint8Array<ArrayBuffer> {
+// Best-effort abort signal: if the peer is still waiting for our next message,
+// telling them to give up shortens their recovery from the 30 s handshake
+// timeout to immediately. A failure to send the abort is non-fatal — the peer
+// will time out on their own — so the send error is swallowed.
+async function sendAbort(conn: Connection): Promise<void> {
   try {
-    return fromBase64Url(str);
+    await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
   } catch {
-    throw new Error("PAKE authentication failed");
+    // Peer will hit the 30 s handshake timeout if abort delivery fails.
   }
 }
 
@@ -219,21 +234,44 @@ const HANDSHAKE_TIMEOUT_MS = 30_000;
 // The `once("data", ...)` listener must be registered synchronously, before
 // any `await`, to avoid a race: if the partner sends and the setImmediate for
 // delivery fires before the listener is registered, the message is dropped.
+// An `error` listener is registered alongside so that an asynchronous transport
+// failure (emitted by FileSyncConnection's poller) rejects the pending receive
+// rather than stalling until the handshake timeout fires.
+//
+// A buffered error from the previous gap (between the last receive's success
+// and this registration) is consumed synchronously here so a failure that
+// arrived while no listener was attached rejects the new receive immediately
+// rather than being silently dropped.
 function receive(conn: Connection): Promise<unknown> {
   const p = new Promise<unknown>((resolve, reject) => {
+    const buffered = conn.takeBufferedError();
+    if (buffered !== undefined) {
+      reject(
+        buffered instanceof Error ? buffered : new Error(String(buffered)),
+      );
+      return;
+    }
     const timer = setTimeout(() => {
       // EventEmitter3's removeListener requires the `once` flag (fourth
       // argument) to locate a listener registered with `once()` rather than
       // `on()`.  Without it the listener is not found and leaks until the
       // peer eventually sends a message.
       conn.removeListener("data", onData, undefined, true);
+      conn.removeListener("error", onError, undefined, true);
       reject(new Error("PAKE handshake timed out"));
     }, HANDSHAKE_TIMEOUT_MS);
     function onData(raw: unknown) {
       clearTimeout(timer);
+      conn.removeListener("error", onError, undefined, true);
       resolve(raw);
     }
+    function onError(err: unknown) {
+      clearTimeout(timer);
+      conn.removeListener("data", onData, undefined, true);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
     conn.once("data", onData);
+    conn.once("error", onError);
   });
   // The timeout may fire before the caller reaches `await p` (while
   // derivePasswordScalar is in-flight).  Attaching a no-op catch marks p as
@@ -248,8 +286,9 @@ function receive(conn: Connection): Promise<unknown> {
  * Result of a completed SPAKE2 handshake.
  *
  * `sessionKey` is the 32-byte Ke from the SPAKE2 transcript, suitable for
- * passing to {@link deriveAeadKey} to derive a channel encryption key.
- * Both parties hold the same value after a successful handshake.
+ * passing to `deriveAeadKey` (exported from `./auth.ts`) to derive a channel
+ * encryption key. Both parties hold the same value after a successful
+ * handshake.
  */
 export interface Spake2Result {
   /** 32-byte SPAKE2 session key (Ke). */
@@ -273,9 +312,15 @@ export interface Spake2Result {
  * if both parties compute quickly.  If the initiator finds `MAC_B` invalid it
  * sends an abort so the responder is not left waiting for msg3.
  *
- * For most callers, prefer {@link authenticateConnection} from `auth.ts`,
+ * For most callers, prefer `authenticateConnection` (from `auth.ts`),
  * which adds token-format validation, expiry checking, and token rotation on
  * top of this primitive.
+ *
+ * `pakeToken` is assumed to satisfy `PAKE_TOKEN_REGEX` (43 base64url
+ * characters encoding 32 bytes). It is decoded directly without normalization,
+ * so a malformed token surfaces as the underlying `fromBase64Url` error rather
+ * than the generic `"PAKE authentication failed"` — callers using runSpake2
+ * directly are responsible for validating the token before passing it in.
  *
  * @throws {Error} with message `"PAKE authentication failed"` on any
  *   authentication failure.  The message is intentionally generic to avoid
@@ -289,15 +334,34 @@ export async function runSpake2(
   pakeToken: string,
 ): Promise<Spake2Result> {
   if (handshakeRole === "initiator") {
+    // Surface a buffered transport error from a prior listener-gap window
+    // before any further work — otherwise we would derive scalars and send
+    // msg1 to a peer that is gone. The responder branch does not need this
+    // synchronous check because it sends no protocol message until after the
+    // first receive resolves; an early buffered error simply makes the
+    // pending `await msg1Promise` throw.
+    //
+    // The receive() helper below also calls takeBufferedError() inside its
+    // executor; that second check is a no-op when this branch runs because
+    // takeBufferedError clears the buffer on read. The duplication is
+    // intentional: extracting a shared "guard then receive" helper would
+    // obscure that the initiator MUST short-circuit before send(msg1), while
+    // the responder need not.
+    const buffered = conn.takeBufferedError();
+    if (buffered !== undefined)
+      throw buffered instanceof Error ? buffered : new Error(String(buffered));
+
+    // Register the msg2 listener BEFORE the first await so that a transport
+    // error (from FileSyncConnection's poller) emitted during the scalar
+    // derivation rejects the pending receive instead of being buffered for
+    // the next round. Mirrors the responder branch below.
+    const msg2Promise = receive(conn);
+
     // Initiator uses blinding point M (RFC 9382 §3.2).
     const w = await derivePasswordScalar(pakeToken);
     const x = randomScalar();
     const T = M.multiply(w).add(p256.Point.BASE.multiply(x));
     const T_bytes = hexToBytes(T.toHex(true));
-
-    // Register the msg2 listener BEFORE sending msg1 to avoid a race where
-    // the responder replies before the listener is registered.
-    const msg2Promise = receive(conn);
 
     // Message 1: send blinded ephemeral point.
     await conn.send({
@@ -306,11 +370,23 @@ export async function runSpake2(
     } satisfies Spake2Msg1);
 
     // Message 2: receive responder's point + MAC_B.
+    // Every failure path below sends an abort so the responder stops waiting
+    // for msg3 immediately rather than blocking until the 30 s handshake
+    // timeout. Aborts are best-effort: see sendAbort() for the rationale.
     const msg2 = Spake2Msg2Schema.safeParse(await msg2Promise);
-    if (!msg2.success) throw new Error("PAKE authentication failed");
-    const S_bytes = safeDecode(msg2.data.point);
+    if (!msg2.success) {
+      await sendAbort(conn);
+      throw new Error("PAKE authentication failed");
+    }
+    let S_bytes;
+    try {
+      S_bytes = fromBase64Url(msg2.data.point);
+    } catch {
+      await sendAbort(conn);
+      throw new Error("PAKE authentication failed");
+    }
     if (S_bytes.length !== 33) {
-      await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
+      await sendAbort(conn);
       throw new Error("PAKE authentication failed");
     }
 
@@ -318,7 +394,7 @@ export async function runSpake2(
     try {
       S = p256.Point.fromHex(bytesToHex(S_bytes));
     } catch {
-      await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
+      await sendAbort(conn);
       throw new Error("PAKE authentication failed");
     }
     const K_bytes = hexToBytes(
@@ -327,14 +403,20 @@ export async function runSpake2(
 
     const { ka, ke } = await deriveKeys(T_bytes, S_bytes, K_bytes, w);
 
-    const receivedMacB = safeDecode(msg2.data.mac);
+    let receivedMacB;
+    try {
+      receivedMacB = fromBase64Url(msg2.data.mac);
+    } catch {
+      await sendAbort(conn);
+      throw new Error("PAKE authentication failed");
+    }
     const expectedMacB = await hmacSha256(
       ka,
       enc.encode("psilink-spake2-confirm-B"),
     );
     if (!bytesEqual(receivedMacB, expectedMacB)) {
       // Send abort so the responder is not left waiting for msg3.
-      await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
+      await sendAbort(conn);
       throw new Error("PAKE authentication failed");
     }
 
@@ -358,12 +440,23 @@ export async function runSpake2(
     const S_bytes = hexToBytes(S.toHex(true));
 
     // Message 1: receive initiator's point.
+    // Every failure path below sends an abort so the initiator stops waiting
+    // for msg2 immediately rather than blocking until the 30 s handshake
+    // timeout. Aborts are best-effort: see sendAbort() for the rationale.
     const msg1 = Spake2Msg1Schema.safeParse(await msg1Promise);
-    if (!msg1.success) throw new Error("PAKE authentication failed");
-    const T_bytes = safeDecode(msg1.data.point);
+    if (!msg1.success) {
+      await sendAbort(conn);
+      throw new Error("PAKE authentication failed");
+    }
+    let T_bytes;
+    try {
+      T_bytes = fromBase64Url(msg1.data.point);
+    } catch {
+      await sendAbort(conn);
+      throw new Error("PAKE authentication failed");
+    }
     if (T_bytes.length !== 33) {
-      // Send abort so the initiator is not left waiting for msg2.
-      await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
+      await sendAbort(conn);
       throw new Error("PAKE authentication failed");
     }
 
@@ -371,7 +464,7 @@ export async function runSpake2(
     try {
       T = p256.Point.fromHex(bytesToHex(T_bytes));
     } catch {
-      await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
+      await sendAbort(conn);
       throw new Error("PAKE authentication failed");
     }
     const K_bytes = hexToBytes(
@@ -392,14 +485,21 @@ export async function runSpake2(
       mac: toBase64Url(macB),
     } satisfies Spake2Msg2);
 
-    // Message 3: receive and verify MAC_A (or abort from initiator).
+    // Message 3: receive and verify MAC_A (or abort from initiator). No
+    // abort is sent on failure: msg3 is the last message in the protocol,
+    // so the initiator has already moved on regardless of the outcome here.
     const msg3 = z
       .union([Spake2Msg3Schema, Spake2AbortSchema])
       .safeParse(await msg3Promise);
     if (!msg3.success || msg3.data.pakeMsg !== "3") {
       throw new Error("PAKE authentication failed");
     }
-    const receivedMacA = safeDecode(msg3.data.mac);
+    let receivedMacA;
+    try {
+      receivedMacA = fromBase64Url(msg3.data.mac);
+    } catch {
+      throw new Error("PAKE authentication failed");
+    }
     const expectedMacA = await hmacSha256(
       ka,
       enc.encode("psilink-spake2-confirm-A"),

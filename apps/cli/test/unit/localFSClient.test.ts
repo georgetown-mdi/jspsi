@@ -182,6 +182,31 @@ test("rename rejects when source does not exist", async () => {
   ).rejects.toThrow();
 });
 
+// --- createExclusive ---------------------------------------------------------
+
+test("createExclusive creates an empty file that did not previously exist", async () => {
+  const dst = path.join(dir, "exclusive.txt");
+  await client.createExclusive(dst);
+  const stat = await fs.stat(dst);
+  expect(stat.size).toBe(0);
+});
+
+test("createExclusive rejects with EEXIST when destination already exists", async () => {
+  const dst = path.join(dir, "exclusive-exists.txt");
+  await fs.writeFile(dst, "existing");
+  await expect(client.createExclusive(dst)).rejects.toMatchObject({
+    code: "EEXIST",
+  });
+  // Destination must be unchanged.
+  expect(await fs.readFile(dst, "utf8")).toBe("existing");
+});
+
+test("createExclusive rejects when the parent directory does not exist", async () => {
+  await expect(
+    client.createExclusive(path.join(dir, "nonexistent-dir", "file.txt")),
+  ).rejects.toThrow();
+});
+
 // --- exists ------------------------------------------------------------------
 
 test("exists returns true for an existing file", async () => {

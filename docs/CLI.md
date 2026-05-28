@@ -58,6 +58,8 @@ Before running, users are warned about the limitations of the security model, na
 
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
+> **Not yet implemented:** `--save`, `psilink invite`, and `psilink accept` are reserved for the bootstrapping workflow but are not yet wired up in the CLI. The `--save` flag currently emits a warning and proceeds with a standard zero-setup exchange. Until these commands land, recurring exchanges require a key file (`.psilink.key`) provisioned out-of-band - see [Required permissions](SECURITY.md#required-permissions) for the file format.
+
 If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY.md#bootstrapping-a-shared-secret).
 
 If a zero-setup exchange is started with configuration and/or key files already present, the user is warned that they will be ignored and that if their intent was to use those files, the user should use `psilink exchange` instead.
@@ -141,7 +143,7 @@ If `--key-file` is not used and there is a pre-existing key file at the default 
 psilink exchange INPUT_FILE [OUTPUT_FILE]
 ```
 
-The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful exchange. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`.
+The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful authentication handshake, before the data exchange begins; if the data exchange subsequently fails, both parties already hold the rotated token and can retry without re-inviting. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`.
 
 The `sftp` and `filedrop` channels are currently supported; `webrtc` is not yet available in the CLI. For file-drop exchanges, the `psilink.yaml` configuration uses `channel: filedrop` and `path` in place of `channel: sftp` and `server`:
 
@@ -157,29 +159,35 @@ connection:
 
 A key file passes through four stages:
 
-1. **Creation** -- `psilink invite` or `psilink accept` writes a fresh
+1. **Creation** - `psilink invite` or `psilink accept` writes a fresh
    `.psilink.key` with a short-lived invitation token. The file is written
    owner-read-only (`0600` on Unix).
-2. **Rotation** -- `psilink exchange` rotates the token automatically after
-   every successful exchange. The new token replaces the previous one in the
-   same file. No manual action is required.
-3. **Loss** -- if the key file is deleted or otherwise unrecoverable, both
+2. **Rotation** - `psilink exchange` rotates the token automatically after
+   each successful authentication handshake, before the data exchange begins. The
+   new token replaces the previous one in the same file. No manual action is
+   required. If the key file write fails, an error is reported immediately; both
+   parties must re-invite because the partner may already hold the rotated token,
+   making the old token invalid (see [Out-of-sync tokens](#out-of-sync-tokens)).
+3. **Loss** - if the key file is deleted or otherwise unrecoverable, both
    parties must re-invite (see below). If a backup exists in a secrets manager
    or encrypted store, restore from the backup and retry the exchange; confirm
    with the partner out-of-band that the backup reflects the same exchange they
-   last completed -- if in doubt, re-invite rather than risk an out-of-sync
+   last completed - if in doubt, re-invite rather than risk an out-of-sync
    token that silently fails the PAKE handshake.
-4. **Compromise** -- if the token is believed to have been observed by a third
+4. **Compromise** - if the token is believed to have been observed by a third
    party, follow the procedure in
    [Compromise response](SECURITY.md#compromise-response).
 
 ### Out-of-sync tokens
 
-If one party crashes or loses power between token rotation and writing the new
-key file, the two sides will hold different tokens and the next PAKE handshake
-will fail. Because there is no way to determine which party holds the newer
-token, both must reset regardless of which side failed; reusing an older token
-may also violate key-rotation policies.
+If one party fails to write the rotated token to its key file - whether due to a
+crash, power loss, or a disk error - the two sides will hold different tokens
+and the next PAKE handshake will fail. Clock skew can produce the same result:
+if one party's clock lags and a token expires between the SPAKE2 round-trip
+messages, that party fails the post-handshake expiry check and discards the new
+token while the other party saves it successfully. Because there is no way to
+determine which party holds the newer token, both must reset regardless of which
+side failed; reusing an older token may also violate key-rotation policies.
 
 To recognize failed rotations, the error messages for exchanges that fail PAKE
 authentication instruct users how they can generate and accept new invitation

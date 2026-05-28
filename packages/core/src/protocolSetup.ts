@@ -7,7 +7,16 @@ import {
   validateCompatibility,
 } from "./config/linkageTerms";
 
-// ─── Message schemas ──────────────────────────────────────────────────────
+// Wraps an `error` emitted while no listener was attached (i.e. between this
+// helper's registration calls and a prior receive cycle). Returns the error
+// as an Error instance, or undefined if no buffered error is pending.
+function takeBufferedConnectionError(conn: Connection): Error | undefined {
+  const buffered = conn.takeBufferedError();
+  if (buffered === undefined) return undefined;
+  return buffered instanceof Error ? buffered : new Error(String(buffered));
+}
+
+// --- Message schemas ---------------------------------------------------------
 
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
@@ -28,7 +37,7 @@ const recordCountMessage = z.object({
   recordCount: z.number().int().nonnegative(),
 });
 
-// ─── Terms exchange ───────────────────────────────────────────────────────
+// --- Terms exchange ----------------------------------------------------------
 
 export interface TermsExchangeResult {
   partnerTerms: LinkageTerms;
@@ -56,10 +65,22 @@ export async function exchangeTerms(
   localTerms: LinkageTerms,
 ): Promise<TermsExchangeResult> {
   if (handshakeRole === "initiator") {
-    await conn.send({ linkageTerms: localTerms });
-
     return new Promise((resolve, reject) => {
+      const buffered = takeBufferedConnectionError(conn);
+      if (buffered) {
+        reject(buffered);
+        return;
+      }
+      const cleanupListeners = () => {
+        conn.removeListener("data", handleData, undefined, true);
+        conn.removeListener("error", onError, undefined, true);
+      };
+      const onError = (err: unknown) => {
+        conn.removeListener("data", handleData, undefined, true);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
       const handleData = async (rawData: unknown) => {
+        conn.removeListener("error", onError, undefined, true);
         try {
           const msg = termsWithDecisionMessage.parse(rawData);
 
@@ -82,7 +103,9 @@ export async function exchangeTerms(
             });
             throw new Error(
               "partner linkage terms failed to parse: " +
-              (parseErr instanceof Error ? parseErr.message : String(parseErr)),
+                (parseErr instanceof Error
+                  ? parseErr.message
+                  : String(parseErr)),
             );
           }
 
@@ -106,11 +129,43 @@ export async function exchangeTerms(
         }
       };
 
+      // Register the response listener BEFORE sending so that a fast partner
+      // cannot deliver msg2 in the window before our listener attaches. The
+      // `data` event has no listener-gap buffering (see Connection in
+      // types.ts); listener-first is the only safe ordering.
+      conn.once("error", onError);
       conn.once("data", handleData);
+
+      // `conn.send` is typed `void | Promise<void>`; a synchronous throw would
+      // not be caught by `.catch` if it happened before Promise wrapping.
+      // Capture the result explicitly so all failure paths converge on the
+      // same cleanup-and-reject branch.
+      let sendResult: void | Promise<void>;
+      try {
+        sendResult = conn.send({ linkageTerms: localTerms });
+      } catch (err) {
+        cleanupListeners();
+        reject(err);
+        return;
+      }
+      Promise.resolve(sendResult).catch((err) => {
+        cleanupListeners();
+        reject(err);
+      });
     });
   } else {
     return new Promise((resolve, reject) => {
-      conn.once("data", async (rawData: unknown) => {
+      const buffered = takeBufferedConnectionError(conn);
+      if (buffered) {
+        reject(buffered);
+        return;
+      }
+      const onError1 = (err: unknown) => {
+        conn.removeListener("data", handleData1, undefined, true);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      const handleData1 = async (rawData: unknown) => {
+        conn.removeListener("error", onError1, undefined, true);
         // Message 1: parse partner's terms, validate, send message 2.
         let partnerTerms: LinkageTerms;
 
@@ -135,26 +190,48 @@ export async function exchangeTerms(
             : validateCompatibility(localTerms, partnerTerms!);
 
         if (errors.length > 0) {
-          await conn.send({
-            linkageTerms: localTerms,
-            decision: "abort",
-            abortReasons: errors,
-          });
+          // Abort delivery is best-effort: if the send fails (transport
+          // error coinciding with terms incompatibility), the partner
+          // hits the receive timeout. Swallow that failure so the
+          // local rejection below — which carries the actual
+          // diagnostic — is always observed. Without this guard, a
+          // throw from `await conn.send` would leave the outer Promise
+          // pending forever because the responder's `handleData1`
+          // never reaches `reject(...)`.
+          try {
+            await conn.send({
+              linkageTerms: localTerms,
+              decision: "abort",
+              abortReasons: errors,
+            });
+          } catch {
+            /* see comment above */
+          }
           reject(
             new Error(`linkage terms are incompatible: ${errors.join("; ")}`),
           );
           return;
         }
 
-        try {
-          await conn.send({ linkageTerms: localTerms, decision: "proceed" });
-        } catch (err) {
-          reject(err);
+        // Register the msg3 listener BEFORE sending msg2 so that a fast
+        // initiator cannot deliver msg3 in the window before our listener
+        // attaches. `data` events with no listener attached are silently
+        // dropped (see Connection in types.ts).
+        const buffered3 = takeBufferedConnectionError(conn);
+        if (buffered3) {
+          reject(buffered3);
           return;
         }
-
-        // Message 3: initiator's final decision.
-        conn.once("data", (rawData: unknown) => {
+        const cleanupListeners3 = () => {
+          conn.removeListener("data", handleData3, undefined, true);
+          conn.removeListener("error", onError3, undefined, true);
+        };
+        const onError3 = (err: unknown) => {
+          conn.removeListener("data", handleData3, undefined, true);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        };
+        const handleData3 = (rawData: unknown) => {
+          conn.removeListener("error", onError3, undefined, true);
           // catch parse errors and throw logic ones
           try {
             const msg = decisionMessage.parse(rawData);
@@ -172,13 +249,34 @@ export async function exchangeTerms(
           } catch (err) {
             reject(err);
           }
+        };
+        conn.once("error", onError3);
+        conn.once("data", handleData3);
+
+        let sendResult: void | Promise<void>;
+        try {
+          sendResult = conn.send({
+            linkageTerms: localTerms,
+            decision: "proceed",
+          });
+        } catch (err) {
+          cleanupListeners3();
+          reject(err);
+          return;
+        }
+        Promise.resolve(sendResult).catch((err) => {
+          cleanupListeners3();
+          reject(err);
         });
-      });
+      };
+
+      conn.once("error", onError1);
+      conn.once("data", handleData1);
     });
   }
 }
 
-// ─── Role resolution ─────────────────────────────────────────────────────────
+// --- Role resolution ---------------------------------------------------------
 
 function pickRole(
   localCount: number,
@@ -215,10 +313,22 @@ export async function resolveRole(
 
   // Both expect output: exchange record counts.
   if (handshakeRole === "initiator") {
-    await conn.send({ recordCount: localRecordCount });
-
     return new Promise((resolve, reject) => {
+      const buffered = takeBufferedConnectionError(conn);
+      if (buffered) {
+        reject(buffered);
+        return;
+      }
+      const cleanupListeners = () => {
+        conn.removeListener("data", handleData, undefined, true);
+        conn.removeListener("error", onError, undefined, true);
+      };
+      const onError = (err: unknown) => {
+        conn.removeListener("data", handleData, undefined, true);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
       const handleData = (rawData: unknown) => {
+        conn.removeListener("error", onError, undefined, true);
         try {
           const msg = recordCountMessage.parse(rawData);
           resolve(pickRole(localRecordCount, msg.recordCount, handshakeRole));
@@ -226,11 +336,38 @@ export async function resolveRole(
           reject(err);
         }
       };
+      // Register the response listener BEFORE sending so that a fast partner
+      // cannot deliver their recordCount in the window before our listener
+      // attaches (see notes on the data-event listener gap in types.ts).
+      conn.once("error", onError);
       conn.once("data", handleData);
+
+      let sendResult: void | Promise<void>;
+      try {
+        sendResult = conn.send({ recordCount: localRecordCount });
+      } catch (err) {
+        cleanupListeners();
+        reject(err);
+        return;
+      }
+      Promise.resolve(sendResult).catch((err) => {
+        cleanupListeners();
+        reject(err);
+      });
     });
   } else {
     return new Promise((resolve, reject) => {
+      const buffered = takeBufferedConnectionError(conn);
+      if (buffered) {
+        reject(buffered);
+        return;
+      }
+      const onError = (err: unknown) => {
+        conn.removeListener("data", handleData, undefined, true);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
       const handleData = async (rawData: unknown) => {
+        conn.removeListener("error", onError, undefined, true);
         try {
           const msg = recordCountMessage.parse(rawData);
           await conn.send({ recordCount: localRecordCount });
@@ -239,6 +376,7 @@ export async function resolveRole(
           reject(err);
         }
       };
+      conn.once("error", onError);
       conn.once("data", handleData);
     });
   }

@@ -16,6 +16,19 @@ const errMessage = (err: unknown) =>
 const DEFAULT_TIME_TO_LIVE_MS = 1000 * 60 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
+// Consecutive ENOENT from get() after exists() returned true indicates a
+// filesystem state that is unlikely to self-resolve: emit an error rather
+// than looping silently until the peer timeout fires.
+//
+// 3 is structural rather than performance-tuning, so it is not exposed as a
+// config option: one ENOENT after exists()=true is the expected TOCTOU race
+// when the peer's cleanup runs between the two calls (a single race per
+// message-consumption cycle); two more in a row indicates the directory
+// listing is not converging, which is pathological. A smaller threshold
+// (1-2) produces false positives on slow filesystems where one peer's
+// cleanup may briefly overlap with our next poll; a larger threshold (>5)
+// approaches the peer timeout and gives no practical benefit.
+const MAX_CONSECUTIVE_ENOENT = 3;
 
 interface Events {
   data: (data: unknown) => void;
@@ -23,7 +36,10 @@ interface Events {
 }
 
 interface Options {
-  timeToLive: Date;
+  // Optional: when not supplied to the constructor, open() sets this from
+  // `config.options.peerTimeoutMs` (or DEFAULT_TIME_TO_LIVE_MS) so the budget
+  // is not consumed by the time between construction and synchronize().
+  timeToLive?: Date;
   pollingFrequency: number;
   verbose: number;
 }
@@ -37,7 +53,6 @@ const Message = z.object({
 
 const getDefaultOptions = (): Options => {
   return {
-    timeToLive: new Date(Date.now() + DEFAULT_TIME_TO_LIVE_MS),
     pollingFrequency: DEFAULT_POLLING_FREQUENCY_MS,
     verbose: DEFAULT_VERBOSITY,
   };
@@ -83,6 +98,12 @@ export interface FileTransportClient {
   delete: (path: string) => Promise<void>;
   safeDelete: (path: string) => Promise<void>;
   rename: (fromPath: string, toPath: string) => Promise<void>;
+  /**
+   * Creates an empty file at `path` atomically. Throws with
+   * `code === "EEXIST"` (or an equivalent server error) if `path` already
+   * exists, giving atomic "only one winner" semantics for the wave-file race.
+   */
+  createExclusive: (path: string) => Promise<void>;
   exists: (remotePath: string) => Promise<boolean>;
 }
 
@@ -109,6 +130,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
   private responsibleFiles: Set<string>;
+  private consecutiveEnoentCount = 0;
+  // An `error` emitted while no listener is registered is held here so the
+  // next protocol-layer receive can detect failures that arrived in the gap
+  // between listener-registration cycles. Reading clears the value; only the
+  // most recent unhandled error is retained, since a subsequent error would
+  // supersede the first as the proximate cause.
+  private bufferedError: unknown;
 
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
@@ -125,14 +153,68 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
   }
 
+  // Override emit so that an error fired with no listener is retained rather
+  // than dropped. EventEmitter3 silently discards unhandled errors (unlike
+  // Node's EventEmitter, which throws); buffering them lets the next
+  // protocol-layer receive observe failures that occurred in the gap between
+  // listener-registration cycles. `eventNames()` returns the events that
+  // currently have listeners; an error-with-no-listener has the event absent.
+  emit<E extends keyof Events>(
+    event: E,
+    ...args: Parameters<Events[E]>
+  ): boolean {
+    const hadListeners = super.emit(event, ...args);
+    if (event === "error" && !hadListeners) {
+      // Only the most recent unhandled error is retained because a subsequent
+      // error usually supersedes the first as the proximate cause. Surface a
+      // log line when this happens so a chained failure is not invisible.
+      // When both the prior and new errors are Error instances and the new
+      // one has no `cause` set, chain the prior error as its cause so
+      // downstream diagnostic output (e.g. an "Error: ... { cause: ... }"
+      // formatter) can still surface the earlier failure rather than losing
+      // it entirely. Mutation is gated on `cause === undefined` so we never
+      // overwrite a cause the caller already set, and on `incoming !==
+      // bufferedError` so a re-emit of the same Error reference cannot create
+      // a self-referential cause chain that loops a downstream walker.
+      const incoming = args[0];
+      if (this.bufferedError !== undefined) {
+        this.log.warn(
+          `[${this.role}] superseding earlier buffered error: ` +
+            errMessage(this.bufferedError),
+        );
+        if (
+          incoming instanceof Error &&
+          incoming.cause === undefined &&
+          incoming !== this.bufferedError
+        ) {
+          try {
+            incoming.cause = this.bufferedError;
+          } catch {
+            /* error object is frozen; chain is best-effort. */
+          }
+        }
+      }
+      this.bufferedError = incoming;
+    }
+    return hadListeners;
+  }
+
+  takeBufferedError(): unknown {
+    const e = this.bufferedError;
+    this.bufferedError = undefined;
+    return e;
+  }
+
   /** Opens a connection from a typed config. Dispatches on `config.channel`. */
   async open(
     config: SFTPConnectionConfig | FileDropConnectionConfig,
   ): Promise<void> {
     if (config.options?.pollIntervalMs !== undefined)
       this.options.pollingFrequency = config.options.pollIntervalMs;
-    // timeToLive is set after a successful connect so the full peerTimeoutMs
-    // budget is available for peer-waiting rather than being eaten by retries.
+    // timeToLive is computed after a successful connect (below) so that
+    // retry latency during connection setup does not eat into the
+    // peer-waiting budget. Applies to both peerTimeoutMs-supplied and
+    // default-fallback windows.
 
     if (config.channel === "filedrop") {
       // Normalize backslashes to forward slashes so ${this.path}/${name}
@@ -193,10 +275,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
 
     this.connected = true;
-    if (config.options?.peerTimeoutMs !== undefined)
+    // Compute timeToLive only after connect() has resolved so that retry
+    // latency during connection setup does not eat into the peer-waiting
+    // budget. An explicit timeToLive passed to the constructor (test path)
+    // wins over both peerTimeoutMs and the default.
+    if (this.options.timeToLive === undefined) {
+      const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_TIME_TO_LIVE_MS;
+      this.options.timeToLive = new Date(Date.now() + ttlMs);
+    } else if (config.options?.peerTimeoutMs !== undefined) {
       this.options.timeToLive = new Date(
         Date.now() + config.options.peerTimeoutMs,
       );
+    }
     this.log.debug(`[${this.role}] connected`);
   }
 
@@ -227,6 +317,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return result;
   }
 
+  /**
+   * Negotiates rendezvous with the peer by exchanging `.hello` and `.wave`
+   * files in the shared directory, assigning `peerId` and `handshakeRole` on
+   * success.
+   *
+   * Failures throw synchronously rather than being emitted on the `error`
+   * channel: the `error` event is reserved for asynchronous failures from the
+   * poll loop (see {@link start}), which can occur at any time. Callers must
+   * await this method and catch its rejection; an attached `on("error", ...)`
+   * listener will not observe a synchronize-time failure.
+   */
   async synchronize() {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
@@ -239,8 +340,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     try {
       files = await this.client.list(this.path);
     } catch (err: unknown) {
-      this.emit("error", errMessage(err));
-      return;
+      throw err instanceof Error ? err : new Error(errMessage(err));
     }
     const fileNames = files.map((file) => file.name);
     this.log.trace(
@@ -256,9 +356,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       helloFiles.length > 1 ||
       files.some((file) => file.name.endsWith(".wave"))
     ) {
+      const leftover = files
+        .filter((f) => f.name.endsWith(".hello") || f.name.endsWith(".wave"))
+        .map((f) => f.name)
+        .join(", ");
       throw new Error(
-        `path ${this.path} had preexisting hello or wave files; must be ` +
-          "empty to execute protocol",
+        `path ${this.path} had preexisting hello or wave files ` +
+          `(${leftover}); the directory must be empty of .hello and .wave ` +
+          "files before executing the protocol. Most likely cause: a " +
+          "previous exchange was terminated by SIGKILL/OOM/power loss " +
+          "before its cleanup ran. Remove the listed files manually after " +
+          "verifying that no other session is concurrently using this path.",
       );
     }
 
@@ -279,17 +387,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       const otherFile = helloFiles[0];
       const otherPath = `${this.path}/${otherFile.name}`;
-
-      // arrived second, and so should send the first message
-      this.handshakeRole = "initiator";
-      this.role = "joiner";
-      this.peerId = otherFile.name.slice(0, -6);
+      const peerId = otherFile.name.slice(0, -6);
 
       this.log.debug(
-        `[${this.role}] creating response ${this.id}.hello and deleting ` +
+        `[joiner] creating response ${this.id}.hello and deleting ` +
           `discovered ${otherFile.name}`,
       );
 
+      // Partial-failure note: if delete(otherPath) succeeds but put(helloPath)
+      // fails, the peer's hello is gone and we never wrote our own. The peer's
+      // waitForPeer loop will see an empty directory and poll until
+      // peerTimeoutMs before reporting a synchronization timeout. Recovery is
+      // by retry of the whole exchange. We do not re-create the peer's hello
+      // here because doing so races the peer's next list() and can produce a
+      // two-hello state the wave protocol treats as a collision.
       try {
         await this.client.delete(otherPath);
 
@@ -299,9 +410,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         });
         this.responsibleFiles.add(`${this.id}.hello`);
       } catch (err: unknown) {
-        this.emit("error", errMessage(err));
-        return;
+        throw err instanceof Error ? err : new Error(errMessage(err));
       }
+
+      // Commit role and peerId only after both writes have succeeded. If
+      // either write threw above, the connection stays in its
+      // pre-synchronize state: `this.peerId` remains undefined, so the
+      // "already synchronized" guard does not block a retry on the same
+      // instance, and `handshakeRole` does not point at a peer that may
+      // not actually exist.
+      this.handshakeRole = "initiator";
+      this.role = "joiner";
+      this.peerId = peerId;
     } else {
       /**
        * Either
@@ -328,7 +448,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       let wavePath: string | undefined;
 
       const waitForPeer = async () => {
-        while (Date.now() <= this.options.timeToLive.getTime()) {
+        // open() set timeToLive before synchronize() can run, so the non-null
+        // assertion is safe here.
+        while (Date.now() <= this.options.timeToLive!.getTime()) {
           const currentFiles = await this.client.list(this.path!);
 
           const fileNames = currentFiles.map((file) => file.name);
@@ -399,7 +521,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 /([0-9a-f]{8}-?[0-9a-f]{4}-?4[0-9a-f]{3}-?[89ab][0-9a-f]{3}-?[0-9a-f]{12})/,
                 /-/,
                 /([0-9a-f]{8}-?[0-9a-f]{4}-?4[0-9a-f]{3}-?[89ab][0-9a-f]{3}-?[0-9a-f]{12})/,
-                /.wave/,
+                /\.wave/,
                 /$/,
               ]
                 .map((r) => r.source)
@@ -409,9 +531,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const waveMatches = waveFile.name.match(waveRegex);
             if (!waveMatches || waveMatches.length !== 3)
               throw new Error("wave file name not in expected format");
-            if (!waveMatches.some((x) => x === thisFile.name))
+            // The two capture groups are bare UUIDs, but theseFiles /
+            // otherFiles entries carry the ".hello" suffix; strip it before
+            // comparing so the cross-checks can succeed.
+            const thisId = thisFile.name.slice(0, -".hello".length);
+            const otherId = otherFile.name.slice(0, -".hello".length);
+            if (waveMatches[1] !== thisId && waveMatches[2] !== thisId)
               throw new Error("wave file does not reference this connection");
-            if (!waveMatches.some((x) => x === otherFile.name))
+            if (waveMatches[1] !== otherId && waveMatches[2] !== otherId)
               throw new Error("wave file does not reference other connection");
 
             // first to arrive => should wait for first message
@@ -490,19 +617,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               `${arrivedFirst ? this.id : this.peerId}-` +
               `${arrivedFirst ? this.peerId : this.id}.wave`;
             wavePath = `${this.path}/${waveName}`;
-            const tempPath = `${this.path}/${this.id}.tmp.wave`;
 
             this.log.debug(`[${this.role}] attempting to create ${waveName}`);
-            await this.client.put(Buffer.from(new ArrayBuffer(0)), tempPath, {
-              flags: "w",
-              encoding: "utf-8",
-            });
-            this.responsibleFiles.add(`${this.id}.tmp.wave`);
 
+            // Pre-emptively track waveName: if createExclusive only partially
+            // succeeds (file created on server but handle-close fails with a
+            // non-EEXIST error), cleanup() will still attempt safeDelete even
+            // though the EEXIST handler's responsibleFiles.clear() is never
+            // reached. Both EEXIST branches below call responsibleFiles.clear(),
+            // which also removes this pre-emptive entry.
+            this.responsibleFiles.add(waveName);
             try {
-              await this.client.rename(tempPath, wavePath);
-              this.responsibleFiles.add(waveName);
-              this.responsibleFiles.delete(`${this.id}.tmp.wave`);
+              await this.client.createExclusive(wavePath);
               this.log.debug(
                 `[${this.role}] created wave file ${waveName}; waiting for ` +
                   "peer to finalize handshake",
@@ -512,7 +638,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                * A ~ B list
                * A ~ B hello
                * A ~ list
-               * A ~ wave
+               * A ~ createExclusive wave
                * ...
                *
                * This is A
@@ -522,27 +648,53 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                * A ~ B list
                * A ~ B hello
                * A ~ B list
-               * A wave
-               * B try to wave, fail
+               * A createExclusive wave
+               * B createExclusive wave, EEXIST
                * B delete A hello, B hello, wave
                *
                * This is B
                */
-              await this.client.safeDelete(tempPath);
+              if (
+                !(err instanceof Error) ||
+                (err as NodeJS.ErrnoException).code !== "EEXIST"
+              )
+                throw err;
+
               const waveAlreadyExists = await this.client.exists(wavePath);
 
-              if (!(err instanceof Error) || !waveAlreadyExists) throw err;
+              if (!waveAlreadyExists) {
+                // The winner never deletes the wave file in its normal path
+                // (it returns from waitForPeer leaving the wave for the loser
+                // to clean up). If the wave is gone after we received EEXIST,
+                // the winner must have either crashed (their doCleanup ran
+                // during the narrow window where waveName was in
+                // responsibleFiles) or otherwise abandoned the handshake.
+                // Either way, polling for their first protocol message would
+                // stall until peerTimeoutMs. Fail fast with a clear cause so
+                // the user does not wait for a peer that is not coming.
+                // Best-effort tidy of both hellos before throwing so the
+                // directory is left clean for a retry.
+                await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+                await this.client.safeDelete(helloPath);
+                this.responsibleFiles.clear();
+                throw new Error(
+                  "peer appears to have abandoned the handshake: wave file " +
+                    "was claimed by the peer but disappeared before this " +
+                    "side could complete synchronization. Retry the exchange.",
+                  { cause: "usage" },
+                );
+              } else {
+                this.log.debug(
+                  `[${this.role}] wave file creation failed, assuming race ` +
+                    "condition",
+                );
 
-              this.log.debug(
-                `[${this.role}] wave file creation failed, assuming race ` +
-                  "condition",
-              );
+                await this.client.safeDelete(wavePath);
+                await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+                await this.client.safeDelete(helloPath);
 
-              await this.client.safeDelete(wavePath);
-              await this.client.safeDelete(`${this.path}/${otherFile.name}`);
-              await this.client.safeDelete(helloPath);
-
-              this.responsibleFiles.clear();
+                this.responsibleFiles.clear();
+              }
             }
             return;
           }
@@ -552,21 +704,33 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       };
       try {
         await waitForPeer();
-        this.responsibleFiles.clear();
+        // No clear() here: branches that finish their own cleanup
+        // (responder, wave-detection, EEXIST loser) clear explicitly
+        // before returning. The createExclusive-winner path is the
+        // exception — it leaves `${this.id}.hello` and waveName in
+        // responsibleFiles so the eventual cleanup() can sweep them
+        // if the loser never arrives (e.g. crash before reaching the
+        // wave file). Clearing here would lose that safety net.
         return;
       } catch (err: unknown) {
         if (wavePath) await this.client.safeDelete(wavePath);
         await this.client.safeDelete(helloPath);
-        if (err instanceof Error && err.cause === "usage") {
-          delete err.cause;
-          throw err;
-        }
-
-        this.emit("error", errMessage(err));
+        this.responsibleFiles.clear();
+        if (err instanceof Error && err.cause === "usage") delete err.cause;
+        throw err instanceof Error ? err : new Error(errMessage(err));
       }
     }
   }
 
+  /**
+   * Writes one message to the shared directory for the peer to consume.
+   *
+   * Failures throw synchronously rather than being emitted on the `error`
+   * channel: the `error` event is reserved for asynchronous failures from the
+   * poll loop (see {@link start}). Callers must await this method and catch
+   * its rejection; an attached `on("error", ...)` listener will not observe
+   * a send-time failure.
+   */
   async send(data: unknown) {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
@@ -581,7 +745,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `[${this.role}] waiting for previous message to be consumed`,
         );
         while (await this.client.exists(outPath)) {
-          if (Date.now() > this.options.timeToLive.getTime()) {
+          // open() set timeToLive before send() can run; assertion is safe.
+          if (Date.now() > this.options.timeToLive!.getTime()) {
             throw new Error(
               `timed out waiting for message from ${this.id} to be consumed`,
               { cause: "usage" },
@@ -620,11 +785,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
-      if (err instanceof Error && err.cause === "usage") {
-        delete err.cause;
-        throw err;
-      }
-      this.emit("error", errMessage(err));
+      if (err instanceof Error && err.cause === "usage") delete err.cause;
+      throw err instanceof Error ? err : new Error(errMessage(err));
     }
   }
 
@@ -638,6 +800,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     const inPath = `${this.path}/${this.peerId}.json`;
 
+    let reachedGet = false;
     try {
       this.log.trace(`[${this.role}] polling for message from ${this.peerId}`);
       const messageFile = await this.client.exists(inPath);
@@ -646,7 +809,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `[${this.role}] getting message from ${this.peerId}.json`,
         );
 
+        reachedGet = true;
         const message = await this.client.get(inPath, { encoding: "utf-8" });
+        reachedGet = false;
 
         this.log.debug(`[${this.role}] deleting message ${this.peerId}.json`);
         try {
@@ -682,8 +847,45 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.emit("data", validatedMessage.payload);
         }
       }
+      this.consecutiveEnoentCount = 0;
     } catch (err: unknown) {
-      this.emit("error", errMessage(err));
+      if ((err as NodeJS.ErrnoException).code === "ENOENT" && reachedGet) {
+        // TOCTOU race: exists() returned true but get() found the file gone,
+        // meaning the peer cleaned up between our two calls. After a single
+        // race the file is genuinely gone and subsequent exists() calls return
+        // false, resetting the counter on the next clean poll cycle.
+        // Consecutive ENOENTs that keep incrementing the counter indicate a
+        // pathological filesystem state that will not self-resolve; emit an
+        // error after MAX_CONSECUTIVE_ENOENT rather than looping silently
+        // until the peer timeout fires.
+        if (++this.consecutiveEnoentCount >= MAX_CONSECUTIVE_ENOENT) {
+          // Stop the poller synchronously before emitting so that the
+          // finally block does not reschedule another poll. The external
+          // error handler (doCleanup → conn.stop()) is still called and
+          // is safe when pollerActive is already false.
+          this.pollerActive = false;
+          this.emit(
+            "error",
+            err instanceof Error ? err : new Error(errMessage(err)),
+          );
+        } else {
+          this.log.warn(
+            `[${this.role}] ${this.peerId}.json disappeared between exists and ` +
+              "get; assuming peer cleaned up",
+          );
+        }
+      } else {
+        // Non-TOCTOU failure: either a non-ENOENT error from any operation, or
+        // any error where reachedGet is false (e.g., exists() or message
+        // parsing). Note: delete() errors cannot reach here — delete() has its
+        // own inner try/catch (see above) that handles and swallows them.
+        // All cases are propagated immediately as hard failures.
+        this.consecutiveEnoentCount = 0;
+        this.emit(
+          "error",
+          err instanceof Error ? err : new Error(errMessage(err)),
+        );
+      }
     } finally {
       if (this.pollerActive) {
         this.poller = setTimeout(
@@ -697,6 +899,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   start() {
     this.log.debug(`[${this.role}] starting poller`);
     this.pollerActive = true;
+    this.consecutiveEnoentCount = 0;
     this.poll();
   }
 

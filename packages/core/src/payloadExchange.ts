@@ -94,18 +94,67 @@ export async function exchangePayloads(
 
   if (handshakeRole === "initiator") {
     return new Promise<PartnerPayload>((resolve, reject) => {
-      conn.once("data", (rawData: unknown) => {
+      const buffered = conn.takeBufferedError();
+      if (buffered !== undefined) {
+        reject(
+          buffered instanceof Error ? buffered : new Error(String(buffered)),
+        );
+        return;
+      }
+      const cleanupListeners = () => {
+        conn.removeListener("data", onData, undefined, true);
+        conn.removeListener("error", onError, undefined, true);
+      };
+      const onError = (err: unknown) => {
+        conn.removeListener("data", onData, undefined, true);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      const onData = (rawData: unknown) => {
+        conn.removeListener("error", onError, undefined, true);
         try {
           resolve(decode(rawData));
         } catch (e) {
           reject(e);
         }
+      };
+      conn.once("error", onError);
+      conn.once("data", onData);
+      // `conn.send` is typed as `void | Promise<void>`; a synchronous throw
+      // would not be caught by `.then`/`.catch` if it occurred before the
+      // Promise wrapping. Capture it explicitly so any send failure path
+      // converges on the same cleanup-and-reject branch.
+      let sendResult: void | Promise<void>;
+      try {
+        sendResult = conn.send(localPayload);
+      } catch (err) {
+        cleanupListeners();
+        reject(err);
+        return;
+      }
+      Promise.resolve(sendResult).catch((err) => {
+        cleanupListeners();
+        reject(err);
       });
-      Promise.resolve(conn.send(localPayload)).catch(reject);
     });
   } else {
     return new Promise<PartnerPayload>((resolve, reject) => {
-      conn.once("data", (rawData: unknown) => {
+      const buffered = conn.takeBufferedError();
+      if (buffered !== undefined) {
+        reject(
+          buffered instanceof Error ? buffered : new Error(String(buffered)),
+        );
+        return;
+      }
+      const cleanupListeners = () => {
+        conn.removeListener("data", onData, undefined, true);
+        conn.removeListener("error", onError, undefined, true);
+      };
+      const onError = (err: unknown) => {
+        conn.removeListener("data", onData, undefined, true);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      const onData = (rawData: unknown) => {
+        conn.removeListener("error", onError, undefined, true);
         let decoded: PartnerPayload;
         try {
           decoded = decode(rawData);
@@ -113,11 +162,26 @@ export async function exchangePayloads(
           reject(e);
           return;
         }
-        Promise.resolve(conn.send(localPayload)).then(
+        // Same rationale as the initiator branch: a synchronous throw from
+        // `conn.send` needs an explicit catch around the call.
+        let sendResult: void | Promise<void>;
+        try {
+          sendResult = conn.send(localPayload);
+        } catch (err) {
+          cleanupListeners();
+          reject(err);
+          return;
+        }
+        Promise.resolve(sendResult).then(
           () => resolve(decoded),
-          reject,
+          (err) => {
+            cleanupListeners();
+            reject(err);
+          },
         );
-      });
+      };
+      conn.once("error", onError);
+      conn.once("data", onData);
     });
   }
 }

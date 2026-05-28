@@ -15,7 +15,7 @@ import type {
 import { applyConnectionOverrides } from "../config";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
-import { runProtocol } from "../protocol";
+import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -157,8 +157,11 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
 function tryParseURL(raw: string, errorMsg: string): URL {
   try {
     return new URL(raw);
-  } catch {
-    throw new Error(errorMsg);
+  } catch (cause) {
+    // Object.assign rather than `new Error(msg, { cause })`: the second-arg
+    // ErrorOptions form requires lib ES2022, but the runtime preserves the
+    // assigned property either way.
+    throw Object.assign(new Error(errorMsg), { cause });
   }
 }
 
@@ -341,7 +344,26 @@ export async function handler(argv: Arguments): Promise<void> {
   }
 
   try {
-    await runProtocol(connection, prepared, output, verbosity, "psilink");
+    // Spread + cast: `connection` is `ConnectionConfig` (which includes the
+    // webrtc channel), so TypeScript cannot verify that the spread result fits
+    // `ProtocolConnectionConfig` (constrained to sftp and filedrop). The double
+    // cast through `unknown` is intentional; the channel guard inside
+    // `runProtocol` rejects unsupported channels at runtime. The satisfies
+    // check verifies that the authentication override is structurally valid for
+    // ProtocolConnectionConfig.
+    // authentication: null is the explicit opt-out that tells runProtocol to
+    // proceed without PAKE and without a warning.
+    const authOverride = { authentication: null } satisfies Pick<
+      ProtocolConnectionConfig,
+      "authentication"
+    >;
+    await runProtocol(
+      { ...connection, ...authOverride } as unknown as ProtocolConnectionConfig,
+      prepared,
+      output,
+      verbosity,
+      "psilink",
+    );
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(69);

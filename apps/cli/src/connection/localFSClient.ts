@@ -15,10 +15,10 @@ import type {
  * synced to an SFTP server). No SSH connection is made; the operating system's
  * filesystem driver handles all I/O.
  *
- * NOTE: `rename` relies on `fs.rename`, which is atomic only within a single
- * filesystem. The mounted share and the temp files written during the handshake
- * must reside on the same volume for the wave-file race resolution to be safe.
- * This is always true when both paths are within the same network mount.
+ * NOTE: `rename` relies on OS primitives that are atomic only within a single
+ * filesystem. The mounted share and the message temp files must reside on the
+ * same volume. This is always true when both paths are within the same network
+ * mount.
  */
 export class LocalFSClient implements FileTransportClient {
   /**
@@ -142,6 +142,11 @@ export class LocalFSClient implements FileTransportClient {
 
   async rename(fromPath: string, toPath: string): Promise<void> {
     await fs.rename(fromPath, toPath);
+  }
+
+  async createExclusive(filePath: string): Promise<void> {
+    const handle = await fs.open(filePath, "wx");
+    await handle.close();
   }
 
   async exists(filePath: string): Promise<boolean> {

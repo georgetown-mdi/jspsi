@@ -1,10 +1,13 @@
 import { default as EventEmitter } from "eventemitter3";
 
-export class PassthroughConnection extends EventEmitter<
-  { data: (data: unknown) => void },
-  never
-> {
+type Events = {
+  data: (data: unknown) => void;
+  error: (err: unknown) => void;
+};
+
+export class PassthroughConnection extends EventEmitter<Events, never> {
   other: PassthroughConnection | undefined;
+  private bufferedError: unknown;
 
   send(data: unknown) {
     setImmediate(() => {
@@ -22,4 +25,22 @@ export class PassthroughConnection extends EventEmitter<
   }
 
   close() {}
+
+  // Mirrors FileSyncConnection's emit override so tests exercising the
+  // protocol-layer takeBufferedError() path see the same buffering semantics
+  // as the production transport.
+  emit<E extends keyof Events>(
+    event: E,
+    ...args: Parameters<Events[E]>
+  ): boolean {
+    const hadListeners = super.emit(event, ...args);
+    if (event === "error" && !hadListeners) this.bufferedError = args[0];
+    return hadListeners;
+  }
+
+  takeBufferedError(): unknown {
+    const e = this.bufferedError;
+    this.bufferedError = undefined;
+    return e;
+  }
 }

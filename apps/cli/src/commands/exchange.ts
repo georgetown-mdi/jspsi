@@ -10,17 +10,23 @@ import {
   loadCSVFile,
   prepareForExchange,
 } from "@psilink/core";
-import type {
-  ConnectionConfig,
-  ExchangeDataSpec,
-  PreparedExchange,
-} from "@psilink/core";
+import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
 
 import { applyConnectionOverrides } from "../config";
 import { loadKeyFile, type KeyFile } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
-import { runProtocol } from "../protocol";
+import {
+  runProtocol,
+  type AuthPersist,
+  type ProtocolConnectionConfig,
+} from "../protocol";
+
+// Defined here rather than in protocol.ts: it is only needed as the return
+// type of loadConfig and does not belong to the protocol layer's public API.
+type AuthenticatedConnectionConfig = ProtocolConnectionConfig & {
+  authentication: AuthPersist;
+};
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -152,7 +158,7 @@ function parseArgs(argv: Arguments): ExchangeArgs {
 /** @internal exported for testing */
 export function loadConfig(
   options: ExchangeOptions,
-): { connection: ConnectionConfig } & ExchangeDataSpec {
+): { connection: AuthenticatedConnectionConfig } & ExchangeDataSpec {
   const log = getLogger("exchange");
 
   let rawConfig: unknown;
@@ -169,6 +175,79 @@ export function loadConfig(
       );
     throw err;
   }
+
+  // Warn about and strip auth fields the CLI always ignores. This runs before
+  // parseExchangeSpec (which applies Zod validation and `camelizeKeys`), so
+  // we see raw user-input keys: a single canonical name may appear as either
+  // its snake_case form (the YAML convention) or its camelCase form (if the
+  // user wrote camelCase directly). Both forms must be listed for each
+  // canonical name or one would slip through silently.
+  //
+  // The named keys get specific guidance; any other field under
+  // `authentication` (e.g. typos like `expires_at` or `pakeTok`) gets a
+  // generic warning so the user sees the silent drop rather than wondering
+  // why their setting did nothing.
+  //
+  // CANONICAL_TO_USER_FORMS centralizes the dual-form mapping so a future
+  // field cannot be added to only one of the two lookups.
+  const CANONICAL_TO_USER_FORMS: Record<string, string[]> = {
+    pakeToken: ["pake_token", "pakeToken"],
+    expires: ["expires"],
+    role: ["role"],
+  };
+  const CANONICAL_TO_HINT: Record<string, string> = {
+    pakeToken:
+      "the token is always loaded from the key file (any @-file reference " +
+      "in this field was also not resolved)",
+    expires:
+      "expiration is always loaded from the key file (any @-file reference " +
+      "in this field was also not resolved)",
+    role: "this field is only valid for the WebRTC channel",
+  };
+  const KEY_SPECIFIC_HINT: Record<string, string> = Object.fromEntries(
+    Object.entries(CANONICAL_TO_USER_FORMS).flatMap(([canonical, forms]) =>
+      forms.map((form) => [form, CANONICAL_TO_HINT[canonical]]),
+    ),
+  );
+  const rawConn = (rawConfig as Record<string, unknown>)?.["connection"];
+  if (typeof rawConn === "object" && rawConn !== null) {
+    // `role` is a valid WebRTC field; only the sftp/filedrop channels treat
+    // it as ignored. Detect the channel from the raw config before Zod parses
+    // and normalizes it so we do not strip a field WebRTC will need.
+    const isWebRTC =
+      (rawConn as Record<string, unknown>)["channel"] === "webrtc";
+    const canonicalIgnored = isWebRTC
+      ? ["pakeToken", "expires"]
+      : ["pakeToken", "expires", "role"];
+    const ignoredKeys = canonicalIgnored.flatMap(
+      (canonical) => CANONICAL_TO_USER_FORMS[canonical],
+    );
+    const rawAuth = (rawConn as Record<string, unknown>)?.["authentication"];
+    if (typeof rawAuth === "object" && rawAuth !== null) {
+      const a = rawAuth as Record<string, unknown>;
+      for (const key of Object.keys(a)) {
+        // On the webrtc channel, `role` is a valid field: leave it intact so
+        // Zod parses it normally and the strip-and-warn message does not
+        // contradict the actual channel.
+        if (isWebRTC && key === "role") continue;
+        if (ignoredKeys.includes(key)) {
+          log.warn(
+            `${options.configFile}: connection.authentication.${key} is set ` +
+              `and will be ignored; ${KEY_SPECIFIC_HINT[key]}`,
+          );
+        } else {
+          log.warn(
+            `${options.configFile}: connection.authentication.${key} is not ` +
+              "a recognized field and will be silently dropped; valid keys " +
+              "are loaded from the key file or apply only to the WebRTC " +
+              "channel (see EXCHANGE_SPEC.md#connectionauthentication)",
+          );
+        }
+        delete a[key];
+      }
+    }
+  }
+
   const { connection: baseConn, ...exchangeDataSpec } = parseExchangeSpec(
     resolveAtSignRefs(rawConfig),
   );
@@ -200,20 +279,31 @@ export function loadConfig(
   }
   if (keyData === undefined)
     throw new Error(
-      `key file ${options.keyFile} does not exist; ` +
-        "to create one, run 'psilink URL INPUT_FILE --save' first",
+      `key file ${options.keyFile} does not exist. ` +
+        "The CLI commands that create a key file (psilink invite, psilink " +
+        "accept, and psilink --save) are not yet implemented; until they " +
+        "land, the key file must be created out-of-band - a base64url-" +
+        'encoded 32-byte token under "pakeToken" - and copied to both ' +
+        "parties via a trusted channel. See " +
+        "docs/SECURITY.md#recurring-exchange-authentication.",
     );
-  if (connection.authentication === undefined) {
-    connection.authentication = {
-      pakeToken: keyData.pakeToken,
-      expires: keyData.expires,
-    };
-  } else {
-    connection.authentication.pakeToken = keyData.pakeToken;
-    connection.authentication.expires = keyData.expires;
-  }
-
-  return { connection, ...exchangeDataSpec };
+  const authPersist: AuthPersist = {
+    pakeToken: keyData.pakeToken,
+    expires: keyData.expires,
+    keyFilePath: options.keyFile,
+  };
+  // Spread + cast: `connection` is `ConnectionConfig` (which includes the
+  // webrtc channel), so TypeScript cannot verify that the spread result fits
+  // `AuthenticatedConnectionConfig` (constrained to sftp and filedrop). The
+  // double cast through `unknown` is intentional; the channel guard above
+  // ensures only sftp/filedrop configs reach this point.
+  return {
+    connection: {
+      ...connection,
+      authentication: authPersist,
+    } as unknown as AuthenticatedConnectionConfig,
+    ...exchangeDataSpec,
+  };
 }
 
 // --- Data preparation --------------------------------------------------------
