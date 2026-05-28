@@ -16,6 +16,11 @@ const Envelope = z.object({ enc: z.string() });
 const TYPE_JSON = 0;
 const TYPE_BINARY = 1;
 
+// Byte offset within the 12-byte IV where the 8-byte big-endian sequence
+// number is written (preceded by 4 reserved zero bytes). Both the encode path
+// (seqToIv) and the decode path (handleInbound) must agree on this offset.
+const IV_SEQ_OFFSET = 4;
+
 /**
  * Wraps any {@link Connection} and transparently encrypts all outbound messages
  * and decrypts all inbound messages using AES-256-GCM.
@@ -56,8 +61,7 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     });
   };
   private readonly onInnerError = (err: unknown): void => {
-    this.failed = true;
-    this.emit("error", err);
+    this.markFailed(err instanceof Error ? err : new Error(String(err)));
   };
 
   private constructor(
@@ -79,6 +83,17 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     sessionKey: Uint8Array<ArrayBuffer>,
     role: HandshakeRole,
   ): Promise<EncryptedConnection> {
+    // Register a data listener before the async key derivation so any
+    // encrypted message that arrives during key derivation is buffered rather
+    // than dropped. The constructor registers onInnerData on inner; after
+    // construction we remove this listener and replay held messages through
+    // onInnerData synchronously.
+    const pendingMessages: unknown[] = [];
+    const bufferData = (data: unknown): void => {
+      pendingMessages.push(data);
+    };
+    inner.on("data", bufferData);
+
     const [initiatorBytes, responderBytes] = await Promise.all([
       deriveAeadKey(sessionKey, "initiator-to-responder"),
       deriveAeadKey(sessionKey, "responder-to-initiator"),
@@ -98,12 +113,15 @@ export class EncryptedConnection extends BufferedErrorEmitter {
       ]),
     ]);
 
-    return new EncryptedConnection(inner, sendKey, recvKey);
+    inner.removeListener("data", bufferData);
+    const conn = new EncryptedConnection(inner, sendKey, recvKey);
+    for (const msg of pendingMessages) conn.onInnerData(msg);
+    return conn;
   }
 
   private seqToIv(seq: number): Uint8Array<ArrayBuffer> {
     const iv = new Uint8Array(12) as Uint8Array<ArrayBuffer>;
-    new DataView(iv.buffer).setBigUint64(4, BigInt(seq), false);
+    new DataView(iv.buffer).setBigUint64(IV_SEQ_OFFSET, BigInt(seq), false);
     return iv;
   }
 
@@ -182,7 +200,7 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     const cipherWithTag = bytes.slice(12) as Uint8Array<ArrayBuffer>;
 
     const seq = Number(
-      new DataView(iv.buffer, iv.byteOffset).getBigUint64(4, false),
+      new DataView(iv.buffer, iv.byteOffset).getBigUint64(IV_SEQ_OFFSET, false),
     );
 
     if (seq <= this.recvSeq) {

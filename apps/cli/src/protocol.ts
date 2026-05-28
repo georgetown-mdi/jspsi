@@ -585,19 +585,7 @@ export async function runProtocol(
           { psilinkRecoveryHintEmitted: true },
         );
       }
-      // Register a data listener before the async create() so any encrypted
-      // message that arrives during key derivation is buffered rather than
-      // dropped. The EncryptedConnection constructor registers its own
-      // onInnerData; after create() returns we remove the buffer and replay
-      // any held messages through that listener synchronously.
-      const pendingMessages: unknown[] = [];
-      const bufferData = (data: unknown): void => {
-        pendingMessages.push(data);
-      };
-      conn.on("data", bufferData);
       activeConn = await EncryptedConnection.create(conn, sessionKey, role);
-      conn.removeListener("data", bufferData);
-      for (const msg of pendingMessages) conn.emit("data", msg);
     }
 
     const stageLabels = Object.fromEntries(

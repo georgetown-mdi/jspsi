@@ -1,12 +1,9 @@
-import { default as EventEmitter } from "eventemitter3";
+import { BufferedErrorEmitter } from "@psilink/core";
 
-export class PassthroughConnection extends EventEmitter<
-  { data: (data: unknown) => void },
-  never
-> {
+export class PassthroughConnection extends BufferedErrorEmitter {
   other: PassthroughConnection | undefined;
 
-  send(data: any) {
+  send(data: unknown) {
     setImmediate(() => {
       this.other!.emit("data", data);
     });
