@@ -55,6 +55,12 @@ vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
     ...actual,
+    // Keep the real EncryptedConnection so that protocol.ts can call
+    // EncryptedConnection.create after PAKE, and so vi.spyOn tests can
+    // replace create() on the real class object. Without this explicit
+    // entry Vitest's module proxy stubs the class's static methods and
+    // throws when create() is called.
+    EncryptedConnection: actual.EncryptedConnection,
     // Replace getLogger so that runProtocol's log.warn / log.error calls are
     // captured in mockState and can be asserted by individual tests. The
     // logger is only used for informational output; replacing it does not
@@ -76,7 +82,7 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
-import { runExchange } from "@psilink/core";
+import { runExchange, EncryptedConnection } from "@psilink/core";
 import { runProtocol } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 
@@ -1444,3 +1450,179 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
     exitSpy.mockRestore();
   }
 });
+
+// --- EncryptedConnection.create failure paths --------------------------------
+
+test("runProtocol throws a tagged recovery message when EncryptedConnection.create fails after tokenRotated=true", async () => {
+  // Path A: saveKeyFile succeeds (tokenRotated=true) but create() rejects with
+  // a synthetic error. The catch block wraps the error with the recovery message
+  // and tags it psilinkRecoveryHintEmitted=true to suppress the generic
+  // "already rotated and saved" advisory that would otherwise also fire.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  // Wait for both key files to reflect the rotated token before rejecting: same
+  // synchronization pattern used by waitForRotationThenThrow. This ensures PAKE
+  // has completed on both sides before either party's create() throws; without
+  // it, the first party to throw would close its connection while the second is
+  // still exchanging PAKE messages, causing a PAKE failure with different
+  // diagnostics.
+  async function waitForBothRotationsThenReject(): Promise<never> {
+    const { readFileSync } = await import("node:fs");
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      try {
+        const a = JSON.parse(readFileSync(keyFileA, "utf8")).pakeToken;
+        const b = JSON.parse(readFileSync(keyFileB, "utf8")).pakeToken;
+        if (a !== TOKEN_A && b !== TOKEN_A) break;
+      } catch {
+        // key file may not exist yet; retry
+      }
+      if (Date.now() > deadline)
+        throw new Error("timed out waiting for both key files to rotate");
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    throw new Error("simulated create() failure");
+  }
+
+  const createSpy = vi
+    .spyOn(EncryptedConnection, "create")
+    .mockImplementation(waitForBothRotationsThenReject as never);
+
+  try {
+    const pA = runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    );
+    const pB = runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    );
+
+    const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+
+    // Both rejection messages must carry the Path A recovery hint.
+    expect((resultA as PromiseRejectedResult).reason.message).toContain(
+      "PAKE token was already rotated and saved, but encryption key setup failed",
+    );
+    expect((resultB as PromiseRejectedResult).reason.message).toContain(
+      "PAKE token was already rotated and saved, but encryption key setup failed",
+    );
+
+    // The psilinkRecoveryHintEmitted tag must suppress the generic advisory.
+    // If the tag is missing, the catch block logs "The PAKE token was already
+    // rotated and saved before this error." which would appear in mockState.errors.
+    expect(
+      mockState.errors.every((m) => !m.includes("already rotated and saved")),
+    ).toBe(true);
+  } finally {
+    createSpy.mockRestore();
+  }
+}, 15_000);
+
+test("runProtocol resolves (does not reject) when SIGINT fires during EncryptedConnection.create", async () => {
+  // Path B: a signal fires while create() is awaiting key derivation. doCleanup
+  // runs against the raw conn (activeConn before create resolves). After create
+  // resolves, the code closes the wrapper and throws "interrupted by SIGINT
+  // during key derivation". The catch block sees signalReceived !== undefined,
+  // logs the error, and returns — so runProtocol resolves rather than rejecting,
+  // leaving the signal handler's process.exit(130) as the sole exit path.
+  //
+  // Both parties must reach create() before the signal fires so neither is
+  // still in the PAKE round-trip when doCleanup closes the connection.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  const exitSpy = vi
+    .spyOn(process, "exit")
+    .mockReturnValue(undefined as never);
+
+  let resolveA!: () => void;
+  let resolveB!: () => void;
+  let callCount = 0;
+  const createSpy = vi
+    .spyOn(EncryptedConnection, "create")
+    .mockImplementation(
+      () =>
+        new Promise<never>((resolve) => {
+          if (callCount === 0) {
+            resolveA = resolve as () => void;
+          } else {
+            resolveB = resolve as () => void;
+          }
+          callCount++;
+        }),
+    );
+
+  try {
+    const pA = runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    );
+    const pB = runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    );
+
+    // Wait for both parties to enter create() before emitting the signal. Both
+    // PAKE handshakes must have completed at this point.
+    await vi.waitFor(() => expect(callCount).toBeGreaterThanOrEqual(2), {
+      timeout: 10_000,
+    });
+
+    process.emit("SIGINT");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
+      timeout: 5_000,
+    });
+
+    // Resolve both held create() Promises so runProtocol can proceed to the
+    // signalReceived check at line 612, close the wrapper, and return.
+    resolveA();
+    resolveB();
+
+    const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+    expect(resultA.status).toBe("fulfilled");
+    expect(resultB.status).toBe("fulfilled");
+  } finally {
+    exitSpy.mockRestore();
+    createSpy.mockRestore();
+  }
+}, 20_000);
