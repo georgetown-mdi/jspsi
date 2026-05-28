@@ -57,4 +57,20 @@ describe("waitForConnectionOpen", () => {
     await p.catch(() => {});
     expect(fake.listenerCount("open")).toBe(0);
   });
+
+  test("rejects when 'close' fires before 'open'", async () => {
+    const { fake, conn } = makeConn();
+    const p = waitForConnectionOpen(conn);
+    fake.emit("close");
+    await expect(p).rejects.toBeInstanceOf(Error);
+  });
+
+  test("open and error listeners are removed after 'close' fires", async () => {
+    const { fake, conn } = makeConn();
+    const p = waitForConnectionOpen(conn);
+    fake.emit("close");
+    await p.catch(() => {});
+    expect(fake.listenerCount("open")).toBe(0);
+    expect(fake.listenerCount("error")).toBe(0);
+  });
 });
