@@ -38,10 +38,11 @@ import FileSelect from "@components/FileSelect";
 import SessionDetails from "@components/SessionDetails";
 import { Status } from "@components/Status";
 
+import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
+
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
-import type { DataConnection } from "peerjs";
+import type { Connection, ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
 export const Route = createFileRoute("/psi")({
@@ -132,7 +133,7 @@ function Home() {
     setSubmitted(true);
 
     const finishExchange = (
-      conn: DataConnection,
+      conn: Connection,
       { associationTable, partnerPayload }: ExchangeResult,
       prepared: PreparedExchange,
     ) => {
@@ -162,7 +163,8 @@ function Home() {
             loadCSVFile(files[0]),
             openPeerConnection(peerId),
           ]);
-          conn.once("data", () => peer.disconnect());
+          const adapter = new DataConnectionAdapter(conn);
+          adapter.once("data", () => peer.disconnect());
 
           const rawRows = csvResult.data as Array<Record<string, string>>;
           const prepared = prepareForExchange(
@@ -181,7 +183,7 @@ function Home() {
           ]);
 
           const exchangeResult = await runExchange(
-            conn,
+            adapter,
             "responder",
             prepared,
             {
@@ -189,7 +191,7 @@ function Home() {
               onStage: setStageById,
             },
           );
-          finishExchange(conn, exchangeResult, prepared);
+          finishExchange(adapter, exchangeResult, prepared);
         })
         .catch((error) => {
           console.error(error);
@@ -219,15 +221,16 @@ function Home() {
 
           peer.on("connection", (conn) => {
             conn.on("open", async () => {
-              conn.once("data", () => peer.disconnect());
+              const adapter = new DataConnectionAdapter(conn);
+              adapter.once("data", () => peer.disconnect());
               try {
                 const exchangeResult = await runExchange(
-                  conn,
+                  adapter,
                   "initiator",
                   prepared,
                   { psiLibrary: psi, onStage: setStageById },
                 );
-                finishExchange(conn, exchangeResult, prepared);
+                finishExchange(adapter, exchangeResult, prepared);
               } catch (error) {
                 console.error(error);
               }

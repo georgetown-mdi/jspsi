@@ -9,6 +9,7 @@ import { prepareForExchange, runExchange } from "@psilink/core";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { sortAssociationTable } from "../utils/associationTable.js";
+import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
 
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -175,9 +176,10 @@ const clientPrepared = prepareForExchange(
 );
 
 const runServerPSI = async () => {
-  serverConn.once("data", () => serverPeer.disconnect());
+  const adapter = new DataConnectionAdapter(serverConn);
+  adapter.once("data", () => serverPeer.disconnect());
   const { associationTable } = await runExchange(
-    serverConn,
+    adapter,
     "responder",
     serverPrepared,
     { psiLibrary },
@@ -186,9 +188,10 @@ const runServerPSI = async () => {
 };
 
 const runClientPSI = async () => {
-  clientConn.once("data", () => clientPeer.disconnect());
+  const adapter = new DataConnectionAdapter(clientConn);
+  adapter.once("data", () => clientPeer.disconnect());
   const { associationTable } = await runExchange(
-    clientConn,
+    adapter,
     "initiator",
     clientPrepared,
     { psiLibrary },
