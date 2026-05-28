@@ -12,7 +12,15 @@ export const dec = new TextDecoder();
  * Encode a byte array as a base64url string (no padding).
  */
 export function toBase64Url(bytes: Uint8Array<ArrayBuffer>): string {
-  const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+  // Chunked apply avoids the N-element intermediate array that `Array.from`
+  // would allocate; 0x8000 is below V8's apply-argument limit on all platforms.
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK)
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + CHUNK) as unknown as number[],
+    );
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 

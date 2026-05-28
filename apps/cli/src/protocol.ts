@@ -327,6 +327,13 @@ export async function runProtocol(
   // the exit code to the signal handler — preventing the CLI handler's
   // process.exit(69) from racing the signal handler's process.exit(130/143).
   let signalReceived: NodeJS.Signals | undefined;
+  // activeConn is the connection used for runExchange. When authentication
+  // succeeds, it is replaced with an EncryptedConnection that wraps conn so
+  // all subsequent messages are protected by AES-256-GCM. Without auth,
+  // activeConn stays as conn (no AEAD). Declared here so doCleanup can call
+  // activeConn.close(), which routes through the wrapper's teardown (listener
+  // detach + inner.close()) when it is an EncryptedConnection.
+  let activeConn: Connection = conn;
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
@@ -346,17 +353,19 @@ export async function runProtocol(
     await conn.cleanup().catch((err: unknown) => {
       log.debug("conn.cleanup() during cleanup:", err);
     });
-    await conn.close().catch((err: unknown) => {
-      // When the connection was open, a close failure is user-visible: the
-      // transport may not have terminated cleanly (e.g. SSH session timeout).
-      // When it was never opened, "not connected" is the expected throw and
-      // is logged at debug to avoid spurious noise.
+    // When the connection was open, a close failure is user-visible: the
+    // transport may not have terminated cleanly (e.g. SSH session timeout).
+    // When it was never opened, "not connected" is the expected throw and
+    // is logged at debug to avoid spurious noise.
+    try {
+      await activeConn.close();
+    } catch (err: unknown) {
       if (opened) {
         log.warn("failed to close connection during cleanup:", err);
       } else {
-        log.debug("conn.close() during cleanup:", err);
+        log.debug("connection close during cleanup:", err);
       }
-    });
+    }
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than
@@ -519,12 +528,6 @@ export async function runProtocol(
     conn.start();
     started = true;
 
-    // activeConn is the connection used for runExchange. When authentication
-    // succeeds, it is replaced with an EncryptedConnection that wraps conn so
-    // all subsequent messages are protected by AES-256-GCM. Without auth,
-    // activeConn stays as conn (no AEAD).
-    let activeConn: Connection = conn;
-
     if (auth) {
       log.info("authenticating");
       // conn.start() must precede authenticateConnection: the SPAKE2 receive()
@@ -582,7 +585,19 @@ export async function runProtocol(
           { psilinkRecoveryHintEmitted: true },
         );
       }
+      // Register a data listener before the async create() so any encrypted
+      // message that arrives during key derivation is buffered rather than
+      // dropped. The EncryptedConnection constructor registers its own
+      // onInnerData; after create() returns we remove the buffer and replay
+      // any held messages through that listener synchronously.
+      const pendingMessages: unknown[] = [];
+      const bufferData = (data: unknown): void => {
+        pendingMessages.push(data);
+      };
+      conn.on("data", bufferData);
       activeConn = await EncryptedConnection.create(conn, sessionKey, role);
+      conn.removeListener("data", bufferData);
+      for (const msg of pendingMessages) conn.emit("data", msg);
     }
 
     const stageLabels = Object.fromEntries(

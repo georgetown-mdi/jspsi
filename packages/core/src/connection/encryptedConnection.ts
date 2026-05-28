@@ -56,6 +56,7 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     });
   };
   private readonly onInnerError = (err: unknown): void => {
+    this.failed = true;
     this.emit("error", err);
   };
 
