@@ -285,3 +285,46 @@ describe("DataConnectionAdapter", () => {
     expect(received).toHaveLength(0);
   });
 });
+
+describe("DataConnectionAdapter.open()", () => {
+  test("resolves with a functional adapter after the connection emits 'open'", async () => {
+    const fake = new FakeDataConnection();
+    const promise = DataConnectionAdapter.open(
+      fake as unknown as DataConnection,
+    );
+
+    fake.emit("open");
+
+    const adapter = await promise;
+    expect(adapter).toBeInstanceOf(DataConnectionAdapter);
+
+    // Verify the adapter is functional by checking data forwarding.
+    const received: Array<unknown> = [];
+    adapter.on("data", (d) => received.push(d));
+    fake.emit("data", "hello");
+    expect(received).toEqual(["hello"]);
+  });
+
+  test("rejects and does not construct an adapter if the connection emits 'error' before 'open'", async () => {
+    const fake = new FakeDataConnection();
+    const err = new Error("ICE failure");
+    const promise = DataConnectionAdapter.open(
+      fake as unknown as DataConnection,
+    );
+
+    fake.emit("error", err);
+
+    await expect(promise).rejects.toBe(err);
+  });
+
+  test("rejects if the connection emits 'close' before 'open'", async () => {
+    const fake = new FakeDataConnection();
+    const promise = DataConnectionAdapter.open(
+      fake as unknown as DataConnection,
+    );
+
+    fake.emit("close");
+
+    await expect(promise).rejects.toThrow("connection closed before open");
+  });
+});
