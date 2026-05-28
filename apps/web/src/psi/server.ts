@@ -100,7 +100,8 @@ export function openPeerConnection(
         `got peer id ${id} from peer server; connecting to peer ${peerId}`,
       );
       const conn = peer.connect(peerId, { reliable: true });
-      resolve([peer, conn]);
+      conn.on("open", () => resolve([peer, conn]));
+      conn.on("error", (err) => reject(err));
     });
 
     peer.on("error", (err) => {
