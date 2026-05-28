@@ -268,7 +268,7 @@ export class PSIParticipant {
         sortingPermutation,
       );
 
-      let result: Array<Array<number>> | undefined;
+      let result: [Array<number>, Array<number>] | undefined;
 
       this.log.debug(
         `${this.id}: starting identify-intersection protocol; sending server ` +
@@ -309,7 +309,7 @@ export class PSIParticipant {
             const [partnerIndices, localIndices] =
               associationTableMessage.parse(rawData);
 
-            result = [localIndices, partnerIndices];
+            result = [localIndices, partnerIndices] as [Array<number>, Array<number>];
             for (let i = 0; i < result[0].length; ++i) {
               result[0][i] = sortingPermutation[result[0][i]];
             }
@@ -327,7 +327,9 @@ export class PSIParticipant {
         () => conn.send(serverSetup.serializeBinary()),
       );
 
-      return [result![0], result![1]];
+      if (result === undefined)
+        throw new Error("invariant: PSI result was not set by handlers");
+      return result;
     } else {
       let serverSetup: ServerSetup | undefined = undefined;
       let localIndices: Array<number> | undefined;
@@ -405,7 +407,9 @@ export class PSIParticipant {
         },
       ]);
 
-      return [localIndices!, partnerIndices!];
+      if (localIndices === undefined || partnerIndices === undefined)
+        throw new Error("invariant: PSI result was not set by handlers");
+      return [localIndices, partnerIndices] as [Array<number>, Array<number>];
     }
   }
 }

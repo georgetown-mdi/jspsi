@@ -233,12 +233,15 @@ describe("DataConnectionAdapter", () => {
     );
   });
 
-  test("remote close seals the adapter: conn.close() is invoked", () => {
+  test("remote close seals the adapter without calling conn.close()", () => {
     const { fake } = makeAdapter();
 
     fake.emit("close");
 
-    expect(fake.close).toHaveBeenCalledTimes(1);
+    // The connection is already closing when it fires "close"; calling
+    // conn.close() from within the event handler would be re-entrant and
+    // redundant. The adapter seals itself without re-invoking conn.close().
+    expect(fake.close).not.toHaveBeenCalled();
   });
 
   test("send() after underlying conn fires close throws and does not delegate to underlying DataConnection", () => {
@@ -250,6 +253,13 @@ describe("DataConnectionAdapter", () => {
       "connection closed",
     );
     expect(fake.send).not.toHaveBeenCalled();
+  });
+
+  test("close() clears the buffered error", () => {
+    const { fake, adapter } = makeAdapter();
+    fake.emit("error", new Error("prior error"));
+    adapter.close();
+    expect(adapter.takeBufferedError()).toBeUndefined();
   });
 
   test("close event after adapter.close() does not emit an error", () => {

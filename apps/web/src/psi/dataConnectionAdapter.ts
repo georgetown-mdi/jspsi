@@ -21,9 +21,11 @@ interface Events {
  * A `close` event from the underlying connection (remote peer closed or network
  * drop) is forwarded as an `error` so protocol-layer receives fail immediately
  * rather than waiting for the handshake timeout; the adapter then seals itself
- * so subsequent {@link send} calls are no-ops. Intentional closure via
- * {@link close} removes the `close` listener before calling
- * `DataConnection.close()`, so only unilateral remote closes surface as errors.
+ * so subsequent {@link send} calls throw. Intentional closure via {@link close}
+ * calls `DataConnection.close()` and clears the error buffer; a remote close
+ * does not call `DataConnection.close()` (the connection is already closing)
+ * and preserves the buffered close-as-error so the protocol layer can observe
+ * it via {@link takeBufferedError}.
  */
 export class DataConnectionAdapter
   extends EventEmitter<Events, never>
@@ -49,7 +51,10 @@ export class DataConnectionAdapter
     };
     this.onClose = () => {
       this.emit("error", new Error("peer connection closed unexpectedly"));
-      this.close();
+      // Don't call conn.close() — the connection is already closing. The
+      // buffered close-as-error is intentionally preserved so takeBufferedError
+      // can surface it if no listener was registered at the time of the close.
+      this.seal(false);
     };
 
     conn.on("data", this.onData);
@@ -116,17 +121,25 @@ export class DataConnectionAdapter
     return this.conn.send(data, chunked);
   }
 
-  /**
-   * Detaches the forwarding listeners and closes the underlying connection.
-   * Idempotent: a second call is a no-op. The `close` listener is removed first
-   * so an intentional close does not surface as an error.
-   */
-  close(): void {
+  // Removes forwarding listeners, optionally closes the underlying connection,
+  // and clears the error buffer when called as an intentional close. Idempotent.
+  private seal(callConnClose: boolean): void {
     if (this.closed) return;
     this.closed = true;
+    if (callConnClose) this.bufferedError = undefined;
     this.conn.off("data", this.onData);
     this.conn.off("error", this.onError);
     this.conn.off("close", this.onClose);
-    this.conn.close();
+    if (callConnClose) this.conn.close();
+  }
+
+  /**
+   * Detaches the forwarding listeners, closes the underlying connection, and
+   * clears the error buffer. Idempotent: a second call is a no-op. The `close`
+   * listener is removed before calling `DataConnection.close()` so an
+   * intentional close does not surface as an error.
+   */
+  close(): void {
+    this.seal(true);
   }
 }

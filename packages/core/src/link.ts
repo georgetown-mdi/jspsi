@@ -9,13 +9,16 @@ const associationAndIterationArray = z.array(
   z.object({ theirIndex: z.number(), iteration: z.number() }),
 );
 
-interface IndexIterationPair {
+/** @internal */
+export interface IndexIterationPair {
   theirIndex: number;
   iteration: number;
 }
 
 type IndexIterationMap = Array<IndexIterationPair | undefined>;
-type IterationMap = Array<IndexIterationPair>;
+
+/** @internal */
+export type IterationMap = Array<IndexIterationPair>;
 
 export interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
@@ -238,7 +241,8 @@ export async function linkViaPSI(
 // gone. Sized generously so per-message work on large match sets is not cut off.
 const MAPPED_EXCHANGE_TIMEOUT_MS = 120_000;
 
-function exchangeMappedElements(
+/** @internal */
+export function exchangeMappedElements(
   id: string,
   conn: Connection,
   log: {

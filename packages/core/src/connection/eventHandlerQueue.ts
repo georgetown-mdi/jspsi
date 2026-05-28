@@ -4,9 +4,9 @@ export class EventHandlerQueue<
   /** Functions to run sequentially as data are received. */
   private handlers: Array<T>;
   /** Invoked if a handler throws synchronously or rejects. */
-  private onError?: (err: unknown) => void;
+  private onError: (err: unknown) => void;
 
-  constructor(handlers: Array<T>, onError?: (err: unknown) => void) {
+  constructor(handlers: Array<T>, onError: (err: unknown) => void) {
     this.handlers = handlers;
     this.onError = onError;
   }
@@ -24,11 +24,11 @@ export class EventHandlerQueue<
         typeof (result as PromiseLike<unknown>).then === "function"
       ) {
         (result as PromiseLike<unknown>).then(undefined, (err: unknown) =>
-          this.onError?.(err),
+          this.onError(err),
         );
       }
     } catch (err) {
-      this.onError?.(err);
+      this.onError(err);
     }
   };
 }

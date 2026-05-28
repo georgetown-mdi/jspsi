@@ -5,14 +5,17 @@ import { EventHandlerQueue } from "../src/connection/eventHandlerQueue";
 describe("EventHandlerQueue", () => {
   test("runs handlers in order, one per event, then no-ops", () => {
     const calls: Array<number> = [];
-    const queue = new EventHandlerQueue([
-      () => {
-        calls.push(1);
-      },
-      () => {
-        calls.push(2);
-      },
-    ]);
+    const queue = new EventHandlerQueue(
+      [
+        () => {
+          calls.push(1);
+        },
+        () => {
+          calls.push(2);
+        },
+      ],
+      vi.fn(),
+    );
 
     queue.handleEvent();
     queue.handleEvent();
