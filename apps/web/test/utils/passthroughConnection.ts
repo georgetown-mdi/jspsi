@@ -26,7 +26,7 @@ export class PassthroughConnection extends EventEmitter<Events, never> {
 
   close() {}
 
-  // Mirrors FileSyncConnection's emit override so tests exercising the
+  // Mirrors DataConnectionAdapter's emit override so tests exercising the
   // protocol-layer takeBufferedError() path see the same buffering semantics
   // as the production transport.
   emit<TEvent extends keyof Events>(

@@ -17,6 +17,12 @@ interface Events {
  * can detect failures that arrived in the gap between listener-registration
  * cycles. Reading the buffer clears it; only the most recent unhandled error
  * is retained.
+ *
+ * A `close` event from the underlying connection (remote peer closed or network
+ * drop) is forwarded as an `error` so protocol-layer receives fail immediately
+ * rather than waiting for the handshake timeout. Intentional closure via
+ * {@link close} removes the `close` listener before calling
+ * `DataConnection.close()`, so only unilateral remote closes surface as errors.
  */
 export class DataConnectionAdapter
   extends EventEmitter<Events, never>
@@ -27,6 +33,7 @@ export class DataConnectionAdapter
   private closed = false;
   private onData: (data: unknown) => void;
   private onError: (err: unknown) => void;
+  private onClose: () => void;
 
   constructor(conn: DataConnection) {
     super();
@@ -39,9 +46,13 @@ export class DataConnectionAdapter
     this.onError = (err: unknown) => {
       this.emit("error", err);
     };
+    this.onClose = () => {
+      this.emit("error", new Error("peer connection closed unexpectedly"));
+    };
 
     conn.on("data", this.onData);
     conn.on("error", this.onError);
+    conn.on("close", this.onClose);
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -95,6 +106,7 @@ export class DataConnectionAdapter
     this.closed = true;
     this.conn.off("data", this.onData);
     this.conn.off("error", this.onError);
+    this.conn.off("close", this.onClose);
     this.conn.close();
   }
 }

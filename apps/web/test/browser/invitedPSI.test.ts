@@ -123,8 +123,15 @@ const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
     });
     peer.on("open", () => {
       const conn = peer.connect(clientPeerId, { reliable: true });
-      conn.on("open", () => resolve([peer, conn]));
-      conn.once("error", (err) => reject(err));
+      const onConnError = (err: Error) => {
+        conn.off("error", onConnError);
+        reject(err);
+      };
+      conn.on("open", () => {
+        conn.off("error", onConnError);
+        resolve([peer, conn]);
+      });
+      conn.on("error", onConnError);
     });
 
     peer.on("error", (err) => reject(err));

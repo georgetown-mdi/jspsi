@@ -195,4 +195,30 @@ describe("DataConnectionAdapter", () => {
 
     expect(adapter.takeBufferedError()).toBe("second string");
   });
+
+  test("close event from underlying conn is forwarded as an error", () => {
+    const { fake, adapter } = makeAdapter();
+    const received: Array<unknown> = [];
+    adapter.on("error", (e) => received.push(e));
+
+    fake.emit("close");
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toBeInstanceOf(Error);
+    expect((received[0] as Error).message).toBe(
+      "peer connection closed unexpectedly",
+    );
+  });
+
+  test("close event after adapter.close() does not emit an error", () => {
+    const { fake, adapter } = makeAdapter();
+    const received: Array<unknown> = [];
+    adapter.on("error", (e) => received.push(e));
+
+    adapter.close();
+    fake.emit("close");
+
+    expect(received).toHaveLength(0);
+    expect(adapter.takeBufferedError()).toBeUndefined();
+  });
 });
