@@ -22,19 +22,23 @@ export class DataConnectionAdapter
 {
   private conn: DataConnection;
   private bufferedError: unknown;
+  private onData: (data: unknown) => void;
+  private onError: (err: unknown) => void;
 
   constructor(conn: DataConnection) {
     super();
     this.conn = conn;
     this.bufferedError = undefined;
 
-    conn.on("data", (data: unknown) => {
+    this.onData = (data: unknown) => {
       this.emit("data", data);
-    });
-
-    conn.on("error", (err: unknown) => {
+    };
+    this.onError = (err: unknown) => {
       this.emit("error", err);
-    });
+    };
+
+    conn.on("data", this.onData);
+    conn.on("error", this.onError);
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -79,6 +83,8 @@ export class DataConnectionAdapter
   }
 
   close(): void {
+    this.conn.off("data", this.onData);
+    this.conn.off("error", this.onError);
     this.conn.close();
   }
 }

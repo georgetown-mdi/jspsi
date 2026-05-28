@@ -20,7 +20,7 @@ function makeAdapter() {
 describe("DataConnectionAdapter", () => {
   test("forwards data events to registered listeners", () => {
     const { fake, adapter } = makeAdapter();
-    const received: unknown[] = [];
+    const received: Array<unknown> = [];
     adapter.on("data", (d) => received.push(d));
 
     fake.emit("data", { hello: "world" });
@@ -31,7 +31,7 @@ describe("DataConnectionAdapter", () => {
   test("forwards error events to a registered listener", () => {
     const { fake, adapter } = makeAdapter();
     const err = new Error("transport failure");
-    const received: unknown[] = [];
+    const received: Array<unknown> = [];
     adapter.on("error", (e) => received.push(e));
 
     fake.emit("error", err);
@@ -76,6 +76,32 @@ describe("DataConnectionAdapter", () => {
     const buffered = adapter.takeBufferedError();
     expect(buffered).toBe(second);
     expect((buffered as Error).cause).toBe(first);
+  });
+
+  test("removing an error listener causes subsequent errors to be buffered", () => {
+    const { fake, adapter } = makeAdapter();
+    const err = new Error("post-removal error");
+    const received: Array<unknown> = [];
+    const listener = (e: unknown) => received.push(e);
+
+    adapter.on("error", listener);
+    adapter.removeListener("error", listener);
+
+    fake.emit("error", err);
+
+    expect(received).toHaveLength(0);
+    expect(adapter.takeBufferedError()).toBe(err);
+  });
+
+  test("close removes forwarding listeners from the underlying DataConnection", () => {
+    const { fake, adapter } = makeAdapter();
+    adapter.close();
+
+    const received: Array<unknown> = [];
+    adapter.on("data", (d) => received.push(d));
+    fake.emit("data", { after: "close" });
+
+    expect(received).toHaveLength(0);
   });
 
   test("delegates send to the underlying DataConnection", () => {
