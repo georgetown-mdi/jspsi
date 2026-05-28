@@ -194,9 +194,10 @@ function Home() {
             );
             finishExchange(adapter, exchangeResult, prepared);
           } catch (error) {
-            adapter.close();
             peer.disconnect();
             throw error;
+          } finally {
+            adapter.close();
           }
         })
         .catch((error) => {
@@ -238,9 +239,10 @@ function Home() {
                 );
                 finishExchange(adapter, exchangeResult, prepared);
               } catch (error) {
-                adapter.close();
                 peer.disconnect();
                 console.error(error);
+              } finally {
+                adapter.close();
               }
             });
           });

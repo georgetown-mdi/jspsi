@@ -98,6 +98,7 @@ export class DataConnectionAdapter
   }
 
   send(data: unknown, chunked?: boolean): void | Promise<void> {
+    if (this.closed) return;
     return this.conn.send(data, chunked);
   }
 

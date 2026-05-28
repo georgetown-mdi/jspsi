@@ -210,6 +210,16 @@ describe("DataConnectionAdapter", () => {
     );
   });
 
+  test("close event is buffered when no error listener is registered", () => {
+    const { fake, adapter } = makeAdapter();
+
+    fake.emit("close");
+
+    const buffered = adapter.takeBufferedError();
+    expect(buffered).toBeInstanceOf(Error);
+    expect((buffered as Error).message).toBe("peer connection closed unexpectedly");
+  });
+
   test("close event after adapter.close() does not emit an error", () => {
     const { fake, adapter } = makeAdapter();
     const received: Array<unknown> = [];
