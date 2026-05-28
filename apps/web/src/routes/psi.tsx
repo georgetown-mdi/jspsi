@@ -169,7 +169,7 @@ function Home() {
             loadCSVFile(files[0]),
             openPeerConnection(peerId),
           ]);
-          const adapter = await DataConnectionAdapter.open(conn);
+          const adapter = new DataConnectionAdapter(conn);
           adapter.once("data", () => peer.disconnect());
 
           const rawRows = csvResult.data as Array<Record<string, string>>;
