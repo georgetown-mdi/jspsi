@@ -178,34 +178,39 @@ const clientPrepared = prepareForExchange(
 const runServerPSI = async () => {
   const adapter = new DataConnectionAdapter(serverConn);
   adapter.once("data", () => serverPeer.disconnect());
-  const { associationTable } = await runExchange(
-    adapter,
-    "responder",
-    serverPrepared,
-    { psiLibrary },
-  );
-  return associationTable;
+  try {
+    const { associationTable } = await runExchange(
+      adapter,
+      "responder",
+      serverPrepared,
+      { psiLibrary },
+    );
+    return associationTable;
+  } finally {
+    adapter.close();
+  }
 };
 
 const runClientPSI = async () => {
   const adapter = new DataConnectionAdapter(clientConn);
   adapter.once("data", () => clientPeer.disconnect());
-  const { associationTable } = await runExchange(
-    adapter,
-    "initiator",
-    clientPrepared,
-    { psiLibrary },
-  );
-  return associationTable;
+  try {
+    const { associationTable } = await runExchange(
+      adapter,
+      "initiator",
+      clientPrepared,
+      { psiLibrary },
+    );
+    return associationTable;
+  } finally {
+    adapter.close();
+  }
 };
 
 let [serverResult, clientResult] = await Promise.all([
   runServerPSI(),
   runClientPSI(),
 ]);
-
-serverConn.close();
-clientConn.close();
 
 serverResult = sortAssociationTable(serverResult);
 clientResult = sortAssociationTable(clientResult, true);

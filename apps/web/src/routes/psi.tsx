@@ -182,16 +182,21 @@ function Home() {
             doneStage,
           ]);
 
-          const exchangeResult = await runExchange(
-            adapter,
-            "responder",
-            prepared,
-            {
-              psiLibrary: psi,
-              onStage: setStageById,
-            },
-          );
-          finishExchange(adapter, exchangeResult, prepared);
+          try {
+            const exchangeResult = await runExchange(
+              adapter,
+              "responder",
+              prepared,
+              {
+                psiLibrary: psi,
+                onStage: setStageById,
+              },
+            );
+            finishExchange(adapter, exchangeResult, prepared);
+          } catch (error) {
+            adapter.close();
+            throw error;
+          }
         })
         .catch((error) => {
           console.error(error);
@@ -232,6 +237,7 @@ function Home() {
                 );
                 finishExchange(adapter, exchangeResult, prepared);
               } catch (error) {
+                adapter.close();
                 console.error(error);
               }
             });

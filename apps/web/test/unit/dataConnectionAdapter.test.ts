@@ -104,6 +104,18 @@ describe("DataConnectionAdapter", () => {
     expect(received).toHaveLength(0);
   });
 
+  test("close removes error forwarding listeners from the underlying DataConnection", () => {
+    const { fake, adapter } = makeAdapter();
+    adapter.close();
+
+    const received: Array<unknown> = [];
+    adapter.on("error", (e) => received.push(e));
+    fake.emit("error", new Error("after close"));
+
+    expect(received).toHaveLength(0);
+    expect(adapter.takeBufferedError()).toBeUndefined();
+  });
+
   test("delegates send to the underlying DataConnection", () => {
     const { fake, adapter } = makeAdapter();
 
