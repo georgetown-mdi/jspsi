@@ -13,6 +13,7 @@
     "test:integration": "vitest run --project integration"
   },
   "dependencies": {
+    "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",
     "@psilink/core": "file:../../packages/core",
     "loglevel": "^1.9.2",
     "ssh2-sftp-client": "^12.0.1",

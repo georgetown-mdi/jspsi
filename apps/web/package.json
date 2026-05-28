@@ -26,7 +26,7 @@
     "@mantine/core": "^9.1.1",
     "@mantine/dropzone": "^9.1.1",
     "@mantine/hooks": "^9.1.1",
-    "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6.tgz",
+    "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",
     "@psilink/core": "file:../../packages/core",
     "@tabler/icons-react": "^3.34.1",
     "@tanstack/react-form": "^1.14.1",
