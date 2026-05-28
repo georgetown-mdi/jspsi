@@ -4,6 +4,8 @@ import { getLogger } from "@psilink/core";
 
 import { ConfigManager } from "@utils/clientConfig";
 
+import { waitForConnectionOpen } from "./waitForOpen";
+
 import type { DataConnection } from "peerjs";
 
 const log = getLogger("server");
@@ -100,15 +102,9 @@ export function openPeerConnection(
         `got peer id ${id} from peer server; connecting to peer ${peerId}`,
       );
       const conn = peer.connect(peerId, { reliable: true });
-      const onConnError = (err: Error) => {
-        conn.off("error", onConnError);
-        reject(err);
-      };
-      conn.once("open", () => {
-        conn.off("error", onConnError);
-        resolve([peer, conn]);
-      });
-      conn.on("error", onConnError);
+      waitForConnectionOpen(conn)
+        .then(() => resolve([peer, conn]))
+        .catch(reject);
     });
 
     peer.on("error", (err) => {

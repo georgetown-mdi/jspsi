@@ -42,7 +42,7 @@ import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { Connection, ExchangeResult, PreparedExchange } from "@psilink/core";
+import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
 export const Route = createFileRoute("/psi")({
@@ -133,11 +133,9 @@ function Home() {
     setSubmitted(true);
 
     const finishExchange = (
-      conn: Connection,
       { associationTable, partnerPayload }: ExchangeResult,
       prepared: PreparedExchange,
     ) => {
-      conn.close();
       log.info("linkage complete, generating results file");
       const { headers, rows } = buildOutputTable(
         associationTable,
@@ -192,7 +190,7 @@ function Home() {
                 onStage: setStageById,
               },
             );
-            finishExchange(adapter, exchangeResult, prepared);
+            finishExchange(exchangeResult, prepared);
           } catch (error) {
             peer.disconnect();
             throw error;
@@ -237,7 +235,7 @@ function Home() {
                   prepared,
                   { psiLibrary: psi, onStage: setStageById },
                 );
-                finishExchange(adapter, exchangeResult, prepared);
+                finishExchange(exchangeResult, prepared);
               } catch (error) {
                 peer.disconnect();
                 console.error(error);

@@ -9,6 +9,8 @@ import { prepareForExchange, runExchange } from "@psilink/core";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
+import { waitForConnectionOpen } from "@psi/waitForOpen";
+
 import { sortAssociationTable } from "../utils/associationTable.js";
 
 import type { DataConnection } from "peerjs";
@@ -123,15 +125,9 @@ const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
     });
     peer.on("open", () => {
       const conn = peer.connect(clientPeerId, { reliable: true });
-      const onConnError = (err: Error) => {
-        conn.off("error", onConnError);
-        reject(err);
-      };
-      conn.once("open", () => {
-        conn.off("error", onConnError);
-        resolve([peer, conn]);
-      });
-      conn.on("error", onConnError);
+      waitForConnectionOpen(conn)
+        .then(() => resolve([peer, conn]))
+        .catch(reject);
     });
 
     peer.on("error", (err) => reject(err));
