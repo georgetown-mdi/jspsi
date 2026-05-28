@@ -1,3 +1,5 @@
+import log from "loglevel";
+
 import { default as EventEmitter } from "eventemitter3";
 
 import type { Connection } from "@psilink/core";
@@ -55,16 +57,21 @@ export class DataConnectionAdapter
       // supersedes the first as the proximate cause. Chain the prior error as
       // `cause` when possible so downstream diagnostics can still surface it.
       const incoming = args[0];
-      if (
-        this.bufferedError !== undefined &&
-        incoming instanceof Error &&
-        incoming.cause === undefined &&
-        incoming !== this.bufferedError
-      ) {
-        try {
-          incoming.cause = this.bufferedError;
-        } catch {
-          /* error object is frozen; chain is best-effort. */
+      if (this.bufferedError !== undefined) {
+        log.warn(
+          "DataConnectionAdapter: superseding buffered error:",
+          this.bufferedError,
+        );
+        if (
+          incoming instanceof Error &&
+          incoming.cause === undefined &&
+          incoming !== this.bufferedError
+        ) {
+          try {
+            incoming.cause = this.bufferedError;
+          } catch {
+            /* error object is frozen; chain is best-effort. */
+          }
         }
       }
       this.bufferedError = incoming;

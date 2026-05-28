@@ -78,6 +78,31 @@ describe("DataConnectionAdapter", () => {
     expect((buffered as Error).cause).toBe(first);
   });
 
+  test("once('data') fires on the first event only", () => {
+    const { fake, adapter } = makeAdapter();
+    const received: Array<unknown> = [];
+    adapter.once("data", (d) => received.push(d));
+
+    fake.emit("data", "first");
+    fake.emit("data", "second");
+
+    expect(received).toEqual(["first"]);
+  });
+
+  test("once('error') fires on the first error; second unhandled error is buffered", () => {
+    const { fake, adapter } = makeAdapter();
+    const received: Array<unknown> = [];
+    adapter.once("error", (e) => received.push(e));
+
+    const first = new Error("first");
+    const second = new Error("second");
+    fake.emit("error", first);
+    fake.emit("error", second);
+
+    expect(received).toEqual([first]);
+    expect(adapter.takeBufferedError()).toBe(second);
+  });
+
   test("removing an error listener causes subsequent errors to be buffered", () => {
     const { fake, adapter } = makeAdapter();
     const err = new Error("post-removal error");
