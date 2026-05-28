@@ -14,6 +14,18 @@ function makeConn(): { fake: FakeConn; conn: DataConnection } {
 }
 
 describe("waitForConnectionOpen", () => {
+  test("resolves immediately when the connection is already open", async () => {
+    class FakeConnOpen extends EventEmitter {
+      readonly open = true;
+    }
+    const fake = new FakeConnOpen();
+    await expect(
+      waitForConnectionOpen(fake as unknown as DataConnection),
+    ).resolves.toBeUndefined();
+    expect(fake.listenerCount("open")).toBe(0);
+    expect(fake.listenerCount("error")).toBe(0);
+  });
+
   test("resolves when 'open' fires", async () => {
     const { fake, conn } = makeConn();
     const p = waitForConnectionOpen(conn);

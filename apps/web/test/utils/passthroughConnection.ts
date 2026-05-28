@@ -41,7 +41,22 @@ export class PassthroughConnection extends EventEmitter<Events, never> {
   ): boolean {
     if (this.closed) return false;
     const hadListeners = super.emit(event, ...args);
-    if (event === "error" && !hadListeners) this.bufferedError = args[0];
+    if (event === "error" && !hadListeners) {
+      const incoming = args[0];
+      if (
+        this.bufferedError !== undefined &&
+        incoming instanceof Error &&
+        incoming.cause === undefined &&
+        incoming !== this.bufferedError
+      ) {
+        try {
+          incoming.cause = this.bufferedError;
+        } catch {
+          /* frozen object */
+        }
+      }
+      this.bufferedError = incoming;
+    }
     return hadListeners;
   }
 

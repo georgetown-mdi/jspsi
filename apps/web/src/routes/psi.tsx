@@ -39,6 +39,7 @@ import SessionDetails from "@components/SessionDetails";
 import { Status } from "@components/Status";
 
 import { DataConnectionAdapter } from "@psi/dataConnectionAdapter";
+import { waitForConnectionOpen } from "@psi/waitForOpen";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -225,24 +226,28 @@ function Home() {
           const peer = await createAndSharePeerId(session);
 
           peer.on("connection", (conn) => {
-            conn.on("open", async () => {
-              const adapter = new DataConnectionAdapter(conn);
-              adapter.once("data", () => peer.disconnect());
-              try {
-                const exchangeResult = await runExchange(
-                  adapter,
-                  "initiator",
-                  prepared,
-                  { psiLibrary: psi, onStage: setStageById },
-                );
-                finishExchange(exchangeResult, prepared);
-              } catch (error) {
-                peer.disconnect();
+            waitForConnectionOpen(conn)
+              .then(async () => {
+                const adapter = new DataConnectionAdapter(conn);
+                adapter.once("data", () => peer.disconnect());
+                try {
+                  const exchangeResult = await runExchange(
+                    adapter,
+                    "initiator",
+                    prepared,
+                    { psiLibrary: psi, onStage: setStageById },
+                  );
+                  finishExchange(exchangeResult, prepared);
+                } catch (error) {
+                  peer.disconnect();
+                  console.error(error);
+                } finally {
+                  adapter.close();
+                }
+              })
+              .catch((error) => {
                 console.error(error);
-              } finally {
-                adapter.close();
-              }
-            });
+              });
           });
         })
         .catch((error) => {

@@ -77,11 +77,11 @@ const clientPeer: Peer = await (() => {
 })();
 
 const clientConnPromise: Promise<DataConnection> = (() => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     clientPeer.on("connection", (conn) => {
-      conn.on("open", () => {
-        resolve(conn);
-      });
+      waitForConnectionOpen(conn)
+        .then(() => resolve(conn))
+        .catch(reject);
     });
   });
 })();

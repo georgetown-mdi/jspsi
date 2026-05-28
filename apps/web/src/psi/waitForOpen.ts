@@ -2,10 +2,12 @@ import type { DataConnection } from "peerjs";
 
 /**
  * Resolves when `conn` emits `"open"`, or rejects with the first `"error"`
- * that fires before `"open"`. Both event listeners are removed whichever
- * branch runs so neither outlives the handshake.
+ * that fires before `"open"`. Returns immediately if `conn.open` is already
+ * `true`. Both event listeners are removed whichever branch runs so neither
+ * outlives the handshake.
  */
 export function waitForConnectionOpen(conn: DataConnection): Promise<void> {
+  if (conn.open) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const onOpen = () => {
       conn.off("error", onError);
