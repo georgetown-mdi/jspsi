@@ -67,8 +67,16 @@ export interface MessageConnection {
    * already arrived; otherwise parks until the next arrival. Rejects if the
    * connection enters (or has entered) a terminal error state, or once a clean
    * close has drained all buffered messages.
+   *
+   * `timeoutMs` optionally bounds how long a parked receive waits for the next
+   * message. The effective deadline is `min(connection-default inactivity,
+   * timeoutMs)`: an override can only *shorten* the wait, never extend it past
+   * the connection default (`undefined` on either side means "no bound from
+   * that source"). On expiry the connection latches the same sticky terminal
+   * `transport` {@link ConnectionError} the default inactivity deadline uses,
+   * so every later call fails fast.
    */
-  receive(): Promise<unknown>;
+  receive(timeoutMs?: number): Promise<unknown>;
   /** Tears down the transport. Idempotent; always resolves on a clean close. */
   close(): Promise<void>;
 }
@@ -94,6 +102,9 @@ type TransportConnect = (controls: TransportControls) => TransportHooks;
 interface Waiter {
   resolve: (message: unknown) => void;
   reject: (error: ConnectionError) => void;
+  // Per-receive deadline override (see MessageConnection.receive). Combined
+  // with the connection default via min() when arming the idle timer.
+  timeoutMs?: number;
 }
 
 // Generous upper bound on unconsumed inbound messages. A strictly lockstep
@@ -144,9 +155,21 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   private armIdle(): void {
-    const ms = this.inactivityTimeoutMs;
-    if (ms === undefined) return;
     if (this.idleTimer !== undefined || this.waiters.length === 0) return;
+    // Effective deadline = min(connection default, head waiter's override).
+    // undefined on either side means "no bound from that source"; if both are
+    // undefined there is no deadline to arm. Reading the head waiter (rather
+    // than a single stored value) keeps this correct if more than one receive
+    // is ever parked at once; lockstep callers only ever park one.
+    const connectionMs = this.inactivityTimeoutMs;
+    const overrideMs = this.waiters[0].timeoutMs;
+    const ms =
+      connectionMs === undefined
+        ? overrideMs
+        : overrideMs === undefined
+          ? connectionMs
+          : Math.min(connectionMs, overrideMs);
+    if (ms === undefined) return;
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
       this.fail(
@@ -207,7 +230,7 @@ export class QueuedMessageConnection implements MessageConnection {
     }
   }
 
-  receive(): Promise<unknown> {
+  receive(timeoutMs?: number): Promise<unknown> {
     if (this.error) return Promise.reject(this.error);
     // Drain buffered messages even after a clean close, but never after an
     // error: a latched error may mean the buffered data is untrustworthy.
@@ -215,7 +238,7 @@ export class QueuedMessageConnection implements MessageConnection {
     if (this.closed)
       return Promise.reject(new ConnectionError("connection closed", "usage"));
     return new Promise<unknown>((resolve, reject) => {
-      this.waiters.push({ resolve, reject });
+      this.waiters.push({ resolve, reject, timeoutMs });
       this.armIdle();
     });
   }
@@ -287,6 +310,44 @@ export function fromEventConnection(
         options?.inactivityTimeoutMs ?? DEFAULT_INACTIVITY_TIMEOUT_MS,
     },
   );
+}
+
+/**
+ * Minimal structural schema type accepted by {@link receiveParsed}: anything
+ * with a `parse` method that returns the validated value or throws. Both Zod
+ * schemas and hand-written validators satisfy it, so this helper does not pin a
+ * specific Zod version.
+ */
+export interface ParseSchema<T> {
+  parse(value: unknown): T;
+}
+
+/**
+ * Awaits the next message on `conn` and validates it with `schema.parse`. On a
+ * parse failure this always throws a {@link ConnectionError} of kind
+ * `"protocol"` (the peer sent a frame that violates the message contract),
+ * preserving the validator's error as the `cause`.
+ *
+ * No timeout argument: the connection's own inactivity deadline applies. This
+ * is the shared receive-and-validate path for every consumer whose only
+ * parse-failure response is "fail as a protocol violation". Sites that must run
+ * a custom abort, or send an outbound frame before parsing, call
+ * {@link MessageConnection.receive} and parse inline instead.
+ */
+export async function receiveParsed<T>(
+  conn: MessageConnection,
+  schema: ParseSchema<T>,
+): Promise<T> {
+  const raw = await conn.receive();
+  try {
+    return schema.parse(raw);
+  } catch (e) {
+    throw new ConnectionError(
+      "received a message that failed schema validation",
+      "protocol",
+      { cause: e },
+    );
+  }
 }
 
 /**

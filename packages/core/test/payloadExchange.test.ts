@@ -8,9 +8,9 @@ import {
 
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
-import type { Connection } from "../src/types";
 
-import { PassthroughConnection } from "./utils/passthroughConnection";
+import { createMessagePipe } from "../src/connection/messageConnection";
+import type { MessageConnection } from "../src/connection/messageConnection";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -41,13 +41,6 @@ const rawRows = [
   { ssn: "004", patient_id: "P3", diagnosis: "D" },
   { ssn: "005", patient_id: "P4", diagnosis: "E" },
 ];
-
-function makeConnections(): [PassthroughConnection, PassthroughConnection] {
-  const a = new PassthroughConnection();
-  const b = new PassthroughConnection(a);
-  a.setOther(b);
-  return [a, b];
-}
 
 // --- preparePayload ----------------------------------------------------------
 
@@ -101,7 +94,7 @@ async function runExchangePayloads(
   payloadA: ReturnType<typeof preparePayload>,
   payloadB: ReturnType<typeof preparePayload>,
 ) {
-  const [connA, connB] = makeConnections();
+  const [connA, connB] = createMessagePipe();
   return Promise.all([
     exchangePayloads(connA, "initiator", payloadA),
     exchangePayloads(connB, "responder", payloadB),
@@ -184,53 +177,48 @@ test("exchangePayloads: hasData:false from responder yields empty PartnerPayload
 });
 
 test("exchangePayloads: malformed data from partner rejects the initiator", async () => {
-  const [connA, connB] = makeConnections();
+  const [connA, connB] = createMessagePipe();
   const initiatorPromise = exchangePayloads(connA, "initiator", {
     hasData: false,
   });
   // Responder sends garbage instead of a valid payload message.
-  connB.once("data", () => {
-    connB.send({ unexpected: true });
-  });
+  await connB.receive();
+  await connB.send({ unexpected: true });
   await expect(initiatorPromise).rejects.toThrow();
 });
 
 test("exchangePayloads: malformed data from partner rejects the responder", async () => {
-  const [connA, connB] = makeConnections();
+  const [connA, connB] = createMessagePipe();
   const responderPromise = exchangePayloads(connB, "responder", {
     hasData: false,
   });
   // Initiator sends garbage instead of a valid payload message.
-  connA.send({ unexpected: true });
+  await connA.send({ unexpected: true });
   await expect(responderPromise).rejects.toThrow();
 });
 
 test("exchangePayloads: rowIndices/rows length mismatch rejects the receiver", async () => {
-  const [connA, connB] = makeConnections();
+  const [connA, connB] = createMessagePipe();
   const initiatorPromise = exchangePayloads(connA, "initiator", {
     hasData: false,
   });
   // Responder sends a structurally valid message but with mismatched lengths.
-  connB.once("data", () => {
-    connB.send({
-      hasData: true,
-      columns: ["patient_id"],
-      rowIndices: [0, 1],
-      rows: [["P0"]], // only one row for two indices
-    });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id"],
+    rowIndices: [0, 1],
+    rows: [["P0"]], // only one row for two indices
   });
   await expect(initiatorPromise).rejects.toThrow();
 });
 
 test("exchangePayloads: send rejection rejects the initiator", async () => {
   const sendError = new Error("send failed");
-  const conn: Connection = {
-    on: () => conn,
-    once: () => conn,
-    removeListener: () => conn,
+  const conn: MessageConnection = {
     send: () => Promise.reject(sendError),
-    close: () => {},
-    takeBufferedError: () => undefined,
+    receive: () => new Promise<unknown>(() => {}),
+    close: () => Promise.resolve(),
   };
   await expect(
     exchangePayloads(conn, "initiator", { hasData: false }),
@@ -239,21 +227,15 @@ test("exchangePayloads: send rejection rejects the initiator", async () => {
 
 test("exchangePayloads: send rejection rejects the responder", async () => {
   const sendError = new Error("send failed");
-  let dataHandler: ((data: unknown) => void) | undefined;
-  const conn: Connection = {
-    on: () => conn,
-    once: (event, fn) => {
-      if (event === "data") dataHandler = fn as (data: unknown) => void;
-      return conn;
-    },
-    removeListener: () => conn,
+  const conn: MessageConnection = {
     send: () => Promise.reject(sendError),
-    close: () => {},
-    takeBufferedError: () => undefined,
+    receive: () => Promise.resolve({ hasData: false }),
+    close: () => Promise.resolve(),
   };
-  const promise = exchangePayloads(conn, "responder", { hasData: false });
-  dataHandler!({ hasData: false });
-  await expect(promise).rejects.toThrow("send failed");
+  // Responder receives first then sends; the send rejection surfaces.
+  await expect(
+    exchangePayloads(conn, "responder", { hasData: false }),
+  ).rejects.toThrow("send failed");
 });
 
 // --- buildOutputTable --------------------------------------------------------

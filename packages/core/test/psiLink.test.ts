@@ -7,14 +7,12 @@ import PSI from "@openmined/psi.js";
 import { PSIParticipant } from "../src/participant";
 import { linkViaPSI } from "../src/link";
 
-import { PassthroughConnection } from "./utils/passthroughConnection";
+import { createMessagePipe } from "../src/connection/messageConnection";
 import { sortAssociationTable } from "./utils/associationTable";
 
 const psiLibrary = await PSI();
 
-const serverConn = new PassthroughConnection();
-const clientConn = new PassthroughConnection(serverConn);
-serverConn.setOther(clientConn);
+const [serverConn, clientConn] = createMessagePipe();
 
 const server = new PSIParticipant("server", psiLibrary, {
   role: "starter",

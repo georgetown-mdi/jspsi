@@ -1,7 +1,8 @@
 import { hkdfDerive, toBase64Url } from "./utils/crypto.js";
 import { runSpake2 } from "./pake.js";
 
-import type { Connection, HandshakeRole } from "./types.js";
+import type { HandshakeRole } from "./types.js";
+import type { MessageConnection } from "./connection/messageConnection.js";
 import { PAKE_TOKEN_REGEX } from "./config/connection.js";
 import type { Authentication } from "./config/connection.js";
 
@@ -101,7 +102,7 @@ export async function deriveAeadKey(
  *                 messages).
  */
 export async function authenticateConnection(
-  conn: Connection,
+  conn: MessageConnection,
   authentication: Authentication,
   handshakeRole: HandshakeRole,
 ): Promise<AuthResult> {

@@ -12,8 +12,14 @@ import type { HandshakeRole } from "../types";
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
-/** 1 hour */
-const DEFAULT_TIME_TO_LIVE_MS = 1000 * 60 * 60;
+/**
+ * Default peer-inactivity budget (1 hour) used when `peerTimeoutMs` is not
+ * supplied in the connection options. Bounds how long this side waits for the
+ * peer before treating silence as a transport failure: it is the fallback both
+ * for the file-sync rendezvous time-to-live and for the CLI's
+ * {@link fromEventConnection} inactivity deadline.
+ */
+export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
 // Consecutive ENOENT from get() after exists() returned true indicates a
@@ -37,7 +43,7 @@ interface Events {
 
 interface Options {
   // Optional: when not supplied to the constructor, open() sets this from
-  // `config.options.peerTimeoutMs` (or DEFAULT_TIME_TO_LIVE_MS) so the budget
+  // `config.options.peerTimeoutMs` (or DEFAULT_PEER_TIMEOUT_MS) so the budget
   // is not consumed by the time between construction and synchronize().
   timeToLive?: Date;
   pollingFrequency: number;
@@ -280,7 +286,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // budget. An explicit timeToLive passed to the constructor (test path)
     // wins over both peerTimeoutMs and the default.
     if (this.options.timeToLive === undefined) {
-      const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_TIME_TO_LIVE_MS;
+      const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
       this.options.timeToLive = new Date(Date.now() + ttlMs);
     } else if (config.options?.peerTimeoutMs !== undefined) {
       this.options.timeToLive = new Date(

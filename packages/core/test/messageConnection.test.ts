@@ -1,16 +1,12 @@
 import { expect, test } from "vitest";
+import { z } from "zod";
 
 import {
   ConnectionError,
   createMessagePipe,
   fromEventConnection,
+  receiveParsed,
 } from "../src/connection/messageConnection";
-import {
-  preparePayload,
-  exchangePayloadsOverMessages,
-} from "../src/payloadExchange";
-
-import type { Metadata } from "../src/config/metadata";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
@@ -85,94 +81,6 @@ test("exceeding capacity fails the connection as a protocol violation", async ()
   expect((err as ConnectionError).kind).toBe("protocol");
 });
 
-// --- exchangePayloadsOverMessages --------------------------------------------
-
-const metaWithId: Metadata = [
-  { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
-  {
-    name: "patient_id",
-    type: "identifier",
-    role: "identifier",
-    isPayload: true,
-  },
-  { name: "diagnosis", type: "other", role: "payload", isPayload: true },
-];
-
-const metaNoId: Metadata = [
-  { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
-  { name: "diagnosis", type: "other", role: "payload", isPayload: true },
-];
-
-const rawRows = [
-  { ssn: "001", patient_id: "P0", diagnosis: "A" },
-  { ssn: "002", patient_id: "P1", diagnosis: "B" },
-  { ssn: "003", patient_id: "P2", diagnosis: "C" },
-  { ssn: "004", patient_id: "P3", diagnosis: "D" },
-];
-
-test("exchangePayloadsOverMessages: each party receives the other's payload", async () => {
-  const [connA, connB] = createMessagePipe();
-  const payloadA = preparePayload(rawRows, metaWithId, [
-    [0, 2],
-    [1, 3],
-  ]);
-  const payloadB = preparePayload(rawRows, metaNoId, [
-    [1, 3],
-    [0, 2],
-  ]);
-
-  const [receivedByA, receivedByB] = await Promise.all([
-    exchangePayloadsOverMessages(connA, "initiator", payloadA),
-    exchangePayloadsOverMessages(connB, "responder", payloadB),
-  ]);
-
-  expect(receivedByB.columns).toEqual(["patient_id", "diagnosis"]);
-  expect(receivedByB.rowIndices).toEqual([0, 2]);
-  expect(receivedByB.rows).toEqual([
-    ["P0", "A"],
-    ["P2", "C"],
-  ]);
-  expect(receivedByA.columns).toEqual(["diagnosis"]);
-  expect(receivedByA.rowIndices).toEqual([1, 3]);
-  expect(receivedByA.rows).toEqual([["B"], ["D"]]);
-});
-
-test("exchangePayloadsOverMessages: empty payloads from both parties", async () => {
-  const [connA, connB] = createMessagePipe();
-  const empty = preparePayload(rawRows, metaWithId, [[], []]);
-
-  const [a, b] = await Promise.all([
-    exchangePayloadsOverMessages(connA, "initiator", empty),
-    exchangePayloadsOverMessages(connB, "responder", empty),
-  ]);
-
-  expect(a).toEqual({ columns: [], rowIndices: [], rows: [] });
-  expect(b).toEqual({ columns: [], rowIndices: [], rows: [] });
-});
-
-test("exchangePayloadsOverMessages: malformed partner data rejects", async () => {
-  const [connA, connB] = createMessagePipe();
-  const initiator = exchangePayloadsOverMessages(connA, "initiator", {
-    hasData: false,
-  });
-  // Responder replies with garbage instead of a valid payload message.
-  await connB.receive();
-  await connB.send({ unexpected: true });
-  await expect(initiator).rejects.toThrow();
-});
-
-test("exchangePayloadsOverMessages: a mid-exchange transport drop rejects", async () => {
-  const [connA, connB] = createMessagePipe();
-  const responder = exchangePayloadsOverMessages(connB, "responder", {
-    hasData: false,
-  });
-  // Initiator never sends; the link drops instead.
-  await connA.close();
-  const err = await responder.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-});
-
 // --- fromEventConnection bridge ----------------------------------------------
 
 function makeEventConnections(): [
@@ -185,21 +93,16 @@ function makeEventConnections(): [
   return [a, b];
 }
 
-test("fromEventConnection: runs the exchange over an event-based Connection", async () => {
+test("fromEventConnection: relays messages over an event-based Connection", async () => {
   const [eventA, eventB] = makeEventConnections();
   const connA = fromEventConnection(eventA);
   const connB = fromEventConnection(eventB);
 
-  const payloadA = preparePayload(rawRows, metaWithId, [[0], [1]]);
-  const payloadB = preparePayload(rawRows, metaNoId, [[1], [0]]);
+  await connA.send({ from: "A" });
+  await connB.send({ from: "B" });
 
-  const [receivedByA, receivedByB] = await Promise.all([
-    exchangePayloadsOverMessages(connA, "initiator", payloadA),
-    exchangePayloadsOverMessages(connB, "responder", payloadB),
-  ]);
-
-  expect(receivedByB.columns).toEqual(["patient_id", "diagnosis"]);
-  expect(receivedByA.columns).toEqual(["diagnosis"]);
+  expect(await connB.receive()).toEqual({ from: "A" });
+  expect(await connA.receive()).toEqual({ from: "B" });
 });
 
 test("fromEventConnection: surfaces an error buffered before the bridge attached", async () => {
@@ -256,4 +159,71 @@ test("createMessagePipe: receive has no inactivity deadline", async () => {
   // Release the parked receive so it does not dangle past the test.
   await b.close();
   await parked;
+});
+
+// --- per-receive timeout -----------------------------------------------------
+
+test("receive(timeoutMs) shorter than the connection default fires and latches", async () => {
+  const [, eventB] = makeEventConnections();
+  const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 10_000 });
+  const err = await connB.receive(20).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  // min(10000, 20) = 20: the override won.
+  expect((err as ConnectionError).message).toContain("20ms");
+  // Latched terminal: later calls fail fast on the same error.
+  await expect(connB.receive()).rejects.toBeInstanceOf(ConnectionError);
+  await expect(connB.send("x")).rejects.toBeInstanceOf(ConnectionError);
+});
+
+test("receive(timeoutMs) longer than the connection default is capped by the default", async () => {
+  const [, eventB] = makeEventConnections();
+  const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 20 });
+  // Override is 10 s, but the 20 ms connection default is the ceiling.
+  const err = await connB.receive(10_000).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("20ms");
+});
+
+test("receive(timeoutMs) bounds a connection that has no inactivity default", async () => {
+  // createMessagePipe is unbounded; the override is the only deadline source,
+  // exercising armIdle's undefined-connection-default branch.
+  const [, b] = createMessagePipe();
+  const err = await b.receive(20).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("20ms");
+});
+
+// --- receiveParsed -----------------------------------------------------------
+
+test("receiveParsed: resolves with the validated message", async () => {
+  const [a, b] = createMessagePipe();
+  const schema = z.object({ n: z.number() });
+  const parked = receiveParsed(b, schema);
+  await a.send({ n: 42 });
+  expect(await parked).toEqual({ n: 42 });
+});
+
+test("receiveParsed: a malformed message throws a protocol ConnectionError", async () => {
+  const [a, b] = createMessagePipe();
+  const schema = z.object({ n: z.number() });
+  const parked = receiveParsed(b, schema);
+  await a.send({ n: "not a number" });
+  const err = await parked.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  // The validator's failure is preserved as the cause.
+  expect((err as ConnectionError).cause).toBeInstanceOf(z.ZodError);
+});
+
+test("receiveParsed: a transport drop surfaces as transport, not protocol", async () => {
+  const [a, b] = createMessagePipe();
+  const schema = z.object({ n: z.number() });
+  const parked = receiveParsed(b, schema);
+  await a.close();
+  const err = await parked.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
 });
