@@ -553,7 +553,7 @@ Channel-agnostic and channel-specific tuning parameters. A configuration warning
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `peer_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the partner before giving up; the effective limit is the minimum of this and the remaining PAKE token lifetime |
+| `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining PAKE token lifetime. |
 | `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait during each connection attempt to the primary exchange server |
 | `max_reconnect_attempts` | integer | 3 | Maximum number of times to attempt reopening a dropped connection before giving up |
 

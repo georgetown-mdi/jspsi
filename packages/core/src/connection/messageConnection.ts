@@ -87,9 +87,12 @@ export interface MessageConnection {
   close(): Promise<void>;
 }
 
-/** Handle a transport hands to the queue to push inbound events. */
+/** The transport's interface to push inbound events into the queue. */
 export interface TransportControls {
-  /** Enqueue one inbound message (or hand it to a parked {@link MessageConnection.receive}). */
+  /**
+   * Enqueue one inbound message (or hand it to a parked
+   * {@link MessageConnection.receive}).
+   */
   deliver: (message: unknown) => void;
   /** Latch a terminal error; idempotent after the first call. */
   fail: (error: ConnectionError) => void;
@@ -99,7 +102,10 @@ export interface TransportControls {
 export interface TransportHooks {
   send: (data: unknown) => void | Promise<void>;
   close: () => void | Promise<void>;
-  /** Run once after wiring is complete; safe to call {@link TransportControls} here. */
+  /**
+   * Run once after wiring is complete; safe to call {@link TransportControls}
+   * here.
+   */
   start?: () => void;
 }
 
