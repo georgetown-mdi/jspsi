@@ -2,6 +2,7 @@ import * as z from "zod";
 
 import type { Connection, HandshakeRole, AssociationTable } from "./types.js";
 import type { Metadata } from "./config/metadata.js";
+import type { MessageConnection } from "./connection/messageConnection.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -184,6 +185,35 @@ export async function exchangePayloads(
       conn.once("data", onData);
     });
   }
+}
+
+/** Parses one inbound payload-exchange message into a {@link PartnerPayload}. */
+function decodePayloadMessage(rawData: unknown): PartnerPayload {
+  const msg = payloadWireSchema.parse(rawData);
+  if (!msg.hasData) return { columns: [], rowIndices: [], rows: [] };
+  return { columns: msg.columns, rowIndices: msg.rowIndices, rows: msg.rows };
+}
+
+/**
+ * Pull-based counterpart to {@link exchangePayloads} over a
+ * {@link MessageConnection}. Behaviourally identical - initiator sends first,
+ * responder receives first then sends - but expressed as the linear
+ * conversation it is: every failure mode (transport error, malformed message,
+ * send rejection) surfaces as a rejection of the awaited call, so no listener
+ * registration, error buffering, or per-path cleanup is needed.
+ */
+export async function exchangePayloadsOverMessages(
+  conn: MessageConnection,
+  handshakeRole: HandshakeRole,
+  localPayload: PayloadWireMessage,
+): Promise<PartnerPayload> {
+  if (handshakeRole === "initiator") {
+    await conn.send(localPayload);
+    return decodePayloadMessage(await conn.receive());
+  }
+  const partnerPayload = decodePayloadMessage(await conn.receive());
+  await conn.send(localPayload);
+  return partnerPayload;
 }
 
 function quoteCsvField(value: string): string {
