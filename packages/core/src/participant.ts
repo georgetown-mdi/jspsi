@@ -17,7 +17,7 @@ const statusCompletedMessage = z.object({
 });
 
 const numberArrayMessage = z.array(z.number());
-const associationTableMessage = z.array(z.array(z.number()));
+const associationTableMessage = z.tuple([z.array(z.number()), z.array(z.number())]);
 
 const DEFAULT_VERBOSITY = 1;
 
