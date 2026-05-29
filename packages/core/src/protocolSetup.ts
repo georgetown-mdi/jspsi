@@ -40,6 +40,30 @@ export interface TermsExchangeResult {
 }
 
 /**
+ * Best-effort delivery of an abort decision to the partner. The send is wrapped
+ * so a transport failure coinciding with the abort condition is swallowed: the
+ * partner falls back to its own receive timeout, and the caller's subsequent
+ * throw - which carries the real diagnostic - is always what surfaces. Pass
+ * `localTerms` when aborting from the responder's message-2 slot, which must
+ * still carry `linkageTerms`; omit it for the initiator's decision-only frame.
+ */
+async function sendAbort(
+  conn: MessageConnection,
+  abortReasons: string[],
+  localTerms?: LinkageTerms,
+): Promise<void> {
+  try {
+    await conn.send(
+      localTerms !== undefined
+        ? { linkageTerms: localTerms, decision: "abort", abortReasons }
+        : { decision: "abort", abortReasons },
+    );
+  } catch {
+    /* swallow: see doc comment */
+  }
+}
+
+/**
  * Exchange {@link LinkageTerms} with a partner over an established
  * connection, validate compatibility, and obtain agreement from both parties to
  * proceed.
@@ -77,10 +101,7 @@ export async function exchangeTerms(
     try {
       partnerTerms = parseLinkageTerms(msg.linkageTerms);
     } catch (parseErr) {
-      await conn.send({
-        decision: "abort",
-        abortReasons: ["partner linkage terms failed to parse"],
-      });
+      await sendAbort(conn, ["partner linkage terms failed to parse"]);
       throw new Error(
         "partner linkage terms failed to parse: " +
           (parseErr instanceof Error ? parseErr.message : String(parseErr)),
@@ -90,7 +111,7 @@ export async function exchangeTerms(
     const { errors, warnings } = validateCompatibility(localTerms, partnerTerms);
 
     if (errors.length > 0) {
-      await conn.send({ decision: "abort", abortReasons: errors });
+      await sendAbort(conn, errors);
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
@@ -123,19 +144,7 @@ export async function exchangeTerms(
         : validateCompatibility(localTerms, partnerTerms!);
 
     if (errors.length > 0) {
-      // Abort delivery is best-effort: if the send fails (transport error
-      // coinciding with terms incompatibility), the partner hits the receive
-      // timeout. Swallow that failure so the local throw below — which carries
-      // the actual diagnostic — is always observed.
-      try {
-        await conn.send({
-          linkageTerms: localTerms,
-          decision: "abort",
-          abortReasons: errors,
-        });
-      } catch {
-        /* see comment above */
-      }
+      await sendAbort(conn, errors, localTerms);
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
