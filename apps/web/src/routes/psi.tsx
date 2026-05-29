@@ -42,6 +42,9 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
+import type { DataConnection } from "peerjs";
+import type Peer from "peerjs";
+
 import type {
   ExchangeResult,
   MessageConnection,
@@ -163,12 +166,43 @@ function Home() {
       setStageById("done");
     };
 
+    // Shared per-connection lifecycle for both roles: open a MessageConnection,
+    // run the exchange, surface the result or the failure, and always tear down.
+    // `psi` may still be loading - opening the connection first attaches the
+    // inbound listener (so the initiator's unprompted first frame is not
+    // dropped) while the WASM library finishes in parallel.
+    const runExchangeOn = async (
+      conn: DataConnection,
+      exchangeRole: "initiator" | "responder",
+      prepared: PreparedExchange,
+      psi: PSILibrary | Promise<PSILibrary>,
+      peer: Peer,
+    ) => {
+      let mc: MessageConnection | undefined;
+      try {
+        mc = await openPeerMessageConnection(conn);
+        const exchangeResult = await runExchange(mc, exchangeRole, prepared, {
+          psiLibrary: await psi,
+          onStage: setStageById,
+        });
+        finishExchange(exchangeResult, prepared);
+      } catch (error) {
+        handleFailure(error);
+      } finally {
+        peer.disconnect();
+        await mc?.close();
+      }
+    };
+
     if (role === "server") {
       setStageById("waiting for peer");
       waitForPeerId(session.uuid)
         .then(async (peerId) => {
-          const [psi, csvResult, [peer, conn]] = await Promise.all([
-            PSI() as Promise<PSILibrary>,
+          // Start the WASM load now, but do not let it gate opening the channel:
+          // the responder must attach its inbound listener before the initiator
+          // sends, which can happen before this load finishes.
+          const psi = PSI() as Promise<PSILibrary>;
+          const [csvResult, [peer, conn]] = await Promise.all([
             loadCSVFile(files[0]),
             openPeerConnection(peerId),
           ]);
@@ -189,25 +223,7 @@ function Home() {
             doneStage,
           ]);
 
-          let mc: MessageConnection | undefined;
-          try {
-            mc = await openPeerMessageConnection(conn);
-            const exchangeResult = await runExchange(
-              mc,
-              "responder",
-              prepared,
-              {
-                psiLibrary: psi,
-                onStage: setStageById,
-              },
-            );
-            finishExchange(exchangeResult, prepared);
-          } catch (error) {
-            handleFailure(error);
-          } finally {
-            peer.disconnect();
-            await mc?.close();
-          }
+          await runExchangeOn(conn, "responder", prepared, psi, peer);
         })
         .catch((error) => {
           handleFailure(error);
@@ -235,25 +251,14 @@ function Home() {
 
           const peer = await createAndSharePeerId(session);
 
-          peer.on("connection", (conn) => {
-            void (async () => {
-              let mc: MessageConnection | undefined;
-              try {
-                mc = await openPeerMessageConnection(conn);
-                const exchangeResult = await runExchange(
-                  mc,
-                  "initiator",
-                  prepared,
-                  { psiLibrary: psi, onStage: setStageById },
-                );
-                finishExchange(exchangeResult, prepared);
-              } catch (error) {
-                handleFailure(error);
-              } finally {
-                peer.disconnect();
-                await mc?.close();
-              }
-            })();
+          // once, not on: a single exchange runs per session, so a duplicate
+          // incoming connection must not spawn a concurrent runExchange. The
+          // trailing catch guards against a teardown rejection in the helper's
+          // finally escaping as an unhandled rejection.
+          peer.once("connection", (conn) => {
+            void runExchangeOn(conn, "initiator", prepared, psi, peer).catch(
+              handleFailure,
+            );
           });
         })
         .catch((error) => {
