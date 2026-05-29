@@ -123,7 +123,7 @@ export function InvitationTab() {
               </Text>
               <SegmentedControl
                 value={credential}
-                onChange={(value) => setCredential(value as Credential)}
+                onChange={(value) => setCredential(value)}
                 mb="xs"
                 data={[
                   {
