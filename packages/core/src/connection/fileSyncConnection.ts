@@ -812,10 +812,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `${message.length} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
-      // Track the .tmp before the write so cleanup() can sweep it if the
-      // process dies between put() and rename(); the rename removes the .tmp
-      // entry and replaces it with the final .json name.
-      this.responsibleFiles.add(tempFile);
       await this.client.put(Buffer.from(message), tempPath, {
         flags: "w",
         encoding: null,
@@ -823,11 +819,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       this.log.debug(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
       await this.client.rename(tempPath, outPath);
-      this.responsibleFiles.delete(tempFile);
       this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
-      this.responsibleFiles.delete(tempFile);
       if (err instanceof Error && err.cause === "usage") delete err.cause;
       throw err instanceof Error ? err : new Error(errMessage(err));
     }
