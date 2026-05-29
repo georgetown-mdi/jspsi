@@ -770,9 +770,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       throw new Error("not connected");
 
     const outPath = `${this.path}/${this.id}.json`;
-    // The in-flight write uses a `.tmp` extension, not `.json`, so a sync tool
-    // configured to watch `*.json` never matches the partial write before the
-    // atomic rename to the final `.json` name completes.
+    // A `.tmp` extension (not `.json`) keeps this in-flight write from matching
+    // a `*.json` sync-tool watch before the rename to the final name lands.
     const tempFile = `temp-${uuidv4()}.tmp`;
     const tempPath = `${this.path}/${tempFile}`;
 

@@ -398,6 +398,22 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
   const { client, files } = makeMockClient();
   const conn = makeConnectedConn(client);
 
+  // Capture the temp path the write actually produced so the cleanup
+  // assertion cannot pass vacuously: if a refactor stopped writing the temp
+  // file, tempPath stays undefined and the "was written" check below fails.
+  let tempPath: string | undefined;
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    await origPut(src, dest, opts);
+    tempPath = dest;
+  };
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
   client.rename = async () => {
     throw new Error("synthetic rename failure");
   };
@@ -406,7 +422,13 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
     "synthetic rename failure",
   );
 
-  // No .tmp residue on disk.
+  // The temp file was actually written (a .tmp, not a .json) ...
+  expect(tempPath).toBeDefined();
+  expect(tempPath!.endsWith(".tmp")).toBe(true);
+  // ... the catch swept exactly that file via safeDelete ...
+  expect(safeDeleted).toContain(tempPath!);
+  // ... and no .tmp residue remains on disk.
+  expect(files.has(tempPath!)).toBe(false);
   const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
   expect(tmpFiles).toEqual([]);
 });
