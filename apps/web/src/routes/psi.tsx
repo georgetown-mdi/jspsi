@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import {
   ActionIcon,
+  Alert,
   Code,
   Container,
   CopyButton,
@@ -33,6 +34,8 @@ import {
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
+import { openPeerMessageConnection } from "@psi/peerMessageConnection";
+import { waitForIncomingConnection } from "@psi/waitForConnection";
 
 import FileSelect from "@components/FileSelect";
 import SessionDetails from "@components/SessionDetails";
@@ -40,8 +43,14 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { DataConnection } from "peerjs";
+import type Peer from "peerjs";
+
+import type {
+  ExchangeResult,
+  MessageConnection,
+  PreparedExchange,
+} from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
 export const Route = createFileRoute("/psi")({
@@ -127,16 +136,30 @@ function Home() {
   const [submitted, setSubmitted] = useState(false);
   const [stageId, setStageById] = useState<string>("before start");
   const [resultURL, setResultURL] = useState<string>();
+  const [errorAlert, setErrorAlert] = useState<{
+    title: string;
+    message: string;
+  }>();
 
   const handleSubmit = () => {
     setSubmitted(true);
+    setErrorAlert(undefined);
+
+    const describeError = (error: unknown) =>
+      error instanceof Error ? error.message : String(error);
+
+    const handleFailure = (error: unknown) => {
+      console.error(error);
+      setErrorAlert({
+        title: "Exchange failed",
+        message: describeError(error),
+      });
+    };
 
     const finishExchange = (
-      conn: DataConnection,
       { associationTable, partnerPayload }: ExchangeResult,
       prepared: PreparedExchange,
     ) => {
-      conn.close();
       log.info("linkage complete, generating results file");
       const { headers, rows } = buildOutputTable(
         associationTable,
@@ -153,17 +176,75 @@ function Home() {
       setStageById("done");
     };
 
+    // Shared per-connection lifecycle for both roles: open a MessageConnection,
+    // run the exchange, surface the result or the failure, and always tear down.
+    // `psi` may still be loading - opening the connection first attaches the
+    // inbound listener (so the initiator's unprompted first frame is not
+    // dropped) while the WASM library finishes in parallel.
+    const runExchangeOn = async (
+      conn: DataConnection,
+      exchangeRole: "initiator" | "responder",
+      prepared: PreparedExchange,
+      // Either the still-loading library (server: passed before the WASM load
+      // resolves, so the inbound listener attaches first) or an already-loaded
+      // one (client: resolved before the connection handler runs). await covers
+      // both, so the union is intentional, not a dead branch.
+      psi: PSILibrary | Promise<PSILibrary>,
+      peer: Peer,
+    ) => {
+      let mc: MessageConnection | undefined;
+      try {
+        mc = await openPeerMessageConnection(conn);
+        const exchangeResult = await runExchange(mc, exchangeRole, prepared, {
+          psiLibrary: await psi,
+          onStage: setStageById,
+        });
+        // The privacy-sensitive exchange has completed by here; a failure
+        // building the local results file must not be reported as an exchange
+        // failure, or the user may needlessly re-run a PSI exchange that in
+        // fact already succeeded.
+        try {
+          finishExchange(exchangeResult, prepared);
+        } catch (error) {
+          console.error(error);
+          setErrorAlert({
+            title: "Results unavailable",
+            message:
+              "The linkage completed, but generating the results file failed: " +
+              describeError(error),
+          });
+        }
+      } catch (error) {
+        handleFailure(error);
+      } finally {
+        // Teardown must not throw: a rejection here would propagate past the
+        // handlers above and overwrite a more accurate alert (e.g. the
+        // "Results unavailable" set when only output generation failed).
+        try {
+          peer.disconnect();
+        } catch (teardownError) {
+          console.error(teardownError);
+        }
+        try {
+          await mc?.close();
+        } catch (teardownError) {
+          console.error(teardownError);
+        }
+      }
+    };
+
     if (role === "server") {
       setStageById("waiting for peer");
       waitForPeerId(session.uuid)
         .then(async (peerId) => {
-          const [psi, csvResult, [peer, conn]] = await Promise.all([
-            PSI() as Promise<PSILibrary>,
-            loadCSVFile(files[0]),
-            openPeerConnection(peerId),
-          ]);
-          conn.once("data", () => peer.disconnect());
-
+          // Load and prepare before dialing the peer. Opening the connection
+          // resolves a live Peer/DataConnection that only runExchangeOn tears
+          // down, so a CSV or standardization failure must happen before it
+          // exists, not after, or the connection leaks. The WASM load still
+          // runs in parallel and is awaited (with the inbound listener already
+          // attached) inside runExchangeOn.
+          const psi = PSI() as Promise<PSILibrary>;
+          const csvResult = await loadCSVFile(files[0]);
           const rawRows = csvResult.data as Array<Record<string, string>>;
           const prepared = prepareForExchange(
             {}, // no explicit spec; infer from input
@@ -180,19 +261,11 @@ function Home() {
             doneStage,
           ]);
 
-          const exchangeResult = await runExchange(
-            conn,
-            "responder",
-            prepared,
-            {
-              psiLibrary: psi,
-              onStage: setStageById,
-            },
-          );
-          finishExchange(conn, exchangeResult, prepared);
+          const [peer, conn] = await openPeerConnection(peerId);
+          await runExchangeOn(conn, "responder", prepared, psi, peer);
         })
         .catch((error) => {
-          console.error(error);
+          handleFailure(error);
         });
     } else {
       // role is client
@@ -217,25 +290,22 @@ function Home() {
 
           const peer = await createAndSharePeerId(session);
 
-          peer.on("connection", (conn) => {
-            conn.on("open", async () => {
-              conn.once("data", () => peer.disconnect());
-              try {
-                const exchangeResult = await runExchange(
-                  conn,
-                  "initiator",
-                  prepared,
-                  { psiLibrary: psi, onStage: setStageById },
-                );
-                finishExchange(conn, exchangeResult, prepared);
-              } catch (error) {
-                console.error(error);
-              }
-            });
-          });
+          try {
+            // A single exchange runs per session: take the first incoming
+            // connection, bounded so a peer that never dials in surfaces an
+            // error instead of hanging on "Confirming protocol" forever.
+            const conn = await waitForIncomingConnection(peer);
+            await runExchangeOn(conn, "initiator", prepared, psi, peer);
+          } catch (error) {
+            // Reached only when no peer dialed in within the deadline;
+            // runExchangeOn handles and tears down its own failures. Drop the
+            // peer we created so the timed-out attempt does not leak it.
+            handleFailure(error);
+            peer.disconnect();
+          }
         })
         .catch((error) => {
-          console.error(error);
+          handleFailure(error);
         });
     }
   };
@@ -259,6 +329,11 @@ function Home() {
             resultsFileURL={resultURL}
           />
         </Group>
+        {errorAlert && (
+          <Alert color="red" title={errorAlert.title}>
+            {errorAlert.message}
+          </Alert>
+        )}
         {url && (
           <Paper>
             <Title order={2}>Sharable Link</Title>

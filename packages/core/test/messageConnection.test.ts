@@ -1,12 +1,15 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import {
   ConnectionError,
+  QueuedMessageConnection,
   createMessagePipe,
   fromEventConnection,
   receiveParsed,
 } from "../src/connection/messageConnection";
+
+import type { TransportControls } from "../src/connection/messageConnection";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
@@ -88,6 +91,120 @@ test("exceeding capacity fails the connection as a protocol violation", async ()
   const err = await b.receive().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+// --- finish (drain-then-fail half-close) -------------------------------------
+
+function makeQueued(options?: {
+  capacity?: number;
+  inactivityTimeoutMs?: number;
+}): {
+  conn: QueuedMessageConnection;
+  controls: TransportControls;
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+} {
+  let controls!: TransportControls;
+  const send = vi.fn();
+  const close = vi.fn();
+  const conn = new QueuedMessageConnection((c) => {
+    controls = c;
+    return { send, close };
+  }, options);
+  return { conn, controls, send, close };
+}
+
+test("finish drains a buffered frame before surfacing the transport error", async () => {
+  const { conn, controls, close } = makeQueued();
+  controls.deliver("final"); // buffered, no parked waiter
+  controls.finish(new ConnectionError("peer closed", "transport"));
+
+  // The buffered frame is still delivered...
+  expect(await conn.receive()).toBe("final");
+  // ...and only the next receive surfaces the deferred transport error.
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  // Teardown runs exactly once, on promotion.
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+test("finish with an empty queue fails immediately, like fail", async () => {
+  const { conn, controls, close } = makeQueued();
+  controls.finish(new ConnectionError("peer closed", "transport"));
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+test("finish rejects a parked receive immediately", async () => {
+  const { conn, controls } = makeQueued();
+  const parked = conn.receive();
+  controls.finish(new ConnectionError("peer closed", "transport"));
+  const err = await parked.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+});
+
+test("inbound after finish is ignored; the drained frame is the last one", async () => {
+  const { conn, controls } = makeQueued();
+  controls.deliver("keep");
+  controls.finish(new ConnectionError("peer closed", "transport"));
+  controls.deliver("dropped"); // a half-close is pending: ignored
+  expect(await conn.receive()).toBe("keep");
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect((err as ConnectionError).kind).toBe("transport");
+});
+
+test("a second finish is ignored; the first deferred error wins", async () => {
+  const { conn, controls } = makeQueued();
+  controls.deliver("final");
+  controls.finish(new ConnectionError("first", "transport"));
+  controls.finish(new ConnectionError("second", "security")); // ignored
+
+  expect(await conn.receive()).toBe("final");
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toBe("first");
+});
+
+test("send is rejected while a half-close is pending, without writing", async () => {
+  const { conn, controls, send } = makeQueued();
+  controls.deliver("final"); // buffered, half-close pending behind it
+  controls.finish(new ConnectionError("peer closed", "transport"));
+
+  const err = await conn.send("x").catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect(send).not.toHaveBeenCalled();
+  // The buffered frame is still drainable after the rejected send.
+  expect(await conn.receive()).toBe("final");
+});
+
+test("a close racing the final drain still surfaces the transport error", async () => {
+  const { conn, controls } = makeQueued();
+  controls.deliver("final");
+  controls.finish(new ConnectionError("peer closed", "transport"));
+  await conn.close(); // races ahead of draining the final frame
+
+  // The buffered frame still drains...
+  expect(await conn.receive()).toBe("final");
+  // ...and the deferred error surfaces as transport, not a generic close/usage.
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+});
+
+test("a clean close requests a flush; an error teardown does not", async () => {
+  const clean = makeQueued();
+  await clean.conn.close();
+  expect(clean.close).toHaveBeenCalledWith({ flush: true });
+
+  const failed = makeQueued();
+  failed.controls.fail(new ConnectionError("boom", "transport"));
+  await failed.conn.receive().catch(() => undefined);
+  expect(failed.close).toHaveBeenCalledWith();
 });
 
 // --- fromEventConnection bridge ----------------------------------------------
