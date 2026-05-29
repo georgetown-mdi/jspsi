@@ -297,8 +297,8 @@ test("rejects before opening a connection when keyFilePath parent is a dangling 
 test("rejects and cleans up when conn.open() itself throws (opened=false cleanup path)", async () => {
   // Uses a path that does not exist so that LocalFSClient.connect() ->
   // fs.access() throws ENOENT. open() rejects before opened=true, exercising
-  // the doCleanup branch where close() throws "not connected" and is swallowed
-  // at debug level.
+  // the doCleanup branch where close() runs idempotently on a connection that
+  // was never opened (no teardown to perform).
   await expect(
     runProtocol(
       {

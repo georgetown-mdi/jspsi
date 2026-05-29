@@ -338,17 +338,18 @@ export async function runProtocol(
     }
     if (opened) log.info("closing connection");
     // cleanup() and close() are intentionally called even when opened is false:
-    // cleanup() is a no-op on an unconnected instance; close() throws "not
-    // connected" which the catch below handles. This covers any partial state
-    // left by a failed open() call.
+    // both are idempotent no-ops on an unconnected instance, covering any
+    // partial state left by a failed open() call. (close() now also stops the
+    // poller and sweeps responsible files, so the preceding cleanup() is
+    // redundant but harmless.)
     await conn.cleanup().catch((err: unknown) => {
       log.debug("conn.cleanup() during cleanup:", err);
     });
     await conn.close().catch((err: unknown) => {
       // When the connection was open, a close failure is user-visible: the
       // transport may not have terminated cleanly (e.g. SSH session timeout).
-      // When it was never opened, "not connected" is the expected throw and
-      // is logged at debug to avoid spurious noise.
+      // close() is idempotent and does not throw on an unopened instance, so
+      // the else branch is only a defensive fallback for an unexpected error.
       if (opened) {
         log.warn("failed to close connection during cleanup:", err);
       } else {

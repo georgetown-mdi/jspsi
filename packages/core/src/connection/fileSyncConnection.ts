@@ -306,15 +306,36 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
   }
 
+  /**
+   * Tears the connection down in full: stops the poll loop, sweeps the files
+   * this side is responsible for, then ends the underlying client. Ordering is
+   * load-bearing - the poller must stop before the client is ended (or its next
+   * cycle would run against a dead client and emit a spurious error), and
+   * cleanup must run before the client is ended (it deletes remote files
+   * through that client). Idempotent: safe to call repeatedly and on a
+   * connection that was never opened.
+   */
   async close() {
-    if (!this.connected || this.path === undefined)
-      throw new Error("not connected");
+    this.stop();
 
-    this.log.debug(`[${this.role}] closing connection`);
-    const result = await this.client.end();
-    this.connected = false;
+    // Best-effort sweep: a delete failure must not stop us from ending the
+    // client, so it is logged rather than propagated.
+    if (this.path !== undefined) {
+      try {
+        await this.cleanup();
+      } catch (err: unknown) {
+        this.log.debug(
+          `[${this.role}] cleanup during close: ${errMessage(err)}`,
+        );
+      }
+    }
+
+    if (this.connected) {
+      this.log.debug(`[${this.role}] closing connection`);
+      await this.client.end();
+      this.connected = false;
+    }
     this.path = undefined;
-    return result;
   }
 
   /**
