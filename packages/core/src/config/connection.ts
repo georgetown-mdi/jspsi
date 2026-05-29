@@ -328,11 +328,21 @@ export interface FileSyncOptions extends SharedOptions {
    * 100.
    */
   pollIntervalMs?: number;
+  /**
+   * When `true`, each outgoing message filename also encodes a UTC timestamp
+   * and a per-session sequence number, so filename-based logging can capture
+   * when a file was written even in sync-mediated environments where the sync
+   * tool stamps files with the transfer time rather than the original creation
+   * time; default: `false`. With it unset, message filenames carry only the
+   * declared byte count (`<id>-<byteCount>.json`).
+   */
+  timestampInFilename?: boolean;
 }
 
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z.object({
   ...sharedOptionsFields,
   pollIntervalMs: z.int().nonnegative().optional(),
+  timestampInFilename: z.boolean().optional(),
 });
 
 // --- Connection config -------------------------------------------------------

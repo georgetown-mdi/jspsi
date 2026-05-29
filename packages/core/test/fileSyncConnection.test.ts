@@ -17,7 +17,22 @@ function makeMockClient(): {
   const client: FileTransportClient = {
     connect: async () => {},
     end: async () => {},
-    list: async (): Promise<FileInfo[]> => [],
+    // Reflect the in-memory store so send()/poll(), which now detect files via
+    // list() pattern scans, see the same state exists()/get() do. Returns
+    // direct children of `dir`, with `size` taken from the buffer length.
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...files.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
     get: async (path: string) => {
       const data = files.get(path);
       if (!data) throw new Error(`${path}: not found`);
@@ -108,13 +123,16 @@ test("close() sweeps responsible files and ends the client, idempotently", async
   const conn = makeConnectedConn(client);
   // send() records the outbound file as one this side is responsible for.
   await conn.send({ hello: 1 });
-  expect(files.has(`/test/${conn.id}.json`)).toBe(true);
+  const messagePath = [...files.keys()].find((p) =>
+    new RegExp(`^/test/${conn.id}-\\d+\\.json$`).test(p),
+  );
+  expect(messagePath).toBeDefined();
 
   await conn.close();
 
   expect(ended).toBe(true);
-  expect(deleted).toContain(`/test/${conn.id}.json`);
-  expect(files.has(`/test/${conn.id}.json`)).toBe(false);
+  expect(deleted).toContain(messagePath);
+  expect(files.has(messagePath!)).toBe(false);
 
   // A second close neither throws nor re-ends the client.
   ended = false;
@@ -124,11 +142,11 @@ test("close() sweeps responsible files and ends the client, idempotently", async
 
 test("close() stops a running poller", async () => {
   const { client } = makeMockClient();
-  let existsCalls = 0;
-  const origExists = client.exists;
-  client.exists = async (p: string) => {
-    existsCalls++;
-    return origExists(p);
+  let listCalls = 0;
+  const origList = client.list;
+  client.list = async (p: string) => {
+    listCalls++;
+    return origList(p);
   };
   const conn = makeConnectedConn(client, { pollingFrequency: 5 });
   conn.peerId = "peer-test";
@@ -136,9 +154,9 @@ test("close() stops a running poller", async () => {
   await new Promise((r) => setTimeout(r, 25));
   await conn.close();
 
-  const callsAfterClose = existsCalls;
+  const callsAfterClose = listCalls;
   await new Promise((r) => setTimeout(r, 25));
-  expect(existsCalls).toBe(callsAfterClose);
+  expect(listCalls).toBe(callsAfterClose);
 });
 
 // --- buffered error ----------------------------------------------------------
@@ -357,7 +375,26 @@ test("send writes the message file to the store", async () => {
 
   await conn.send({ hello: "world" });
 
-  expect(files.has(`/test/${conn.id}.json`)).toBe(true);
+  // Default (timestampInFilename unset): `<id>-<byteCount>.json`.
+  const written = [...files.keys()].filter((p) =>
+    new RegExp(`^/test/${conn.id}-\\d+\\.json$`).test(p),
+  );
+  expect(written).toHaveLength(1);
+});
+
+test("send encodes the exact serialized byte count in the filename", async () => {
+  const { client, files } = makeMockClient();
+  const conn = makeConnectedConn(client);
+
+  await conn.send({ hello: "world" });
+
+  const [written] = [...files.entries()].filter(([p]) =>
+    new RegExp(`^/test/${conn.id}-\\d+\\.json$`).test(p),
+  );
+  expect(written).toBeDefined();
+  const [path, buf] = written;
+  const declared = Number(path.slice(0, -".json".length).split("-").at(-1));
+  expect(declared).toBe(buf.length);
 });
 
 test("send writes the in-flight file with a .tmp extension and renames to .json", async () => {
@@ -386,7 +423,10 @@ test("send writes the in-flight file with a .tmp extension and renames to .json"
   expect(putDests[0].endsWith(".tmp")).toBe(true);
   expect(putDests[0].endsWith(".json")).toBe(false);
 
-  expect(renameTargets).toEqual([`/test/${conn.id}.json`]);
+  expect(renameTargets).toHaveLength(1);
+  expect(renameTargets[0]).toMatch(
+    new RegExp(`^/test/${conn.id}-\\d+\\.json$`),
+  );
 });
 
 test("send removes the .tmp file in-process when the rename fails", async () => {
@@ -440,8 +480,9 @@ test("send waits for a previous unconsumed message before writing the next", asy
   const conn = makeConnectedConn(client);
 
   // Simulate a message from this connection already sitting in the store
-  // (e.g. the peer's poller hasn't run yet).
-  const outPath = `/test/${conn.id}.json`;
+  // (e.g. the peer's poller hasn't run yet). The exact byte count is
+  // irrelevant; send() detects any `<id>-*.json` it still owns.
+  const outPath = `/test/${conn.id}-99.json`;
   files.set(outPath, Buffer.from(JSON.stringify({ stale: true })));
 
   // After 50 ms, simulate the peer consuming (deleting) the stale message.
@@ -466,7 +507,7 @@ test("send times out when the previous message is never consumed", async () => {
   });
 
   // Plant a stale message that nobody will ever delete.
-  const outPath = `/test/${conn.id}.json`;
+  const outPath = `/test/${conn.id}-99.json`;
   files.set(outPath, Buffer.from(JSON.stringify({ stale: true })));
 
   await expect(conn.send({ next: true })).rejects.toThrow("timed out");
@@ -474,55 +515,58 @@ test("send times out when the previous message is never consumed", async () => {
 
 // --- TOCTOU race: ENOENT from get() ------------------------------------------
 
-test("poll does not emit error when get() throws ENOENT after a successful exists()", async () => {
-  // Simulate the TOCTOU window: exists() returns true, but by the time get()
-  // runs the peer has already deleted the file (their cleanup() raced with our
-  // poll()). The poller must swallow ENOENT and reschedule rather than
+test("poll does not emit error when get() throws ENOENT after list() surfaced the file", async () => {
+  // Simulate the TOCTOU window: list() surfaces the peer's message file, but by
+  // the time get() runs the peer has already deleted it (their cleanup() raced
+  // with our poll()). The poller must swallow ENOENT and reschedule rather than
   // emitting "error" and killing the connection.
   let getCount = 0;
   const { client } = makeMockClient();
-  const originalGet = client.get.bind(client);
-  let existsCount = 0;
-  client.exists = async () => {
-    existsCount++;
-    // Return true once so poll() attempts get(); false afterwards.
-    return existsCount === 1;
+  const peerId = "peer-test";
+  let listCount = 0;
+  // Surface a matching message file once (size matches the declared count so
+  // poll() proceeds to get()); empty afterwards.
+  client.list = async () => {
+    listCount++;
+    return listCount === 1
+      ? [{ name: `${peerId}-5.json`, modifyTime: 0, size: 5 }]
+      : [];
   };
-  client.get = async (p, opts) => {
+  client.get = async (p) => {
     if (++getCount === 1) {
       throw Object.assign(
         new Error(`ENOENT: no such file or directory, open '${p}'`),
         { code: "ENOENT" },
       );
     }
-    return originalGet(p, opts);
+    throw new Error("unexpected second get()");
   };
 
   const conn = makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = "peer-test";
+  conn.peerId = peerId;
 
   const errors: unknown[] = [];
   conn.on("error", (err) => errors.push(err));
 
-  // Resolved by exists() on its 3rd call, confirming the poller rescheduled at
-  // least twice after the ENOENT — without relying on a fixed wall-clock wait.
-  let notifyThirdExists!: () => void;
-  const thirdExists = new Promise<void>((r) => {
-    notifyThirdExists = r;
+  // Resolved on list()'s 3rd call, confirming the poller rescheduled at least
+  // twice after the ENOENT — without relying on a fixed wall-clock wait.
+  let notifyThirdList!: () => void;
+  const thirdList = new Promise<void>((r) => {
+    notifyThirdList = r;
   });
-  const origExists = client.exists.bind(client);
-  client.exists = async (p: string) => {
-    const result = await origExists(p);
-    if (existsCount === 3) notifyThirdExists();
+  const origList = client.list.bind(client);
+  client.list = async (p: string) => {
+    const result = await origList(p);
+    if (listCount === 3) notifyThirdList();
     return result;
   };
 
   conn.start();
   await Promise.race([
-    thirdExists,
+    thirdList,
     new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error("timed out waiting for 3rd exists() call")),
+        () => reject(new Error("timed out waiting for 3rd list() call")),
         2_000,
       ),
     ),
@@ -533,36 +577,38 @@ test("poll does not emit error when get() throws ENOENT after a successful exist
   // get() was called exactly once (on the ENOENT-throwing poll cycle).
   expect(getCount).toBe(1);
   // The poller rescheduled and ran additional cycles after the ENOENT.
-  expect(existsCount).toBeGreaterThan(1);
+  expect(listCount).toBeGreaterThan(1);
 });
 
 test("poll delivers a subsequent valid message after swallowing an ENOENT", async () => {
   const { client, files } = makeMockClient();
   const originalGet = client.get.bind(client);
-  let existsCallCount = 0;
   let getCount = 0;
   const peerId = "peer-test";
-  const peerPath = `/test/${peerId}.json`;
+  const validMessage = Buffer.from(
+    JSON.stringify({
+      ts: 1,
+      seq: 0,
+      type: "Object",
+      payload: { hello: "world" },
+    }),
+  );
+  const peerName = `${peerId}-${validMessage.length}.json`;
+  const peerPath = `/test/${peerName}`;
 
-  client.exists = async (p: string) => {
-    existsCallCount++;
-    if (existsCallCount === 1) return true; // triggers ENOENT on get()
-    if (existsCallCount === 3) {
-      // Plant a valid message on the third poll cycle, after the ENOENT.
-      files.set(
-        peerPath,
-        Buffer.from(
-          JSON.stringify({
-            ts: Date.now(),
-            seq: 0,
-            type: "Object",
-            payload: { hello: "world" },
-          }),
-        ),
-      );
-      return true;
+  let listCount = 0;
+  client.list = async () => {
+    listCount++;
+    // First cycle surfaces a phantom file (get() throws ENOENT); second cycle
+    // is empty (resets the consecutive-ENOENT counter); third cycle surfaces a
+    // real message whose on-disk size matches its declared byte count.
+    if (listCount === 1)
+      return [{ name: `${peerId}-1.json`, modifyTime: 0, size: 1 }];
+    if (listCount >= 3) {
+      if (!files.has(peerPath)) files.set(peerPath, validMessage);
+      return [{ name: peerName, modifyTime: 0, size: validMessage.length }];
     }
-    return files.has(p);
+    return [];
   };
   client.get = async (p: string, opts?: unknown) => {
     if (++getCount === 1)
@@ -604,11 +650,14 @@ test("poll delivers a subsequent valid message after swallowing an ENOENT", asyn
 });
 
 test("poll emits error when ENOENT threshold is reached on consecutive poll cycles", async () => {
-  // exists() always returns true; get() always throws ENOENT. After 3
-  // consecutive ENOENT cycles the poller must emit an error instead of
-  // warning indefinitely.
+  // list() always surfaces a matching file (size matches declared count);
+  // get() always throws ENOENT. After 3 consecutive ENOENT cycles the poller
+  // must emit an error instead of warning indefinitely.
   const { client } = makeMockClient();
-  client.exists = async () => true;
+  const peerId = "peer-test";
+  client.list = async () => [
+    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+  ];
   client.get = async (p) => {
     throw Object.assign(
       new Error(`ENOENT: no such file or directory, open '${p}'`),
@@ -617,7 +666,7 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
   };
 
   const conn = makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = "peer-test";
+  conn.peerId = peerId;
 
   const errors: unknown[] = [];
   // Resolved by the error handler so the test waits only as long as necessary
@@ -647,13 +696,14 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
   expect(errors).toHaveLength(1);
 });
 
-test("poll emits error immediately when exists() throws ENOENT (not a TOCTOU race)", async () => {
-  // reachedGet is false when exists() throws, so ENOENT from exists() is a
-  // hard error that must be emitted immediately — not tolerated as a TOCTOU race.
+test("poll emits error immediately when list() throws ENOENT (not a TOCTOU race)", async () => {
+  // reachedGet is false when list() throws, so ENOENT from the detection scan
+  // is a hard error that must be emitted immediately — not tolerated as a
+  // TOCTOU race.
   const { client } = makeMockClient();
-  client.exists = async (p) => {
+  client.list = async (p) => {
     throw Object.assign(
-      new Error(`ENOENT: no such file or directory, open '${p}'`),
+      new Error(`ENOENT: no such file or directory, scandir '${p}'`),
       { code: "ENOENT" },
     );
   };
@@ -735,8 +785,8 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
     listCallCount++;
     if (listCallCount === 1) return []; // initial check: directory is clean
     return [
-      { name: myHelloName, modifyTime: mtime },
-      { name: peerHelloName, modifyTime: mtime },
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -791,8 +841,8 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
     listCallCount++;
     if (listCallCount === 1) return []; // initial check: directory is clean
     return [
-      { name: myHelloName, modifyTime: mtime },
-      { name: peerHelloName, modifyTime: mtime },
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -839,8 +889,8 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
     listCallCount++;
     if (listCallCount === 1) return [];
     return [
-      { name: myHelloName, modifyTime: mtime },
-      { name: peerHelloName, modifyTime: mtime },
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -888,8 +938,8 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
     listCallCount++;
     if (listCallCount === 1) return [];
     return [
-      { name: myHelloName, modifyTime: mtime },
-      { name: peerHelloName, modifyTime: mtime },
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -965,9 +1015,9 @@ test("synchronize() resolves cleanly when it observes a wave file already create
     // Subsequent listings expose the peer hello and the peer-created wave.
     if (listCallCount === 1) return [];
     return [
-      { name: myHelloName, modifyTime: mtime },
-      { name: peerHelloName, modifyTime: mtime },
-      { name: waveName, modifyTime: mtime },
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -1013,8 +1063,8 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
     listCallCount++;
     if (listCallCount === 1) return []; // initial check
     return [
-      { name: myHelloName, modifyTime: mtime },
-      { name: peerHelloName, modifyTime: mtime },
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
   // Default mock createExclusive succeeds (no EEXIST) — this conn is the
@@ -1070,8 +1120,8 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
       // This side's own hello carries the EARLIER timestamp; under a
       // modifyTime tiebreaker that would mark this side as "arrived first".
       return [
-        { name: myHelloName, modifyTime: 1000 },
-        { name: peerHelloName, modifyTime: 5000 },
+        { name: myHelloName, modifyTime: 1000, size: 0 },
+        { name: peerHelloName, modifyTime: 5000, size: 0 },
       ];
     };
 
@@ -1113,7 +1163,9 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}.hello`;
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
-  client.list = async () => [{ name: peerHelloName, modifyTime: Date.now() }];
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
 
   await conn.synchronize();
 
@@ -1137,7 +1189,9 @@ test("synchronize() joiner branch: leaves connection unsynchronized when put fai
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}.hello`;
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
-  client.list = async () => [{ name: peerHelloName, modifyTime: Date.now() }];
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
   // delete succeeds (default mock behavior); put rejects with a synthetic
   // transport error.
   client.put = async () => {
@@ -1158,28 +1212,30 @@ test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of re
   // resets), then two more ENOENTs. Four total ENOENTs — but split across two
   // groups — must never reach the threshold and must not emit an error.
   const { client } = makeMockClient();
-  let existsCallCount = 0;
+  const peerId = "peer-test";
+  let listCallCount = 0;
   let getCount = 0;
 
   let resolveDone!: () => void;
-  // Resolves once exists() is called a 6th time, confirming all 5 expected
-  // poll cycles (including both ENOENT groups and the reset cycle) are done.
+  // Resolves once list() is called a 6th time, confirming all 5 expected poll
+  // cycles (including both ENOENT groups and the reset cycle) are done.
   const cyclesDone = new Promise<void>((resolve) => {
     resolveDone = resolve;
   });
 
-  client.exists = async () => {
-    existsCallCount++;
-    // Cycles 1–2: true → ENOENT on get (count reaches 2, below threshold 3)
-    // Cycle 3: false → clean poll, counter resets to 0
-    // Cycles 4–5: true → ENOENT on get (count reaches 2 again, still below 3)
-    if (existsCallCount === 6) resolveDone();
-    return (
-      existsCallCount === 1 ||
-      existsCallCount === 2 ||
-      existsCallCount === 4 ||
-      existsCallCount === 5
-    );
+  const match = [{ name: `${peerId}-5.json`, modifyTime: 0, size: 5 }];
+  client.list = async () => {
+    listCallCount++;
+    // Cycles 1-2: match -> ENOENT on get (count reaches 2, below threshold 3)
+    // Cycle 3: empty -> clean poll, counter resets to 0
+    // Cycles 4-5: match -> ENOENT on get (count reaches 2 again, still below 3)
+    if (listCallCount === 6) resolveDone();
+    return listCallCount === 1 ||
+      listCallCount === 2 ||
+      listCallCount === 4 ||
+      listCallCount === 5
+      ? match
+      : [];
   };
   client.get = async (p) => {
     getCount++;
@@ -1190,7 +1246,7 @@ test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of re
   };
 
   const conn = makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = "peer-test";
+  conn.peerId = peerId;
 
   const errors: unknown[] = [];
   conn.on("error", (err) => errors.push(err));
@@ -1208,4 +1264,209 @@ test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of re
   // consecutive ENOENTs occurred, so no error should be emitted.
   expect(getCount).toBe(4);
   expect(errors).toHaveLength(0);
+});
+
+// --- message filename format -------------------------------------------------
+
+// Drives a poller until `signal` resolves or a safety timeout fires, then
+// stops it. Keeps the message-format tests free of repeated race scaffolding.
+async function runPoller(
+  conn: FileSyncConnection,
+  signal: Promise<void>,
+): Promise<void> {
+  conn.start();
+  await Promise.race([signal, new Promise<void>((r) => setTimeout(r, 2_000))]);
+  conn.stop();
+}
+
+test("send filename is <id>-<byteCount>.json when timestampInFilename is unset", async () => {
+  const { client, files } = makeMockClient();
+  const conn = makeConnectedConn(client);
+
+  await conn.send({ hello: "world" });
+
+  const names = [...files.keys()].map((p) => p.slice("/test/".length));
+  expect(names).toHaveLength(1);
+  // Exactly two segments around the id: `<uuid>-<digits>.json`, no timestamp
+  // or counter inserted.
+  expect(names[0]).toMatch(new RegExp(`^${conn.id}-\\d+\\.json$`));
+});
+
+test("send filename encodes timestamp and zero-padded counter when timestampInFilename is true", async () => {
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+
+  await conn.send({ first: true });
+  const firstName = [...files.keys()][0].slice("/test/".length);
+  // <id>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>.json; counter starts at 000.
+  expect(firstName).toMatch(
+    new RegExp(`^${conn.id}-\\d{8}T\\d{6}-000-\\d+\\.json$`),
+  );
+  // The last segment is the exact serialized byte count.
+  const firstBuf = files.get(`/test/${firstName}`)!;
+  expect(Number(firstName.slice(0, -".json".length).split("-").at(-1))).toBe(
+    firstBuf.length,
+  );
+
+  // Simulate the peer consuming the first message, then send again: the
+  // per-session counter advances to 001.
+  files.clear();
+  await conn.send({ second: true });
+  const secondName = [...files.keys()][0].slice("/test/".length);
+  expect(secondName).toMatch(
+    new RegExp(`^${conn.id}-\\d{8}T\\d{6}-001-\\d+\\.json$`),
+  );
+});
+
+test("poll waits while the file is partially synced and reads it once the size matches", async () => {
+  const { client, files } = makeMockClient();
+  const peerId = "peer-partial";
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { value: 42 } }),
+  );
+  const name = `${peerId}-${message.length}.json`;
+  const fullPath = `/test/${name}`;
+
+  let listCount = 0;
+  client.list = async () => {
+    listCount++;
+    // First two cycles: the file is present but not fully synced. It reports a
+    // smaller size and is deliberately absent from the store, so any premature
+    // get() would throw "not found" and surface as an error below.
+    if (listCount <= 2)
+      return [{ name, modifyTime: 0, size: message.length - 5 }];
+    files.set(fullPath, message);
+    return [{ name, modifyTime: 0, size: message.length }];
+  };
+
+  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+  conn.on("error", (err) => errors.push(err));
+
+  await runPoller(conn, delivered);
+
+  expect(errors).toHaveLength(0);
+  expect(received).toHaveLength(1);
+  expect((received[0] as Record<string, unknown>)["value"]).toBe(42);
+  // The reader did not act on either partial-sync cycle.
+  expect(listCount).toBeGreaterThanOrEqual(3);
+});
+
+test("poll ignores message files belonging to a different peer", async () => {
+  const { client } = makeMockClient();
+  const peerId = "peer-a";
+
+  let listCount = 0;
+  let notifyEnough!: () => void;
+  const enoughCycles = new Promise<void>((r) => (notifyEnough = r));
+  // Only a different peer's message file is present; it pattern-matches
+  // `*-<count>.json` but not our peer-scoped `<peerId>-` prefix.
+  client.list = async () => {
+    listCount++;
+    if (listCount >= 4) notifyEnough();
+    return [{ name: "peer-b-7.json", modifyTime: 0, size: 7 }];
+  };
+  let getCalled = false;
+  client.get = async () => {
+    getCalled = true;
+    return Buffer.alloc(0) as Buffer<ArrayBufferLike>;
+  };
+
+  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  conn.on("data", (msg) => received.push(msg));
+  conn.on("error", (err) => errors.push(err));
+
+  await runPoller(conn, enoughCycles);
+
+  expect(getCalled).toBe(false);
+  expect(received).toHaveLength(0);
+  expect(errors).toHaveLength(0);
+});
+
+test("poll extracts the byte count from the last segment when the filename has many segments", async () => {
+  const { client, files } = makeMockClient();
+  // A peer id containing hyphens plus an inserted timestamp and counter: the
+  // right-anchored parse must still read the byte count from the final segment.
+  const peerId = "00000000-0000-4000-8000-000000000abc";
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 7, type: "Object", payload: { ok: true } }),
+  );
+  const name = `${peerId}-20260529T142301-007-${message.length}.json`;
+  files.set(`/test/${name}`, message);
+
+  client.list = async () => [{ name, modifyTime: 0, size: message.length }];
+
+  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+  conn.on("error", (err) => errors.push(err));
+
+  await runPoller(conn, delivered);
+
+  expect(errors).toHaveLength(0);
+  expect(received).toHaveLength(1);
+  expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
+});
+
+test("poll ignores a prefix-matching file whose final segment is not a byte count", async () => {
+  // A leftover or foreign file sharing the peer's id prefix but not encoding a
+  // byte count (e.g. `<peerId>-backup.json`) must be ignored, not treated as a
+  // fatal protocol error: the exact-name lookup it replaced never matched such
+  // a file. The real message alongside it is still delivered.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-leftover";
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { ok: true } }),
+  );
+  files.set(`/test/${peerId}-${message.length}.json`, message);
+  files.set(`/test/${peerId}-backup.json`, Buffer.from("not a message"));
+
+  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+  conn.on("error", (err) => errors.push(err));
+
+  await runPoller(conn, delivered);
+
+  expect(errors).toHaveLength(0);
+  expect(received).toHaveLength(1);
+  expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
+  // The non-message file is left untouched, not deleted or read.
+  expect(files.has(`/test/${peerId}-backup.json`)).toBe(true);
 });

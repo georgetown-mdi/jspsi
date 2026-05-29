@@ -12,6 +12,18 @@ import type { HandshakeRole } from "../types";
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
+// Extracts the declared byte count from a message filename by reading the last
+// `-`-delimited segment before `.json`. Parsing is right-anchored so an id
+// containing hyphens (a UUID, or a configured peer id) cannot corrupt the
+// result regardless of how many segments precede the count. Returns undefined
+// when that segment is not a non-negative integer.
+const parseMessageByteCount = (name: string): number | undefined => {
+  const stem = name.slice(0, -".json".length);
+  const lastSegment = stem.slice(stem.lastIndexOf("-") + 1);
+  if (!/^\d+$/.test(lastSegment)) return undefined;
+  return Number(lastSegment);
+};
+
 /**
  * Default peer-inactivity budget (1 hour) used when `peerTimeoutMs` is not
  * supplied in the connection options. Bounds how long this side waits for the
@@ -22,18 +34,18 @@ const errMessage = (err: unknown) =>
 export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
-// Consecutive ENOENT from get() after exists() returned true indicates a
+// Consecutive ENOENT from get() after list() surfaced the file indicates a
 // filesystem state that is unlikely to self-resolve: emit an error rather
 // than looping silently until the peer timeout fires.
 //
 // 3 is structural rather than performance-tuning, so it is not exposed as a
-// config option: one ENOENT after exists()=true is the expected TOCTOU race
-// when the peer's cleanup runs between the two calls (a single race per
-// message-consumption cycle); two more in a row indicates the directory
-// listing is not converging, which is pathological. A smaller threshold
-// (1-2) produces false positives on slow filesystems where one peer's
-// cleanup may briefly overlap with our next poll; a larger threshold (>5)
-// approaches the peer timeout and gives no practical benefit.
+// config option: one ENOENT after the file appeared in list() is the expected
+// TOCTOU race when the peer's cleanup runs between the listing and the get()
+// (a single race per message-consumption cycle); two more in a row indicates
+// the directory listing is not converging, which is pathological. A smaller
+// threshold (1-2) produces false positives on slow filesystems where one
+// peer's cleanup may briefly overlap with our next poll; a larger threshold
+// (>5) approaches the peer timeout and gives no practical benefit.
 const MAX_CONSECUTIVE_ENOENT = 3;
 
 interface Events {
@@ -48,6 +60,7 @@ interface Options {
   timeToLive?: Date;
   pollingFrequency: number;
   verbose: number;
+  timestampInFilename: boolean;
 }
 
 const Message = z.object({
@@ -61,6 +74,7 @@ const getDefaultOptions = (): Options => {
   return {
     pollingFrequency: DEFAULT_POLLING_FREQUENCY_MS,
     verbose: DEFAULT_VERBOSITY,
+    timestampInFilename: false,
   };
 };
 
@@ -70,6 +84,10 @@ export interface FileInfo {
   // rendezvous tiebreaker (see waitForPeer), which orders on UUID alone
   // because sync tools stamp transfer time rather than creation time.
   modifyTime: number;
+  // On-disk byte count, populated by every FileTransportClient.list(). poll()
+  // compares it against the declared count encoded in a message filename so a
+  // partially synced file is not read as a complete message.
+  size: number;
 }
 
 export interface PutOptions {
@@ -220,6 +238,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   ): Promise<void> {
     if (config.options?.pollIntervalMs !== undefined)
       this.options.pollingFrequency = config.options.pollIntervalMs;
+    if (config.options?.timestampInFilename !== undefined)
+      this.options.timestampInFilename = config.options.timestampInFilename;
     // timeToLive is computed after a successful connect (below) so that
     // retry latency during connection setup does not eat into the
     // peer-waiting budget. Applies to both peerTimeoutMs-supplied and
@@ -769,18 +789,29 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
 
-    const outPath = `${this.path}/${this.id}.json`;
+    const path = this.path;
     // A `.tmp` extension (not `.json`) keeps this in-flight write from matching
     // a `*.json` sync-tool watch before the rename to the final name lands.
     const tempFile = `temp-${uuidv4()}.tmp`;
-    const tempPath = `${this.path}/${tempFile}`;
+    const tempPath = `${path}/${tempFile}`;
+
+    // Each message carries a distinct filename (the byte count, and optionally
+    // a counter, differ per send), so a previous message the peer has not yet
+    // consumed cannot be found by an exact name. Scan for any `<id>-*.json` we
+    // still own and wait for it to clear, preserving the one-outstanding-
+    // message-at-a-time invariant the peer's poll() relies on.
+    const hasOutstandingMessage = async () =>
+      (await this.client.list(path)).some(
+        (file) =>
+          file.name.startsWith(`${this.id}-`) && file.name.endsWith(".json"),
+      );
 
     try {
-      if (await this.client.exists(outPath)) {
+      if (await hasOutstandingMessage()) {
         this.log.debug(
           `[${this.role}] waiting for previous message to be consumed`,
         );
-        while (await this.client.exists(outPath)) {
+        while (await hasOutstandingMessage()) {
           // open() set timeToLive before send() can run; assertion is safe.
           if (Date.now() > this.options.timeToLive!.getTime()) {
             throw new Error(
@@ -800,30 +831,59 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         type = "Uint8Array";
       }
 
-      const message = JSON.stringify({
-        ts: Date.now(),
-        seq: this.seq++,
-        type,
-        payload: data,
-      });
+      const ts = Date.now();
+      const seq = this.seq++;
+      // Serialize before constructing the filename so the encoded byte count is
+      // the exact on-disk size; the peer waits until the synced file reaches
+      // that many bytes before reading it, so a partial sync delivery is never
+      // read as a complete message.
+      const payload = Buffer.from(
+        JSON.stringify({ ts, seq, type, payload: data }),
+      );
+      const outName = this.messageFilename(payload.byteLength, seq, ts);
+      const outPath = `${path}/${outName}`;
+
       this.log.trace(
-        `[${this.role}] message seq=${this.seq - 1}, type=${type}, ` +
-          `${message.length} bytes`,
+        `[${this.role}] message seq=${seq}, type=${type}, ` +
+          `${payload.byteLength} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
-      await this.client.put(Buffer.from(message), tempPath, {
+      await this.client.put(payload, tempPath, {
         flags: "w",
         encoding: null,
       });
 
-      this.log.debug(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
+      this.log.debug(`[${this.role}] renaming ${tempFile} to ${outName}`);
       await this.client.rename(tempPath, outPath);
-      this.responsibleFiles.add(`${this.id}.json`);
+      this.responsibleFiles.add(outName);
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
       if (err instanceof Error && err.cause === "usage") delete err.cause;
       throw err instanceof Error ? err : new Error(errMessage(err));
     }
+  }
+
+  // Builds an outgoing message filename. The byte count is always the final
+  // `-`-delimited segment before `.json` so the receiver can extract it with a
+  // right-anchored parse (see parseMessageByteCount). When timestampInFilename
+  // is set, a compact UTC timestamp and a zero-padded per-session counter are
+  // inserted so sync-mediated logging can recover write order even when the
+  // sync tool rewrites file mtimes.
+  private messageFilename(byteCount: number, seq: number, ts: number): string {
+    if (!this.options.timestampInFilename)
+      return `${this.id}-${byteCount}.json`;
+    // YYYYMMDDTHHMMSS in UTC: no colons or hyphens, so it is Windows-safe,
+    // lexicographically time-sortable, and occupies one hyphen-delimited
+    // segment.
+    const timestamp = new Date(ts)
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .slice(0, 15);
+    // Zero-padded to three digits for the common case; widens to four or more
+    // past message 999, which keeps names unique (the byte count is still the
+    // final segment) at the cost of strict three-digit width on long sessions.
+    const counter = String(seq).padStart(3, "0");
+    return `${this.id}-${timestamp}-${counter}-${byteCount}.json`;
   }
 
   private async poll() {
@@ -834,62 +894,111 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     if (!this.peerId) throw new Error("not synchronized");
 
-    const inPath = `${this.path}/${this.peerId}.json`;
+    const path = this.path;
+    const peerId = this.peerId;
 
     let reachedGet = false;
     try {
-      this.log.trace(`[${this.role}] polling for message from ${this.peerId}`);
-      const messageFile = await this.client.exists(inPath);
-      if (messageFile) {
-        this.log.debug(
-          `[${this.role}] getting message from ${this.peerId}.json`,
+      this.log.trace(`[${this.role}] polling for message from ${peerId}`);
+      // Detect via a pattern scan rather than an exact-name exists(): the
+      // message filename now encodes a per-message byte count (and optionally
+      // a timestamp and counter), so the receiver cannot predict the exact
+      // name. `<peerId>-*.json` matches only the peer's message files - its
+      // `.hello`/`.wave` handshake files and our own `<id>-*.json` writes are
+      // excluded by prefix or extension.
+      //
+      // A name that matches the prefix but whose final segment is not a byte
+      // count (e.g. a leftover `<peerId>-backup.json`) is ignored, not treated
+      // as an error: the previous exact-name lookup never matched such a file,
+      // so failing the exchange over an unrelated file would be a regression.
+      const messages: Array<{ file: FileInfo; declaredSize: number }> = [];
+      const ignored: string[] = [];
+      for (const file of await this.client.list(path)) {
+        if (!file.name.startsWith(`${peerId}-`) || !file.name.endsWith(".json"))
+          continue;
+        const declaredSize = parseMessageByteCount(file.name);
+        if (declaredSize === undefined) ignored.push(file.name);
+        else messages.push({ file, declaredSize });
+      }
+      if (ignored.length > 0)
+        this.log.trace(
+          `[${this.role}] ignoring ${ignored.length} non-message file(s) ` +
+            `matching ${peerId}-*.json: ${ignored.join(", ")}`,
         );
 
-        reachedGet = true;
-        const message = await this.client.get(inPath, { encoding: "utf-8" });
-        reachedGet = false;
+      if (messages.length > 1) {
+        // Emitted (not thrown to a caller), so no "usage" sentinel: the bridge
+        // classifies every poll-loop error as a transport failure.
+        throw new Error(
+          `more than one message file from ${peerId} in ${path} - are there ` +
+            "other sessions using this path?",
+        );
+      }
 
-        this.log.debug(`[${this.role}] deleting message ${this.peerId}.json`);
-        try {
-          await this.client.delete(inPath);
-        } catch {
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.options.pollingFrequency),
+      if (messages.length === 1) {
+        const { file: messageFile, declaredSize } = messages[0];
+
+        if (messageFile.size < declaredSize) {
+          // The file has appeared but the sync tool has not finished
+          // transferring it. Leave it untouched and re-check next cycle rather
+          // than reading a truncated message. For a direct transport (SFTP),
+          // the atomic rename means the size already matches on the first poll.
+          this.log.trace(
+            `[${this.role}] ${messageFile.name} is ${messageFile.size}/` +
+              `${declaredSize} bytes; waiting for full sync`,
           );
+        } else {
+          const inPath = `${path}/${messageFile.name}`;
+          this.log.debug(`[${this.role}] getting message ${messageFile.name}`);
+
+          reachedGet = true;
+          const message = await this.client.get(inPath, { encoding: "utf-8" });
+          reachedGet = false;
+
+          this.log.debug(`[${this.role}] deleting message ${messageFile.name}`);
           try {
             await this.client.delete(inPath);
-          } catch (deleteErr: unknown) {
-            this.log.warn(
-              `[${this.role}] failed to delete ${this.peerId}.json; ` +
-                "please notify the administrator that manual cleanup " +
-                `may be required: ${errMessage(deleteErr)}`,
+          } catch {
+            await new Promise((resolve) =>
+              setTimeout(resolve, this.options.pollingFrequency),
             );
+            try {
+              await this.client.delete(inPath);
+            } catch (deleteErr: unknown) {
+              this.log.warn(
+                `[${this.role}] failed to delete ${messageFile.name}; ` +
+                  "please notify the administrator that manual cleanup " +
+                  `may be required: ${errMessage(deleteErr)}`,
+              );
+            }
           }
-        }
 
-        const validatedMessage = Message.parse(JSON.parse(message.toString()));
-        this.log.trace(
-          `[${this.role}] received message seq=${validatedMessage.seq}, ` +
-            `type=${validatedMessage.type}`,
-        );
-
-        if (validatedMessage.type === "Uint8Array") {
-          const bytes = Buffer.from(
-            validatedMessage.payload as string,
-            "base64",
+          const validatedMessage = Message.parse(
+            JSON.parse(message.toString()),
           );
-          this.emit("data", bytes);
-        } else {
-          this.emit("data", validatedMessage.payload);
+          this.log.trace(
+            `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+              `type=${validatedMessage.type}`,
+          );
+
+          if (validatedMessage.type === "Uint8Array") {
+            const bytes = Buffer.from(
+              validatedMessage.payload as string,
+              "base64",
+            );
+            this.emit("data", bytes);
+          } else {
+            this.emit("data", validatedMessage.payload);
+          }
         }
       }
       this.consecutiveEnoentCount = 0;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT" && reachedGet) {
-        // TOCTOU race: exists() returned true but get() found the file gone,
-        // meaning the peer cleaned up between our two calls. After a single
-        // race the file is genuinely gone and subsequent exists() calls return
-        // false, resetting the counter on the next clean poll cycle.
+        // TOCTOU race: list() surfaced the file but get() found it gone,
+        // meaning the peer cleaned up between the two calls. After a single
+        // race the file is genuinely gone and subsequent list() cycles no
+        // longer match it, resetting the counter on the next clean poll.
         // Consecutive ENOENTs that keep incrementing the counter indicate a
         // pathological filesystem state that will not self-resolve; emit an
         // error after MAX_CONSECUTIVE_ENOENT rather than looping silently
@@ -906,8 +1015,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           );
         } else {
           this.log.warn(
-            `[${this.role}] ${this.peerId}.json disappeared between exists and ` +
-              "get; assuming peer cleaned up",
+            `[${this.role}] message from ${peerId} disappeared between list ` +
+              "and get; assuming peer cleaned up",
           );
         }
       } else {

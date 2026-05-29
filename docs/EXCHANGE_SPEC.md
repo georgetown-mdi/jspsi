@@ -564,6 +564,27 @@ These options apply to both `sftp` and `filedrop` channels.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `poll_interval_ms` | integer | 100 | Milliseconds between checks for the partner's uploaded file. The default is tuned for local-network mounts and CI; raise it (for example, to 1000-5000 ms) for public SFTP servers to reduce request load. |
+| `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
+
+#### Message filenames
+
+On the `sftp` and `filedrop` channels each party writes its outgoing messages as files in the shared directory; the partner polls for them. Every message filename ends in `.json`, and the last `-`-delimited segment before the extension is a decimal byte count: the exact size of the serialized message. The receiver compares that declared count against the file's on-disk size and reads the file only once the two match, so a partially synced file is never read as a complete message. Because the byte count is always the final segment, parsing is right-anchored and a party id containing hyphens does not affect extraction.
+
+With `timestamp_in_filename` unset (the default), the format is:
+
+```
+<id>-<byteCount>.json
+```
+
+With `timestamp_in_filename: true`, the filename additionally carries a timestamp and counter:
+
+```
+<id>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>.json
+```
+
+`<YYYYMMDDTHHMMSS>` is the UTC write time in compact ISO 8601 form (no colons or hyphens, so it is Windows-safe and sorts lexicographically by time). `<NNN>` is a per-session counter that starts at `000`, is zero-padded to three digits, and increments with each message sent; it widens to four or more digits only after the 1000th message of a session.
+
+In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`.hello`, `.wave`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
 
 ### `connection.provider_options`
 
