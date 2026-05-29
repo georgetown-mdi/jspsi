@@ -35,6 +35,7 @@ import {
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
 import { openPeerMessageConnection } from "@psi/peerMessageConnection";
+import { waitForIncomingConnection } from "@psi/waitForConnection";
 
 import FileSelect from "@components/FileSelect";
 import SessionDetails from "@components/SessionDetails";
@@ -216,8 +217,19 @@ function Home() {
       } catch (error) {
         handleFailure(error);
       } finally {
-        peer.disconnect();
-        await mc?.close();
+        // Teardown must not throw: a rejection here would propagate past the
+        // handlers above and overwrite a more accurate alert (e.g. the
+        // "Results unavailable" set when only output generation failed).
+        try {
+          peer.disconnect();
+        } catch (teardownError) {
+          console.error(teardownError);
+        }
+        try {
+          await mc?.close();
+        } catch (teardownError) {
+          console.error(teardownError);
+        }
       }
     };
 
@@ -225,15 +237,14 @@ function Home() {
       setStageById("waiting for peer");
       waitForPeerId(session.uuid)
         .then(async (peerId) => {
-          // Start the WASM load now, but do not let it gate opening the channel:
-          // the responder must attach its inbound listener before the initiator
-          // sends, which can happen before this load finishes.
+          // Load and prepare before dialing the peer. Opening the connection
+          // resolves a live Peer/DataConnection that only runExchangeOn tears
+          // down, so a CSV or standardization failure must happen before it
+          // exists, not after, or the connection leaks. The WASM load still
+          // runs in parallel and is awaited (with the inbound listener already
+          // attached) inside runExchangeOn.
           const psi = PSI() as Promise<PSILibrary>;
-          const [csvResult, [peer, conn]] = await Promise.all([
-            loadCSVFile(files[0]),
-            openPeerConnection(peerId),
-          ]);
-
+          const csvResult = await loadCSVFile(files[0]);
           const rawRows = csvResult.data as Array<Record<string, string>>;
           const prepared = prepareForExchange(
             {}, // no explicit spec; infer from input
@@ -250,6 +261,7 @@ function Home() {
             doneStage,
           ]);
 
+          const [peer, conn] = await openPeerConnection(peerId);
           await runExchangeOn(conn, "responder", prepared, psi, peer);
         })
         .catch((error) => {
@@ -278,15 +290,19 @@ function Home() {
 
           const peer = await createAndSharePeerId(session);
 
-          // once, not on: a single exchange runs per session, so a duplicate
-          // incoming connection must not spawn a concurrent runExchange. The
-          // trailing catch guards against a teardown rejection in the helper's
-          // finally escaping as an unhandled rejection.
-          peer.once("connection", (conn) => {
-            void runExchangeOn(conn, "initiator", prepared, psi, peer).catch(
-              handleFailure,
-            );
-          });
+          try {
+            // A single exchange runs per session: take the first incoming
+            // connection, bounded so a peer that never dials in surfaces an
+            // error instead of hanging on "Confirming protocol" forever.
+            const conn = await waitForIncomingConnection(peer);
+            await runExchangeOn(conn, "initiator", prepared, psi, peer);
+          } catch (error) {
+            // Reached only when no peer dialed in within the deadline;
+            // runExchangeOn handles and tears down its own failures. Drop the
+            // peer we created so the timed-out attempt does not leak it.
+            handleFailure(error);
+            peer.disconnect();
+          }
         })
         .catch((error) => {
           handleFailure(error);
