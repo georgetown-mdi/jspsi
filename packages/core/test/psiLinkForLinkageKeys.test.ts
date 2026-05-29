@@ -11,7 +11,7 @@ import { linkViaPSI } from "../src/link";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 
-import { PassthroughConnection } from "./utils/passthroughConnection";
+import { createMessagePipe } from "../src/connection/messageConnection";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -70,9 +70,7 @@ function makeIterables(
 
 const psiLibrary = await PSI();
 
-const serverConn = new PassthroughConnection();
-const clientConn = new PassthroughConnection(serverConn);
-serverConn.setOther(clientConn);
+const [serverConn, clientConn] = createMessagePipe();
 
 const server = new PSIParticipant("server", psiLibrary, { role: "starter",  verbose: -1 });
 const client = new PSIParticipant("client", psiLibrary, { role: "joiner",   verbose: -1 });

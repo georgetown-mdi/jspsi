@@ -17,12 +17,12 @@ import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
-  Connection,
   HandshakeRole,
   AssociationTable,
   PsiRole,
   Prettify,
 } from "./types.js";
+import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
@@ -233,7 +233,7 @@ export interface RunExchangeOptions {
  * @param options        PSI library instance, callbacks, and verbosity level.
  */
 export async function runExchange(
-  conn: Connection,
+  conn: MessageConnection,
   handshakeRole: HandshakeRole,
   prepared: PreparedExchange,
   options: RunExchangeOptions,

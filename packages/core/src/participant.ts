@@ -1,22 +1,23 @@
 import * as z from "zod";
 
-import { EventHandlerQueue } from "./connection/eventHandlerQueue";
-
-import type { AssociationTable, Config, Connection } from "./types";
+import type { AssociationTable, Config } from "./types";
+import {
+  receiveParsed,
+  type MessageConnection,
+} from "./connection/messageConnection";
 
 import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { Server as PSIServer } from "@openmined/psi.js/implementation/server.d.ts";
 
 import { getLoggerForVerbosity } from "./utils/logger";
-import type { ServerSetup } from "@openmined/psi.js/implementation/proto/psi_pb";
 
 const statusCompletedMessage = z.object({
   status: z.literal("completed"),
 });
 
 const numberArrayMessage = z.array(z.number());
-const associationTableMessage = z.array(z.array(z.number()));
+const associationTableMessage = z.tuple([z.array(z.number()), z.array(z.number())]);
 
 const DEFAULT_VERBOSITY = 1;
 
@@ -167,7 +168,7 @@ export class PSIParticipant {
    * Returns an association table with elements [localIndices, partnerIndices]
    */
   public async identifyIntersection(
-    conn: Connection,
+    conn: MessageConnection,
     set: Array<string>,
   ): Promise<AssociationTable> {
     if (this.config.role === "starter") {
@@ -181,68 +182,9 @@ export class PSIParticipant {
         sortingPermutation,
       );
 
-      const associationTablePromise: Promise<AssociationTable> = new Promise(
-        (resolve) => {
-          let result: Array<Array<number>>;
-
-          const eventHandlerQueue = new EventHandlerQueue([
-            async (rawData: unknown) => {
-              this.log.debug(
-                `${this.id}: received client data encrypted by client`,
-              );
-              this.setStage("processing client request");
-
-              const clientRequest = this.library.request.deserializeBinary(
-                rawData as Uint8Array,
-              );
-              const serverResponse = this.psi
-                .server!.processRequest(clientRequest)
-                .serializeBinary();
-
-              this.log.debug(
-                `${this.id}: sending client data encrypted by both server ` +
-                  "and client",
-              );
-              this.setStage("sending response");
-
-              await conn.send(serverResponse);
-
-              this.setStage("waiting for association table");
-            },
-            async (rawData: unknown) => {
-              this.log.debug(`${this.id}: received association table`);
-              this.setStage("processing association table");
-              // note: what we receive is backwards, so this is correct
-              const [partnerIndices, localIndices] =
-                associationTableMessage.parse(rawData);
-
-              result = [localIndices, partnerIndices];
-              for (let i = 0; i < result[0].length; ++i) {
-                result[0][i] = sortingPermutation[result[0][i]];
-              }
-
-              this.log.debug(`${this.id}: sending my original indices`);
-              await conn.send(result[0]);
-
-              this.log.debug(`${this.id}: waiting for status completed`);
-            },
-            (rawData: unknown) => {
-              statusCompletedMessage.parse(rawData);
-
-              this.setStage("done");
-
-              conn.removeListener("data", eventHandlerQueue.handleEvent);
-
-              resolve([result[0], result[1]]);
-            },
-          ]);
-          conn.on("data", eventHandlerQueue.handleEvent);
-        },
-      );
-
       this.log.debug(
         `${this.id}: starting identify-intersection protocol; sending server ` +
-        " data encrypted by server",
+          " data encrypted by server",
       );
       this.setStage("sending startup message");
       await conn.send(serverSetup.serializeBinary());
@@ -250,82 +192,107 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: waiting for client request`);
       this.setStage("waiting for client request");
 
-      return associationTablePromise;
+      const clientRequestRaw = await conn.receive();
+      this.log.debug(`${this.id}: received client data encrypted by client`);
+      this.setStage("processing client request");
+
+      const clientRequest = this.library.request.deserializeBinary(
+        clientRequestRaw as Uint8Array,
+      );
+      const serverResponse = this.psi
+        .server!.processRequest(clientRequest)
+        .serializeBinary();
+
+      this.log.debug(
+        `${this.id}: sending client data encrypted by both server and client`,
+      );
+      this.setStage("sending response");
+
+      await conn.send(serverResponse);
+
+      this.setStage("waiting for association table");
+
+      // note: what we receive is backwards, so this is correct
+      const [partnerIndices, localIndices] = await receiveParsed(
+        conn,
+        associationTableMessage,
+      );
+      this.log.debug(`${this.id}: received association table`);
+      this.setStage("processing association table");
+
+      const result: Array<Array<number>> = [localIndices, partnerIndices];
+      for (let i = 0; i < result[0].length; ++i) {
+        result[0][i] = sortingPermutation[result[0][i]];
+      }
+
+      this.log.debug(`${this.id}: sending my original indices`);
+      await conn.send(result[0]);
+
+      this.log.debug(`${this.id}: waiting for status completed`);
+      await receiveParsed(conn, statusCompletedMessage);
+
+      this.setStage("done");
+
+      return [result[0], result[1]];
     } else {
-      return new Promise((resolve) => {
-        let serverSetup: ServerSetup | undefined = undefined;
-        let localIndices: Array<number>;
+      this.setStage("waiting for startup message");
+      this.log.debug(`${this.id}: starting identify-intersection protocol`);
 
-        this.setStage("waiting for startup message");
+      const serverSetupRaw = await conn.receive();
+      this.log.debug(`${this.id}: receiving server data encrypted by server`);
+      this.setStage("processing startup message");
 
-        const eventHandlerQueue = new EventHandlerQueue([
-          async (rawData: unknown) => {
-            this.log.debug(
-              `${this.id}: receiving server data encrypted by server`,
-            );
-            this.setStage("processing startup message");
+      const serverSetup = this.library.serverSetup.deserializeBinary(
+        serverSetupRaw as Uint8Array,
+      );
 
-            serverSetup = this.library.serverSetup.deserializeBinary(
-              rawData as Uint8Array,
-            );
+      const clientRequest = this.psi.client!.createRequest(set);
 
-            const clientRequest = this.psi.client!.createRequest(set);
+      this.log.debug(`${this.id}: sending client data encrypted by client`);
+      this.setStage("sending client request");
 
-            this.log.debug(
-              `${this.id}: sending client data encrypted by client`,
-            );
-            this.setStage("sending client request");
+      await conn.send(clientRequest.serializeBinary());
 
-            await conn.send(clientRequest.serializeBinary());
+      this.setStage("waiting for response");
 
-            this.setStage("waiting for response");
-          },
-          async (rawData: unknown) => {
-            this.log.debug(
-              `${this.id}: receiving server data encrypted by both by server ` +
-                "and client",
-            );
-            this.setStage("creating association table");
+      const serverResponseRaw = await conn.receive();
+      this.log.debug(
+        `${this.id}: receiving server data encrypted by both by server and ` +
+          "client",
+      );
+      this.setStage("creating association table");
 
-            const serverResponse = this.library.response.deserializeBinary(
-              rawData as Uint8Array,
-            );
-            /**
-             * Association table is indices into client data mapped to the
-             * indices given by the server (which are likely permuted).
-             */
-            const associationTable: Array<Array<number>> =
-              this.psi.client!.getAssociationTable(
-                serverSetup!,
-                serverResponse,
-              );
-            localIndices = associationTable[0];
+      const serverResponse = this.library.response.deserializeBinary(
+        serverResponseRaw as Uint8Array,
+      );
+      /**
+       * Association table is indices into client data mapped to the indices
+       * given by the server (which are likely permuted).
+       */
+      const associationTable: Array<Array<number>> =
+        this.psi.client!.getAssociationTable(serverSetup, serverResponse);
+      const localIndices = associationTable[0];
 
-            this.log.debug(
-              `${this.id}: sending association table with permuted server ` +
-                "indices",
-            );
-            this.setStage("sending association table");
+      this.log.debug(
+        `${this.id}: sending association table with permuted server indices`,
+      );
+      this.setStage("sending association table");
 
-            await conn.send(associationTable);
+      await conn.send(associationTable);
 
-            this.setStage("waiting for permutation");
-          },
-          async (rawData: unknown) => {
-            this.log.debug(`${this.id}: receiving original server indices`);
-            this.setStage("done");
+      this.setStage("waiting for permutation");
 
-            this.log.debug(`${this.id}: sending status completed`);
-            await conn.send({ status: "completed" });
+      // Send-before-parse: receive the partner's original indices, acknowledge
+      // with status:completed, then parse. Sending the acknowledgement before
+      // validating ensures a malformed final frame does not strand the partner.
+      const rawData = await conn.receive();
+      this.log.debug(`${this.id}: receiving original server indices`);
+      this.setStage("done");
 
-            conn.removeListener("data", eventHandlerQueue.handleEvent);
+      this.log.debug(`${this.id}: sending status completed`);
+      await conn.send({ status: "completed" });
 
-            resolve([localIndices, numberArrayMessage.parse(rawData)]);
-          },
-        ]);
-        conn.on("data", eventHandlerQueue.handleEvent);
-        this.log.debug(`${this.id}: starting identify-intersection protocol`);
-      });
+      return [localIndices, numberArrayMessage.parse(rawData)];
     }
   }
 }

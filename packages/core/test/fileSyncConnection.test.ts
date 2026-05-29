@@ -86,10 +86,59 @@ test("stop and cleanup are safe on a connection that was never opened", async ()
   await expect(conn.cleanup()).resolves.not.toThrow();
 });
 
-test("close throws 'not connected' on a connection that was never opened", async () => {
+test("close is idempotent and safe on a connection that was never opened", async () => {
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, { verbose: -1 });
-  await expect(conn.close()).rejects.toThrow("not connected");
+  await expect(conn.close()).resolves.toBeUndefined();
+  await expect(conn.close()).resolves.toBeUndefined();
+});
+
+test("close() sweeps responsible files and ends the client, idempotently", async () => {
+  const { client, files } = makeMockClient();
+  let ended = false;
+  client.end = async () => {
+    ended = true;
+  };
+  const deleted: string[] = [];
+  const origSafeDelete = client.safeDelete;
+  client.safeDelete = async (p: string) => {
+    deleted.push(p);
+    return origSafeDelete(p);
+  };
+  const conn = makeConnectedConn(client);
+  // send() records the outbound file as one this side is responsible for.
+  await conn.send({ hello: 1 });
+  expect(files.has(`/test/${conn.id}.json`)).toBe(true);
+
+  await conn.close();
+
+  expect(ended).toBe(true);
+  expect(deleted).toContain(`/test/${conn.id}.json`);
+  expect(files.has(`/test/${conn.id}.json`)).toBe(false);
+
+  // A second close neither throws nor re-ends the client.
+  ended = false;
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(ended).toBe(false);
+});
+
+test("close() stops a running poller", async () => {
+  const { client } = makeMockClient();
+  let existsCalls = 0;
+  const origExists = client.exists;
+  client.exists = async (p: string) => {
+    existsCalls++;
+    return origExists(p);
+  };
+  const conn = makeConnectedConn(client, { pollingFrequency: 5 });
+  conn.peerId = "peer-test";
+  conn.start();
+  await new Promise((r) => setTimeout(r, 25));
+  await conn.close();
+
+  const callsAfterClose = existsCalls;
+  await new Promise((r) => setTimeout(r, 25));
+  expect(existsCalls).toBe(callsAfterClose);
 });
 
 // --- buffered error ----------------------------------------------------------

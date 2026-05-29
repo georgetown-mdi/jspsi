@@ -4,14 +4,12 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
 
-import { PassthroughConnection } from "./utils/passthroughConnection";
+import { createMessagePipe } from "../src/connection/messageConnection";
 import { sortAssociationTable } from "./utils/associationTable";
 
 const psiLibrary = await PSI();
 
-const serverConn = new PassthroughConnection();
-const clientConn = new PassthroughConnection(serverConn);
-serverConn.setOther(clientConn);
+const [serverConn, clientConn] = createMessagePipe();
 
 const server = new PSIParticipant("server", psiLibrary, {
   role: "starter",
@@ -53,11 +51,6 @@ test("server and client yield identical results", () => {
 test("psi yields correct results", () => {
   expect(serverResult[0]).toStrictEqual([2, 4]);
   expect(serverResult[1]).toStrictEqual([0, 1]);
-});
-
-test("listeners removed correctly", () => {
-  expect(serverConn.listenerCount("data")).toBe(0);
-  expect(clientConn.listenerCount("data")).toBe(0);
 });
 
 [clientResult, serverResult] = await (async () => {

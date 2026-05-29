@@ -20,6 +20,17 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 - Custom linkage keys: linkage terms can be set in config and keys can be derived using transformations.
 - Data standardization: transformations can create canonical linkage terms from input columns according to their semantic types.
 
+### Changed
+
+- Library API: `runExchange` and `authenticateConnection` now take a `MessageConnection` instead of the event-based `Connection`. CLI exchanges are unaffected.
+- An exchange now fails with a clear error (bounded by `peer_timeout_ms`) when the partner stops responding, instead of hanging.
+- A peer sending messages out of turn is rejected rather than buffered without limit.
+
+### Fixed
+
+- A malformed message from a peer is reported as a protocol error instead of crashing.
+- A failed exchange surfaces its original cause instead of a generic connection error.
+
 ### Security
 
 - SPAKE2 blinding points M and N are derived via hash-to-curve (RFC 9380, SSWU for P-256) with `psilink`-specific domain separation strings, ensuring no known discrete-log relationship with the generator.

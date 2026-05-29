@@ -1,7 +1,9 @@
 import * as z from "zod";
 
-import type { Connection, HandshakeRole, AssociationTable } from "./types.js";
+import type { HandshakeRole, AssociationTable } from "./types.js";
 import type { Metadata } from "./config/metadata.js";
+import type { MessageConnection } from "./connection/messageConnection.js";
+import { receiveParsed } from "./connection/messageConnection.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -73,117 +75,36 @@ export function preparePayload(
   return { hasData: true, columns, rowIndices, rows };
 }
 
+/** Maps a validated payload wire message into a {@link PartnerPayload}. */
+function toPartnerPayload(msg: PayloadWireMessage): PartnerPayload {
+  if (!msg.hasData) return { columns: [], rowIndices: [], rows: [] };
+  return { columns: msg.columns, rowIndices: msg.rowIndices, rows: msg.rows };
+}
+
 /**
- * Exchanges payload datasets over an open connection after PSI linkage.
+ * Exchanges payload datasets over an open {@link MessageConnection} after PSI
+ * linkage.
  *
  * Initiator sends first; responder receives first then sends. The returned
  * {@link PartnerPayload} rows are in the same order as the association table.
+ * Every failure mode (transport error, malformed message, send rejection)
+ * surfaces as a rejection of the awaited call, so no listener registration,
+ * error buffering, or per-path cleanup is needed.
  */
 export async function exchangePayloads(
-  conn: Connection,
+  conn: MessageConnection,
   handshakeRole: HandshakeRole,
   localPayload: PayloadWireMessage,
 ): Promise<PartnerPayload> {
-  const empty: PartnerPayload = { columns: [], rowIndices: [], rows: [] };
-
-  const decode = (rawData: unknown): PartnerPayload => {
-    const msg = payloadWireSchema.parse(rawData);
-    if (!msg.hasData) return empty;
-    return { columns: msg.columns, rowIndices: msg.rowIndices, rows: msg.rows };
-  };
-
   if (handshakeRole === "initiator") {
-    return new Promise<PartnerPayload>((resolve, reject) => {
-      const buffered = conn.takeBufferedError();
-      if (buffered !== undefined) {
-        reject(
-          buffered instanceof Error ? buffered : new Error(String(buffered)),
-        );
-        return;
-      }
-      const cleanupListeners = () => {
-        conn.removeListener("data", onData, undefined, true);
-        conn.removeListener("error", onError, undefined, true);
-      };
-      const onError = (err: unknown) => {
-        conn.removeListener("data", onData, undefined, true);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      };
-      const onData = (rawData: unknown) => {
-        conn.removeListener("error", onError, undefined, true);
-        try {
-          resolve(decode(rawData));
-        } catch (e) {
-          reject(e);
-        }
-      };
-      conn.once("error", onError);
-      conn.once("data", onData);
-      // `conn.send` is typed as `void | Promise<void>`; a synchronous throw
-      // would not be caught by `.then`/`.catch` if it occurred before the
-      // Promise wrapping. Capture it explicitly so any send failure path
-      // converges on the same cleanup-and-reject branch.
-      let sendResult: void | Promise<void>;
-      try {
-        sendResult = conn.send(localPayload);
-      } catch (err) {
-        cleanupListeners();
-        reject(err);
-        return;
-      }
-      Promise.resolve(sendResult).catch((err) => {
-        cleanupListeners();
-        reject(err);
-      });
-    });
-  } else {
-    return new Promise<PartnerPayload>((resolve, reject) => {
-      const buffered = conn.takeBufferedError();
-      if (buffered !== undefined) {
-        reject(
-          buffered instanceof Error ? buffered : new Error(String(buffered)),
-        );
-        return;
-      }
-      const cleanupListeners = () => {
-        conn.removeListener("data", onData, undefined, true);
-        conn.removeListener("error", onError, undefined, true);
-      };
-      const onError = (err: unknown) => {
-        conn.removeListener("data", onData, undefined, true);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      };
-      const onData = (rawData: unknown) => {
-        conn.removeListener("error", onError, undefined, true);
-        let decoded: PartnerPayload;
-        try {
-          decoded = decode(rawData);
-        } catch (e) {
-          reject(e);
-          return;
-        }
-        // Same rationale as the initiator branch: a synchronous throw from
-        // `conn.send` needs an explicit catch around the call.
-        let sendResult: void | Promise<void>;
-        try {
-          sendResult = conn.send(localPayload);
-        } catch (err) {
-          cleanupListeners();
-          reject(err);
-          return;
-        }
-        Promise.resolve(sendResult).then(
-          () => resolve(decoded),
-          (err) => {
-            cleanupListeners();
-            reject(err);
-          },
-        );
-      };
-      conn.once("error", onError);
-      conn.once("data", onData);
-    });
+    await conn.send(localPayload);
+    return toPartnerPayload(await receiveParsed(conn, payloadWireSchema));
   }
+  const partnerPayload = toPartnerPayload(
+    await receiveParsed(conn, payloadWireSchema),
+  );
+  await conn.send(localPayload);
+  return partnerPayload;
 }
 
 function quoteCsvField(value: string): string {

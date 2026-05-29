@@ -7,6 +7,12 @@ import { runSpake2 } from "../src/pake";
 import { authenticateConnection, deriveAeadKey } from "../src/auth";
 import { PAKE_TOKEN_REGEX } from "../src/config/connection";
 import type { Authentication } from "../src/config/connection";
+import {
+  createMessagePipe,
+  fromEventConnection,
+  type MessageConnection,
+} from "../src/connection/messageConnection";
+
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
 // --- Token constants ---------------------------------------------------------
@@ -18,11 +24,8 @@ const TOKEN_BETA = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
 
 // --- Helpers -----------------------------------------------------------------
 
-function makeConnections(): [PassthroughConnection, PassthroughConnection] {
-  const a = new PassthroughConnection();
-  const b = new PassthroughConnection(a);
-  a.setOther(b);
-  return [a, b];
+function makeConnections(): [MessageConnection, MessageConnection] {
+  return createMessagePipe();
 }
 
 /** Run SPAKE2 between an initiator and a responder with the same token. */
@@ -94,99 +97,17 @@ test("session key is always a 32-byte Uint8Array", async () => {
   expect(responder.value.sessionKey.length).toBe(32);
 });
 
-test("listeners are removed after a successful handshake", async () => {
-  const [connA, connB] = makeConnections();
-  await Promise.all([
-    runSpake2(connA, "initiator", TOKEN_ALPHA),
-    runSpake2(connB, "responder", TOKEN_ALPHA),
-  ]);
-  expect(connA.listenerCount("data")).toBe(0);
-  expect(connB.listenerCount("data")).toBe(0);
-});
-
-test("listeners are removed after a failed handshake", async () => {
-  const [connA, connB] = makeConnections();
-  await Promise.allSettled([
-    runSpake2(connA, "initiator", TOKEN_ALPHA),
-    runSpake2(connB, "responder", TOKEN_BETA),
-  ]);
-  expect(connA.listenerCount("data")).toBe(0);
-  expect(connB.listenerCount("data")).toBe(0);
-});
-
 test("handshake times out if the peer never responds", async () => {
-  // Only fake setTimeout/clearTimeout so setImmediate remains real; that lets
-  // vi.advanceTimersByTimeAsync interleave real async work (WebCrypto) between
-  // ticks so runSpake2 reaches `await msg1Promise` before the timeout fires.
-  // The responder role is used because it calls receive() synchronously before
-  // any await, installing the fake setTimeout before the first yield.
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  const [connA] = makeConnections();
-  const promise = runSpake2(connA, "responder", TOKEN_ALPHA);
-  // Without this, the runSpake2 promise would be briefly unhandled between
-  // when the timeout fires and when `await expect(...).rejects` is reached.
-  promise.catch(() => {});
-  await vi.advanceTimersByTimeAsync(30_000);
-  await expect(promise).rejects.toThrow("PAKE handshake timed out");
-});
-
-test("listener is removed after timeout", async () => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  const [connA] = makeConnections();
-  const promise = runSpake2(connA, "responder", TOKEN_ALPHA).catch(() => {});
-  await vi.advanceTimersByTimeAsync(30_000);
-  await promise;
-  expect(connA.listenerCount("data")).toBe(0);
-});
-
-// --- Buffered-error consumption ----------------------------------------------
-//
-// Regression guard for the listener gap addressed by takeBufferedError(). An
-// `error` emitted while no listener is attached is buffered on the connection;
-// the next protocol-layer receive must consume it and reject the promise
-// rather than registering a fresh listener that waits indefinitely.
-
-test("runSpake2 rejects with the buffered error when one was emitted before the call", async () => {
-  const [connA] = makeConnections();
-  const buffered = new Error("poller error during gap");
-  // Emit before any listener is registered so the error is buffered rather
-  // than dispatched. PassthroughConnection mirrors FileSyncConnection's emit
-  // override for this purpose.
-  connA.emit("error", buffered);
-  await expect(runSpake2(connA, "responder", TOKEN_ALPHA)).rejects.toThrow(
-    "poller error during gap",
+  // A silent peer must surface as the distinct handshake-timeout error rather
+  // than hang forever. runSpake2 bounds each receive by HANDSHAKE_TIMEOUT_MS
+  // (30 s); the effective deadline is the min of that and the connection's own
+  // inactivity default, so a short bridge-level default fires this quickly
+  // while exercising the same transport-error -> timeout-message path.
+  const eventConn = new PassthroughConnection();
+  const conn = fromEventConnection(eventConn, { inactivityTimeoutMs: 20 });
+  await expect(runSpake2(conn, "responder", TOKEN_ALPHA)).rejects.toThrow(
+    "PAKE handshake timed out",
   );
-});
-
-test("runSpake2 initiator consumes a buffered error before sending msg1", async () => {
-  const [connA, connB] = makeConnections();
-  // Capture anything sent by connA; if the initiator short-circuits on a
-  // buffered error before sending msg1, connB must see nothing.
-  const observed: unknown[] = [];
-  connB.on("data", (m) => observed.push(m));
-  connA.emit("error", new Error("poller error during gap"));
-  await expect(runSpake2(connA, "initiator", TOKEN_ALPHA)).rejects.toThrow(
-    "poller error during gap",
-  );
-  // Allow any setImmediate-queued sends to drain before asserting.
-  await new Promise<void>((r) => setImmediate(r));
-  expect(observed).toEqual([]);
-});
-
-test("PassthroughConnection.takeBufferedError clears the buffered error after one read", () => {
-  const [connA] = makeConnections();
-  connA.emit("error", new Error("first"));
-  expect((connA.takeBufferedError() as Error).message).toBe("first");
-  expect(connA.takeBufferedError()).toBeUndefined();
-});
-
-test("PassthroughConnection.emit does not buffer when an error listener is attached", () => {
-  const [connA] = makeConnections();
-  const observed: unknown[] = [];
-  connA.on("error", (err) => observed.push(err));
-  connA.emit("error", new Error("delivered to listener"));
-  expect(observed).toHaveLength(1);
-  expect(connA.takeBufferedError()).toBeUndefined();
 });
 
 // --- Abort propagation on malformed peer messages ----------------------------
@@ -194,107 +115,69 @@ test("PassthroughConnection.emit does not buffer when an error listener is attac
 // Regression guard: every peer-input failure path on the receive side must
 // send `{ pakeMsg: "abort" }` before throwing, so the partner stops waiting
 // for the next protocol message immediately rather than timing out after 30s.
-
-// PassthroughConnection.send dispatches messages via setImmediate. When
-// runSpake2 throws after calling sendAbort(), the abort's delivery is still
-// pending in the setImmediate queue at the moment the rejection propagates.
-// `drainSetImmediate` lets queued callbacks fire so we can observe the abort
-// at the partner end.
-const drainSetImmediate = () => new Promise<void>((r) => setImmediate(r));
-
-const isAbort = (m: unknown) =>
-  typeof m === "object" &&
-  m !== null &&
-  (m as { pakeMsg?: unknown }).pakeMsg === "abort";
+// Each test drives one end of an in-memory pipe by hand, injecting a malformed
+// frame and then reading the partner's next frame to confirm the abort landed.
 
 test("responder sends abort when initiator's msg1 has a malformed point", async () => {
   const [connA, connB] = makeConnections();
-  const aborts: unknown[] = [];
-  connA.on("data", (m) => aborts.push(m));
   const responder = runSpake2(connB, "responder", TOKEN_ALPHA);
   responder.catch(() => {});
-  // Send malformed msg1 from A to B directly.
-  connA.send({ pakeMsg: "1", point: "not-base64url!!" });
+  await connA.send({ pakeMsg: "1", point: "not-base64url!!" });
   await expect(responder).rejects.toThrow("PAKE authentication failed");
-  await drainSetImmediate();
-  expect(aborts.some(isAbort)).toBe(true);
+  expect(await connA.receive()).toEqual({ pakeMsg: "abort" });
 });
 
 test("responder sends abort when initiator's msg1 fails schema validation", async () => {
   const [connA, connB] = makeConnections();
-  const aborts: unknown[] = [];
-  connA.on("data", (m) => aborts.push(m));
   const responder = runSpake2(connB, "responder", TOKEN_ALPHA);
   responder.catch(() => {});
   // pakeMsg is correct but `point` is missing entirely.
-  connA.send({ pakeMsg: "1" });
+  await connA.send({ pakeMsg: "1" });
   await expect(responder).rejects.toThrow("PAKE authentication failed");
-  await drainSetImmediate();
-  expect(aborts.some(isAbort)).toBe(true);
+  expect(await connA.receive()).toEqual({ pakeMsg: "abort" });
 });
 
 test("initiator sends abort when responder's msg2 has a malformed point", async () => {
   const [connA, connB] = makeConnections();
-  const aborts: unknown[] = [];
-  // Capture aborts arriving at B (the side that sent the malformed msg2).
-  // The runSpake2 responder is NOT running here; we inject msg2 manually.
-  connB.on("data", (m) => {
-    if (isAbort(m)) aborts.push(m);
-  });
   const initiator = runSpake2(connA, "initiator", TOKEN_ALPHA);
   initiator.catch(() => {});
 
-  // Wait for A's msg1 to arrive at B, then respond with malformed msg2.
-  await new Promise<void>((resolve) => {
-    const onMsg1 = (m: unknown) => {
-      if (
-        typeof m === "object" &&
-        m !== null &&
-        (m as { pakeMsg?: unknown }).pakeMsg === "1"
-      ) {
-        connB.removeListener("data", onMsg1);
-        connB.send({
-          pakeMsg: "2",
-          point: "not-base64url!!",
-          mac: "AA",
-        });
-        resolve();
-      }
-    };
-    connB.on("data", onMsg1);
-  });
+  // Receive A's msg1, then reply with a malformed msg2.
+  const msg1 = await connB.receive();
+  expect((msg1 as { pakeMsg?: unknown }).pakeMsg).toBe("1");
+  await connB.send({ pakeMsg: "2", point: "not-base64url!!", mac: "AA" });
 
   await expect(initiator).rejects.toThrow("PAKE authentication failed");
-  await drainSetImmediate();
-  expect(aborts.length).toBeGreaterThan(0);
+  expect(await connB.receive()).toEqual({ pakeMsg: "abort" });
 });
 
 test("responder rejects with PAKE authentication failed when initiator's msg3 is an abort", async () => {
-  // Exercises the `Spake2AbortSchema` branch of the responder's msg3 receive
-  // (pake.ts line ~472). Both parties run runSpake2 with matching tokens so
-  // a valid msg1/msg2 round-trip occurs; the initiator's msg3 is then
-  // intercepted at the send boundary and replaced with an abort. The
-  // responder must reject with the generic PAKE-authentication-failed error
-  // (the abort is treated as an authentication failure, not a special case).
+  // Exercises the `Spake2AbortSchema` branch of the responder's msg3 receive.
+  // Both parties run runSpake2 with matching tokens so a valid msg1/msg2
+  // round-trip occurs; the initiator's msg3 is then intercepted at the send
+  // boundary and replaced with an abort. The responder must reject with the
+  // generic PAKE-authentication-failed error (the abort is treated as an
+  // authentication failure, not a special case).
   const [connA, connB] = makeConnections();
 
-  // Intercept connA.send: a valid msg3 is replaced with abort; other messages
-  // pass through unchanged. Bind the original prototype method via .call to
-  // avoid `this` being lost after reassignment, then write the replacement
-  // to the instance (shadowing the prototype method).
-  const realSend = connA.send.bind(connA);
-  (connA as { send: (data: unknown) => void }).send = (data: unknown) => {
-    if (
-      typeof data === "object" &&
-      data !== null &&
-      (data as { pakeMsg?: unknown }).pakeMsg === "3"
-    ) {
-      return realSend({ pakeMsg: "abort" });
-    }
-    return realSend(data);
+  // Wrap connA so a msg3 send is replaced with an abort; every other call
+  // delegates to the real pipe end unchanged.
+  const interceptedA: MessageConnection = {
+    send: (data: unknown) => {
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        (data as { pakeMsg?: unknown }).pakeMsg === "3"
+      ) {
+        return connA.send({ pakeMsg: "abort" });
+      }
+      return connA.send(data);
+    },
+    receive: (timeoutMs?: number) => connA.receive(timeoutMs),
+    close: () => connA.close(),
   };
 
-  const initiator = runSpake2(connA, "initiator", TOKEN_ALPHA);
+  const initiator = runSpake2(interceptedA, "initiator", TOKEN_ALPHA);
   initiator.catch(() => {});
   const responder = runSpake2(connB, "responder", TOKEN_ALPHA);
 
@@ -522,13 +405,13 @@ test("authenticateConnection does NOT tag SPAKE2 'PAKE authentication failed' er
 
 test("authenticateConnection throws when token expires during the SPAKE2 round-trip", async () => {
   // This exercises the second expiry check (after runSpake2 returns) rather
-  // than the first (before it starts). The pre-checks run synchronously
-  // before the first `await runSpake2`; PassthroughConnection delivers
-  // messages via setImmediate, so SPAKE2 completes across multiple event
-  // loop ticks. A microtask (Promise.resolve().then) fires before the first
-  // setImmediate callback, advancing the fake clock past `expires` so the
-  // post-handshake checks — which run after all setImmediate callbacks —
-  // see the token as expired.
+  // than the first (before it starts). The pre-checks run synchronously when
+  // authenticateConnection is first called, before any await; the SPAKE2
+  // round-trip then proceeds across many async hops (in-memory message
+  // delivery plus real WebCrypto). A microtask scheduled now
+  // (Promise.resolve().then) advances the fake clock past `expires` while the
+  // handshake is still in flight, so the post-handshake checks — which run
+  // only after both runSpake2 calls resolve — see the token as expired.
   const expires = "2030-01-01T00:00:00.000Z";
   vi.useFakeTimers({
     toFake: ["Date"],
@@ -547,7 +430,7 @@ test("authenticateConnection throws when token expires during the SPAKE2 round-t
       "responder",
     ),
   ]);
-  // Advance past expires before any setImmediate (SPAKE2 message delivery) fires.
+  // Advance past expires while the SPAKE2 round-trip is still in flight.
   await Promise.resolve().then(() =>
     vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
   );

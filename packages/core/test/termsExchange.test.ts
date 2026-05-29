@@ -3,7 +3,10 @@ import { expect, test } from "vitest";
 import { exchangeTerms, resolveRole } from "../src/protocolSetup";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 
-import { PassthroughConnection } from "./utils/passthroughConnection";
+import {
+  createMessagePipe,
+  type MessageConnection,
+} from "../src/connection/messageConnection";
 
 // --- Test fixtures -----------------------------------------------------------
 
@@ -31,11 +34,8 @@ const termsB: LinkageTerms = {
   identity: "Party B",
 };
 
-function makeConnections(): [PassthroughConnection, PassthroughConnection] {
-  const a = new PassthroughConnection();
-  const b = new PassthroughConnection(a);
-  a.setOther(b);
-  return [a, b];
+function makeConnections(): [MessageConnection, MessageConnection] {
+  return createMessagePipe();
 }
 
 /** Run an exchange between A (initiator) and B (responder). */
@@ -182,64 +182,33 @@ test("neither party expects output -> both parties reject", async () => {
   expect(results[1].status).toBe("rejected");
 });
 
-// --- Listener cleanup --------------------------------------------------------
-
-test("exchangeTerms: listeners are removed after a successful exchange", async () => {
-  const [connA, connB] = makeConnections();
-  await Promise.all([
-    exchangeTerms(connA, "initiator", termsA),
-    exchangeTerms(connB, "responder", termsB),
-  ]);
-  expect(connA.listenerCount("data")).toBe(0);
-  expect(connB.listenerCount("data")).toBe(0);
-});
-
-test("exchangeTerms: listeners are removed after a failed exchange", async () => {
-  const [connA, connB] = makeConnections();
-  await Promise.allSettled([
-    exchangeTerms(connA, "initiator", termsA),
-    exchangeTerms(connB, "responder", { ...termsB, algorithm: "psi-c" }),
-  ]);
-  expect(connA.listenerCount("data")).toBe(0);
-  expect(connB.listenerCount("data")).toBe(0);
-});
-
-test("resolveRole: listeners are removed after a count exchange", async () => {
-  const [connA, connB] = makeConnections();
-  const out = { expectsOutput: true, shareWithPartner: true };
-  await Promise.all([
-    resolveRole(connA, "initiator", out, out, 100),
-    resolveRole(connB, "responder", out, out, 200),
-  ]);
-  expect(connA.listenerCount("data")).toBe(0);
-  expect(connB.listenerCount("data")).toBe(0);
-});
-
 // --- Abort-send failure on the responder -------------------------------------
 
 test("exchangeTerms responder: rejects (does not hang) when abort send fails on incompatible terms", async () => {
   // Regression guard: previously, the responder's incompatible-terms branch
   // awaited `conn.send({...abort})` without a try/catch. If the send rejected
-  // (transport error coinciding with terms incompatibility), the resulting
-  // unhandled rejection inside the once("data") handler left the
-  // exchangeTerms promise pending indefinitely. The fix wraps the abort send
-  // in a try/catch so the local "linkage terms are incompatible" rejection
-  // is always observed.
+  // (transport error coinciding with terms incompatibility), the abort failure
+  // masked the local "linkage terms are incompatible" rejection and left
+  // exchangeTerms pending. The fix wraps the abort send in a try/catch so the
+  // local rejection is always observed.
   const [connA, connB] = makeConnections();
-  // Replace connB's send with one that rejects, simulating a transport-layer
-  // failure on the responder side. connA is left intact so msg1 (terms) is
-  // delivered to connB normally; the responder then detects incompatible
-  // terms and attempts to send the abort, which fails.
-  (connB as unknown as { send: (data: unknown) => Promise<void> }).send = () =>
-    Promise.reject(new Error("simulated transport failure"));
+  // Wrap connB so its send always rejects (simulating a transport-layer
+  // failure on the responder side) while receive still delivers msg1 from the
+  // initiator. The responder reads the terms, detects the incompatible
+  // algorithm, and attempts to send the abort, which fails.
+  const failingB: MessageConnection = {
+    send: () => Promise.reject(new Error("simulated transport failure")),
+    receive: (timeoutMs?: number) => connB.receive(timeoutMs),
+    close: () => connB.close(),
+  };
 
-  const responder = exchangeTerms(connB, "responder", {
+  const responder = exchangeTerms(failingB, "responder", {
     ...termsB,
     algorithm: "psi-c",
   });
-  // Inject msg1 directly from the initiator side. Running the initiator's
+  // Inject msg1 (the initiator's terms) directly. Running the initiator's
   // exchangeTerms is not possible here because the responder's reply (the
   // failed abort send) never reaches connA, and the initiator would hang.
-  connA.send({ linkageTerms: termsA });
+  await connA.send({ linkageTerms: termsA });
   await expect(responder).rejects.toThrow("linkage terms are incompatible");
 });
