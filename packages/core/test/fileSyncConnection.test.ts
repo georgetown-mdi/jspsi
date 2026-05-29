@@ -360,6 +360,79 @@ test("send writes the message file to the store", async () => {
   expect(files.has(`/test/${conn.id}.json`)).toBe(true);
 });
 
+test("send writes the in-flight file with a .tmp extension and renames to .json", async () => {
+  // A sync tool watching `*.json` must never match the partial write, so the
+  // temp file carries a `.tmp` extension; only the atomic rename target ends
+  // in `.json`.
+  const { client } = makeMockClient();
+  const conn = makeConnectedConn(client);
+
+  const putDests: string[] = [];
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    putDests.push(dest);
+    return origPut(src, dest, opts);
+  };
+  const renameTargets: string[] = [];
+  const origRename = client.rename.bind(client);
+  client.rename = async (from, to) => {
+    renameTargets.push(to);
+    return origRename(from, to);
+  };
+
+  await conn.send({ hello: "world" });
+
+  expect(putDests).toHaveLength(1);
+  expect(putDests[0].endsWith(".tmp")).toBe(true);
+  expect(putDests[0].endsWith(".json")).toBe(false);
+
+  expect(renameTargets).toEqual([`/test/${conn.id}.json`]);
+});
+
+test("send removes the .tmp file in-process when the rename fails", async () => {
+  // If the rename throws (e.g. transport failure) the catch block must delete
+  // the orphaned .tmp file so it is not left behind for the failed exchange.
+  // This is a best-effort in-process sweep through the still-live client; it
+  // is the only cleanup path for an in-flight write, so the .tmp name is
+  // deliberately not tracked in responsibleFiles (see send()).
+  const { client, files } = makeMockClient();
+  const conn = makeConnectedConn(client);
+
+  // Capture the temp path the write actually produced so the cleanup
+  // assertion cannot pass vacuously: if a refactor stopped writing the temp
+  // file, tempPath stays undefined and the "was written" check below fails.
+  let tempPath: string | undefined;
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    await origPut(src, dest, opts);
+    tempPath = dest;
+  };
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  client.rename = async () => {
+    throw new Error("synthetic rename failure");
+  };
+
+  await expect(conn.send({ hello: "world" })).rejects.toThrow(
+    "synthetic rename failure",
+  );
+
+  // The temp file was actually written (a .tmp, not a .json) ...
+  expect(tempPath).toBeDefined();
+  expect(tempPath!.endsWith(".tmp")).toBe(true);
+  // ... the catch swept exactly that file via safeDelete ...
+  expect(safeDeleted).toContain(tempPath!);
+  // ... and no .tmp residue remains on disk.
+  expect(files.has(tempPath!)).toBe(false);
+  const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
+  expect(tmpFiles).toEqual([]);
+});
+
 // --- Race condition: consecutive sends ---------------------------------------
 
 test("send waits for a previous unconsumed message before writing the next", async () => {
