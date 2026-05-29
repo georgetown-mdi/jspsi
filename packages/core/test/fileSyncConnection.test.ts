@@ -360,6 +360,86 @@ test("send writes the message file to the store", async () => {
   expect(files.has(`/test/${conn.id}.json`)).toBe(true);
 });
 
+test("send writes the in-flight file with a .tmp extension and renames to .json", async () => {
+  // A sync tool watching `*.json` must never match the partial write, so the
+  // temp file carries a `.tmp` extension; only the atomic rename target ends
+  // in `.json`.
+  const { client } = makeMockClient();
+  const conn = makeConnectedConn(client);
+
+  const putDests: string[] = [];
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    putDests.push(dest);
+    return origPut(src, dest, opts);
+  };
+  const renameTargets: string[] = [];
+  const origRename = client.rename.bind(client);
+  client.rename = async (from, to) => {
+    renameTargets.push(to);
+    return origRename(from, to);
+  };
+
+  await conn.send({ hello: "world" });
+
+  expect(putDests).toHaveLength(1);
+  expect(putDests[0].endsWith(".tmp")).toBe(true);
+  expect(putDests[0].endsWith(".json")).toBe(false);
+
+  expect(renameTargets).toEqual([`/test/${conn.id}.json`]);
+});
+
+test("send tracks the .tmp file in responsibleFiles until the rename completes", async () => {
+  // The .tmp must be listed in responsibleFiles before the write so cleanup()
+  // can sweep it if the process dies before the rename; once the rename
+  // succeeds the entry is replaced by the final .json name.
+  const { client } = makeMockClient();
+  const conn = makeConnectedConn(client);
+  const responsible = (conn as unknown as { responsibleFiles: Set<string> })
+    .responsibleFiles;
+
+  let tmpTrackedDuringPut: string | undefined;
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    const tmpName = dest.slice("/test/".length);
+    if (responsible.has(tmpName)) tmpTrackedDuringPut = tmpName;
+    return origPut(src, dest, opts);
+  };
+
+  await conn.send({ hello: "world" });
+
+  // The .tmp was tracked while the write was in flight ...
+  expect(tmpTrackedDuringPut).toBeDefined();
+  expect(tmpTrackedDuringPut!.endsWith(".tmp")).toBe(true);
+  // ... and is replaced by the final .json name once the rename completes.
+  expect(responsible.has(tmpTrackedDuringPut!)).toBe(false);
+  expect(responsible.has(`${conn.id}.json`)).toBe(true);
+});
+
+test("send cleans up the .tmp file and its responsibleFiles entry when the rename fails", async () => {
+  // If the rename throws (e.g. transport failure), the catch block must delete
+  // the orphaned .tmp file and drop it from responsibleFiles so a later
+  // cleanup() does not attempt to re-delete a name that no longer exists.
+  const { client, files } = makeMockClient();
+  const conn = makeConnectedConn(client);
+  const responsible = (conn as unknown as { responsibleFiles: Set<string> })
+    .responsibleFiles;
+
+  client.rename = async () => {
+    throw new Error("synthetic rename failure");
+  };
+
+  await expect(conn.send({ hello: "world" })).rejects.toThrow(
+    "synthetic rename failure",
+  );
+
+  // No .tmp residue on disk and nothing tracked for cleanup.
+  const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
+  expect(tmpFiles).toEqual([]);
+  const tracked = [...responsible].filter((n) => n.endsWith(".tmp"));
+  expect(tracked).toEqual([]);
+});
+
 // --- Race condition: consecutive sends ---------------------------------------
 
 test("send waits for a previous unconsumed message before writing the next", async () => {

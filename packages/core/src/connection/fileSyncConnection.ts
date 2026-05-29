@@ -770,7 +770,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       throw new Error("not connected");
 
     const outPath = `${this.path}/${this.id}.json`;
-    const tempFile = `temp-${uuidv4()}.json`;
+    // The in-flight write uses a `.tmp` extension, not `.json`, so a sync tool
+    // configured to watch `*.json` never matches the partial write before the
+    // atomic rename to the final `.json` name completes.
+    const tempFile = `temp-${uuidv4()}.tmp`;
     const tempPath = `${this.path}/${tempFile}`;
 
     try {
@@ -809,6 +812,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `${message.length} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
+      // Track the .tmp before the write so cleanup() can sweep it if the
+      // process dies between put() and rename(); the rename removes the .tmp
+      // entry and replaces it with the final .json name.
+      this.responsibleFiles.add(tempFile);
       await this.client.put(Buffer.from(message), tempPath, {
         flags: "w",
         encoding: null,
@@ -816,9 +823,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       this.log.debug(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
       await this.client.rename(tempPath, outPath);
+      this.responsibleFiles.delete(tempFile);
       this.responsibleFiles.add(`${this.id}.json`);
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
+      this.responsibleFiles.delete(tempFile);
       if (err instanceof Error && err.cause === "usage") delete err.cause;
       throw err instanceof Error ? err : new Error(errMessage(err));
     }
