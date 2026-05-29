@@ -477,6 +477,14 @@ test("both key files hold the same rotated token after a successful exchange", a
     ),
   ]);
 
+  // Both runExchange calls must have received the EncryptedConnection wrapper,
+  // not the raw FileSyncConnection. A regression here would silently bypass
+  // AES-256-GCM and send plaintext over the filedrop transport.
+  expect(vi.mocked(runExchange).mock.calls).toHaveLength(2);
+  for (const [conn] of vi.mocked(runExchange).mock.calls) {
+    expect(conn).toBeInstanceOf(EncryptedConnection);
+  }
+
   const loadedA = loadKeyFile(keyFileA);
   const loadedB = loadKeyFile(keyFileB);
 

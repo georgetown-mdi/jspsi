@@ -118,7 +118,7 @@ As noted in [Transport-layer authentication](#transport-layer-authentication), s
 
 Each sender encrypts exclusively with its own outbound key, so the two directions never share a `(key, nonce)` pair — a design that avoids the catastrophic nonce-reuse vulnerability that a single shared key would introduce when both sides start their sequence counter at 0.
 
-**Wire format** for one encrypted message: `{ enc: base64url(IV ‖ ciphertext ‖ 16-byte GCM tag) }`, where IV is 12 bytes: 4 reserved zero bytes followed by an 8-byte big-endian sequence number. The sequence number is not transmitted separately; the receiver reads it from the cleartext IV prefix before decryption and rejects any message whose sequence number is not strictly greater than the last accepted sequence number, preventing replay and out-of-order delivery.
+**Wire format** for one encrypted message: `{ enc: base64url(IV ‖ ciphertext ‖ 16-byte GCM tag) }`, where IV is 12 bytes: 4 reserved zero bytes followed by an 8-byte big-endian sequence number. The sequence number is not transmitted separately; the receiver reads it from the cleartext IV prefix before decryption and rejects any message whose sequence number is not strictly greater than the last accepted sequence number, preventing replay of already-seen messages. (Gaps in the sequence — a sender skipping from seq 0 to seq 5 — are accepted; the check enforces a monotonically increasing sequence per sender, not strict sequentiality.)
 
 The server admin sees only opaque ciphertext objects. If they tamper with a file, the AES-GCM authentication tag fails and the exchange aborts — any tag failure or replay permanently disables the `EncryptedConnection` wrapper.
 
