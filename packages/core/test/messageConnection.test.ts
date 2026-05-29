@@ -59,6 +59,15 @@ test("close is idempotent and rejects sends afterwards", async () => {
   expect((err as ConnectionError).kind).toBe("usage");
 });
 
+test("close rejects a parked receive as cancelled, not usage", async () => {
+  const [a] = createMessagePipe();
+  const parked = a.receive();
+  await a.close();
+  const err = await parked.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("closed");
+});
+
 test("buffered messages drain before a clean close rejects receive", async () => {
   const [a, b] = createMessagePipe();
   await a.send("buffered");

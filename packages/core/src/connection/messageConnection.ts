@@ -12,12 +12,18 @@ import type { Connection } from "../types";
  *   after close, a path shared by another session). The caller must fix
  *   something before retrying.
  * - `protocol`: the peer violated the message protocol (e.g. sent out of turn).
+ * - `closed`: a parked operation was cancelled by a deliberate local
+ *   {@link MessageConnection.close} (e.g. a signal-driven shutdown). Nothing
+ *   went wrong; it is distinct from `usage` so a clean shutdown is not
+ *   mistaken for a programming error, and distinct from `transport` so it is
+ *   not remapped to a peer-timeout diagnostic.
  */
 export type ConnectionErrorKind =
   | "transport"
   | "security"
   | "usage"
-  | "protocol";
+  | "protocol"
+  | "closed";
 
 /** A terminal connection failure, tagged with a {@link ConnectionErrorKind}. */
 export class ConnectionError extends Error {
@@ -261,7 +267,9 @@ export class QueuedMessageConnection implements MessageConnection {
     this.terminated = true;
     this.closed = true;
     this.disarmIdle();
-    this.rejectWaiters(new ConnectionError("connection closed", "usage"));
+    // A waiter parked before this deliberate close did nothing wrong, so reject
+    // it as "closed" (a cancelled operation), not "usage" (caller misuse).
+    this.rejectWaiters(new ConnectionError("connection closed", "closed"));
     await this.hooks.close();
   }
 }
