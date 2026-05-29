@@ -611,15 +611,11 @@ export async function runProtocol(
       }
       if (signalReceived !== undefined) {
         // A signal fired during EncryptedConnection.create(): doCleanup
-        // already ran against the raw conn (activeConn at that time). Now
-        // that create() has resolved, close the wrapper explicitly so its
-        // listeners are detached, then bail so the signal handler owns the
+        // already closed conn (activeConn at that time). Now that create()
+        // has resolved, detach the wrapper's listeners without closing the
+        // inner transport again, then bail so the signal handler owns the
         // exit code.
-        try {
-          await activeConn.close();
-        } catch (err) {
-          log.debug("post-create signal close failed:", err);
-        }
+        (activeConn as EncryptedConnection).detachListeners();
         throw new Error(
           `interrupted by ${signalReceived} during key derivation`,
         );

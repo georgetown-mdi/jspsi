@@ -357,6 +357,41 @@ test("send() after close() throws permanently-dead", async () => {
   await expect(encA.send({ test: true })).rejects.toThrow(/permanently dead/i);
 });
 
+// --- detachListeners ----------------------------------------------------------
+
+test("detachListeners() removes inner listeners without closing the inner connection", async () => {
+  const conn = new PassthroughConnection();
+  const enc = await EncryptedConnection.create(conn, SESSION_KEY, "responder");
+
+  let dataFired = false;
+  let errorFired = false;
+  enc.on("data", () => {
+    dataFired = true;
+  });
+  enc.on("error", () => {
+    errorFired = true;
+  });
+
+  enc.detachListeners();
+
+  // Late events on the inner connection must not reach the wrapper.
+  conn.emit("data", await buildEnvelope("initiator", 0, { x: 1 }));
+  conn.emit("error", new Error("late transport error"));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  expect(dataFired).toBe(false);
+  expect(errorFired).toBe(false);
+  // Inner connection is still open (not closed by detachListeners).
+  expect(conn.listenerCount("data")).toBe(0);
+});
+
+test("send() after detachListeners() throws permanently-dead", async () => {
+  const conn = new PassthroughConnection();
+  const enc = await EncryptedConnection.create(conn, SESSION_KEY, "initiator");
+  enc.detachListeners();
+  await expect(enc.send({ test: true })).rejects.toThrow(/permanently dead/i);
+});
+
 // --- Sequence number bounds ---------------------------------------------------
 
 test("inbound seq > MAX_SAFE_INTEGER is rejected before AES-GCM", async () => {

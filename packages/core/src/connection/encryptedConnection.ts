@@ -318,10 +318,22 @@ export class EncryptedConnection extends BufferedErrorEmitter {
     this.emit("error", err);
   }
 
-  close(): void | Promise<void> {
+  /**
+   * Marks the wrapper dead and removes its listeners from the inner connection
+   * without closing the inner connection itself.
+   *
+   * Use this when the inner connection has already been closed by another path
+   * (e.g. a signal handler that ran `doCleanup` while this wrapper was still
+   * being constructed) and only the listener cleanup is needed.
+   */
+  detachListeners(): void {
     this.failed = true;
     this.inner.removeListener("data", this.onInnerData);
     this.inner.removeListener("error", this.onInnerError);
+  }
+
+  close(): void | Promise<void> {
+    this.detachListeners();
     return this.inner.close();
   }
 
