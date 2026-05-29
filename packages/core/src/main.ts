@@ -3,7 +3,6 @@ export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/fileSyncConnection";
-export { chainAsCause } from "./connection/chainAsCause";
 export { BufferingEventEmitter } from "./connection/bufferingEventEmitter";
 export { getLogger, setLogPrefixer } from "./utils/logger";
 export { retryPromise, withTimeout } from "./utils/promise";
