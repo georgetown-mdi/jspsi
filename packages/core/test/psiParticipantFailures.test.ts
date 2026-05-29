@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
+import { PassthroughConnection } from "./utils/passthroughConnection";
 import { StubConnection } from "./utils/stubConnection";
 
 import type { Connection } from "../src/types";
@@ -60,5 +61,53 @@ describe("identifyIntersection failure handling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("joiner resolves even when the status-completed send fails", async () => {
+    // The joiner's three sends are: (1) clientRequest, (2) associationTable,
+    // (3) { status: "completed" }. The third is best-effort: participant.ts
+    // wraps it in try/catch so a failure does not reject identifyIntersection.
+    class FailOnNthSend extends PassthroughConnection {
+      private count = 0;
+      constructor(private readonly n: number, other?: PassthroughConnection) {
+        super(other);
+      }
+      send(data: unknown): void | Promise<void> {
+        this.count++;
+        if (this.count === this.n)
+          return Promise.reject(new Error("status-completed send failed"));
+        return super.send(data);
+      }
+    }
+
+    const starterConn = new PassthroughConnection();
+    const joinerConn = new FailOnNthSend(3, starterConn);
+    starterConn.setOther(joinerConn);
+
+    const starter = new PSIParticipant("starter", psiLibrary, {
+      role: "starter",
+      verbose: 0,
+    });
+    const joiner = new PSIParticipant("joiner", psiLibrary, {
+      role: "joiner",
+      verbose: 0,
+    });
+
+    const starterPromise = starter.identifyIntersection(
+      starterConn as Connection,
+      ["a", "b"],
+    );
+    const joinerResult = await joiner.identifyIntersection(
+      joinerConn as Connection,
+      ["a", "b"],
+    );
+
+    expect(Array.isArray(joinerResult[0])).toBe(true);
+    expect(Array.isArray(joinerResult[1])).toBe(true);
+
+    // The starter is now blocked waiting for "status completed" which was never
+    // delivered. Emit an error to unblock it so no promise outlives the test.
+    starterConn.emit("error", new Error("test cleanup"));
+    await expect(starterPromise).rejects.toThrow();
   });
 });
