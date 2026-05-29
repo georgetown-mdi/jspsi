@@ -8,6 +8,8 @@ import { prepareForExchange, runExchange } from "@psilink/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
+import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+
 import { sortAssociationTable } from "../utils/associationTable.js";
 
 import type { DataConnection } from "peerjs";
@@ -174,10 +176,12 @@ const clientPrepared = prepareForExchange(
   ["first_name"],
 );
 
+const serverMc = await openPeerMessageConnection(serverConn);
+const clientMc = await openPeerMessageConnection(clientConn);
+
 const runServerPSI = async () => {
-  serverConn.once("data", () => serverPeer.disconnect());
   const { associationTable } = await runExchange(
-    serverConn,
+    serverMc,
     "responder",
     serverPrepared,
     { psiLibrary },
@@ -186,9 +190,8 @@ const runServerPSI = async () => {
 };
 
 const runClientPSI = async () => {
-  clientConn.once("data", () => clientPeer.disconnect());
   const { associationTable } = await runExchange(
-    clientConn,
+    clientMc,
     "initiator",
     clientPrepared,
     { psiLibrary },
@@ -201,8 +204,10 @@ let [serverResult, clientResult] = await Promise.all([
   runClientPSI(),
 ]);
 
-serverConn.close();
-clientConn.close();
+await serverMc.close();
+await clientMc.close();
+serverPeer.disconnect();
+clientPeer.disconnect();
 
 serverResult = sortAssociationTable(serverResult);
 clientResult = sortAssociationTable(clientResult, true);

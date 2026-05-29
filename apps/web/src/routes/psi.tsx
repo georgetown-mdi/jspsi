@@ -33,6 +33,7 @@ import {
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
+import { openPeerMessageConnection } from "@psi/peerMessageConnection";
 
 import FileSelect from "@components/FileSelect";
 import SessionDetails from "@components/SessionDetails";
@@ -40,8 +41,11 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
-import type { DataConnection } from "peerjs";
+import type {
+  ExchangeResult,
+  MessageConnection,
+  PreparedExchange,
+} from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
 export const Route = createFileRoute("/psi")({
@@ -132,11 +136,9 @@ function Home() {
     setSubmitted(true);
 
     const finishExchange = (
-      conn: DataConnection,
       { associationTable, partnerPayload }: ExchangeResult,
       prepared: PreparedExchange,
     ) => {
-      conn.close();
       log.info("linkage complete, generating results file");
       const { headers, rows } = buildOutputTable(
         associationTable,
@@ -162,7 +164,6 @@ function Home() {
             loadCSVFile(files[0]),
             openPeerConnection(peerId),
           ]);
-          conn.once("data", () => peer.disconnect());
 
           const rawRows = csvResult.data as Array<Record<string, string>>;
           const prepared = prepareForExchange(
@@ -180,16 +181,25 @@ function Home() {
             doneStage,
           ]);
 
-          const exchangeResult = await runExchange(
-            conn,
-            "responder",
-            prepared,
-            {
-              psiLibrary: psi,
-              onStage: setStageById,
-            },
-          );
-          finishExchange(conn, exchangeResult, prepared);
+          let mc: MessageConnection | undefined;
+          try {
+            mc = await openPeerMessageConnection(conn);
+            const exchangeResult = await runExchange(
+              mc,
+              "responder",
+              prepared,
+              {
+                psiLibrary: psi,
+                onStage: setStageById,
+              },
+            );
+            finishExchange(exchangeResult, prepared);
+          } catch (error) {
+            console.error(error);
+          } finally {
+            peer.disconnect();
+            await mc?.close();
+          }
         })
         .catch((error) => {
           console.error(error);
@@ -218,20 +228,24 @@ function Home() {
           const peer = await createAndSharePeerId(session);
 
           peer.on("connection", (conn) => {
-            conn.on("open", async () => {
-              conn.once("data", () => peer.disconnect());
+            void (async () => {
+              let mc: MessageConnection | undefined;
               try {
+                mc = await openPeerMessageConnection(conn);
                 const exchangeResult = await runExchange(
-                  conn,
+                  mc,
                   "initiator",
                   prepared,
                   { psiLibrary: psi, onStage: setStageById },
                 );
-                finishExchange(conn, exchangeResult, prepared);
+                finishExchange(exchangeResult, prepared);
               } catch (error) {
                 console.error(error);
+              } finally {
+                peer.disconnect();
+                await mc?.close();
               }
-            });
+            })();
           });
         })
         .catch((error) => {
