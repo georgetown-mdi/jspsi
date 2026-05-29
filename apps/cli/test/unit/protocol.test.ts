@@ -1559,6 +1559,9 @@ test("runProtocol resolves (does not reject) when SIGINT fires during EncryptedC
     .spyOn(process, "exit")
     .mockReturnValue(undefined as never);
 
+  const detachListeners = vi.fn();
+  const stubConn = { detachListeners } as unknown as EncryptedConnection;
+
   let resolveA!: () => void;
   let resolveB!: () => void;
   let callCount = 0;
@@ -1566,11 +1569,11 @@ test("runProtocol resolves (does not reject) when SIGINT fires during EncryptedC
     .spyOn(EncryptedConnection, "create")
     .mockImplementation(
       () =>
-        new Promise<never>((resolve) => {
+        new Promise<EncryptedConnection>((resolve) => {
           if (callCount === 0) {
-            resolveA = resolve as () => void;
+            resolveA = () => resolve(stubConn);
           } else {
-            resolveB = resolve as () => void;
+            resolveB = () => resolve(stubConn);
           }
           callCount++;
         }),
@@ -1621,6 +1624,7 @@ test("runProtocol resolves (does not reject) when SIGINT fires during EncryptedC
     const [resultA, resultB] = await Promise.allSettled([pA, pB]);
     expect(resultA.status).toBe("fulfilled");
     expect(resultB.status).toBe("fulfilled");
+    expect(detachListeners).toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
     createSpy.mockRestore();
