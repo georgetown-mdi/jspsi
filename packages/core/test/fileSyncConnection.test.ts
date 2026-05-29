@@ -902,6 +902,9 @@ test("synchronize() resolves cleanly when it observes a wave file already create
 
   // Peer arrived first so this party is the initiator (second to arrive).
   expect(conn.handshakeRole).toBe("initiator");
+  // The wave-detection branch must label roles with the same convention as
+  // the other rendezvous branches: responder=starter, initiator=joiner.
+  expect(conn.role).toBe("joiner");
   expect(conn.peerId).toBe(peerId);
   // All three files cleaned up by the wave-detection branch.
   expect(files.has(wavePath)).toBe(false);
@@ -954,6 +957,76 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
     .responsibleFiles;
   expect(responsible.has(myHelloName)).toBe(true);
   expect(responsible.has(waveName)).toBe(true);
+});
+
+test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring divergent modifyTimes", async () => {
+  // Across heterogeneous transports the two parties can observe different --
+  // even contradictory -- modifyTimes for the same hello files, because sync
+  // tools stamp the transfer time rather than the original creation time. Here
+  // each side sees ITS OWN hello as the earlier file, the worst case for a
+  // modifyTime tiebreaker: it would make both parties believe they arrived
+  // first, both claim the starter role, and derive two different wave names --
+  // a deadlock. The UUID-only tiebreaker must instead assign the starter role
+  // to the lexicographically-smaller UUID on both sides regardless of
+  // modifyTime, so the parties agree on roles and on a single wave name.
+  const idLow = "00000000-0000-4000-8000-000000000001";
+  const idHigh = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+
+  // Run one side's synchronize() against a listing in which this side's own
+  // hello is the earlier (smaller modifyTime) file. Returns the assigned roles
+  // plus the wave name the side derived (captured from createExclusive).
+  const runSide = async (
+    myId: string,
+    peerId: string,
+  ): Promise<{
+    role: string;
+    handshakeRole: string | undefined;
+    waveName: string;
+  }> => {
+    const { client } = makeMockClient();
+    const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.id = myId;
+    const base = conn.path ?? "";
+    const myHelloName = `${myId}.hello`;
+    const peerHelloName = `${peerId}.hello`;
+
+    let listCallCount = 0;
+    client.list = async () => {
+      listCallCount++;
+      if (listCallCount === 1) return []; // initial check: directory is clean
+      // This side's own hello carries the EARLIER timestamp; under a
+      // modifyTime tiebreaker that would mark this side as "arrived first".
+      return [
+        { name: myHelloName, modifyTime: 1000 },
+        { name: peerHelloName, modifyTime: 5000 },
+      ];
+    };
+
+    let waveName = "";
+    const realCreateExclusive = client.createExclusive.bind(client);
+    client.createExclusive = async (path: string) => {
+      waveName = path.slice(base.length + 1);
+      return realCreateExclusive(path);
+    };
+
+    await conn.synchronize();
+    return { role: conn.role, handshakeRole: conn.handshakeRole, waveName };
+  };
+
+  const low = await runSide(idLow, idHigh);
+  const high = await runSide(idHigh, idLow);
+
+  // The smaller UUID is the starter on both sides; modifyTime is ignored even
+  // though it pointed the other way for the high-UUID side.
+  expect(low.handshakeRole).toBe("responder");
+  expect(low.role).toBe("starter");
+  expect(high.handshakeRole).toBe("initiator");
+  expect(high.role).toBe("joiner");
+
+  // Both sides independently derive the SAME wave name, `${low}-${high}.wave`,
+  // which is what lets the loser locate and clean up the winner's wave file.
+  expect(low.waveName).toBe(`${idLow}-${idHigh}.wave`);
+  expect(high.waveName).toBe(`${idLow}-${idHigh}.wave`);
 });
 
 // --- synchronize(): joiner branch (initial list shows one peer hello) -------
