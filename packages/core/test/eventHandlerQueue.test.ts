@@ -78,4 +78,110 @@ describe("EventHandlerQueue", () => {
 
     expect(onError).not.toHaveBeenCalled();
   });
+
+  describe("onDone", () => {
+    test("called synchronously after last synchronous handler completes", () => {
+      const onDone = vi.fn();
+      const onError = vi.fn();
+      const queue = new EventHandlerQueue(
+        [
+          () => {
+            /* sync handler */
+          },
+        ],
+        onError,
+        onDone,
+      );
+
+      queue.handleEvent();
+
+      expect(onDone).toHaveBeenCalledTimes(1);
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    test("called after last async handler resolves", async () => {
+      const onDone = vi.fn();
+      const onError = vi.fn();
+      const queue = new EventHandlerQueue(
+        [
+          async () => {
+            /* async handler */
+          },
+        ],
+        onError,
+        onDone,
+      );
+
+      queue.handleEvent();
+      expect(onDone).not.toHaveBeenCalled();
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onDone).toHaveBeenCalledTimes(1);
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    test("not called when the last handler throws synchronously", () => {
+      const onDone = vi.fn();
+      const onError = vi.fn();
+      const queue = new EventHandlerQueue(
+        [
+          () => {
+            throw new Error("sync boom");
+          },
+        ],
+        onError,
+        onDone,
+      );
+
+      queue.handleEvent();
+
+      expect(onDone).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    test("not called when the last async handler rejects", async () => {
+      const onDone = vi.fn();
+      const onError = vi.fn();
+      const queue = new EventHandlerQueue(
+        [
+          async () => {
+            throw new Error("async boom");
+          },
+        ],
+        onError,
+        onDone,
+      );
+
+      queue.handleEvent();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onDone).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    test("not called after a non-last handler completes", () => {
+      const onDone = vi.fn();
+      const onError = vi.fn();
+      const queue = new EventHandlerQueue(
+        [
+          () => {
+            /* first handler */
+          },
+          () => {
+            /* second handler */
+          },
+        ],
+        onError,
+        onDone,
+      );
+
+      queue.handleEvent();
+
+      expect(onDone).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+  });
 });

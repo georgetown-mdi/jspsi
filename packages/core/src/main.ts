@@ -1,5 +1,6 @@
 export * from "./participant";
-export * from "./link";
+export type { IndexableIterable } from "./link";
+export { linkViaPSI } from "./link";
 export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/fileSyncConnection";

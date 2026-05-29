@@ -55,7 +55,7 @@ export function runReceiveSequence(
     const queue = new EventHandlerQueue(handlers, fail, succeed);
     const dataListener = (rawData: unknown) => {
       queue.handleEvent(rawData);
-      resetTimer();
+      if (!settled) resetTimer();
     };
 
     resetTimer();

@@ -1,9 +1,36 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi, afterEach } from "vitest";
 
 import { runReceiveSequence } from "../src/utils/receiveSequence";
 import { StubConnection } from "./utils/stubConnection";
 
 import type { Connection } from "../src/types";
+
+describe("runReceiveSequence timer cleanup", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("no stale timer after synchronous last handler completes", async () => {
+    vi.useFakeTimers();
+    const conn = new StubConnection();
+    let handlerRan = false;
+    const promise = runReceiveSequence(conn as Connection, [
+      (_rawData: unknown) => {
+        handlerRan = true;
+      },
+    ]);
+
+    // Drive one data event so the synchronous handler fires and the phase resolves.
+    conn.emit("data", { type: "message" });
+    expect(handlerRan).toBe(true);
+
+    // Advance past the 120-second inactivity timeout.
+    await vi.advanceTimersByTimeAsync(125_000);
+
+    // The promise should still resolve cleanly — no stale timer fired fail().
+    await expect(promise).resolves.toBeUndefined();
+  });
+});
 
 describe("runReceiveSequence with empty handlers", () => {
   test("resolves immediately when handlers is empty and no initialSend", async () => {
