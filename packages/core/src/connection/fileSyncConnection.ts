@@ -66,6 +66,9 @@ const getDefaultOptions = (): Options => {
 
 export interface FileInfo {
   name: string;
+  // Retained for downstream transport consumers; no longer used by the
+  // rendezvous tiebreaker (see waitForPeer), which orders on UUID alone
+  // because sync tools stamp transfer time rather than creation time.
   modifyTime: number;
 }
 
@@ -572,7 +575,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.handshakeRole =
               waveMatches[1] === this.id ? "responder" : "initiator";
             this.role =
-              this.handshakeRole === "initiator" ? "starter" : "joiner";
+              this.handshakeRole === "initiator" ? "joiner" : "starter";
             this.peerId = otherFile.name.slice(0, -6);
 
             this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
@@ -632,10 +635,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             const thisFile = theseFiles[0];
 
-            const arrivedFirst =
-              thisFile.modifyTime < otherFile.modifyTime ||
-              (thisFile.modifyTime === otherFile.modifyTime &&
-                thisFile.name < otherFile.name);
+            // Tiebreak on UUID lexicographic order alone, never modifyTime:
+            // both hello UUIDs are identical on each side, so this comparison
+            // is deterministic and symmetric regardless of which party runs
+            // it. modifyTime is unreliable here -- sync tools stamp files with
+            // the transfer time rather than the original creation time, so the
+            // two parties may observe different (even contradictory) timestamps
+            // for the same files.
+            const arrivedFirst = thisFile.name < otherFile.name;
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role = arrivedFirst ? "starter" : "joiner";
             this.peerId = otherFile.name.slice(0, -6);
