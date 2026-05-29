@@ -135,15 +135,24 @@ function Home() {
   const [submitted, setSubmitted] = useState(false);
   const [stageId, setStageById] = useState<string>("before start");
   const [resultURL, setResultURL] = useState<string>();
-  const [errorMessage, setErrorMessage] = useState<string>();
+  const [errorAlert, setErrorAlert] = useState<{
+    title: string;
+    message: string;
+  }>();
 
   const handleSubmit = () => {
     setSubmitted(true);
-    setErrorMessage(undefined);
+    setErrorAlert(undefined);
+
+    const describeError = (error: unknown) =>
+      error instanceof Error ? error.message : String(error);
 
     const handleFailure = (error: unknown) => {
       console.error(error);
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorAlert({
+        title: "Exchange failed",
+        message: describeError(error),
+      });
     };
 
     const finishExchange = (
@@ -175,6 +184,10 @@ function Home() {
       conn: DataConnection,
       exchangeRole: "initiator" | "responder",
       prepared: PreparedExchange,
+      // Either the still-loading library (server: passed before the WASM load
+      // resolves, so the inbound listener attaches first) or an already-loaded
+      // one (client: resolved before the connection handler runs). await covers
+      // both, so the union is intentional, not a dead branch.
       psi: PSILibrary | Promise<PSILibrary>,
       peer: Peer,
     ) => {
@@ -185,7 +198,21 @@ function Home() {
           psiLibrary: await psi,
           onStage: setStageById,
         });
-        finishExchange(exchangeResult, prepared);
+        // The privacy-sensitive exchange has completed by here; a failure
+        // building the local results file must not be reported as an exchange
+        // failure, or the user may needlessly re-run a PSI exchange that in
+        // fact already succeeded.
+        try {
+          finishExchange(exchangeResult, prepared);
+        } catch (error) {
+          console.error(error);
+          setErrorAlert({
+            title: "Results unavailable",
+            message:
+              "The linkage completed, but generating the results file failed: " +
+              describeError(error),
+          });
+        }
       } catch (error) {
         handleFailure(error);
       } finally {
@@ -286,9 +313,9 @@ function Home() {
             resultsFileURL={resultURL}
           />
         </Group>
-        {errorMessage && (
-          <Alert color="red" title="Exchange failed">
-            {errorMessage}
+        {errorAlert && (
+          <Alert color="red" title={errorAlert.title}>
+            {errorAlert.message}
           </Alert>
         )}
         {url && (
