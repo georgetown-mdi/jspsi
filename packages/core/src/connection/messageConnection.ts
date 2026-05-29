@@ -40,8 +40,12 @@ export class ConnectionError extends Error {
   }
 }
 
-/** Wraps an arbitrary thrown value as a {@link ConnectionError}. */
-function asConnectionError(
+/**
+ * Wraps an arbitrary thrown value as a {@link ConnectionError}, passing an
+ * existing {@link ConnectionError} through unchanged. Shared by the bridges so
+ * every transport classifies a raw transport failure the same way.
+ */
+export function asConnectionError(
   err: unknown,
   kind: ConnectionErrorKind,
 ): ConnectionError {
@@ -96,12 +100,29 @@ export interface TransportControls {
   deliver: (message: unknown) => void;
   /** Latch a terminal error; idempotent after the first call. */
   fail: (error: ConnectionError) => void;
+  /**
+   * Half-close: latch a terminal error that surfaces only once any already
+   * buffered messages have been drained by {@link MessageConnection.receive}.
+   * If the queue is already empty it behaves exactly like {@link fail}. Use
+   * for a clean remote close that may arrive with the peer's final frame still
+   * queued, where {@link fail} would discard it. Idempotent once a terminal
+   * state is reached.
+   */
+  finish: (error: ConnectionError) => void;
 }
 
 /** The transport-specific operations the queue drives. */
 export interface TransportHooks {
   send: (data: unknown) => void | Promise<void>;
-  close: () => void | Promise<void>;
+  /**
+   * Tears down the transport. `options.flush` is set on a deliberate clean
+   * close ({@link MessageConnection.close}) and unset on error teardown (via
+   * {@link TransportControls.fail}). A transport that buffers outbound writes
+   * should drain them before closing when `flush` is set, so a final frame
+   * still in flight is not lost, and close immediately otherwise; a transport
+   * without an outbound buffer may ignore it.
+   */
+  close: (options?: { flush?: boolean }) => void | Promise<void>;
   /**
    * Run once after wiring is complete; safe to call {@link TransportControls}
    * here.
@@ -146,6 +167,10 @@ export class QueuedMessageConnection implements MessageConnection {
   private readonly inactivityTimeoutMs: number | undefined;
   private readonly hooks: TransportHooks;
   private error: ConnectionError | undefined;
+  // Deferred terminal error from a half-close (finish): held while the queue
+  // still has buffered frames and promoted to a real error by receive() once
+  // the queue drains, so a clean remote close surfaces after its final frame.
+  private pendingError: ConnectionError | undefined;
   private closed = false;
   // Guards the single transport teardown shared by close() and fail().
   private terminated = false;
@@ -162,6 +187,7 @@ export class QueuedMessageConnection implements MessageConnection {
     this.hooks = connect({
       deliver: (message) => this.deliver(message),
       fail: (error) => this.fail(error),
+      finish: (error) => this.finish(error),
     });
     this.hooks.start?.();
   }
@@ -207,7 +233,11 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   private deliver(message: unknown): void {
-    if (this.error || this.closed) return;
+    // Once a half-close is pending, ignore further inbound: drain exactly what
+    // was buffered at close time, then fail. PeerJS will not deliver after a
+    // close, so this is belt-and-suspenders, but it keeps the half-closed
+    // semantics crisp.
+    if (this.error || this.closed || this.pendingError !== undefined) return;
     const waiter = this.waiters.shift();
     if (waiter) {
       // A message just arrived: the peer is alive, so reset the idle clock,
@@ -242,11 +272,50 @@ export class QueuedMessageConnection implements MessageConnection {
     }
   }
 
+  // Half-close: latch a terminal error to be surfaced only after the queue
+  // drains. A genuine error uses fail() (discarding buffered frames is the
+  // intended stance); a clean remote close that may have left the peer's final
+  // frame queued uses this so receive() returns that frame before failing.
+  private finish(error: ConnectionError): void {
+    // Idempotent once a half-close is already pending: a second finish() (a
+    // duplicate transport close, or a transport that finishes on both a close
+    // and a timeout) must not overwrite the first deferred error. Mirrors the
+    // pendingError guard in deliver().
+    if (this.error || this.closed || this.pendingError !== undefined) return;
+    if (this.queue.length > 0) {
+      this.pendingError = error;
+    } else {
+      // Nothing buffered to drain (a parked waiter implies an empty queue), so
+      // there is nothing to wait for: fail now, exactly like fail().
+      this.fail(error);
+    }
+  }
+
   receive(timeoutMs?: number): Promise<unknown> {
     if (this.error) return Promise.reject(this.error);
     // Drain buffered messages even after a clean close, but never after an
     // error: a latched error may mean the buffered data is untrustworthy.
-    if (this.queue.length > 0) return Promise.resolve(this.queue.shift());
+    if (this.queue.length > 0) {
+      const message = this.queue.shift();
+      // The just-drained frame was the last one a half-close was waiting on, so
+      // promote its deferred error through fail() (not a bare this.error
+      // assignment) to keep terminated/hooks.close() in sync with every other
+      // error path. The next receive() then rejects with it.
+      if (this.queue.length === 0 && this.pendingError !== undefined) {
+        const deferred = this.pendingError;
+        this.pendingError = undefined;
+        // fail() no-ops once closed, so a close() that raced ahead of this final
+        // drain would otherwise drop the deferred error and leave the next
+        // receive() reporting a generic close. Latch it directly in that case;
+        // teardown already ran in close().
+        if (this.closed) {
+          this.error = deferred;
+        } else {
+          this.fail(deferred);
+        }
+      }
+      return Promise.resolve(message);
+    }
     if (this.closed)
       return Promise.reject(new ConnectionError("connection closed", "usage"));
     return new Promise<unknown>((resolve, reject) => {
@@ -257,6 +326,9 @@ export class QueuedMessageConnection implements MessageConnection {
 
   async send(data: unknown): Promise<void> {
     if (this.error) throw this.error;
+    // A half-close has latched a terminal error behind still-buffered inbound
+    // frames; the peer is gone, so reject rather than write into the void.
+    if (this.pendingError) throw this.pendingError;
     if (this.closed)
       throw new ConnectionError("cannot send on a closed connection", "usage");
     try {
@@ -276,7 +348,10 @@ export class QueuedMessageConnection implements MessageConnection {
     // A waiter parked before this deliberate close did nothing wrong, so reject
     // it as "closed" (a cancelled operation), not "usage" (caller misuse).
     this.rejectWaiters(new ConnectionError("connection closed", "closed"));
-    await this.hooks.close();
+    // Deliberate close: ask the transport to drain buffered outbound writes
+    // before tearing down. fail() closes without flush, since an error means
+    // the link is already unusable.
+    await this.hooks.close({ flush: true });
   }
 }
 
