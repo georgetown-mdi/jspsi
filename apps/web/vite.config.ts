@@ -19,6 +19,20 @@ const config = await configManager.load({ dotenv: true });
 
 logLibrary.setDefaultLevel(config.LOG_LEVEL);
 
+// Vite resolution for the `@`-prefixed imports the app uses, shared so the
+// inline vitest projects (which do not inherit the root `resolve`) resolve them
+// too. tsconfig provides these via explicit `paths` plus a `@*` -> `./src/*`
+// catch-all; `@psi` here stands in for that catch-all, which the unit project
+// needs because its `src/psi` sources pull in `@utils/*`.
+const srcAliases = {
+  "@components": path.resolve(__dirname, "src/components"),
+  "@utils": path.resolve(__dirname, "src/utils"),
+  "@util": path.resolve(__dirname, "src/util"),
+  "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
+  "@psi": path.resolve(__dirname, "src/psi"),
+  "@": path.resolve(__dirname, "src"),
+};
+
 export default defineConfig((_configEnv) => {
   return {
     server: {
@@ -36,6 +50,7 @@ export default defineConfig((_configEnv) => {
             name: "unit",
             environment: "node",
           },
+          resolve: { alias: srcAliases },
         },
         {
           test: {
@@ -89,12 +104,7 @@ export default defineConfig((_configEnv) => {
     ],
     resolve: {
       tsconfigPaths: true,
-      alias: {
-        "@components": path.resolve(__dirname, "src/components"),
-        "@util": path.resolve(__dirname, "src/util"),
-        "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
-        "@": path.resolve(__dirname, "src"),
-      },
+      alias: srcAliases,
     },
   };
 });

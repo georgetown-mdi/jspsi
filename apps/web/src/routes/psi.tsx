@@ -2,7 +2,7 @@ import log from "loglevel";
 
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ActionIcon,
@@ -28,13 +28,13 @@ import {
   ProcessState,
   buildOutputTable,
   describeExchangeStages,
+  errorMessage,
   loadCSVFile,
   prepareForExchange,
-  runExchange,
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
-import { openPeerMessageConnection } from "@psi/peerMessageConnection";
+import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
 import FileSelect from "@components/FileSelect";
@@ -43,14 +43,8 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { DataConnection } from "peerjs";
-import type Peer from "peerjs";
-
-import type {
-  ExchangeResult,
-  MessageConnection,
-  PreparedExchange,
-} from "@psilink/core";
+import type { Acquire, StageDefinition } from "@psi/exchangeLifecycle";
+import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
 export const Route = createFileRoute("/psi")({
@@ -77,8 +71,6 @@ export const Route = createFileRoute("/psi")({
   component: Home,
 });
 
-type StageDefinition = { id: string; label: string; state: ProcessState };
-
 const serverPreStages: Array<StageDefinition> = [
   {
     id: "before start",
@@ -98,6 +90,11 @@ const clientPreStages: Array<StageDefinition> = [
     label: "Before start",
     state: ProcessState.BeforeStart,
   },
+  {
+    id: "waiting for peer",
+    label: "Waiting for peer",
+    state: ProcessState.Waiting,
+  },
 ];
 
 const doneStage: StageDefinition = {
@@ -106,15 +103,35 @@ const doneStage: StageDefinition = {
   state: ProcessState.Done,
 };
 
+function preStagesFor(role: "server" | "client"): Array<StageDefinition> {
+  return role === "server" ? serverPreStages : clientPreStages;
+}
+
 function buildInitialStages(role: "server" | "client"): Array<StageDefinition> {
-  const preStages = role === "server" ? serverPreStages : clientPreStages;
   return [
-    ...preStages,
+    ...preStagesFor(role),
     {
       id: CONFIRMING_PROTOCOL_STAGE_ID,
       label: "Confirming protocol",
       state: ProcessState.Working,
     },
+    doneStage,
+  ];
+}
+
+/** Full per-exchange stage tree, emitted once after load/prepare via `onStages`:
+ * the role's pre-stages, the protocol stages derived from the prepared exchange,
+ * and the terminal done stage. */
+function buildStageList(
+  role: "server" | "client",
+  prepared: PreparedExchange,
+): Array<StageDefinition> {
+  return [
+    ...preStagesFor(role),
+    ...describeExchangeStages(prepared).map((stage) => ({
+      ...stage,
+      state: ProcessState.Working as const,
+    })),
     doneStage,
   ];
 }
@@ -141,173 +158,121 @@ function Home() {
     message: string;
   }>();
 
+  // Drives the lifecycle's AbortSignal. A useEffect cleanup aborts it on
+  // unmount, so the owner tears down any in-flight wait or exchange and every
+  // owner-driven seam stops firing (no setState after unmount).
+  const abortRef = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const handleSubmit = () => {
     setSubmitted(true);
     setErrorAlert(undefined);
 
-    const describeError = (error: unknown) =>
-      error instanceof Error ? error.message : String(error);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    const handleFailure = (error: unknown) => {
-      console.error(error);
-      setErrorAlert({
-        title: "Exchange failed",
-        message: describeError(error),
-      });
-    };
-
-    const finishExchange = (
-      { associationTable, partnerPayload }: ExchangeResult,
+    // Pure output-generation half of the former finishExchange: build the local
+    // results file and return its URL. No React state and no previous-URL revoke
+    // (a fresh session sets the URL at most once per component lifetime).
+    const generateOutput = (
+      result: ExchangeResult,
       prepared: PreparedExchange,
-    ) => {
+    ): string => {
       log.info("linkage complete, generating results file");
       const { headers, rows } = buildOutputTable(
-        associationTable,
+        result.associationTable,
         prepared.rawRows,
         prepared.metadata,
-        partnerPayload,
+        result.partnerPayload,
       );
       const csv =
         headers.join(",") + "\n" + rows.map((r) => r.join(",") + "\n").join("");
       const fileData = new Blob([csv], { type: "text/csv" });
-      const newResultURL = window.URL.createObjectURL(fileData);
-      if (resultURL !== undefined) window.URL.revokeObjectURL(resultURL);
-      setResultURL(newResultURL);
-      setStageById("done");
+      return window.URL.createObjectURL(fileData);
     };
 
-    // Shared per-connection lifecycle for both roles: open a MessageConnection,
-    // run the exchange, surface the result or the failure, and always tear down.
-    // `psi` may still be loading - opening the connection first attaches the
-    // inbound listener (so the initiator's unprompted first frame is not
-    // dropped) while the WASM library finishes in parallel.
-    const runExchangeOn = async (
-      conn: DataConnection,
-      exchangeRole: "initiator" | "responder",
-      prepared: PreparedExchange,
-      // Either the still-loading library (server: passed before the WASM load
-      // resolves, so the inbound listener attaches first) or an already-loaded
-      // one (client: resolved before the connection handler runs). await covers
-      // both, so the union is intentional, not a dead branch.
-      psi: PSILibrary | Promise<PSILibrary>,
-      peer: Peer,
-    ) => {
-      let mc: MessageConnection | undefined;
+    // Server (PSI responder, PeerJS dialer): load/prepare, emit the stage tree,
+    // then wait for the invited peer id over SSE and dial. The WASM library
+    // stays pending - the responder must attach its inbound listener before it
+    // resolves - so it is returned unresolved and awaited late inside the owner.
+    const serverAcquire: Acquire = async ({ signal, onStage, onStages }) => {
+      const psi = PSI() as Promise<PSILibrary>;
+      const csvResult = await loadCSVFile(files[0]);
+      const rawRows = csvResult.data as Array<Record<string, string>>;
+      const prepared = prepareForExchange(
+        {}, // no explicit spec; infer from input
+        session.initiatedName,
+        rawRows,
+        csvResult.meta.fields ?? [],
+      );
+      onStages(buildStageList("server", prepared));
+
+      onStage("waiting for peer");
+      const peerId = await waitForPeerId(session.uuid, { signal });
+      const [peer, conn] = await openPeerConnection(peerId);
+      return { peer, conn, psi, prepared };
+    };
+
+    // Client (PSI initiator, PeerJS receiver): load/prepare, emit the stage
+    // tree, await the WASM early (fail before publishing the peer id), publish
+    // the id, then wait for the incoming connection. A wait failure destroys the
+    // published peer so acquisition stays atomic.
+    const clientAcquire: Acquire = async ({ signal, onStage, onStages }) => {
+      const psi = PSI() as Promise<PSILibrary>;
+      const csvResult = await loadCSVFile(files[0]);
+      const rawRows = csvResult.data as Array<Record<string, string>>;
+      const prepared = prepareForExchange(
+        {}, // no explicit spec; infer from input
+        session.invitedName,
+        rawRows,
+        csvResult.meta.fields ?? [],
+      );
+      onStages(buildStageList("client", prepared));
+
+      await psi;
+      const peer = await createAndSharePeerId(session);
       try {
-        mc = await openPeerMessageConnection(conn);
-        const exchangeResult = await runExchange(mc, exchangeRole, prepared, {
-          psiLibrary: await psi,
-          onStage: setStageById,
-        });
-        // The privacy-sensitive exchange has completed by here; a failure
-        // building the local results file must not be reported as an exchange
-        // failure, or the user may needlessly re-run a PSI exchange that in
-        // fact already succeeded.
-        try {
-          finishExchange(exchangeResult, prepared);
-        } catch (error) {
-          console.error(error);
+        onStage("waiting for peer");
+        const conn = await waitForIncomingConnection(peer, { signal });
+        return { peer, conn, psi, prepared };
+      } catch (error) {
+        // The peer was published but no data channel ever opened, so destroy it
+        // (freeing the broker id) before propagating - acquisition is atomic.
+        peer.destroy();
+        throw error;
+      }
+    };
+
+    void runExchangeLifecycle({
+      acquire: role === "server" ? serverAcquire : clientAcquire,
+      exchangeRole: role === "server" ? "responder" : "initiator",
+      signal: controller.signal,
+      generateOutput,
+      onStages: setStages,
+      onStage: setStageById,
+      onResult: (url) => {
+        setResultURL(url);
+        setStageById("done");
+      },
+      onError: ({ category, error }) => {
+        console.error(error);
+        if (category === "output") {
+          // The exchange succeeded; only results-file generation failed. The
+          // user must not be told to re-run a privacy-sensitive exchange.
           setErrorAlert({
             title: "Results unavailable",
             message:
               "The linkage completed, but generating the results file failed: " +
-              describeError(error),
+              errorMessage(error),
+          });
+        } else {
+          setErrorAlert({
+            title: "Exchange failed",
+            message: errorMessage(error),
           });
         }
-      } catch (error) {
-        handleFailure(error);
-      } finally {
-        // Teardown must not throw: a rejection here would propagate past the
-        // handlers above and overwrite a more accurate alert (e.g. the
-        // "Results unavailable" set when only output generation failed).
-        try {
-          peer.disconnect();
-        } catch (teardownError) {
-          console.error(teardownError);
-        }
-        try {
-          await mc?.close();
-        } catch (teardownError) {
-          console.error(teardownError);
-        }
-      }
-    };
-
-    if (role === "server") {
-      setStageById("waiting for peer");
-      waitForPeerId(session.uuid)
-        .then(async (peerId) => {
-          // Load and prepare before dialing the peer. Opening the connection
-          // resolves a live Peer/DataConnection that only runExchangeOn tears
-          // down, so a CSV or standardization failure must happen before it
-          // exists, not after, or the connection leaks. The WASM load still
-          // runs in parallel and is awaited (with the inbound listener already
-          // attached) inside runExchangeOn.
-          const psi = PSI() as Promise<PSILibrary>;
-          const csvResult = await loadCSVFile(files[0]);
-          const rawRows = csvResult.data as Array<Record<string, string>>;
-          const prepared = prepareForExchange(
-            {}, // no explicit spec; infer from input
-            session.initiatedName,
-            rawRows,
-            csvResult.meta.fields ?? [],
-          );
-          setStages([
-            ...serverPreStages,
-            ...describeExchangeStages(prepared).map((s) => ({
-              ...s,
-              state: ProcessState.Working as const,
-            })),
-            doneStage,
-          ]);
-
-          const [peer, conn] = await openPeerConnection(peerId);
-          await runExchangeOn(conn, "responder", prepared, psi, peer);
-        })
-        .catch((error) => {
-          handleFailure(error);
-        });
-    } else {
-      // role is client
-      setStageById("before start");
-      Promise.all([PSI() as Promise<PSILibrary>, loadCSVFile(files[0])])
-        .then(async ([psi, csvResult]) => {
-          const rawRows = csvResult.data as Array<Record<string, string>>;
-          const prepared = prepareForExchange(
-            {}, // no explicit spec; infer from input
-            session.invitedName,
-            rawRows,
-            csvResult.meta.fields ?? [],
-          );
-          setStages([
-            ...clientPreStages,
-            ...describeExchangeStages(prepared).map((s) => ({
-              ...s,
-              state: ProcessState.Working as const,
-            })),
-            doneStage,
-          ]);
-
-          const peer = await createAndSharePeerId(session);
-
-          try {
-            // A single exchange runs per session: take the first incoming
-            // connection, bounded so a peer that never dials in surfaces an
-            // error instead of hanging on "Confirming protocol" forever.
-            const conn = await waitForIncomingConnection(peer);
-            await runExchangeOn(conn, "initiator", prepared, psi, peer);
-          } catch (error) {
-            // Reached only when no peer dialed in within the deadline;
-            // runExchangeOn handles and tears down its own failures. Drop the
-            // peer we created so the timed-out attempt does not leak it.
-            handleFailure(error);
-            peer.disconnect();
-          }
-        })
-        .catch((error) => {
-          handleFailure(error);
-        });
-    }
+      },
+    });
   };
 
   let url: URL | undefined;
