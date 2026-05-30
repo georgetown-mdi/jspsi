@@ -29,7 +29,21 @@ function makeMockClient(): {
   const client: FileTransportClient = {
     connect: async () => {},
     end: async () => {},
-    list: async (): Promise<FileInfo[]> => [],
+    // Reflect the in-memory store so send()/poll(), which detect files via
+    // list() pattern scans, observe the same state get() does.
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...files.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
     get: async (path: string) => {
       const data = files.get(path);
       if (!data) throw new Error(`${path}: not found`);
@@ -99,7 +113,8 @@ test("fromEventConnection over FileSyncConnection: a polled message is delivered
   const { client, files } = makeMockClient();
   const conn = makeConnectedConn(client);
   conn.peerId = "peer-test";
-  files.set("/test/peer-test.json", envelope({ hello: "world" }));
+  const body = envelope({ hello: "world" });
+  files.set(`/test/peer-test-${body.length}.json`, body);
 
   const mc = fromEventConnection(conn);
   conn.start();
@@ -117,14 +132,21 @@ test("fromEventConnection over FileSyncConnection: send() writes the outbound me
   const mc = fromEventConnection(conn);
   await mc.send({ ping: 1 });
 
-  expect(files.has(`/test/${conn.id}.json`)).toBe(true);
+  const written = [...files.keys()].filter((p) =>
+    new RegExp(`^/test/${conn.id}-\\d+\\.json$`).test(p),
+  );
+  expect(written).toHaveLength(1);
 });
 
 test("fromEventConnection over FileSyncConnection: a poll-loop error surfaces as a sticky transport ConnectionError", async () => {
   const { client } = makeMockClient();
-  // exists() always true but get() always throws ENOENT: after
-  // MAX_CONSECUTIVE_ENOENT cycles the poller emits a terminal error.
-  client.exists = async () => true;
+  const peerId = "peer-test";
+  // list() always surfaces a matching file (size matches declared) but get()
+  // always throws ENOENT: after MAX_CONSECUTIVE_ENOENT cycles the poller emits
+  // a terminal error.
+  client.list = async () => [
+    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+  ];
   client.get = async (p) => {
     throw Object.assign(
       new Error(`ENOENT: no such file or directory, open '${p}'`),
@@ -132,7 +154,7 @@ test("fromEventConnection over FileSyncConnection: a poll-loop error surfaces as
     );
   };
   const conn = makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = "peer-test";
+  conn.peerId = peerId;
 
   const mc = fromEventConnection(conn);
   conn.start();
@@ -171,7 +193,10 @@ test("fromEventConnection over FileSyncConnection: a send-time transport failure
   });
   // A previous unconsumed message blocks send(); with a short TTL the wait
   // times out and send() rejects, which the bridge latches as terminal.
-  files.set(`/test/${conn.id}.json`, Buffer.from(JSON.stringify({ stale: 1 })));
+  files.set(
+    `/test/${conn.id}-99.json`,
+    Buffer.from(JSON.stringify({ stale: 1 })),
+  );
 
   const mc = fromEventConnection(conn);
   const err = await mc.send({ next: true }).catch((e: unknown) => e);
