@@ -41,6 +41,18 @@ export class ConnectionError extends Error {
 }
 
 /**
+ * Extracts a human-readable message from an arbitrary thrown value. The single
+ * shared rule for turning an `unknown` error into display text: an `Error`'s
+ * `message`, falling back to `String(err)` when that message is empty (so an
+ * `Error` with no message yields `"Error"` rather than a blank string), and
+ * `String(err)` for any non-`Error` value (so `null`/`undefined` become
+ * `"null"`/`"undefined"` rather than throwing on a `.message` dereference).
+ */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message || String(err) : String(err);
+}
+
+/**
  * Wraps an arbitrary thrown value as a {@link ConnectionError}, passing an
  * existing {@link ConnectionError} through unchanged. Shared by the bridges so
  * every transport classifies a raw transport failure the same way.
@@ -50,11 +62,7 @@ export function asConnectionError(
   kind: ConnectionErrorKind,
 ): ConnectionError {
   if (err instanceof ConnectionError) return err;
-  return new ConnectionError(
-    err instanceof Error ? err.message : String(err),
-    kind,
-    { cause: err },
-  );
+  return new ConnectionError(errorMessage(err), kind, { cause: err });
 }
 
 /**

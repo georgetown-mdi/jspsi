@@ -95,7 +95,12 @@ export async function openPeerMessageConnection(
     // The open handshake failed; tear down the half-open channel and its
     // listeners so it does not linger before re-throwing the open error.
     await mc.close();
-    throw err;
+    // waitForConnectionOpen rejects with a bare Error (timeout, pre-open
+    // error/close), so tag it as a `transport` ConnectionError at the boundary;
+    // otherwise a consumer that branches on ConnectionError.kind cannot classify
+    // an open-time failure (F5). asConnectionError passes an existing
+    // ConnectionError through unchanged.
+    throw asConnectionError(err, "transport");
   }
   return mc;
 }
