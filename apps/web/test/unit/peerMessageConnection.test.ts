@@ -154,6 +154,22 @@ describe("openPeerMessageConnection", () => {
     expect(fake.torndown).toBe(true);
   });
 
+  test("tags an open-handshake failure as a transport ConnectionError", async () => {
+    // F5: waitForConnectionOpen rejects with a bare Error, but the boundary must
+    // surface a kind-tagged ConnectionError so a consumer can classify it.
+    const { fake, conn } = makeConn(false);
+    const promise = openPeerMessageConnection(conn);
+
+    fake.emit("close");
+
+    const err = await promise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("transport");
+    expect((err as ConnectionError).message).toBe(
+      "connection closed before open",
+    );
+  });
+
   test("hard-closes a never-opening channel on timeout instead of leaking it", async () => {
     // An open timeout emits no pre-open error/close to route through fail(), so
     // the catch closes the channel itself. A flush close would no-op on an
