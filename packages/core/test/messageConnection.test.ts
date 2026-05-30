@@ -4,7 +4,9 @@ import { z } from "zod";
 import {
   ConnectionError,
   QueuedMessageConnection,
+  asConnectionError,
   createMessagePipe,
+  errorMessage,
   fromEventConnection,
   receiveParsed,
 } from "../src/connection/messageConnection";
@@ -352,4 +354,35 @@ test("receiveParsed: a transport drop surfaces as transport, not protocol", asyn
   const err = await parked.catch((e: unknown) => e);
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("transport");
+});
+
+// --- errorMessage / asConnectionError ----------------------------------------
+
+test("errorMessage returns an Error's message", () => {
+  expect(errorMessage(new Error("boom"))).toBe("boom");
+});
+
+test("errorMessage falls back to String(err) for an empty-message Error", () => {
+  // Non-blank guarantee: an empty message never yields a blank alert.
+  expect(errorMessage(new Error(""))).toBe("Error");
+});
+
+test("errorMessage stringifies non-Error values without throwing", () => {
+  expect(errorMessage(null)).toBe("null");
+  expect(errorMessage(undefined)).toBe("undefined");
+  expect(errorMessage("plain string")).toBe("plain string");
+  expect(errorMessage(42)).toBe("42");
+});
+
+test("asConnectionError routes its message through errorMessage", () => {
+  // The deliberate behavior change: an empty-message Error becomes "Error".
+  const err = asConnectionError(new Error(""), "transport");
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect(err.kind).toBe("transport");
+  expect(err.message).toBe("Error");
+});
+
+test("asConnectionError passes an existing ConnectionError through unchanged", () => {
+  const original = new ConnectionError("nope", "security");
+  expect(asConnectionError(original, "transport")).toBe(original);
 });
