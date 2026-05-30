@@ -32,7 +32,7 @@ export const Route = createFileRoute("/api/psi/create")({
         ) {
           timeToLive = new Date(Date.now() + DEFAULT_SESSION_DURATION_MS);
         } else {
-          let duration = 1000 * 80 * payload["valid_duration_minutes"];
+          let duration = 1000 * 60 * payload["valid_duration_minutes"];
           duration =
             MAXIMUM_SESSION_DURATION_MS < duration
               ? MAXIMUM_SESSION_DURATION_MS
