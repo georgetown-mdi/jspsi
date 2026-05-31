@@ -103,6 +103,15 @@ export async function exchangePayloads(
   const partnerPayload = toPartnerPayload(
     await receiveParsed(conn, payloadWireSchema),
   );
+  // This is the exchange's terminal frame. On a buffering transport (WebRTC) it
+  // looks racy: the responder's last act is a fire-and-forget send (resolves on
+  // local hand-off, not peer delivery) right before the caller tears the
+  // connection down. It is safe because the transport delivery contract
+  // guarantees the final frame survives a clean close - either the send is
+  // durable (file-sync, where the written file outlives the connection) or the
+  // clean close flushes buffered frames before teardown (WebRTC). See the
+  // send/close contract in types.ts / messageConnection.ts and
+  // docs/COMMUNICATION.md. Do not "fix" this by assuming send has delivered.
   await conn.send(localPayload);
   return partnerPayload;
 }

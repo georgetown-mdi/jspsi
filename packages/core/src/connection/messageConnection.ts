@@ -121,6 +121,15 @@ export interface TransportControls {
 
 /** The transport-specific operations the queue drives. */
 export interface TransportHooks {
+  /**
+   * Hands a message to the transport. Resolution means the message has been
+   * accepted locally for delivery (buffered, or durably written), NOT that the
+   * peer has received it - there is no acknowledgement at this layer. Code must
+   * not infer peer receipt from this resolving; final-frame delivery is
+   * guaranteed by the {@link TransportHooks.close} contract below - a durable
+   * `send` or a flushing clean close, depending on the transport. See
+   * docs/COMMUNICATION.md ("Message delivery and teardown").
+   */
   send: (data: unknown) => void | Promise<void>;
   /**
    * Tears down the transport. `options.flush` is set on a deliberate clean
@@ -129,6 +138,14 @@ export interface TransportHooks {
    * should drain them before closing when `flush` is set, so a final frame
    * still in flight is not lost, and close immediately otherwise; a transport
    * without an outbound buffer may ignore it.
+   *
+   * For a buffering transport this `flush` is the delivery contract's
+   * load-bearing half: because {@link TransportHooks.send} resolves on local
+   * hand-off, not on peer delivery, such a transport's final frame is
+   * guaranteed only by the flush on a clean close. A transport whose `send` is
+   * durable (its write outlives the connection) has nothing in flight and may
+   * ignore `flush`. Every transport must satisfy one of these two; see
+   * docs/COMMUNICATION.md ("Message delivery and teardown").
    */
   close: (options?: { flush?: boolean }) => void | Promise<void>;
   /**

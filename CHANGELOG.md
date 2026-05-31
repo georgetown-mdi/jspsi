@@ -37,6 +37,10 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 - Password scalar derivation uses HKDF-SHA-256 expanded to 48 bytes before reduction modulo the P-256 order, keeping mod-reduction bias below 2^-128.
 - Invitation tokens carry a bounded lifetime (default 1 hour); rotation tokens carry no expiration, making them suitable for recurring scheduled exchanges.
 
+### Documentation
+
+- Documented the transport delivery contract - a send completes on local hand-off rather than peer delivery, and a clean close flushes the final frame before teardown - in docs/COMMUNICATION.md and the `Connection` and `TransportHooks` interfaces, stating the guarantee any future channel must satisfy.
+
 ## [0.1.0] - 2026-05-08
 
 Initial proof-of-concept release.
