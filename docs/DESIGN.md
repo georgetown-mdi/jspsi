@@ -86,6 +86,8 @@ Communication over SFTP requires polling for messages, which introduces signific
 
 SSH offers no built-in solution for synchronizing two parties who arrive at the same time. However, SSH servers often expose an SFTP subsystem so that the strategy used there can also be applied. Once order has been established, both parties can close their SFTP subsystems and switch to SSH channels for message passing. If the SSH server does not expose an SFTP subsystem but does permit remote command execution, shell-level primitives such as `mkdir` can provide the same atomicity guarantee that SFTP synchronization requires.
 
+Any such SSH transport, like any new channel, must satisfy the message-delivery contract described in [COMMUNICATION.md](COMMUNICATION.md#message-delivery-and-teardown): either its send blocks until the message is durably delivered, or a clean close flushes buffered sends before closing, so the final frame of an exchange is not lost.
+
 ## WebSocket relay
 
 WebRTC connections can fail due to aggressive firewalling in some corporate environments even if a TURN server is available on port 443. A WebSocket relay addresses this by giving both parties a channel that is genuine HTTPS traffic from the network's perspective: each party opens a WebSocket connection to the relay server on port 443, and the relay forwards messages between them.

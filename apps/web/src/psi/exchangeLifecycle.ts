@@ -191,9 +191,14 @@ export async function runExchangeLifecycle(
     } catch (err) {
       log.error("teardown: closing the connection failed:", err);
     }
-    // Interim teardown for this item: disconnect() frees the broker id without
-    // abruptly killing the still-flushing channel. The disconnect() -> destroy()
-    // upgrade is a separate follow-up gated on an awaitable flush.
+    // disconnect() frees the broker id but deliberately leaves the data channel
+    // alive so the flushing close above can finish draining the final frame to
+    // the peer (the send/close delivery contract; see docs/COMMUNICATION.md and
+    // the Connection interface in core). Do NOT "upgrade" this to peer.destroy():
+    // destroy() routes through the abrupt RTCPeerConnection.close(), which
+    // discards buffered outbound data and would drop the final frame. The local
+    // connection is reaped without it - via the data channel's native onclose on
+    // a clean close, or by ICE-failure detection if the peer vanished.
     try {
       peer.disconnect();
     } catch (err) {
