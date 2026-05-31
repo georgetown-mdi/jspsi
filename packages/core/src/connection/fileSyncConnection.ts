@@ -380,7 +380,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.log.debug(
               `[${this.role}] draining ${lastSentFile} before cleanup`,
             );
-            while ((await filePresent()) && Date.now() < deadline) {
+            while (Date.now() < deadline && (await filePresent())) {
               await new Promise((resolve) =>
                 setTimeout(resolve, this.options.pollingFrequency),
               );
