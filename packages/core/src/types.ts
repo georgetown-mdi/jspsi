@@ -44,9 +44,9 @@ export type Connection = {
   // there is no end-to-end delivery or acknowledgement at this layer. So never
   // infer "the peer has my message" from `send` resolving. The guarantee that
   // the final frame survives teardown comes from the `close` contract below,
-  // which each transport meets one of two ways: a durable `send` (file-sync,
-  // where the written file outlives the connection) or a flushing clean close
-  // (WebRTC). See docs/COMMUNICATION.md ("Message delivery and teardown").
+  // which each transport meets one of two ways: a durable send with a draining
+  // close (file-sync) or a flushing close (WebRTC). See docs/COMMUNICATION.md
+  // ("Message delivery and teardown").
   send: (data: unknown, chunked?: boolean) => void | Promise<void>;
   // `close` may be synchronous (e.g. a test passthrough) or asynchronous (e.g.
   // FileSyncConnection, which calls its transport client's `end()`). Callers
@@ -55,12 +55,13 @@ export type Connection = {
   // Delivery contract (paired with `send`): the exchange's final frame must
   // survive a clean close. Because `send` resolving does not imply the peer
   // received the message, every transport guarantees this one of two ways:
-  // (a) `send` delivers durably - file-sync, where the written file outlives the
-  // connection, so a clean close need not flush anything; or (b) a clean close
-  // flushes - delivers frames `send` accepted but has not yet put on the wire -
-  // before teardown completes (WebRTC). A transport that does neither silently
-  // drops final frames. An error close never flushes: an errored link is
-  // already unusable.
+  // (a) durable send + draining close - file-sync writes durably to the shared
+  // directory but the sender's cleanup can delete a file before the peer polls
+  // it, so a clean close drains (waits for the peer to consume the last sent
+  // file) before sweeping; or (b) flushing close - delivers frames `send`
+  // accepted but has not yet put on the wire before teardown completes (WebRTC).
+  // A transport that does neither silently drops final frames. An error close
+  // never flushes: an errored link is already unusable.
   close: () => void | Promise<void>;
   // An `error` emitted while no listener is registered is retained here so
   // the next protocol-layer receive can detect failures that arrived in the

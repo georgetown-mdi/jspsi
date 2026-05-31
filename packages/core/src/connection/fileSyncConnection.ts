@@ -61,6 +61,10 @@ interface Options {
   pollingFrequency: number;
   verbose: number;
   timestampInFilename: boolean;
+  // Raw peer-timeout duration stored alongside timeToLive so close() can
+  // compute a fresh drain deadline independent of exchange duration. Set from
+  // config in open(); may be supplied in the constructor for tests.
+  peerTimeoutMs?: number;
 }
 
 const Message = z.object({
@@ -157,6 +161,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
   private responsibleFiles: Set<string>;
+  private lastSentFile: string | undefined;
   private consecutiveEnoentCount = 0;
   // An `error` emitted while no listener is registered is held here so the
   // next protocol-layer receive can detect failures that arrived in the gap
@@ -310,8 +315,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // wins over both peerTimeoutMs and the default.
     if (this.options.timeToLive === undefined) {
       const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+      this.options.peerTimeoutMs = ttlMs;
       this.options.timeToLive = new Date(Date.now() + ttlMs);
     } else if (config.options?.peerTimeoutMs !== undefined) {
+      this.options.peerTimeoutMs = config.options.peerTimeoutMs;
       this.options.timeToLive = new Date(
         Date.now() + config.options.peerTimeoutMs,
       );
@@ -341,15 +348,51 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * load-bearing - the poller must stop before the client is ended (or its next
    * cycle would run against a dead client and emit a spurious error), and
    * cleanup must run before the client is ended (it deletes remote files
-   * through that client). Idempotent: safe to call repeatedly and on a
+   * through that client).
+   *
+   * Before cleanup, drains the last sent file: waits for the peer to consume
+   * it so a clean close never deletes an unconsumed terminal frame. The wait is
+   * bounded by a fresh {@link Options.peerTimeoutMs} budget from close() start
+   * (not the remaining timeToLive, which may be near-zero for long exchanges).
+   * An unresponsive peer causes the drain to time out and cleanup() to delete
+   * the file as a fallback. Idempotent: safe to call repeatedly and on a
    * connection that was never opened.
    */
   async close() {
     this.stop();
 
-    // Best-effort sweep: a delete failure must not stop us from ending the
-    // client, so it is logged rather than propagated.
     if (this.path !== undefined) {
+      // Drain the last sent file before sweeping: a clean close must not
+      // delete a terminal frame the peer has not yet consumed. Uses a fresh
+      // peerTimeoutMs budget from close() start so a long exchange does not
+      // leave the budget near-zero for teardown. Drain failure (list() error
+      // or timeout) falls through to cleanup(), which deletes as a fallback.
+      if (this.lastSentFile !== undefined) {
+        const path = this.path;
+        const lastSentFile = this.lastSentFile;
+        const deadline =
+          Date.now() +
+          (this.options.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
+        const filePresent = async () =>
+          (await this.client.list(path)).some((f) => f.name === lastSentFile);
+        try {
+          if (await filePresent()) {
+            this.log.debug(
+              `[${this.role}] draining ${lastSentFile} before cleanup`,
+            );
+            while ((await filePresent()) && Date.now() < deadline) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, this.options.pollingFrequency),
+              );
+            }
+          }
+        } catch {
+          // list() failure during drain; fall through to cleanup.
+        }
+      }
+
+      // Best-effort sweep: a delete failure must not stop us from ending the
+      // client, so it is logged rather than propagated.
       try {
         await this.cleanup();
       } catch (err: unknown) {
@@ -856,6 +899,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.debug(`[${this.role}] renaming ${tempFile} to ${outName}`);
       await this.client.rename(tempPath, outPath);
       this.responsibleFiles.add(outName);
+      this.lastSentFile = outName;
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
       if (err instanceof Error && err.cause === "usage") delete err.cause;

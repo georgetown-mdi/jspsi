@@ -80,11 +80,18 @@ function makeMockClient(): {
 // running the handshake.
 function makeConnectedConn(
   client: FileTransportClient,
-  opts?: Partial<{ pollingFrequency: number; timeToLiveMs: number }>,
+  opts?: Partial<{
+    pollingFrequency: number;
+    timeToLiveMs: number;
+    peerTimeoutMs: number;
+  }>,
 ): FileSyncConnection {
   const conn = new FileSyncConnection(client, {
     pollingFrequency: opts?.pollingFrequency ?? 10,
     timeToLive: new Date(Date.now() + (opts?.timeToLiveMs ?? 5_000)),
+    // Short drain timeout so tests that send but have no receiver do not hang
+    // for the full DEFAULT_PEER_TIMEOUT_MS before cleanup runs.
+    peerTimeoutMs: opts?.peerTimeoutMs ?? 50,
     verbose: -1,
   });
   conn.connected = true;
@@ -1469,4 +1476,56 @@ test("poll ignores a prefix-matching file whose final segment is not a byte coun
   expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
   // The non-message file is left untouched, not deleted or read.
   expect(files.has(`/test/${peerId}-backup.json`)).toBe(true);
+});
+
+// --- drain-before-cleanup (terminal-frame race regression) -------------------
+
+test("close() drains the last sent file before cleanup, preventing premature deletion of the terminal frame", async () => {
+  // Regression guard for the file-sync terminal-frame race: the sender's
+  // close() must not call safeDelete on the last sent file until the peer has
+  // consumed it (i.e. the file has disappeared from the directory listing).
+  // Without the drain, cleanup() runs immediately after stop(), deleting the
+  // file before a slow receiver's next poll.
+
+  const { client, files } = makeMockClient();
+
+  let receiverConsumed = false;
+  let deletedBeforeConsumed = false;
+
+  const sender = makeConnectedConn(client, {
+    pollingFrequency: 5,
+    peerTimeoutMs: 500,
+  });
+
+  // Intercept safeDelete to record whether cleanup races the receiver.
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (path: string) => {
+    if (!receiverConsumed && /\/[^/]+-\d+\.json$/.test(path)) {
+      deletedBeforeConsumed = true;
+    }
+    return origSafeDelete(path);
+  };
+
+  await sender.send({ terminal: true });
+
+  // Identify the written message file.
+  const msgPath = [...files.keys()].find((p) =>
+    new RegExp(`^/test/${sender.id}-\\d+\\.json$`).test(p),
+  );
+  expect(msgPath).toBeDefined();
+
+  // Kick off close() - the drain holds cleanup until the file disappears.
+  const closePromise = sender.close();
+
+  // Let the drain poll at least once (pollingFrequency = 5 ms) before the
+  // "receiver" consumes the file.
+  await new Promise((r) => setTimeout(r, 20));
+
+  // Simulate receiver consuming the terminal frame.
+  receiverConsumed = true;
+  files.delete(msgPath!);
+
+  await closePromise;
+
+  expect(deletedBeforeConsumed).toBe(false);
 });

@@ -107,11 +107,13 @@ export async function exchangePayloads(
   // looks racy: the responder's last act is a fire-and-forget send (resolves on
   // local hand-off, not peer delivery) right before the caller tears the
   // connection down. It is safe because the transport delivery contract
-  // guarantees the final frame survives a clean close - either the send is
-  // durable (file-sync, where the written file outlives the connection) or the
-  // clean close flushes buffered frames before teardown (WebRTC). See the
-  // send/close contract in types.ts / messageConnection.ts and
-  // docs/COMMUNICATION.md. Do not "fix" this by assuming send has delivered.
+  // guarantees the final frame survives a clean close - the send is durable
+  // (file-sync writes the file before send resolves) and the clean close drains
+  // it (waits for the peer to consume the last written file before cleanup
+  // deletes it), or the clean close flushes buffered frames before teardown
+  // (WebRTC). See the send/close contract in types.ts / messageConnection.ts
+  // and docs/COMMUNICATION.md. Do not "fix" this by assuming send has
+  // delivered.
   await conn.send(localPayload);
   return partnerPayload;
 }

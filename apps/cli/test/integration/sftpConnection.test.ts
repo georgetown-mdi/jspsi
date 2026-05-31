@@ -142,3 +142,53 @@ test("message deliverable", async () => {
 
   expect(message).toEqual({ message: "hello world" });
 });
+
+test("terminal frame is received when sender closes before receiver polls", async () => {
+  // Regression guard for the terminal-frame deletion race: the sender's
+  // close() must drain (wait for the receiver to consume the last sent file)
+  // before running cleanup. This test sends a message, starts the receiver
+  // polling concurrently with sender close(), and verifies the message arrives.
+  // Without the drain, cleanup() deletes the file before the receiver polls and
+  // the message is lost.
+
+  const senderSFTP = new SSH2SFTPClientAdapter();
+  const senderConn = new FileSyncConnection(senderSFTP, { verbose: -1 });
+  const receiverSFTP = new SSH2SFTPClientAdapter();
+  const receiverConn = new FileSyncConnection(receiverSFTP, { verbose: -1 });
+
+  const base = {
+    channel: "sftp" as const,
+    server: { host: "localhost", port: 2222, path: SFTP_PATH },
+  };
+
+  await Promise.all([
+    senderConn.open({
+      ...base,
+      server: { ...base.server, username: "usera", password: "usera" },
+    }),
+    receiverConn.open({
+      ...base,
+      server: { ...base.server, username: "userb", password: "userb" },
+    }),
+  ]);
+
+  await Promise.all([senderConn.synchronize(), receiverConn.synchronize()]);
+
+  await senderConn.send({ terminal: true });
+
+  const received = new Promise<unknown>((resolve) => {
+    receiverConn.once("data", resolve);
+  });
+
+  // Start the receiver polling concurrently with sender close().
+  // The drain in close() holds cleanup until the receiver consumes the file.
+  receiverConn.start();
+  await senderConn.close();
+
+  const message = await received;
+
+  receiverConn.stop();
+  await receiverConn.close();
+
+  expect(message).toEqual({ terminal: true });
+});
