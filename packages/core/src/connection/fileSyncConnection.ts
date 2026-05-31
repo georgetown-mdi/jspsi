@@ -311,17 +311,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.connected = true;
     // Compute timeToLive only after connect() has resolved so that retry
     // latency during connection setup does not eat into the peer-waiting
-    // budget. An explicit timeToLive passed to the constructor (test path)
-    // wins over both peerTimeoutMs and the default.
+    // budget. Three cases:
+    //   1. No constructor timeToLive, no config peerTimeoutMs: use the default
+    //      budget for both timeToLive and peerTimeoutMs.
+    //   2. No constructor timeToLive, config peerTimeoutMs present: derive
+    //      timeToLive from config peerTimeoutMs and store the raw duration.
+    //   3. Constructor timeToLive present: it wins - do not recompute timeToLive.
+    //      Still store config peerTimeoutMs when provided so close() can use a
+    //      fresh drain deadline independent of the exchange duration.
     if (this.options.timeToLive === undefined) {
       const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
       this.options.peerTimeoutMs = ttlMs;
       this.options.timeToLive = new Date(Date.now() + ttlMs);
     } else if (config.options?.peerTimeoutMs !== undefined) {
       this.options.peerTimeoutMs = config.options.peerTimeoutMs;
-      this.options.timeToLive = new Date(
-        Date.now() + config.options.peerTimeoutMs,
-      );
     }
     this.log.debug(`[${this.role}] connected`);
   }

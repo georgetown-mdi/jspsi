@@ -249,6 +249,61 @@ test("open maps pollIntervalMs to pollingFrequency for sftp config", async () =>
   expect(conn.options.pollingFrequency).toBe(15_000);
 });
 
+test("open preserves constructor timeToLive and stores config peerTimeoutMs when both are supplied", async () => {
+  // Constructor timeToLive wins; open() must not recompute it from
+  // config.options.peerTimeoutMs. The raw duration is still stored in
+  // peerTimeoutMs so close() can use a fresh drain deadline.
+  const { client } = makeMockClient();
+  const constructorTtl = new Date(Date.now() + 9_999_999);
+  const conn = new FileSyncConnection(client, {
+    verbose: -1,
+    timeToLive: constructorTtl,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { peerTimeoutMs: 30_000 },
+  });
+  expect(conn.options.timeToLive).toBe(constructorTtl);
+  expect(conn.options.peerTimeoutMs).toBe(30_000);
+});
+
+test("open preserves constructor timeToLive and leaves peerTimeoutMs undefined when config has none", async () => {
+  // Constructor timeToLive wins; when no config peerTimeoutMs is provided
+  // peerTimeoutMs stays undefined so close() falls back to DEFAULT_PEER_TIMEOUT_MS.
+  const { client } = makeMockClient();
+  const constructorTtl = new Date(Date.now() + 9_999_999);
+  const conn = new FileSyncConnection(client, {
+    verbose: -1,
+    timeToLive: constructorTtl,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+  });
+  expect(conn.options.timeToLive).toBe(constructorTtl);
+  expect(conn.options.peerTimeoutMs).toBeUndefined();
+});
+
+test("open derives timeToLive from config peerTimeoutMs when no constructor timeToLive is set", async () => {
+  // Existing behavior: no constructor timeToLive, config peerTimeoutMs present
+  // -> timeToLive is computed as Date.now() + peerTimeoutMs and peerTimeoutMs
+  // is stored.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const before = Date.now();
+  await conn.open({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { peerTimeoutMs: 45_000 },
+  });
+  const after = Date.now();
+  const ttl = conn.options.timeToLive!.getTime();
+  expect(ttl).toBeGreaterThanOrEqual(before + 45_000);
+  expect(ttl).toBeLessThanOrEqual(after + 45_000);
+  expect(conn.options.peerTimeoutMs).toBe(45_000);
+});
+
 // --- open (filedrop) ---------------------------------------------------------
 
 test("open sets path and marks connected for filedrop config", async () => {
