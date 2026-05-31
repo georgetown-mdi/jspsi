@@ -88,6 +88,14 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe: "silent | error | warn | info | debug | trace; default=info",
     })
+    .option("lockless-rendezvous", {
+      type: "boolean",
+      describe:
+        "use the ack-handshake rendezvous instead of the atomic wave-file " +
+        "race; required on sync-mediated transports that lack atomic " +
+        "exclusive-create or deletion visibility during rendezvous. Both " +
+        "parties must set this flag identically",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -113,6 +121,7 @@ interface ZeroSetupArgs {
   connectionTimeout?: number;
   peerTimeout?: number;
   maxReconnectAttempts?: number;
+  locklessRendezvous?: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -147,6 +156,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     connectionTimeout: argv["connection-timeout"] as number | undefined,
     peerTimeout: argv["peer-timeout"] as number | undefined,
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
+    locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -249,6 +259,7 @@ export function createConnection(
       connectionTimeout: options.connectionTimeout,
       peerTimeout: options.peerTimeout,
       maxReconnectAttempts: options.maxReconnectAttempts,
+      locklessRendezvous: options.locklessRendezvous,
     });
   }
 
@@ -274,6 +285,7 @@ export function createConnection(
     serverPassword: options.serverPassword,
     serverPrivateKey: options.serverPrivateKey,
     serverPort: options.serverPort,
+    locklessRendezvous: options.locklessRendezvous,
   });
 }
 

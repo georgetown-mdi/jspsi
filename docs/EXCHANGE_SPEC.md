@@ -565,6 +565,7 @@ These options apply to both `sftp` and `filedrop` channels.
 |-------|------|---------|-------------|
 | `poll_interval_ms` | integer | 100 | Milliseconds between checks for the partner's uploaded file. The default is tuned for local-network mounts and CI; raise it (for example, to 1000-5000 ms) for public SFTP servers to reduce request load. |
 | `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
+| `lockless_rendezvous` | boolean | false | When `true`, the rendezvous handshake uses an ack-handshake barrier (`<id>-hello.json` + `<id>-hello-ack.json`) instead of the default atomic wave-file race (`<id>-hello.json` + `<id1>-<id2>.wave`). Required on sync-mediated transports that lack atomic exclusive-create or deletion visibility during rendezvous (e.g. a cloud sync service reconciling two local mirrors where both sides "win" a local create). Both parties must set this identically; a mismatch causes rendezvous to time out. The operational sync glob in lockless mode is `<myId>-*` (upload) / `<partnerId>-*` (download), which covers hello, ack, and message files while excluding in-flight `temp-*.tmp` writes. |
 
 #### Message filenames
 
@@ -584,7 +585,16 @@ With `timestamp_in_filename: true`, the filename additionally carries a timestam
 
 `<YYYYMMDDTHHMMSS>` is the UTC write time in compact ISO 8601 form (no colons or hyphens, so it is Windows-safe and sorts lexicographically by time). `<NNN>` is a per-session counter that starts at `000`, is zero-padded to three digits, and increments with each message sent; it widens to four or more digits only after the 1000th message of a session.
 
-In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`.hello`, `.wave`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
+In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<id1>-<id2>.wave`, `<id>-hello-ack.json`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
+
+#### Filename grammar
+
+Every protocol file on `sftp` and `filedrop` channels is named `<id>-...-<token>.json`, where `<token>` is the final `-`-delimited segment before `.json`:
+
+- If `<token>` is all digits, the file is a **message** and `<token>` is its declared byte count. Parsing is right-anchored so a party id containing hyphens does not affect extraction.
+- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (lockless-mode handshake ack). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric.
+
+The receiver only reads files whose on-disk size matches the declared byte count, so a partially synced message file is never consumed prematurely.
 
 ### `connection.provider_options`
 

@@ -48,6 +48,10 @@ const DEFAULT_VERBOSITY = 1;
 // (>5) approaches the peer timeout and gives no practical benefit.
 const MAX_CONSECUTIVE_ENOENT = 3;
 
+// Suffix shared by all hello files. Using a named constant avoids repeating
+// magic strings and numbers at the multiple slice/endsWith sites below.
+const HELLO_SUFFIX = "-hello.json";
+
 interface Events {
   data: (data: unknown) => void;
   error: (err: unknown) => void;
@@ -61,6 +65,7 @@ interface Options {
   pollingFrequency: number;
   verbose: number;
   timestampInFilename: boolean;
+  locklessRendezvous: boolean;
 }
 
 const Message = z.object({
@@ -75,6 +80,7 @@ const getDefaultOptions = (): Options => {
     pollingFrequency: DEFAULT_POLLING_FREQUENCY_MS,
     verbose: DEFAULT_VERBOSITY,
     timestampInFilename: false,
+    locklessRendezvous: false,
   };
 };
 
@@ -136,9 +142,9 @@ export interface FileTransportClient {
 
 /**
  * File-based rendezvous and message-passing connection. Implements the
- * `.hello`/`.wave` handshake and `.json` polling protocol over any
- * {@link FileTransportClient} — an SFTP server via
- * {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
+ * `-hello.json`/`.wave` handshake (or the lockless ack-handshake barrier) and
+ * `.json` polling protocol over any {@link FileTransportClient} — an SFTP
+ * server via {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
  * `LocalFSClient`.
  */
 export class FileSyncConnection extends EventEmitter<Events, never> {
@@ -242,6 +248,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.pollingFrequency = config.options.pollIntervalMs;
     if (config.options?.timestampInFilename !== undefined)
       this.options.timestampInFilename = config.options.timestampInFilename;
+    if (config.options?.locklessRendezvous !== undefined)
+      this.options.locklessRendezvous = config.options.locklessRendezvous;
     this.config = config;
     // timeToLive is computed after a successful connect (below) so that
     // retry latency during connection setup does not eat into the
@@ -406,9 +414,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   }
 
   /**
-   * Negotiates rendezvous with the peer by exchanging `.hello` and `.wave`
-   * files in the shared directory, assigning `peerId` and `handshakeRole` on
-   * success.
+   * Negotiates rendezvous with the peer by exchanging `-hello.json` and
+   * `.wave` files (wave-race mode) or `-hello.json` and `-hello-ack.json`
+   * files (lockless mode) in the shared directory, assigning `peerId` and
+   * `handshakeRole` on success.
    *
    * Failures throw synchronously rather than being emitted on the `error`
    * channel: the `error` event is reserved for asynchronous failures from the
@@ -438,29 +447,41 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.responsibleFiles.forEach((fileName) => {
       if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
     });
-    const helloFiles = files.filter((file) => file.name.endsWith(".hello"));
+    const helloFiles = files.filter((file) =>
+      file.name.endsWith(HELLO_SUFFIX),
+    );
+    const hasStaleAck = files.some((file) =>
+      file.name.endsWith("-hello-ack.json"),
+    );
 
     if (
       helloFiles.length > 1 ||
-      files.some((file) => file.name.endsWith(".wave"))
+      files.some((file) => file.name.endsWith(".wave")) ||
+      hasStaleAck
     ) {
       const leftover = files
-        .filter((f) => f.name.endsWith(".hello") || f.name.endsWith(".wave"))
+        .filter(
+          (f) =>
+            f.name.endsWith(HELLO_SUFFIX) ||
+            f.name.endsWith(".wave") ||
+            f.name.endsWith("-hello-ack.json"),
+        )
         .map((f) => f.name)
         .join(", ");
       throw new Error(
-        `path ${this.path} had preexisting hello or wave files ` +
-          `(${leftover}); the directory must be empty of .hello and .wave ` +
-          "files before executing the protocol. Most likely cause: a " +
-          "previous exchange was terminated by SIGKILL/OOM/power loss " +
-          "before its cleanup ran. Remove the listed files manually after " +
-          "verifying that no other session is concurrently using this path.",
+        `path ${this.path} had preexisting hello, wave, or handshake-ack ` +
+          `files (${leftover}); the directory must be empty of these files ` +
+          "before executing the protocol. Most likely cause: a previous " +
+          "exchange was terminated by SIGKILL/OOM/power loss before its " +
+          "cleanup ran (a handshake-ack file indicates a crashed lockless " +
+          "session). Remove the listed files manually after verifying that " +
+          "no other session is concurrently using this path.",
       );
     }
 
-    const helloPath = `${this.path}/${this.id}.hello`;
+    const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;
 
-    if (helloFiles.length === 1) {
+    if (helloFiles.length === 1 && !this.options.locklessRendezvous) {
       /**
        * A list
        * A hello
@@ -475,11 +496,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       const otherFile = helloFiles[0];
       const otherPath = `${this.path}/${otherFile.name}`;
-      const peerId = otherFile.name.slice(0, -6);
+      const peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
       this.log.debug(
-        `[joiner] creating response ${this.id}.hello and deleting ` +
-          `discovered ${otherFile.name}`,
+        `[joiner] creating response ${this.id}${HELLO_SUFFIX} and ` +
+          `deleting discovered ${otherFile.name}`,
       );
 
       // Partial-failure note: if delete(otherPath) succeeds but put(helloPath)
@@ -496,7 +517,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           flags: "w",
           encoding: "utf-8",
         });
-        this.responsibleFiles.add(`${this.id}.hello`);
+        this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
       } catch (err: unknown) {
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
@@ -525,17 +546,122 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
        * A ~ B hello
        * A ~ B list
        * A ~ B wave
+       *
+       * or (lockless mode, joiner fast-path bypassed):
+       *
+       * A list
+       * A hello
+       * B list (sees A hello)
+       * B hello (does not delete A hello)
+       * A ~ B ack-handshake barrier
        */
 
-      this.log.debug(`[${this.role}] creating initial ${this.id}.hello`);
+      this.log.debug(
+        `[${this.role}] creating initial ${this.id}${HELLO_SUFFIX}`,
+      );
       await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
         flags: "w",
         encoding: "utf-8",
       });
-      this.responsibleFiles.add(`${this.id}.hello`);
+      this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
       let wavePath: string | undefined;
+      let ackPath: string | undefined;
 
       const waitForPeer = async () => {
+        if (this.options.locklessRendezvous) {
+          // Lockless ack-handshake barrier: completes rendezvous using neither
+          // createExclusive nor delete. Each party writes a hello, then an ack
+          // on seeing the peer's hello, then completes when it sees the peer's
+          // ack. A peer hello already present before entering this loop (joiner
+          // fast-path bypassed) satisfies the condition on the first iteration.
+          //
+          // open() set timeToLive before synchronize() can run, so the
+          // non-null assertion is safe here.
+          while (Date.now() <= this.options.timeToLive!.getTime()) {
+            const currentFiles = await this.client.list(this.path!);
+
+            const fileNames = currentFiles.map((file) => file.name);
+            this.responsibleFiles.forEach((fileName) => {
+              if (!fileNames.includes(fileName))
+                this.responsibleFiles.delete(fileName);
+            });
+
+            const peerHello = currentFiles.find(
+              (file) =>
+                file.name !== `${this.id}${HELLO_SUFFIX}` &&
+                file.name.endsWith(HELLO_SUFFIX),
+            );
+
+            if (peerHello === undefined) {
+              this.log.trace(`[${this.role}] no peer hello found; polling`);
+              const delay = (ms: number) =>
+                new Promise((resolve) => setTimeout(resolve, ms));
+              await delay(this.options.pollingFrequency);
+              continue;
+            }
+
+            const peerId = peerHello.name.slice(0, -HELLO_SUFFIX.length);
+
+            // Write our ack once on the first sighting of the peer's hello.
+            if (ackPath === undefined) {
+              const ackName = `${this.id}-hello-ack.json`;
+              ackPath = `${this.path}/${ackName}`;
+              // Pre-track before writing so cleanup() sweeps it at close().
+              this.responsibleFiles.add(ackName);
+              this.log.debug(
+                `[${this.role}] writing handshake ack ${ackName}`,
+              );
+              await this.client.put(
+                Buffer.from(new ArrayBuffer(0)),
+                ackPath,
+                { flags: "w", encoding: "utf-8" },
+              );
+            }
+
+            // Barrier completes when the peer's ack is visible in the
+            // current listing. The listing was taken before we wrote our
+            // ack, so the peer's ack may not appear until the next poll;
+            // that is fine -- the barrier is correct as long as each party
+            // writes its ack before declaring completion.
+            const peerAckName = `${peerId}-hello-ack.json`;
+            const hasPeerAck = currentFiles.some(
+              (file) => file.name === peerAckName,
+            );
+
+            if (!hasPeerAck) {
+              this.log.trace(
+                `[${this.role}] waiting for peer ack ${peerAckName}`,
+              );
+              const delay = (ms: number) =>
+                new Promise((resolve) => setTimeout(resolve, ms));
+              await delay(this.options.pollingFrequency);
+              continue;
+            }
+
+            // Peer ack confirmed -- commit roles and peerId as the last step,
+            // the same invariant as the joiner path (see above): if the ack
+            // write fails before this point, this.peerId stays undefined and
+            // the "already synchronized" guard allows a retry on this instance.
+            const arrivedFirst =
+              `${this.id}${HELLO_SUFFIX}` < peerHello.name;
+            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
+            this.role = arrivedFirst ? "starter" : "joiner";
+            this.peerId = peerId;
+
+            this.log.debug(
+              `[${this.role}] lockless rendezvous complete with ${peerId}`,
+            );
+
+            // Do NOT clear responsibleFiles: hello and ack remain so
+            // cleanup() can sweep them at close() time, the same as the
+            // wave-winner path.
+            return;
+          }
+
+          throw new Error(`[${this.role}] synchronization has timed out`);
+        }
+
+        // Wave-race path.
         // open() set timeToLive before synchronize() can run, so the non-null
         // assertion is safe here.
         while (Date.now() <= this.options.timeToLive!.getTime()) {
@@ -549,10 +675,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
           const otherFiles = currentFiles.filter(
             (file) =>
-              file.name !== `${this.id}.hello` && file.name.endsWith(".hello"),
+              file.name !== `${this.id}${HELLO_SUFFIX}` &&
+              file.name.endsWith(HELLO_SUFFIX),
           );
           const theseFiles = currentFiles.filter(
-            (file) => file.name === `${this.id}.hello`,
+            (file) => file.name === `${this.id}${HELLO_SUFFIX}`,
           );
           const waveFiles = currentFiles.filter((file) =>
             file.name.endsWith(".wave"),
@@ -620,10 +747,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             if (!waveMatches || waveMatches.length !== 3)
               throw new Error("wave file name not in expected format");
             // The two capture groups are bare UUIDs, but theseFiles /
-            // otherFiles entries carry the ".hello" suffix; strip it before
+            // otherFiles entries carry the HELLO_SUFFIX; strip it before
             // comparing so the cross-checks can succeed.
-            const thisId = thisFile.name.slice(0, -".hello".length);
-            const otherId = otherFile.name.slice(0, -".hello".length);
+            const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
+            const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
             if (waveMatches[1] !== thisId && waveMatches[2] !== thisId)
               throw new Error("wave file does not reference this connection");
             if (waveMatches[1] !== otherId && waveMatches[2] !== otherId)
@@ -634,7 +761,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               waveMatches[1] === this.id ? "responder" : "initiator";
             this.role =
               this.handshakeRole === "initiator" ? "joiner" : "starter";
-            this.peerId = otherFile.name.slice(0, -6);
+            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
             this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
 
@@ -671,7 +798,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // arrived first, should wait for a message
             this.handshakeRole = "responder";
             this.role = "starter";
-            this.peerId = otherFile.name.slice(0, -6);
+            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
             this.log.debug(
               `[${this.role}] detected ${otherFile.name}; deleting it`,
@@ -703,7 +830,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const arrivedFirst = thisFile.name < otherFile.name;
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role = arrivedFirst ? "starter" : "joiner";
-            this.peerId = otherFile.name.slice(0, -6);
+            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
             const waveName =
               `${arrivedFirst ? this.id : this.peerId}-` +
@@ -797,15 +924,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       try {
         await waitForPeer();
         // No clear() here: branches that finish their own cleanup
-        // (responder, wave-detection, EEXIST loser) clear explicitly
-        // before returning. The createExclusive-winner path is the
-        // exception — it leaves `${this.id}.hello` and waveName in
-        // responsibleFiles so the eventual cleanup() can sweep them
-        // if the loser never arrives (e.g. crash before reaching the
-        // wave file). Clearing here would lose that safety net.
+        // (responder, wave-detection, EEXIST loser, lockless) clear or retain
+        // explicitly before returning. The createExclusive-winner and lockless
+        // paths are the exception -- they leave hello (and wave or ack) in
+        // responsibleFiles so cleanup() can sweep them if the peer never
+        // arrives (e.g. crash before reaching the handshake files). Clearing
+        // here would lose that safety net.
         return;
       } catch (err: unknown) {
         if (wavePath) await this.client.safeDelete(wavePath);
+        if (ackPath) await this.client.safeDelete(ackPath);
         await this.client.safeDelete(helloPath);
         this.responsibleFiles.clear();
         if (err instanceof Error && err.cause === "usage") delete err.cause;
@@ -838,10 +966,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // consumed cannot be found by an exact name. Scan for any `<id>-*.json` we
     // still own and wait for it to clear, preserving the one-outstanding-
     // message-at-a-time invariant the peer's poll() relies on.
+    // Typed protocol files (hello, ack, receipt) share the `<id>-` prefix and
+    // `.json` extension but have a non-numeric terminal segment. Exclude them
+    // via parseMessageByteCount so a renamed hello does not cause send() to
+    // spin waiting for a protocol file to disappear.
     const hasOutstandingMessage = async () =>
       (await this.client.list(path)).some(
         (file) =>
-          file.name.startsWith(`${this.id}-`) && file.name.endsWith(".json"),
+          file.name.startsWith(`${this.id}-`) &&
+          file.name.endsWith(".json") &&
+          parseMessageByteCount(file.name) !== undefined,
       );
 
     try {

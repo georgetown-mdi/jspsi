@@ -337,12 +337,22 @@ export interface FileSyncOptions extends SharedOptions {
    * declared byte count (`<id>-<byteCount>.json`).
    */
   timestampInFilename?: boolean;
+  /**
+   * When `true`, the rendezvous handshake uses an ack-handshake barrier
+   * instead of the atomic-exclusive-create wave-file race. Both parties must
+   * set this identically; a mismatch causes rendezvous to time out. Use on
+   * transports that lack atomic exclusive-create (`createExclusive`) or
+   * deletion visibility during rendezvous (e.g. sync-mediated directories
+   * where both sides "win" a local create). Default: `false`.
+   */
+  locklessRendezvous?: boolean;
 }
 
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z.object({
   ...sharedOptionsFields,
   pollIntervalMs: z.int().nonnegative().optional(),
   timestampInFilename: z.boolean().optional(),
+  locklessRendezvous: z.boolean().optional(),
 });
 
 // --- Connection config -------------------------------------------------------
@@ -481,6 +491,18 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.stun !== undefined || conn.turn !== undefined)
       ),
     { message: "iceProvision is mutually exclusive with stun and turn" },
+  )
+  // Defense-in-depth: locklessRendezvous is a FileSyncOptions field and
+  // cannot be expressed on a webrtc config through the discriminated union
+  // (webrtc uses SharedOptions, not FileSyncOptions). This refine guards the
+  // path anyway so a future schema change cannot silently accept it.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        (conn.options as FileSyncOptions | undefined)?.locklessRendezvous
+      ),
+    { message: "locklessRendezvous is not valid for the webrtc channel" },
   );
 
 // --- Parse -------------------------------------------------------------------

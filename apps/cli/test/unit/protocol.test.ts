@@ -1017,7 +1017,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
       () => {
         const entries = fs
           .readdirSync(dropDir)
-          .filter((f) => f.endsWith(".hello"));
+          .filter((f) => f.endsWith("-hello.json"));
         expect(entries.length).toBeGreaterThanOrEqual(1);
       },
       { timeout: 5_000 },
@@ -1032,7 +1032,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
     // After cleanup runs the hello file must be gone — otherwise a retry
     // would trip the "preexisting hello or wave files" guard.
     expect(
-      fs.readdirSync(dropDir).filter((f) => f.endsWith(".hello")),
+      fs.readdirSync(dropDir).filter((f) => f.endsWith("-hello.json")),
     ).toHaveLength(0);
   } finally {
     exitSpy.mockRestore();
@@ -1225,7 +1225,7 @@ test.skipIf(process.platform === "win32")(
     );
 
     // Poll for B's rendezvous file rather than sleeping a fixed amount. B
-    // writes its .hello file to dropDir during open()/synchronize(); its
+    // writes its -hello.json file to dropDir during open()/synchronize(); its
     // presence is the deterministic signal that B has reached synchronize() and
     // is waiting for a peer. A only starts after this loop exits, guaranteeing
     // B is already in the drop directory before A's open() runs.

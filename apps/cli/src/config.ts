@@ -8,6 +8,7 @@ export interface ConnectionOverrides {
   serverPassword?: string;
   serverPrivateKey?: string;
   serverPort?: number;
+  locklessRendezvous?: boolean;
 }
 
 export function applyConnectionOverrides(
@@ -30,7 +31,8 @@ export function applyConnectionOverrides(
   if (
     overrides.peerTimeout !== undefined ||
     overrides.connectionTimeout !== undefined ||
-    overrides.maxReconnectAttempts !== undefined
+    overrides.maxReconnectAttempts !== undefined ||
+    overrides.locklessRendezvous !== undefined
   ) {
     result.options = {
       ...result.options,
@@ -42,6 +44,9 @@ export function applyConnectionOverrides(
       }),
       ...(overrides.maxReconnectAttempts !== undefined && {
         maxReconnectAttempts: overrides.maxReconnectAttempts,
+      }),
+      ...(overrides.locklessRendezvous !== undefined && {
+        locklessRendezvous: overrides.locklessRendezvous,
       }),
     };
   }
