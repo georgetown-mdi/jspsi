@@ -5,6 +5,10 @@ import type {
   FileTransportClient,
   FileInfo,
 } from "../src/connection/fileSyncConnection";
+import type {
+  SFTPConnectionConfig,
+  FileDropConnectionConfig,
+} from "../src/config/connection";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
 // send() need real implementations; everything else is a no-op.
@@ -76,26 +80,31 @@ function makeMockClient(): {
   return { client, files };
 }
 
-// Put a connection into the post-synchronize state without actually
-// running the handshake.
-function makeConnectedConn(
+// Put a connection into the post-open state without running the handshake.
+// Calls open() with a fake filedrop config so this.config is populated and
+// the drain deadline in close() reads peerTimeoutMs from the config rather
+// than falling back to DEFAULT_PEER_TIMEOUT_MS (1 hour).
+async function makeConnectedConn(
   client: FileTransportClient,
   opts?: Partial<{
     pollingFrequency: number;
     timeToLiveMs: number;
     peerTimeoutMs: number;
   }>,
-): FileSyncConnection {
+): Promise<FileSyncConnection> {
   const conn = new FileSyncConnection(client, {
     pollingFrequency: opts?.pollingFrequency ?? 10,
     timeToLive: new Date(Date.now() + (opts?.timeToLiveMs ?? 5_000)),
-    // Short drain timeout so tests that send but have no receiver do not hang
-    // for the full DEFAULT_PEER_TIMEOUT_MS before cleanup runs.
-    peerTimeoutMs: opts?.peerTimeoutMs ?? 50,
     verbose: -1,
   });
-  conn.connected = true;
-  conn.path = "/test";
+  // Pass peerTimeoutMs via a fake filedrop config so close()'s drain deadline
+  // reads from this.config rather than falling back to DEFAULT_PEER_TIMEOUT_MS.
+  const fakeConfig: FileDropConnectionConfig = {
+    channel: "filedrop",
+    path: "/test",
+    options: { peerTimeoutMs: opts?.peerTimeoutMs ?? 50 },
+  };
+  await conn.open(fakeConfig);
   return conn;
 }
 
@@ -127,7 +136,7 @@ test("close() sweeps responsible files and ends the client, idempotently", async
     deleted.push(p);
     return origSafeDelete(p);
   };
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
   // send() records the outbound file as one this side is responsible for.
   await conn.send({ hello: 1 });
   const messagePath = [...files.keys()].find((p) =>
@@ -155,7 +164,7 @@ test("close() stops a running poller", async () => {
     listCalls++;
     return origList(p);
   };
-  const conn = makeConnectedConn(client, { pollingFrequency: 5 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
   conn.peerId = "peer-test";
   conn.start();
   await new Promise((r) => setTimeout(r, 25));
@@ -251,8 +260,8 @@ test("open maps pollIntervalMs to pollingFrequency for sftp config", async () =>
 
 test("open preserves constructor timeToLive and stores config peerTimeoutMs when both are supplied", async () => {
   // Constructor timeToLive wins; open() must not recompute it from
-  // config.options.peerTimeoutMs. The raw duration is still stored in
-  // peerTimeoutMs so close() can use a fresh drain deadline.
+  // config.options.peerTimeoutMs. The config is stored as a private field so
+  // close() can read peerTimeoutMs from it for a fresh drain deadline.
   const { client } = makeMockClient();
   const constructorTtl = new Date(Date.now() + 9_999_999);
   const conn = new FileSyncConnection(client, {
@@ -265,12 +274,19 @@ test("open preserves constructor timeToLive and stores config peerTimeoutMs when
     options: { peerTimeoutMs: 30_000 },
   });
   expect(conn.options.timeToLive).toBe(constructorTtl);
-  expect(conn.options.peerTimeoutMs).toBe(30_000);
+  expect(
+    (
+      conn as unknown as {
+        config: SFTPConnectionConfig | FileDropConnectionConfig | undefined;
+      }
+    ).config?.options?.peerTimeoutMs,
+  ).toBe(30_000);
 });
 
 test("open preserves constructor timeToLive and leaves peerTimeoutMs undefined when config has none", async () => {
   // Constructor timeToLive wins; when no config peerTimeoutMs is provided
-  // peerTimeoutMs stays undefined so close() falls back to DEFAULT_PEER_TIMEOUT_MS.
+  // the config's options.peerTimeoutMs stays undefined, so close() falls back
+  // to DEFAULT_PEER_TIMEOUT_MS for the drain deadline.
   const { client } = makeMockClient();
   const constructorTtl = new Date(Date.now() + 9_999_999);
   const conn = new FileSyncConnection(client, {
@@ -282,13 +298,19 @@ test("open preserves constructor timeToLive and leaves peerTimeoutMs undefined w
     server: { host: "sftp.example.org" },
   });
   expect(conn.options.timeToLive).toBe(constructorTtl);
-  expect(conn.options.peerTimeoutMs).toBeUndefined();
+  expect(
+    (
+      conn as unknown as {
+        config: SFTPConnectionConfig | FileDropConnectionConfig | undefined;
+      }
+    ).config?.options?.peerTimeoutMs,
+  ).toBeUndefined();
 });
 
 test("open derives timeToLive from config peerTimeoutMs when no constructor timeToLive is set", async () => {
   // Existing behavior: no constructor timeToLive, config peerTimeoutMs present
-  // -> timeToLive is computed as Date.now() + peerTimeoutMs and peerTimeoutMs
-  // is stored.
+  // -> timeToLive is computed as Date.now() + peerTimeoutMs. The config is
+  // stored as a private field so close() can read peerTimeoutMs from it.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, { verbose: -1 });
   const before = Date.now();
@@ -301,7 +323,13 @@ test("open derives timeToLive from config peerTimeoutMs when no constructor time
   const ttl = conn.options.timeToLive!.getTime();
   expect(ttl).toBeGreaterThanOrEqual(before + 45_000);
   expect(ttl).toBeLessThanOrEqual(after + 45_000);
-  expect(conn.options.peerTimeoutMs).toBe(45_000);
+  expect(
+    (
+      conn as unknown as {
+        config: SFTPConnectionConfig | FileDropConnectionConfig | undefined;
+      }
+    ).config?.options?.peerTimeoutMs,
+  ).toBe(45_000);
 });
 
 // --- open (filedrop) ---------------------------------------------------------
@@ -433,7 +461,7 @@ test("open normalizes Windows UNC filedrop path with subdirectory", async () => 
 
 test("send writes the message file to the store", async () => {
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
 
   await conn.send({ hello: "world" });
 
@@ -446,7 +474,7 @@ test("send writes the message file to the store", async () => {
 
 test("send encodes the exact serialized byte count in the filename", async () => {
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
 
   await conn.send({ hello: "world" });
 
@@ -464,7 +492,7 @@ test("send writes the in-flight file with a .tmp extension and renames to .json"
   // temp file carries a `.tmp` extension; only the atomic rename target ends
   // in `.json`.
   const { client } = makeMockClient();
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
 
   const putDests: string[] = [];
   const origPut = client.put.bind(client);
@@ -498,7 +526,7 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
   // is the only cleanup path for an in-flight write, so the .tmp name is
   // deliberately not tracked in responsibleFiles (see send()).
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
 
   // Capture the temp path the write actually produced so the cleanup
   // assertion cannot pass vacuously: if a refactor stopped writing the temp
@@ -539,7 +567,7 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
 
 test("send waits for a previous unconsumed message before writing the next", async () => {
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
 
   // Simulate a message from this connection already sitting in the store
   // (e.g. the peer's poller hasn't run yet). The exact byte count is
@@ -563,7 +591,7 @@ test("send waits for a previous unconsumed message before writing the next", asy
 test("send times out when the previous message is never consumed", async () => {
   const { client, files } = makeMockClient();
   // Short TTL so the test doesn't take long.
-  const conn = makeConnectedConn(client, {
+  const conn = await makeConnectedConn(client, {
     timeToLiveMs: 150,
     pollingFrequency: 10,
   });
@@ -604,7 +632,7 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
     throw new Error("unexpected second get()");
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const errors: unknown[] = [];
@@ -681,7 +709,7 @@ test("poll delivers a subsequent valid message after swallowing an ENOENT", asyn
     return originalGet(p, opts as Parameters<typeof originalGet>[1]);
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const received: unknown[] = [];
@@ -727,7 +755,7 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
     );
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const errors: unknown[] = [];
@@ -770,7 +798,7 @@ test("poll emits error immediately when list() throws ENOENT (not a TOCTOU race)
     );
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = "peer-test";
 
   const errors: unknown[] = [];
@@ -827,7 +855,7 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
   // (.hello x2, .wave) must be deleted before synchronize() returns.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   // Pin conn.id to the lexicographic maximum so peerId always sorts below it,
   // guaranteeing the wave-file name and role assignment are deterministic.
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
@@ -880,7 +908,7 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
   // peerTimeoutMs; synchronize() must fail fast and leave the directory clean.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   // Pin conn.id to the lexicographic maximum so peerId always sorts below it.
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
@@ -934,7 +962,7 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
   // synchronize() must safeDelete the wave file and reject.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   // Pin conn.id to the lexicographic maximum so peerId always sorts below it.
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
@@ -985,7 +1013,7 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
   // outer catch already deleted.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
@@ -1054,7 +1082,7 @@ test("synchronize() resolves cleanly when it observes a wave file already create
   // observes peer.hello + my.hello + wave file on its next list().
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
@@ -1110,7 +1138,7 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
   // and the files were stranded.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
   const myHelloName = `${myId}.hello`;
@@ -1169,7 +1197,7 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
     waveName: string;
   }> => {
     const { client } = makeMockClient();
-    const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.id = myId;
     const base = conn.path ?? "";
     const myHelloName = `${myId}.hello`;
@@ -1221,7 +1249,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   // (this party arrived second on a previously-empty directory).
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}.hello`;
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
@@ -1247,7 +1275,7 @@ test("synchronize() joiner branch: leaves connection unsynchronized when put fai
   // writes succeed.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}.hello`;
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
@@ -1307,7 +1335,7 @@ test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of re
     );
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const errors: unknown[] = [];
@@ -1343,7 +1371,7 @@ async function runPoller(
 
 test("send filename is <id>-<byteCount>.json when timestampInFilename is unset", async () => {
   const { client, files } = makeMockClient();
-  const conn = makeConnectedConn(client);
+  const conn = await makeConnectedConn(client);
 
   await conn.send({ hello: "world" });
 
@@ -1408,7 +1436,7 @@ test("poll waits while the file is partially synced and reads it once the size m
     return [{ name, modifyTime: 0, size: message.length }];
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const received: unknown[] = [];
@@ -1450,7 +1478,7 @@ test("poll ignores message files belonging to a different peer", async () => {
     return Buffer.alloc(0) as Buffer<ArrayBufferLike>;
   };
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const received: unknown[] = [];
@@ -1478,7 +1506,7 @@ test("poll extracts the byte count from the last segment when the filename has m
 
   client.list = async () => [{ name, modifyTime: 0, size: message.length }];
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const received: unknown[] = [];
@@ -1511,7 +1539,7 @@ test("poll ignores a prefix-matching file whose final segment is not a byte coun
   files.set(`/test/${peerId}-${message.length}.json`, message);
   files.set(`/test/${peerId}-backup.json`, Buffer.from("not a message"));
 
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
 
   const received: unknown[] = [];
@@ -1547,7 +1575,7 @@ test("close() drains the last sent file before cleanup, preventing premature del
   let receiverConsumed = false;
   let deletedBeforeConsumed = false;
 
-  const sender = makeConnectedConn(client, {
+  const sender = await makeConnectedConn(client, {
     pollingFrequency: 5,
     peerTimeoutMs: 500,
   });
