@@ -61,10 +61,6 @@ interface Options {
   pollingFrequency: number;
   verbose: number;
   timestampInFilename: boolean;
-  // Raw peer-timeout duration stored alongside timeToLive so close() can
-  // compute a fresh drain deadline independent of exchange duration. Set from
-  // config in open(); may be supplied in the constructor for tests.
-  peerTimeoutMs?: number;
 }
 
 const Message = z.object({
@@ -155,6 +151,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   connected = false;
 
   path: string | undefined;
+  private config: SFTPConnectionConfig | FileDropConnectionConfig | undefined;
 
   peerId: string | undefined;
   handshakeRole: HandshakeRole | undefined;
@@ -245,6 +242,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.pollingFrequency = config.options.pollIntervalMs;
     if (config.options?.timestampInFilename !== undefined)
       this.options.timestampInFilename = config.options.timestampInFilename;
+    this.config = config;
     // timeToLive is computed after a successful connect (below) so that
     // retry latency during connection setup does not eat into the
     // peer-waiting budget. Applies to both peerTimeoutMs-supplied and
@@ -311,20 +309,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.connected = true;
     // Compute timeToLive only after connect() has resolved so that retry
     // latency during connection setup does not eat into the peer-waiting
-    // budget. Three cases:
-    //   1. No constructor timeToLive, no config peerTimeoutMs: use the default
-    //      budget for both timeToLive and peerTimeoutMs.
-    //   2. No constructor timeToLive, config peerTimeoutMs present: derive
-    //      timeToLive from config peerTimeoutMs and store the raw duration.
-    //   3. Constructor timeToLive present: it wins - do not recompute timeToLive.
-    //      Still store config peerTimeoutMs when provided so close() can use a
-    //      fresh drain deadline independent of the exchange duration.
+    // budget. Two cases:
+    //   1. No constructor timeToLive: derive from config peerTimeoutMs (or the
+    //      default fallback) so the full budget is available for peer-waiting.
+    //   2. Constructor timeToLive present: it wins - do not recompute it.
     if (this.options.timeToLive === undefined) {
       const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
-      this.options.peerTimeoutMs = ttlMs;
       this.options.timeToLive = new Date(Date.now() + ttlMs);
-    } else if (config.options?.peerTimeoutMs !== undefined) {
-      this.options.peerTimeoutMs = config.options.peerTimeoutMs;
     }
     this.log.debug(`[${this.role}] connected`);
   }
@@ -355,10 +346,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    *
    * Before cleanup, drains the last sent file: waits for the peer to consume
    * it so a clean close never deletes an unconsumed terminal frame. The wait is
-   * bounded by a fresh {@link Options.peerTimeoutMs} budget from close() start
-   * (not the remaining timeToLive, which may be near-zero for long exchanges).
-   * An unresponsive peer causes the drain to time out and cleanup() to delete
-   * the file as a fallback. Idempotent: safe to call repeatedly and on a
+   * bounded by a fresh `peerTimeoutMs` budget from close() start (not the
+   * remaining timeToLive, which may be near-zero for long exchanges). An
+   * unresponsive peer causes the drain to time out and cleanup() to delete the
+   * file as a fallback. Idempotent: safe to call repeatedly and on a
    * connection that was never opened.
    */
   async close() {
@@ -375,7 +366,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         const lastSentFile = this.lastSentFile;
         const deadline =
           Date.now() +
-          (this.options.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
+          (this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
         const filePresent = async () =>
           (await this.client.list(path)).some((f) => f.name === lastSentFile);
         try {
@@ -411,6 +402,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.connected = false;
     }
     this.path = undefined;
+    this.config = undefined;
   }
 
   /**
