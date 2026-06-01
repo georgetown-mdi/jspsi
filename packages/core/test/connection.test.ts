@@ -406,3 +406,72 @@ test("parses snake_case SFTP server keys from disk", () => {
   expect(result.server.hostKeyFingerprint).toBe("SHA256:abc");
   expect(result.server.knownHosts).toBe("/etc/ssh/known_hosts");
 });
+
+// --- FileSyncOptions: peerId refines -----------------------------------------
+
+test("peerId is accepted on sftp when timestampInFilename is true", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "agency-a" },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  if (result.data.channel !== "sftp") return;
+  expect(result.data.options?.peerId).toBe("agency-a");
+});
+
+test("peerId is accepted on filedrop when timestampInFilename is true", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share",
+    options: { timestampInFilename: true, peerId: "agency-a" },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("peerId with hyphens is accepted", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "agency-a-outbound" },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("peerId is rejected without timestampInFilename", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peerId: "agency-a" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("timestamp_in_filename"))).toBe(true);
+});
+
+test("peerId is rejected when timestampInFilename is false", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peerId: "agency-a", timestampInFilename: false },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("peerId 'temp' is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "temp" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("reserved"))).toBe(true);
+});
+
+test("parses snake_case peer_id from disk", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { timestamp_in_filename: true, peer_id: "agency-a" },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.peerId).toBe("agency-a");
+});

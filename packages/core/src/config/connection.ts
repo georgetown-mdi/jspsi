@@ -354,14 +354,49 @@ export interface FileSyncOptions extends SharedOptions {
    * Default: `false`.
    */
   locklessRendezvous?: boolean;
+  /**
+   * A stable, human-readable identifier for this party on the file-sync
+   * transport. Appears in every filename this party writes (hello, message,
+   * ack) and in server-side logs and transcripts. When unset, a UUID is
+   * generated at construction time.
+   *
+   * Requires `timestampInFilename: true`. A reused stable id across sessions
+   * in the same directory (without a timestamp segment) could collide with a
+   * leftover file from a crashed prior session, causing phantom message
+   * detection via `hasOutstandingMessage`.
+   *
+   * The two parties must use distinct ids, and neither may be the other's id
+   * extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous
+   * because `"site-2".startsWith("site-")` breaks prefix routing). Spaces
+   * and `-` are permitted within an id. The value `"temp"` is reserved.
+   * Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`,
+   * `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may
+   * cause errors at the transport layer.
+   */
+  peerId?: string;
 }
 
-const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z.object({
-  ...sharedOptionsFields,
-  pollIntervalMs: z.int().nonnegative().optional(),
-  timestampInFilename: z.boolean().optional(),
-  locklessRendezvous: z.boolean().optional(),
-});
+const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
+  .object({
+    ...sharedOptionsFields,
+    pollIntervalMs: z.int().nonnegative().optional(),
+    timestampInFilename: z.boolean().optional(),
+    locklessRendezvous: z.boolean().optional(),
+    peerId: z.string().optional(),
+  })
+  .refine((opts) => !opts.peerId || opts.timestampInFilename === true, {
+    message:
+      "peer_id requires timestamp_in_filename: true; without it, a reused " +
+      "stable id can collide with a leftover file from a crashed prior " +
+      "session, causing phantom message detection",
+    path: ["peerId"],
+  })
+  .refine((opts) => opts.peerId !== "temp", {
+    message:
+      "peer_id 'temp' is reserved; the lockless rendezvous upload glob " +
+      "('<myId>-*') would capture in-flight 'temp-*.tmp' writes",
+    path: ["peerId"],
+  });
 
 // --- Connection config -------------------------------------------------------
 
@@ -511,6 +546,18 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.options as FileSyncOptions | undefined)?.locklessRendezvous
       ),
     { message: "locklessRendezvous is not valid for the webrtc channel" },
+  )
+  // Defense-in-depth: peerId is a FileSyncOptions field and cannot be
+  // expressed on a webrtc config through the discriminated union (webrtc uses
+  // SharedOptions, not FileSyncOptions). This refine guards the path anyway
+  // so a future schema change cannot silently accept it.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        (conn.options as FileSyncOptions | undefined)?.peerId !== undefined
+      ),
+    { message: "peer_id is not valid for the webrtc channel" },
   );
 
 // --- Parse -------------------------------------------------------------------

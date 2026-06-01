@@ -66,6 +66,7 @@ interface Options {
   verbose: number;
   timestampInFilename: boolean;
   locklessRendezvous: boolean;
+  peerId?: string;
 }
 
 const Message = z.object({
@@ -176,7 +177,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
     this.client = client;
-    this.id = uuidv4();
+    this.id = options?.peerId ?? uuidv4();
     this.role = "unknown role";
     this.pollerActive = false;
     this.responsibleFiles = new Set();
@@ -186,6 +187,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
+    // Waiting for retain_files (item 192859097): once retainFiles is
+    // implemented, complete the guard below -- it needs both retainFiles and
+    // the absence of peerId to emit the warning:
+    //
+    //   if (this.options.retainFiles && !this.options.peerId)
+    //     this.log.warn(
+    //       "peer_id is unset and retain_files is true: reusing a directory " +
+    //       "with files from a prior session can cause phantom messages via " +
+    //       "uuid collision; set peer_id to a stable id to avoid this",
+    //     );
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -250,6 +261,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.timestampInFilename = config.options.timestampInFilename;
     if (config.options?.locklessRendezvous !== undefined)
       this.options.locklessRendezvous = config.options.locklessRendezvous;
+    if (config.options?.peerId !== undefined) {
+      this.options.peerId = config.options.peerId;
+      this.id = config.options.peerId;
+    }
     this.config = config;
     // timeToLive is computed after a successful connect (below) so that
     // retry latency during connection setup does not eat into the
@@ -532,6 +547,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // "already synchronized" guard does not block a retry on the same
       // instance, and `handshakeRole` does not point at a peer that may
       // not actually exist.
+      if (
+        peerId.startsWith(this.id + "-") ||
+        this.id.startsWith(peerId + "-")
+      )
+        throw new Error(
+          `peer id '${peerId}' and this party's id '${this.id}' share a ` +
+            "prefix at a '-' boundary; ids must not be prefix-extensions " +
+            "of each other (e.g. 'site' / 'site-2')",
+          { cause: "usage" },
+        );
       this.handshakeRole = "initiator";
       this.role = "joiner";
       this.peerId = peerId;
@@ -939,6 +964,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // responsibleFiles so cleanup() can sweep them if the peer never
         // arrives (e.g. crash before reaching the handshake files). Clearing
         // here would lose that safety net.
+        //
+        // Both rendezvous modes have assigned this.peerId by this point.
+        // Reject prefix-at-dash id pairs before any message is sent; both
+        // parties evaluate this symmetrically.
+        if (
+          this.peerId!.startsWith(this.id + "-") ||
+          this.id.startsWith(this.peerId! + "-")
+        )
+          throw new Error(
+            `peer id '${this.peerId}' and this party's id '${this.id}' share ` +
+              "a prefix at a '-' boundary; ids must not be prefix-extensions " +
+              "of each other (e.g. 'site' / 'site-2')",
+            { cause: "usage" },
+          );
         return;
       } catch (err: unknown) {
         if (wavePath) await this.client.safeDelete(wavePath);
