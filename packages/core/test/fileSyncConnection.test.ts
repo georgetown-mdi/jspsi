@@ -852,7 +852,7 @@ test("createExclusive creates an empty entry and does not affect other files", a
 test("synchronize() cleans up hello and wave files when createExclusive() throws EEXIST", async () => {
   // Simulates the losing party in the wave-file race: createExclusive() throws
   // because the peer already claimed the wave slot, and all three residue files
-  // (.hello x2, .wave) must be deleted before synchronize() returns.
+  // (-hello.json x2, .wave) must be deleted before synchronize() returns.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -861,8 +861,8 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
-  const myHelloName = `${myId}.hello`;
-  const peerHelloName = `${peerId}.hello`;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId (pinned to max), so peer "arrived first" by name tiebreak.
   // Wave name: peer-mine.
   const waveName = `${peerId}-${myId}.wave`;
@@ -913,8 +913,8 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
-  const myHelloName = `${myId}.hello`;
-  const peerHelloName = `${peerId}.hello`;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId (pinned to max), so peer "arrived first" by name tiebreak.
   // Wave name would be peer-mine.
 
@@ -967,8 +967,8 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
-  const myHelloName = `${myId}.hello`;
-  const peerHelloName = `${peerId}.hello`;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId (pinned to max), so peer arrived first.
   const waveName = `${peerId}-${myId}.wave`;
   const wavePath = `${conn.path}/${waveName}`;
@@ -1017,8 +1017,8 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
-  const myHelloName = `${myId}.hello`;
-  const peerHelloName = `${peerId}.hello`;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
   const waveName = `${peerId}-${myId}.wave`;
   const wavePath = `${conn.path}/${waveName}`;
 
@@ -1072,22 +1072,22 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
 test("synchronize() resolves cleanly when it observes a wave file already created by the peer", async () => {
   // Regression guard: the wave-detection branch
   // (waitForPeer's "waveFiles.length > 0" arm) used to compare bare UUIDs
-  // from the wave filename against .hello entries, which never matched, so
-  // any party that observed a peer-created wave file threw
+  // from the wave filename against -hello.json entries, which never matched,
+  // so any party that observed a peer-created wave file threw
   // "wave file does not reference this connection" instead of completing
   // the rendezvous.
   //
-  // Scenario reproduced here: peer arrived first, both wrote .hello, peer
-  // won the wave race and created `${peerId}-${myId}.wave`. This party
-  // observes peer.hello + my.hello + wave file on its next list().
+  // Scenario reproduced here: peer arrived first, both wrote -hello.json,
+  // peer won the wave race and created `${peerId}-${myId}.wave`. This party
+  // observes peer-hello.json + my-hello.json + wave file on its next list().
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
-  const myHelloName = `${myId}.hello`;
-  const peerHelloName = `${peerId}.hello`;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
   // Peer arrived first (sorted lower) so the wave name is `${peer}-${my}`.
   const waveName = `${peerId}-${myId}.wave`;
   const wavePath = `${conn.path}/${waveName}`;
@@ -1141,8 +1141,8 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
-  const myHelloName = `${myId}.hello`;
-  const peerHelloName = `${peerId}.hello`;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId so the peer "arrived first" by name tiebreak; wave name
   // is `${peerId}-${myId}.wave` and is created by THIS connection.
   const waveName = `${peerId}-${myId}.wave`;
@@ -1200,8 +1200,8 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.id = myId;
     const base = conn.path ?? "";
-    const myHelloName = `${myId}.hello`;
-    const peerHelloName = `${peerId}.hello`;
+    const myHelloName = `${myId}-hello.json`;
+    const peerHelloName = `${peerId}-hello.json`;
 
     let listCallCount = 0;
     client.list = async () => {
@@ -1251,7 +1251,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const peerHelloName = `${peerId}.hello`;
+  const peerHelloName = `${peerId}-hello.json`;
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
@@ -1263,7 +1263,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   expect(conn.peerId).toBe(peerId);
   // Peer's hello was deleted; our own hello was written.
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
-  expect(files.has(`${conn.path}/${conn.id}.hello`)).toBe(true);
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
 });
 
 test("synchronize() joiner branch: leaves connection unsynchronized when put fails after delete succeeds", async () => {
@@ -1277,7 +1277,7 @@ test("synchronize() joiner branch: leaves connection unsynchronized when put fai
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const peerHelloName = `${peerId}.hello`;
+  const peerHelloName = `${peerId}-hello.json`;
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
@@ -1611,4 +1611,368 @@ test("close() drains the last sent file before cleanup, preventing premature del
   await closePromise;
 
   expect(deletedBeforeConsumed).toBe(false);
+});
+
+// --- synchronize(): unconditional hello rename --------------------------------
+
+test("synchronize() preexisting -hello-ack.json causes an immediate rejection", async () => {
+  // A stale ack file indicates a crashed lockless session. The preexisting-file
+  // guard must reject regardless of whether locklessRendezvous is set.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const staleAck = "some-peer-id-hello-ack.json";
+  files.set(`${conn.path}/${staleAck}`, Buffer.alloc(0));
+  client.list = async () => [
+    { name: staleAck, modifyTime: 0, size: 0 },
+  ];
+
+  await expect(conn.synchronize()).rejects.toThrow(/handshake-ack/);
+});
+
+test("synchronize() wave path writes hello as <id>-hello.json and self-hello detection still works", async () => {
+  // Regression guard: the unconditional hello rename must not break the
+  // self-hello filter inside waitForPeer (the pair of checks that prevents a
+  // party from treating its own hello as the peer's).
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await conn.synchronize();
+
+  // The wave-race winner (this conn: wave created by createExclusive)
+  // committed peerId correctly from the -hello.json filename.
+  expect(conn.peerId).toBe(peerId);
+  expect(conn.handshakeRole).toBe("initiator");
+  // Our hello is named with the new convention and was written to the store.
+  const helloInStore = [...files.keys()].find((p) =>
+    p.endsWith(`/${myHelloName}`),
+  );
+  expect(helloInStore).toBeDefined();
+});
+
+// --- synchronize(): lockless mode ---------------------------------------------
+
+test("synchronize() lockless mode completes rendezvous when createExclusive and delete both throw", async () => {
+  // Robustness proof: the ack-handshake barrier must complete rendezvous even
+  // when createExclusive and delete both throw. This is the most extreme
+  // constraint possible and is here to prove the protocol is sound under it.
+  // Real lockless deployments target sync-mediated transports where
+  // createExclusive lacks atomicity or deletion has high propagation latency
+  // -- delete itself works, just asynchronously. Cleanup therefore succeeds
+  // eventually on real transports; the pure no-op safeDelete here is not
+  // representative of a real storage backend.
+  const idA = "00000000-0000-4000-8000-000000000001"; // sorts lower
+  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff"; // sorts higher
+
+  const sharedFiles = new Map<string, Buffer>();
+
+  const makeThrowingClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (
+      src: string | Buffer | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async () => {
+      throw new Error("delete not supported on this transport");
+    },
+    safeDelete: async () => {
+      // Swallow silently: transport cannot delete.
+    },
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (data === undefined) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => {
+      throw new Error("createExclusive not supported on this transport");
+    },
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const connA = new FileSyncConnection(makeThrowingClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connA.id = idA;
+  connA.connected = true;
+  connA.path = "/shared";
+
+  const connB = new FileSyncConnection(makeThrowingClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connB.id = idB;
+  connB.connected = true;
+  connB.path = "/shared";
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // Both parties must be synchronized.
+  expect(connA.peerId).toBe(idB);
+  expect(connB.peerId).toBe(idA);
+});
+
+test("synchronize() lockless mode role assignment matches the lexicographic rule for the same id pair as the wave path", async () => {
+  // Role must be determined by lexicographic id order regardless of arrival
+  // timing. The throwing delete/createExclusive is robustness scaffolding
+  // (see the previous test); real lockless transports support delete.
+  const idA = "00000000-0000-4000-8000-000000000001";
+  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const sharedFiles = new Map<string, Buffer>();
+
+  const makeClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (
+      src: string | Buffer | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async () => { throw new Error("delete not supported"); },
+    safeDelete: async () => {},
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (!data) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => { throw new Error("not supported"); },
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const connA = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connA.id = idA;
+  connA.connected = true;
+  connA.path = "/shared";
+
+  const connB = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connB.id = idB;
+  connB.connected = true;
+  connB.path = "/shared";
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // idA < idB: A arrived "first" by lexicographic order.
+  expect(connA.handshakeRole).toBe("responder");
+  expect(connA.role).toBe("starter");
+  expect(connB.handshakeRole).toBe("initiator");
+  expect(connB.role).toBe("joiner");
+});
+
+test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier is entered even with peer hello already present", async () => {
+  // The throwing delete proves the joiner fast-path (which calls delete) is
+  // not taken in lockless mode. The no-op safeDelete is robustness scaffolding
+  // only; real lockless transports support delete (see the first lockless test).
+  //
+  // When locklessRendezvous is set and a single peer hello is found on the
+  // initial list(), the party must NOT take the joiner shortcut (which would
+  // call delete(peer hello), unsupported on a lockless transport). It must
+  // write its own hello and enter the lockless ack-handshake barrier instead.
+  const idA = "00000000-0000-4000-8000-000000000001";
+  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const sharedFiles = new Map<string, Buffer>();
+
+  // Pre-plant A's hello so B's initial list() sees it (simulating A having
+  // arrived first and written its hello before B calls synchronize()).
+  sharedFiles.set(`/shared/${idA}-hello.json`, Buffer.alloc(0));
+
+  let deleteCalled = false;
+  const makeClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (
+      src: string | Buffer | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async () => {
+      deleteCalled = true;
+      throw new Error("delete not supported");
+    },
+    safeDelete: async () => {},
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (!data) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => {
+      throw new Error("createExclusive not supported");
+    },
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const connA = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connA.id = idA;
+  connA.connected = true;
+  connA.path = "/shared";
+
+  const connB = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connB.id = idB;
+  connB.connected = true;
+  connB.path = "/shared";
+
+  // Simulate A entering the lockless barrier (A's hello is pre-planted; A
+  // must poll for B's hello). Run A and B concurrently.
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // Neither party should have called delete (unsupported on lockless transport).
+  expect(deleteCalled).toBe(false);
+  // Both are synchronized.
+  expect(connA.peerId).toBe(idB);
+  expect(connB.peerId).toBe(idA);
+  // A's hello was NOT deleted (still in sharedFiles).
+  expect(sharedFiles.has(`/shared/${idA}-hello.json`)).toBe(true);
+});
+
+// --- send(): hasOutstandingMessage excludes typed protocol files ---------------
+
+test("send() completes without spinning when a <id>-hello.json file is present in the store", async () => {
+  // Regression guard: after the hello rename, <id>-hello.json matches the
+  // `startsWith(<id>-) && endsWith(.json)` scan in hasOutstandingMessage.
+  // Without the parseMessageByteCount fix, send() would spin waiting for the
+  // hello file to be consumed. Verify it completes immediately instead.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+
+  // Plant the hello file as it would appear after synchronize().
+  const helloPath = `/test/${conn.id}-hello.json`;
+  files.set(helloPath, Buffer.alloc(0));
+
+  // send() must complete without looping on the hello file.
+  await expect(conn.send({ check: true })).resolves.toBeUndefined();
+
+  // The hello file must still be present (send() is not responsible for it).
+  expect(files.has(helloPath)).toBe(true);
+});
+
+test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
+  // Regression guard for the multi-peer-hello guard added to the lockless
+  // loop: mirrors the wave path's otherFiles.length > 1 check and catches a
+  // third party that slipped in after the initial synchronize() guard.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  conn.id = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+  conn.connected = true;
+  conn.path = "/test";
+
+  const peerId1 = "00000000-0000-4000-8000-000000000001";
+  const peerId2 = "00000000-0000-4000-8000-000000000002";
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial synchronize() guard: clean
+    // Second call (inside waitForPeer): two peer hellos are present.
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: 0, size: 0 },
+      { name: `${peerId1}-hello.json`, modifyTime: 0, size: 0 },
+      { name: `${peerId2}-hello.json`, modifyTime: 0, size: 0 },
+    ];
+  };
+
+  await expect(conn.synchronize()).rejects.toThrow(/more than one peer hello/);
 });

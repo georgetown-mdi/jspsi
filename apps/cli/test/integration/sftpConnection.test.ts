@@ -99,20 +99,20 @@ test("wave synchronization with race condition", async () => {
 test("basic synchronization", async () => {
   await serverSFTP.put(
     Buffer.from(new ArrayBuffer(0)),
-    `${SFTP_PATH}/${clientConn.id}.hello`,
+    `${SFTP_PATH}/${clientConn.id}-hello.json`,
   );
 
   await serverConn.synchronize();
 
   const currentFiles = await serverSFTP.list(SFTP_PATH);
 
-  await serverSFTP.safeDelete(`${SFTP_PATH}/${serverConn.id}.hello`);
+  await serverSFTP.safeDelete(`${SFTP_PATH}/${serverConn.id}-hello.json`);
 
   expect(serverConn.peerId).toBe(clientConn.id);
   expect(serverConn.handshakeRole).toBe("initiator");
 
   expect(currentFiles.length).toBe(1);
-  expect(currentFiles[0].name === `${serverConn.id}.hello`).toBe(true);
+  expect(currentFiles[0].name === `${serverConn.id}-hello.json`).toBe(true);
 
   desynchronize(serverConn);
 });
