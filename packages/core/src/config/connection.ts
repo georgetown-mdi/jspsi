@@ -382,7 +382,7 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
     pollIntervalMs: z.int().nonnegative().optional(),
     timestampInFilename: z.boolean().optional(),
     locklessRendezvous: z.boolean().optional(),
-    peerId: z.string().optional(),
+    peerId: z.string().min(1).optional(),
   })
   .refine((opts) => !opts.peerId || opts.timestampInFilename === true, {
     message:

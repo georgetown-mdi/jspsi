@@ -437,6 +437,14 @@ test("peerId with hyphens is accepted", () => {
   expect(result.success).toBe(true);
 });
 
+test("empty string peerId is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "" },
+  });
+  expect(result.success).toBe(false);
+});
+
 test("peerId is rejected without timestampInFilename", () => {
   const result = safeParseConnectionConfig({
     ...sftpBase,

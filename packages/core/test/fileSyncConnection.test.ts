@@ -2182,7 +2182,12 @@ test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () =>
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
 
-  await expect(conn.synchronize()).rejects.toThrow("'-' boundary");
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toContain("'-' boundary");
+  // cause: "usage" must not leak to callers from the joiner fast-path (no
+  // enclosing catch to strip it, unlike the else-branch path).
+  expect((err as Error).cause).toBeUndefined();
   // Connection must stay unsynchronized so a retry is not blocked.
   expect(conn.peerId).toBeUndefined();
 });

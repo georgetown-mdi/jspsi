@@ -264,6 +264,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (config.options?.peerId !== undefined) {
       this.options.peerId = config.options.peerId;
       this.id = config.options.peerId;
+      this.log = getLoggerForVerbosity(
+        `filesync-${this.id.substring(0, 8)}`,
+        this.options.verbose,
+      );
     }
     this.config = config;
     // timeToLive is computed after a successful connect (below) so that
@@ -551,11 +555,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         peerId.startsWith(this.id + "-") ||
         this.id.startsWith(peerId + "-")
       )
+        // No { cause: "usage" } here: this throw escapes synchronize()
+        // directly (the joiner fast-path has no enclosing catch to strip the
+        // sentinel), so callers would receive a leaked internal property.
+        // The else-branch throw at the equivalent site sets the sentinel
+        // safely because its enclosing catch strips it before rethrowing.
         throw new Error(
           `peer id '${peerId}' and this party's id '${this.id}' share a ` +
             "prefix at a '-' boundary; ids must not be prefix-extensions " +
             "of each other (e.g. 'site' / 'site-2')",
-          { cause: "usage" },
         );
       this.handshakeRole = "initiator";
       this.role = "joiner";
