@@ -996,9 +996,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         await this.client.safeDelete(helloPath);
         this.responsibleFiles.clear();
         // The prefix-at-dash guard fires after waitForPeer() has already
-        // committed this.peerId. Reset it so the "already synchronized"
-        // guard does not block a retry on the same instance.
+        // committed this.peerId, this.role, and this.handshakeRole. Reset
+        // them so the "already synchronized" guard does not block a retry
+        // and the stale role does not appear in the retry's first log line.
         this.peerId = undefined;
+        this.role = "unknown role";
+        this.handshakeRole = undefined;
         if (err instanceof Error && err.cause === "usage") delete err.cause;
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
