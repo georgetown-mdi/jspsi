@@ -96,6 +96,13 @@ export function builder(cmd: Argv): Argv {
         "exclusive-create or deletion visibility during rendezvous. Both " +
         "parties must set this flag identically",
     })
+    .option("peer-id", {
+      type: "string",
+      describe:
+        "stable identifier for this party; appears in filenames and logs. " +
+        "Requires timestamp_in_filename: true. Both parties must use " +
+        "distinct ids",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -122,6 +129,7 @@ interface ZeroSetupArgs {
   peerTimeout?: number;
   maxReconnectAttempts?: number;
   locklessRendezvous?: boolean;
+  peerId?: string;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -157,6 +165,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     peerTimeout: argv["peer-timeout"] as number | undefined,
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
+    peerId: argv["peer-id"] as string | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -260,6 +269,7 @@ export function createConnection(
       peerTimeout: options.peerTimeout,
       maxReconnectAttempts: options.maxReconnectAttempts,
       locklessRendezvous: options.locklessRendezvous,
+      peerId: options.peerId,
     });
   }
 
@@ -286,6 +296,7 @@ export function createConnection(
     serverPrivateKey: options.serverPrivateKey,
     serverPort: options.serverPort,
     locklessRendezvous: options.locklessRendezvous,
+    peerId: options.peerId,
   });
 }
 

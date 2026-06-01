@@ -83,3 +83,52 @@ test("the input connection object is not mutated", () => {
   if (input.channel !== "sftp") return;
   expect(input.server.username).toBeUndefined();
 });
+
+// --- peerId validation -------------------------------------------------------
+
+test("peerId override accepted when timestampInFilename is already set in config", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { timestampInFilename: true },
+  };
+  const result = applyConnectionOverrides(base, { peerId: "agency-a" });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.peerId).toBe("agency-a");
+});
+
+test("peerId 'temp' is rejected by applyConnectionOverrides", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { timestampInFilename: true },
+  };
+  expect(() => applyConnectionOverrides(base, { peerId: "temp" })).toThrow(
+    "reserved",
+  );
+});
+
+test("peerId without timestampInFilename is rejected by applyConnectionOverrides", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { peerId: "agency-a" }),
+  ).toThrow("timestamp_in_filename");
+});
+
+test("peerId without timestampInFilename is rejected on filedrop too", () => {
+  const base: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  expect(() =>
+    applyConnectionOverrides(base, { peerId: "agency-a" }),
+  ).toThrow("timestamp_in_filename");
+});
+
+test("empty peerId is rejected by applyConnectionOverrides", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { timestampInFilename: true },
+  };
+  expect(() => applyConnectionOverrides(base, { peerId: "" })).toThrow();
+});

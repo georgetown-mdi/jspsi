@@ -2114,3 +2114,150 @@ test("synchronize() lockless mode throws when more than one peer hello is detect
 
   await expect(conn.synchronize()).rejects.toThrow(/more than one peer hello/);
 });
+
+// --- peerId: construction and open() ----------------------------------------
+
+test("unconfigured id falls back to UUID v4 format", () => {
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  expect(conn.id).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+});
+
+test("peerId from constructor option sets this.id and appears in message filenames", async () => {
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    verbose: -1,
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    peerId: "agency-a",
+  });
+  await conn.open({
+    channel: "filedrop",
+    path: "/test",
+    options: { peerTimeoutMs: 50 },
+  });
+  expect(conn.id).toBe("agency-a");
+  await conn.send({ hello: 1 });
+  const messageFile = [...files.keys()].find((p) =>
+    /\/test\/agency-a-\d+\.json$/.test(p),
+  );
+  expect(messageFile).toBeDefined();
+});
+
+test("peerId from open() config sets this.id and appears in message filenames", async () => {
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    verbose: -1,
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+  });
+  await conn.open({
+    channel: "filedrop",
+    path: "/test",
+    options: { peerTimeoutMs: 50, peerId: "agency-b" },
+  });
+  expect(conn.id).toBe("agency-b");
+  await conn.send({ hello: 1 });
+  const messageFile = [...files.keys()].find((p) =>
+    /\/test\/agency-b-\d+\.json$/.test(p),
+  );
+  expect(messageFile).toBeDefined();
+});
+
+// --- peerId: prefix-at-dash guard --------------------------------------------
+
+test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () => {
+  // "site-2".startsWith("site-") is true, so the pair is rejected.
+  const myId = "site-2";
+  const peerId = "site";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toContain("'-' boundary");
+  // Connection must stay unsynchronized so a retry is not blocked.
+  expect(conn.peerId).toBeUndefined();
+  // Our hello must have been deleted so a retry does not find a stale file.
+  expect(files.has(`${conn.path}/${myId}-hello.json`)).toBe(false);
+});
+
+test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", async () => {
+  // "site-2-hello.json" < "site-hello.json" (because '2' < 'h'), so myId
+  // ("site-2") arrived first; wave name is "site-2-site.wave".
+  const myId = "site-2";
+  const peerId = "site";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const waveName = `${myId}-${peerId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(wavePath, Buffer.alloc(0));
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await expect(conn.synchronize()).rejects.toThrow("'-' boundary");
+  // peerId must be reset so a retry is not blocked by "already synchronized".
+  expect(conn.peerId).toBeUndefined();
+});
+
+test("synchronize() joiner branch accepts shared-prefix ids that are not prefix-at-dash", async () => {
+  // "agency-a" and "agency-b" share the "agency" prefix but neither is the
+  // other extended by "-", so the pair is valid.
+  const myId = "agency-b";
+  const peerId = "agency-a";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  await conn.synchronize();
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() joiner branch accepts space-containing ids", async () => {
+  const myId = "Agency B";
+  const peerId = "Agency A";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  await conn.synchronize();
+  expect(conn.peerId).toBe(peerId);
+});
