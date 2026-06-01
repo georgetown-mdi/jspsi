@@ -591,7 +591,7 @@ In-flight writes use a temporary `.tmp` file that is renamed to the final `.json
 
 The shared directory (SFTP path or local filedrop path) must be **dedicated exclusively** to a single active exchange between exactly two parties. Both channels treat the directory as a private communication channel: each party reads and deletes files written by the other, and the rendezvous protocol uses filename presence as a synchronization signal.
 
-A third process writing `<id>-hello.json`, `.wave`, `-hello-ack.json`, or `<id>-*.json` files into the same path during an active session will cause the exchange to abort with a diagnostic error. Separate concurrent exchanges must use separate directories.
+A third process writing `<id>-hello.json`, `<id1>-<id2>.wave`, `<id>-hello-ack.json`, or `<id>-*.json` files into the same path during an active session will cause the exchange to abort with a diagnostic error. Separate concurrent exchanges must use separate directories.
 
 #### Filename grammar
 

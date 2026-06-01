@@ -572,6 +572,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       let ackPath: string | undefined;
 
       const waitForPeer = async () => {
+        const delay = (ms: number) =>
+          new Promise((resolve) => setTimeout(resolve, ms));
         if (this.options.locklessRendezvous) {
           // Lockless ack-handshake barrier: completes rendezvous using neither
           // createExclusive nor delete. Each party writes a hello, then an ack
@@ -598,8 +600,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             if (peerHellos.length === 0) {
               this.log.trace(`[${this.role}] no peer hello found; polling`);
-              const delay = (ms: number) =>
-                new Promise((resolve) => setTimeout(resolve, ms));
               await delay(this.options.pollingFrequency);
               continue;
             }
@@ -648,8 +648,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.log.trace(
                 `[${this.role}] waiting for peer ack ${peerAckName}`,
               );
-              const delay = (ms: number) =>
-                new Promise((resolve) => setTimeout(resolve, ms));
               await delay(this.options.pollingFrequency);
               continue;
             }
@@ -703,8 +701,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
           if (otherFiles.length === 0) {
             this.log.trace(`[${this.role}] no peer hello found; polling`);
-            const delay = (ms: number) =>
-              new Promise((resolve) => setTimeout(resolve, ms));
             await delay(this.options.pollingFrequency);
             continue;
           }

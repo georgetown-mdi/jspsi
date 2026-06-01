@@ -339,7 +339,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
   // Warn before createConnection can throw so the user sees the flag issue
   // even if the channel is not yet supported.
-  if (options.locklessRendezvous !== undefined) {
+  if (options.locklessRendezvous === true) {
     try {
       const ch = channelFromURL(server);
       if (ch !== "sftp" && ch !== "filedrop") {

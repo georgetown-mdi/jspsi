@@ -274,7 +274,7 @@ export function loadConfig(
     locklessRendezvous: options.locklessRendezvous,
   });
 
-  if (options.locklessRendezvous !== undefined &&
+  if (options.locklessRendezvous === true &&
     connection.channel !== "sftp" &&
     connection.channel !== "filedrop"
   ) {
