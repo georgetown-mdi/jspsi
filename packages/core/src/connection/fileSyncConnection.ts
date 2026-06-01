@@ -8,6 +8,7 @@ import type {
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
+import { UsageError } from "../errors";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -470,9 +471,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.responsibleFiles.forEach((fileName) => {
       if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
     });
-    const helloFiles = files.filter((file) =>
-      file.name.endsWith(HELLO_SUFFIX),
-    );
+    const helloFiles = files.filter((file) => file.name.endsWith(HELLO_SUFFIX));
     const hasStaleAck = files.some((file) =>
       file.name.endsWith("-hello-ack.json"),
     );
@@ -491,7 +490,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         )
         .map((f) => f.name)
         .join(", ");
-      throw new Error(
+      throw new UsageError(
         `path ${this.path} had preexisting hello, wave, or handshake-ack ` +
           `files (${leftover}); the directory must be empty of these files ` +
           "before executing the protocol. Most likely cause: a previous " +
@@ -645,10 +644,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             }
 
             if (peerHellos.length > 1) {
-              throw new Error(
+              throw new UsageError(
                 `more than one peer hello file in ${this.path} - are there ` +
                   "other sessions using this path?",
-                { cause: "usage" },
               );
             }
 
@@ -661,14 +659,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               ackPath = `${this.path}/${ackName}`;
               // Pre-track before writing so cleanup() sweeps it at close().
               this.responsibleFiles.add(ackName);
-              this.log.debug(
-                `[${this.role}] writing handshake ack ${ackName}`,
-              );
-              await this.client.put(
-                Buffer.from(new ArrayBuffer(0)),
-                ackPath,
-                { flags: "w", encoding: "utf-8" },
-              );
+              this.log.debug(`[${this.role}] writing handshake ack ${ackName}`);
+              await this.client.put(Buffer.from(new ArrayBuffer(0)), ackPath, {
+                flags: "w",
+                encoding: "utf-8",
+              });
               // Re-enter the loop so hasPeerAck is checked against a fresh
               // listing; the pre-ack-write snapshot from this iteration may
               // miss a peer ack that arrived in the window between list() and
@@ -696,8 +691,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // the same invariant as the joiner path (see above): if the ack
             // write fails before this point, this.peerId stays undefined and
             // the "already synchronized" guard allows a retry on this instance.
-            const arrivedFirst =
-              `${this.id}${HELLO_SUFFIX}` < peerHello.name;
+            const arrivedFirst = `${this.id}${HELLO_SUFFIX}` < peerHello.name;
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role = arrivedFirst ? "starter" : "joiner";
             this.peerId = peerId;
@@ -757,24 +751,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
              * This is B
              */
             if (waveFiles.length > 1) {
-              throw new Error(
+              throw new UsageError(
                 "more than one wave file - are there other sessions using " +
                   "this path?",
-                { cause: "usage" },
               );
             }
             if (otherFiles.length !== 1) {
-              throw new Error(
+              throw new UsageError(
                 "wave file detected but no peer hello - are there other " +
                   "sessions using this path?",
-                { cause: "usage" },
               );
             }
             if (theseFiles.length !== 1) {
-              throw new Error(
+              throw new UsageError(
                 "wave file detected but no self hello - are there other " +
                   "sessions using this path?",
-                { cause: "usage" },
               );
             }
 
@@ -824,10 +815,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           }
 
           if (otherFiles.length > 1) {
-            throw new Error(
+            throw new UsageError(
               `more than one peer hello file in ${this.path} - are there ` +
                 "other sessions using this path?",
-              { cause: "usage" },
             );
           }
           const otherFile = otherFiles[0];
@@ -860,10 +850,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             return;
           } else {
             if (theseFiles.length > 1) {
-              throw new Error(
+              throw new UsageError(
                 `more than one self hello file in ${this.path} - are there ` +
                   "other sessions using this path?",
-                { cause: "usage" },
               );
             }
 
@@ -945,11 +934,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 await this.client.safeDelete(`${this.path}/${otherFile.name}`);
                 await this.client.safeDelete(helloPath);
                 this.responsibleFiles.clear();
-                throw new Error(
+                throw new UsageError(
                   "peer appears to have abandoned the handshake: wave file " +
                     "was claimed by the peer but disappeared before this " +
                     "side could complete synchronization. Retry the exchange.",
-                  { cause: "usage" },
                 );
               } else {
                 this.log.debug(
@@ -987,11 +975,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.peerId!.startsWith(this.id + "-") ||
           this.id.startsWith(this.peerId! + "-")
         )
-          throw new Error(
+          throw new UsageError(
             `peer id '${this.peerId}' and this party's id '${this.id}' share ` +
               "a prefix at a '-' boundary; ids must not be prefix-extensions " +
               "of each other (e.g. 'site' / 'site-2')",
-            { cause: "usage" },
           );
         return;
       } catch (err: unknown) {
@@ -1006,7 +993,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
-        if (err instanceof Error && err.cause === "usage") delete err.cause;
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
     }
@@ -1056,9 +1042,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         while (await hasOutstandingMessage()) {
           // open() set timeToLive before send() can run; assertion is safe.
           if (Date.now() > this.options.timeToLive!.getTime()) {
-            throw new Error(
+            throw new UsageError(
               `timed out waiting for message from ${this.id} to be consumed`,
-              { cause: "usage" },
             );
           }
           await new Promise((resolve) =>
@@ -1101,7 +1086,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.lastSentFile = outName;
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
-      if (err instanceof Error && err.cause === "usage") delete err.cause;
       throw err instanceof Error ? err : new Error(errMessage(err));
     }
   }

@@ -9,6 +9,7 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
+  UsageError,
 } from "@psilink/core";
 import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
 
@@ -284,7 +285,8 @@ export function loadConfig(
     peerId: options.peerId,
   });
 
-  if (options.locklessRendezvous === true &&
+  if (
+    options.locklessRendezvous === true &&
     connection.channel !== "sftp" &&
     connection.channel !== "filedrop"
   ) {
@@ -402,6 +404,6 @@ export async function handler(argv: Arguments): Promise<void> {
     await runProtocol(connection, prepared, output, verbosity, "exchange");
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit(69);
+    process.exit(err instanceof UsageError ? 64 : 69);
   }
 }
