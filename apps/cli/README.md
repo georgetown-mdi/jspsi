@@ -87,21 +87,21 @@ docker compose -f apps/cli/test/container/compose.yaml down
 Connection examples:
 
 ```sh
-npm run -w apps/cli dev \
+run dev -w apps/cli -- \
   sftp://usera:usera@localhost:2222/psi \
-  ../../fake_data_1.csv \
+  test_data/fake_data_1.csv \
   usera_output.csv
 ```
 
 ```sh
-npm run -w apps/cli dev \
+run dev -w apps/cli -- \
   sftp://userb:userb@localhost:2222/psi \
-  ../../fake_data_2.csv \
+  test_data/fake_data_2.csv \
   userb_output.csv
 ```
 
 ## Running tests
 
 ```sh
-npm run -w apps/cli test
+npm test -w apps/cli
 ```

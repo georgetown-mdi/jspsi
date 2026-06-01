@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
-    "dev": "node --import=tsx src/index.ts",
+    "dev": "PKG_DIR=$(pwd) && cd \"$INIT_CWD\" && node --import=tsx \"$PKG_DIR/dist/index.js\"",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration"
@@ -30,6 +30,7 @@
     "@types/ssh2-sftp-client": "^9.0.5",
     "@types/yargs": "^17.0.33",
     "rollup": "^4.50.1",
+    "tsx": "^4.22.4",
     "vitest": "^4.0.5"
   }
 }
