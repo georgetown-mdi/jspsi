@@ -274,6 +274,16 @@ export function loadConfig(
     locklessRendezvous: options.locklessRendezvous,
   });
 
+  if (options.locklessRendezvous !== undefined &&
+    connection.channel !== "sftp" &&
+    connection.channel !== "filedrop"
+  ) {
+    log.warn(
+      `--lockless-rendezvous has no effect on the ${connection.channel} ` +
+        "channel and will be ignored; it is only supported on sftp and filedrop",
+    );
+  }
+
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
     throw new Error(
       `the ${connection.channel} channel is not yet supported in the CLI`,

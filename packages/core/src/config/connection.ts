@@ -340,10 +340,18 @@ export interface FileSyncOptions extends SharedOptions {
   /**
    * When `true`, the rendezvous handshake uses an ack-handshake barrier
    * instead of the atomic-exclusive-create wave-file race. Both parties must
-   * set this identically; a mismatch causes rendezvous to time out. Use on
-   * transports that lack atomic exclusive-create (`createExclusive`) or
-   * deletion visibility during rendezvous (e.g. sync-mediated directories
-   * where both sides "win" a local create). Default: `false`.
+   * set this identically; a mismatch causes rendezvous to time out.
+   *
+   * Intended for sync-mediated transports (e.g. a cloud-sync service
+   * reconciling two local directories) where `createExclusive` lacks
+   * atomicity or deletion has high propagation latency. Delete still works
+   * on these transports — cleanup via `safeDelete` succeeds eventually —
+   * but arrival order cannot be determined by an atomic exclusive-create.
+   * This option is **not** intended for transports that genuinely cannot
+   * delete; handshake files must be removable at `close()` time or they
+   * accumulate and block future sessions.
+   *
+   * Default: `false`.
    */
   locklessRendezvous?: boolean;
 }

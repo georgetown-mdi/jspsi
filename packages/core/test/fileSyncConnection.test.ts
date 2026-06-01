@@ -1668,9 +1668,14 @@ test("synchronize() wave path writes hello as <id>-hello.json and self-hello det
 // --- synchronize(): lockless mode ---------------------------------------------
 
 test("synchronize() lockless mode completes rendezvous when createExclusive and delete both throw", async () => {
-  // Two-party test using an inline client where createExclusive and delete
-  // always throw, simulating a transport that supports neither. The
-  // ack-handshake barrier must complete rendezvous using neither capability.
+  // Robustness proof: the ack-handshake barrier must complete rendezvous even
+  // when createExclusive and delete both throw. This is the most extreme
+  // constraint possible and is here to prove the protocol is sound under it.
+  // Real lockless deployments target sync-mediated transports where
+  // createExclusive lacks atomicity or deletion has high propagation latency
+  // -- delete itself works, just asynchronously. Cleanup therefore succeeds
+  // eventually on real transports; the pure no-op safeDelete here is not
+  // representative of a real storage backend.
   const idA = "00000000-0000-4000-8000-000000000001"; // sorts lower
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff"; // sorts higher
 
@@ -1749,8 +1754,9 @@ test("synchronize() lockless mode completes rendezvous when createExclusive and 
 });
 
 test("synchronize() lockless mode role assignment matches the lexicographic rule for the same id pair as the wave path", async () => {
-  // idA < idB so A "arrived first" and is the responder/starter; B is
-  // the initiator/joiner. This must hold in lockless mode without any race.
+  // Role must be determined by lexicographic id order regardless of arrival
+  // timing. The throwing delete/createExclusive is robustness scaffolding
+  // (see the previous test); real lockless transports support delete.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const sharedFiles = new Map<string, Buffer>();
@@ -1824,6 +1830,10 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
 });
 
 test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier is entered even with peer hello already present", async () => {
+  // The throwing delete proves the joiner fast-path (which calls delete) is
+  // not taken in lockless mode. The no-op safeDelete is robustness scaffolding
+  // only; real lockless transports support delete (see the first lockless test).
+  //
   // When locklessRendezvous is set and a single peer hello is found on the
   // initial list(), the party must NOT take the joiner shortcut (which would
   // call delete(peer hello), unsupported on a lockless transport). It must

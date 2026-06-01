@@ -337,6 +337,22 @@ export async function handler(argv: Arguments): Promise<void> {
 
   const { server, input, output } = resolved;
 
+  // Warn before createConnection can throw so the user sees the flag issue
+  // even if the channel is not yet supported.
+  if (options.locklessRendezvous !== undefined) {
+    try {
+      const ch = channelFromURL(server);
+      if (ch !== "sftp" && ch !== "filedrop") {
+        log.warn(
+          `--lockless-rendezvous has no effect on the ${ch} channel and ` +
+            "will be ignored; it is only supported on sftp and filedrop",
+        );
+      }
+    } catch {
+      // Unknown URL scheme; createConnection handles this.
+    }
+  }
+
   if (options.save) {
     log.warn(
       "--save: bootstrapping a shared secret is not yet implemented; " +
