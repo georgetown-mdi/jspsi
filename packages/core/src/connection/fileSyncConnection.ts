@@ -616,6 +616,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (this.options.retainFiles) {
       const staleMessages = files.filter(
         (f) =>
+          !f.name.startsWith(`${this.id}-`) &&
           f.name.endsWith(".json") &&
           parseMessageByteCount(f.name) !== undefined,
       );
@@ -1243,6 +1244,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     try {
       if (this.options.retainFiles) {
+        if (!this.peerId) throw new Error("not synchronized");
         // First send (seq === 0) proceeds immediately; subsequent sends wait
         // for a receipt acknowledging the previous message.
         if (this.seq > 0) {
@@ -1482,6 +1484,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             const receiptName = await this.writeReceipt(path, msgNNN);
+            this.responsibleFiles.add(receiptName);
             this.log.debug(
               `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
             );

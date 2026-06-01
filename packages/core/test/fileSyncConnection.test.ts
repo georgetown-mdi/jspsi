@@ -3021,7 +3021,7 @@ test("retain mode: first send proceeds immediately without any receipt", async (
   expect(messageFiles).toHaveLength(1);
 });
 
-test("retain mode: cleanup() does not delete exchange files", async () => {
+test("retain mode: cleanup() does not delete exchange files; receipts in responsibleFiles", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -3057,13 +3057,20 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
 
   await runPoller(conn, delivered);
 
+  const responsibleFiles = (
+    conn as unknown as { responsibleFiles: Set<string> }
+  ).responsibleFiles;
+
+  // The receipt written during poll() must be tracked in responsibleFiles.
+  const hasReceipt = [...responsibleFiles].some((f) =>
+    f.endsWith("-receipt.json"),
+  );
+  expect(hasReceipt).toBe(true);
+
   // cleanup() must not delete any files in retain mode.
   await conn.cleanup();
   expect(safeDeleted).toHaveLength(0);
-  // The receipt written by the receiver is still on disk (cleanup did not
-  // remove it). The received message may or may not be present depending on
-  // whether the best-effort delete in poll() succeeded -- we only test that
-  // cleanup() itself did not sweep files.
+  // The receipt file is still on disk (cleanup did not remove it).
   const receiptOnDisk = [...files.keys()].find(
     (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
   );

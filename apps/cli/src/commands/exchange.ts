@@ -311,6 +311,17 @@ export function loadConfig(
     );
   }
 
+  if (
+    options.retainFiles === true &&
+    connection.channel !== "sftp" &&
+    connection.channel !== "filedrop"
+  ) {
+    log.warn(
+      `--retain-files has no effect on the ${connection.channel} ` +
+        "channel and will be ignored; it is only supported on sftp and filedrop",
+    );
+  }
+
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
     throw new Error(
       `the ${connection.channel} channel is not yet supported in the CLI`,
