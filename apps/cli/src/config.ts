@@ -12,6 +12,7 @@ export interface ConnectionOverrides {
   locklessRendezvous?: boolean;
   peerId?: string;
   retainFiles?: boolean;
+  timestampInFilename?: boolean;
 }
 
 export function applyConnectionOverrides(
@@ -50,15 +51,16 @@ export function applyConnectionOverrides(
     };
   }
 
-  // locklessRendezvous, peerId, and retainFiles are FileSyncOptions fields;
-  // only apply them on channels that use FileSyncConnection. The other
-  // overrides above (peerTimeout etc.) are SharedOptions that apply to all
-  // channels including webrtc.
+  // locklessRendezvous, peerId, retainFiles, and timestampInFilename are
+  // FileSyncOptions fields; only apply them on channels that use
+  // FileSyncConnection. The other overrides above (peerTimeout etc.) are
+  // SharedOptions that apply to all channels including webrtc.
   if (
     (result.channel === "sftp" || result.channel === "filedrop") &&
     (overrides.locklessRendezvous !== undefined ||
       overrides.peerId !== undefined ||
-      overrides.retainFiles !== undefined)
+      overrides.retainFiles !== undefined ||
+      overrides.timestampInFilename !== undefined)
   ) {
     result.options = {
       ...result.options,
@@ -70,6 +72,9 @@ export function applyConnectionOverrides(
       }),
       ...(overrides.retainFiles !== undefined && {
         retainFiles: overrides.retainFiles,
+      }),
+      ...(overrides.timestampInFilename !== undefined && {
+        timestampInFilename: overrides.timestampInFilename,
       }),
     };
 

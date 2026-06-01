@@ -286,14 +286,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
-    if (this.options.retainFiles && !this.options.peerId)
-      this.log.warn(
-        "peer_id is unset and retain_files is true: without a stable " +
-          "peer_id a new session can collide with a prior session's files " +
-          "by UUID coincidence, but even with a stable peer_id retain mode " +
-          "requires a fresh directory per exchange -- stale receipts from a " +
-          "prior session will suppress current messages regardless",
-      );
+    if (this.options.retainFiles) {
+      let msg =
+        "retain_files is true: retain mode requires a fresh directory per " +
+        "exchange -- own receipt files from a prior session silently suppress " +
+        "incoming messages with matching sequence numbers";
+      if (!this.options.peerId)
+        msg +=
+          "; without a stable peer_id, UUID coincidence across sessions can " +
+          "also cause phantom message files -- set peer_id to a stable value";
+      this.log.warn(msg);
+    }
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -627,6 +630,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             `(${staleMessages.map((f) => f.name).join(", ")}); files from ` +
             "a prior retain-mode session may be processed as current " +
             "messages -- use a fresh directory per exchange",
+        );
+
+      const staleReceipts = files.filter(
+        (f) =>
+          f.name.startsWith(`${this.id}-`) &&
+          f.name.endsWith("-receipt.json"),
+      );
+      if (staleReceipts.length > 0)
+        this.log.warn(
+          `[${this.role}] retain mode: ${staleReceipts.length} own receipt ` +
+            `file(s) already present in ${this.path} ` +
+            `(${staleReceipts.map((f) => f.name).join(", ")}); stale ` +
+            "receipts from a prior session will silently suppress incoming " +
+            "messages with matching sequence numbers -- use a fresh directory " +
+            "per exchange",
         );
     }
 
