@@ -76,12 +76,13 @@ export function applyConnectionOverrides(
     // Re-validate the merged options through FileSyncOptionsSchema so that
     // all constraints (min length, timestampInFilename dependency, reserved
     // values) are enforced from one place rather than mirrored here.
-    if (overrides.peerId !== undefined || overrides.retainFiles !== undefined) {
-      const validation = safeParseFileSyncOptions(result.options);
-      if (!validation.success) {
-        const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");
-        throw new Error(message);
-      }
+    // Re-validate whenever any FileSyncOptions field is overridden, not just
+    // peerId/retainFiles, so future cross-field constraints on locklessRendezvous
+    // are not silently bypassed.
+    const validation = safeParseFileSyncOptions(result.options);
+    if (!validation.success) {
+      const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");
+      throw new Error(message);
     }
   }
 

@@ -288,9 +288,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
     if (this.options.retainFiles && !this.options.peerId)
       this.log.warn(
-        "peer_id is unset and retain_files is true: reusing a directory " +
-          "with files from a prior session can cause phantom messages via " +
-          "uuid collision; set peer_id to a stable id to avoid this",
+        "peer_id is unset and retain_files is true: without a stable " +
+          "peer_id a new session can collide with a prior session's files " +
+          "by UUID coincidence, but even with a stable peer_id retain mode " +
+          "requires a fresh directory per exchange -- stale receipts from a " +
+          "prior session will suppress current messages regardless",
       );
   }
 
@@ -450,9 +452,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // in-flight temp write would need removal, but those are cleaned up
     // inline in send()/writeReceipt(), so cleanup() is a no-op here.
     if (this.options.retainFiles) {
-      this.log.debug(
-        `[${this.role}] retain mode: skipping cleanup of ${this.responsibleFiles.size} file(s)`,
-      );
+      this.log.debug(`[${this.role}] retain mode: directory is transcript, skipping cleanup`);
       return;
     }
     const responsibleFilesString =
@@ -609,6 +609,26 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
     }
 
+    // In retain mode, files from a prior session are never deleted and will be
+    // present in a reused directory. Warn loudly -- the spec requires a fresh
+    // directory per exchange, but a hard error would break legitimate reconnect
+    // paths where cleanup() already ran and the directory is otherwise clean.
+    if (this.options.retainFiles) {
+      const staleMessages = files.filter(
+        (f) =>
+          f.name.endsWith(".json") &&
+          parseMessageByteCount(f.name) !== undefined,
+      );
+      if (staleMessages.length > 0)
+        this.log.warn(
+          `[${this.role}] retain mode: ${staleMessages.length} message ` +
+            `file(s) already present in ${this.path} ` +
+            `(${staleMessages.map((f) => f.name).join(", ")}); files from ` +
+            "a prior retain-mode session may be processed as current " +
+            "messages -- use a fresh directory per exchange",
+        );
+    }
+
     const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;
 
     if (helloFiles.length === 1 && !this.options.locklessRendezvous) {
@@ -657,7 +677,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           flags: "w",
           encoding: "utf-8",
         });
-        this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
+        if (!this.options.retainFiles)
+          this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
       } catch (err: unknown) {
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
@@ -720,7 +741,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         flags: "w",
         encoding: "utf-8",
       });
-      this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
+      if (!this.options.retainFiles)
+        this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
       let wavePath: string | undefined;
       let ackPath: string | undefined;
 
@@ -781,7 +803,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               const ackName = `${this.id}-hello-ack.json`;
               ackPath = `${this.path}/${ackName}`;
               // Pre-track before writing so cleanup() sweeps it at close().
-              this.responsibleFiles.add(ackName);
+              if (!this.options.retainFiles) this.responsibleFiles.add(ackName);
               this.log.debug(`[${this.role}] writing handshake ack ${ackName}`);
               await this.client.put(serializeEnvelope({}), ackPath, {
                 flags: "w",
@@ -1036,13 +1058,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             this.log.debug(`[${this.role}] attempting to create ${waveName}`);
 
-            // Pre-emptively track waveName: if createExclusive only partially
-            // succeeds (file created on server but handle-close fails with a
-            // non-EEXIST error), cleanup() will still attempt safeDelete even
-            // though the EEXIST handler's responsibleFiles.clear() is never
-            // reached. Both EEXIST branches below call responsibleFiles.clear(),
-            // which also removes this pre-emptive entry.
-            this.responsibleFiles.add(waveName);
+            // Pre-emptively track waveName in delete mode: if createExclusive
+            // only partially succeeds (file created on server but handle-close
+            // fails with a non-EEXIST error), cleanup() will still attempt
+            // safeDelete even though the EEXIST handler's
+            // responsibleFiles.clear() is never reached. Both EEXIST branches
+            // below call responsibleFiles.clear(), which also removes this
+            // pre-emptive entry. In retain mode cleanup() is a no-op so
+            // tracking serves no purpose.
+            if (!this.options.retainFiles) this.responsibleFiles.add(waveName);
             try {
               await this.client.createExclusive(wavePath);
               this.log.debug(
@@ -1287,7 +1311,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       this.log.debug(`[${this.role}] renaming ${tempFile} to ${outName}`);
       await this.client.rename(tempPath, outPath);
-      this.responsibleFiles.add(outName);
+      if (!this.options.retainFiles) this.responsibleFiles.add(outName);
       this.lastSentFile = outName;
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
@@ -1389,6 +1413,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       for (const file of allFiles) {
         if (!file.name.startsWith(`${peerId}-`) || !file.name.endsWith(".json"))
           continue;
+        // Receipt files share the peer prefix and `.json` extension but are
+        // control files, not messages. Exclude them here so they never reach
+        // the ignored array and do not produce repeated trace-log noise.
+        if (file.name.endsWith("-receipt.json")) continue;
         const declaredSize = parseMessageByteCount(file.name);
         if (declaredSize === undefined) {
           ignored.push(file.name);
@@ -1454,7 +1482,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             const receiptName = await this.writeReceipt(path, msgNNN);
-            this.responsibleFiles.add(receiptName);
             this.log.debug(
               `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
             );

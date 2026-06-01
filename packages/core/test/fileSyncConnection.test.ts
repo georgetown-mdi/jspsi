@@ -3021,7 +3021,7 @@ test("retain mode: first send proceeds immediately without any receipt", async (
   expect(messageFiles).toHaveLength(1);
 });
 
-test("retain mode: cleanup() does not delete exchange files; receipts are in responsibleFiles", async () => {
+test("retain mode: cleanup() does not delete exchange files", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -3056,16 +3056,6 @@ test("retain mode: cleanup() does not delete exchange files; receipts are in res
   conn.on("data", () => notifyReceived());
 
   await runPoller(conn, delivered);
-
-  const responsibleFiles = (
-    conn as unknown as { responsibleFiles: Set<string> }
-  ).responsibleFiles;
-
-  // A receipt must have been added to responsibleFiles.
-  const hasReceipt = [...responsibleFiles].some((f) =>
-    f.endsWith("-receipt.json"),
-  );
-  expect(hasReceipt).toBe(true);
 
   // cleanup() must not delete any files in retain mode.
   await conn.cleanup();
