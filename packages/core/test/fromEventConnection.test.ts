@@ -9,6 +9,7 @@ import {
   ConnectionError,
   fromEventConnection,
 } from "../src/connection/messageConnection";
+import { withCapturedLogs } from "../src/testing";
 
 // These tests exercise `fromEventConnection` over the *real* FileSyncConnection
 // transport (driven by an in-memory FileTransportClient), rather than the
@@ -139,36 +140,41 @@ test("fromEventConnection over FileSyncConnection: send() writes the outbound me
 });
 
 test("fromEventConnection over FileSyncConnection: a poll-loop error surfaces as a sticky transport ConnectionError", async () => {
-  const { client } = makeMockClient();
   const peerId = "peer-test";
   // list() always surfaces a matching file (size matches declared) but get()
   // always throws ENOENT: after MAX_CONSECUTIVE_ENOENT cycles the poller emits
   // a terminal error.
-  client.list = async () => [
-    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
-  ];
-  client.get = async (p) => {
-    throw Object.assign(
-      new Error(`ENOENT: no such file or directory, open '${p}'`),
-      { code: "ENOENT" },
-    );
-  };
-  const conn = makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = peerId;
+  const [{ err, mc }, logs] = await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    client.list = async () => [
+      { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+    ];
+    client.get = async (p) => {
+      throw Object.assign(
+        new Error(`ENOENT: no such file or directory, open '${p}'`),
+        { code: "ENOENT" },
+      );
+    };
+    const conn = makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    const mc = fromEventConnection(conn);
+    try {
+      conn.start();
+      const err = await mc.receive().catch((e: unknown) => e);
+      return { err, mc };
+    } finally {
+      conn.stop();
+    }
+  });
 
-  const mc = fromEventConnection(conn);
-  conn.start();
-  try {
-    const err = await mc.receive().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConnectionError);
-    expect((err as ConnectionError).kind).toBe("transport");
+  expect(logs).toHaveLength(2);
+  expect(logs[0].message).toContain("disappeared between list and get");
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
 
-    // The terminal state is sticky: later calls observe the same latch.
-    await expect(mc.receive()).rejects.toBeInstanceOf(ConnectionError);
-    await expect(mc.send("x")).rejects.toBeInstanceOf(ConnectionError);
-  } finally {
-    conn.stop();
-  }
+  // The terminal state is sticky: later calls observe the same latch.
+  await expect(mc.receive()).rejects.toBeInstanceOf(ConnectionError);
+  await expect(mc.send("x")).rejects.toBeInstanceOf(ConnectionError);
 });
 
 test("fromEventConnection over FileSyncConnection: an error buffered before the bridge attaches is surfaced", async () => {

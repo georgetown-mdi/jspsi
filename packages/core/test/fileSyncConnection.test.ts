@@ -10,6 +10,7 @@ import type {
   FileDropConnectionConfig,
 } from "../src/config/connection";
 import { UsageError } from "../src/errors";
+import { withCapturedLogs } from "../src/testing";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
 // send() need real implementations; everything else is a no-op.
@@ -612,32 +613,9 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
   // with our poll()). The poller must swallow ENOENT and reschedule rather than
   // emitting "error" and killing the connection.
   let getCount = 0;
-  const { client } = makeMockClient();
   const peerId = "peer-test";
   let listCount = 0;
-  // Surface a matching message file once (size matches the declared count so
-  // poll() proceeds to get()); empty afterwards.
-  client.list = async () => {
-    listCount++;
-    return listCount === 1
-      ? [{ name: `${peerId}-5.json`, modifyTime: 0, size: 5 }]
-      : [];
-  };
-  client.get = async (p) => {
-    if (++getCount === 1) {
-      throw Object.assign(
-        new Error(`ENOENT: no such file or directory, open '${p}'`),
-        { code: "ENOENT" },
-      );
-    }
-    throw new Error("unexpected second get()");
-  };
-
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = peerId;
-
   const errors: unknown[] = [];
-  conn.on("error", (err) => errors.push(err));
 
   // Resolved on list()'s 3rd call, confirming the poller rescheduled at least
   // twice after the ENOENT — without relying on a fixed wall-clock wait.
@@ -645,24 +623,49 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
   const thirdList = new Promise<void>((r) => {
     notifyThirdList = r;
   });
-  const origList = client.list.bind(client);
-  client.list = async (p: string) => {
-    const result = await origList(p);
-    if (listCount === 3) notifyThirdList();
-    return result;
-  };
 
-  conn.start();
-  await Promise.race([
-    thirdList,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for 3rd list() call")),
-        2_000,
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    // Surface a matching message file once (size matches the declared count so
+    // poll() proceeds to get()); empty afterwards.
+    client.list = async () => {
+      listCount++;
+      return listCount === 1
+        ? [{ name: `${peerId}-5.json`, modifyTime: 0, size: 5 }]
+        : [];
+    };
+    client.get = async (p) => {
+      if (++getCount === 1) {
+        throw Object.assign(
+          new Error(`ENOENT: no such file or directory, open '${p}'`),
+          { code: "ENOENT" },
+        );
+      }
+      throw new Error("unexpected second get()");
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    conn.on("error", (err) => errors.push(err));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      const result = await origList(p);
+      if (listCount === 3) notifyThirdList();
+      return result;
+    };
+    conn.start();
+    await Promise.race([
+      thirdList,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for 3rd list() call")),
+          2_000,
+        ),
       ),
-    ),
-  ]);
-  conn.stop();
+    ]);
+    conn.stop();
+  });
+  expect(logs).toHaveLength(1);
+  expect(logs[0].message).toContain("disappeared between list and get");
 
   expect(errors).toHaveLength(0);
   // get() was called exactly once (on the ENOENT-throwing poll cycle).
@@ -672,8 +675,6 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
 });
 
 test("poll delivers a subsequent valid message after swallowing an ENOENT", async () => {
-  const { client, files } = makeMockClient();
-  const originalGet = client.get.bind(client);
   let getCount = 0;
   const peerId = "peer-test";
   const validMessage = Buffer.from(
@@ -688,53 +689,57 @@ test("poll delivers a subsequent valid message after swallowing an ENOENT", asyn
   const peerPath = `/test/${peerName}`;
 
   let listCount = 0;
-  client.list = async () => {
-    listCount++;
-    // First cycle surfaces a phantom file (get() throws ENOENT); second cycle
-    // is empty (resets the consecutive-ENOENT counter); third cycle surfaces a
-    // real message whose on-disk size matches its declared byte count.
-    if (listCount === 1)
-      return [{ name: `${peerId}-1.json`, modifyTime: 0, size: 1 }];
-    if (listCount >= 3) {
-      if (!files.has(peerPath)) files.set(peerPath, validMessage);
-      return [{ name: peerName, modifyTime: 0, size: validMessage.length }];
-    }
-    return [];
-  };
-  client.get = async (p: string, opts?: unknown) => {
-    if (++getCount === 1)
-      throw Object.assign(
-        new Error(`ENOENT: no such file or directory, open '${p}'`),
-        { code: "ENOENT" },
-      );
-    return originalGet(p, opts as Parameters<typeof originalGet>[1]);
-  };
-
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = peerId;
-
   const received: unknown[] = [];
   // Resolved when the first message arrives — no fixed wall-clock wait.
   let notifyReceived!: () => void;
   const firstMessage = new Promise<void>((r) => {
     notifyReceived = r;
   });
-  conn.on("data", (msg) => {
-    received.push(msg);
-    notifyReceived();
-  });
 
-  conn.start();
-  await Promise.race([
-    firstMessage,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for first message delivery")),
-        2_000,
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const originalGet = client.get.bind(client);
+    client.list = async () => {
+      listCount++;
+      // First cycle surfaces a phantom file (get() throws ENOENT); second cycle
+      // is empty (resets the consecutive-ENOENT counter); third cycle surfaces a
+      // real message whose on-disk size matches its declared byte count.
+      if (listCount === 1)
+        return [{ name: `${peerId}-1.json`, modifyTime: 0, size: 1 }];
+      if (listCount >= 3) {
+        if (!files.has(peerPath)) files.set(peerPath, validMessage);
+        return [{ name: peerName, modifyTime: 0, size: validMessage.length }];
+      }
+      return [];
+    };
+    client.get = async (p: string, opts?: unknown) => {
+      if (++getCount === 1)
+        throw Object.assign(
+          new Error(`ENOENT: no such file or directory, open '${p}'`),
+          { code: "ENOENT" },
+        );
+      return originalGet(p, opts as Parameters<typeof originalGet>[1]);
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    conn.on("data", (msg) => {
+      received.push(msg);
+      notifyReceived();
+    });
+    conn.start();
+    await Promise.race([
+      firstMessage,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for first message delivery")),
+          2_000,
+        ),
       ),
-    ),
-  ]);
-  conn.stop();
+    ]);
+    conn.stop();
+  });
+  expect(logs).toHaveLength(1);
+  expect(logs[0].message).toContain("disappeared between list and get");
 
   expect(received).toHaveLength(1);
   expect((received[0] as Record<string, unknown>)["hello"]).toBe("world");
@@ -744,45 +749,46 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
   // list() always surfaces a matching file (size matches declared count);
   // get() always throws ENOENT. After 3 consecutive ENOENT cycles the poller
   // must emit an error instead of warning indefinitely.
-  const { client } = makeMockClient();
   const peerId = "peer-test";
-  client.list = async () => [
-    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
-  ];
-  client.get = async (p) => {
-    throw Object.assign(
-      new Error(`ENOENT: no such file or directory, open '${p}'`),
-      { code: "ENOENT" },
-    );
-  };
-
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = peerId;
-
   const errors: unknown[] = [];
   // Resolved by the error handler so the test waits only as long as necessary
   // rather than sleeping a fixed amount of wall time.
   let notifyError!: () => void;
   const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
 
-  // Stop the poller on the first error, mirroring real protocol behavior where
-  // the error handler calls doCleanup()/conn.stop().
-  conn.on("error", (err) => {
-    errors.push(err);
-    conn.stop();
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for ENOENT threshold error")),
-        2_000,
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    client.list = async () => [
+      { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+    ];
+    client.get = async (p) => {
+      throw Object.assign(
+        new Error(`ENOENT: no such file or directory, open '${p}'`),
+        { code: "ENOENT" },
+      );
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    // Stop the poller on the first error, mirroring real protocol behavior where
+    // the error handler calls doCleanup()/conn.stop().
+    conn.on("error", (err) => {
+      errors.push(err);
+      conn.stop();
+      notifyError();
+    });
+    conn.start();
+    await Promise.race([
+      errorArrived,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for ENOENT threshold error")),
+          2_000,
+        ),
       ),
-    ),
-  ]);
+    ]);
+  });
+  expect(logs).toHaveLength(2);
+  expect(logs[0].message).toContain("disappeared between list and get");
 
   expect(errors).toHaveLength(1);
 });
@@ -1441,10 +1447,10 @@ test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of re
   // Two ENOENTs (below threshold of 3), then exists() returns false (counter
   // resets), then two more ENOENTs. Four total ENOENTs — but split across two
   // groups — must never reach the threshold and must not emit an error.
-  const { client } = makeMockClient();
   const peerId = "peer-test";
   let listCallCount = 0;
   let getCount = 0;
+  const errors: unknown[] = [];
 
   let resolveDone!: () => void;
   // Resolves once list() is called a 6th time, confirming all 5 expected poll
@@ -1453,42 +1459,43 @@ test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of re
     resolveDone = resolve;
   });
 
-  const match = [{ name: `${peerId}-5.json`, modifyTime: 0, size: 5 }];
-  client.list = async () => {
-    listCallCount++;
-    // Cycles 1-2: match -> ENOENT on get (count reaches 2, below threshold 3)
-    // Cycle 3: empty -> clean poll, counter resets to 0
-    // Cycles 4-5: match -> ENOENT on get (count reaches 2 again, still below 3)
-    if (listCallCount === 6) resolveDone();
-    return listCallCount === 1 ||
-      listCallCount === 2 ||
-      listCallCount === 4 ||
-      listCallCount === 5
-      ? match
-      : [];
-  };
-  client.get = async (p) => {
-    getCount++;
-    throw Object.assign(
-      new Error(`ENOENT: no such file or directory, open '${p}'`),
-      { code: "ENOENT" },
-    );
-  };
-
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.peerId = peerId;
-
-  const errors: unknown[] = [];
-  conn.on("error", (err) => errors.push(err));
-
-  conn.start();
-  // Wait until the 6th exists() call confirms all 5 cycles completed;
-  // fall back to a 2 s safety timeout so the test never hangs.
-  await Promise.race([
-    cyclesDone,
-    new Promise<void>((r) => setTimeout(r, 2_000)),
-  ]);
-  conn.stop();
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    const match = [{ name: `${peerId}-5.json`, modifyTime: 0, size: 5 }];
+    client.list = async () => {
+      listCallCount++;
+      // Cycles 1-2: match -> ENOENT on get (count reaches 2, below threshold 3)
+      // Cycle 3: empty -> clean poll, counter resets to 0
+      // Cycles 4-5: match -> ENOENT on get (count reaches 2 again, still below 3)
+      if (listCallCount === 6) resolveDone();
+      return listCallCount === 1 ||
+        listCallCount === 2 ||
+        listCallCount === 4 ||
+        listCallCount === 5
+        ? match
+        : [];
+    };
+    client.get = async (p) => {
+      getCount++;
+      throw Object.assign(
+        new Error(`ENOENT: no such file or directory, open '${p}'`),
+        { code: "ENOENT" },
+      );
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    conn.on("error", (err) => errors.push(err));
+    conn.start();
+    // Wait until the 6th exists() call confirms all 5 cycles completed;
+    // fall back to a 2 s safety timeout so the test never hangs.
+    await Promise.race([
+      cyclesDone,
+      new Promise<void>((r) => setTimeout(r, 2_000)),
+    ]);
+    conn.stop();
+  });
+  expect(logs).toHaveLength(4);
+  expect(logs[0].message).toContain("disappeared between list and get");
 
   // 4 ENOENTs were thrown (get() called 4 times), but no single run of 3
   // consecutive ENOENTs occurred, so no error should be emitted.

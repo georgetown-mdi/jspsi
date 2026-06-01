@@ -49,13 +49,27 @@ export default defineConfig([
     external: makeExternal(ALWAYS_BUNDLED),
     plugins: [typescript({ outputToFilesystem: true })],
     output: [
-      { file: pkg.main, format: "cjs", entryFileNames: "[name].cjs" },
+      { file: pkg.main, format: "cjs" },
       { file: pkg.module, format: "es" },
     ],
   },
   {
     input: "src/main.ts",
     output: { file: "dist/index.d.ts", format: "es" },
+    plugins: [dts()],
+  },
+  {
+    input: "src/testing.ts",
+    external: makeExternal(ALWAYS_BUNDLED),
+    plugins: [typescript({ outputToFilesystem: true })],
+    output: [
+      { file: "dist/testing.cjs", format: "cjs" },
+      { file: "dist/testing.esm.js", format: "es" },
+    ],
+  },
+  {
+    input: "src/testing.ts",
+    output: { file: "dist/testing.d.ts", format: "es" },
     plugins: [dts()],
   },
 ]);
