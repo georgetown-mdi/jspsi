@@ -1125,6 +1125,144 @@ test("synchronize() resolves cleanly when it observes a wave file already create
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
 });
 
+// --- synchronize(): wave-detection with arbitrary-string ids -----------------
+
+test("synchronize() wave-detection branch completes rendezvous with arbitrary string ids", async () => {
+  // Acceptance criterion: a two-party unit test with arbitrary string ids
+  // (not UUIDs) completes the wave handshake and assigns roles deterministically.
+  //
+  // "Agency A-hello.json" < "Agency B-hello.json" lexicographically, so
+  // "Agency A" arrived first. The wave producer (the winner of the wave race,
+  // which is unmodelled here -- we plant the wave directly) creates
+  // "Agency A-Agency B.wave". This connection is "Agency B" and observes both
+  // hellos plus the peer-created wave, triggering the wave-detection branch.
+  const myId = "Agency B";
+  const peerId = "Agency A";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  // Peer arrived first (sorts lower) so the wave name is `${peerId}-${myId}`.
+  const waveName = `${peerId}-${myId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(wavePath, Buffer.alloc(0));
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await conn.synchronize();
+
+  // Peer arrived first => this connection is initiator/joiner.
+  expect(conn.handshakeRole).toBe("initiator");
+  expect(conn.role).toBe("joiner");
+  expect(conn.peerId).toBe(peerId);
+  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
+  expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
+});
+
+test("synchronize() wave-detection branch uses filename order (I7), not id order, for prefix-related ids", async () => {
+  // Acceptance criterion: with prefix-related ids where filename order and raw
+  // id-compare diverge, roles are derived from filename order (I7) and the
+  // wave-detection branch does NOT throw.
+  //
+  // "Agency A-hello.json" < "Agency-hello.json" because space (U+0020) sorts
+  // before "-" (U+002D). So "Agency A" arrived first by filename order.
+  // A raw `"Agency" < "Agency A"` id-compare would say "Agency" arrived first,
+  // producing the wrong expected wave name and a false rejection. Filename order
+  // is the source of truth (I7) and must win.
+  const myId = "Agency";
+  const peerId = "Agency A";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  // "Agency A-hello.json" < "Agency-hello.json" => peer arrived first.
+  // Wave name is `${peerId}-${myId}.wave`, matching what the producer wrote.
+  const waveName = `${peerId}-${myId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(wavePath, Buffer.alloc(0));
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  // Must not throw "wave does not reference this connection".
+  await conn.synchronize();
+
+  expect(conn.handshakeRole).toBe("initiator");
+  expect(conn.role).toBe("joiner");
+  expect(conn.peerId).toBe(peerId);
+  expect(files.has(wavePath)).toBe(false);
+});
+
+test("synchronize() wave-detection branch rejects a stale wave from a different id-pair", async () => {
+  // Acceptance criterion: a stale .wave from a different id-pair, present
+  // alongside the current pair's hellos, fails the pair-validation check.
+  //
+  // The current pair is "Agency B" + "Agency A". A stale wave file
+  // "StaleX-StaleY.wave" from a prior session of a different pair is present.
+  // Reconstruct-and-compare produces "Agency A-Agency B.wave" (peer arrived
+  // first by filename order), which does not match the stale name.
+  const myId = "Agency B";
+  const peerId = "Agency A";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const staleWaveName = "StaleX-StaleY.wave";
+  const staleWavePath = `${conn.path}/${staleWaveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(staleWavePath, Buffer.alloc(0));
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: staleWaveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await expect(conn.synchronize()).rejects.toThrow(
+    "wave file does not reference this connection",
+  );
+});
+
 // --- synchronize(): createExclusive winner retains responsibleFiles --------
 
 test("synchronize() createExclusive winner: leaves own hello and wave name in responsibleFiles so cleanup() can sweep them if peer never arrives", async () => {

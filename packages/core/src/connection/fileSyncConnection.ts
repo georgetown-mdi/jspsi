@@ -742,38 +742,35 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const otherFile = otherFiles[0];
             const thisFile = theseFiles[0];
 
-            const waveRegex = new RegExp(
-              [
-                /^/,
-                /([0-9a-f]{8}-?[0-9a-f]{4}-?4[0-9a-f]{3}-?[89ab][0-9a-f]{3}-?[0-9a-f]{12})/,
-                /-/,
-                /([0-9a-f]{8}-?[0-9a-f]{4}-?4[0-9a-f]{3}-?[89ab][0-9a-f]{3}-?[0-9a-f]{12})/,
-                /\.wave/,
-                /$/,
-              ]
-                .map((r) => r.source)
-                .join(""),
-              "i",
-            );
-            const waveMatches = waveFile.name.match(waveRegex);
-            if (!waveMatches || waveMatches.length !== 3)
-              throw new Error("wave file name not in expected format");
-            // The two capture groups are bare UUIDs, but theseFiles /
-            // otherFiles entries carry the HELLO_SUFFIX; strip it before
-            // comparing so the cross-checks can succeed.
             const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
             const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
-            if (waveMatches[1] !== thisId && waveMatches[2] !== thisId)
+
+            // Use hello filename order -- the same tiebreak the wave producer
+            // uses (I7) -- to reconstruct the expected wave name. Do NOT fall
+            // back to a raw `thisId < otherId` compare: for ids where one is a
+            // prefix of the other (e.g. "Agency" / "Agency A"), space (U+0020)
+            // sorts before "-" (U+002D), so hello-filename order and id-order
+            // can diverge, causing a false "wave does not reference this
+            // connection" throw that UUID tests would never catch.
+            const arrivedFirst = thisFile.name < otherFile.name;
+            const expectedWaveName = arrivedFirst
+              ? `${thisId}-${otherId}.wave`
+              : `${otherId}-${thisId}.wave`;
+
+            // Pair validation via reconstruct-and-compare. A stale wave from a
+            // different id-pair that happens to concatenate to the same
+            // <a>-<b>.wave string is a theoretical residual; the single-wave
+            // guard above (waveFiles.length > 1) is the primary protection, so
+            // the peer_id charset is left unrestricted rather than working
+            // around this edge case here.
+            if (waveFile.name !== expectedWaveName)
               throw new Error("wave file does not reference this connection");
-            if (waveMatches[1] !== otherId && waveMatches[2] !== otherId)
-              throw new Error("wave file does not reference other connection");
 
             // first to arrive => should wait for first message
-            this.handshakeRole =
-              waveMatches[1] === this.id ? "responder" : "initiator";
+            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role =
               this.handshakeRole === "initiator" ? "joiner" : "starter";
-            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
+            this.peerId = otherId;
 
             this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
 
@@ -832,13 +829,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             const thisFile = theseFiles[0];
 
-            // Tiebreak on UUID lexicographic order alone, never modifyTime:
-            // both hello UUIDs are identical on each side, so this comparison
-            // is deterministic and symmetric regardless of which party runs
-            // it. modifyTime is unreliable here -- sync tools stamp files with
-            // the transfer time rather than the original creation time, so the
-            // two parties may observe different (even contradictory) timestamps
-            // for the same files.
+            // Tiebreak on hello filename order alone, never modifyTime: both
+            // parties compute the identical hello filenames, so this comparison
+            // is deterministic and symmetric regardless of which party runs it.
+            // modifyTime is unreliable here -- sync tools stamp files with the
+            // transfer time rather than the original creation time, so the two
+            // parties may observe different (even contradictory) timestamps for
+            // the same files.
             const arrivedFirst = thisFile.name < otherFile.name;
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role = arrivedFirst ? "starter" : "joiner";
