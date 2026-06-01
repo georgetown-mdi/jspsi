@@ -9,6 +9,11 @@ import type {
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
 import { UsageError } from "../errors";
+import {
+  ControlFileEnvelopeSchema,
+  serializeEnvelope,
+  type ControlFileEnvelope,
+} from "./controlEnvelope";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -52,6 +57,52 @@ const MAX_CONSECUTIVE_ENOENT = 3;
 // Suffix shared by all hello files. Using a named constant avoids repeating
 // magic strings and numbers at the multiple slice/endsWith sites below.
 const HELLO_SUFFIX = "-hello.json";
+
+// Reads a control file (hello or hello-ack) through the I5 partial-sync gate.
+// Retries on any get() failure or JSON parse failure (indicating the sync tool
+// has not finished writing the file) until timeToLive expires, then throws a
+// transport Error. A fully-synced body that parses but fails the envelope
+// schema is a terminal UsageError (protocol mismatch, not a transient sync
+// gap). Peer-id recovery is always filename-based; this function validates
+// the body only.
+async function readControlFileWithGate(
+  client: FileTransportClient,
+  filePath: string,
+  timeToLive: Date,
+  pollingFrequency: number,
+): Promise<ControlFileEnvelope> {
+  const delay = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
+  while (Date.now() <= timeToLive.getTime()) {
+    let raw: Buffer<ArrayBufferLike>;
+    try {
+      raw = await client.get(filePath, { encoding: "utf-8" });
+    } catch {
+      // File may not be readable yet (TOCTOU or partial sync); retry.
+      await delay(pollingFrequency);
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.toString());
+    } catch {
+      // Partial write: body is not valid JSON yet; retry until fully synced.
+      await delay(pollingFrequency);
+      continue;
+    }
+    const result = ControlFileEnvelopeSchema.safeParse(parsed);
+    if (!result.success) {
+      throw new UsageError(
+        `control file at ${filePath} has a malformed payload: ` +
+          result.error.message,
+      );
+    }
+    return result.data;
+  }
+  throw new Error(
+    `timed out waiting for ${filePath} to fully sync`,
+  );
+}
 
 interface Events {
   data: (data: unknown) => void;
@@ -529,6 +580,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `deleting discovered ${otherFile.name}`,
       );
 
+      // I5: read the peer hello body through the partial-sync gate before
+      // deleting it. open() sets timeToLive before synchronize() runs, so
+      // the non-null assertion is safe.
+      await readControlFileWithGate(
+        this.client,
+        otherPath,
+        this.options.timeToLive!,
+        this.options.pollingFrequency,
+      );
+
       // Partial-failure note: if delete(otherPath) succeeds but put(helloPath)
       // fails, the peer's hello is gone and we never wrote our own. The peer's
       // waitForPeer loop will see an empty directory and poll until
@@ -539,7 +600,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       try {
         await this.client.delete(otherPath);
 
-        await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
+        await this.client.put(serializeEnvelope({}), helloPath, {
           flags: "w",
           encoding: "utf-8",
         });
@@ -602,7 +663,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.debug(
         `[${this.role}] creating initial ${this.id}${HELLO_SUFFIX}`,
       );
-      await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
+      await this.client.put(serializeEnvelope({}), helloPath, {
         flags: "w",
         encoding: "utf-8",
       });
@@ -655,12 +716,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             // Write our ack once on the first sighting of the peer's hello.
             if (ackPath === undefined) {
+              // I5: read the peer hello body through the partial-sync gate
+              // before writing our ack, so a truncated body is not treated as
+              // malformed and does not abort the handshake prematurely.
+              await readControlFileWithGate(
+                this.client,
+                `${this.path!}/${peerHello.name}`,
+                this.options.timeToLive!,
+                this.options.pollingFrequency,
+              );
               const ackName = `${this.id}-hello-ack.json`;
               ackPath = `${this.path}/${ackName}`;
               // Pre-track before writing so cleanup() sweeps it at close().
               this.responsibleFiles.add(ackName);
               this.log.debug(`[${this.role}] writing handshake ack ${ackName}`);
-              await this.client.put(Buffer.from(new ArrayBuffer(0)), ackPath, {
+              await this.client.put(serializeEnvelope({}), ackPath, {
                 flags: "w",
                 encoding: "utf-8",
               });
@@ -686,6 +756,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               await delay(this.options.pollingFrequency);
               continue;
             }
+
+            // I5: read the peer ack body through the partial-sync gate before
+            // committing roles; the ack name carries no byte-count segment.
+            await readControlFileWithGate(
+              this.client,
+              `${this.path!}/${peerAckName}`,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+            );
 
             // Peer ack confirmed -- commit roles and peerId as the last step,
             // the same invariant as the joiner path (see above): if the ack
@@ -797,6 +876,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             if (waveFile.name !== expectedWaveName)
               throw new Error("wave file does not reference this connection");
 
+            // I5: read the peer hello body through the partial-sync gate
+            // before committing roles. The hello name carries no byte-count
+            // segment, so a half-synced body cannot be caught by a size check.
+            await readControlFileWithGate(
+              this.client,
+              `${this.path}/${otherFile.name}`,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+            );
+
             // first to arrive => should wait for first message
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role =
@@ -833,6 +922,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
              * This is A
              */
             const otherPath = `${this.path}/${otherFile.name}`;
+
+            // I5: read the joiner's hello body through the partial-sync gate
+            // before deleting it. The joiner's hello carries no byte-count
+            // segment so a half-synced body would be silently misread without
+            // this gate.
+            await readControlFileWithGate(
+              this.client,
+              otherPath,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+            );
 
             // arrived first, should wait for a message
             this.handshakeRole = "responder";
