@@ -90,7 +90,7 @@ test("wave synchronization with race condition", async () => {
 
 test("basic synchronization", async () => {
   await sftpAdapter.put(
-    Buffer.from(new ArrayBuffer(0)),
+    Buffer.from("{}"),
     `${SFTP_PATH}/${localConn.id}-hello.json`,
   );
 
