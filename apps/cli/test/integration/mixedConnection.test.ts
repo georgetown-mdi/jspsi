@@ -91,19 +91,19 @@ test("wave synchronization with race condition", async () => {
 test("basic synchronization", async () => {
   await sftpAdapter.put(
     Buffer.from(new ArrayBuffer(0)),
-    `${SFTP_PATH}/${localConn.id}.hello`,
+    `${SFTP_PATH}/${localConn.id}-hello.json`,
   );
 
   await sftpConn.synchronize();
 
   const currentFiles = await sftpAdapter.list(SFTP_PATH);
-  await sftpAdapter.safeDelete(`${SFTP_PATH}/${sftpConn.id}.hello`);
+  await sftpAdapter.safeDelete(`${SFTP_PATH}/${sftpConn.id}-hello.json`);
 
   expect(sftpConn.peerId).toBe(localConn.id);
   expect(sftpConn.handshakeRole).toBe("initiator");
 
   expect(currentFiles.length).toBe(1);
-  expect(currentFiles[0].name).toBe(`${sftpConn.id}.hello`);
+  expect(currentFiles[0].name).toBe(`${sftpConn.id}-hello.json`);
 
   desynchronize(sftpConn);
 });
