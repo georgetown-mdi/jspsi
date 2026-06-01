@@ -11,6 +11,7 @@ export interface ConnectionOverrides {
   serverPort?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
+  retainFiles?: boolean;
 }
 
 export function applyConnectionOverrides(
@@ -49,13 +50,15 @@ export function applyConnectionOverrides(
     };
   }
 
-  // locklessRendezvous and peerId are FileSyncOptions fields; only apply them
-  // on channels that use FileSyncConnection. The other overrides above
-  // (peerTimeout etc.) are SharedOptions that apply to all channels including
-  // webrtc.
+  // locklessRendezvous, peerId, and retainFiles are FileSyncOptions fields;
+  // only apply them on channels that use FileSyncConnection. The other
+  // overrides above (peerTimeout etc.) are SharedOptions that apply to all
+  // channels including webrtc.
   if (
     (result.channel === "sftp" || result.channel === "filedrop") &&
-    (overrides.locklessRendezvous !== undefined || overrides.peerId !== undefined)
+    (overrides.locklessRendezvous !== undefined ||
+      overrides.peerId !== undefined ||
+      overrides.retainFiles !== undefined)
   ) {
     result.options = {
       ...result.options,
@@ -65,12 +68,15 @@ export function applyConnectionOverrides(
       ...(overrides.peerId !== undefined && {
         peerId: overrides.peerId,
       }),
+      ...(overrides.retainFiles !== undefined && {
+        retainFiles: overrides.retainFiles,
+      }),
     };
 
     // Re-validate the merged options through FileSyncOptionsSchema so that
     // all constraints (min length, timestampInFilename dependency, reserved
     // values) are enforced from one place rather than mirrored here.
-    if (overrides.peerId !== undefined) {
+    if (overrides.peerId !== undefined || overrides.retainFiles !== undefined) {
       const validation = safeParseFileSyncOptions(result.options);
       if (!validation.success) {
         const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");

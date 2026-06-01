@@ -374,6 +374,28 @@ export interface FileSyncOptions extends SharedOptions {
    * cause errors at the transport layer.
    */
   peerId?: string;
+  /**
+   * When `true`, the receiver writes a `receipt` control file after consuming
+   * each message, and the sender gates its next `send()` on that receipt
+   * rather than waiting for its own file to be deleted. No exchange file is
+   * deleted as a protocol step; the shared directory becomes a permanent
+   * transcript. Default: `false`.
+   *
+   * Intended for sync-mediated transports that do not propagate deletions
+   * (where the delete-as-signal protocol would stall indefinitely) and for
+   * audit/transcript retention use cases.
+   *
+   * Both parties must set this flag identically; a mismatch causes the
+   * exchange to stall until the peer timeout fires. Requires
+   * `timestampInFilename: true` -- without it, every message from the same
+   * party collides on filename and a retained transcript would overwrite
+   * itself.
+   *
+   * Use a fresh directory for each exchange. Retained mode never deletes, so
+   * files from a prior session remain and could be misread as current
+   * messages if the directory is reused.
+   */
+  retainFiles?: boolean;
 }
 
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
@@ -383,6 +405,7 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
     timestampInFilename: z.boolean().optional(),
     locklessRendezvous: z.boolean().optional(),
     peerId: z.string().min(1).optional(),
+    retainFiles: z.boolean().optional(),
   })
   .refine((opts) => !opts.peerId || opts.timestampInFilename === true, {
     message:
@@ -396,6 +419,13 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
       "peer_id 'temp' is reserved; the lockless rendezvous upload glob " +
       "('<myId>-*') would capture in-flight 'temp-*.tmp' writes",
     path: ["peerId"],
+  })
+  .refine((opts) => !opts.retainFiles || opts.timestampInFilename === true, {
+    message:
+      "retain_files requires timestamp_in_filename: true; without it, every " +
+      "message from the same party shares a filename and a retained transcript " +
+      "would overwrite itself",
+    path: ["retainFiles"],
   });
 
 // --- Connection config -------------------------------------------------------
@@ -558,6 +588,19 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.options as FileSyncOptions | undefined)?.peerId !== undefined
       ),
     { message: "peer_id is not valid for the webrtc channel" },
+  )
+  // Defense-in-depth: retainFiles is a FileSyncOptions field and cannot be
+  // expressed on a webrtc config through the discriminated union (webrtc uses
+  // SharedOptions, not FileSyncOptions). This refine guards the path anyway
+  // so a future schema change cannot silently accept it; the path is not
+  // reachable through the current union.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        (conn.options as FileSyncOptions | undefined)?.retainFiles
+      ),
+    { message: "retain_files is not valid for the webrtc channel" },
   );
 
 // --- Parse -------------------------------------------------------------------

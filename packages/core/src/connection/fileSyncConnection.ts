@@ -30,6 +30,43 @@ const parseMessageByteCount = (name: string): number | undefined => {
   return Number(lastSegment);
 };
 
+// Right-anchored parse of the NNN (per-session sequence counter) from a
+// timestamped message filename (<id>-<ts>-<NNN>-<byteCount>.json). NNN is
+// the segment immediately before the terminal byte-count segment. Returns
+// undefined when the segment is not a non-negative integer; only valid for
+// retain mode where timestampInFilename is always true.
+const parseMessageNNN = (name: string): number | undefined => {
+  const stem = name.slice(0, -".json".length);
+  const withoutByteCount = stem.slice(0, stem.lastIndexOf("-"));
+  const nnnStr = withoutByteCount.slice(withoutByteCount.lastIndexOf("-") + 1);
+  if (!/^\d+$/.test(nnnStr)) return undefined;
+  return Number(nnnStr);
+};
+
+// Right-anchored parse of a receipt filename, extracting both the NNN
+// (sequence counter) and the declared byte count. The terminal segment is the
+// type word "receipt"; the segment immediately before it is the byte count;
+// the segment before that is NNN. Returns undefined when the name does not
+// match the receipt pattern or either numeric field is missing.
+const parseReceiptSegments = (
+  name: string,
+): { nnn: number; byteCount: number } | undefined => {
+  if (!name.endsWith("-receipt.json")) return undefined;
+  const stem = name.slice(0, -".json".length);
+  // Remove the "-receipt" type token to expose "<id>-<ts>-<NNN>-<byteCount>".
+  const withoutToken = stem.slice(0, -"-receipt".length);
+  const bcSep = withoutToken.lastIndexOf("-");
+  if (bcSep === -1) return undefined;
+  const byteCountStr = withoutToken.slice(bcSep + 1);
+  if (!/^\d+$/.test(byteCountStr)) return undefined;
+  const withoutByteCount = withoutToken.slice(0, bcSep);
+  const nnnSep = withoutByteCount.lastIndexOf("-");
+  if (nnnSep === -1) return undefined;
+  const nnnStr = withoutByteCount.slice(nnnSep + 1);
+  if (!/^\d+$/.test(nnnStr)) return undefined;
+  return { nnn: Number(nnnStr), byteCount: Number(byteCountStr) };
+};
+
 /**
  * Default peer-inactivity budget (1 hour) used when `peerTimeoutMs` is not
  * supplied in the connection options. Bounds how long this side waits for the
@@ -123,6 +160,7 @@ interface Options {
   timestampInFilename: boolean;
   locklessRendezvous: boolean;
   peerId?: string;
+  retainFiles: boolean;
 }
 
 const Message = z.object({
@@ -138,6 +176,7 @@ const getDefaultOptions = (): Options => {
     verbose: DEFAULT_VERBOSITY,
     timestampInFilename: false,
     locklessRendezvous: false,
+    retainFiles: false,
   };
 };
 
@@ -247,16 +286,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
-    // Waiting for retain_files (item 192859097): once retainFiles is
-    // implemented, complete the guard below -- it needs both retainFiles and
-    // the absence of peerId to emit the warning:
-    //
-    //   if (this.options.retainFiles && !this.options.peerId)
-    //     this.log.warn(
-    //       "peer_id is unset and retain_files is true: reusing a directory " +
-    //       "with files from a prior session can cause phantom messages via " +
-    //       "uuid collision; set peer_id to a stable id to avoid this",
-    //     );
+    if (this.options.retainFiles && !this.options.peerId)
+      this.log.warn(
+        "peer_id is unset and retain_files is true: reusing a directory " +
+          "with files from a prior session can cause phantom messages via " +
+          "uuid collision; set peer_id to a stable id to avoid this",
+      );
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -321,6 +356,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.timestampInFilename = config.options.timestampInFilename;
     if (config.options?.locklessRendezvous !== undefined)
       this.options.locklessRendezvous = config.options.locklessRendezvous;
+    if (config.options?.retainFiles !== undefined)
+      this.options.retainFiles = config.options.retainFiles;
     if (config.options?.peerId !== undefined) {
       this.options.peerId = config.options.peerId;
       this.id = config.options.peerId;
@@ -408,6 +445,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   }
 
   async cleanup() {
+    // In retain mode the shared directory is intentionally a transcript;
+    // exchange files (hello, ack, message, receipt) are kept. Only an
+    // in-flight temp write would need removal, but those are cleaned up
+    // inline in send()/writeReceipt(), so cleanup() is a no-op here.
+    if (this.options.retainFiles) {
+      this.log.debug(
+        `[${this.role}] retain mode: skipping cleanup of ${this.responsibleFiles.size} file(s)`,
+      );
+      return;
+    }
     const responsibleFilesString =
       this.responsibleFiles.size > 0
         ? `: ${[...this.responsibleFiles].join(", ")}`
@@ -448,7 +495,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // peerTimeoutMs budget from close() start so a long exchange does not
       // leave the budget near-zero for teardown. Drain failure (list() error
       // or timeout) falls through to cleanup(), which deletes as a fallback.
-      if (this.lastSentFile !== undefined) {
+      // In retain mode the last sent file is never deleted, so the drain would
+      // spin to its deadline; skip it since cleanup() is a no-op anyway.
+      if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
         const deadline =
@@ -1152,21 +1201,59 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
     };
 
-    try {
-      if (await hasOutstandingMessage()) {
-        this.log.debug(
-          `[${this.role}] waiting for previous message to be consumed`,
+    // In retain mode, the peer never deletes our message. Instead we wait for
+    // a receipt whose NNN matches the just-sent seq (and whose on-disk size has
+    // reached the declared byte count). The first send proceeds without waiting.
+    const hasQualifyingReceipt = async (expectedNNN: number) => {
+      const currentFiles = await this.client.list(path);
+      return currentFiles.some((file) => {
+        if (!file.name.startsWith(`${this.peerId!}-`)) return false;
+        const segs = parseReceiptSegments(file.name);
+        return (
+          segs !== undefined &&
+          segs.nnn === expectedNNN &&
+          file.size >= segs.byteCount
         );
-        while (await hasOutstandingMessage()) {
-          // open() set timeToLive before send() can run; assertion is safe.
-          if (Date.now() > this.options.timeToLive!.getTime()) {
-            throw new UsageError(
-              `timed out waiting for message from ${this.id} to be consumed`,
+      });
+    };
+
+    try {
+      if (this.options.retainFiles) {
+        // First send (seq === 0) proceeds immediately; subsequent sends wait
+        // for a receipt acknowledging the previous message.
+        if (this.seq > 0) {
+          const expectedNNN = this.seq - 1;
+          this.log.debug(
+            `[${this.role}] waiting for receipt NNN=${expectedNNN} from ${this.peerId}`,
+          );
+          while (!(await hasQualifyingReceipt(expectedNNN))) {
+            // open() set timeToLive before send() can run; assertion is safe.
+            if (Date.now() > this.options.timeToLive!.getTime()) {
+              throw new UsageError(
+                `timed out waiting for receipt from ${this.peerId} for seq=${expectedNNN}`,
+              );
+            }
+            await new Promise((resolve) =>
+              setTimeout(resolve, this.options.pollingFrequency),
             );
           }
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.options.pollingFrequency),
+        }
+      } else {
+        if (await hasOutstandingMessage()) {
+          this.log.debug(
+            `[${this.role}] waiting for previous message to be consumed`,
           );
+          while (await hasOutstandingMessage()) {
+            // open() set timeToLive before send() can run; assertion is safe.
+            if (Date.now() > this.options.timeToLive!.getTime()) {
+              throw new UsageError(
+                `timed out waiting for message from ${this.id} to be consumed`,
+              );
+            }
+            await new Promise((resolve) =>
+              setTimeout(resolve, this.options.pollingFrequency),
+            );
+          }
         }
       }
 
@@ -1231,6 +1318,31 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return `${this.id}-${timestamp}-${counter}-${byteCount}.json`;
   }
 
+  // Writes a receipt for a consumed message whose NNN is `nnn`. Follows the
+  // same temp-then-rename pattern as send() so the declared byte count in the
+  // filename always matches the on-disk size (I5 gate). Returns the final
+  // receipt filename (without directory).
+  private async writeReceipt(dir: string, nnn: number): Promise<string> {
+    const body = serializeEnvelope({});
+    const ts = Date.now();
+    const timestamp = new Date(ts)
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .slice(0, 15);
+    const counter = String(nnn).padStart(3, "0");
+    const name = `${this.id}-${timestamp}-${counter}-${body.byteLength}-receipt.json`;
+    const tempFile = `temp-${uuidv4()}.tmp`;
+    const tempPath = `${dir}/${tempFile}`;
+    try {
+      await this.client.put(body, tempPath, { flags: "w", encoding: null });
+      await this.client.rename(tempPath, `${dir}/${name}`);
+    } catch (err) {
+      await this.client.safeDelete(tempPath);
+      throw err instanceof Error ? err : new Error(errMessage(err));
+    }
+    return name;
+  }
+
   private async poll() {
     if (!this.pollerActive) return;
 
@@ -1256,14 +1368,37 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // count (e.g. a leftover `<peerId>-backup.json`) is ignored, not treated
       // as an error: the previous exact-name lookup never matched such a file,
       // so failing the exchange over an unrelated file would be a regression.
+      //
+      // In retain mode, messages are never deleted so the directory accumulates
+      // one entry per send. Receipts this party has already written identify
+      // which peer messages have been processed; scan them from the same list()
+      // result and skip already-receipted messages to preserve the
+      // one-outstanding-message invariant.
+      const allFiles = await this.client.list(path);
+      const alreadyReceiptedNNNs = new Set<number>();
+      if (this.options.retainFiles) {
+        for (const file of allFiles) {
+          if (!file.name.startsWith(`${this.id}-`)) continue;
+          const segs = parseReceiptSegments(file.name);
+          if (segs !== undefined) alreadyReceiptedNNNs.add(segs.nnn);
+        }
+      }
+
       const messages: Array<{ file: FileInfo; declaredSize: number }> = [];
       const ignored: string[] = [];
-      for (const file of await this.client.list(path)) {
+      for (const file of allFiles) {
         if (!file.name.startsWith(`${peerId}-`) || !file.name.endsWith(".json"))
           continue;
         const declaredSize = parseMessageByteCount(file.name);
-        if (declaredSize === undefined) ignored.push(file.name);
-        else messages.push({ file, declaredSize });
+        if (declaredSize === undefined) {
+          ignored.push(file.name);
+        } else {
+          if (this.options.retainFiles) {
+            const nnn = parseMessageNNN(file.name);
+            if (nnn !== undefined && alreadyReceiptedNNNs.has(nnn)) continue;
+          }
+          messages.push({ file, declaredSize });
+        }
       }
       if (ignored.length > 0)
         this.log.trace(
@@ -1300,40 +1435,86 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           const message = await this.client.get(inPath, { encoding: "utf-8" });
           reachedGet = false;
 
-          this.log.debug(`[${this.role}] deleting message ${messageFile.name}`);
-          try {
-            await this.client.delete(inPath);
-          } catch {
-            await new Promise((resolve) =>
-              setTimeout(resolve, this.options.pollingFrequency),
+          if (this.options.retainFiles) {
+            // Retain mode: write receipt after validation, before emit; attempt
+            // best-effort delete (tolerated -- no-delete transports will fail here).
+            const msgNNN = parseMessageNNN(messageFile.name);
+            if (msgNNN === undefined)
+              throw new Error(
+                `cannot parse sequence number from ${messageFile.name}; ` +
+                  "retain_files requires timestamp_in_filename: true",
+              );
+
+            const validatedMessage = Message.parse(
+              JSON.parse(message.toString()),
             );
+            this.log.trace(
+              `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+                `type=${validatedMessage.type}`,
+            );
+
+            const receiptName = await this.writeReceipt(path, msgNNN);
+            this.responsibleFiles.add(receiptName);
+            this.log.debug(
+              `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
+            );
+
+            if (validatedMessage.type === "Uint8Array") {
+              const bytes = Buffer.from(
+                validatedMessage.payload as string,
+                "base64",
+              );
+              this.emit("data", bytes);
+            } else {
+              this.emit("data", validatedMessage.payload);
+            }
+
             try {
               await this.client.delete(inPath);
             } catch (deleteErr: unknown) {
               this.log.warn(
-                `[${this.role}] failed to delete ${messageFile.name}; ` +
-                  "please notify the administrator that manual cleanup " +
-                  `may be required: ${errMessage(deleteErr)}`,
+                `[${this.role}] failed to delete ${messageFile.name} ` +
+                  `(retain mode; tolerated): ${errMessage(deleteErr)}`,
               );
             }
-          }
-
-          const validatedMessage = Message.parse(
-            JSON.parse(message.toString()),
-          );
-          this.log.trace(
-            `[${this.role}] received message seq=${validatedMessage.seq}, ` +
-              `type=${validatedMessage.type}`,
-          );
-
-          if (validatedMessage.type === "Uint8Array") {
-            const bytes = Buffer.from(
-              validatedMessage.payload as string,
-              "base64",
-            );
-            this.emit("data", bytes);
           } else {
-            this.emit("data", validatedMessage.payload);
+            this.log.debug(
+              `[${this.role}] deleting message ${messageFile.name}`,
+            );
+            try {
+              await this.client.delete(inPath);
+            } catch {
+              await new Promise((resolve) =>
+                setTimeout(resolve, this.options.pollingFrequency),
+              );
+              try {
+                await this.client.delete(inPath);
+              } catch (deleteErr: unknown) {
+                this.log.warn(
+                  `[${this.role}] failed to delete ${messageFile.name}; ` +
+                    "please notify the administrator that manual cleanup " +
+                    `may be required: ${errMessage(deleteErr)}`,
+                );
+              }
+            }
+
+            const validatedMessage = Message.parse(
+              JSON.parse(message.toString()),
+            );
+            this.log.trace(
+              `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+                `type=${validatedMessage.type}`,
+            );
+
+            if (validatedMessage.type === "Uint8Array") {
+              const bytes = Buffer.from(
+                validatedMessage.payload as string,
+                "base64",
+              );
+              this.emit("data", bytes);
+            } else {
+              this.emit("data", validatedMessage.payload);
+            }
           }
         }
       }

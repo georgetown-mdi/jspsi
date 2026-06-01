@@ -2730,3 +2730,376 @@ test("synchronize() wave starter: malformed joiner hello body is a UsageError", 
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
+
+// --- retain mode (retainFiles: true) -----------------------------------------
+
+// Creates a retain-mode connection that is already open, connected, and paired.
+function makeRetainConn(
+  client: FileTransportClient,
+  id: string,
+  peerId: string,
+  timeToLiveMs = 5_000,
+): FileSyncConnection {
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + timeToLiveMs),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/shared";
+  conn.peerId = peerId;
+  return conn;
+}
+
+test("retain mode: multi-message exchange completes when delete() always fails", async () => {
+  // Acceptance: two-party unit test demonstrating a full multi-message cycle
+  // when the mock's delete() is stubbed to always throw.
+  const sharedFiles = new Map<string, Buffer>();
+
+  const makeClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async () => {
+      throw new Error("delete not supported on this transport");
+    },
+    safeDelete: async () => {},
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (data === undefined) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => {},
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const idA = "sender-a";
+  const idB = "receiver-b";
+  const connA = makeRetainConn(makeClient(), idA, idB);
+  const connB = makeRetainConn(makeClient(), idB, idA);
+
+  const received: unknown[] = [];
+  let resolveAll!: () => void;
+  const allReceived = new Promise<void>((r) => (resolveAll = r));
+  connB.on("data", (msg) => {
+    received.push(msg);
+    if (received.length === 3) resolveAll();
+  });
+
+  // Send 3 messages concurrently with B's poller; the receipt gate serializes
+  // them even though delete() always fails.
+  const sending = (async () => {
+    await connA.send({ n: 1 });
+    await connA.send({ n: 2 });
+    await connA.send({ n: 3 });
+  })();
+
+  await runPoller(connB, allReceived);
+  await sending;
+
+  expect(received).toHaveLength(3);
+  expect((received[0] as { n: number }).n).toBe(1);
+  expect((received[1] as { n: number }).n).toBe(2);
+  expect((received[2] as { n: number }).n).toBe(3);
+});
+
+test("retain mode: receipt is written before the data event fires", async () => {
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
+  files.set(`/test/${msgName}`, message);
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  let receiptPresentAtEmit = false;
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", () => {
+    receiptPresentAtEmit = [...files.keys()].some(
+      (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
+    );
+    notifyReceived();
+  });
+
+  await runPoller(conn, delivered);
+
+  expect(receiptPresentAtEmit).toBe(true);
+});
+
+test("retain mode: sender blocks until a matching receipt appears, then proceeds", async () => {
+  const { client, files } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  // First send proceeds without waiting (seq=0).
+  await conn.send({ first: true });
+
+  // Second send blocks waiting for a receipt with NNN=000.
+  let secondDone = false;
+  const secondSend = conn.send({ second: true }).then(() => {
+    secondDone = true;
+  });
+
+  await new Promise((r) => setTimeout(r, 50));
+  expect(secondDone).toBe(false);
+
+  // Add a receipt with NNN=000 and full size so the gate passes.
+  const receiptBody = Buffer.from("{}");
+  files.set(
+    `/test/${peerId}-20260101T000000-000-${receiptBody.length}-receipt.json`,
+    receiptBody,
+  );
+
+  await secondSend;
+  expect(secondDone).toBe(true);
+});
+
+test("retain mode: a receipt with a non-matching NNN does not release the sender", async () => {
+  const { client, files } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  await conn.send({ first: true });
+
+  let secondDone = false;
+  const secondSend = conn.send({ second: true }).then(() => {
+    secondDone = true;
+  });
+
+  await new Promise((r) => setTimeout(r, 30));
+  expect(secondDone).toBe(false);
+
+  // Receipt for NNN=001 -- wrong (sender needs NNN=000 for seq=0).
+  const receiptBody = Buffer.from("{}");
+  files.set(
+    `/test/${peerId}-20260101T000000-001-${receiptBody.length}-receipt.json`,
+    receiptBody,
+  );
+
+  await new Promise((r) => setTimeout(r, 30));
+  expect(secondDone).toBe(false);
+
+  // Correct receipt for NNN=000.
+  files.set(
+    `/test/${peerId}-20260101T000000-000-${receiptBody.length}-receipt.json`,
+    receiptBody,
+  );
+
+  await secondSend;
+  expect(secondDone).toBe(true);
+});
+
+test("retain mode: receipt below declared byte count does not release sender; full size does", async () => {
+  const { client, files } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  await conn.send({ first: true });
+
+  let secondDone = false;
+  const secondSend = conn.send({ second: true }).then(() => {
+    secondDone = true;
+  });
+
+  await new Promise((r) => setTimeout(r, 30));
+
+  // Receipt with NNN=000 but actual size=1, declared=5 (partial sync).
+  const receiptName = `/test/${peerId}-20260101T000000-000-5-receipt.json`;
+  files.set(receiptName, Buffer.alloc(1));
+
+  await new Promise((r) => setTimeout(r, 30));
+  expect(secondDone).toBe(false);
+
+  // Update to full declared size -- gate passes.
+  files.set(receiptName, Buffer.alloc(5));
+
+  await secondSend;
+  expect(secondDone).toBe(true);
+});
+
+test("retain mode: first send proceeds immediately without any receipt", async () => {
+  const { client, files } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  // No receipts present; first send must resolve without waiting.
+  await conn.send({ first: true });
+
+  const messageFiles = [...files.keys()].filter(
+    (p) =>
+      p.includes(`${id}-`) &&
+      p.endsWith(".json") &&
+      !p.endsWith("-receipt.json"),
+  );
+  expect(messageFiles).toHaveLength(1);
+});
+
+test("retain mode: cleanup() does not delete exchange files; receipts are in responsibleFiles", async () => {
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
+  files.set(`/test/${msgName}`, message);
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p: string) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", () => notifyReceived());
+
+  await runPoller(conn, delivered);
+
+  const responsibleFiles = (
+    conn as unknown as { responsibleFiles: Set<string> }
+  ).responsibleFiles;
+
+  // A receipt must have been added to responsibleFiles.
+  const hasReceipt = [...responsibleFiles].some((f) =>
+    f.endsWith("-receipt.json"),
+  );
+  expect(hasReceipt).toBe(true);
+
+  // cleanup() must not delete any files in retain mode.
+  await conn.cleanup();
+  expect(safeDeleted).toHaveLength(0);
+  // The receipt written by the receiver is still on disk (cleanup did not
+  // remove it). The received message may or may not be present depending on
+  // whether the best-effort delete in poll() succeeded -- we only test that
+  // cleanup() itself did not sweep files.
+  const receiptOnDisk = [...files.keys()].find(
+    (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
+  );
+  expect(receiptOnDisk).toBeDefined();
+});
+
+test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget", async () => {
+  const { client } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 100),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  // First send uses the budget without blocking; no receipt will arrive.
+  await conn.send({ first: true });
+
+  // Second send must time out and throw UsageError.
+  await expect(conn.send({ second: true })).rejects.toBeInstanceOf(UsageError);
+});

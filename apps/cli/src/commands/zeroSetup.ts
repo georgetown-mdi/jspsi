@@ -108,6 +108,18 @@ export function builder(cmd: Argv): Argv {
         "Requires timestamp_in_filename: true. Both parties must use " +
         "distinct ids",
     })
+    .option("retain-files", {
+      type: "boolean",
+      describe:
+        "keep all exchange files as a permanent transcript instead of " +
+        "deleting them after consumption; intended for sync-mediated " +
+        "transports that do not propagate deletions and for audit use cases. " +
+        "Requires timestamp_in_filename: true in config. Both parties must " +
+        "set this flag identically -- a mismatch causes the exchange to stall " +
+        "until the peer timeout fires (fast-fail detection not yet available). " +
+        "Use a fresh directory for each exchange; retained files from a prior " +
+        "session are not cleaned up",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -135,6 +147,7 @@ interface ZeroSetupArgs {
   maxReconnectAttempts?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
+  retainFiles?: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -171,6 +184,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
     peerId: argv["peer-id"] as string | undefined,
+    retainFiles: argv["retain-files"] as boolean | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -275,6 +289,7 @@ export function createConnection(
       maxReconnectAttempts: options.maxReconnectAttempts,
       locklessRendezvous: options.locklessRendezvous,
       peerId: options.peerId,
+      retainFiles: options.retainFiles,
     });
   }
 
@@ -302,6 +317,7 @@ export function createConnection(
     serverPort: options.serverPort,
     locklessRendezvous: options.locklessRendezvous,
     peerId: options.peerId,
+    retainFiles: options.retainFiles,
   });
 }
 

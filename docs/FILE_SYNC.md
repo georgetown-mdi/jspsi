@@ -21,9 +21,9 @@ Two consequences follow, and they are the reason this document exists:
 
 Routing safety rests entirely on one rule, defined in full under [EXCHANGE_SPEC.md "Filename grammar"](EXCHANGE_SPEC.md#filename-grammar) and restated here as the discriminant the state machine depends on:
 
-> A protocol file is named `<id>-...-<token>.json`. If `<token>` is all digits the file is a **message** and `<token>` is its declared byte count. Otherwise `<token>` is a **type word** (`hello`, `ack`, and the planned `joining`, `receipt`) and the file is a **control file** that is never routed as a message.
+> A protocol file is named `<id>-...-<token>.json`. If `<token>` is all digits the file is a **message** and `<token>` is its declared byte count. Otherwise `<token>` is a **type word** (`hello`, `ack`, `receipt`, and the planned `joining`) and the file is a **control file** that is never routed as a message.
 
-In code this discriminant is `parseMessageByteCount(name) !== undefined` ([fileSyncConnection.ts:20](../packages/core/src/connection/fileSyncConnection.ts#L20)). A `.tmp` file (the in-flight `temp-<uuid>.tmp` write) and a `.wave` file are excluded earlier, by extension. The grammar is what lets the message scan ignore a renamed hello, an ack, or a receipt without an explicit per-type exclusion -- so every new control file gets a non-numeric terminal token *for free*, provided the site that reads the directory uses the discriminant rather than a bare prefix glob.
+In code this discriminant is `parseMessageByteCount(name) !== undefined` ([fileSyncConnection.ts:26](../packages/core/src/connection/fileSyncConnection.ts#L26)). A `.tmp` file (the in-flight `temp-<uuid>.tmp` write) and a `.wave` file are excluded earlier, by extension. The grammar is what lets the message scan ignore a renamed hello, an ack, or a receipt without an explicit per-type exclusion -- so every new control file gets a non-numeric terminal token *for free*, provided the site that reads the directory uses the discriminant rather than a bare prefix glob.
 
 ### File taxonomy
 
@@ -37,7 +37,7 @@ Every row here must agree with every column for the state machine to be consiste
 | message | `<id>-<bytes>.json` or `<id>-<ts>-<NNN>-<bytes>.json` | each party | numeric | yes | **yes** | yes | yes (not in retain mode) | **yes** | **yes** |
 | temp | `temp-<uuid>.tmp` | each party (in-flight) | n/a (`.tmp`) | partial write | n/a | no | best-effort on error | no (extension) | no (extension) |
 | joining (planned) | `<id>-joining.json` | joiner (wave path) | `joining` | marker | no | yes | yes | no (non-numeric) | no (non-numeric) |
-| receipt (planned) | `<receiverId>-<ts>-<NNN>-<bytes>-receipt.json` | receiver (retain mode) | `receipt` | yes | **yes (size before token)** | yes | **no (transcript is retained)** | no (non-numeric) | no (non-numeric) |
+| receipt | `<receiverId>-<ts>-<NNN>-<bytes>-receipt.json` | receiver (retain mode) | `receipt` | yes | **yes (size before token)** | yes | **no (transcript is retained)** | no (non-numeric) | no (non-numeric) |
 
 ## The five enforcement sites
 
@@ -58,7 +58,7 @@ The transport has two independent binary modes. They are bilateral: both parties
   - *Lockless* (`lockless_rendezvous: true`): an ack-handshake barrier that uses neither exclusive-create nor delete; both hellos and both acks coexist. For sync-mediated transports where both sides "win" a local create or deletions do not propagate.
 - **Message-loop mode** -- how send/consume is signalled:
   - *Delete-as-signal* (default): the receiver deletes the sender's message file; the sender waits for that deletion before sending the next.
-  - *Retain* (planned, `retain_files: true`): no exchange file is deleted; the receiver writes a `receipt` the sender waits for instead. For transports that do not propagate deletions, and for audit transcripts.
+  - *Retain* (`retain_files: true`): no exchange file is deleted; the receiver writes a `receipt` the sender waits for instead. For transports that do not propagate deletions, and for audit transcripts.
 
 The four combinations are all valid. The rendezvous axis and the message-loop axis do not interact except through shared invariants (notably the retain-mode cleanup exception and the fresh-directory precondition).
 
@@ -96,9 +96,9 @@ Legal contents: both hellos and both acks coexist and persist into the message l
 
 The sender writes `temp-<uuid>.tmp`, renames it to the final numeric-terminal name (so a watcher never sees a partial file under its final name), and then blocks in `hasOutstandingMessage` until the peer deletes it. The receiver's `poll()` reads one peer message once its on-disk size reaches the declared byte count, emits `data`, and deletes it. Legal contents: at most one outstanding message per direction.
 
-### Phase 2 -- message loop, retain mode (planned)
+### Phase 2 -- message loop, retain mode
 
-Same write path, but the receiver writes a `receipt` (carrying the consumed message's `<NNN>`) before emitting `data`, then attempts a best-effort, failure-tolerated delete. The sender gates its next send on a receipt whose parsed `<NNN>` equals the just-sent `seq` *and* whose on-disk size has reached its own declared byte count. No exchange file is deleted as a protocol step.
+Same write path, but the receiver writes a `receipt` (carrying the consumed message's `<NNN>`) before emitting `data`, then attempts a best-effort, failure-tolerated delete. The sender gates its next send on a receipt whose parsed `<NNN>` equals the just-sent `seq` *and* whose on-disk size has reached its own declared byte count. No exchange file is deleted as a protocol step. Because retained messages accumulate, the receiver identifies the next unprocessed message by scanning its own receipt files to find which NNNs it has already acknowledged, then processing the one message (if any) without a matching receipt.
 
 ### Phase 3 -- cleanup and close
 
@@ -122,7 +122,7 @@ These operator-level requirements are part of the model: violating any of them s
 
 - **Dedicated directory.** One active exchange, exactly two parties, per directory. See [EXCHANGE_SPEC.md "Directory exclusivity"](EXCHANGE_SPEC.md#directory-exclusivity).
 - **Matching builds.** There is no `protocol_version` field; both parties run compatible builds and the payload schema is a hard contract. A payload-schema change (e.g. adding hello flags) is a flag-day that both sides must deploy together.
-- **Identical bilateral flags.** `lockless_rendezvous` and (planned) `retain_files` must match on both sides.
+- **Identical bilateral flags.** `lockless_rendezvous` and `retain_files` must match on both sides.
 - **Fresh directory in retain mode.** Retain mode never deletes, so a reused directory leaves a prior exchange's files; combined with a stable `peer_id` a new session could read a prior message as current. A fresh directory per exchange is a hard requirement, not a suggestion.
 - **Distinct, non-prefix peer ids.** When `peer_id` is configured, the two ids must be distinct, and neither may be the other extended by `-` (e.g. `site` / `site-2`), which would break message prefix-routing. UUIDs (the default) satisfy this automatically.
 
@@ -157,7 +157,7 @@ Lockless rendezvous (item `194002643`) is **merged**: it introduced the lockless
 | 193204531 -- custom peer ID | The distinct/non-prefix-id precondition; rendezvous-time prefix-at-dash guard | Depends on 194002650; reserves the `temp` prefix; shares the unset-`peer_id` warning with retain mode |
 | 194315096 -- typed error mechanism | The error taxonomy (typed, 64 vs 69) | Should land before any item that adds throw sites, so they are typed from the start |
 | 194332289 -- hello/ack payload envelope + read gate | The shared control-file body plumbing and the I5 partial-sync read gate | **Merged.** Introduced `ControlFileEnvelope` + `readControlFileWithGate`; hello and lockless ack now carry `{}` envelope. 193901017 and 194304738 extend it. Supersedes 194002643's "no payload" decision |
-| 192859097 -- retained mode | Message-loop retain axis, `receipt` file, I4 cleanup exception | Its `retainFiles` field must exist before mode flags can be advertised |
+| 192859097 -- retained mode | Message-loop retain axis, `receipt` file, I4 cleanup exception | **Merged.** `--retain-files` ships without bilateral fast-fail (193901017); a mismatch stalls until the peer timeout fires. |
 | 193901017 -- advertise flags, fast-fail | Bilateral mismatch detection in the hello payload | Adds the two flag fields to 194332289's envelope and compares them; needs the `retainFiles` field from 192859097 and the read gate from 194332289 |
 | 194304738 -- bind ack filename to peer id | `<peerId>-hello-ack.json` filename binding | Filename rename; any ack body reuses 194332289's envelope (the writer id is likely redundant, so the ack may stay body-less); order vs 193901017 is merge-conflict avoidance, not a semantic dependency |
 | 192785502 -- joiner partial-failure sentinel | The `joining` file closing the wave-path inconsistency window | Wave-path only; its `hasOutstandingMessage` exclusion is already satisfied by the grammar discriminant (I3), so that part is a no-op against the current branch |

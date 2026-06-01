@@ -567,6 +567,7 @@ These options apply to both `sftp` and `filedrop` channels.
 | `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
 | `lockless_rendezvous` | boolean | false | When `true`, the rendezvous handshake uses an ack-handshake barrier (`<id>-hello.json` + `<id>-hello-ack.json`) instead of the default atomic wave-file race (`<id>-hello.json` + `<id1>-<id2>.wave`). Required on sync-mediated transports that lack atomic exclusive-create or deletion visibility during rendezvous (e.g. a cloud sync service reconciling two local mirrors where both sides "win" a local create). Both parties must set this identically; a mismatch causes rendezvous to time out. The operational sync glob in lockless mode is `<myId>-*` (upload) / `<partnerId>-*` (download), which covers hello, ack, and message files while excluding in-flight `temp-*.tmp` writes. |
 | `peer_id` | string | — | A stable, human-readable identifier for this party. Appears in every filename this party writes (hello, message, ack) and in server-side logs and transcripts. When unset, a UUID is generated at construction time. Requires `timestamp_in_filename: true`; a reused stable id without a timestamp segment can collide with a leftover file from a crashed prior session. The two parties must use distinct ids, and neither may be the other's id extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous; see [FILE_SYNC.md preconditions](FILE_SYNC.md#preconditions-for-a-correct-exchange)). Spaces and `-` are permitted within a `peer_id`. The value `"temp"` is reserved. Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may cause errors at the transport layer. |
+| `retain_files` | boolean | false | When `true`, the receiver writes a `receipt` control file after consuming each message rather than deleting it; the sender gates its next write on observing that receipt rather than on the message file disappearing. No exchange file is deleted as a protocol step; the shared directory becomes a permanent transcript. Requires `timestamp_in_filename: true` -- without it, every message from the same party would share a filename and a retained transcript would overwrite itself. Both parties must set this flag identically; a mismatch causes the exchange to stall until the peer timeout fires. **Use a fresh directory for each exchange**: retained mode never deletes, so files from a prior session remain and can be misread as current messages if the directory is reused. See [Receipt files](#receipt-files). |
 
 #### Message filenames
 
@@ -587,6 +588,22 @@ With `timestamp_in_filename: true`, the filename additionally carries a timestam
 `<YYYYMMDDTHHMMSS>` is the UTC write time in compact ISO 8601 form (no colons or hyphens, so it is Windows-safe and sorts lexicographically by time). `<NNN>` is a per-session counter that starts at `000`, is zero-padded to three digits, and increments with each message sent; it widens to four or more digits only after the 1000th message of a session.
 
 In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<id1>-<id2>.wave`, `<id>-hello-ack.json`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
+
+#### Receipt files
+
+When `retain_files: true`, the receiver writes a receipt file immediately after validating each message and before emitting it to the application layer. The receipt filename follows the same right-anchored byte-count convention as message files, but its terminal segment is the type word `receipt` (not a digit string), so it is never mistaken for a message:
+
+```
+<receiverId>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-receipt.json
+```
+
+`<NNN>` copies the consumed message's sequence counter. `<byteCount>` is the exact on-disk size of the receipt body, enabling the same partial-sync safety gate (I5) used for messages: the sender reads the file size from the directory listing and waits until it matches the declared count before treating the receipt as valid.
+
+After writing the receipt the receiver attempts a best-effort delete of the consumed message file; a failure is logged as a warning and not re-raised, since it is expected on transports that do not propagate deletions.
+
+In `retain_files` mode `close()` does not delete exchange files; the directory is the transcript. The only file ever removed is an in-flight `temp-*.tmp` write, which is cleaned up inline on error.
+
+The transcript accumulates with no in-protocol cleanup; retention, rotation, and archival are out-of-band operator responsibilities.
 
 #### Directory exclusivity
 
