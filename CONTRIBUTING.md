@@ -63,7 +63,7 @@ npm run build -w apps/web
 
 ```sh
 npm test -w packages/core
-npm test -w apps/cli
+npm run test:unit -w apps/cli
 npm run test:unit -w apps/web
 ```
 
@@ -75,6 +75,10 @@ npx vitest run path/to/file.test.ts
 
 ### Integration tests
 
+Integration tests must pass before a pull request is merged into `main` or `staging`.
+
+#### CLI application
+
 Integration tests for the CLI require Docker and spin up a local SFTP server:
 
 ```sh
@@ -82,7 +86,17 @@ docker compose -f apps/cli/test/container/compose.yaml up -d
 npm run test:integration -w apps/cli
 ```
 
-These tests exercise the full exchange protocol end-to-end, including the SPAKE2 handshake and file transport. They are slower than unit tests but must pass before a pull request is merged into `main`.
+The Docker compose runs an SFTP server under the container name `sftp-1` and image name `atmoz/sftp`.
+
+#### Web application
+
+Web integration tests require the development server to be running:
+
+```sh
+npm run dev -w apps/web
+```
+
+This starts a foreground web server process which listens on port 3000.
 
 ## Code Conventions
 
@@ -100,6 +114,7 @@ These tests exercise the full exchange protocol end-to-end, including the SPAKE2
 Linting and formatting are enforced by CI. Run locally before pushing:
 
 ```sh
+npm run typecheck
 npm run lint
 npm run format
 ```
@@ -112,9 +127,9 @@ npm run format
 
 ## Pull Request Process
 
-1. For significant changes, open an issue first to align on approach. Bug fixes and documentation improvements do not require a prior issue.
-2. Keep pull requests focused — one logical change per PR.
-3. Ensure all tests pass and lint is clean before marking the PR ready for review.
+1. For significant changes, open a draft issue on the Github project first to align on approach. Bug fixes and documentation improvements do not require a prior issue.
+2. Keep pull requests focused - one logical change per PR.
+3. Ensure all tests pass and lint is clean before marking the PR ready for review. Include this as a checklist in the PR.
 4. Changes to cryptographic code require explicit security review before merging (see Dependency Policy).
 5. Update `docs/` when behavior changes. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
 6. A maintainer will review and merge. Force-pushes to `main` are not permitted.

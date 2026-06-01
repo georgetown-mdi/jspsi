@@ -1,0 +1,10 @@
+node_modules
+dist
+*.local*
+.nitro
+.tanstack
+.output
+.rollup.cache
+
+*.md
+docs
