@@ -33,6 +33,7 @@ test("loadKeyFile parses a valid key file with pakeToken and expires", () => {
       expires: "2027-01-01T00:00:00.000Z",
     }),
   );
+  fs.chmodSync(keyPath, 0o600);
   const result = loadKeyFile(keyPath);
   expect(result?.pakeToken).toBe(TOKEN);
   expect(result?.expires).toBe("2027-01-01T00:00:00.000Z");
@@ -41,6 +42,7 @@ test("loadKeyFile parses a valid key file with pakeToken and expires", () => {
 test("loadKeyFile parses a valid key file with pakeToken only", () => {
   const keyPath = path.join(dir, ".psilink.key");
   fs.writeFileSync(keyPath, JSON.stringify({ pakeToken: TOKEN }));
+  fs.chmodSync(keyPath, 0o600);
   const result = loadKeyFile(keyPath);
   expect(result?.pakeToken).toBe(TOKEN);
   expect(result?.expires).toBeUndefined();
