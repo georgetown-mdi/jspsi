@@ -73,7 +73,11 @@ async function readControlFileWithGate(
 ): Promise<ControlFileEnvelope> {
   const delay = (ms: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, ms));
-  while (Date.now() <= timeToLive.getTime()) {
+  // do-while guarantees at least one read attempt even when timeToLive has
+  // already expired by the time the gate is entered (e.g. a slow polling loop
+  // that exhausts the budget before reaching this call). Without this a fully-
+  // present file would produce a spurious "timed out" error.
+  do {
     let raw: Buffer<ArrayBufferLike>;
     try {
       raw = await client.get(filePath, { encoding: "utf-8" });
@@ -98,7 +102,7 @@ async function readControlFileWithGate(
       );
     }
     return result.data;
-  }
+  } while (Date.now() <= timeToLive.getTime());
   throw new Error(
     `timed out waiting for ${filePath} to fully sync`,
   );

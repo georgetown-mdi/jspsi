@@ -1980,7 +1980,8 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
 
   // Pre-plant A's hello so B's initial list() sees it (simulating A having
   // arrived first and written its hello before B calls synchronize()).
-  sharedFiles.set(`/shared/${idA}-hello.json`, Buffer.alloc(0));
+  // Must be valid JSON so the I5 read gate does not retry to timeout.
+  sharedFiles.set(`/shared/${idA}-hello.json`, Buffer.from("{}"));
 
   let deleteCalled = false;
   const makeClient = (): FileTransportClient => ({

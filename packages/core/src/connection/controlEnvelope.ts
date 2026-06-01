@@ -24,7 +24,7 @@ export const ControlFileEnvelopeSchema: z.ZodType<ControlFileEnvelope> =
 
 /**
  * Serializes a {@link ControlFileEnvelope} to a `Buffer` for writing via
- * {@link FileTransportClient.put}.
+ * `FileTransportClient.put`.
  */
 export const serializeEnvelope = (envelope: ControlFileEnvelope): Buffer =>
   Buffer.from(JSON.stringify(envelope));
