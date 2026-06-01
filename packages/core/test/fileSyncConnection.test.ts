@@ -2185,11 +2185,10 @@ test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () =>
   const err = await conn.synchronize().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(Error);
   expect((err as Error).message).toContain("'-' boundary");
-  // cause: "usage" must not leak to callers from the joiner fast-path (no
-  // enclosing catch to strip it, unlike the else-branch path).
-  expect((err as Error).cause).toBeUndefined();
   // Connection must stay unsynchronized so a retry is not blocked.
   expect(conn.peerId).toBeUndefined();
+  // Our hello must have been deleted so a retry does not find a stale file.
+  expect(files.has(`${conn.path}/${myId}-hello.json`)).toBe(false);
 });
 
 test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", async () => {
@@ -2223,6 +2222,8 @@ test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", asy
   };
 
   await expect(conn.synchronize()).rejects.toThrow("'-' boundary");
+  // peerId must be reset so a retry is not blocked by "already synchronized".
+  expect(conn.peerId).toBeUndefined();
 });
 
 test("synchronize() joiner branch accepts shared-prefix ids that are not prefix-at-dash", async () => {

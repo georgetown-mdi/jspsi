@@ -65,6 +65,24 @@ export function applyConnectionOverrides(
         peerId: overrides.peerId,
       }),
     };
+
+    // Enforce peer_id schema constraints against the merged options.
+    // applyConnectionOverrides bypasses Zod, so these mirror the refines in
+    // FileSyncOptionsSchema that cannot be re-run here.
+    if (overrides.peerId !== undefined) {
+      if (overrides.peerId === "temp")
+        throw new Error(
+          "peer_id 'temp' is reserved; the lockless rendezvous upload glob " +
+            "('<myId>-*') would capture in-flight 'temp-*.tmp' writes",
+        );
+      if (result.options?.timestampInFilename !== true)
+        throw new Error(
+          "--peer-id requires timestamp_in_filename: true in the connection " +
+            "options (set it in psilink.yaml); without a timestamp segment, " +
+            "a reused stable id can collide with a leftover file from a prior " +
+            "crashed session",
+        );
+    }
   }
 
   return result;
