@@ -587,6 +587,12 @@ With `timestamp_in_filename: true`, the filename additionally carries a timestam
 
 In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<id1>-<id2>.wave`, `<id>-hello-ack.json`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
 
+#### Directory exclusivity
+
+The shared directory (SFTP path or local filedrop path) must be **dedicated exclusively** to a single active exchange between exactly two parties. Both channels treat the directory as a private communication channel: each party reads and deletes files written by the other, and the rendezvous protocol uses filename presence as a synchronization signal.
+
+A third process writing `<id>-hello.json`, `.wave`, `-hello-ack.json`, or `<id>-*.json` files into the same path during an active session will cause the exchange to abort with a diagnostic error. Separate concurrent exchanges must use separate directories.
+
 #### Filename grammar
 
 Every protocol file on `sftp` and `filedrop` channels is named `<id>-...-<token>.json`, where `<token>` is the final `-`-delimited segment before `.json`:

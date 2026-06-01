@@ -474,8 +474,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "before executing the protocol. Most likely cause: a previous " +
           "exchange was terminated by SIGKILL/OOM/power loss before its " +
           "cleanup ran (a handshake-ack file indicates a crashed lockless " +
-          "session). Remove the listed files manually after verifying that " +
-          "no other session is concurrently using this path.",
+          "session). A handshake-ack can also appear when a live lockless " +
+          "peer wrote its ack and this party timed out and retried before " +
+          "the peer finished or cleaned up; in that case wait for the peer " +
+          "to complete or time out before retrying. Remove the listed files " +
+          "manually after verifying that no other session is concurrently " +
+          "using this path.",
       );
     }
 
@@ -586,13 +590,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 this.responsibleFiles.delete(fileName);
             });
 
-            const peerHello = currentFiles.find(
+            const peerHellos = currentFiles.filter(
               (file) =>
                 file.name !== `${this.id}${HELLO_SUFFIX}` &&
                 file.name.endsWith(HELLO_SUFFIX),
             );
 
-            if (peerHello === undefined) {
+            if (peerHellos.length === 0) {
               this.log.trace(`[${this.role}] no peer hello found; polling`);
               const delay = (ms: number) =>
                 new Promise((resolve) => setTimeout(resolve, ms));
@@ -600,6 +604,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               continue;
             }
 
+            if (peerHellos.length > 1) {
+              throw new Error(
+                `more than one peer hello file in ${this.path} - are there ` +
+                  "other sessions using this path?",
+                { cause: "usage" },
+              );
+            }
+
+            const peerHello = peerHellos[0];
             const peerId = peerHello.name.slice(0, -HELLO_SUFFIX.length);
 
             // Write our ack once on the first sighting of the peer's hello.
@@ -616,13 +629,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 ackPath,
                 { flags: "w", encoding: "utf-8" },
               );
+              // Re-enter the loop so hasPeerAck is checked against a fresh
+              // listing; the pre-ack-write snapshot from this iteration may
+              // miss a peer ack that arrived in the window between list() and
+              // put(), adding up to pollIntervalMs of unnecessary latency on
+              // slow-sync transports.
+              continue;
             }
 
-            // Barrier completes when the peer's ack is visible in the
-            // current listing. The listing was taken before we wrote our
-            // ack, so the peer's ack may not appear until the next poll;
-            // that is fine -- the barrier is correct as long as each party
-            // writes its ack before declaring completion.
+            // Barrier completes when the peer's ack is visible in the current
+            // listing (always a fresh one because of the continue above).
             const peerAckName = `${peerId}-hello-ack.json`;
             const hasPeerAck = currentFiles.some(
               (file) => file.name === peerAckName,

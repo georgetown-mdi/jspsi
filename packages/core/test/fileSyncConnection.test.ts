@@ -1934,3 +1934,35 @@ test("send() completes without spinning when a <id>-hello.json file is present i
   // The hello file must still be present (send() is not responsible for it).
   expect(files.has(helloPath)).toBe(true);
 });
+
+test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
+  // Regression guard for the multi-peer-hello guard added to the lockless
+  // loop: mirrors the wave path's otherFiles.length > 1 check and catches a
+  // third party that slipped in after the initial synchronize() guard.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  conn.id = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+  conn.connected = true;
+  conn.path = "/test";
+
+  const peerId1 = "00000000-0000-4000-8000-000000000001";
+  const peerId2 = "00000000-0000-4000-8000-000000000002";
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial synchronize() guard: clean
+    // Second call (inside waitForPeer): two peer hellos are present.
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: 0, size: 0 },
+      { name: `${peerId1}-hello.json`, modifyTime: 0, size: 0 },
+      { name: `${peerId2}-hello.json`, modifyTime: 0, size: 0 },
+    ];
+  };
+
+  await expect(conn.synchronize()).rejects.toThrow(/more than one peer hello/);
+});

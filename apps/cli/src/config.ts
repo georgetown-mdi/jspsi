@@ -31,8 +31,7 @@ export function applyConnectionOverrides(
   if (
     overrides.peerTimeout !== undefined ||
     overrides.connectionTimeout !== undefined ||
-    overrides.maxReconnectAttempts !== undefined ||
-    overrides.locklessRendezvous !== undefined
+    overrides.maxReconnectAttempts !== undefined
   ) {
     result.options = {
       ...result.options,
@@ -45,9 +44,19 @@ export function applyConnectionOverrides(
       ...(overrides.maxReconnectAttempts !== undefined && {
         maxReconnectAttempts: overrides.maxReconnectAttempts,
       }),
-      ...(overrides.locklessRendezvous !== undefined && {
-        locklessRendezvous: overrides.locklessRendezvous,
-      }),
+    };
+  }
+
+  // locklessRendezvous is a FileSyncOptions field; only apply it on channels
+  // that use FileSyncConnection. The other overrides above (peerTimeout etc.)
+  // are SharedOptions that apply to all channels including webrtc.
+  if (
+    (result.channel === "sftp" || result.channel === "filedrop") &&
+    overrides.locklessRendezvous !== undefined
+  ) {
+    result.options = {
+      ...result.options,
+      locklessRendezvous: overrides.locklessRendezvous,
     };
   }
 
