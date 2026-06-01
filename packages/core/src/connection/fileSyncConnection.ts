@@ -1136,13 +1136,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // `.json` extension but have a non-numeric terminal segment. Exclude them
     // via parseMessageByteCount so a renamed hello does not cause send() to
     // spin waiting for a protocol file to disappear.
-    const hasOutstandingMessage = async () =>
-      (await this.client.list(path)).some(
+    // The list() result also prunes responsibleFiles: any entry no longer on
+    // the server was consumed by the peer and need not be swept at close time.
+    const hasOutstandingMessage = async () => {
+      const currentFiles = await this.client.list(path);
+      const fileNames = currentFiles.map((f) => f.name);
+      this.responsibleFiles.forEach((fileName) => {
+        if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
+      });
+      return currentFiles.some(
         (file) =>
           file.name.startsWith(`${this.id}-`) &&
           file.name.endsWith(".json") &&
           parseMessageByteCount(file.name) !== undefined,
       );
+    };
 
     try {
       if (await hasOutstandingMessage()) {
