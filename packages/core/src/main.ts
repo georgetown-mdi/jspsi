@@ -1,3 +1,4 @@
+export * from "./errors";
 export * from "./participant";
 export * from "./link";
 export * from "./protocolSetup";

@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
-import { getLogger, loadCSVFile, prepareForExchange } from "@psilink/core";
+import {
+  getLogger,
+  loadCSVFile,
+  prepareForExchange,
+  UsageError,
+} from "@psilink/core";
 import type {
   ConnectionConfig,
   FileDropConnectionConfig,
@@ -405,7 +410,7 @@ export async function handler(argv: Arguments): Promise<void> {
     );
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit(69);
+    process.exit(err instanceof UsageError ? 64 : 69);
   }
 
   if (!options.save) {

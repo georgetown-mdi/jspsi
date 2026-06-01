@@ -9,6 +9,7 @@ import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
 } from "../src/config/connection";
+import { UsageError } from "../src/errors";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
 // send() need real implementations; everything else is a no-op.
@@ -1760,9 +1761,7 @@ test("synchronize() preexisting -hello-ack.json causes an immediate rejection", 
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   const staleAck = "some-peer-id-hello-ack.json";
   files.set(`${conn.path}/${staleAck}`, Buffer.alloc(0));
-  client.list = async () => [
-    { name: staleAck, modifyTime: 0, size: 0 },
-  ];
+  client.list = async () => [{ name: staleAck, modifyTime: 0, size: 0 }];
 
   await expect(conn.synchronize()).rejects.toThrow(/handshake-ack/);
 });
@@ -1840,10 +1839,7 @@ test("synchronize() lockless mode completes rendezvous when createExclusive and 
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (
-      src: string | Buffer | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
       if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
     },
     delete: async () => {
@@ -1920,13 +1916,12 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (
-      src: string | Buffer | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
       if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
     },
-    delete: async () => { throw new Error("delete not supported"); },
+    delete: async () => {
+      throw new Error("delete not supported");
+    },
     safeDelete: async () => {},
     rename: async (from: string, to: string) => {
       const data = sharedFiles.get(from);
@@ -1934,7 +1929,9 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
       sharedFiles.delete(from);
       sharedFiles.set(to, data);
     },
-    createExclusive: async () => { throw new Error("not supported"); },
+    createExclusive: async () => {
+      throw new Error("not supported");
+    },
     exists: async (path: string) => sharedFiles.has(path),
   });
 
@@ -2006,10 +2003,7 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (
-      src: string | Buffer | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
       if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
     },
     delete: async () => {
@@ -2260,4 +2254,74 @@ test("synchronize() joiner branch accepts space-containing ids", async () => {
 
   await conn.synchronize();
   expect(conn.peerId).toBe(peerId);
+});
+
+// --- UsageError taxonomy -------------------------------------------------------
+
+test("synchronize() throws UsageError when preexisting hello files are present", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  // Two hello files in the directory trigger the preexisting-files guard.
+  files.set(`${conn.path}/peer-aaa-hello.json`, Buffer.alloc(0));
+  files.set(`${conn.path}/peer-bbb-hello.json`, Buffer.alloc(0));
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() throws UsageError when a stale lockless ack file is present", async () => {
+  // A -hello-ack.json left behind by a crashed lockless session trips the
+  // preexisting-files guard, which is classified as a usage/configuration error.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  files.set(`${conn.path}/peer-aaa-hello-ack.json`, Buffer.alloc(0));
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() throws UsageError for multiple concurrent sessions detected in wave-race path", async () => {
+  // Trigger the "more than one peer hello" guard inside waitForPeer(). The
+  // initial list() returns empty (passes the preexisting check); subsequent
+  // calls return our own hello plus two peer hellos, simulating a third party
+  // joining the same directory mid-rendezvous.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const myHello = `${conn.id}-hello.json`;
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting check: empty
+    return [
+      { name: myHello, modifyTime: 0, size: 0 },
+      { name: "peer-aaa-hello.json", modifyTime: 0, size: 0 },
+      { name: "peer-bbb-hello.json", modifyTime: 0, size: 0 },
+    ];
+  };
+  // put() must succeed (writing our hello); delete/safeDelete are no-ops.
+  client.put = async () => {};
+  client.safeDelete = async () => {};
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() transport failure is not a UsageError", async () => {
+  // A rejected list() (e.g. SFTP connection lost) is a transport failure and
+  // must NOT be identified as a UsageError.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  client.list = async () => {
+    throw new Error("SFTP connection lost");
+  };
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(err).toBeInstanceOf(Error);
+});
+
+test("send() message timeout throws UsageError", async () => {
+  // A stale unconsumed message that outlasts the TTL is a send-timeout usage
+  // error: the caller is responsible for ensuring the peer is polling.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    timeToLiveMs: 150,
+    pollingFrequency: 10,
+  });
+  // Plant a stale outbound message that nobody will consume.
+  files.set(`${conn.path}/${conn.id}-99.json`, Buffer.from("stale"));
+  await expect(conn.send({ next: true })).rejects.toBeInstanceOf(UsageError);
 });

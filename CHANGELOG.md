@@ -25,6 +25,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 - Library API: `runExchange` and `authenticateConnection` now take a `MessageConnection` instead of the event-based `Connection`. CLI exchanges are unaffected.
 - An exchange now fails with a clear error (bounded by `peer_timeout_ms`) when the partner stops responding, instead of hanging.
 - A peer sending messages out of turn is rejected rather than buffered without limit.
+- The CLI now exits with code 64 (EX_USAGE) instead of 69 (EX_UNAVAILABLE) when `synchronize()` or `send()` fails due to a configuration or usage problem: a dirty exchange directory (preexisting handshake files), multiple concurrent sessions on the same path, or a send timeout. Transport failures continue to exit with code 69.
 
 ### Fixed
 
