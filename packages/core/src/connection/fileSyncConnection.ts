@@ -177,6 +177,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
     this.client = client;
+    // No peerId validation here: Options is an internal type, not the public
+    // FileSyncOptions. The validation boundary is FileSyncOptionsSchema
+    // (enforced by parseFileSyncOptions / applyConnectionOverrides). All
+    // production callers go through that path before reaching this constructor.
     this.id = options?.peerId ?? uuidv4();
     this.role = "unknown role";
     this.pollerActive = false;
