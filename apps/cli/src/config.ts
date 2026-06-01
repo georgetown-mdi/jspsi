@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from "@psilink/core";
+import { safeParseFileSyncOptions } from "@psilink/core";
 
 export interface ConnectionOverrides {
   connectionTimeout?: number;
@@ -66,22 +67,15 @@ export function applyConnectionOverrides(
       }),
     };
 
-    // Enforce peer_id schema constraints against the merged options.
-    // applyConnectionOverrides bypasses Zod, so these mirror the refines in
-    // FileSyncOptionsSchema that cannot be re-run here.
+    // Re-validate the merged options through FileSyncOptionsSchema so that
+    // all constraints (min length, timestampInFilename dependency, reserved
+    // values) are enforced from one place rather than mirrored here.
     if (overrides.peerId !== undefined) {
-      if (overrides.peerId === "temp")
-        throw new Error(
-          "peer_id 'temp' is reserved; the lockless rendezvous upload glob " +
-            "('<myId>-*') would capture in-flight 'temp-*.tmp' writes",
-        );
-      if (result.options?.timestampInFilename !== true)
-        throw new Error(
-          "--peer-id requires timestamp_in_filename: true in the connection " +
-            "options (set it in psilink.yaml); without a timestamp segment, " +
-            "a reused stable id can collide with a leftover file from a prior " +
-            "crashed session",
-        );
+      const validation = safeParseFileSyncOptions(result.options);
+      if (!validation.success) {
+        const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");
+        throw new Error(message);
+      }
     }
   }
 

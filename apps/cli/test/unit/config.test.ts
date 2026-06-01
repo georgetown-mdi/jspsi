@@ -123,3 +123,12 @@ test("peerId without timestampInFilename is rejected on filedrop too", () => {
     applyConnectionOverrides(base, { peerId: "agency-a" }),
   ).toThrow("timestamp_in_filename");
 });
+
+test("empty peerId is rejected by applyConnectionOverrides", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { timestampInFilename: true },
+  };
+  expect(() => applyConnectionOverrides(base, { peerId: "" })).toThrow();
+});

@@ -581,3 +581,20 @@ export function parseConnectionConfig(raw: unknown): ConnectionConfig {
 export function safeParseConnectionConfig(raw: unknown) {
   return ConnectionConfigSchema.safeParse(camelizeKeys(raw));
 }
+
+/**
+ * Parse and validate a raw value as {@link FileSyncOptions}.
+ * Snake_case keys are converted to camelCase before validation; already-
+ * camelCase objects (e.g. from {@link applyConnectionOverrides}) are accepted
+ * unchanged.
+ *
+ * @throws {ZodError} if validation fails.
+ */
+export function parseFileSyncOptions(raw: unknown): FileSyncOptions {
+  return FileSyncOptionsSchema.parse(camelizeKeys(raw));
+}
+
+/** Non-throwing version of {@link parseFileSyncOptions}. */
+export function safeParseFileSyncOptions(raw: unknown) {
+  return FileSyncOptionsSchema.safeParse(camelizeKeys(raw));
+}
