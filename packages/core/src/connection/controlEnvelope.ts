@@ -14,7 +14,7 @@ export interface ControlFileEnvelope {}
  * Zod schema for {@link ControlFileEnvelope}. Accepts any JSON object,
  * stripping unknown fields. Used by the read gate to distinguish a
  * fully-synced body that fails validation (terminal
- * {@link UsageError}) from a partially-synced body (retried until the peer
+ * `UsageError`) from a partially-synced body (retried until the peer
  * timeout). Unknown fields are stripped rather than rejected so that a peer
  * running a newer build does not cause a schema failure in an older build;
  * required fields added by downstream items will tighten this as needed.

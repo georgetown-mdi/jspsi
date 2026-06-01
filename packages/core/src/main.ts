@@ -4,7 +4,7 @@ export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/fileSyncConnection";
-export * from "./connection/controlEnvelope";
+export type { ControlFileEnvelope } from "./connection/controlEnvelope";
 export * from "./connection/messageConnection";
 export { getLogger, setLogPrefixer } from "./utils/logger";
 export { retryPromise, withTimeout } from "./utils/promise";

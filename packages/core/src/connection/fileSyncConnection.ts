@@ -970,6 +970,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.role = arrivedFirst ? "starter" : "joiner";
             this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
+            // I5 gap: the two-hellos path (winner and EEXIST loser) reads
+            // peerId from the filename but does not call readControlFileWithGate
+            // on the peer hello body. The body is `{}` today so this is safe,
+            // but item 193901017 (bilateral mode flags) must add the gate call
+            // to both the winner path and the EEXIST cleanup path before it
+            // reads any flag fields from the envelope.
             const waveName =
               `${arrivedFirst ? this.id : this.peerId}-` +
               `${arrivedFirst ? this.peerId : this.id}.wave`;

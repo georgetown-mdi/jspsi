@@ -2579,3 +2579,146 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
 });
+
+test("synchronize() wave-detection: mid-sync peer hello body retried, not malformed", async () => {
+  // The wave-detection branch (waveFiles.length > 0) calls readControlFileWithGate
+  // on the peer hello before committing roles. A partially-synced body (invalid
+  // JSON on first get()) must cause a retry, not a terminal failure.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 2_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const waveName = `${peerId}-${myId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(wavePath, Buffer.alloc(0));
+
+  let getCalls = 0;
+  const origGet = client.get;
+  client.get = async (path: string) => {
+    if (path === `${conn.path}/${peerHelloName}`) {
+      getCalls++;
+      if (getCalls <= 2) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+    }
+    return origGet(path);
+  };
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await conn.synchronize();
+
+  expect(getCalls).toBeGreaterThanOrEqual(3);
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() wave-detection: malformed peer hello body is a UsageError", async () => {
+  // A fully-synced hello body in the wave-detection branch that parses as JSON
+  // but fails the envelope schema must throw a terminal UsageError, not retry.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const waveName = `${peerId}-${myId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("[]"));
+  files.set(wavePath, Buffer.alloc(0));
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() wave starter: mid-sync joiner hello body retried, not malformed", async () => {
+  // The starter fast-path (theseFiles.length === 0 in waitForPeer) calls
+  // readControlFileWithGate on the joiner's hello before deleting it. A
+  // partially-synced body must be retried, not treated as a terminal failure.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 2_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+
+  let getCalls = 0;
+  const origGet = client.get;
+  client.get = async (path: string) => {
+    if (path === `${conn.path}/${peerHelloName}`) {
+      getCalls++;
+      if (getCalls <= 2) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+    }
+    return origGet(path);
+  };
+
+  // First list(): empty (initial preexisting check passes). Second+: only the
+  // peer hello is visible — no self hello — triggering the theseFiles===0 branch.
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [{ name: peerHelloName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  await conn.synchronize();
+
+  expect(getCalls).toBeGreaterThanOrEqual(3);
+  expect(conn.peerId).toBe(peerId);
+  expect(conn.handshakeRole).toBe("responder");
+});
+
+test("synchronize() wave starter: malformed joiner hello body is a UsageError", async () => {
+  // A fully-synced but schema-invalid joiner hello body in the starter
+  // theseFiles===0 branch must throw a terminal UsageError, not retry.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("[]"));
+
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [{ name: peerHelloName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
