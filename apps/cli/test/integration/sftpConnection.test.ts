@@ -98,7 +98,7 @@ test("wave synchronization with race condition", async () => {
 
 test("basic synchronization", async () => {
   await serverSFTP.put(
-    Buffer.from(new ArrayBuffer(0)),
+    Buffer.from("{}"),
     `${SFTP_PATH}/${clientConn.id}-hello.json`,
   );
 

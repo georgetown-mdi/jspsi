@@ -1094,8 +1094,9 @@ test("synchronize() resolves cleanly when it observes a wave file already create
   const wavePath = `${conn.path}/${waveName}`;
 
   // Plant the three files so safeDelete calls have something to remove.
+  // Peer hello must be valid JSON so the I5 read gate does not retry to timeout.
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -1150,7 +1151,7 @@ test("synchronize() wave-detection branch completes rendezvous with arbitrary st
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -1200,7 +1201,7 @@ test("synchronize() wave-detection branch uses filename order (I7), not id order
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -1391,7 +1392,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -1417,7 +1418,7 @@ test("synchronize() joiner branch: leaves connection unsynchronized when put fai
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -1979,7 +1980,8 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
 
   // Pre-plant A's hello so B's initial list() sees it (simulating A having
   // arrived first and written its hello before B calls synchronize()).
-  sharedFiles.set(`/shared/${idA}-hello.json`, Buffer.alloc(0));
+  // Must be valid JSON so the I5 read gate does not retry to timeout.
+  sharedFiles.set(`/shared/${idA}-hello.json`, Buffer.from("{}"));
 
   let deleteCalled = false;
   const makeClient = (): FileTransportClient => ({
@@ -2171,7 +2173,7 @@ test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () =>
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2200,7 +2202,7 @@ test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", asy
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -2230,7 +2232,7 @@ test("synchronize() joiner branch accepts shared-prefix ids that are not prefix-
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2247,7 +2249,7 @@ test("synchronize() joiner branch accepts space-containing ids", async () => {
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2324,4 +2326,400 @@ test("send() message timeout throws UsageError", async () => {
   // Plant a stale outbound message that nobody will consume.
   files.set(`${conn.path}/${conn.id}-99.json`, Buffer.from("stale"));
   await expect(conn.send({ next: true })).rejects.toBeInstanceOf(UsageError);
+});
+
+// --- control file envelope: round-trip, partial-sync gate, malformed body -----
+
+test("synchronize() wave mode: round-trip hello write and read with JSON envelope body", async () => {
+  // Both the joiner fast-path (writes and reads the peer hello) and the starter
+  // (reads the joiner hello before deleting) must write and read the JSON envelope.
+  // Run joiner path: initial list shows one peer hello; joiner reads it, deletes
+  // it, writes its own with an envelope body.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  await conn.synchronize();
+
+  // Joiner wrote its own hello with a JSON envelope body.
+  const myHelloPath = `${conn.path}/${conn.id}-hello.json`;
+  expect(files.has(myHelloPath)).toBe(true);
+  const body = JSON.parse(files.get(myHelloPath)!.toString());
+  expect(body).toMatchObject({});
+  expect(conn.handshakeRole).toBe("initiator");
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() lockless mode: round-trip hello and ack write and read with JSON envelope body", async () => {
+  // Both parties must write hellos and acks with JSON envelope bodies, and each
+  // must validate the peer's hello and ack through the read gate.
+  const idA = "00000000-0000-4000-8000-000000000001";
+  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const sharedFiles = new Map<string, Buffer>();
+
+  const makeClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async (path: string) => {
+      sharedFiles.delete(path);
+    },
+    safeDelete: async (path: string) => {
+      sharedFiles.delete(path);
+    },
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (!data) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => {
+      throw new Error("not supported");
+    },
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const connA = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connA.id = idA;
+  connA.connected = true;
+  connA.path = "/shared";
+
+  const connB = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connB.id = idB;
+  connB.connected = true;
+  connB.path = "/shared";
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // Both hellos and both acks must have been written with JSON envelope bodies.
+  for (const id of [idA, idB]) {
+    const helloBody = JSON.parse(
+      sharedFiles.get(`/shared/${id}-hello.json`)!.toString(),
+    );
+    expect(helloBody).toMatchObject({});
+    const ackBody = JSON.parse(
+      sharedFiles.get(`/shared/${id}-hello-ack.json`)!.toString(),
+    );
+    expect(ackBody).toMatchObject({});
+  }
+  expect(connA.peerId).toBe(idB);
+  expect(connB.peerId).toBe(idA);
+});
+
+test("synchronize() joiner: mid-sync hello body retried, not reported malformed", async () => {
+  // A hello body that fails JSON.parse on the first get() (simulating a partial
+  // write by a sync tool) must be retried rather than causing a terminal failure.
+  // Only once the body becomes valid JSON should synchronize() proceed.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 2_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+
+  // First two get() calls return truncated JSON (partial sync); the third
+  // returns a fully valid envelope. The gate must retry silently for the
+  // first two and succeed on the third.
+  let getCalls = 0;
+  const origGet = client.get;
+  client.get = async (path: string) => {
+    if (path === `${conn.path}/${peerHelloName}`) {
+      getCalls++;
+      if (getCalls <= 2) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+    }
+    return origGet(path);
+  };
+
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  await conn.synchronize();
+
+  // Gate retried at least twice before succeeding.
+  expect(getCalls).toBeGreaterThanOrEqual(3);
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() joiner: fully-synced but malformed hello body is a UsageError", async () => {
+  // A hello body that parses as JSON but fails the envelope schema is a
+  // terminal UsageError (protocol mismatch), not a retry.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+
+  // A JSON array is syntactically valid but fails the envelope schema (expects
+  // an object), so it is a terminal malformed-payload error, not a retry.
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("[]"));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() lockless: mid-sync ack body retried, not reported malformed", async () => {
+  // A lockless ack body that fails JSON.parse on first read must be retried.
+  // The gate applies to both the hello read (before writing own ack) and the
+  // ack read (before committing roles).
+  const idA = "00000000-0000-4000-8000-000000000001";
+  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const sharedFiles = new Map<string, Buffer>();
+
+  // Track how many times the ack is read through the gate.
+  let ackGetCalls = 0;
+  const peerAckName = `${idA}-hello-ack.json`;
+
+  const makeClient = (id: string): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      // connB reads connA's ack: first call returns truncated body, subsequent
+      // calls return the full body. connA reads connB's ack normally.
+      if (id === idB && path.endsWith(peerAckName)) {
+        ackGetCalls++;
+        if (ackGetCalls === 1) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+      }
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async (path: string) => { sharedFiles.delete(path); },
+    safeDelete: async (path: string) => { sharedFiles.delete(path); },
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (!data) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => { throw new Error("not supported"); },
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const connA = new FileSyncConnection(makeClient(idA), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connA.id = idA;
+  connA.connected = true;
+  connA.path = "/shared";
+
+  const connB = new FileSyncConnection(makeClient(idB), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  connB.id = idB;
+  connB.connected = true;
+  connB.path = "/shared";
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  // connB retried the ack read at least once (first call returned truncated).
+  expect(ackGetCalls).toBeGreaterThanOrEqual(2);
+  expect(connA.peerId).toBe(idB);
+  expect(connB.peerId).toBe(idA);
+});
+
+test("synchronize() wave-detection: mid-sync peer hello body retried, not malformed", async () => {
+  // The wave-detection branch (waveFiles.length > 0) calls readControlFileWithGate
+  // on the peer hello before committing roles. A partially-synced body (invalid
+  // JSON on first get()) must cause a retry, not a terminal failure.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 2_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const waveName = `${peerId}-${myId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(wavePath, Buffer.alloc(0));
+
+  let getCalls = 0;
+  const origGet = client.get;
+  client.get = async (path: string) => {
+    if (path === `${conn.path}/${peerHelloName}`) {
+      getCalls++;
+      if (getCalls <= 2) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+    }
+    return origGet(path);
+  };
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await conn.synchronize();
+
+  expect(getCalls).toBeGreaterThanOrEqual(3);
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() wave-detection: malformed peer hello body is a UsageError", async () => {
+  // A fully-synced hello body in the wave-detection branch that parses as JSON
+  // but fails the envelope schema must throw a terminal UsageError, not retry.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const waveName = `${peerId}-${myId}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+
+  files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("[]"));
+  files.set(wavePath, Buffer.alloc(0));
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+      { name: waveName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() wave starter: mid-sync joiner hello body retried, not malformed", async () => {
+  // The starter fast-path (theseFiles.length === 0 in waitForPeer) calls
+  // readControlFileWithGate on the joiner's hello before deleting it. A
+  // partially-synced body must be retried, not treated as a terminal failure.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 2_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+
+  let getCalls = 0;
+  const origGet = client.get;
+  client.get = async (path: string) => {
+    if (path === `${conn.path}/${peerHelloName}`) {
+      getCalls++;
+      if (getCalls <= 2) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+    }
+    return origGet(path);
+  };
+
+  // First list(): empty (initial preexisting check passes). Second+: only the
+  // peer hello is visible — no self hello — triggering the theseFiles===0 branch.
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [{ name: peerHelloName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  await conn.synchronize();
+
+  expect(getCalls).toBeGreaterThanOrEqual(3);
+  expect(conn.peerId).toBe(peerId);
+  expect(conn.handshakeRole).toBe("responder");
+});
+
+test("synchronize() wave starter: malformed joiner hello body is a UsageError", async () => {
+  // A fully-synced but schema-invalid joiner hello body in the starter
+  // theseFiles===0 branch must throw a terminal UsageError, not retry.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+
+  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("[]"));
+
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return [];
+    return [{ name: peerHelloName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
