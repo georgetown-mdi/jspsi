@@ -17,7 +17,7 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-import { applyConnectionOverrides } from "../config";
+import { applyConnectionOverrides, announceRetainMode } from "../config";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
@@ -108,6 +108,26 @@ export function builder(cmd: Argv): Argv {
         "Requires timestamp_in_filename: true. Both parties must use " +
         "distinct ids",
     })
+    .option("timestamp-in-filename", {
+      type: "boolean",
+      describe:
+        "encode a UTC timestamp and per-session counter in each outgoing " +
+        "message filename; --retain-files implies it, so it need not be passed " +
+        "explicitly. Both parties must use the same value",
+    })
+    .option("retain-files", {
+      type: "boolean",
+      describe:
+        "keep all exchange files as a permanent transcript instead of " +
+        "deleting them after consumption; intended for sync-mediated " +
+        "transports that do not propagate deletions and for audit use cases. " +
+        "Requires --timestamp-in-filename. Both parties must set this flag " +
+        "identically -- a mismatch causes the exchange to stall until the " +
+        "peer timeout fires (fast-fail detection not yet available). A fresh " +
+        "directory is required for each exchange and is enforced: reusing a " +
+        "directory with retained files from a prior session is rejected with " +
+        "an error at startup",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -135,6 +155,8 @@ interface ZeroSetupArgs {
   maxReconnectAttempts?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
+  timestampInFilename?: boolean;
+  retainFiles?: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -171,6 +193,8 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
     peerId: argv["peer-id"] as string | undefined,
+    timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
+    retainFiles: argv["retain-files"] as boolean | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -275,6 +299,8 @@ export function createConnection(
       maxReconnectAttempts: options.maxReconnectAttempts,
       locklessRendezvous: options.locklessRendezvous,
       peerId: options.peerId,
+      timestampInFilename: options.timestampInFilename,
+      retainFiles: options.retainFiles,
     });
   }
 
@@ -302,6 +328,8 @@ export function createConnection(
     serverPort: options.serverPort,
     locklessRendezvous: options.locklessRendezvous,
     peerId: options.peerId,
+    timestampInFilename: options.timestampInFilename,
+    retainFiles: options.retainFiles,
   });
 }
 
@@ -369,6 +397,20 @@ export async function handler(argv: Arguments): Promise<void> {
     }
   }
 
+  if (options.retainFiles === true) {
+    try {
+      const ch = channelFromURL(server);
+      if (ch !== "sftp" && ch !== "filedrop") {
+        log.warn(
+          `--retain-files is not supported on the ${ch} channel; ` +
+            "it is only valid for sftp and filedrop",
+        );
+      }
+    } catch {
+      // Unknown URL scheme; createConnection handles this.
+    }
+  }
+
   if (options.save) {
     log.warn(
       "--save: bootstrapping a shared secret is not yet implemented; " +
@@ -386,6 +428,8 @@ export async function handler(argv: Arguments): Promise<void> {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit((err as { exitCode?: number }).exitCode ?? 69);
   }
+
+  announceRetainMode(connection, log);
 
   try {
     // Spread + cast: `connection` is `ConnectionConfig` (which includes the

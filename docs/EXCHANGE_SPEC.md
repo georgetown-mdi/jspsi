@@ -567,6 +567,7 @@ These options apply to both `sftp` and `filedrop` channels.
 | `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
 | `lockless_rendezvous` | boolean | false | When `true`, the rendezvous handshake uses an ack-handshake barrier (`<id>-hello.json` + `<id>-hello-ack.json`) instead of the default atomic wave-file race (`<id>-hello.json` + `<id1>-<id2>.wave`). Required on sync-mediated transports that lack atomic exclusive-create or deletion visibility during rendezvous (e.g. a cloud sync service reconciling two local mirrors where both sides "win" a local create). Both parties must set this identically; a mismatch causes rendezvous to time out. The operational sync glob in lockless mode is `<myId>-*` (upload) / `<partnerId>-*` (download), which covers hello, ack, and message files while excluding in-flight `temp-*.tmp` writes. |
 | `peer_id` | string | — | A stable, human-readable identifier for this party. Appears in every filename this party writes (hello, message, ack) and in server-side logs and transcripts. When unset, a UUID is generated at construction time. Requires `timestamp_in_filename: true`; a reused stable id without a timestamp segment can collide with a leftover file from a crashed prior session. The two parties must use distinct ids, and neither may be the other's id extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous; see [FILE_SYNC.md preconditions](FILE_SYNC.md#preconditions-for-a-correct-exchange)). Spaces and `-` are permitted within a `peer_id`. The value `"temp"` is reserved. Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may cause errors at the transport layer. |
+| `retain_files` | boolean | false | When `true`, the receiver writes a `receipt` control file after consuming each message rather than deleting it; the sender gates its next write on observing that receipt rather than on the message file disappearing. No exchange file is deleted as a protocol step; the shared directory becomes a permanent transcript. Requires `timestamp_in_filename: true` -- without it, every message from the same party would share a filename and a retained transcript would overwrite itself. Also requires `lockless_rendezvous: true` -- wave rendezvous is delete-based and cannot produce the whole-directory no-delete transcript retain mode guarantees. The CLI `--retain-files` flag implies both `--lockless-rendezvous` and `--timestamp-in-filename` when those are not already set. Both parties must set this flag identically; a mismatch causes the exchange to stall until the peer timeout fires. **A fresh directory is required for each exchange and is enforced**: `synchronize()` requires the directory to be empty except for at most one peer hello and throws a `UsageError` on any other pre-existing file (a leftover message, receipt, wave, handshake-ack, self-hello, or temp file from a prior session); otherwise a stale message would be mis-consumed against the per-session sequence counter and a stale receipt could prematurely release the sender. See [Receipt files](#receipt-files). |
 
 #### Message filenames
 
@@ -588,6 +589,22 @@ With `timestamp_in_filename: true`, the filename additionally carries a timestam
 
 In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<id1>-<id2>.wave`, `<id>-hello-ack.json`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
 
+#### Receipt files
+
+When `retain_files: true`, the receiver writes a receipt file immediately after validating each message and before emitting it to the application layer. The receipt filename follows the same right-anchored byte-count convention as message files, but its terminal segment is the type word `receipt` (not a digit string), so it is never mistaken for a message:
+
+```
+<receiverId>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-receipt.json
+```
+
+`<NNN>` copies the consumed message's sequence counter. `<byteCount>` is the exact on-disk size of the receipt body, enabling the same partial-sync safety gate (I5a) used for messages: the sender reads the file size from the directory listing and waits until it matches the declared count before treating the receipt as valid.
+
+The receiver never deletes the consumed message file. The message and its receipt both persist, and the directory accumulates one of each per exchanged message on every transport -- including those, such as SFTP, that do support deletion. This is what makes the directory a durable transcript rather than only a workaround for transports that cannot propagate deletions.
+
+In `retain_files` mode `close()` does not delete exchange files; the directory is the transcript. This includes the rendezvous artifacts: each party's `-hello.json` and the lockless `-hello-ack.json` persist alongside the messages and receipts, so the transcript is not only message and receipt files. The only file ever removed is an in-flight `temp-*.tmp` write, which is cleaned up inline on error.
+
+The transcript accumulates with no in-protocol cleanup; retention, rotation, and archival are out-of-band operator responsibilities.
+
 #### Directory exclusivity
 
 The shared directory (SFTP path or local filedrop path) must be **dedicated exclusively** to a single active exchange between exactly two parties. Both channels treat the directory as a private communication channel: each party reads and deletes files written by the other, and the rendezvous protocol uses filename presence as a synchronization signal.
@@ -599,7 +616,7 @@ A third process writing `<id>-hello.json`, `<id1>-<id2>.wave`, `<id>-hello-ack.j
 Every protocol file on `sftp` and `filedrop` channels is named `<id>-...-<token>.json`, where `<token>` is the final `-`-delimited segment before `.json`:
 
 - If `<token>` is all digits, the file is a **message** and `<token>` is its declared byte count. Parsing is right-anchored so a party id containing hyphens does not affect extraction.
-- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (lockless-mode handshake ack). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric.
+- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (lockless-mode handshake ack), `receipt` (retain-mode read receipt). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric.
 
 The receiver only reads files whose on-disk size matches the declared byte count, so a partially synced message file is never consumed prematurely.
 

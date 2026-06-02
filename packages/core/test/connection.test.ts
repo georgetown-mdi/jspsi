@@ -475,6 +475,59 @@ test("peerId 'temp' is rejected", () => {
   expect(messages.some((m) => m.includes("reserved"))).toBe(true);
 });
 
+test("retainFiles is accepted on sftp when timestampInFilename and locklessRendezvous are true", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, locklessRendezvous: true, retainFiles: true },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("retainFiles is rejected without timestampInFilename", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { retainFiles: true },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("timestamp_in_filename"))).toBe(true);
+});
+
+test("retainFiles is rejected when timestampInFilename is false", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { retainFiles: true, timestampInFilename: false },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("retainFiles is rejected without locklessRendezvous", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { retainFiles: true, timestampInFilename: true },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("lockless_rendezvous"))).toBe(true);
+});
+
+test("retainFiles is rejected when locklessRendezvous is false", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: {
+      retainFiles: true,
+      timestampInFilename: true,
+      locklessRendezvous: false,
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("lockless_rendezvous"))).toBe(true);
+});
+
 test("parses snake_case peer_id from disk", () => {
   const result = parseConnectionConfig({
     ...sftpBase,

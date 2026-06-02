@@ -132,3 +132,33 @@ test("empty peerId is rejected by applyConnectionOverrides", () => {
   };
   expect(() => applyConnectionOverrides(base, { peerId: "" })).toThrow();
 });
+
+// --- retainFiles implication --------------------------------------------------
+
+test("retainFiles: true with unset lockless and timestamp implies both true", () => {
+  const result = applyConnectionOverrides(baseSFTP, { retainFiles: true });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.retainFiles).toBe(true);
+  expect(result.options?.locklessRendezvous).toBe(true);
+  expect(result.options?.timestampInFilename).toBe(true);
+});
+
+test("retainFiles: true preserves an already-set locklessRendezvous: true", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { locklessRendezvous: true, timestampInFilename: true },
+  };
+  const result = applyConnectionOverrides(base, { retainFiles: true });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.locklessRendezvous).toBe(true);
+});
+
+test("retainFiles: true with explicit locklessRendezvous: false throws", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      retainFiles: true,
+      locklessRendezvous: false,
+    }),
+  ).toThrow("lockless_rendezvous");
+});

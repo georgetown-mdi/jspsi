@@ -129,6 +129,7 @@ test("fromEventConnection over FileSyncConnection: a polled message is delivered
 test("fromEventConnection over FileSyncConnection: send() writes the outbound message file", async () => {
   const { client, files } = makeMockClient();
   const conn = makeConnectedConn(client);
+  conn.peerId = "peer-test";
 
   const mc = fromEventConnection(conn);
   await mc.send({ ping: 1 });
@@ -197,6 +198,7 @@ test("fromEventConnection over FileSyncConnection: a send-time transport failure
     timeToLiveMs: 150,
     pollingFrequency: 10,
   });
+  conn.peerId = "peer-test";
   // A previous unconsumed message blocks send(); with a short TTL the wait
   // times out and send() rejects, which the bridge latches as terminal.
   files.set(

@@ -11,6 +11,8 @@ export interface ConnectionOverrides {
   serverPort?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
+  retainFiles?: boolean;
+  timestampInFilename?: boolean;
 }
 
 export function applyConnectionOverrides(
@@ -49,13 +51,16 @@ export function applyConnectionOverrides(
     };
   }
 
-  // locklessRendezvous and peerId are FileSyncOptions fields; only apply them
-  // on channels that use FileSyncConnection. The other overrides above
-  // (peerTimeout etc.) are SharedOptions that apply to all channels including
-  // webrtc.
+  // locklessRendezvous, peerId, retainFiles, and timestampInFilename are
+  // FileSyncOptions fields; only apply them on channels that use
+  // FileSyncConnection. The other overrides above (peerTimeout etc.) are
+  // SharedOptions that apply to all channels including webrtc.
   if (
     (result.channel === "sftp" || result.channel === "filedrop") &&
-    (overrides.locklessRendezvous !== undefined || overrides.peerId !== undefined)
+    (overrides.locklessRendezvous !== undefined ||
+      overrides.peerId !== undefined ||
+      overrides.retainFiles !== undefined ||
+      overrides.timestampInFilename !== undefined)
   ) {
     result.options = {
       ...result.options,
@@ -65,19 +70,61 @@ export function applyConnectionOverrides(
       ...(overrides.peerId !== undefined && {
         peerId: overrides.peerId,
       }),
+      ...(overrides.retainFiles !== undefined && {
+        retainFiles: overrides.retainFiles,
+      }),
+      ...(overrides.timestampInFilename !== undefined && {
+        timestampInFilename: overrides.timestampInFilename,
+      }),
     };
+
+    // retain_files implies lockless_rendezvous and timestamp_in_filename when
+    // those are not yet set. This lets --retain-files alone suffice at the CLI.
+    // An explicit false is left untouched so the schema refine can surface the
+    // contradiction with a clear error message.
+    if (result.options.retainFiles === true) {
+      if (result.options.locklessRendezvous === undefined)
+        result.options.locklessRendezvous = true;
+      if (result.options.timestampInFilename === undefined)
+        result.options.timestampInFilename = true;
+    }
 
     // Re-validate the merged options through FileSyncOptionsSchema so that
     // all constraints (min length, timestampInFilename dependency, reserved
     // values) are enforced from one place rather than mirrored here.
-    if (overrides.peerId !== undefined) {
-      const validation = safeParseFileSyncOptions(result.options);
-      if (!validation.success) {
-        const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");
-        throw new Error(message);
-      }
+    // Re-validate whenever any FileSyncOptions field is overridden, not just
+    // peerId/retainFiles, so future cross-field constraints on locklessRendezvous
+    // are not silently bypassed.
+    const validation = safeParseFileSyncOptions(result.options);
+    if (!validation.success) {
+      const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");
+      throw new Error(message);
     }
   }
 
   return result;
+}
+
+/**
+ * Logs a one-time reminder, on the file-sync channels only, that retain mode is
+ * a bilateral agreement with no negotiation: this party has it enabled (with the
+ * `lockless_rendezvous` and `timestamp_in_filename` it implies), and the peer
+ * must set all three identically or the exchange stalls until the peer timeout.
+ * Shared by the `exchange` and `zero-setup` commands so the wording cannot drift
+ * between them.
+ */
+export function announceRetainMode(
+  connection: ConnectionConfig,
+  log: { info: (message: string) => void },
+): void {
+  if (
+    (connection.channel === "sftp" || connection.channel === "filedrop") &&
+    connection.options?.retainFiles === true
+  ) {
+    log.info(
+      "retain mode is enabled, with lockless_rendezvous and " +
+        "timestamp_in_filename; the peer must set all three identically " +
+        "(these flags are not negotiated).",
+    );
+  }
 }
