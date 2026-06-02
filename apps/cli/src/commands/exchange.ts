@@ -115,8 +115,9 @@ export function builder(cmd: Argv): Argv {
         "Requires timestamp_in_filename: true in config. Both parties must " +
         "set this flag identically -- a mismatch causes the exchange to stall " +
         "until the peer timeout fires (fast-fail detection not yet available). " +
-        "Use a fresh directory for each exchange; retained files from a prior " +
-        "session are not cleaned up",
+        "A fresh directory is required for each exchange and is enforced: " +
+        "reusing a directory with retained files from a prior session is " +
+        "rejected with an error at startup",
     })
     .option("verbose", {
       alias: "v",
@@ -308,17 +309,6 @@ export function loadConfig(
     log.warn(
       `--lockless-rendezvous has no effect on the ${connection.channel} ` +
         "channel and will be ignored; it is only supported on sftp and filedrop",
-    );
-  }
-
-  if (
-    options.retainFiles === true &&
-    connection.channel !== "sftp" &&
-    connection.channel !== "filedrop"
-  ) {
-    log.warn(
-      `--retain-files is not supported on the ${connection.channel} ` +
-        "channel; it is only valid for sftp and filedrop",
     );
   }
 

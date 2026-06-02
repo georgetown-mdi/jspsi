@@ -1411,6 +1411,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         } else {
           if (this.options.retainFiles) {
             const nnn = parseMessageNNN(file.name);
+            if (nnn === undefined) {
+              this.log.trace(
+                `[${this.role}] skipping ${file.name}: no numeric NNN segment (unexpected in retain mode)`,
+              );
+              continue;
+            }
             if (nnn !== this.recvSeq) continue;
           }
           messages.push({ file, declaredSize });
@@ -1465,7 +1471,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             const receiptName = await this.writeReceipt(path, msgNNN);
-            this.recvSeq++;
             this.log.debug(
               `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
             );
@@ -1479,6 +1484,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             } else {
               this.emit("data", validatedMessage.payload);
             }
+            // Advance only after the application has seen the payload: if emit
+            // throws, recvSeq stays at msgNNN so the message file (not yet
+            // deleted) is retried on the next poll rather than permanently lost.
+            this.recvSeq++;
 
             try {
               await this.client.delete(inPath);

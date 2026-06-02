@@ -391,9 +391,9 @@ export interface FileSyncOptions extends SharedOptions {
    * party collides on filename and a retained transcript would overwrite
    * itself.
    *
-   * Use a fresh directory for each exchange. Retained mode never deletes, so
-   * files from a prior session remain and could be misread as current
-   * messages if the directory is reused.
+   * A fresh directory is required for each exchange and is enforced:
+   * `synchronize()` throws a `UsageError` if any message or receipt files
+   * from a prior session are present in the directory.
    */
   retainFiles?: boolean;
 }

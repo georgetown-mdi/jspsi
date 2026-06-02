@@ -123,9 +123,10 @@ export function builder(cmd: Argv): Argv {
         "transports that do not propagate deletions and for audit use cases. " +
         "Requires --timestamp-in-filename. Both parties must set this flag " +
         "identically -- a mismatch causes the exchange to stall until the " +
-        "peer timeout fires (fast-fail detection not yet available). Use a " +
-        "fresh directory for each exchange; retained files from a prior " +
-        "session are not cleaned up",
+        "peer timeout fires (fast-fail detection not yet available). A fresh " +
+        "directory is required for each exchange and is enforced: reusing a " +
+        "directory with retained files from a prior session is rejected with " +
+        "an error at startup",
     })
     .option("verbose", {
       alias: "v",
