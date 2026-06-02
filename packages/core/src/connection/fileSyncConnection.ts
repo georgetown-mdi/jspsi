@@ -1501,8 +1501,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         );
 
       if (messages.length > 1) {
-        // Emitted (not thrown to a caller), so no "usage" sentinel: the bridge
-        // classifies every poll-loop error as a transport failure.
+        // Two messages selected at once is a terminal protocol violation in
+        // either mode -- re-reading cannot reconcile it -- so it is a UsageError
+        // that stops the poller (I5b/I6), not a retryable transport failure.
         if (this.options.retainFiles) {
           // In retain mode the scan is filtered to a single NNN (recvSeq), so
           // two matches mean two files share one NNN -- a protocol violation or
@@ -1512,7 +1513,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
           );
         }
-        throw new Error(
+        // Delete mode keeps at most one outstanding message per direction (I9),
+        // so two peer messages means a concurrent session or a protocol bug.
+        throw new UsageError(
           `more than one message file from ${peerId} in ${path} - are there ` +
             "other sessions using this path?",
         );

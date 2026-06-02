@@ -3526,6 +3526,47 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
   expect(errors).toHaveLength(1);
 });
 
+test("delete mode: poll() more-than-one-message error is a UsageError and stops the poller", async () => {
+  // Delete mode keeps at most one outstanding message per direction (I9), so two
+  // peer messages at once is a terminal protocol violation (a concurrent session
+  // or a bug), not a retryable transport failure -- a UsageError that stops the
+  // poller, matching the retain-mode duplicate-NNN case. Re-reading the same two
+  // files cannot reconcile them.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  const peerId = "peer-sender";
+  conn.peerId = peerId;
+
+  // Two distinct, fully-synced delete-mode message files from the peer.
+  files.set(`/test/${peerId}-10.json`, Buffer.from("a".repeat(10)));
+  files.set(`/test/${peerId}-20.json`, Buffer.from("b".repeat(20)));
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  // Do NOT call stop() -- a terminal error must stop the poller on its own.
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for poll error")), 2_000),
+    ),
+  ]);
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("more than one message file");
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
+  // No second error: the poller did not reschedule.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(errors).toHaveLength(1);
+});
+
 test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () => {
   // The seq-mismatch UsageError was already a UsageError before this change;
   // confirm it also stops the poller (finding #1), consistent with the
