@@ -1414,7 +1414,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   // Writes a receipt for a consumed message whose NNN is `nnn`. Follows the
   // same temp-then-rename pattern as send() so the declared byte count in the
-  // filename always matches the on-disk size (I5 gate). Returns the final
+  // filename always matches the on-disk size (I5a gate). Returns the final
   // receipt filename (without directory).
   private async writeReceipt(dir: string, nnn: number): Promise<string> {
     const body = serializeEnvelope({});
