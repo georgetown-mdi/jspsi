@@ -286,19 +286,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
-    if (this.options.retainFiles) this.emitRetainFilesWarning();
-  }
-
-  private emitRetainFilesWarning() {
-    let msg =
-      "retain_files is true: retain mode requires a fresh directory per " +
-      "exchange -- own receipt files from a prior session silently suppress " +
-      "incoming messages with matching sequence numbers";
-    if (!this.options.peerId)
-      msg +=
-        "; without a stable peer_id, UUID coincidence across sessions can " +
-        "also cause phantom message files -- set peer_id to a stable value";
-    this.log.warn(msg);
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -363,15 +350,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.timestampInFilename = config.options.timestampInFilename;
     if (config.options?.locklessRendezvous !== undefined)
       this.options.locklessRendezvous = config.options.locklessRendezvous;
-    if (config.options?.retainFiles !== undefined) {
-      const wasRetainFiles = this.options.retainFiles;
+    if (config.options?.retainFiles !== undefined)
       this.options.retainFiles = config.options.retainFiles;
-      // Emit the fresh-directory warning when retainFiles first becomes true
-      // via open() -- the constructor warning only fires when retainFiles is
-      // set in the constructor options, which the CLI never does.
-      if (this.options.retainFiles && !wasRetainFiles)
-        this.emitRetainFilesWarning();
-    }
     if (config.options?.peerId !== undefined) {
       this.options.peerId = config.options.peerId;
       this.id = config.options.peerId;
@@ -584,9 +564,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `[${this.role}] found ${files.length} file(s)` +
         `${files.length > 0 ? `: ${fileNames.join(", ")}` : ""}`,
     );
-    this.responsibleFiles.forEach((fileName) => {
-      if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
-    });
+    if (!this.options.retainFiles)
+      this.responsibleFiles.forEach((fileName) => {
+        if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
+      });
     const helloFiles = files.filter((file) => file.name.endsWith(HELLO_SUFFIX));
     const hasStaleAck = files.some((file) =>
       file.name.endsWith("-hello-ack.json"),
@@ -621,40 +602,23 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
     }
 
-    // In retain mode, files from a prior session are never deleted and will be
-    // present in a reused directory. Warn loudly -- the spec requires a fresh
-    // directory per exchange, but a hard error would break legitimate reconnect
-    // paths where cleanup() already ran and the directory is otherwise clean.
+    // Retain mode requires a fresh directory per exchange: nothing is ever
+    // deleted, so leftover files from a prior session are indistinguishable
+    // from current-session files and will corrupt the exchange.
     if (this.options.retainFiles) {
-      const staleMessages = files.filter(
+      const staleFiles = files.filter(
         (f) =>
-          !f.name.startsWith(`${this.id}-`) &&
-          f.name.endsWith(".json") &&
-          parseMessageByteCount(f.name) !== undefined,
-      );
-      if (staleMessages.length > 0)
-        this.log.warn(
-          `[${this.role}] retain mode: ${staleMessages.length} non-own ` +
-            `message file(s) already present in ${this.path} ` +
-            `(${staleMessages.map((f) => f.name).join(", ")}); the peer ` +
-            "is not yet known -- any that match the eventual peer's prefix " +
-            "will be processed as current messages -- use a fresh directory " +
-            "per exchange",
-        );
-
-      const staleReceipts = files.filter(
-        (f) =>
-          f.name.startsWith(`${this.id}-`) &&
+          (f.name.endsWith(".json") &&
+            parseMessageByteCount(f.name) !== undefined) ||
           f.name.endsWith("-receipt.json"),
       );
-      if (staleReceipts.length > 0)
-        this.log.warn(
-          `[${this.role}] retain mode: ${staleReceipts.length} own receipt ` +
-            `file(s) already present in ${this.path} ` +
-            `(${staleReceipts.map((f) => f.name).join(", ")}); stale ` +
-            "receipts from a prior session will silently suppress incoming " +
-            "messages with matching sequence numbers -- use a fresh directory " +
-            "per exchange",
+      if (staleFiles.length > 0)
+        throw new UsageError(
+          `retain mode: path ${this.path} contains ${staleFiles.length} ` +
+            `exchange file(s) from a prior session ` +
+            `(${staleFiles.map((f) => f.name).join(", ")}); ` +
+            "retain mode requires a fresh directory per exchange -- " +
+            "move or remove these files before retrying",
         );
     }
 
@@ -1424,19 +1388,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // so failing the exchange over an unrelated file would be a regression.
       //
       // In retain mode, messages are never deleted so the directory accumulates
-      // one entry per send. Build the set of already-processed NNNs from
-      // this.responsibleFiles (receipts written in the current session) rather
-      // than from a filesystem scan. A filesystem scan would include receipts
-      // left by prior sessions in a reused directory, silently suppressing
-      // every incoming message whose NNN matches a prior-session receipt and
-      // stalling the exchange indefinitely. Using responsibleFiles limits the
-      // suppression set to receipts this instance wrote, so stale files from
-      // any earlier session are invisible to the current session's poll loop.
+      // one entry per send. synchronize() asserts a clean directory, so all
+      // own-prefixed receipt files on disk belong to the current session; scan
+      // them directly to build the set of already-processed NNNs.
       const allFiles = await this.client.list(path);
       const alreadyReceiptedNNNs = new Set<number>();
       if (this.options.retainFiles) {
-        for (const filename of this.responsibleFiles) {
-          const segs = parseReceiptSegments(filename);
+        for (const file of allFiles) {
+          if (!file.name.startsWith(`${this.id}-`)) continue;
+          const segs = parseReceiptSegments(file.name);
           if (segs !== undefined) alreadyReceiptedNNNs.add(segs.nnn);
         }
       }
@@ -1520,7 +1480,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             const receiptName = await this.writeReceipt(path, msgNNN);
-            this.responsibleFiles.add(receiptName);
             this.log.debug(
               `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
             );

@@ -3021,7 +3021,7 @@ test("retain mode: first send proceeds immediately without any receipt", async (
   expect(messageFiles).toHaveLength(1);
 });
 
-test("retain mode: cleanup() does not delete exchange files; receipts in responsibleFiles", async () => {
+test("retain mode: cleanup() does not delete exchange files", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -3057,16 +3057,6 @@ test("retain mode: cleanup() does not delete exchange files; receipts in respons
 
   await runPoller(conn, delivered);
 
-  const responsibleFiles = (
-    conn as unknown as { responsibleFiles: Set<string> }
-  ).responsibleFiles;
-
-  // The receipt written during poll() must be tracked in responsibleFiles.
-  const hasReceipt = [...responsibleFiles].some((f) =>
-    f.endsWith("-receipt.json"),
-  );
-  expect(hasReceipt).toBe(true);
-
   // cleanup() must not delete any files in retain mode.
   await conn.cleanup();
   expect(safeDeleted).toHaveLength(0);
@@ -3101,55 +3091,33 @@ test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget
   await expect(conn.send({ second: true })).rejects.toBeInstanceOf(UsageError);
 });
 
-test("retain mode: stale receipt on disk does not suppress current-session messages", async () => {
-  // Regression guard for the structural fix: alreadyReceiptedNNNs is now built
-  // from this.responsibleFiles (in-session receipts only), not from a filesystem
-  // scan. A receipt file left in the directory by a prior session must NOT
-  // suppress incoming messages whose NNN matches.
-  const { client, files } = makeMockClient();
-  const peerId = "peer-sender";
+test("retain mode: synchronize() throws UsageError when exchange files from a prior session are present", async () => {
+  // Enforces the clean-directory precondition: retain mode errors immediately
+  // rather than silently processing or suppressing stale files.
   const id = "receiver-me";
+  const peerId = "peer-sender";
 
-  // Plant a stale receipt for NNN=0 directly in the mock store,
-  // simulating a prior session's leftover -- NOT via responsibleFiles.
-  const staleReceipt = Buffer.from("{}");
-  files.set(
-    `/test/${id}-20260101T000000-000-${staleReceipt.length}-receipt.json`,
-    staleReceipt,
-  );
+  for (const staleFileName of [
+    // Own receipt from a prior session.
+    `${id}-20260101T000000-000-2-receipt.json`,
+    // Non-own message file from a prior session (any prefix).
+    `${peerId}-20260101T000000-000-42.json`,
+  ]) {
+    const { client, files } = makeMockClient();
+    const staleBody = Buffer.from("{}");
+    files.set(`/test/${staleFileName}`, staleBody);
 
-  // Plant the current session's message from the peer (NNN=0).
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 99 } }),
-  );
-  files.set(
-    `/test/${peerId}-20260101T120000-000-${message.length}.json`,
-    message,
-  );
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 10,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      timestampInFilename: true,
+      retainFiles: true,
+    });
+    conn.id = id;
+    conn.connected = true;
+    conn.path = "/test";
 
-  const conn = new FileSyncConnection(client, {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    timestampInFilename: true,
-    retainFiles: true,
-  });
-  conn.id = id;
-  conn.connected = true;
-  conn.path = "/test";
-  conn.peerId = peerId;
-
-  const received: unknown[] = [];
-  let notifyReceived!: () => void;
-  const delivered = new Promise<void>((r) => (notifyReceived = r));
-  conn.on("data", (msg) => {
-    received.push(msg);
-    notifyReceived();
-  });
-
-  await runPoller(conn, delivered);
-
-  // The stale on-disk receipt must not have suppressed the message.
-  expect(received).toHaveLength(1);
-  expect((received[0] as { v: number }).v).toBe(99);
+    await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+  }
 });
