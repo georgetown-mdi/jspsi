@@ -112,8 +112,8 @@ export function builder(cmd: Argv): Argv {
       type: "boolean",
       describe:
         "encode a UTC timestamp and per-session counter in each outgoing " +
-        "message filename; required when --retain-files is set. Both parties " +
-        "must use the same value",
+        "message filename; --retain-files implies it, so it need not be passed " +
+        "explicitly. Both parties must use the same value",
     })
     .option("retain-files", {
       type: "boolean",

@@ -1703,7 +1703,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         } else {
           this.log.warn(
             `[${this.role}] message from ${peerId} disappeared between list ` +
-              "and get; assuming peer cleaned up",
+              "and get; " +
+              (this.options.retainFiles
+                ? "unexpected in retain mode (files are never deleted) -- " +
+                  "possible external interference; retrying"
+                : "assuming peer cleaned up"),
           );
         }
       } else {
