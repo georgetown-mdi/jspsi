@@ -3100,3 +3100,56 @@ test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget
   // Second send must time out and throw UsageError.
   await expect(conn.send({ second: true })).rejects.toBeInstanceOf(UsageError);
 });
+
+test("retain mode: stale receipt on disk does not suppress current-session messages", async () => {
+  // Regression guard for the structural fix: alreadyReceiptedNNNs is now built
+  // from this.responsibleFiles (in-session receipts only), not from a filesystem
+  // scan. A receipt file left in the directory by a prior session must NOT
+  // suppress incoming messages whose NNN matches.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  // Plant a stale receipt for NNN=0 directly in the mock store,
+  // simulating a prior session's leftover -- NOT via responsibleFiles.
+  const staleReceipt = Buffer.from("{}");
+  files.set(
+    `/test/${id}-20260101T000000-000-${staleReceipt.length}-receipt.json`,
+    staleReceipt,
+  );
+
+  // Plant the current session's message from the peer (NNN=0).
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 99 } }),
+  );
+  files.set(
+    `/test/${peerId}-20260101T120000-000-${message.length}.json`,
+    message,
+  );
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+
+  await runPoller(conn, delivered);
+
+  // The stale on-disk receipt must not have suppressed the message.
+  expect(received).toHaveLength(1);
+  expect((received[0] as { v: number }).v).toBe(99);
+});
