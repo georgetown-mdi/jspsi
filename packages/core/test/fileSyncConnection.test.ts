@@ -3250,3 +3250,109 @@ test("retain mode: synchronize() throws UsageError when exchange files from a pr
     await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
   }
 });
+
+test("retain mode + lockless rendezvous: multi-message exchange completes end-to-end", async () => {
+  // Primary production configuration: sync-mediated transports that lack both
+  // atomic exclusive-create and deletion visibility need lockless_rendezvous
+  // for rendezvous AND retain_files for message-loop signaling. This test
+  // covers the one combination that had zero prior coverage.
+  const idA = "00000000-0000-4000-8000-000000000001"; // sorts lower
+  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff"; // sorts higher
+
+  const sharedFiles = new Map<string, Buffer>();
+  const deleteCalls: string[] = [];
+
+  const makeClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...sharedFiles.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (path: string) => {
+      const data = sharedFiles.get(path);
+      if (!data) throw new Error(`${path}: not found`);
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
+      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    },
+    delete: async (path: string) => {
+      deleteCalls.push(path);
+      throw new Error("delete not supported on this transport");
+    },
+    safeDelete: async () => {},
+    rename: async (from: string, to: string) => {
+      const data = sharedFiles.get(from);
+      if (data === undefined) throw new Error(`${from}: no such file`);
+      sharedFiles.delete(from);
+      sharedFiles.set(to, data);
+    },
+    createExclusive: async () => {
+      throw new Error("createExclusive not supported on this transport");
+    },
+    exists: async (path: string) => sharedFiles.has(path),
+  });
+
+  const connA = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  connA.id = idA;
+  connA.connected = true;
+  connA.path = "/shared";
+
+  const connB = new FileSyncConnection(makeClient(), {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  connB.id = idB;
+  connB.connected = true;
+  connB.path = "/shared";
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+  expect(connA.peerId).toBe(idB);
+  expect(connB.peerId).toBe(idA);
+
+  const received: unknown[] = [];
+  let resolveAll!: () => void;
+  const allReceived = new Promise<void>((r) => (resolveAll = r));
+  connB.on("data", (msg) => {
+    received.push(msg);
+    if (received.length === 3) resolveAll();
+  });
+
+  const sending = (async () => {
+    await connA.send({ n: 1 });
+    await connA.send({ n: 2 });
+    await connA.send({ n: 3 });
+  })();
+
+  await runPoller(connB, allReceived);
+  await sending;
+
+  expect(received).toHaveLength(3);
+  expect((received[0] as { n: number }).n).toBe(1);
+  expect((received[1] as { n: number }).n).toBe(2);
+  expect((received[2] as { n: number }).n).toBe(3);
+  // delete() was never called: retain mode on a no-delete transport must not
+  // attempt deletion anywhere in the rendezvous-to-message-loop path.
+  expect(deleteCalls).toHaveLength(0);
+});

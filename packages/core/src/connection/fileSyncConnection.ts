@@ -442,10 +442,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   }
 
   async cleanup() {
-    // In retain mode the shared directory is intentionally a transcript;
-    // exchange files (hello, ack, message, receipt) are kept. Only an
-    // in-flight temp write would need removal, but those are cleaned up
-    // inline in send()/writeReceipt(), so cleanup() is a no-op here.
+    // In retain mode, cleanup() removes nothing: in-flight temp-*.tmp writes
+    // are cleaned up inline in send()/writeReceipt() before reaching here,
+    // and all protocol files are the durable transcript that must persist.
     if (this.options.retainFiles) {
       this.log.debug(
         `[${this.role}] retain mode: directory is transcript, skipping cleanup`,
@@ -493,7 +492,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // leave the budget near-zero for teardown. Drain failure (list() error
       // or timeout) falls through to cleanup(), which deletes as a fallback.
       // In retain mode the last sent file is never deleted, so the drain would
-      // spin to its deadline; skip it since cleanup() is a no-op anyway.
+      // spin to its deadline; skip it since cleanup() is a no-op anyway. This
+      // is safe, not a lost terminal frame: retain mode never deletes a
+      // message, so the final send persists on disk as part of the transcript
+      // and the peer's poller reads it whenever it next lists -- durability is
+      // decoupled from deletion. The drain exists in delete mode only to stop
+      // cleanup() from deleting an unconsumed frame, a race that cannot occur
+      // here. Skipping it forgoes only sender-side confirmation that the peer
+      // consumed the final message, which matches the durable-receipt contract
+      // (a receipt means "durably received", not "consumed by the application").
       if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
@@ -1178,6 +1185,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
+        this.recvSeq = 0;
+        this.lastReceiptedNNN = -1;
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
     }

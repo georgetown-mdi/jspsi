@@ -106,18 +106,25 @@ export function builder(cmd: Argv): Argv {
         "Overrides connection.options.peer_id in config. Requires " +
         "timestamp_in_filename: true. Both parties must use distinct ids",
     })
+    .option("timestamp-in-filename", {
+      type: "boolean",
+      describe:
+        "encode a UTC timestamp and per-session counter in each outgoing " +
+        "message filename; required when --retain-files is set. Both parties " +
+        "must use the same value",
+    })
     .option("retain-files", {
       type: "boolean",
       describe:
         "keep all exchange files as a permanent transcript instead of " +
         "deleting them after consumption; intended for sync-mediated " +
         "transports that do not propagate deletions and for audit use cases. " +
-        "Requires timestamp_in_filename: true in config. Both parties must " +
-        "set this flag identically -- a mismatch causes the exchange to stall " +
-        "until the peer timeout fires (fast-fail detection not yet available). " +
-        "A fresh directory is required for each exchange and is enforced: " +
-        "reusing a directory with retained files from a prior session is " +
-        "rejected with an error at startup",
+        "Requires --timestamp-in-filename. Both parties must set this flag " +
+        "identically -- a mismatch causes the exchange to stall until the " +
+        "peer timeout fires (fast-fail detection not yet available). A fresh " +
+        "directory is required for each exchange and is enforced: reusing a " +
+        "directory with retained files from a prior session is rejected with " +
+        "an error at startup",
     })
     .option("verbose", {
       alias: "v",
@@ -145,6 +152,7 @@ interface ExchangeArgs {
   maxReconnectAttempts?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
+  timestampInFilename?: boolean;
   retainFiles?: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
@@ -182,6 +190,7 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
     peerId: argv["peer-id"] as string | undefined,
+    timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
@@ -298,6 +307,7 @@ export function loadConfig(
     serverPort: options.serverPort,
     locklessRendezvous: options.locklessRendezvous,
     peerId: options.peerId,
+    timestampInFilename: options.timestampInFilename,
     retainFiles: options.retainFiles,
   });
 
@@ -309,6 +319,17 @@ export function loadConfig(
     log.warn(
       `--lockless-rendezvous has no effect on the ${connection.channel} ` +
         "channel and will be ignored; it is only supported on sftp and filedrop",
+    );
+  }
+
+  if (
+    options.retainFiles === true &&
+    connection.channel !== "sftp" &&
+    connection.channel !== "filedrop"
+  ) {
+    log.warn(
+      `--retain-files has no effect on the ${connection.channel} channel ` +
+        "and will be ignored; it is only supported on sftp and filedrop",
     );
   }
 
