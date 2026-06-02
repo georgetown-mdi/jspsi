@@ -435,7 +435,9 @@ export async function handler(argv: Arguments): Promise<void> {
     (connection.options as FileSyncOptions | undefined)?.retainFiles === true
   ) {
     log.info(
-      "retain mode requires lockless_rendezvous and timestamp_in_filename; both parties must set all three identically.",
+      "retain mode is enabled, with lockless_rendezvous and " +
+        "timestamp_in_filename; the peer must set all three identically " +
+        "(these flags are not negotiated).",
     );
   }
 

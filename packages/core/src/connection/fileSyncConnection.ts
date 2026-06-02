@@ -41,7 +41,7 @@ const parseMessageByteCount = (name: string): number | undefined => {
 // so this returns a WRONG value rather than undefined. There is no runtime
 // guard (the sole caller, poll() in retain mode, satisfies the contract); a new
 // caller outside retain mode must check timestampInFilename itself.
-const parseMessageNNN = (name: string): number | undefined => {
+const parseTimestampedMessageNNN = (name: string): number | undefined => {
   const stem = name.slice(0, -".json".length);
   const withoutByteCount = stem.slice(0, stem.lastIndexOf("-"));
   const nnnStr = withoutByteCount.slice(withoutByteCount.lastIndexOf("-") + 1);
@@ -589,7 +589,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
 
     // Without timestampInFilename the message filename has no NNN segment, so
-    // poll()'s parseMessageNNN() returns undefined for every file and the
+    // poll()'s parseTimestampedMessageNNN() returns undefined for every file and the
     // receiver silently skips every incoming message. Enforce at the class
     // boundary so a direct library consumer hits a clear error rather than a
     // stall.
@@ -1482,7 +1482,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           ignored.push(file.name);
         } else {
           if (this.options.retainFiles) {
-            const nnn = parseMessageNNN(file.name);
+            const nnn = parseTimestampedMessageNNN(file.name);
             if (nnn === undefined) {
               this.log.trace(
                 `[${this.role}] skipping ${file.name}: no numeric NNN segment (unexpected in retain mode)`,
@@ -1633,6 +1633,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // is reprocessed on the next poll rather than permanently lost.
             this.recvSeq++;
           } else {
+            // Parse before deleting. A corrupt fully-synced message is terminal
+            // (I5b), so parsing first leaves the offending file on disk for
+            // inspection instead of destroying it; a valid message is then
+            // consumed by deleting it (the delete-mode go-ahead signal to the
+            // sender) before emit, the same ordering relative to emit as before.
+            const validatedMessage = parseMessage();
+            this.log.trace(
+              `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+                `type=${validatedMessage.type}`,
+            );
+
             this.log.debug(
               `[${this.role}] deleting message ${messageFile.name}`,
             );
@@ -1652,12 +1663,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 );
               }
             }
-
-            const validatedMessage = parseMessage();
-            this.log.trace(
-              `[${this.role}] received message seq=${validatedMessage.seq}, ` +
-                `type=${validatedMessage.type}`,
-            );
 
             if (validatedMessage.type === "Uint8Array") {
               const bytes = Buffer.from(

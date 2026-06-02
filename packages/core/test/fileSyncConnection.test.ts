@@ -3913,11 +3913,16 @@ const entryPreconditionCells: Array<{
   { name: "handshake-ack (delete mode)", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: false, outcome: "reject" },
   { name: "handshake-ack (retain mode)", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: true, outcome: "reject" },
   // A stale non-timestamped message: closes the pre-existing gap where the old
-  // generic (delete-mode) guard let leftover messages through.
-  { name: "stale non-timestamped message", present: [`${ENTRY_PEER_ID}-42.json`], retain: false, outcome: "reject" },
-  // The retain-shape message and receipt.
-  { name: "timestamped message", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], retain: true, outcome: "reject" },
-  { name: "receipt", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], retain: true, outcome: "reject" },
+  // generic (delete-mode) guard let leftover messages through. Rejected in both
+  // modes, since the rule is mode-agnostic.
+  { name: "stale non-timestamped message (delete mode)", present: [`${ENTRY_PEER_ID}-42.json`], retain: false, outcome: "reject" },
+  { name: "stale non-timestamped message (retain mode)", present: [`${ENTRY_PEER_ID}-42.json`], retain: true, outcome: "reject" },
+  // The retain-shape timestamped message and receipt, each rejected in both
+  // modes (a message/receipt only appears after entry regardless of mode).
+  { name: "timestamped message (retain mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], retain: true, outcome: "reject" },
+  { name: "timestamped message (delete mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], retain: false, outcome: "reject" },
+  { name: "receipt (retain mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], retain: true, outcome: "reject" },
+  { name: "receipt (delete mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], retain: false, outcome: "reject" },
   // An in-flight temp file is rejected today (strict-empty). The planned tmp
   // sweep (193792285) will move this into the guard's `ignored` set.
   { name: "temp file (delete mode)", present: ["temp-abc.tmp"], retain: false, outcome: "reject" },
@@ -4085,10 +4090,10 @@ test("poll() retryable: a transient list() failure reschedules and the message i
 });
 
 test("poll() terminal: delete mode also stops the poller on a fully-synced corrupt message", async () => {
-  // The terminal-parse rule is mode-agnostic. In delete mode poll() deletes the
-  // message before parsing, so a corrupt fully-synced file is removed AND the
-  // poller stops -- it no longer silently drops-and-continues as it did before
-  // this change (the deliberate "both modes" behavior change).
+  // The terminal-parse rule is mode-agnostic. In delete mode poll() parses
+  // before deleting, so a corrupt fully-synced file stops the poller AND is left
+  // on disk for inspection -- it no longer silently drops-and-continues as it
+  // did before this change (the deliberate "both modes" behavior change).
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
   const peerId = "peer-sender";
@@ -4122,8 +4127,8 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   expect((errors[0] as Error).message).toContain("not valid JSON");
   expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
   expect(received).toHaveLength(0);
-  // delete-before-parse: the corrupt file was removed from the directory.
-  expect(files.has(`/test/${msgName}`)).toBe(false);
+  // parse-before-delete: the corrupt file is left on disk for inspection.
+  expect(files.has(`/test/${msgName}`)).toBe(true);
   // No second error: the finally block did not reschedule.
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
