@@ -37,13 +37,13 @@ Every row here must agree with every column for the state machine to be consiste
 | message | `<id>-<bytes>.json` or `<id>-<ts>-<NNN>-<bytes>.json` | each party | numeric | yes | **yes** | yes | yes (not in retain mode) | **yes** | **yes** |
 | temp | `temp-<uuid>.tmp` | each party (in-flight) | n/a (`.tmp`) | partial write | n/a | no | best-effort on error | no (extension) | no (extension) |
 | joining (planned) | `<id>-joining.json` | joiner (wave path) | `joining` | marker | no | yes | yes | no (non-numeric) | no (non-numeric) |
-| receipt | `<receiverId>-<ts>-<NNN>-<bytes>-receipt.json` | receiver (retain mode) | `receipt` | yes | **yes (size before token)** | yes | **no (transcript is retained)** | no (non-numeric) | no (non-numeric) |
+| receipt | `<receiverId>-<ts>-<NNN>-<bytes>-receipt.json` | receiver (retain mode) | `receipt` | yes | **yes (size before token)** | no | **no (transcript is retained)** | no (non-numeric) | no (non-numeric) |
 
 ## The five enforcement sites
 
 The state machine is enforced -- and therefore must be kept consistent -- at exactly these five places in [fileSyncConnection.ts](../packages/core/src/connection/fileSyncConnection.ts). Adding or changing a file type is a change to *all applicable rows of the taxonomy at all five sites*; this is the anti-drift checklist.
 
-1. **Preexisting-file guard** (`synchronize()` start, ~[:457](../packages/core/src/connection/fileSyncConnection.ts#L457)). Rejects a non-clean start: more than one hello, any `.wave`, or any `-hello-ack.json` left over from a crashed session. A new control file that can be left behind by a crash belongs here.
+1. **Preexisting-file guard** (`synchronize()` start, ~[:457](../packages/core/src/connection/fileSyncConnection.ts#L457)). Rejects a non-clean start: more than one hello, any `.wave`, or any `-hello-ack.json` left over from a crashed session. In retain mode it also rejects any pre-existing message or receipt files -- this is what makes the fresh-directory precondition code-enforced rather than advisory (a stale receipt on disk with the same NNN as a current-session message would silently suppress it). A new control file that can be left behind by a crash belongs here.
 2. **`responsibleFiles` + `cleanup()`** (~[:447](../packages/core/src/connection/fileSyncConnection.ts#L447), ~[:341](../packages/core/src/connection/fileSyncConnection.ts#L341)). The set of files this party created and must remove on `close()`/`cleanup()`. Pre-track before writing so a crash mid-write is still swept. Retain mode is the sole exception: exchange files are intentionally not swept.
 3. **`poll()` message scan** (~[:1106](../packages/core/src/connection/fileSyncConnection.ts#L1106)). Reads the peer's messages: `<peerId>-` prefix, `.json`, numeric terminal, and `size >= declaredSize`. Non-numeric terminals are ignored, not errors.
 4. **`hasOutstandingMessage`** (~[:989](../packages/core/src/connection/fileSyncConnection.ts#L989)). The delete-mode sender waits here for the peer to consume (delete) its last message. Must use the grammar discriminant (it does: `parseMessageByteCount(name) !== undefined`) so the party's own hello/ack/receipt are not mistaken for an outstanding message.
@@ -68,7 +68,7 @@ Read each phase as "given this mode, the directory may legitimately contain exac
 
 ### Phase 0 -- clean start
 
-Legal contents at entry: nothing this protocol owns. The preexisting-file guard aborts on any leftover hello, wave, or ack (and, planned, `joining`). This is what makes the fresh-directory precondition enforceable rather than merely documented.
+Legal contents at entry: nothing this protocol owns. The preexisting-file guard aborts on any leftover hello, wave, or ack (and, planned, `joining`). In retain mode `synchronize()` additionally throws a `UsageError` if any message or receipt files are present -- stale receipts with the same NNN as a current-session message would silently suppress it, and stale messages could be replayed. This is what makes the fresh-directory precondition code-enforced rather than merely documented.
 
 ### Phase 1 -- rendezvous, wave path
 
@@ -98,7 +98,7 @@ The sender writes `temp-<uuid>.tmp`, renames it to the final numeric-terminal na
 
 ### Phase 2 -- message loop, retain mode
 
-Same write path, but the receiver writes a `receipt` (carrying the consumed message's `<NNN>`) before emitting `data`, then attempts a best-effort, failure-tolerated delete. The sender gates its next send on a receipt whose parsed `<NNN>` equals the just-sent `seq` *and* whose on-disk size has reached its own declared byte count. No exchange file is deleted as a protocol step. Because retained messages accumulate, the receiver identifies the next unprocessed message by scanning its own receipt files to find which NNNs it has already acknowledged, then processing the one message (if any) without a matching receipt.
+Same write path, but the receiver writes a `receipt` (carrying the consumed message's `<NNN>`) before emitting `data`, then attempts a best-effort, failure-tolerated delete. The sender gates its next send on a receipt whose parsed `<NNN>` equals the just-sent `seq` *and* whose on-disk size has reached its own declared byte count. No exchange file is deleted as a protocol step. Because retained messages accumulate, the receiver identifies the next unprocessed message by scanning the directory for its own receipt files to determine which NNNs it has already acknowledged (via `alreadyReceiptedNNNs`), then processing the one peer message (if any) without a matching receipt. This filesystem scan is safe because `synchronize()` enforces the clean-directory precondition at session start: every own receipt file on disk is guaranteed to belong to the current session.
 
 ### Phase 3 -- cleanup and close
 
@@ -123,7 +123,7 @@ These operator-level requirements are part of the model: violating any of them s
 - **Dedicated directory.** One active exchange, exactly two parties, per directory. See [EXCHANGE_SPEC.md "Directory exclusivity"](EXCHANGE_SPEC.md#directory-exclusivity).
 - **Matching builds.** There is no `protocol_version` field; both parties run compatible builds and the payload schema is a hard contract. A payload-schema change (e.g. adding hello flags) is a flag-day that both sides must deploy together.
 - **Identical bilateral flags.** `lockless_rendezvous` and `retain_files` must match on both sides.
-- **Fresh directory in retain mode.** Retain mode never deletes, so a reused directory leaves a prior exchange's files; combined with a stable `peer_id` a new session could read a prior message as current. A fresh directory per exchange is a hard requirement, not a suggestion.
+- **Fresh directory in retain mode.** Retain mode never deletes, so a reused directory leaves a prior exchange's files; a stale receipt with the same NNN as a current-session message silently suppresses it, stalling the exchange with no error. `synchronize()` enforces this as a hard `UsageError` on any pre-existing message or receipt files -- this is not advisory.
 - **Distinct, non-prefix peer ids.** When `peer_id` is configured, the two ids must be distinct, and neither may be the other extended by `-` (e.g. `site` / `site-2`), which would break message prefix-routing. UUIDs (the default) satisfy this automatically.
 
 ## Bilateral configuration: detect and fail, never negotiate

@@ -693,7 +693,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // file guard. The throw escapes synchronize() directly (the joiner
         // fast-path has no enclosing catch), so no outer handler cleans up.
         await this.client.safeDelete(helloPath);
-        this.responsibleFiles.delete(`${this.id}${HELLO_SUFFIX}`);
+        if (!this.options.retainFiles)
+          this.responsibleFiles.delete(`${this.id}${HELLO_SUFFIX}`);
         throw new Error(
           `peer id '${peerId}' and this party's id '${this.id}' share a ` +
             "prefix at a '-' boundary; ids must not be prefix-extensions " +
@@ -756,10 +757,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const currentFiles = await this.client.list(this.path!);
 
             const fileNames = currentFiles.map((file) => file.name);
-            this.responsibleFiles.forEach((fileName) => {
-              if (!fileNames.includes(fileName))
-                this.responsibleFiles.delete(fileName);
-            });
+            if (!this.options.retainFiles)
+              this.responsibleFiles.forEach((fileName) => {
+                if (!fileNames.includes(fileName))
+                  this.responsibleFiles.delete(fileName);
+              });
 
             const peerHellos = currentFiles.filter(
               (file) =>
@@ -864,10 +866,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           const currentFiles = await this.client.list(this.path!);
 
           const fileNames = currentFiles.map((file) => file.name);
-          this.responsibleFiles.forEach((fileName) => {
-            if (!fileNames.includes(fileName))
-              this.responsibleFiles.delete(fileName);
-          });
+          if (!this.options.retainFiles)
+            this.responsibleFiles.forEach((fileName) => {
+              if (!fileNames.includes(fileName))
+                this.responsibleFiles.delete(fileName);
+            });
 
           const otherFiles = currentFiles.filter(
             (file) =>
@@ -967,7 +970,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             await this.client.safeDelete(`${this.path}/${otherFile.name}`);
             await this.client.safeDelete(helloPath);
 
-            this.responsibleFiles.clear();
+            if (!this.options.retainFiles) this.responsibleFiles.clear();
 
             return;
           }
@@ -1014,7 +1017,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             await this.client.safeDelete(otherPath);
 
-            this.responsibleFiles.clear();
+            if (!this.options.retainFiles) this.responsibleFiles.clear();
 
             return;
           } else {
@@ -1110,7 +1113,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 // directory is left clean for a retry.
                 await this.client.safeDelete(`${this.path}/${otherFile.name}`);
                 await this.client.safeDelete(helloPath);
-                this.responsibleFiles.clear();
+                if (!this.options.retainFiles) this.responsibleFiles.clear();
                 throw new UsageError(
                   "peer appears to have abandoned the handshake: wave file " +
                     "was claimed by the peer but disappeared before this " +
@@ -1126,7 +1129,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 await this.client.safeDelete(`${this.path}/${otherFile.name}`);
                 await this.client.safeDelete(helloPath);
 
-                this.responsibleFiles.clear();
+                if (!this.options.retainFiles) this.responsibleFiles.clear();
               }
             }
             return;
@@ -1162,7 +1165,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         if (wavePath) await this.client.safeDelete(wavePath);
         if (ackPath) await this.client.safeDelete(ackPath);
         await this.client.safeDelete(helloPath);
-        this.responsibleFiles.clear();
+        if (!this.options.retainFiles) this.responsibleFiles.clear();
         // The prefix-at-dash guard fires after waitForPeer() has already
         // committed this.peerId, this.role, and this.handshakeRole. Reset
         // them so the "already synchronized" guard does not block a retry
