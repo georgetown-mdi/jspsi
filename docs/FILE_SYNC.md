@@ -60,7 +60,11 @@ The transport has two independent binary modes. They are bilateral: both parties
   - *Delete-as-signal* (default): the receiver deletes the sender's message file; the sender waits for that deletion before sending the next.
   - *Retain* (`retain_files: true`): no exchange file is deleted; the receiver writes a `receipt` the sender waits for instead. For transports that do not propagate deletions, and for audit transcripts.
 
-The four combinations are all valid. The rendezvous axis and the message-loop axis do not interact except through shared invariants (notably the retain-mode cleanup exception and the fresh-directory precondition).
+Not all combinations are valid. Retain mode requires lockless rendezvous: wave rendezvous
+is delete-based (the joiner deletes the peer hello as a role-assignment signal) and cannot
+produce the whole-directory no-delete transcript retain mode guarantees.
+The three valid combinations are: wave + delete-as-signal (default), lockless +
+delete-as-signal, and lockless + retain. Wave + retain is rejected by schema validation.
 
 ## Phases and legal directory contents
 

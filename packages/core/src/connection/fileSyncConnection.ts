@@ -586,6 +586,33 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       file.name.endsWith("-hello-ack.json"),
     );
 
+    // Retain mode requires a fresh directory per exchange: nothing is ever
+    // deleted, so leftover files from a prior session are indistinguishable
+    // from current-session files and will corrupt the exchange. Check this
+    // before the generic preexisting-file guard so a reused retain directory
+    // (which will have persisted hellos and acks) yields the clear
+    // "retain mode requires a fresh directory" error rather than the generic
+    // "crashed session" message.
+    if (this.options.retainFiles) {
+      const staleFiles = files.filter(
+        (f) =>
+          f.name.endsWith(HELLO_SUFFIX) ||
+          f.name.endsWith(".wave") ||
+          f.name.endsWith("-hello-ack.json") ||
+          (f.name.endsWith(".json") &&
+            parseMessageByteCount(f.name) !== undefined) ||
+          f.name.endsWith("-receipt.json"),
+      );
+      if (staleFiles.length > 0)
+        throw new UsageError(
+          `retain mode: path ${this.path} contains ${staleFiles.length} ` +
+            `exchange file(s) from a prior session ` +
+            `(${staleFiles.map((f) => f.name).join(", ")}); ` +
+            "retain mode requires a fresh directory per exchange -- " +
+            "move or remove these files before retrying",
+        );
+    }
+
     if (
       helloFiles.length > 1 ||
       files.some((file) => file.name.endsWith(".wave")) ||
@@ -613,26 +640,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "manually after verifying that no other session is concurrently " +
           "using this path.",
       );
-    }
-
-    // Retain mode requires a fresh directory per exchange: nothing is ever
-    // deleted, so leftover files from a prior session are indistinguishable
-    // from current-session files and will corrupt the exchange.
-    if (this.options.retainFiles) {
-      const staleFiles = files.filter(
-        (f) =>
-          (f.name.endsWith(".json") &&
-            parseMessageByteCount(f.name) !== undefined) ||
-          f.name.endsWith("-receipt.json"),
-      );
-      if (staleFiles.length > 0)
-        throw new UsageError(
-          `retain mode: path ${this.path} contains ${staleFiles.length} ` +
-            `exchange file(s) from a prior session ` +
-            `(${staleFiles.map((f) => f.name).join(", ")}); ` +
-            "retain mode requires a fresh directory per exchange -- " +
-            "move or remove these files before retrying",
-        );
     }
 
     const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;

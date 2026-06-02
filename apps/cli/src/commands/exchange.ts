@@ -417,6 +417,16 @@ export async function handler(argv: Arguments): Promise<void> {
   }
   const { connection, ...exchangeDataSpec } = configResult;
 
+  if (
+    options.retainFiles === true &&
+    (connection.channel === "sftp" || connection.channel === "filedrop")
+  ) {
+    log.info(
+      "--retain-files requires and enables --lockless-rendezvous and " +
+        "--timestamp-in-filename where not already set",
+    );
+  }
+
   let identity: string;
   if (options.identity) {
     identity = options.identity;

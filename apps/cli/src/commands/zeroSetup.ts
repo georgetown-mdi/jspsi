@@ -429,6 +429,16 @@ export async function handler(argv: Arguments): Promise<void> {
     process.exit((err as { exitCode?: number }).exitCode ?? 69);
   }
 
+  if (
+    options.retainFiles === true &&
+    (connection.channel === "sftp" || connection.channel === "filedrop")
+  ) {
+    log.info(
+      "--retain-files requires and enables --lockless-rendezvous and " +
+        "--timestamp-in-filename where not already set",
+    );
+  }
+
   try {
     // Spread + cast: `connection` is `ConnectionConfig` (which includes the
     // webrtc channel), so TypeScript cannot verify that the spread result fits

@@ -389,7 +389,9 @@ export interface FileSyncOptions extends SharedOptions {
    * exchange to stall until the peer timeout fires. Requires
    * `timestampInFilename: true` -- without it, every message from the same
    * party collides on filename and a retained transcript would overwrite
-   * itself.
+   * itself. Also requires `locklessRendezvous: true` -- wave rendezvous is
+   * delete-based and cannot produce the whole-directory no-delete transcript
+   * retain mode guarantees.
    *
    * A fresh directory is required for each exchange and is enforced:
    * `synchronize()` throws a `UsageError` if any message or receipt files
@@ -425,6 +427,14 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
       "retain_files requires timestamp_in_filename: true; without it, every " +
       "message from the same party shares a filename and a retained transcript " +
       "would overwrite itself",
+    path: ["retainFiles"],
+  })
+  .refine((opts) => !opts.retainFiles || opts.locklessRendezvous === true, {
+    message:
+      "retain_files requires lockless_rendezvous: true; wave rendezvous is " +
+      "delete-based (the joiner deletes the peer hello as a role-assignment " +
+      "signal) and cannot produce the whole-directory no-delete transcript " +
+      "retain mode guarantees",
     path: ["retainFiles"],
   });
 

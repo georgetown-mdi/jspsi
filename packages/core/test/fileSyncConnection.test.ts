@@ -2753,6 +2753,7 @@ function makeRetainConn(
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + timeToLiveMs),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -2851,6 +2852,7 @@ test("retain mode: receipt is written before the data event fires", async () => 
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -2883,6 +2885,7 @@ test("retain mode: sender blocks until a matching receipt appears, then proceeds
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -2923,6 +2926,7 @@ test("retain mode: a receipt with a non-matching NNN does not release the sender
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -2970,6 +2974,7 @@ test("retain mode: receipt below declared byte count does not release sender; fu
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -3010,6 +3015,7 @@ test("retain mode: first send proceeds immediately without any receipt", async (
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -3052,6 +3058,7 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -3107,6 +3114,7 @@ test("retain mode: a consumed message file is retained on a delete-capable trans
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -3162,6 +3170,7 @@ test("retain mode: a message reprocessed after an emit failure is not receipted 
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -3203,6 +3212,7 @@ test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 100),
     verbose: -1,
+    locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
@@ -3231,6 +3241,12 @@ test("retain mode: synchronize() throws UsageError when exchange files from a pr
     `${id}-20260101T000000-000-42.json`,
     // Non-own message file from a prior session (any prefix).
     `${peerId}-20260101T000000-000-42.json`,
+    // Hello file left from a prior session (e.g. reused retain directory).
+    `${id}-hello.json`,
+    // Wave file from a prior session.
+    `${id}-${peerId}.wave`,
+    // Hello-ack from a prior lockless session.
+    `${id}-hello-ack.json`,
   ]) {
     const { client, files } = makeMockClient();
     const staleBody = Buffer.from("{}");
@@ -3240,6 +3256,7 @@ test("retain mode: synchronize() throws UsageError when exchange files from a pr
       pollingFrequency: 10,
       timeToLive: new Date(Date.now() + 5_000),
       verbose: -1,
+      locklessRendezvous: true,
       timestampInFilename: true,
       retainFiles: true,
     });
