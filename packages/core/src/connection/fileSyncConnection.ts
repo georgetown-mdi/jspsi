@@ -638,9 +638,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           f.name.endsWith(HELLO_SUFFIX) ||
           f.name.endsWith(".wave") ||
           f.name.endsWith("-hello-ack.json") ||
-          // Targets the retain message shape (<id>-<ts>-<NNN>-<byteCount>.json);
-          // directory exclusivity covers any residual stray file.
-          parseMessageNNN(f.name) !== undefined ||
+          // Catches BOTH message shapes: the timestamped retain shape
+          // (<id>-<ts>-<NNN>-<byteCount>.json) and any non-timestamped delete-
+          // mode leftover (<id>-<byteCount>.json). parseMessageByteCount is
+          // right-anchored to the terminal numeric segment and returns undefined
+          // for receipts (whose terminal segment is the word "receipt"), so the
+          // separate -receipt.json clause below is still required.
+          (f.name.endsWith(".json") && parseMessageByteCount(f.name) !== undefined) ||
           f.name.endsWith("-receipt.json"),
       );
       if (staleFiles.length > 0)
@@ -1252,6 +1256,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
 
+    // peerId is committed by synchronize() in all rendezvous paths; guard here
+    // (before mode-specific branches) so both retain and non-retain modes
+    // require synchronize() to have completed first.
+    if (!this.peerId) throw new Error("not synchronized");
+
     const path = this.path;
     // A `.tmp` extension (not `.json`) keeps this in-flight write from matching
     // a `*.json` sync-tool watch before the rename to the final name lands.
@@ -1302,7 +1311,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     try {
       if (this.options.retainFiles) {
-        if (!this.peerId) throw new Error("not synchronized");
         // First send (seq === 0) proceeds immediately; subsequent sends wait
         // for a receipt acknowledging the previous message.
         if (this.seq > 0) {
@@ -1316,7 +1324,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           while (true) {
             if (Date.now() > this.options.timeToLive!.getTime()) {
               throw new UsageError(
-                `timed out waiting for receipt from ${this.peerId} for seq=${expectedNNN}`,
+                `timed out waiting for receipt from ${this.peerId} for NNN=${expectedNNN}`,
               );
             }
             if (await hasQualifyingReceipt(expectedNNN)) break;
@@ -1506,7 +1514,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // In retain mode the scan is filtered to a single NNN (recvSeq), so
           // two matches mean two files share one NNN -- a protocol violation or
           // directory reuse, not necessarily a separate session.
-          throw new Error(
+          throw new UsageError(
             `more than one message file with NNN=${this.recvSeq} from ` +
               `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
           );
@@ -1678,6 +1686,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // own inner try/catch (see above) that handles and swallows them.
         // All cases are propagated immediately as hard failures.
         this.consecutiveEnoentCount = 0;
+        // A UsageError here is a terminal protocol violation (seq/NNN mismatch,
+        // duplicate NNN): stop the poller before emitting so the finally block
+        // does not reschedule and re-read the same corrupt file. Recoverable
+        // errors (emit failure, receipt-write failure, transient transport) are
+        // NOT UsageErrors and must still reschedule so the retained message is
+        // reprocessed (invariant I8).
+        if (err instanceof UsageError) this.pollerActive = false;
         this.emit(
           "error",
           err instanceof Error ? err : new Error(errMessage(err)),

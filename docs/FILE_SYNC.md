@@ -119,6 +119,33 @@ These are the testable properties the state machine must preserve. New work shou
 - **I5 -- partial-sync safety for every payload-bearing file.** A file whose body is read for content must not be read before the sync tool has finished writing it. Messages carry a body gated by a byte count *in the filename*; receipts the same. Control files have no byte-count segment in their names; they use a read gate (`readControlFileWithGate` in `fileSyncConnection.ts`) that retries on a short/unparseable read until the peer timeout. A fully-synced body that parses but fails the envelope schema is a terminal `UsageError`. This gate was introduced by `194332289` for the hello (both rendezvous branches) and the lockless ack; see [Payload-bearing control files](#payload-bearing-control-files-i5).
 - **I6 -- terminal failure, no caller retry.** `synchronize()` and `send()` always present a terminal failure to the caller; the caller does not retry. Any bounded retry is internal.
 - **I7 -- role from filename order.** Wave-path role assignment derives from hello filename order, never from a fresh id comparison.
+- **I8 -- in-memory counters are a shadow of on-disk NNN state, not an
+  independent source of truth.** `seq` (next NNN to write), `recvSeq` (retain:
+  next NNN to read), `lastReceiptedNNN` (retain: receipt idempotency guard), and
+  `lastSentFile` (delete-mode drain target) are all in-memory projections of the
+  shared directory's NNN sequence. Three rules keep the shadow aligned; breaking
+  any one silently desynchronizes the two parties:
+  - `seq` advances only AFTER a message's durable `rename` in `send()`. A failed
+    write must not leave the counter past an unwritten NNN; if it did, the
+    receipt gate on the next send would wait for a receipt whose NNN was never
+    written to disk.
+  - In retain mode, `recvSeq` advances only after a successful `emit` in
+    `poll()`. The receipt (and `lastReceiptedNNN`) is written before `emit` so
+    that a failed emit causes the (never-deleted) message to be reprocessed on
+    the next poll and receipted exactly once rather than skipped or double-
+    receipted.
+  - All four counters reset together via `resetSessionState()` at every session-
+    boundary path: the rendezvous outer catch, the joiner prefix-at-dash error,
+    and `close()`. A partial reset that left any counter non-zero would corrupt
+    the next session on the same instance.
+  The shadow is only safe because `synchronize()` enforces the clean-directory
+  precondition (retain mode rejects any pre-existing message or receipt file):
+  both counters begin at 0 against an empty directory and therefore stay aligned
+  with the peer's monotonic NNN sequence, which also starts at 0.
+  Enforcement sites: `resetSessionState()` (session-boundary resets), the post-
+  rename `this.seq = seq + 1` in `send()` (I8 write rule), and the post-emit
+  `this.recvSeq++` guarded by the pre-emit receipt write in `poll()` (I8 receive
+  rule).
 
 ## Preconditions for a correct exchange
 

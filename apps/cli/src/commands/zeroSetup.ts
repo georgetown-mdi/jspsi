@@ -13,6 +13,7 @@ import {
 import type {
   ConnectionConfig,
   FileDropConnectionConfig,
+  FileSyncOptions,
   SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
@@ -430,11 +431,11 @@ export async function handler(argv: Arguments): Promise<void> {
   }
 
   if (
-    options.retainFiles === true &&
-    (connection.channel === "sftp" || connection.channel === "filedrop")
+    (connection.channel === "sftp" || connection.channel === "filedrop") &&
+    (connection.options as FileSyncOptions | undefined)?.retainFiles === true
   ) {
     log.info(
-      "--retain-files requires --lockless-rendezvous and --timestamp-in-filename; any not already set are enabled automatically.",
+      "retain mode requires lockless_rendezvous and timestamp_in_filename; both parties must set all three identically.",
     );
   }
 

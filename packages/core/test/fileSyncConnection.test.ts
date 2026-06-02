@@ -139,6 +139,7 @@ test("close() sweeps responsible files and ends the client, idempotently", async
     return origSafeDelete(p);
   };
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
   // send() records the outbound file as one this side is responsible for.
   await conn.send({ hello: 1 });
   const messagePath = [...files.keys()].find((p) =>
@@ -464,6 +465,7 @@ test("open normalizes Windows UNC filedrop path with subdirectory", async () => 
 test("send writes the message file to the store", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   await conn.send({ hello: "world" });
 
@@ -477,6 +479,7 @@ test("send writes the message file to the store", async () => {
 test("send encodes the exact serialized byte count in the filename", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   await conn.send({ hello: "world" });
 
@@ -495,6 +498,7 @@ test("send writes the in-flight file with a .tmp extension and renames to .json"
   // in `.json`.
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   const putDests: string[] = [];
   const origPut = client.put.bind(client);
@@ -529,6 +533,7 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
   // deliberately not tracked in responsibleFiles (see send()).
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   // Capture the temp path the write actually produced so the cleanup
   // assertion cannot pass vacuously: if a refactor stopped writing the temp
@@ -570,6 +575,7 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
 test("send waits for a previous unconsumed message before writing the next", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   // Simulate a message from this connection already sitting in the store
   // (e.g. the peer's poller hasn't run yet). The exact byte count is
@@ -597,6 +603,7 @@ test("send times out when the previous message is never consumed", async () => {
     timeToLiveMs: 150,
     pollingFrequency: 10,
   });
+  conn.peerId = "stub-peer";
 
   // Plant a stale message that nobody will ever delete.
   const outPath = `/test/${conn.id}-99.json`;
@@ -1521,6 +1528,7 @@ async function runPoller(
 test("send filename is <id>-<byteCount>.json when timestampInFilename is unset", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   await conn.send({ hello: "world" });
 
@@ -1541,6 +1549,7 @@ test("send filename encodes timestamp and zero-padded counter when timestampInFi
   });
   conn.connected = true;
   conn.path = "/test";
+  conn.peerId = "stub-peer";
 
   await conn.send({ first: true });
   const firstName = [...files.keys()][0].slice("/test/".length);
@@ -1728,6 +1737,7 @@ test("close() drains the last sent file before cleanup, preventing premature del
     pollingFrequency: 5,
     peerTimeoutMs: 500,
   });
+  sender.peerId = "stub-peer";
 
   // Intercept safeDelete to record whether cleanup races the receiver.
   const origSafeDelete = client.safeDelete.bind(client);
@@ -2076,6 +2086,7 @@ test("send() completes without spinning when a <id>-hello.json file is present i
   // hello file to be consumed. Verify it completes immediately instead.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   // Plant the hello file as it would appear after synchronize().
   const helloPath = `/test/${conn.id}-hello.json`;
@@ -2144,6 +2155,7 @@ test("peerId from constructor option sets this.id and appears in message filenam
     options: { peerTimeoutMs: 50 },
   });
   expect(conn.id).toBe("agency-a");
+  conn.peerId = "stub-peer";
   await conn.send({ hello: 1 });
   const messageFile = [...files.keys()].find((p) =>
     /\/test\/agency-a-\d+\.json$/.test(p),
@@ -2164,6 +2176,7 @@ test("peerId from open() config sets this.id and appears in message filenames", 
     options: { peerTimeoutMs: 50, peerId: "agency-b" },
   });
   expect(conn.id).toBe("agency-b");
+  conn.peerId = "stub-peer";
   await conn.send({ hello: 1 });
   const messageFile = [...files.keys()].find((p) =>
     /\/test\/agency-b-\d+\.json$/.test(p),
@@ -2332,6 +2345,7 @@ test("send() message timeout throws UsageError", async () => {
     timeToLiveMs: 150,
     pollingFrequency: 10,
   });
+  conn.peerId = "stub-peer";
   // Plant a stale outbound message that nobody will consume.
   files.set(`${conn.path}/${conn.id}-99.json`, Buffer.from("stale"));
   await expect(conn.send({ next: true })).rejects.toBeInstanceOf(UsageError);
@@ -3511,6 +3525,7 @@ test("delete mode: send() does not advance seq when rename throws", async () => 
   // Same invariant must hold in non-retain mode.
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   const seqBefore = conn.seq;
   client.rename = async () => {
@@ -3549,6 +3564,7 @@ test("close() resets seq, recvSeq, and lastReceiptedNNN to their initial values"
   // re-open. Set each to a non-zero value, close(), then assert they reset.
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
 
   // Drive counters to non-initial values by sending a message and manipulating
   // internal state directly (the fields are internal but accessible in tests).
@@ -3568,51 +3584,40 @@ test("close() resets seq, recvSeq, and lastReceiptedNNN to their initial values"
   );
 });
 
-// --- finding #6: stale-file check uses retain message shape ------------------
+// --- finding #3: stale-file check catches BOTH message shapes -----------------
 
-test(
-  "retain mode: non-timestamped peer file does not trigger stale-file UsageError at synchronize()",
-  async () => {
-    // A file like `<peerId>-<digits>.json` matches parseMessageByteCount but NOT
-    // parseMessageNNN (no NNN segment). The tightened stale-file clause uses
-    // parseMessageNNN, so it must pass without error.
-    const { client, files } = makeMockClient();
-    const id = "receiver-me";
-    const peerId = "peer-sender";
+test("retain mode: non-timestamped message-shaped file triggers stale-file UsageError at synchronize()", async () => {
+  // After the revert from parseMessageNNN to parseMessageByteCount, a file
+  // like `<peerId>-<digits>.json` (a non-timestamped delete-mode leftover) IS
+  // a leftover message and MUST now trigger the stale-file guard.
+  const { client, files } = makeMockClient();
+  const id = "receiver-me";
+  const peerId = "peer-sender";
 
-    // Non-timestamped message name: only a byte-count segment, no NNN.
-    const nonTimestampedName = `${peerId}-42.json`;
-    files.set(`/test/${nonTimestampedName}`, Buffer.from("{}"));
+  // Non-timestamped message name: only a byte-count segment, no NNN.
+  const nonTimestampedName = `${peerId}-42.json`;
+  files.set(`/test/${nonTimestampedName}`, Buffer.from("{}"));
 
-    const conn = new FileSyncConnection(client, {
-      pollingFrequency: 10,
-      // Short TTL so synchronize() times out quickly instead of waiting 5s.
-      timeToLive: new Date(Date.now() + 200),
-      verbose: -1,
-      locklessRendezvous: true,
-      timestampInFilename: true,
-      retainFiles: true,
-    });
-    conn.id = id;
-    conn.connected = true;
-    conn.path = "/test";
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
 
-    // synchronize() will proceed past the stale-file check (which should not
-    // fire for this file) and into the lockless ack-handshake wait, where it
-    // times out quickly. The important assertion is that a UsageError about
-    // stale files is NOT thrown; a timeout error is fine.
-    const result = await conn.synchronize().catch((e: unknown) => e);
-    const isStaleFileError =
-      result instanceof UsageError &&
-      (result.message as string).includes("prior session");
-    expect(isStaleFileError).toBe(false);
-  },
-  2_000,
-);
+  // parseMessageByteCount matches the non-timestamped shape, so the stale-file
+  // guard must fire with a "prior session" UsageError.
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
 
-test("retain mode: timestamped message file does trigger stale-file UsageError at synchronize()", async () => {
-  // Counterpart: a properly-timestamped retain message file must still be
-  // caught by the stale-file guard.
+test("retain mode: timestamped message file triggers stale-file UsageError at synchronize()", async () => {
+  // The timestamped retain shape is also caught by parseMessageByteCount
+  // (it is a superset of the non-timestamped shape).
   const { client, files } = makeMockClient();
   const id = "receiver-me";
   const peerId = "peer-sender";
@@ -3634,4 +3639,442 @@ test("retain mode: timestamped message file does trigger stale-file UsageError a
   conn.path = "/test";
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("retain mode: receipt file (non-message .json) triggers stale-file UsageError at synchronize()", async () => {
+  // parseMessageByteCount returns undefined for receipt files (terminal segment
+  // is "receipt", not a number), so the separate -receipt.json clause in the
+  // stale-file filter catches them.
+  const { client, files } = makeMockClient();
+  const id = "receiver-me";
+  const peerId = "peer-sender";
+
+  const receiptName = `${peerId}-20260101T000000-000-42-receipt.json`;
+  files.set(`/test/${receiptName}`, Buffer.from("{}"));
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+// --- finding #1/#6: terminal poll errors stop the poller ---------------------
+
+test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poller", async () => {
+  // Finding #6: the duplicate-NNN throw is now UsageError (terminal protocol
+  // violation). Finding #1: a UsageError in the non-TOCTOU catch branch sets
+  // pollerActive=false before emitting, so the finally block does not reschedule
+  // and the error fires exactly once without the handler calling stop().
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  // Plant two message files with the same NNN (0): the poller scan for
+  // recvSeq=0 will find both and throw the duplicate-NNN UsageError.
+  const msg = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  files.set(`/test/${peerId}-20260101T000000-000-${msg.length}.json`, msg);
+  files.set(`/test/${peerId}-20260101T120000-000-${msg.length}.json`, msg);
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+    // Intentionally do NOT call conn.stop() -- the poller must have already
+    // stopped itself before the emit so the finally block does not reschedule.
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+
+  // Error fired exactly once.
+  expect(errors).toHaveLength(1);
+  // The error is classified as a UsageError (terminal protocol violation).
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("more than one message file");
+
+  // pollerActive must be false: the poller stopped itself before emitting.
+  expect(
+    (conn as unknown as { pollerActive: boolean }).pollerActive,
+  ).toBe(false);
+
+  // Wait two poll intervals and confirm no second error arrives (poller did not
+  // reschedule). If the finally block had rescheduled, a second error would
+  // arrive almost immediately.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(errors).toHaveLength(1);
+});
+
+test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () => {
+  // The seq-mismatch UsageError was already a UsageError before this change;
+  // confirm it also stops the poller (finding #1), consistent with the
+  // duplicate-NNN path above.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  // Plant a message whose body seq disagrees with the filename NNN (NNN=0,
+  // body seq=99). The validator throws UsageError on the mismatch.
+  const msg = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 99, type: "Object", payload: { v: 1 } }),
+  );
+  files.set(`/test/${peerId}-20260101T000000-000-${msg.length}.json`, msg);
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+    // Do NOT call stop() -- the poller must stop itself.
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("seq=");
+
+  expect(
+    (conn as unknown as { pollerActive: boolean }).pollerActive,
+  ).toBe(false);
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(errors).toHaveLength(1);
+});
+
+// --- finding #4: send() not-synchronized guard applies to non-retain mode ----
+
+test("non-retain send() before synchronize() (peerId unset) throws 'not synchronized'", async () => {
+  // Finding #4: the not-synchronized guard is hoisted to the top of send() and
+  // now fires for both retain and non-retain modes.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    // Explicitly NOT retain mode.
+    retainFiles: false,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  // peerId is NOT set (synchronize() was not called).
+
+  await expect(conn.send({ n: 1 })).rejects.toThrow("not synchronized");
+});
+
+// --- I8 counter seam: error-injection tests -----------------------------------
+// Each test targets one of the three I8 rules: (a) seq advances only after a
+// durable rename in send(), (b) recvSeq advances only after a successful emit
+// in poll() and the receipt is written before emit, (c) all counters reset via
+// resetSessionState() at every session-boundary path.
+
+test("I8: send() whose put throws -- seq unchanged, temp file cleaned up", async () => {
+  // Rule (a): a write failure before the rename must not advance seq and must
+  // leave no temp-*.tmp residue in the store.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
+
+  const seqBefore = conn.seq;
+
+  // Track every safeDelete call so we can confirm the temp path was swept.
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p: string) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  // Stub put to throw, making the temp write itself fail.
+  client.put = async () => {
+    throw new Error("synthetic put failure");
+  };
+
+  await expect(conn.send({ n: 1 })).rejects.toThrow("synthetic put failure");
+
+  // seq must be unchanged -- the message slot was never durably written.
+  expect(conn.seq).toBe(seqBefore);
+
+  // The catch block in send() calls safeDelete(tempPath) even when put threw,
+  // so the temp path was passed to safeDelete.
+  expect(safeDeleted.length).toBeGreaterThanOrEqual(1);
+  const tempSweep = safeDeleted.find((p) => p.endsWith(".tmp"));
+  expect(tempSweep).toBeDefined();
+
+  // No temp-*.tmp file must remain in the store.
+  const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
+  expect(tmpFiles).toEqual([]);
+});
+
+test("I8: send() whose rename throws -- seq unchanged, temp file cleaned up", async () => {
+  // Rule (a): rename failure (put succeeded, rename threw) must not advance seq
+  // and must leave no orphaned temp-*.tmp. This test extends the existing
+  // rename-failure coverage to confirm temp cleanup explicitly on the send path.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
+
+  const seqBefore = conn.seq;
+
+  // Capture the temp path that put() actually wrote so the cleanup assertion
+  // cannot pass vacuously (a refactor that skipped the temp write would leave
+  // tempPath undefined and the check below would fail).
+  let tempPath: string | undefined;
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    await origPut(src, dest, opts);
+    tempPath = dest;
+  };
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p: string) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  client.rename = async () => {
+    throw new Error("synthetic rename failure");
+  };
+
+  await expect(conn.send({ n: 1 })).rejects.toThrow("synthetic rename failure");
+
+  // seq must not have advanced.
+  expect(conn.seq).toBe(seqBefore);
+
+  // The temp file was written (a .tmp path)...
+  expect(tempPath).toBeDefined();
+  expect(tempPath!.endsWith(".tmp")).toBe(true);
+  // ...and swept via safeDelete.
+  expect(safeDeleted).toContain(tempPath!);
+  // No temp-*.tmp residue on disk.
+  const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
+  expect(tmpFiles).toEqual([]);
+});
+
+test("I8: retain send() receipt-gate list throws -- send rejects rather than spinning", async () => {
+  // Rule (a) + gateway liveness: when list() throws inside the receipt-gate loop
+  // (waiting for the peer's receipt after the first send), send() must surface
+  // the error rather than looping silently. Without this, a broken list() path
+  // would spin until the TTL expires, which takes too long for a unit test.
+  const { client } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    // Short TTL so a spin would be caught by the test runner.
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  // First send: proceeds immediately (seq=0, no receipt wait).
+  await conn.send({ first: true });
+
+  // Now stub list() to throw so the second send's receipt-gate list fails.
+  // The gate loop exits when list() rejects and the caught error is rethrown.
+  client.list = async () => {
+    throw new Error("synthetic list failure");
+  };
+
+  // Second send must reject (not spin to TTL expiry).
+  await expect(conn.send({ second: true })).rejects.toThrow(
+    "synthetic list failure",
+  );
+});
+
+test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged", async () => {
+  // Rule (b): when list() throws inside poll(), the error must be emitted on
+  // the "error" channel. recvSeq must not advance (no message was consumed).
+  const { client } = makeMockClient();
+  const peerId = "peer-sender";
+
+  // Stub list to throw on every call so poll() fails immediately.
+  client.list = async () => {
+    throw new Error("synthetic list failure from poll");
+  };
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = "receiver-me";
+  conn.peerId = peerId;
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    conn.stop();
+    notifyError();
+  });
+
+  const recvSeqBefore = (conn as unknown as { recvSeq: number }).recvSeq;
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+
+  // Error must have been emitted.
+  expect(errors).toHaveLength(1);
+  expect((errors[0] as Error).message).toContain("synthetic list failure");
+
+  // recvSeq must not have advanced -- no message was processed.
+  const recvSeqAfter = (conn as unknown as { recvSeq: number }).recvSeq;
+  expect(recvSeqAfter).toBe(recvSeqBefore);
+});
+
+test("I8: retain poll() receipt-write failure -- recvSeq held, message reprocessed and receipted once", async () => {
+  // Rule (b), receipt-write-failure variant (distinct from the emit-failure
+  // path covered above): if writeReceipt() throws before lastReceiptedNNN is
+  // set, recvSeq must NOT advance, so the never-deleted message is reprocessed
+  // on the next poll. The retry writes the receipt successfully -- exactly one
+  // receipt and one delivery, no double-receipt and no skipped message.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
+  files.set(`/test/${msgName}`, message);
+
+  // Fail the first receipt rename, then allow subsequent ones. During poll()
+  // the receipt is the only file renamed to a -receipt.json target (the message
+  // is read via get()), so this isolates the receipt write from the message read.
+  let receiptRenameAttempts = 0;
+  const receiptRenames: string[] = [];
+  const origRename = client.rename.bind(client);
+  client.rename = async (from: string, to: string) => {
+    if (to.endsWith("-receipt.json")) {
+      receiptRenameAttempts += 1;
+      if (receiptRenameAttempts === 1)
+        throw new Error("synthetic receipt rename failure");
+      receiptRenames.push(to);
+    }
+    return origRename(from, to);
+  };
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+  // Swallow the receipt-write error so the poller keeps running and reprocesses
+  // the retained message rather than tearing down.
+  conn.on("error", (err) => {
+    errors.push(err);
+  });
+
+  await runPoller(conn, delivered);
+
+  // The receipt write was attempted twice: it threw once, then succeeded.
+  expect(receiptRenameAttempts).toBe(2);
+  // The failure surfaced on the error channel.
+  expect(errors.length).toBeGreaterThanOrEqual(1);
+  // The message was delivered exactly once...
+  expect(received).toHaveLength(1);
+  // ...recvSeq advanced exactly once, only after the successful receipt + emit
+  // (so it was held across the failed attempt)...
+  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(1);
+  // ...and exactly one receipt persists on disk.
+  expect(receiptRenames).toHaveLength(1);
+  const onDiskReceipts = [...files.keys()].filter((p) =>
+    p.endsWith("-receipt.json"),
+  );
+  expect(onDiskReceipts).toHaveLength(1);
 });

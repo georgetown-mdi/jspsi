@@ -11,7 +11,11 @@ import {
   prepareForExchange,
   UsageError,
 } from "@psilink/core";
-import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
+import type {
+  ExchangeDataSpec,
+  FileSyncOptions,
+  PreparedExchange,
+} from "@psilink/core";
 
 import { applyConnectionOverrides } from "../config";
 import { loadKeyFile, type KeyFile } from "../keyFile";
@@ -418,11 +422,11 @@ export async function handler(argv: Arguments): Promise<void> {
   const { connection, ...exchangeDataSpec } = configResult;
 
   if (
-    options.retainFiles === true &&
-    (connection.channel === "sftp" || connection.channel === "filedrop")
+    (connection.channel === "sftp" || connection.channel === "filedrop") &&
+    (connection.options as FileSyncOptions | undefined)?.retainFiles === true
   ) {
     log.info(
-      "--retain-files requires --lockless-rendezvous and --timestamp-in-filename; any not already set are enabled automatically.",
+      "retain mode requires lockless_rendezvous and timestamp_in_filename; both parties must set all three identically.",
     );
   }
 
