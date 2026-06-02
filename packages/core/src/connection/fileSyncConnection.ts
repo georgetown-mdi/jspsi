@@ -140,9 +140,7 @@ async function readControlFileWithGate(
     }
     return result.data;
   } while (Date.now() <= timeToLive.getTime());
-  throw new Error(
-    `timed out waiting for ${filePath} to fully sync`,
-  );
+  throw new Error(`timed out waiting for ${filePath} to fully sync`);
 }
 
 interface Events {
@@ -251,6 +249,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   log: ReturnType<typeof getLoggerForVerbosity>;
   seq = 0;
   private recvSeq = 0;
+  // Highest message NNN whose receipt has already been written, used to keep the
+  // retain-mode receipt write idempotent across a reprocess (see poll()). -1
+  // means none yet; the first message is NNN 0.
+  private lastReceiptedNNN = -1;
   connected = false;
 
   path: string | undefined;
@@ -445,7 +447,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // in-flight temp write would need removal, but those are cleaned up
     // inline in send()/writeReceipt(), so cleanup() is a no-op here.
     if (this.options.retainFiles) {
-      this.log.debug(`[${this.role}] retain mode: directory is transcript, skipping cleanup`);
+      this.log.debug(
+        `[${this.role}] retain mode: directory is transcript, skipping cleanup`,
+      );
       return;
     }
     const responsibleFilesString =
@@ -567,7 +571,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
     if (!this.options.retainFiles)
       this.responsibleFiles.forEach((fileName) => {
-        if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
+        if (!fileNames.includes(fileName))
+          this.responsibleFiles.delete(fileName);
       });
     const helloFiles = files.filter((file) => file.name.endsWith(HELLO_SUFFIX));
     const hasStaleAck = files.some((file) =>
@@ -1212,7 +1217,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const currentFiles = await this.client.list(path);
       const fileNames = currentFiles.map((f) => f.name);
       this.responsibleFiles.forEach((fileName) => {
-        if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
+        if (!fileNames.includes(fileName))
+          this.responsibleFiles.delete(fileName);
       });
       return currentFiles.some(
         (file) =>
@@ -1477,10 +1483,26 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 `type=${validatedMessage.type}`,
             );
 
-            const receiptName = await this.writeReceipt(path, msgNNN);
-            this.log.debug(
-              `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
-            );
+            // Write the receipt before emit. The receipt is the sender's
+            // go-ahead signal and means "durably received", not "consumed by the
+            // application": the message is a fully-synced file that retain mode
+            // never deletes, so it is already durable at this point, and acking
+            // before the local hand-off keeps the peer unblocked even when emit
+            // fails (e.g. downstream backpressure). Do NOT reorder to
+            // emit-before-receipt -- a receipt-write failure after a successful
+            // emit would re-deliver an already-consumed message.
+            //
+            // Write only once per message: if a prior poll wrote this NNN's
+            // receipt and then emit threw, recvSeq stayed at msgNNN and the
+            // message is reprocessed here. Writing again would leave two receipts
+            // for one message, so skip when this NNN was already receipted.
+            if (this.lastReceiptedNNN !== msgNNN) {
+              const receiptName = await this.writeReceipt(path, msgNNN);
+              this.lastReceiptedNNN = msgNNN;
+              this.log.debug(
+                `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
+              );
+            }
 
             if (validatedMessage.type === "Uint8Array") {
               const bytes = Buffer.from(

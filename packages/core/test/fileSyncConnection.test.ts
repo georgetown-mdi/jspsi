@@ -731,7 +731,8 @@ test("poll delivers a subsequent valid message after swallowing an ENOENT", asyn
       firstMessage,
       new Promise<never>((_, reject) =>
         setTimeout(
-          () => reject(new Error("timed out waiting for first message delivery")),
+          () =>
+            reject(new Error("timed out waiting for first message delivery")),
           2_000,
         ),
       ),
@@ -781,7 +782,8 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
       errorArrived,
       new Promise<never>((_, reject) =>
         setTimeout(
-          () => reject(new Error("timed out waiting for ENOENT threshold error")),
+          () =>
+            reject(new Error("timed out waiting for ENOENT threshold error")),
           2_000,
         ),
       ),
@@ -2539,7 +2541,8 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
       // calls return the full body. connA reads connB's ack normally.
       if (id === idB && path.endsWith(peerAckName)) {
         ackGetCalls++;
-        if (ackGetCalls === 1) return Buffer.from("{") as Buffer<ArrayBufferLike>;
+        if (ackGetCalls === 1)
+          return Buffer.from("{") as Buffer<ArrayBufferLike>;
       }
       const data = sharedFiles.get(path);
       if (!data) throw new Error(`${path}: not found`);
@@ -2548,15 +2551,21 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
     put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
       if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
     },
-    delete: async (path: string) => { sharedFiles.delete(path); },
-    safeDelete: async (path: string) => { sharedFiles.delete(path); },
+    delete: async (path: string) => {
+      sharedFiles.delete(path);
+    },
+    safeDelete: async (path: string) => {
+      sharedFiles.delete(path);
+    },
     rename: async (from: string, to: string) => {
       const data = sharedFiles.get(from);
       if (!data) throw new Error(`${from}: no such file`);
       sharedFiles.delete(from);
       sharedFiles.set(to, data);
     },
-    createExclusive: async () => { throw new Error("not supported"); },
+    createExclusive: async () => {
+      throw new Error("not supported");
+    },
     exists: async (path: string) => sharedFiles.has(path),
   });
 
@@ -3121,6 +3130,68 @@ test("retain mode: a consumed message file is retained on a delete-capable trans
     (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
   );
   expect(receiptOnDisk).toBe(true);
+});
+
+test("retain mode: a message reprocessed after an emit failure is not receipted twice", async () => {
+  // The receipt is written before emit, and on an emit failure recvSeq stays so
+  // the (never-deleted) message is reprocessed on the next poll. The receipt
+  // write must be idempotent across that retry: exactly one receipt per message,
+  // even though the message is processed twice.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
+  files.set(`/test/${msgName}`, message);
+
+  // Count receipt writes via rename rather than the on-disk file set: a
+  // duplicate receipt reuses the same NNN and a second-resolution timestamp, so
+  // it overwrites the first under an identical name and would be invisible to a
+  // file-count check.
+  const receiptRenames: string[] = [];
+  const origRename = client.rename.bind(client);
+  client.rename = async (from: string, to: string) => {
+    if (to.endsWith("-receipt.json")) receiptRenames.push(to);
+    return origRename(from, to);
+  };
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  // Fail the first emit so the message is reprocessed; deliver on the second.
+  let emitCount = 0;
+  const received: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    emitCount += 1;
+    if (emitCount === 1) throw new Error("data handler failed on first emit");
+    received.push(msg);
+    notifyReceived();
+  });
+  // Swallow the error the failed emit raises through poll() so the poller keeps
+  // running and reprocesses the retained message.
+  conn.on("error", () => {});
+
+  await runPoller(conn, delivered);
+
+  // Processed twice (first emit threw, second delivered)...
+  expect(emitCount).toBeGreaterThanOrEqual(2);
+  expect(received).toHaveLength(1);
+  // ...but the receipt was written exactly once (idempotent across the retry).
+  expect(receiptRenames).toHaveLength(1);
 });
 
 test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget", async () => {
