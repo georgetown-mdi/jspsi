@@ -11,13 +11,9 @@ import {
   prepareForExchange,
   UsageError,
 } from "@psilink/core";
-import type {
-  ExchangeDataSpec,
-  FileSyncOptions,
-  PreparedExchange,
-} from "@psilink/core";
+import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
 
-import { applyConnectionOverrides } from "../config";
+import { applyConnectionOverrides, announceRetainMode } from "../config";
 import { loadKeyFile, type KeyFile } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
@@ -421,16 +417,7 @@ export async function handler(argv: Arguments): Promise<void> {
   }
   const { connection, ...exchangeDataSpec } = configResult;
 
-  if (
-    (connection.channel === "sftp" || connection.channel === "filedrop") &&
-    (connection.options as FileSyncOptions | undefined)?.retainFiles === true
-  ) {
-    log.info(
-      "retain mode is enabled, with lockless_rendezvous and " +
-        "timestamp_in_filename; the peer must set all three identically " +
-        "(these flags are not negotiated).",
-    );
-  }
+  announceRetainMode(connection, log);
 
   let identity: string;
   if (options.identity) {

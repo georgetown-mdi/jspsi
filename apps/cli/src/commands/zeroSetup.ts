@@ -13,12 +13,11 @@ import {
 import type {
   ConnectionConfig,
   FileDropConnectionConfig,
-  FileSyncOptions,
   SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
 
-import { applyConnectionOverrides } from "../config";
+import { applyConnectionOverrides, announceRetainMode } from "../config";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
@@ -430,16 +429,7 @@ export async function handler(argv: Arguments): Promise<void> {
     process.exit((err as { exitCode?: number }).exitCode ?? 69);
   }
 
-  if (
-    (connection.channel === "sftp" || connection.channel === "filedrop") &&
-    (connection.options as FileSyncOptions | undefined)?.retainFiles === true
-  ) {
-    log.info(
-      "retain mode is enabled, with lockless_rendezvous and " +
-        "timestamp_in_filename; the peer must set all three identically " +
-        "(these flags are not negotiated).",
-    );
-  }
+  announceRetainMode(connection, log);
 
   try {
     // Spread + cast: `connection` is `ConnectionConfig` (which includes the

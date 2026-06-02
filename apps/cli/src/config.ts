@@ -104,3 +104,27 @@ export function applyConnectionOverrides(
 
   return result;
 }
+
+/**
+ * Logs a one-time reminder, on the file-sync channels only, that retain mode is
+ * a bilateral agreement with no negotiation: this party has it enabled (with the
+ * `lockless_rendezvous` and `timestamp_in_filename` it implies), and the peer
+ * must set all three identically or the exchange stalls until the peer timeout.
+ * Shared by the `exchange` and `zero-setup` commands so the wording cannot drift
+ * between them.
+ */
+export function announceRetainMode(
+  connection: ConnectionConfig,
+  log: { info: (message: string) => void },
+): void {
+  if (
+    (connection.channel === "sftp" || connection.channel === "filedrop") &&
+    connection.options?.retainFiles === true
+  ) {
+    log.info(
+      "retain mode is enabled, with lockless_rendezvous and " +
+        "timestamp_in_filename; the peer must set all three identically " +
+        "(these flags are not negotiated).",
+    );
+  }
+}

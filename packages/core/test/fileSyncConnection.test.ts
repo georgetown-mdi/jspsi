@@ -3869,69 +3869,61 @@ test("I8: retain poll() receipt-write failure -- recvSeq held, message reprocess
 
 // --- synchronize() entry precondition matrix ---------------------------------
 // One mode-agnostic rule replaces the former generic + retain-specific guards:
-// at synchronize() entry the directory must be empty except for at most one
-// peer hello. Every row below is derived directly from that rule. A "reject"
-// row is a file kind that can only legitimately appear AFTER entry; the
-// "proceed" rows include the live-peer-hello case that previously had no
-// coverage and was wrongly rejected in retain mode (the bug this fix targets).
-// If this matrix grows a row that is not a direct consequence of the rule, the
-// rule -- not the matrix -- is wrong.
+// at synchronize() entry the directory must be empty except for at most one peer
+// hello. The matrix is the full (file-kind x mode) cross-product of that rule,
+// generated rather than hand-listed so a missing combination is structurally
+// impossible. The only legal pre-entry states are an empty directory and a
+// single peer hello (the case the old retain guard wrongly rejected); every
+// other file kind can appear only AFTER entry and is rejected, in both modes.
+// If a kind below is not a direct consequence of the rule, the rule -- not the
+// matrix -- is wrong.
 
 const ENTRY_SELF_ID = "00000000-0000-4000-8000-000000000001";
 const ENTRY_PEER_ID = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 const ENTRY_PEER_ID_2 = "11111111-1111-4111-8111-111111111111";
 
-const entryPreconditionCells: Array<{
-  name: string;
-  // Files present in the directory at synchronize() entry; bodies are "{}" so
-  // a peer hello passes the I5 read gate immediately on the proceed rows.
+// One row per file kind. `present` is what sits in the directory at entry;
+// bodies are "{}" so a peer hello passes the I5 read gate immediately on the
+// proceed rows. Outcome does not vary by mode (the rule is mode-agnostic), so
+// each kind carries a single expected outcome and is run in both modes below.
+const entryPreconditionKinds: Array<{
+  kind: string;
   present: string[];
-  retain: boolean;
   outcome: "proceed" | "reject";
 }> = [
-  // Empty directory proceeds in both modes.
-  { name: "empty directory (delete mode)", present: [], retain: false, outcome: "proceed" },
-  { name: "empty directory (retain mode)", present: [], retain: true, outcome: "proceed" },
-  // Exactly one peer hello proceeds in both modes. The retain row is the
-  // previously-uncovered case: the second party to start always sees the
-  // first party's hello, and the old retain guard wrongly rejected it.
-  { name: "one peer hello (delete mode)", present: [`${ENTRY_PEER_ID}-hello.json`], retain: false, outcome: "proceed" },
-  { name: "one peer hello (retain mode)", present: [`${ENTRY_PEER_ID}-hello.json`], retain: true, outcome: "proceed" },
-  // A self-hello (same-id leftover from a crashed session) is rejected in both
-  // modes -- it must not be mistaken for a peer hello.
-  { name: "self-hello (delete mode)", present: [`${ENTRY_SELF_ID}-hello.json`], retain: false, outcome: "reject" },
-  { name: "self-hello (retain mode)", present: [`${ENTRY_SELF_ID}-hello.json`], retain: true, outcome: "reject" },
-  // More than one peer hello is rejected in both modes.
-  { name: "two peer hellos (delete mode)", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], retain: false, outcome: "reject" },
-  { name: "two peer hellos (retain mode)", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], retain: true, outcome: "reject" },
-  // Each remaining file kind only appears after entry, so it is rejected. The
-  // rule is mode-agnostic, so wave and ack are rejected in retain mode too (the
-  // ack + retain row also substitutes the deleted stale-lockless-ack test, since
-  // lockless + retain is the production configuration).
-  { name: "wave file (delete mode)", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], retain: false, outcome: "reject" },
-  { name: "wave file (retain mode)", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], retain: true, outcome: "reject" },
-  { name: "handshake-ack (delete mode)", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: false, outcome: "reject" },
-  { name: "handshake-ack (retain mode)", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: true, outcome: "reject" },
-  // A stale non-timestamped message: closes the pre-existing gap where the old
-  // generic (delete-mode) guard let leftover messages through. Rejected in both
-  // modes, since the rule is mode-agnostic.
-  { name: "stale non-timestamped message (delete mode)", present: [`${ENTRY_PEER_ID}-42.json`], retain: false, outcome: "reject" },
-  { name: "stale non-timestamped message (retain mode)", present: [`${ENTRY_PEER_ID}-42.json`], retain: true, outcome: "reject" },
-  // The retain-shape timestamped message and receipt, each rejected in both
-  // modes (a message/receipt only appears after entry regardless of mode).
-  { name: "timestamped message (retain mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], retain: true, outcome: "reject" },
-  { name: "timestamped message (delete mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], retain: false, outcome: "reject" },
-  { name: "receipt (retain mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], retain: true, outcome: "reject" },
-  { name: "receipt (delete mode)", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], retain: false, outcome: "reject" },
+  { kind: "empty directory", present: [], outcome: "proceed" },
+  { kind: "one peer hello", present: [`${ENTRY_PEER_ID}-hello.json`], outcome: "proceed" },
+  // A self-hello is a same-id leftover from a crashed session, not the peer's.
+  { kind: "self-hello", present: [`${ENTRY_SELF_ID}-hello.json`], outcome: "reject" },
+  { kind: "two peer hellos", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], outcome: "reject" },
+  { kind: "wave file", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], outcome: "reject" },
+  { kind: "handshake-ack", present: [`${ENTRY_PEER_ID}-hello-ack.json`], outcome: "reject" },
+  // A stale non-timestamped message closes the pre-existing gap where the old
+  // generic (delete-mode) guard let leftover messages through.
+  { kind: "non-timestamped message", present: [`${ENTRY_PEER_ID}-42.json`], outcome: "reject" },
+  { kind: "timestamped message", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], outcome: "reject" },
+  { kind: "receipt", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], outcome: "reject" },
   // An in-flight temp file is rejected today (strict-empty). The planned tmp
   // sweep (193792285) will move this into the guard's `ignored` set.
-  { name: "temp file (delete mode)", present: ["temp-abc.tmp"], retain: false, outcome: "reject" },
-  { name: "temp file (retain mode)", present: ["temp-abc.tmp"], retain: true, outcome: "reject" },
-  // A foreign (non-protocol) file is rejected in both modes: the directory is
-  // the state machine, so it must be clean at entry.
-  { name: "foreign file (delete mode)", present: ["notes.txt"], retain: false, outcome: "reject" },
-  { name: "foreign file (retain mode)", present: ["notes.txt"], retain: true, outcome: "reject" },
+  { kind: "temp file", present: ["temp-abc.tmp"], outcome: "reject" },
+  // A foreign (non-protocol) file: the directory is the state machine, so it
+  // must be clean at entry.
+  { kind: "foreign file", present: ["notes.txt"], outcome: "reject" },
 ];
+
+const entryPreconditionModes: Array<{ label: string; retain: boolean }> = [
+  { label: "delete mode", retain: false },
+  { label: "retain mode", retain: true },
+];
+
+const entryPreconditionCells = entryPreconditionModes.flatMap((mode) =>
+  entryPreconditionKinds.map((k) => ({
+    name: `${k.kind} (${mode.label})`,
+    present: k.present,
+    retain: mode.retain,
+    outcome: k.outcome,
+  })),
+);
 
 test.each(entryPreconditionCells)(
   "synchronize() entry precondition: $name -> $outcome",
