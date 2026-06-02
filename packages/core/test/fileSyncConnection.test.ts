@@ -3100,6 +3100,8 @@ test("retain mode: synchronize() throws UsageError when exchange files from a pr
   for (const staleFileName of [
     // Own receipt from a prior session.
     `${id}-20260101T000000-000-2-receipt.json`,
+    // Own message file from a prior session (sender crashed after writing).
+    `${id}-20260101T000000-000-42.json`,
     // Non-own message file from a prior session (any prefix).
     `${peerId}-20260101T000000-000-42.json`,
   ]) {

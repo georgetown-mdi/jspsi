@@ -1425,14 +1425,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (messages.length > 1) {
         // Emitted (not thrown to a caller), so no "usage" sentinel: the bridge
         // classifies every poll-loop error as a transport failure.
-        const retainHint = this.options.retainFiles
-          ? "; in retain mode this can happen when a directory is reused " +
-            "across exchanges or after a crash-restart -- use a fresh " +
-            "directory per exchange"
-          : "";
         throw new Error(
           `more than one message file from ${peerId} in ${path} - are there ` +
-            `other sessions using this path?${retainHint}`,
+            "other sessions using this path?",
         );
       }
 
@@ -1459,12 +1454,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           if (this.options.retainFiles) {
             // Retain mode: write receipt after validation, before emit; attempt
             // best-effort delete (tolerated -- no-delete transports will fail here).
-            const msgNNN = parseMessageNNN(messageFile.name);
-            if (msgNNN === undefined)
-              throw new Error(
-                `cannot parse sequence number from ${messageFile.name}; ` +
-                  "retain_files requires timestamp_in_filename: true",
-              );
+            const msgNNN = this.recvSeq;
 
             const validatedMessage = Message.parse(
               JSON.parse(message.toString()),

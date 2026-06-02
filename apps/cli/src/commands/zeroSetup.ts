@@ -401,8 +401,8 @@ export async function handler(argv: Arguments): Promise<void> {
       const ch = channelFromURL(server);
       if (ch !== "sftp" && ch !== "filedrop") {
         log.warn(
-          `--retain-files has no effect on the ${ch} channel and ` +
-            "will be ignored; it is only supported on sftp and filedrop",
+          `--retain-files is not supported on the ${ch} channel; ` +
+            "it is only valid for sftp and filedrop",
         );
       }
     } catch {
