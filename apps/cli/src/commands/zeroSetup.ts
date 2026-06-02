@@ -434,8 +434,7 @@ export async function handler(argv: Arguments): Promise<void> {
     (connection.channel === "sftp" || connection.channel === "filedrop")
   ) {
     log.info(
-      "--retain-files requires and enables --lockless-rendezvous and " +
-        "--timestamp-in-filename where not already set",
+      "--retain-files requires --lockless-rendezvous and --timestamp-in-filename; any not already set are enabled automatically.",
     );
   }
 

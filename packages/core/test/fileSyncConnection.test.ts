@@ -3473,3 +3473,165 @@ test("retain mode + lockless rendezvous: multi-message exchange completes end-to
   // attempt deletion anywhere in the rendezvous-to-message-loop path.
   expect(deleteCalls).toHaveLength(0);
 });
+
+// --- finding #1: seq advances only after durable rename ----------------------
+
+test("retain mode: send() does not advance seq when rename throws", async () => {
+  // Regression guard: a write failure must not leave this.seq past the slot of
+  // the unwritten message, which would cause the receipt gate to wait forever
+  // for a receipt whose NNN was never written.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = "sender-me";
+  conn.peerId = "peer-receiver";
+
+  const seqBefore = conn.seq;
+
+  // Stub rename to throw so the durable write never completes.
+  client.rename = async () => {
+    throw new Error("rename failed");
+  };
+
+  await expect(conn.send({ n: 1 })).rejects.toThrow("rename failed");
+
+  // seq must be unchanged: the message was never committed to disk.
+  expect(conn.seq).toBe(seqBefore);
+});
+
+test("delete mode: send() does not advance seq when rename throws", async () => {
+  // Same invariant must hold in non-retain mode.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+
+  const seqBefore = conn.seq;
+  client.rename = async () => {
+    throw new Error("rename failed");
+  };
+
+  await expect(conn.send({ n: 1 })).rejects.toThrow("rename failed");
+  expect(conn.seq).toBe(seqBefore);
+});
+
+// --- finding #4: retain => timestampInFilename guard in synchronize() --------
+
+test("retain mode: synchronize() throws UsageError when timestampInFilename is false", async () => {
+  // Guard fires when retainFiles=true and timestampInFilename=false (even when
+  // locklessRendezvous=true, so it is the timestamp guard that triggers).
+  const { client } = makeMockClient();
+  client.list = async () => [];
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    retainFiles: true,
+    locklessRendezvous: true,
+    timestampInFilename: false,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+// --- finding #5: close() resets session counters -----------------------------
+
+test("close() resets seq, recvSeq, and lastReceiptedNNN to their initial values", async () => {
+  // A closed connection must not carry stale counters into a hypothetical
+  // re-open. Set each to a non-zero value, close(), then assert they reset.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+
+  // Drive counters to non-initial values by sending a message and manipulating
+  // internal state directly (the fields are internal but accessible in tests).
+  await conn.send({ n: 1 });
+  // seq is now 1 after a successful send.
+  expect(conn.seq).toBe(1);
+  // Manually set recvSeq and lastReceiptedNNN to non-zero/non-(-1) values.
+  (conn as unknown as { recvSeq: number }).recvSeq = 3;
+  (conn as unknown as { lastReceiptedNNN: number }).lastReceiptedNNN = 2;
+
+  await conn.close();
+
+  expect(conn.seq).toBe(0);
+  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
+  expect((conn as unknown as { lastReceiptedNNN: number }).lastReceiptedNNN).toBe(
+    -1,
+  );
+});
+
+// --- finding #6: stale-file check uses retain message shape ------------------
+
+test(
+  "retain mode: non-timestamped peer file does not trigger stale-file UsageError at synchronize()",
+  async () => {
+    // A file like `<peerId>-<digits>.json` matches parseMessageByteCount but NOT
+    // parseMessageNNN (no NNN segment). The tightened stale-file clause uses
+    // parseMessageNNN, so it must pass without error.
+    const { client, files } = makeMockClient();
+    const id = "receiver-me";
+    const peerId = "peer-sender";
+
+    // Non-timestamped message name: only a byte-count segment, no NNN.
+    const nonTimestampedName = `${peerId}-42.json`;
+    files.set(`/test/${nonTimestampedName}`, Buffer.from("{}"));
+
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 10,
+      // Short TTL so synchronize() times out quickly instead of waiting 5s.
+      timeToLive: new Date(Date.now() + 200),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+    });
+    conn.id = id;
+    conn.connected = true;
+    conn.path = "/test";
+
+    // synchronize() will proceed past the stale-file check (which should not
+    // fire for this file) and into the lockless ack-handshake wait, where it
+    // times out quickly. The important assertion is that a UsageError about
+    // stale files is NOT thrown; a timeout error is fine.
+    const result = await conn.synchronize().catch((e: unknown) => e);
+    const isStaleFileError =
+      result instanceof UsageError &&
+      (result.message as string).includes("prior session");
+    expect(isStaleFileError).toBe(false);
+  },
+  2_000,
+);
+
+test("retain mode: timestamped message file does trigger stale-file UsageError at synchronize()", async () => {
+  // Counterpart: a properly-timestamped retain message file must still be
+  // caught by the stale-file guard.
+  const { client, files } = makeMockClient();
+  const id = "receiver-me";
+  const peerId = "peer-sender";
+
+  // Retain-shaped message: <id>-<ts>-<NNN>-<byteCount>.json.
+  const timestampedName = `${peerId}-20260101T000000-000-42.json`;
+  files.set(`/test/${timestampedName}`, Buffer.from("{}"));
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});

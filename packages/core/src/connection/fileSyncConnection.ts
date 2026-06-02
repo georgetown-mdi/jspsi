@@ -548,6 +548,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
     this.path = undefined;
     this.config = undefined;
+    this.resetSessionState();
   }
 
   /**
@@ -579,6 +580,26 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         "retain mode requires lockless rendezvous: wave rendezvous is " +
           "delete-based and cannot produce the whole-directory no-delete " +
           "transcript required by retain mode",
+      );
+
+    // Without timestampInFilename the message filename has no NNN segment, so
+    // poll()'s parseMessageNNN() returns undefined for every file and the
+    // receiver silently skips every incoming message. Enforce at the class
+    // boundary so a direct library consumer hits a clear error rather than a
+    // stall.
+    //
+    // Note: a warning nudging a stable peer_id when retainFiles is true was
+    // removed here. The UUID-collision-on-reuse failure that warning addressed
+    // is now hard-blocked by the fresh-directory guard (synchronize() rejects a
+    // non-empty directory in retain mode) plus this timestampInFilename guard
+    // (which prevents the NNN parse from ever producing undefined). A stable
+    // peer_id only affects audit-transcript readability, which is a docs concern
+    // and not a runtime warning.
+    if (this.options.retainFiles && !this.options.timestampInFilename)
+      throw new UsageError(
+        "retain mode requires timestamp_in_filename: without it message " +
+          "filenames carry no NNN segment and the receiver cannot sequence " +
+          "them (every message would be silently skipped)",
       );
 
     this.log.info(`[${this.role}] synchronizing at path ${this.path}`);
@@ -617,8 +638,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           f.name.endsWith(HELLO_SUFFIX) ||
           f.name.endsWith(".wave") ||
           f.name.endsWith("-hello-ack.json") ||
-          (f.name.endsWith(".json") &&
-            parseMessageByteCount(f.name) !== undefined) ||
+          // Targets the retain message shape (<id>-<ts>-<NNN>-<byteCount>.json);
+          // directory exclusivity covers any residual stray file.
+          parseMessageNNN(f.name) !== undefined ||
           f.name.endsWith("-receipt.json"),
       );
       if (staleFiles.length > 0)
@@ -732,6 +754,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         await this.client.safeDelete(helloPath);
         if (!this.options.retainFiles)
           this.responsibleFiles.delete(`${this.id}${HELLO_SUFFIX}`);
+        this.resetSessionState();
         throw new Error(
           `peer id '${peerId}' and this party's id '${this.id}' share a ` +
             "prefix at a '-' boundary; ids must not be prefix-extensions " +
@@ -1210,8 +1233,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
-        this.recvSeq = 0;
-        this.lastReceiptedNNN = -1;
+        this.resetSessionState();
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
     }
@@ -1288,13 +1310,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.log.debug(
             `[${this.role}] waiting for receipt NNN=${expectedNNN} from ${this.peerId}`,
           );
-          while (!(await hasQualifyingReceipt(expectedNNN))) {
-            // open() set timeToLive before send() can run; assertion is safe.
+          // Check the deadline before the first list() so an already-expired
+          // TTL does not issue a spurious RPC.
+          // open() set timeToLive before send() can run; assertion is safe.
+          while (true) {
             if (Date.now() > this.options.timeToLive!.getTime()) {
               throw new UsageError(
                 `timed out waiting for receipt from ${this.peerId} for seq=${expectedNNN}`,
               );
             }
+            if (await hasQualifyingReceipt(expectedNNN)) break;
             await new Promise((resolve) =>
               setTimeout(resolve, this.options.pollingFrequency),
             );
@@ -1326,7 +1351,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       }
 
       const ts = Date.now();
-      const seq = this.seq++;
+      // Do not increment this.seq yet: advance only after the durable rename so
+      // a failed send does not leave the counter past an unwritten message.
+      const seq = this.seq;
       // Serialize before constructing the filename so the encoded byte count is
       // the exact on-disk size; the peer waits until the synced file reaches
       // that many bytes before reading it, so a partial sync delivery is never
@@ -1351,6 +1378,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       await this.client.rename(tempPath, outPath);
       if (!this.options.retainFiles) this.responsibleFiles.add(outName);
       this.lastSentFile = outName;
+      // Advance after the durable rename: a write failure above leaves seq
+      // unchanged so a retry can reuse this slot and the receipt gate cannot
+      // block on an NNN that was never written.
+      this.seq = seq + 1;
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
       throw err instanceof Error ? err : new Error(errMessage(err));
@@ -1471,6 +1502,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (messages.length > 1) {
         // Emitted (not thrown to a caller), so no "usage" sentinel: the bridge
         // classifies every poll-loop error as a transport failure.
+        if (this.options.retainFiles) {
+          // In retain mode the scan is filtered to a single NNN (recvSeq), so
+          // two matches mean two files share one NNN -- a protocol violation or
+          // directory reuse, not necessarily a separate session.
+          throw new Error(
+            `more than one message file with NNN=${this.recvSeq} from ` +
+              `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
+          );
+        }
         throw new Error(
           `more than one message file from ${peerId} in ${path} - are there ` +
             "other sessions using this path?",
@@ -1651,6 +1691,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         );
       }
     }
+  }
+
+  // Resets all per-session counters and tracking to their initial state.
+  // Called at the rendezvous outer catch (to allow retry on the same instance),
+  // at the joiner prefix-at-dash error path, and at close() (so a closed
+  // instance does not carry stale counters into a hypothetical re-open).
+  private resetSessionState() {
+    this.seq = 0;
+    this.recvSeq = 0;
+    this.lastReceiptedNNN = -1;
+    this.lastSentFile = undefined;
   }
 
   start() {
