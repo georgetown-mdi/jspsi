@@ -2764,6 +2764,106 @@ function makeRetainConn(
   return conn;
 }
 
+test("retain mode: synchronize() throws UsageError when locklessRendezvous is false", async () => {
+  // Class-boundary guard: constructing FileSyncConnection with retainFiles:
+  // true but locklessRendezvous: false (or unset) bypasses the schema refine
+  // and CLI imply, so synchronize() must catch the combination and throw before
+  // entering any rendezvous path.
+  const { client } = makeMockClient();
+  client.list = async () => [];
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    retainFiles: true,
+    // locklessRendezvous intentionally omitted (defaults to false)
+  });
+  conn.connected = true;
+  conn.path = "/test";
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("retain mode: synchronize() throws UsageError when locklessRendezvous is explicitly false", async () => {
+  // Explicit false must also be rejected, not just the default (unset) case.
+  const { client } = makeMockClient();
+  client.list = async () => [];
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    retainFiles: true,
+    locklessRendezvous: false,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("retain mode: poll() emits UsageError when message body seq mismatches filename NNN", async () => {
+  // Regression guard: a message file whose body seq does not match the filename
+  // NNN is corrupt or protocol-buggy. poll() must surface a UsageError via the
+  // error event and must NOT write a receipt or deliver the payload.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  // Filename NNN=000 but body seq=99 -> mismatch.
+  const bodySeq = 99;
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: bodySeq, type: "Object", payload: { v: 1 } }),
+  );
+  // Filename encodes NNN=000 (the third-from-last segment before the byte count).
+  const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
+  files.set(`/test/${msgName}`, message);
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("data", (msg) => received.push(msg));
+  conn.on("error", (err) => {
+    errors.push(err);
+    conn.stop();
+    notifyError();
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for seq-mismatch error")),
+        2_000,
+      ),
+    ),
+  ]);
+
+  // Error must be a UsageError surfaced via the error event.
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  // No data must have been delivered and no receipt written.
+  expect(received).toHaveLength(0);
+  const receiptOnDisk = [...files.keys()].some((p) =>
+    p.endsWith("-receipt.json"),
+  );
+  expect(receiptOnDisk).toBe(false);
+});
+
 test("retain mode: multi-message exchange completes when delete() always fails", async () => {
   // Acceptance: two-party unit test demonstrating a full multi-message cycle
   // when the mock's delete() is stubbed to always throw.

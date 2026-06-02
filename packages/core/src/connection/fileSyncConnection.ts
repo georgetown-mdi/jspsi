@@ -223,6 +223,11 @@ export interface FileTransportClient {
     options?: PutOptions,
   ) => Promise<unknown>;
   delete: (path: string) => Promise<void>;
+  /**
+   * Removes `path`, swallowing all errors (file-absent, permission, transport).
+   * Implementations must never reject so callers may use this in `catch` blocks
+   * to clean up without masking the original error.
+   */
   safeDelete: (path: string) => Promise<void>;
   rename: (fromPath: string, toPath: string) => Promise<void>;
   /**
@@ -562,6 +567,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       throw new Error("not connected");
 
     if (this.peerId) throw new Error("already synchronized");
+
+    // Library-level defense-in-depth: the schema refine and CLI imply cover the
+    // config/CLI entry points, but a direct library consumer that constructs
+    // FileSyncConnection with retainFiles: true and locklessRendezvous: false
+    // would otherwise reach the delete-based wave path, which is incompatible
+    // with retain mode (wave rendezvous is delete-based and cannot produce the
+    // whole-directory no-delete transcript). Make that combination unreachable.
+    if (this.options.retainFiles && !this.options.locklessRendezvous)
+      throw new UsageError(
+        "retain mode requires lockless rendezvous: wave rendezvous is " +
+          "delete-based and cannot produce the whole-directory no-delete " +
+          "transcript required by retain mode",
+      );
 
     this.log.info(`[${this.role}] synchronizing at path ${this.path}`);
 
@@ -1494,6 +1512,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const validatedMessage = Message.parse(
               JSON.parse(message.toString()),
             );
+
+            // Both the sender and receiver derive NNN from the same per-session
+            // counter, so a body seq that does not match the filename NNN
+            // indicates file corruption or a protocol bug. Surface it
+            // immediately rather than silently receipting or delivering a
+            // mismatched message.
+            if (validatedMessage.seq !== msgNNN)
+              throw new UsageError(
+                `message body seq=${validatedMessage.seq} does not match ` +
+                  `filename NNN=${msgNNN}: possible corruption or protocol bug`,
+              );
+
             this.log.trace(
               `[${this.role}] received message seq=${validatedMessage.seq}, ` +
                 `type=${validatedMessage.type}`,
