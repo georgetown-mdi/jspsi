@@ -620,75 +620,59 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         if (!fileNames.includes(fileName))
           this.responsibleFiles.delete(fileName);
       });
-    const helloFiles = files.filter((file) => file.name.endsWith(HELLO_SUFFIX));
-    const hasStaleAck = files.some((file) =>
-      file.name.endsWith("-hello-ack.json"),
+    // Unified entry precondition (mode-agnostic, both delete and retain). At
+    // synchronize() entry the directory must be empty except for at most one
+    // peer hello -- a hello file whose id is not this party's own. That is the
+    // only file kind that can legitimately predate this party's entry: a party
+    // writes its own hello/wave/ack only after observing the peer's hello, and
+    // messages and receipts exist only once rendezvous has completed. So the
+    // only thing that can already be present is the other party's hello.
+    //
+    // Anything else is a protocol error: a second peer hello, a self-hello (a
+    // same-id leftover from a crashed session), a wave, a handshake-ack, a
+    // message, a receipt, an in-flight temp file, or any foreign file. This is
+    // strict-empty by design (the directory is the state machine), so a foreign
+    // file is rejected rather than ignored. The two cases that legitimately
+    // pre-exist as the protocol grows -- an orphaned temp-*.tmp swept by
+    // 193792285, and a directory snapshot -- are accommodated by adding their
+    // names to `ignored`; until those land it stays empty and every
+    // non-peer-hello file is rejected.
+    const isPeerHello = (name: string) =>
+      name.endsWith(HELLO_SUFFIX) &&
+      name.slice(0, -HELLO_SUFFIX.length) !== this.id;
+    const ignored = new Set<string>();
+    const peerHellos = files.filter((file) => isPeerHello(file.name));
+    const unexpected = files.filter(
+      (file) => !isPeerHello(file.name) && !ignored.has(file.name),
     );
 
-    // Retain mode requires a fresh directory per exchange: nothing is ever
-    // deleted, so leftover files from a prior session are indistinguishable
-    // from current-session files and will corrupt the exchange. Check this
-    // before the generic preexisting-file guard so a reused retain directory
-    // (which will have persisted hellos and acks) yields the clear
-    // "retain mode requires a fresh directory" error rather than the generic
-    // "crashed session" message.
-    if (this.options.retainFiles) {
-      const staleFiles = files.filter(
-        (f) =>
-          f.name.endsWith(HELLO_SUFFIX) ||
-          f.name.endsWith(".wave") ||
-          f.name.endsWith("-hello-ack.json") ||
-          // Catches BOTH message shapes: the timestamped retain shape
-          // (<id>-<ts>-<NNN>-<byteCount>.json) and any non-timestamped delete-
-          // mode leftover (<id>-<byteCount>.json). parseMessageByteCount is
-          // right-anchored to the terminal numeric segment and returns undefined
-          // for receipts (whose terminal segment is the word "receipt"), so the
-          // separate -receipt.json clause below is still required.
-          (f.name.endsWith(".json") && parseMessageByteCount(f.name) !== undefined) ||
-          f.name.endsWith("-receipt.json"),
-      );
-      if (staleFiles.length > 0)
-        throw new UsageError(
-          `retain mode: path ${this.path} contains ${staleFiles.length} ` +
-            `exchange file(s) from a prior session ` +
-            `(${staleFiles.map((f) => f.name).join(", ")}); ` +
-            "retain mode requires a fresh directory per exchange -- " +
-            "move or remove these files before retrying",
-        );
-    }
-
-    if (
-      helloFiles.length > 1 ||
-      files.some((file) => file.name.endsWith(".wave")) ||
-      hasStaleAck
-    ) {
-      const leftover = files
-        .filter(
-          (f) =>
-            f.name.endsWith(HELLO_SUFFIX) ||
-            f.name.endsWith(".wave") ||
-            f.name.endsWith("-hello-ack.json"),
-        )
-        .map((f) => f.name)
-        .join(", ");
+    if (unexpected.length > 0)
       throw new UsageError(
-        `path ${this.path} had preexisting hello, wave, or handshake-ack ` +
-          `files (${leftover}); the directory must be empty of these files ` +
-          "before executing the protocol. Most likely cause: a previous " +
-          "exchange was terminated by SIGKILL/OOM/power loss before its " +
-          "cleanup ran (a handshake-ack file indicates a crashed lockless " +
-          "session). A handshake-ack can also appear when a live lockless " +
-          "peer wrote its ack and this party timed out and retried before " +
-          "the peer finished or cleaned up; in that case wait for the peer " +
-          "to complete or time out before retrying. Remove the listed files " +
-          "manually after verifying that no other session is concurrently " +
-          "using this path.",
+        `path ${this.path} must be empty except for a single peer hello at ` +
+          "the start of the protocol, but contains " +
+          `${unexpected.length} unexpected file(s): ` +
+          `${unexpected.map((f) => f.name).join(", ")}. A pre-existing wave, ` +
+          "handshake-ack, message, receipt, self-hello, or temp file usually " +
+          "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
+          "before its cleanup ran, or -- in retain mode, which never deletes " +
+          "-- that this directory was reused for a second exchange. Remove the " +
+          "listed files after confirming no other session is using this path. " +
+          "A handshake-ack specifically indicates a crashed lockless session; " +
+          "if a live lockless peer is mid-rendezvous, wait for it to complete " +
+          "or time out before retrying.",
       );
-    }
+
+    if (peerHellos.length > 1)
+      throw new UsageError(
+        `path ${this.path} contains ${peerHellos.length} peer hello files ` +
+          `(${peerHellos.map((f) => f.name).join(", ")}); only one peer may ` +
+          "share a rendezvous directory -- are there other sessions using " +
+          "this path?",
+      );
 
     const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;
 
-    if (helloFiles.length === 1 && !this.options.locklessRendezvous) {
+    if (peerHellos.length === 1 && !this.options.locklessRendezvous) {
       /**
        * A list
        * A hello
@@ -701,7 +685,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
        * This is B.
        */
 
-      const otherFile = helloFiles[0];
+      const otherFile = peerHellos[0];
       const otherPath = `${this.path}/${otherFile.name}`;
       const peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
@@ -1545,6 +1529,36 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           const message = await this.client.get(inPath, { encoding: "utf-8" });
           reachedGet = false;
 
+          // The file has already passed the byte-count gate above, so it is
+          // fully synced: a JSON-parse or schema-validation failure here is
+          // genuine corruption, not a partial write, and re-reading the same
+          // bytes cannot fix it. Classify it as a terminal UsageError (the
+          // catch below stops the poller on a UsageError) -- the same rule
+          // readControlFileWithGate applies to control files. This is
+          // mode-agnostic: in retain mode the never-deleted file would
+          // otherwise be re-read every poll cycle until the peer timeout; in
+          // delete mode it is deleted before this runs, but the classification
+          // stays uniform so a corrupt frame is a clean terminal failure rather
+          // than a silently dropped message.
+          const parseMessage = (): z.infer<typeof Message> => {
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(message.toString());
+            } catch (parseErr: unknown) {
+              throw new UsageError(
+                `message file ${messageFile.name} from ${peerId} is fully ` +
+                  `synced but is not valid JSON: ${errMessage(parseErr)}`,
+              );
+            }
+            const result = Message.safeParse(parsed);
+            if (!result.success)
+              throw new UsageError(
+                `message file ${messageFile.name} from ${peerId} is fully ` +
+                  `synced but failed schema validation: ${result.error.message}`,
+              );
+            return result.data;
+          };
+
           if (this.options.retainFiles) {
             // Retain mode never deletes the message file: the directory is the
             // durable transcript, and the receipt -- written here after
@@ -1557,9 +1571,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // operator responsibility.
             const msgNNN = this.recvSeq;
 
-            const validatedMessage = Message.parse(
-              JSON.parse(message.toString()),
-            );
+            const validatedMessage = parseMessage();
 
             // Both the sender and receiver derive NNN from the same per-session
             // counter, so a body seq that does not match the filename NNN
@@ -1632,9 +1644,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               }
             }
 
-            const validatedMessage = Message.parse(
-              JSON.parse(message.toString()),
-            );
+            const validatedMessage = parseMessage();
             this.log.trace(
               `[${this.role}] received message seq=${validatedMessage.seq}, ` +
                 `type=${validatedMessage.type}`,
@@ -1686,10 +1696,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // own inner try/catch (see above) that handles and swallows them.
         // All cases are propagated immediately as hard failures.
         this.consecutiveEnoentCount = 0;
-        // A UsageError here is a terminal protocol violation (seq/NNN mismatch,
-        // duplicate NNN): stop the poller before emitting so the finally block
-        // does not reschedule and re-read the same corrupt file. Recoverable
-        // errors (emit failure, receipt-write failure, transient transport) are
+        // A UsageError here is a terminal failure -- re-reading the same bytes
+        // cannot help: a fully-synced message that fails to parse or validate,
+        // a body-seq/filename-NNN mismatch, or a duplicate NNN. Stop the poller
+        // before emitting so the finally block does not reschedule and re-read
+        // the same corrupt file. Recoverable errors (a downstream emit handler
+        // throwing, a receipt-write failure, a transient list/get hiccup) are
         // NOT UsageErrors and must still reschedule so the retained message is
         // reprocessed (invariant I8).
         if (err instanceof UsageError) this.pollerActive = false;
