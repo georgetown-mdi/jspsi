@@ -1458,8 +1458,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           reachedGet = false;
 
           if (this.options.retainFiles) {
-            // Retain mode: write receipt after validation, before emit; attempt
-            // best-effort delete (tolerated -- no-delete transports will fail here).
+            // Retain mode never deletes the message file: the directory is the
+            // durable transcript, and the receipt -- written here after
+            // validation and before emit -- is the consumption signal the sender
+            // waits for in place of the file disappearing. Because no message is
+            // ever removed, the directory accumulates one message and one receipt
+            // per exchanged message on every transport (not only no-delete ones);
+            // poll() re-lists and reclassifies it each cycle, so per-poll cost
+            // scales with transcript length. Rotation/retention is an out-of-band
+            // operator responsibility.
             const msgNNN = this.recvSeq;
 
             const validatedMessage = Message.parse(
@@ -1485,18 +1492,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.emit("data", validatedMessage.payload);
             }
             // Advance only after the application has seen the payload: if emit
-            // throws, recvSeq stays at msgNNN so the message file (not yet
-            // deleted) is retried on the next poll rather than permanently lost.
+            // throws, recvSeq stays at msgNNN so the (never-deleted) message file
+            // is reprocessed on the next poll rather than permanently lost.
             this.recvSeq++;
-
-            try {
-              await this.client.delete(inPath);
-            } catch (deleteErr: unknown) {
-              this.log.warn(
-                `[${this.role}] failed to delete ${messageFile.name} ` +
-                  `(retain mode; tolerated): ${errMessage(deleteErr)}`,
-              );
-            }
           } else {
             this.log.debug(
               `[${this.role}] deleting message ${messageFile.name}`,

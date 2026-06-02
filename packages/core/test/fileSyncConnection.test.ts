@@ -3067,6 +3067,62 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
   expect(receiptOnDisk).toBeDefined();
 });
 
+test("retain mode: a consumed message file is retained on a delete-capable transport", async () => {
+  // Regression: retain mode must never delete the message payload, even when the
+  // transport's delete() succeeds (e.g. real SFTP). The directory is the durable
+  // transcript and the receipt is the consumption signal that replaces deletion.
+  // Previously the receiver issued a best-effort delete that silently removed the
+  // message on capable transports, so the "permanent transcript" guarantee held
+  // only on no-delete transports. makeMockClient's delete() actually removes the
+  // file, so this exercises the capable-transport path.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
+  const msgPath = `/test/${msgName}`;
+  files.set(msgPath, message);
+
+  // Spy on delete() so the test fails if any deletion is attempted at all.
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", () => notifyReceived());
+
+  await runPoller(conn, delivered);
+
+  // The message payload is still on disk after consumption...
+  expect(files.has(msgPath)).toBe(true);
+  // ...because no deletion was ever attempted in retain mode.
+  expect(deleted).toHaveLength(0);
+  // The receipt -- the consumption signal that replaces deletion -- was written.
+  const receiptOnDisk = [...files.keys()].some(
+    (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
+  );
+  expect(receiptOnDisk).toBe(true);
+});
+
 test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget", async () => {
   const { client } = makeMockClient();
   const id = "sender-me";
