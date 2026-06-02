@@ -396,6 +396,20 @@ export async function handler(argv: Arguments): Promise<void> {
     }
   }
 
+  if (options.retainFiles === true) {
+    try {
+      const ch = channelFromURL(server);
+      if (ch !== "sftp" && ch !== "filedrop") {
+        log.warn(
+          `--retain-files has no effect on the ${ch} channel and ` +
+            "will be ignored; it is only supported on sftp and filedrop",
+        );
+      }
+    } catch {
+      // Unknown URL scheme; createConnection handles this.
+    }
+  }
+
   if (options.save) {
     log.warn(
       "--save: bootstrapping a shared secret is not yet implemented; " +

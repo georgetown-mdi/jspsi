@@ -250,6 +250,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   options: Options;
   log: ReturnType<typeof getLoggerForVerbosity>;
   seq = 0;
+  private recvSeq = 0;
   connected = false;
 
   path: string | undefined;
@@ -1388,18 +1389,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // so failing the exchange over an unrelated file would be a regression.
       //
       // In retain mode, messages are never deleted so the directory accumulates
-      // one entry per send. synchronize() asserts a clean directory, so all
-      // own-prefixed receipt files on disk belong to the current session; scan
-      // them directly to build the set of already-processed NNNs.
+      // one entry per send. synchronize() asserts a clean directory, so recvSeq
+      // starts at 0 and the next unprocessed message always has NNN === recvSeq.
       const allFiles = await this.client.list(path);
-      const alreadyReceiptedNNNs = new Set<number>();
-      if (this.options.retainFiles) {
-        for (const file of allFiles) {
-          if (!file.name.startsWith(`${this.id}-`)) continue;
-          const segs = parseReceiptSegments(file.name);
-          if (segs !== undefined) alreadyReceiptedNNNs.add(segs.nnn);
-        }
-      }
 
       const messages: Array<{ file: FileInfo; declaredSize: number }> = [];
       const ignored: string[] = [];
@@ -1416,7 +1408,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         } else {
           if (this.options.retainFiles) {
             const nnn = parseMessageNNN(file.name);
-            if (nnn !== undefined && alreadyReceiptedNNNs.has(nnn)) continue;
+            if (nnn !== this.recvSeq) continue;
           }
           messages.push({ file, declaredSize });
         }
@@ -1480,6 +1472,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             const receiptName = await this.writeReceipt(path, msgNNN);
+            this.recvSeq++;
             this.log.debug(
               `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
             );
