@@ -33,8 +33,14 @@ const parseMessageByteCount = (name: string): number | undefined => {
 // Right-anchored parse of the NNN (per-session sequence counter) from a
 // timestamped message filename (<id>-<ts>-<NNN>-<byteCount>.json). NNN is
 // the segment immediately before the terminal byte-count segment. Returns
-// undefined when the segment is not a non-negative integer; only valid for
-// retain mode where timestampInFilename is always true.
+// undefined when the segment is not a non-negative integer.
+//
+// Caller contract: only meaningful for a timestamped filename, i.e. retain
+// mode, where timestampInFilename is always true. On a non-timestamped name
+// (<id>-<byteCount>.json) the segment before the byte count is part of the id,
+// so this returns a WRONG value rather than undefined. There is no runtime
+// guard (the sole caller, poll() in retain mode, satisfies the contract); a new
+// caller outside retain mode must check timestampInFilename itself.
 const parseMessageNNN = (name: string): number | undefined => {
   const stem = name.slice(0, -".json".length);
   const withoutByteCount = stem.slice(0, stem.lastIndexOf("-"));
@@ -1302,16 +1308,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.log.debug(
             `[${this.role}] waiting for receipt NNN=${expectedNNN} from ${this.peerId}`,
           );
-          // Check the deadline before the first list() so an already-expired
-          // TTL does not issue a spurious RPC.
+          // Check for the receipt before the deadline, so a receipt already on
+          // disk is honored even if the TTL elapsed in the same instant. This
+          // is the do-while rationale readControlFileWithGate uses: re-reading a
+          // present receipt costs one list(), whereas discarding it would fail a
+          // live exchange with a spurious timeout.
           // open() set timeToLive before send() can run; assertion is safe.
           while (true) {
+            if (await hasQualifyingReceipt(expectedNNN)) break;
             if (Date.now() > this.options.timeToLive!.getTime()) {
               throw new UsageError(
                 `timed out waiting for receipt from ${this.peerId} for NNN=${expectedNNN}`,
               );
             }
-            if (await hasQualifyingReceipt(expectedNNN)) break;
             await new Promise((resolve) =>
               setTimeout(resolve, this.options.pollingFrequency),
             );
@@ -1696,14 +1705,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // own inner try/catch (see above) that handles and swallows them.
         // All cases are propagated immediately as hard failures.
         this.consecutiveEnoentCount = 0;
-        // A UsageError here is a terminal failure -- re-reading the same bytes
-        // cannot help: a fully-synced message that fails to parse or validate,
-        // a body-seq/filename-NNN mismatch, or a duplicate NNN. Stop the poller
-        // before emitting so the finally block does not reschedule and re-read
-        // the same corrupt file. Recoverable errors (a downstream emit handler
-        // throwing, a receipt-write failure, a transient list/get hiccup) are
-        // NOT UsageErrors and must still reschedule so the retained message is
-        // reprocessed (invariant I8).
+        // A UsageError reaching this catch is terminal -- re-reading the same
+        // bytes cannot help: a fully-synced message that fails to parse or
+        // validate, a body-seq/filename-NNN mismatch, or a duplicate NNN. Stop
+        // the poller before emitting so the finally block does not reschedule
+        // and re-read the same corrupt file. A transient non-UsageError -- a
+        // list/get/put/rename or receipt-write transport hiccup -- reschedules
+        // instead, so the never-deleted retain message is reprocessed (I8).
+        // emit("data") sits in this try too, but the sole production consumer
+        // (deliver() in messageConnection.ts) cannot throw synchronously; if a
+        // future handler ever threw a UsageError it would be terminal here,
+        // which is the safe default.
         if (err instanceof UsageError) this.pollerActive = false;
         this.emit(
           "error",

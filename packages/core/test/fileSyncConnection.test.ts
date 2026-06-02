@@ -3904,9 +3904,14 @@ const entryPreconditionCells: Array<{
   // More than one peer hello is rejected in both modes.
   { name: "two peer hellos (delete mode)", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], retain: false, outcome: "reject" },
   { name: "two peer hellos (retain mode)", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], retain: true, outcome: "reject" },
-  // Each remaining file kind only appears after entry, so it is rejected.
-  { name: "wave file", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], retain: false, outcome: "reject" },
-  { name: "handshake-ack", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: false, outcome: "reject" },
+  // Each remaining file kind only appears after entry, so it is rejected. The
+  // rule is mode-agnostic, so wave and ack are rejected in retain mode too (the
+  // ack + retain row also substitutes the deleted stale-lockless-ack test, since
+  // lockless + retain is the production configuration).
+  { name: "wave file (delete mode)", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], retain: false, outcome: "reject" },
+  { name: "wave file (retain mode)", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], retain: true, outcome: "reject" },
+  { name: "handshake-ack (delete mode)", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: false, outcome: "reject" },
+  { name: "handshake-ack (retain mode)", present: [`${ENTRY_PEER_ID}-hello-ack.json`], retain: true, outcome: "reject" },
   // A stale non-timestamped message: closes the pre-existing gap where the old
   // generic (delete-mode) guard let leftover messages through.
   { name: "stale non-timestamped message", present: [`${ENTRY_PEER_ID}-42.json`], retain: false, outcome: "reject" },
@@ -4077,4 +4082,85 @@ test("poll() retryable: a transient list() failure reschedules and the message i
   // ...and the poller rescheduled and delivered the message exactly once.
   expect(received).toHaveLength(1);
   expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(1);
+});
+
+test("poll() terminal: delete mode also stops the poller on a fully-synced corrupt message", async () => {
+  // The terminal-parse rule is mode-agnostic. In delete mode poll() deletes the
+  // message before parsing, so a corrupt fully-synced file is removed AND the
+  // poller stops -- it no longer silently drops-and-continues as it did before
+  // this change (the deliberate "both modes" behavior change).
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  const peerId = "peer-sender";
+  conn.peerId = peerId;
+
+  // Non-timestamped delete-mode message name; body is corrupt but full length.
+  const body = Buffer.from("not json");
+  const msgName = `${peerId}-${body.length}.json`;
+  files.set(`/test/${msgName}`, body);
+
+  const errors: unknown[] = [];
+  const received: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("data", (msg) => received.push(msg));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for poll error")), 2_000),
+    ),
+  ]);
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("not valid JSON");
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
+  expect(received).toHaveLength(0);
+  // delete-before-parse: the corrupt file was removed from the directory.
+  expect(files.has(`/test/${msgName}`)).toBe(false);
+  // No second error: the finally block did not reschedule.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(errors).toHaveLength(1);
+});
+
+test("retain mode: send() honors a receipt already on disk even when the TTL has elapsed", async () => {
+  // Regression guard for the receipt-gate ordering: the loop checks for a
+  // qualifying receipt BEFORE the deadline, so a receipt present when send() is
+  // entered is honored rather than discarded as a spurious timeout.
+  const { client, files } = makeMockClient();
+  const id = "sender-me";
+  const peerId = "peer-receiver";
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    // TTL already in the past: a deadline-first loop would throw immediately.
+    timeToLive: new Date(Date.now() - 1),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.connected = true;
+  conn.path = "/test";
+  conn.id = id;
+  conn.peerId = peerId;
+
+  // Drive seq to 1 so the next send waits on a receipt for NNN=0, and plant
+  // that qualifying receipt on disk before sending.
+  (conn as unknown as { seq: number }).seq = 1;
+  const receiptBody = Buffer.from("{}");
+  files.set(
+    `/test/${peerId}-20260101T000000-000-${receiptBody.length}-receipt.json`,
+    receiptBody,
+  );
+
+  // Must not throw a timeout: the receipt is present, so send() proceeds and
+  // writes the next message even though the TTL has already elapsed.
+  await expect(conn.send({ n: 2 })).resolves.toBeUndefined();
+  expect(conn.seq).toBe(2);
 });

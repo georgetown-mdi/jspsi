@@ -601,7 +601,7 @@ When `retain_files: true`, the receiver writes a receipt file immediately after 
 
 The receiver never deletes the consumed message file. The message and its receipt both persist, and the directory accumulates one of each per exchanged message on every transport -- including those, such as SFTP, that do support deletion. This is what makes the directory a durable transcript rather than only a workaround for transports that cannot propagate deletions.
 
-In `retain_files` mode `close()` does not delete exchange files; the directory is the transcript. The only file ever removed is an in-flight `temp-*.tmp` write, which is cleaned up inline on error.
+In `retain_files` mode `close()` does not delete exchange files; the directory is the transcript. This includes the rendezvous artifacts: each party's `-hello.json` and the lockless `-hello-ack.json` persist alongside the messages and receipts, so the transcript is not only message and receipt files. The only file ever removed is an in-flight `temp-*.tmp` write, which is cleaned up inline on error.
 
 The transcript accumulates with no in-protocol cleanup; retention, rotation, and archival are out-of-band operator responsibilities.
 
