@@ -1162,11 +1162,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // Joiner is mid-arrival. Wait a bounded recovery window for the
               // rename to land -- the joiner then appears as a normal peer hello
               // and the branches below take over. If the sentinel persists past
-              // the window, the joiner failed between deleting our hello and
-              // writing its own; abort with a distinct transport error (a plain
-              // Error, CLI exit 69) instead of polling to the full peer timeout.
-              // We do NOT re-create our own hello: that races the joiner's
-              // rename and could trip the two-hello collision check (I1).
+              // the window, the joiner failed mid-arrival -- after writing the
+              // sentinel but before publishing its hello, on either side of the
+              // delete; abort with a distinct transport error (a plain Error,
+              // CLI exit 69) instead of polling to the full peer timeout. We do
+              // NOT re-create our own hello: that races the joiner's rename and
+              // could trip the two-hello collision check (I1).
               const joiningName = joiningFiles[0].name;
               const now = Date.now();
               // Start (or restart) the window on the first sighting, or whenever
@@ -1187,12 +1188,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                     `(${joiningName}); awaiting completion`,
                 );
               } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
+                // The crash could be on either side of the joiner's delete, so
+                // the message names the bracketing operations rather than a
+                // single step. Labelled [starter]: this branch is reached only
+                // by the party that wrote its hello first and is waiting for a
+                // joiner -- the joiner takes the entry fast-path and never
+                // enters this loop -- even though `this.role` is not committed
+                // until rendezvous succeeds.
                 throw new Error(
-                  `[${this.role}] peer began arriving ` +
-                    `(${joiningName}) but did not complete within the ` +
-                    "recovery window; it appears to have failed between " +
-                    "deleting this party's hello and writing its own. Retry " +
-                    "the exchange.",
+                  `[starter] peer began arriving (${joiningName}) but did ` +
+                    "not complete within the recovery window; it appears to " +
+                    "have failed after announcing its arrival but before " +
+                    "publishing its hello. Retry the exchange.",
                 );
               }
             } else {
@@ -1208,7 +1215,31 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           }
 
           // A peer hello is present: the joiner's rename landed (or both
-          // parties wrote hellos), so any sentinel sighting is now stale.
+          // parties wrote hellos), so the recovery timer is stale. A sentinel
+          // may still be visible here in exactly one benign case: the peer's
+          // own rename is mid-propagation on a sync-mediated transport, so its
+          // `<peerId>-joining.json` and `<peerId>-hello.json` momentarily
+          // coexist (the rename is atomic at the SFTP layer, not necessarily at
+          // the sync-tool layer). That same-id sentinel is the peer we are
+          // about to rendezvous with, so tolerate it. A sentinel whose id
+          // matches no peer hello is a third party in the directory -- the same
+          // contamination the multi-hello and multi-wave guards reject -- so
+          // surface it as a UsageError rather than completing against an
+          // inconsistent directory.
+          const peerHelloIds = new Set(
+            otherFiles.map((file) => file.name.slice(0, -HELLO_SUFFIX.length)),
+          );
+          const foreignSentinel = joiningFiles.find(
+            (file) =>
+              !peerHelloIds.has(file.name.slice(0, -JOINING_SUFFIX.length)),
+          );
+          if (foreignSentinel) {
+            throw new UsageError(
+              `joining sentinel ${foreignSentinel.name} in ${this.path} ` +
+                "matches no peer hello - are there other sessions using " +
+                "this path?",
+            );
+          }
           joiningSeenAt = undefined;
           joiningSeenName = undefined;
 

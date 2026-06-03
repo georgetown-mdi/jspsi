@@ -1638,7 +1638,14 @@ test("synchronize() wave starter: aborts with a distinct transport error within 
   expect((err as Error).message).toMatch(
     /did not complete within the recovery window/,
   );
-  expect((err as Error).message).toMatch(/failed between deleting/);
+  // Describes the mid-arrival failure without pinning it to a single step (the
+  // crash can be on either side of the joiner's delete).
+  expect((err as Error).message).toMatch(
+    /failed after announcing its arrival but before publishing its hello/,
+  );
+  // Tagged with the waiting party's actual role rather than the uninitialized
+  // "unknown role" sentinel value.
+  expect((err as Error).message).toMatch(/^\[starter\]/);
   // Transport failure (CLI exit 69), not a usage error (exit 64).
   expect(err).not.toBeInstanceOf(UsageError);
   // Bounded by the recovery window, far below the 5 s TTL.
@@ -1649,6 +1656,71 @@ test("synchronize() wave starter: aborts with a distinct transport error within 
   // Instance is reset, not wedged: a retry is not blocked.
   expect(conn.peerId).toBeUndefined();
   expect(conn.handshakeRole).toBeUndefined();
+});
+
+test("synchronize() wave starter: a peer hello alongside a foreign-id joining sentinel is a UsageError", async () => {
+  // Three-party contamination: a legitimate peer hello (idB) and a joining
+  // sentinel from a different id (idC) are visible together. A sentinel whose
+  // id matches no peer hello cannot be the peer we are completing against, so
+  // it is rejected as a usage error (exit 64) -- like a second peer hello or
+  // wave -- rather than silently ignored.
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const idC = "00000000-0000-4000-8000-000000000002";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${idB}-hello.json`;
+  const foreignSentinel = `${idC}-joining.json`;
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${foreignSentinel}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting guard: empty
+    return [
+      { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+      { name: foreignSentinel, modifyTime: Date.now(), size: 0 },
+    ];
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain(foreignSentinel);
+  expect((err as Error).message).toMatch(/matches no peer hello/);
+});
+
+test("synchronize() wave starter: a peer hello alongside the peer's own same-id sentinel completes (transient rename tolerated)", async () => {
+  // On a sync-mediated transport the joiner's rename can momentarily expose
+  // both `<idB>-joining.json` and `<idB>-hello.json`. That same-id sentinel is
+  // the peer we are completing against, not contamination, so the starter must
+  // tolerate it and finish the rendezvous rather than throw a foreign-sentinel
+  // usage error.
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${idB}-hello.json`;
+  const sameSentinel = `${idB}-joining.json`;
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${sameSentinel}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting guard: empty
+    // Both names visible together: the joiner's rename is mid-propagation.
+    return [
+      { name: peerHelloName, modifyTime: Date.now(), size: 0 },
+      { name: sameSentinel, modifyTime: Date.now(), size: 0 },
+    ];
+  };
+
+  await conn.synchronize();
+
+  // Rendezvous completes against the peer despite the lingering same-id
+  // sentinel; the starter consumed the peer hello.
+  expect(conn.role).toBe("starter");
+  expect(conn.peerId).toBe(idB);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
 });
 
 test("synchronize() preexisting-file guard rejects a leftover joining sentinel at startup", async () => {
