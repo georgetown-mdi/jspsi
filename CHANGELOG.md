@@ -34,6 +34,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 
 - A malformed message from a peer is reported as a protocol error instead of crashing.
 - A failed exchange surfaces its original cause instead of a generic connection error.
+- Wave-path rendezvous: a party whose hello is deleted by a joiner that then fails mid-arrival no longer stalls until the peer timeout. The joiner now signals its arrival with a `<id>-joining.json` sentinel, and the waiting party recovers within a bounded window or aborts with a distinct transport error.
 
 ### Security
 

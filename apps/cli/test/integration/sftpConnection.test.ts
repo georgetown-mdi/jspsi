@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection, UsageError } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { sftpPort } from "../container/env";
@@ -34,6 +34,19 @@ function desynchronize(conn: FileSyncConnection) {
   conn.peerId = undefined;
   conn.handshakeRole = undefined;
   conn.role = "unknown";
+}
+
+// Poll a predicate until it holds (no fixed sleep), failing if it never does.
+async function waitFor(
+  predicate: () => Promise<boolean>,
+  { timeoutMs = 5_000, intervalMs = 25 } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("waitFor: condition not met within timeout");
 }
 
 const serverSFTP = new SSH2SFTPClientAdapter();
@@ -198,4 +211,74 @@ test("terminal frame is received when sender closes before receiver polls", asyn
   await receiverConn.close();
 
   expect(message).toEqual({ terminal: true });
+});
+
+test("wave starter aborts on a stuck mid-arrival joiner over real SFTP", async () => {
+  // End-to-end recovery path on the real SFTP transport. A joiner writes its
+  // sentinel and deletes the starter's hello, then crashes before renaming the
+  // sentinel to its own hello. The starter must observe the orphaned sentinel
+  // over real SFTP and abort on the bounded recovery window with the actionable
+  // error -- not poll to the full peer timeout. (The happy-path sentinel
+  // put/delete/rename runs under the hood whenever a real joiner arrives second
+  // in the wave tests above; this exercises the failure side, which those do
+  // not.)
+  await cleanServer();
+
+  const abortSFTP = new SSH2SFTPClientAdapter();
+  // joinerRecoveryMs well under the peer timeout so the bounded-window abort
+  // fires first; the 100 ms default poll keeps the abort prompt.
+  const abortConn = new FileSyncConnection(abortSFTP, {
+    verbose: -1,
+    joinerRecoveryMs: 400,
+  });
+  await abortConn.open({
+    channel: "sftp",
+    server: {
+      host: "localhost",
+      port: SFTP_PORT,
+      username: "usera",
+      password: "usera",
+      path: SFTP_PATH,
+    },
+    options: { peerTimeoutMs: 8_000 },
+  });
+
+  const fakeJoinerId = "00000000-0000-4000-8000-0000000000aa";
+  const sentinelName = `${fakeJoinerId}-joining.json`;
+  const helloName = `${abortConn.id}-hello.json`;
+
+  // Start the starter without awaiting: it writes its hello and begins polling.
+  const syncPromise = abortConn.synchronize();
+
+  try {
+    // Wait until the starter's hello has landed, then simulate the stuck joiner
+    // using the already-connected serverSFTP session (a separate SFTP client, so
+    // it does not contend with the starter's own polling on abortSFTP): delete
+    // the hello and drop a sentinel from a different id in its place.
+    await waitFor(async () =>
+      (await serverSFTP.list(SFTP_PATH)).some((f) => f.name === helloName),
+    );
+    await serverSFTP.safeDelete(`${SFTP_PATH}/${helloName}`);
+    await serverSFTP.put(
+      Buffer.from(
+        JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
+      ),
+      `${SFTP_PATH}/${sentinelName}`,
+    );
+
+    const err = await syncPromise.catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(
+      /did not complete within the recovery window/,
+    );
+    // Transport failure (CLI exit 69), not a usage error (exit 64) -- mirrors
+    // the unit-test assertion so a regression that reclassified the abort would
+    // be caught over the real transport too.
+    expect(err).not.toBeInstanceOf(UsageError);
+  } finally {
+    await serverSFTP.safeDelete(`${SFTP_PATH}/${sentinelName}`);
+    await abortConn.close();
+    await cleanServer();
+  }
 });
