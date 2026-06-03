@@ -2981,6 +2981,20 @@ test("(c) lockless party reading a wave peer hello fails fast and leaves both he
   );
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+
+  // The durable-hello guarantee is load-bearing: the outer catch must clear
+  // responsibleFiles so a later cleanup()/close() does not sweep the hello this
+  // party advertised. If it were swept, the peer's read would miss it and the
+  // peer would fall through to the timeout instead of fast-failing. Assert the
+  // clear directly, then prove its consequence -- cleanup() (non-retain here,
+  // so not a no-op) removes nothing and both hellos persist as the terminal
+  // state.
+  const responsible = (conn as unknown as { responsibleFiles: Set<string> })
+    .responsibleFiles;
+  expect(responsible.size).toBe(0);
+  await conn.cleanup();
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
 
 test("(c) wave two-hellos branch detects the mismatch before createExclusive (EEXIST-loser sub-path pre-empted)", async () => {
@@ -4332,10 +4346,12 @@ const ENTRY_SELF_ID = "00000000-0000-4000-8000-000000000001";
 const ENTRY_PEER_ID = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 const ENTRY_PEER_ID_2 = "11111111-1111-4111-8111-111111111111";
 
-// One row per file kind. `present` is what sits in the directory at entry;
-// bodies are "{}" so a peer hello passes the I5 read gate immediately on the
-// proceed rows. Outcome does not vary by mode (the rule is mode-agnostic), so
-// each kind carries a single expected outcome and is run in both modes below.
+// One row per file kind. `present` is what sits in the directory at entry. A
+// peer hello on a proceed row is read through the HelloEnvelope gate, so the
+// test body (below) gives it a full mode-matched envelope; every other kind is
+// rejected on filename before any body read, so those bodies stay "{}". Outcome
+// does not vary by mode (the rule is mode-agnostic), so each kind carries a
+// single expected outcome and is run in both modes below.
 const entryPreconditionKinds: Array<{
   kind: string;
   present: string[];

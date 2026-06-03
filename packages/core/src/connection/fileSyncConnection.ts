@@ -772,14 +772,30 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // detection, not negotiation -- neither side adapts to the other's mode.
       const mismatch = this.bilateralMismatch(peerEnvelope);
       if (mismatch) {
-        await this.client.put(
-          serializeEnvelope(this.helloEnvelope()),
-          helloPath,
-          {
-            flags: "w",
-            encoding: "utf-8",
-          },
-        );
+        // Advertise our own hello so the lockless peer reads it and fails
+        // symmetrically. This is best-effort: if the put itself fails there is
+        // no way to leave a durable advertisement -- whatever the write order --
+        // so the peer degrades to the legacy peer-timeout. Swallow that write
+        // failure so THIS party still throws the genuine mismatch it detected (a
+        // UsageError, CLI exit 64) rather than letting a transport rejection --
+        // which escapes the catch-less joiner fast-path directly -- mask it as a
+        // generic Error (exit 69). The mismatch is the actionable cause; the
+        // operator must fix the diverging flag regardless of the transport.
+        try {
+          await this.client.put(
+            serializeEnvelope(this.helloEnvelope()),
+            helloPath,
+            {
+              flags: "w",
+              encoding: "utf-8",
+            },
+          );
+        } catch (writeErr: unknown) {
+          this.log.debug(
+            `[${this.role}] could not advertise hello on mismatch; peer may ` +
+              `time out instead of fast-failing: ${errMessage(writeErr)}`,
+          );
+        }
         this.resetSessionState();
         throw mismatch;
       }
@@ -1116,10 +1132,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // Bilateral flag check before committing roles and before the
             // sweep below. Defense-in-depth: a wave present in the directory
             // implies both parties are in wave mode (lockless never creates a
-            // wave), so a mismatch cannot normally reach here; on the throw the
-            // sweep is skipped and our hello is left for the peer to read.
+            // wave) and a wave party always has retain_files=false (retain
+            // requires lockless), so neither flag can differ and a mismatch
+            // cannot reach here for any valid pairing. If a corrupt directory
+            // somehow produced one, leave exactly the two hellos the design
+            // names as the terminal state: delete the peer-written wave first --
+            // it is a transient, not an advertisement the peer must read, and
+            // the outer catch skips every safeDelete on a mismatch. safeDelete
+            // is contractually non-throwing, so it cannot mask the mismatch. Our
+            // own hello stays via that skip-sweep for the peer to read.
             const mismatch = this.bilateralMismatch(peerEnvelope);
-            if (mismatch) throw mismatch;
+            if (mismatch) {
+              await this.client.safeDelete(`${this.path}/${waveFile.name}`);
+              throw mismatch;
+            }
 
             // first to arrive => should wait for first message
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";

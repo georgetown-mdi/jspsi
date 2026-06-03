@@ -27,8 +27,9 @@ export interface ControlFileEnvelope {}
  * absent, which is the intended flag-day failure when builds diverge on a
  * required field (see FILE_SYNC.md "Matching builds").
  */
-export const ControlFileEnvelopeSchema: z.ZodType<ControlFileEnvelope> =
-  z.object({});
+export const ControlFileEnvelopeSchema: z.ZodType<ControlFileEnvelope> = z
+  .object({})
+  .strip();
 
 /**
  * Hello payload envelope: the base envelope tightened with the two bilateral
@@ -63,12 +64,17 @@ export interface HelloEnvelope extends ControlFileEnvelope {
 /**
  * Zod schema for {@link HelloEnvelope}. Both flags are required (a missing or
  * out-of-type flag is a terminal validation failure), while unknown fields are
- * still stripped for the same forward-tolerance reason as the base schema.
+ * still stripped for the same forward-tolerance reason as the base schema. The
+ * `.strip()` is explicit even though it is `z.object`'s default, so the
+ * forward-tolerance contract is visible at the call site, not only in the
+ * JSDoc.
  */
-export const HelloEnvelopeSchema: z.ZodType<HelloEnvelope> = z.object({
-  locklessRendezvous: z.boolean(),
-  retainFiles: z.boolean(),
-});
+export const HelloEnvelopeSchema: z.ZodType<HelloEnvelope> = z
+  .object({
+    locklessRendezvous: z.boolean(),
+    retainFiles: z.boolean(),
+  })
+  .strip();
 
 /**
  * Serializes a {@link ControlFileEnvelope} (or a subtype such as
