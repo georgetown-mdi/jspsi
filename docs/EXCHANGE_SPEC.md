@@ -616,7 +616,7 @@ A third process writing `<id>-hello.json`, `<id1>-<id2>.wave`, a `<id>-...-ack.j
 Every protocol file on `sftp` and `filedrop` channels is named `<id>-...-<token>.json`, where `<token>` is the final `-`-delimited segment before `.json`:
 
 - If `<token>` is all digits, the file is a **message** and `<token>` is its declared byte count. Parsing is right-anchored so a party id containing hyphens does not affect extraction.
-- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello) or `ack` (a zero-length acknowledgment marker: the lockless rendezvous ack of a peer hello, and the retain-mode ack of a consumed message). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric, so a message ack's mid-name `<NNN>`/`<byteCount>` digits do not route it as a message.
+- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (a zero-length acknowledgment marker: the lockless rendezvous ack of a peer hello, and the retain-mode ack of a consumed message), or `joining` (the wave-path joiner-arrival sentinel `<id>-joining.json`, briefly present while the joiner deletes the peer hello and renames the sentinel to its own hello). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric, so a message ack's mid-name `<NNN>`/`<byteCount>` digits do not route it as a message.
 
 The receiver only reads files whose on-disk size matches the declared byte count, so a partially synced message file is never consumed prematurely.
 

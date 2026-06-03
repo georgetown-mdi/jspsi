@@ -94,6 +94,27 @@ const MAX_CONSECUTIVE_ENOENT = 3;
 // magic strings and numbers at the multiple slice/endsWith sites below.
 const HELLO_SUFFIX = "-hello.json";
 
+// Suffix of the wave-path joiner-arrival sentinel (`<id>-joining.json`). The
+// joiner publishes it before deleting the peer hello and renames it to its own
+// hello once that delete lands, so the peer can tell "joiner mid-arrival" from
+// "joiner crashed" across the window where the peer hello is gone but the
+// joiner hello is not yet written. The terminal segment is the type word
+// `joining` (never a `.joining` extension), so the grammar discriminant already
+// excludes it from the message scan (it is not all-digits).
+const JOINING_SUFFIX = "-joining.json";
+
+// Bounded window the wave-path peer waits for a joiner that has begun arriving
+// (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
+// to its hello. The joiner's remaining work is one delete plus one rename --
+// milliseconds on a direct transport, seconds on a sync-mediated one -- so a
+// window well under peerTimeoutMs distinguishes a slow-but-live joiner from a
+// crashed one without making the peer wait the full inactivity budget. This is
+// the timing heuristic the sentinel narrows to a short, well-defined window
+// rather than the full hour. Internal-only (not a user-facing config option):
+// the default suits both transport classes and the value only matters when a
+// joiner fails mid-arrival, which a correct peer never causes.
+const DEFAULT_JOINER_RECOVERY_MS = 1000 * 30;
+
 // Reads the hello control file through the I5 partial-sync gate. Retries on any
 // get() failure or JSON parse failure (indicating the sync tool has not
 // finished writing the file) until timeToLive expires, then throws a transport
@@ -163,6 +184,11 @@ interface Options {
   locklessRendezvous: boolean;
   peerId?: string;
   retainFiles: boolean;
+  // How long the wave-path peer waits for a mid-arrival joiner (a visible
+  // `<id>-joining.json` sentinel) to finish before treating it as crashed. Not
+  // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
+  // Tests lower it to exercise the abort path without a real-time wait.
+  joinerRecoveryMs: number;
 }
 
 const Message = z.object({
@@ -179,6 +205,7 @@ const getDefaultOptions = (): Options => {
     timestampInFilename: false,
     locklessRendezvous: false,
     retainFiles: false,
+    joinerRecoveryMs: DEFAULT_JOINER_RECOVERY_MS,
   };
 };
 
@@ -704,7 +731,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "the start of the protocol, but contains " +
           `${unexpected.length} unexpected file(s): ` +
           `${unexpected.map((f) => f.name).join(", ")}. A pre-existing wave, ` +
-          "ack marker (-ack.json), message, self-hello, or temp file usually " +
+          "ack marker (-ack.json), joining sentinel (-joining.json), message, " +
+          "self-hello, or temp file usually " +
           "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
           "before its cleanup ran, or -- in retain mode, which never deletes " +
           "-- that this directory was reused for a second exchange. Remove the " +
@@ -729,8 +757,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
        * A list
        * A hello
        * B list
+       * B joining                       (sentinel carrying B's hello body)
        * B delete A hello
-       * B hello
+       * B rename joining -> B hello
        * A list
        * A delete B hello
        *
@@ -742,7 +771,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
       this.log.debug(
-        `[joiner] creating response ${this.id}${HELLO_SUFFIX} and ` +
+        `[joiner] arriving via ${this.id}${JOINING_SUFFIX} sentinel, ` +
           `deleting discovered ${otherFile.name}`,
       );
 
@@ -804,26 +833,57 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         throw mismatch;
       }
 
-      // Partial-failure note: if delete(otherPath) succeeds but put(helloPath)
-      // fails, the peer's hello is gone and we never wrote our own. The peer's
-      // waitForPeer loop will see an empty directory and poll until
-      // peerTimeoutMs before reporting a synchronization timeout. Recovery is
-      // by retry of the whole exchange. We do not re-create the peer's hello
-      // here because doing so races the peer's next list() and can produce a
-      // two-hello state the wave protocol treats as a collision.
+      // Sentinel-mediated arrival (closes the joiner partial-failure window).
+      // A bare delete(peer hello) then put(my hello) is observable as an
+      // inconsistent state: if the delete lands but the put fails, the peer's
+      // hello is gone and ours was never written, and the peer's waitForPeer
+      // cannot tell "joiner mid-write" from "joiner crashed" -- so it polls to
+      // the full peerTimeoutMs. Instead, publish a `<id>-joining.json` sentinel
+      // carrying our hello body, delete the peer hello, then rename the sentinel
+      // to our hello. The rename is atomic, so the sentinel exists across
+      // exactly the window where the peer hello may already be gone but our
+      // hello is not yet present, and the peer recognizes it as a wait signal
+      // (see waitForPeer). We never re-create the peer's hello on failure: that
+      // races the peer's next list() and can trip the two-hello collision check
+      // (I1).
+      const joiningName = `${this.id}${JOINING_SUFFIX}`;
+      const joiningPath = `${this.path}/${joiningName}`;
+      const helloName = `${this.id}${HELLO_SUFFIX}`;
       try {
-        await this.client.delete(otherPath);
-
+        // The sentinel carries the hello body so the rename below yields a
+        // fully-valid `<id>-hello.json` the peer reads through its gate; the
+        // peer itself matches the sentinel by name existence and never reads it.
         await this.client.put(
           serializeEnvelope(this.helloEnvelope()),
-          helloPath,
+          joiningPath,
           {
             flags: "w",
             encoding: "utf-8",
           },
         );
+        // Track the sentinel only until the peer hello is deleted: before that
+        // point a failure leaves the peer hello intact, so cleanup() may safely
+        // sweep the sentinel (the peer is no worse off than if we never
+        // started). The add follows the put with no throwable statement between,
+        // matching the hello write in the else branch.
+        if (!this.options.retainFiles) this.responsibleFiles.add(joiningName);
+
+        await this.client.delete(otherPath);
+
+        // The peer hello is now gone, so the sentinel is the peer's recovery
+        // signal and MUST survive a subsequent failure. Release it from
+        // responsibleFiles so a failure-path cleanup() (conn.close() in the
+        // caller's finally) leaves it on disk for the peer's bounded-window
+        // recovery -- and, if this process dies, for the next run's Phase 0
+        // guard to reject. A crashed joiner cannot clean up after itself; this
+        // is the "best-effort partial-state cleanup" contract.
         if (!this.options.retainFiles)
-          this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
+          this.responsibleFiles.delete(joiningName);
+
+        await this.client.rename(joiningPath, helloPath);
+        // The sentinel is now our hello: stop tracking the (gone) sentinel name
+        // and own the hello so cleanup() sweeps it at close().
+        if (!this.options.retainFiles) this.responsibleFiles.add(helloName);
       } catch (err: unknown) {
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
@@ -844,8 +904,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // file guard. The throw escapes synchronize() directly (the joiner
         // fast-path has no enclosing catch), so no outer handler cleans up.
         await this.client.safeDelete(helloPath);
-        if (!this.options.retainFiles)
-          this.responsibleFiles.delete(`${this.id}${HELLO_SUFFIX}`);
+        if (!this.options.retainFiles) this.responsibleFiles.delete(helloName);
         this.resetSessionState();
         throw new Error(
           `peer id '${peerId}' and this party's id '${this.id}' share a ` +
@@ -1041,6 +1100,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         }
 
         // Wave-race path.
+        // Wall-clock instant this party first saw the joiner's mid-arrival
+        // sentinel, or undefined when no sentinel is present. Bounds the
+        // joiner-recovery window below; reset whenever a peer hello appears or
+        // the sentinel disappears so a later sentinel starts a fresh window.
+        let joiningSeenAt: number | undefined;
         // open() set timeToLive before synchronize() can run, so the non-null
         // assertion is safe here.
         while (Date.now() <= this.options.timeToLive!.getTime()) {
@@ -1064,12 +1128,60 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           const waveFiles = currentFiles.filter((file) =>
             file.name.endsWith(".wave"),
           );
+          // A `<peerId>-joining.json` sentinel marks a joiner mid-arrival: it
+          // has begun the put(sentinel) -> delete(our hello) -> rename(sentinel
+          // -> its hello) sequence the wave joiner uses in place of a bare
+          // delete-then-put. Its presence is the signal that distinguishes a
+          // live-but-incomplete joiner from a crashed one, which a bare
+          // otherFiles.length === 0 cannot. (A self-named sentinel is excluded
+          // for symmetry with the hello filters, though the wave starter never
+          // writes one.)
+          const joiningFiles = currentFiles.filter(
+            (file) =>
+              file.name !== `${this.id}${JOINING_SUFFIX}` &&
+              file.name.endsWith(JOINING_SUFFIX),
+          );
 
           if (otherFiles.length === 0) {
-            this.log.trace(`[${this.role}] no peer hello found; polling`);
+            if (joiningFiles.length > 0) {
+              // Joiner is mid-arrival. Wait a bounded recovery window for the
+              // rename to land -- the joiner then appears as a normal peer hello
+              // and the branches below take over. If the sentinel persists past
+              // the window, the joiner failed between deleting our hello and
+              // writing its own; abort with a distinct transport error (a plain
+              // Error, CLI exit 69) instead of polling to the full peer timeout.
+              // We do NOT re-create our own hello: that races the joiner's
+              // rename and could trip the two-hello collision check (I1).
+              const now = Date.now();
+              if (joiningSeenAt === undefined) {
+                joiningSeenAt = now;
+                this.log.debug(
+                  `[${this.role}] peer is mid-arrival ` +
+                    `(${joiningFiles[0].name}); awaiting completion`,
+                );
+              } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
+                throw new Error(
+                  `[${this.role}] peer began arriving ` +
+                    `(${joiningFiles[0].name}) but did not complete within the ` +
+                    "recovery window; it appears to have failed between " +
+                    "deleting this party's hello and writing its own. Retry " +
+                    "the exchange.",
+                );
+              }
+            } else {
+              // No sentinel: the joiner has not started, or a prior sighting
+              // vanished without producing a hello (only a crash mid-cleanup
+              // does this). Reset so a later sentinel starts a fresh window.
+              joiningSeenAt = undefined;
+              this.log.trace(`[${this.role}] no peer hello found; polling`);
+            }
             await delay(this.options.pollingFrequency);
             continue;
           }
+
+          // A peer hello is present: the joiner's rename landed (or both
+          // parties wrote hellos), so any sentinel sighting is now stale.
+          joiningSeenAt = undefined;
 
           if (waveFiles.length > 0) {
             /**

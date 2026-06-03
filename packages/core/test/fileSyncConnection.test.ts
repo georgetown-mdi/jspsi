@@ -92,12 +92,16 @@ async function makeConnectedConn(
     pollingFrequency: number;
     timeToLiveMs: number;
     peerTimeoutMs: number;
+    joinerRecoveryMs: number;
   }>,
 ): Promise<FileSyncConnection> {
   const conn = new FileSyncConnection(client, {
     pollingFrequency: opts?.pollingFrequency ?? 10,
     timeToLive: new Date(Date.now() + (opts?.timeToLiveMs ?? 5_000)),
     verbose: -1,
+    ...(opts?.joinerRecoveryMs !== undefined
+      ? { joinerRecoveryMs: opts.joinerRecoveryMs }
+      : {}),
   });
   // Pass peerTimeoutMs via a fake filedrop config so close()'s drain deadline
   // reads from this.config rather than falling back to DEFAULT_PEER_TIMEOUT_MS.
@@ -1437,40 +1441,239 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
 
   expect(conn.handshakeRole).toBe("initiator");
   expect(conn.peerId).toBe(peerId);
-  // Peer's hello was deleted; our own hello was written.
+  // Peer's hello was deleted; our own hello was written via the sentinel
+  // rename, and no `<id>-joining.json` sentinel is left behind (it became the
+  // hello).
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${conn.id}-joining.json`)).toBe(false);
 });
 
-test("synchronize() joiner branch: leaves connection unsynchronized when put fails after delete succeeds", async () => {
-  // Regression guard: previously, `peerId` and `handshakeRole` were assigned
-  // before the delete/put pair. A `put` failure after a successful `delete`
-  // left the connection in a half-state where `synchronize()` could not be
-  // re-run on the same instance because the "already synchronized" guard
-  // tripped on the stale `peerId`. The fix defers the assignment until both
-  // writes succeed.
+// --- synchronize(): joiner partial-failure (sentinel) ------------------------
+
+// Helper: stand up a joiner whose initial list shows exactly one peer hello,
+// so synchronize() takes the wave-path joiner branch (this party arrived
+// second). Returns the live store and the planted peer-hello name.
+async function makeJoiner(joinerRecoveryMs?: number): Promise<{
+  conn: FileSyncConnection;
+  client: FileTransportClient;
+  files: Map<string, Buffer>;
+  peerId: string;
+  peerHelloName: string;
+}> {
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs,
+  });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
   files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
-  // delete succeeds (default mock behavior); put rejects with a synthetic
-  // transport error.
+  return { conn, client, files, peerId, peerHelloName };
+}
+
+// Reads the private responsibleFiles set for assertions.
+function responsibleFilesOf(conn: FileSyncConnection): Set<string> {
+  return (conn as unknown as { responsibleFiles: Set<string> })
+    .responsibleFiles;
+}
+
+test("synchronize() joiner branch: a sentinel put failure leaves the peer hello intact and the connection unsynchronized", async () => {
+  // First failure point: the joiner cannot even write its `<id>-joining.json`
+  // sentinel. Because the sentinel is written BEFORE the peer hello is deleted,
+  // a failure here cannot strand the peer -- its hello is untouched and no
+  // sentinel is committed, so the directory is exactly as the joiner found it.
+  const { conn, client, files, peerHelloName } = await makeJoiner();
   client.put = async () => {
-    throw new Error("synthetic put failure");
+    throw new Error("synthetic sentinel put failure");
   };
 
-  await expect(conn.synchronize()).rejects.toThrow("synthetic put failure");
+  await expect(conn.synchronize()).rejects.toThrow(
+    "synthetic sentinel put failure",
+  );
 
-  // Connection must be in its pre-synchronize state: no peer identity, no
-  // role. Otherwise a retry on this instance would hit the
+  // Peer hello untouched; nothing the joiner owns is left behind.
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+  expect(files.has(`${conn.path}/${conn.id}-joining.json`)).toBe(false);
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(false);
+  // Pre-synchronize state, so a retry on this instance is not blocked by the
   // "already synchronized" guard.
   expect(conn.peerId).toBeUndefined();
   expect(conn.handshakeRole).toBeUndefined();
+});
+
+test("synchronize() joiner branch: a failure before the peer hello is deleted tracks the sentinel for cleanup()", async () => {
+  // Second failure point, still BEFORE the peer hello is deleted: the sentinel
+  // was written but delete(peer hello) throws. The peer hello is intact, so the
+  // sentinel is the joiner's own residue -- it stays in responsibleFiles and
+  // cleanup() sweeps it (taxonomy: joining is in responsibleFiles, swept by
+  // cleanup(), until the peer hello is deleted).
+  const { conn, client, files, peerHelloName } = await makeJoiner();
+  const joiningName = `${conn.id}-joining.json`;
+  client.delete = async () => {
+    throw new Error("synthetic peer-hello delete failure");
+  };
+
+  await expect(conn.synchronize()).rejects.toThrow(
+    "synthetic peer-hello delete failure",
+  );
+
+  // Sentinel was committed and the peer hello is intact (delete never ran).
+  expect(files.has(`${conn.path}/${joiningName}`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+  // The joiner still owns the sentinel: it is tracked and cleanup() removes it.
+  expect(responsibleFilesOf(conn).has(joiningName)).toBe(true);
+  await conn.cleanup();
+  expect(files.has(`${conn.path}/${joiningName}`)).toBe(false);
+});
+
+test("synchronize() joiner branch: a failure after the peer hello is deleted leaves the sentinel as the peer's recovery signal", async () => {
+  // Critical failure point: the joiner deleted the peer hello, then the rename
+  // of the sentinel to its hello throws. The peer hello is gone, so the sentinel
+  // MUST persist as the peer's recovery signal -- it is released from
+  // responsibleFiles so a failure-path cleanup() does not sweep it. This is the
+  // exact partial-failure window the fix closes: the peer sees the sentinel and
+  // recovers within a bounded window instead of polling to the peer timeout.
+  const { conn, client, files, peerHelloName } = await makeJoiner();
+  const joiningName = `${conn.id}-joining.json`;
+  client.rename = async () => {
+    throw new Error("synthetic sentinel rename failure");
+  };
+
+  await expect(conn.synchronize()).rejects.toThrow(
+    "synthetic sentinel rename failure",
+  );
+
+  // Peer hello deleted, sentinel still on disk and NOT renamed to a hello.
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
+  expect(files.has(`${conn.path}/${joiningName}`)).toBe(true);
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(false);
+  // Released from responsibleFiles, so the failure-path cleanup() leaves the
+  // sentinel in place for the peer to recover from (and for the next run's
+  // Phase 0 guard to reject if this process dies).
+  expect(responsibleFilesOf(conn).has(joiningName)).toBe(false);
+  await conn.cleanup();
+  expect(files.has(`${conn.path}/${joiningName}`)).toBe(true);
+  // Pre-synchronize state regardless of where the joiner failed.
+  expect(conn.peerId).toBeUndefined();
+  expect(conn.handshakeRole).toBeUndefined();
+});
+
+// --- synchronize(): wave starter peer-side joiner recovery -------------------
+
+test("synchronize() wave starter: completes rendezvous when a mid-arrival joiner recovers", async () => {
+  // The peer (arrived first, wave starter) sees the joiner's sentinel for a few
+  // polls -- the joiner is mid-arrival, having deleted our hello but not yet
+  // renamed its sentinel to its hello -- then the rename lands and the joiner
+  // appears as a normal peer hello. The starter must wait through the sentinel
+  // and complete, not abort or stall.
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joiningName = `${idB}-joining.json`;
+  const peerHelloName = `${idB}-hello.json`;
+  // The joiner's hello body must be readable through the gate once the rename
+  // makes it appear under its final name.
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    // First list (preexisting guard) sees an empty directory, so this party
+    // becomes the wave starter and writes its hello.
+    if (listCallCount === 1) return [];
+    // Joiner mid-arrival: only the sentinel is visible (our hello is gone).
+    if (listCallCount <= 3)
+      return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+    // Joiner recovered: the rename landed, so the sentinel is now its hello.
+    return [{ name: peerHelloName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  await conn.synchronize();
+
+  // Arrived first => starter/responder; peer id recovered from the hello name.
+  expect(conn.role).toBe("starter");
+  expect(conn.handshakeRole).toBe("responder");
+  expect(conn.peerId).toBe(idB);
+  // The starter branch consumed (deleted) the joiner's hello.
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
+});
+
+test("synchronize() wave starter: aborts with a distinct transport error within a bounded window when a joiner never completes", async () => {
+  // The critical case the fix closes. A joiner deleted our hello and then died
+  // before renaming its sentinel to its hello, so the sentinel persists. The
+  // peer must surface a distinct, terminal error and abort on the bounded
+  // recovery window -- NOT poll silently to the full peerTimeoutMs, and NOT a
+  // usage error (this is a transport failure, CLI exit 69).
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 30,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joiningName = `${idB}-joining.json`;
+  files.set(`${conn.path}/${joiningName}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    // Empty at entry (this party becomes the starter and writes its hello),
+    // then the stuck sentinel forever: our hello gone, the rename never lands.
+    if (listCallCount === 1) return [];
+    return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  const start = Date.now();
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  const elapsed = Date.now() - start;
+
+  expect(err).toBeInstanceOf(Error);
+  // Distinct, actionable message -- not the generic "synchronization has timed
+  // out" the full peerTimeoutMs path produces.
+  expect((err as Error).message).toMatch(
+    /did not complete within the recovery window/,
+  );
+  expect((err as Error).message).toMatch(/failed between deleting/);
+  // Transport failure (CLI exit 69), not a usage error (exit 64).
+  expect(err).not.toBeInstanceOf(UsageError);
+  // Bounded by the recovery window, far below the 5 s TTL.
+  expect(elapsed).toBeLessThan(2_000);
+  // The peer never owned the sentinel, so its outer-catch sweep leaves it on
+  // disk for the next run's Phase 0 guard rather than masking the crash.
+  expect(files.has(`${conn.path}/${joiningName}`)).toBe(true);
+  // Instance is reset, not wedged: a retry is not blocked.
+  expect(conn.peerId).toBeUndefined();
+  expect(conn.handshakeRole).toBeUndefined();
+});
+
+test("synchronize() preexisting-file guard rejects a leftover joining sentinel at startup", async () => {
+  // A `<id>-joining.json` left by a crashed prior session is rejected by the
+  // strict-empty entry rule (I0) exactly like any other non-peer-hello file --
+  // the sentinel needs no per-type screening (it is "anything else"). This is a
+  // usage error (CLI exit 64), and the guard does not delete the stale file.
+  const staleId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const staleName = `${staleId}-joining.json`;
+  files.set(`${conn.path}/${staleName}`, WAVE_HELLO_BODY);
+  client.list = async () => [
+    { name: staleName, modifyTime: Date.now(), size: 0 },
+  ];
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain(staleName);
+  expect((err as Error).message).toContain("joining sentinel");
+  // Not swept by the guard: the operator clears the directory after confirming
+  // no live session is using it.
+  expect(files.has(`${conn.path}/${staleName}`)).toBe(true);
 });
 
 test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of retries", async () => {
@@ -2112,6 +2315,27 @@ test("send() completes without spinning when a <id>-hello.json file is present i
 
   // The hello file must still be present (send() is not responsible for it).
   expect(files.has(helloPath)).toBe(true);
+});
+
+test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminant excludes it)", async () => {
+  // The joining sentinel shares the `<id>-` prefix and `.json` extension but
+  // its terminal segment is the type word `joining`, not a byte count, so
+  // hasOutstandingMessage excludes it via parseMessageByteCount (I3) -- no
+  // per-suffix screening is needed. Were it mis-routed as an outstanding
+  // message, send() would spin until the peer timeout. Verify it completes.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
+
+  // Plant a sentinel under this party's own id, as a crashed prior arrival
+  // would leave it.
+  const joiningPath = `/test/${conn.id}-joining.json`;
+  files.set(joiningPath, WAVE_HELLO_BODY);
+
+  await expect(conn.send({ check: true })).resolves.toBeUndefined();
+
+  // send() does not own the sentinel and must not have consumed it.
+  expect(files.has(joiningPath)).toBe(true);
 });
 
 test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
@@ -2939,7 +3163,9 @@ test("(c) wave joiner reading a lockless peer hello fails fast and leaves both h
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
-    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: false })),
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
   );
 
   let err: unknown;
@@ -3021,7 +3247,9 @@ test("(c) wave two-hellos branch detects the mismatch before createExclusive (EE
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
-    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: false })),
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
   );
 
   let createExclusiveCalls = 0;
@@ -3123,7 +3351,9 @@ test("(c) a both-flags-differ mismatch names retain_files (the implying flag)", 
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
-    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: true })),
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: true }),
+    ),
   );
 
   let err: unknown;
@@ -3194,7 +3424,9 @@ test("(e) leftover hellos after a mismatch make a rerun rejected by the entry gu
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
-    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: false })),
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
   );
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(
@@ -3968,9 +4200,9 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
   expect((errors[0] as Error).message).toContain("more than one message file");
 
   // pollerActive must be false: the poller stopped itself before emitting.
-  expect(
-    (conn as unknown as { pollerActive: boolean }).pollerActive,
-  ).toBe(false);
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
 
   // Wait two poll intervals and confirm no second error arrives (poller did not
   // reschedule). If the finally block had rescheduled, a second error would
@@ -4007,14 +4239,19 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
   await Promise.race([
     errorArrived,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timed out waiting for poll error")), 2_000),
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
     ),
   ]);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("more than one message file");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
   // No second error: the poller did not reschedule.
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
@@ -4072,9 +4309,9 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("seq=");
 
-  expect(
-    (conn as unknown as { pollerActive: boolean }).pollerActive,
-  ).toBe(false);
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
 
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
@@ -4386,21 +4623,55 @@ const entryPreconditionKinds: Array<{
   outcome: "proceed" | "reject";
 }> = [
   { kind: "empty directory", present: [], outcome: "proceed" },
-  { kind: "one peer hello", present: [`${ENTRY_PEER_ID}-hello.json`], outcome: "proceed" },
+  {
+    kind: "one peer hello",
+    present: [`${ENTRY_PEER_ID}-hello.json`],
+    outcome: "proceed",
+  },
   // A self-hello is a same-id leftover from a crashed session, not the peer's.
-  { kind: "self-hello", present: [`${ENTRY_SELF_ID}-hello.json`], outcome: "reject" },
-  { kind: "two peer hellos", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], outcome: "reject" },
-  { kind: "wave file", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], outcome: "reject" },
+  {
+    kind: "self-hello",
+    present: [`${ENTRY_SELF_ID}-hello.json`],
+    outcome: "reject",
+  },
+  {
+    kind: "two peer hellos",
+    present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`],
+    outcome: "reject",
+  },
+  {
+    kind: "wave file",
+    present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`],
+    outcome: "reject",
+  },
   // A rendezvous ack marker (a crashed lockless session): a peer acking this
   // party's hello. Its terminal segment is `ack`, so it is not a peer hello.
-  { kind: "rendezvous ack", present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-hello-ack.json`], outcome: "reject" },
+  {
+    kind: "rendezvous ack",
+    present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-hello-ack.json`],
+    outcome: "reject",
+  },
   // A stale non-timestamped message closes the pre-existing gap where the old
   // generic (delete-mode) guard let leftover messages through.
-  { kind: "non-timestamped message", present: [`${ENTRY_PEER_ID}-42.json`], outcome: "reject" },
-  { kind: "timestamped message", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], outcome: "reject" },
+  {
+    kind: "non-timestamped message",
+    present: [`${ENTRY_PEER_ID}-42.json`],
+    outcome: "reject",
+  },
+  {
+    kind: "timestamped message",
+    present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`],
+    outcome: "reject",
+  },
   // A retain-mode message ack: the peer acking a message this party sent. The
   // embedded byte-count (2) is all digits but the terminal segment is `ack`.
-  { kind: "message ack", present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-20260101T000000-000-2-ack.json`], outcome: "reject" },
+  {
+    kind: "message ack",
+    present: [
+      `${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-20260101T000000-000-2-ack.json`,
+    ],
+    outcome: "reject",
+  },
   // An in-flight temp file is rejected today (strict-empty). The planned tmp
   // sweep (193792285) will move this into the guard's `ignored` set.
   { kind: "temp file", present: ["temp-abc.tmp"], outcome: "reject" },
@@ -4500,7 +4771,10 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   await Promise.race([
     errorArrived,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timed out waiting for poll error")), 2_000),
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
     ),
   ]);
 
@@ -4508,7 +4782,9 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("not valid JSON");
   // The poller stopped itself; no payload delivered and no ack written.
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
   // No second error arrives (the finally block did not reschedule).
@@ -4538,14 +4814,19 @@ test("poll() terminal: a fully-synced message that fails schema validation stops
   await Promise.race([
     errorArrived,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timed out waiting for poll error")), 2_000),
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
     ),
   ]);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("failed schema validation");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
 });
@@ -4619,14 +4900,19 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   await Promise.race([
     errorArrived,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timed out waiting for poll error")), 2_000),
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
     ),
   ]);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("not valid JSON");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
   expect(received).toHaveLength(0);
   // parse-before-delete: the corrupt file is left on disk for inspection.
   expect(files.has(`/test/${msgName}`)).toBe(true);
