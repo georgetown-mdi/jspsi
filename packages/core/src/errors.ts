@@ -16,3 +16,25 @@ export class UsageError extends Error {
     this.name = "UsageError";
   }
 }
+
+/**
+ * A {@link UsageError} subclass marking a bilateral-mode mismatch detected at
+ * rendezvous: the peer advertised a `lockless_rendezvous` or `retain_files`
+ * setting in its hello payload that differs from this party's. These flags are
+ * bilateral agreements with no negotiation (see FILE_SYNC.md "Bilateral
+ * configuration"), so a difference is fatal and is surfaced fast on both
+ * parties rather than stalling until the peer timeout.
+ *
+ * It is a distinct type, not a plain `UsageError`, so the rendezvous cleanup
+ * paths can branch on it deterministically: on a mismatch the detecting party
+ * leaves its own advertised hello (and the peer's) in the directory as the
+ * terminal state -- skipping the on-disk sweep so the peer reads the
+ * advertisement and fails too -- while still being classified as a usage error
+ * (CLI exit 64) by the `instanceof UsageError` check at the CLI catch sites.
+ */
+export class BilateralModeMismatchError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "BilateralModeMismatchError";
+  }
+}

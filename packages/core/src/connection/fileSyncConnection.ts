@@ -8,11 +8,13 @@ import type {
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
-import { UsageError } from "../errors";
+import { UsageError, BilateralModeMismatchError } from "../errors";
 import {
   ControlFileEnvelopeSchema,
+  HelloEnvelopeSchema,
   serializeEnvelope,
   type ControlFileEnvelope,
+  type HelloEnvelope,
 } from "./controlEnvelope";
 
 const errMessage = (err: unknown) =>
@@ -104,16 +106,23 @@ const HELLO_SUFFIX = "-hello.json";
 // Reads a control file (hello or hello-ack) through the I5 partial-sync gate.
 // Retries on any get() failure or JSON parse failure (indicating the sync tool
 // has not finished writing the file) until timeToLive expires, then throws a
-// transport Error. A fully-synced body that parses but fails the envelope
-// schema is a terminal UsageError (protocol mismatch, not a transient sync
-// gap). Peer-id recovery is always filename-based; this function validates
+// transport Error. A fully-synced body that parses but fails the supplied
+// envelope schema is a terminal UsageError (protocol mismatch, not a transient
+// sync gap). Peer-id recovery is always filename-based; this function validates
 // the body only.
-async function readControlFileWithGate(
+//
+// The schema is a parameter so the same gate validates two distinct bodies: a
+// peer-hello read passes HelloEnvelopeSchema (the two required bilateral flags)
+// while the lockless ack read passes the empty-body ControlFileEnvelopeSchema.
+// Adding the flags as required fields to one shared schema would instead break
+// the both-lockless ack read, whose body is an empty envelope.
+async function readControlFileWithGate<T extends ControlFileEnvelope>(
   client: FileTransportClient,
   filePath: string,
   timeToLive: Date,
   pollingFrequency: number,
-): Promise<ControlFileEnvelope> {
+  schema: z.ZodType<T>,
+): Promise<T> {
   const delay = (ms: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, ms));
   // do-while guarantees at least one read attempt even when timeToLive has
@@ -137,7 +146,7 @@ async function readControlFileWithGate(
       await delay(pollingFrequency);
       continue;
     }
-    const result = ControlFileEnvelopeSchema.safeParse(parsed);
+    const result = schema.safeParse(parsed);
     if (!result.success) {
       throw new UsageError(
         `control file at ${filePath} has a malformed payload: ` +
@@ -557,6 +566,47 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.resetSessionState();
   }
 
+  // Builds this party's hello payload: the two bilateral mode flags it
+  // advertises so the peer can detect a mismatch and fail fast. Written into
+  // the hello body in both rendezvous branches; the lockless ack stays an empty
+  // envelope (its body carries no flags and is read with the base schema).
+  private helloEnvelope(): HelloEnvelope {
+    return {
+      locklessRendezvous: this.options.locklessRendezvous,
+      retainFiles: this.options.retainFiles,
+    };
+  }
+
+  // Compares a peer's advertised hello flags against this party's own
+  // configuration. Returns a BilateralModeMismatchError naming both sides'
+  // settings for the offending flag, or undefined when both flags match.
+  // Called at every site that reads a peer hello.
+  //
+  // retain_files is compared first because it is the implying flag: the only
+  // way both flags differ is retain=true/lockless=true vs
+  // retain=false/lockless=false (retain_files implies lockless_rendezvous), and
+  // naming the retain_files mismatch lets the operator realign both with a
+  // single rerun rather than risk the invalid retain=true/lockless=false state.
+  // A lockless-only divergence (retain matches) still reports lockless.
+  private bilateralMismatch(
+    peer: HelloEnvelope,
+  ): BilateralModeMismatchError | undefined {
+    if (peer.retainFiles !== this.options.retainFiles)
+      return new BilateralModeMismatchError(
+        `retain_files mismatch: this party has retain_files=` +
+          `${this.options.retainFiles} but the peer has retain_files=` +
+          `${peer.retainFiles}; both parties must use the same setting`,
+      );
+    if (peer.locklessRendezvous !== this.options.locklessRendezvous)
+      return new BilateralModeMismatchError(
+        `lockless_rendezvous mismatch: this party has lockless_rendezvous=` +
+          `${this.options.locklessRendezvous} but the peer has ` +
+          `lockless_rendezvous=${peer.locklessRendezvous}; both parties must ` +
+          `use the same setting`,
+      );
+    return undefined;
+  }
+
   /**
    * Negotiates rendezvous with the peer by exchanging `-hello.json` and
    * `.wave` files (wave-race mode) or `-hello.json` and `-hello-ack.json`
@@ -701,14 +751,38 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
 
       // I5: read the peer hello body through the partial-sync gate before
-      // deleting it. open() sets timeToLive before synchronize() runs, so
-      // the non-null assertion is safe.
-      await readControlFileWithGate(
+      // deleting it, validating the two required bilateral flags. open() sets
+      // timeToLive before synchronize() runs, so the non-null assertion is safe.
+      const peerEnvelope = await readControlFileWithGate(
         this.client,
         otherPath,
         this.options.timeToLive!,
         this.options.pollingFrequency,
+        HelloEnvelopeSchema,
       );
+
+      // Bilateral flag check. A mismatch here means the peer runs a different
+      // rendezvous protocol than this (wave) party -- it is lockless, since
+      // only a lockless peer leaves its hello in place for a wave joiner to
+      // discover. For symmetric detection the joiner must write its own
+      // advertised hello BEFORE throwing (so the lockless peer reads it through
+      // its own peer-hello read and fails too) and must NOT delete the peer
+      // hello: both hellos are the directory's terminal state. The hello is
+      // left untracked so close()/cleanup() does not sweep it. This is
+      // detection, not negotiation -- neither side adapts to the other's mode.
+      const mismatch = this.bilateralMismatch(peerEnvelope);
+      if (mismatch) {
+        await this.client.put(
+          serializeEnvelope(this.helloEnvelope()),
+          helloPath,
+          {
+            flags: "w",
+            encoding: "utf-8",
+          },
+        );
+        this.resetSessionState();
+        throw mismatch;
+      }
 
       // Partial-failure note: if delete(otherPath) succeeds but put(helloPath)
       // fails, the peer's hello is gone and we never wrote our own. The peer's
@@ -720,10 +794,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       try {
         await this.client.delete(otherPath);
 
-        await this.client.put(serializeEnvelope({}), helloPath, {
-          flags: "w",
-          encoding: "utf-8",
-        });
+        await this.client.put(
+          serializeEnvelope(this.helloEnvelope()),
+          helloPath,
+          {
+            flags: "w",
+            encoding: "utf-8",
+          },
+        );
         if (!this.options.retainFiles)
           this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
       } catch (err: unknown) {
@@ -786,10 +864,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.debug(
         `[${this.role}] creating initial ${this.id}${HELLO_SUFFIX}`,
       );
-      await this.client.put(serializeEnvelope({}), helloPath, {
-        flags: "w",
-        encoding: "utf-8",
-      });
+      await this.client.put(
+        serializeEnvelope(this.helloEnvelope()),
+        helloPath,
+        {
+          flags: "w",
+          encoding: "utf-8",
+        },
+      );
       if (!this.options.retainFiles)
         this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
       let wavePath: string | undefined;
@@ -843,13 +925,28 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             if (ackPath === undefined) {
               // I5: read the peer hello body through the partial-sync gate
               // before writing our ack, so a truncated body is not treated as
-              // malformed and does not abort the handshake prematurely.
-              await readControlFileWithGate(
+              // malformed and does not abort the handshake prematurely. The
+              // flag comparison runs on this peer-HELLO read, never the peer-ack
+              // read below.
+              const peerEnvelope = await readControlFileWithGate(
                 this.client,
                 `${this.path!}/${peerHello.name}`,
                 this.options.timeToLive!,
                 this.options.pollingFrequency,
+                HelloEnvelopeSchema,
               );
+
+              // Bilateral flag check before writing our ack. On mismatch throw:
+              // our hello (written before this loop) stays via the outer catch's
+              // skip-sweep, so the peer reads it through its own peer-hello read
+              // and fails too. We do not write the ack, leaving both hellos as
+              // the directory's terminal state. Covers a retain_files mismatch
+              // (both parties lockless, both in this barrier) as well as a
+              // lockless_rendezvous mismatch (peer is a wave party that read our
+              // hello at its own two-hellos branch).
+              const mismatch = this.bilateralMismatch(peerEnvelope);
+              if (mismatch) throw mismatch;
+
               const ackName = `${this.id}-hello-ack.json`;
               ackPath = `${this.path}/${ackName}`;
               // Pre-track before writing so cleanup() sweeps it at close().
@@ -883,12 +980,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             }
 
             // I5: read the peer ack body through the partial-sync gate before
-            // committing roles; the ack name carries no byte-count segment.
+            // committing roles; the ack name carries no byte-count segment. The
+            // ack body is the empty base envelope -- read with the base schema,
+            // and never flag-compared (the flags live on the hello, read above).
             await readControlFileWithGate(
               this.client,
               `${this.path!}/${peerAckName}`,
               this.options.timeToLive!,
               this.options.pollingFrequency,
+              ControlFileEnvelopeSchema,
             );
 
             // Peer ack confirmed -- commit roles and peerId as the last step,
@@ -1005,12 +1105,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // I5: read the peer hello body through the partial-sync gate
             // before committing roles. The hello name carries no byte-count
             // segment, so a half-synced body cannot be caught by a size check.
-            await readControlFileWithGate(
+            const peerEnvelope = await readControlFileWithGate(
               this.client,
               `${this.path}/${otherFile.name}`,
               this.options.timeToLive!,
               this.options.pollingFrequency,
+              HelloEnvelopeSchema,
             );
+
+            // Bilateral flag check before committing roles and before the
+            // sweep below. Defense-in-depth: a wave present in the directory
+            // implies both parties are in wave mode (lockless never creates a
+            // wave), so a mismatch cannot normally reach here; on the throw the
+            // sweep is skipped and our hello is left for the peer to read.
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) throw mismatch;
 
             // first to arrive => should wait for first message
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
@@ -1053,12 +1162,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // before deleting it. The joiner's hello carries no byte-count
             // segment so a half-synced body would be silently misread without
             // this gate.
-            await readControlFileWithGate(
+            const peerEnvelope = await readControlFileWithGate(
               this.client,
               otherPath,
               this.options.timeToLive!,
               this.options.pollingFrequency,
+              HelloEnvelopeSchema,
             );
+
+            // Bilateral flag check before deleting the peer hello. Defense-in-
+            // depth: reaching this branch means our own hello was deleted, which
+            // only a wave joiner does, so the peer is in wave mode and a
+            // mismatch cannot normally arise; on the throw the peer-hello delete
+            // and the sweep are both skipped.
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) throw mismatch;
 
             // arrived first, should wait for a message
             this.handshakeRole = "responder";
@@ -1096,12 +1214,26 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.role = arrivedFirst ? "starter" : "joiner";
             this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
-            // I5 gap: the two-hellos path (winner and EEXIST loser) reads
-            // peerId from the filename but does not call readControlFileWithGate
-            // on the peer hello body. The body is `{}` today so this is safe,
-            // but item 193901017 (bilateral mode flags) must add the gate call
-            // to both the winner path and the EEXIST cleanup path before it
-            // reads any flag fields from the envelope.
+            // I5 (closes the documented two-hellos gap): read the peer hello
+            // body through the partial-sync gate, validating the bilateral
+            // flags, BEFORE racing a wave. A lockless peer's hello can coexist
+            // with our wave hello here, so this is a reachable
+            // lockless_rendezvous mismatch. Running the check before
+            // createExclusive pre-empts both the createExclusive-winner and the
+            // EEXIST-loser sub-paths, so a mismatched pair never races a wave.
+            // On the throw our own hello (already present -- it is one of the
+            // two hellos) is left in place by the outer catch's skip-sweep, so
+            // the lockless peer reads it and fails too.
+            const peerEnvelope = await readControlFileWithGate(
+              this.client,
+              `${this.path}/${otherFile.name}`,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+              HelloEnvelopeSchema,
+            );
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) throw mismatch;
+
             const waveName =
               `${arrivedFirst ? this.id : this.peerId}-` +
               `${arrivedFirst ? this.peerId : this.id}.wave`;
@@ -1216,9 +1348,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           );
         return;
       } catch (err: unknown) {
-        if (wavePath) await this.client.safeDelete(wavePath);
-        if (ackPath) await this.client.safeDelete(ackPath);
-        await this.client.safeDelete(helloPath);
+        // A bilateral-mode mismatch is the one terminal failure that must NOT
+        // sweep the directory: this party's advertised hello (written before
+        // the loop) is the directory's terminal state, left in place so the
+        // peer reads it through its own peer-hello read and fails too. Skip the
+        // on-disk safeDelete of hello/ack/wave; clearing responsibleFiles (so a
+        // later close()/cleanup() does not delete the advertised hello) and the
+        // in-memory reset still run, so the instance is not wedged. A rerun
+        // against the leftover hellos is rejected by the entry guard (I0) until
+        // the operator clears the directory and fixes the mismatched flag.
+        if (!(err instanceof BilateralModeMismatchError)) {
+          if (wavePath) await this.client.safeDelete(wavePath);
+          if (ackPath) await this.client.safeDelete(ackPath);
+          await this.client.safeDelete(helloPath);
+        }
         if (!this.options.retainFiles) this.responsibleFiles.clear();
         // The prefix-at-dash guard fires after waitForPeer() has already
         // committed this.peerId, this.role, and this.handshakeRole. Reset

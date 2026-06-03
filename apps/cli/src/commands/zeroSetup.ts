@@ -122,8 +122,9 @@ export function builder(cmd: Argv): Argv {
         "deleting them after consumption; intended for sync-mediated " +
         "transports that do not propagate deletions and for audit use cases. " +
         "Requires --timestamp-in-filename. Both parties must set this flag " +
-        "identically -- a mismatch causes the exchange to stall until the " +
-        "peer timeout fires (fast-fail detection not yet available). A fresh " +
+        "identically -- a mismatch is detected at rendezvous and fails fast on " +
+        "both sides with a clear error naming each side's setting, rather than " +
+        "stalling until the peer timeout. A fresh " +
         "directory is required for each exchange and is enforced: reusing a " +
         "directory with retained files from a prior session is rejected with " +
         "an error at startup",
