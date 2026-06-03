@@ -378,10 +378,10 @@ export interface FileSyncOptions extends SharedOptions {
    */
   peerId?: string;
   /**
-   * When `true`, the receiver writes a `receipt` control file after consuming
-   * each message, and the sender gates its next `send()` on that receipt
-   * rather than waiting for its own file to be deleted. No exchange file is
-   * deleted as a protocol step; the shared directory becomes a permanent
+   * When `true`, the receiver writes a zero-length acknowledgment marker after
+   * consuming each message, and the sender gates its next `send()` on that
+   * marker rather than waiting for its own file to be deleted. No exchange file
+   * is deleted as a protocol step; the shared directory becomes a permanent
    * transcript. Default: `false`.
    *
    * Intended for sync-mediated transports that do not propagate deletions
@@ -399,7 +399,7 @@ export interface FileSyncOptions extends SharedOptions {
    * retain mode guarantees.
    *
    * A fresh directory is required for each exchange and is enforced:
-   * `synchronize()` throws a `UsageError` if any message or receipt files
+   * `synchronize()` throws a `UsageError` if any message or ack-marker files
    * from a prior session are present in the directory.
    */
   retainFiles?: boolean;
