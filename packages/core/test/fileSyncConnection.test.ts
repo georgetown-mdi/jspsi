@@ -2763,6 +2763,14 @@ const ID_HIGH = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 // generous timeToLive means a stall (instead of a fast-fail) would exceed the
 // vitest timeout and fail the test, so a passing concurrent mismatch test is
 // itself proof the failure is at rendezvous and not at the peer timeout.
+//
+// Determinism note: the concurrent tests rely on the mock client's synchronous
+// in-memory Map (no await/delay in list/put), so the two parties' list()/put()
+// interleave predictably under the microtask scheduler and each sees the
+// other's hello on its first poll. If the mock ever gains artificial latency, a
+// party could miss the peer hello on its first list() and poll to the (generous)
+// TTL, surfacing as a vitest timeout -- a test artifact to fix in the mock, not
+// a production regression.
 function makeRendezvousPair(
   idA: string,
   optsA: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
@@ -3044,6 +3052,61 @@ test("(c) wave two-hellos branch detects the mismatch before createExclusive (EE
   expect(createExclusiveCalls).toBe(0);
   // The conn's own hello (written before the loop) is left behind, not swept.
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+});
+
+test("(c) wave-detection branch sweeps the wave and leaves both hellos on a mismatch", async () => {
+  // Defense-in-depth path (waitForPeer's "waveFiles.length > 0" arm). A wave on
+  // disk implies both parties are wave (lockless never creates one) and a wave
+  // party always has retain_files=false, so no flag can differ and this branch
+  // cannot reach a mismatch for any valid pairing. Drive it with a synthetic
+  // directory -- a peer-created wave plus a lockless-advertising peer hello --
+  // to cover the safeDelete(wave)-then-throw code added for the prior review.
+  // The wave is a transient, not an advertisement, so it is swept; both hellos
+  // remain as the directory's terminal state.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // wave, non-retain
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  // ID_LOW sorts first, so the producer's wave name is `${ID_LOW}-${ID_HIGH}`;
+  // this matches the branch's reconstruct-and-compare (I7) so the read gate and
+  // mismatch check are reached rather than a "wave does not reference" throw.
+  const waveName = `${ID_LOW}-${conn.id}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
+  );
+  files.set(wavePath, Buffer.alloc(0));
+
+  // First list (entry guard) empty so conn writes its own hello and enters the
+  // wave loop; subsequent lists expose both hellos plus the peer-created wave,
+  // routing into the wave-detection branch.
+  let listCalls = 0;
+  client.list = async () => {
+    listCalls++;
+    if (listCalls === 1) return [];
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: 0, size: 0 },
+      { name: peerHelloName, modifyTime: 0, size: 0 },
+      { name: waveName, modifyTime: 0, size: 0 },
+    ];
+  };
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect((err as Error).message).toMatch(/lockless_rendezvous mismatch/);
+  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
 
 test("(c) a both-flags-differ mismatch names retain_files (the implying flag)", async () => {

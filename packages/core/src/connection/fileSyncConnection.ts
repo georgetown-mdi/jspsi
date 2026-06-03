@@ -796,6 +796,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               `time out instead of fast-failing: ${errMessage(writeErr)}`,
           );
         }
+        // Reset role/peer fields defensively, mirroring the outer catch. They
+        // are not yet assigned on this branch (the assignments below the
+        // mismatch gate have not run), so this is a no-op today; setting them
+        // removes the asymmetry with the outer catch and avoids leaving stale
+        // state if those assignments were ever reordered above the gate.
+        this.peerId = undefined;
+        this.role = "unknown role";
+        this.handshakeRole = undefined;
         this.resetSessionState();
         throw mismatch;
       }
