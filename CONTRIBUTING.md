@@ -37,25 +37,9 @@ No additional environment variables are required for local development. SFTP int
 
 ## Building
 
-### Core library
-
 ```sh
-npm run build -w packages/core
-```
-
-Rebuild after any change to `packages/core`; both applications depend on its compiled output.
-
-### CLI application
-
-```sh
-npm run build -w apps/cli
-```
-
-Output is written to `apps/cli/dist/`. The Docker image is built separately; see [docs/RELEASES.md](docs/RELEASES.md).
-
-### Web application
-
-```sh
+npm run build -w packages/core   # must build before the apps; rebuild after any core change
+npm run build -w apps/cli        # -> apps/cli/dist/; Docker image built separately (docs/RELEASES.md)
 npm run build -w apps/web
 ```
 
@@ -65,38 +49,36 @@ npm run build -w apps/web
 npm test -w packages/core
 npm run test:unit -w apps/cli
 npm run test:unit -w apps/web
-```
-
-A single test file:
-
-```sh
-npx vitest run path/to/file.test.ts
+npx vitest run path/to/file.test.ts   # single file
 ```
 
 ### Integration tests
 
-Integration tests must pass before a pull request is merged into `main` or `staging`.
+Must pass before a PR merges to `main` or `staging`.
 
-#### CLI application
-
-Integration tests for the CLI require Docker and spin up a local SFTP server:
+CLI (requires Docker; spins up a local SFTP server, image `atmoz/sftp`). The
+first run in a checkout needs `setup.sh` to generate the host keys, storage dir,
+and a container `.env` (all gitignored):
 
 ```sh
-docker compose -f apps/cli/test/container/compose.yaml up -d
-npm run test:integration -w apps/cli
+sh apps/cli/test/container/setup.sh        # once per checkout
+npm run test:container:up   -w apps/cli    # start the SFTP server
+npm run test:integration    -w apps/cli
+npm run test:container:down -w apps/cli    # stop it (left running otherwise)
 ```
 
-The Docker compose runs an SFTP server under the container name `sftp-1` and image name `atmoz/sftp`.
+The `:up`/`:down` scripts wrap `docker compose` with the `--env-file` and run
+from the checkout root, so the container always picks up that checkout's
+`COMPOSE_PROJECT_NAME` and `SFTP_PORT` (default 2222) -- never run the raw
+`docker compose` command, which would skip the env file. The `make-worktree`
+command gives each worktree a unique project and a free port, so checkouts can
+run the container concurrently.
 
-#### Web application
-
-Web integration tests require the development server to be running:
+Web (requires the dev server, a foreground process on port 3000):
 
 ```sh
 npm run dev -w apps/web
 ```
-
-This starts a foreground web server process which listens on port 3000.
 
 ## Code Conventions
 
@@ -136,53 +118,20 @@ npm run format
 
 ### Pull Request Description
 
-A pull request is a task closed out, so its description mirrors the project board's task template: the reviewer should be able to map each section back to the task it implements. Opening a PR populates [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) with this skeleton. Fill in what applies and delete any optional section that has nothing non-obvious to say -- keep small PRs small.
-
-| Section | What it answers |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| **Summary**             | What this delivers and why, outcome first -- the same sentence as the task's summary. |
-| **Changes**             | Which files or areas actually changed, and why. The "Affected areas" of the task, now concrete. |
-| **Background**          | Optional. Root cause, the invariant preserved, a constraint honored. Omit if the summary covers it. |
-| **Breaking change**     | Only when something breaks. What breaks and what a consumer must do. |
-| **Out of scope / follow-on** | Deferred work, each linked to its board item -- the task's open questions, resolved into next steps. |
-| **Test plan**           | How the change was verified: the commands you ran and the specific behaviors the new tests cover. Verification only. |
-| **Checklist**           | Pre-merge hygiene that keeps the repo consistent: a documentation sweep, the `CHANGELOG.md` line, and security review for crypto changes. |
-
-Conventions:
-
-- **Headings start at `##`.** Do not repeat the PR title as a heading at the top of the body.
-- **Board references use the full Project item URL**, never `Closes #<id>`. The board carries GitHub Project draft items, whose numeric IDs are not issue numbers; `#<id>` does not auto-close and renders as a broken link. Choose the verb by relationship: `Implements`, `Part of`, `Depends on`, or `Follow-on:`. Product board is project `9`, Release & Operations is `10`.
-- **Name what the tests cover**, not just that they pass -- list the specific behaviors, the way the task's acceptance criteria do. A bare "tests pass" is not a test plan.
-- **The test plan is verification, not housekeeping.** It records what you ran: typecheck and lint clean, the relevant unit suites with their counts, and integration tests (or why they could not run). Updating a changelog is not testing -- it belongs in the checklist.
-- **The checklist confirms the repo stays consistent.** Sweep `docs/` for every page the change affects and update it, or record that none was needed -- a deliberate "n/a" is the signal that you looked. Add the `CHANGELOG.md` `[Unreleased]` line, and for cryptographic changes request the security review that the Pull Request Process and Dependency Policy require.
-- Follow the repository's writing style: ASCII only (`-` not en-dash or em-dash, `->` not an arrow character), imperative mood, terse and technical, single space after periods.
+Opening a PR populates [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md), whose inline comments explain each section and the writing conventions (ASCII, imperative mood, `##` headings, board-reference verbs). Fill in what applies; delete any optional section with nothing non-obvious to say -- keep small PRs small.
 
 ## Dependency Policy
 
-Add third-party dependencies conservatively. For every new dependency:
+PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
 
-1. Confirm the license is compatible with Apache 2.0 (see License Compliance below).
+1. Confirm the license permits Apache 2.0 distribution. Copyleft licenses (GPL, AGPL) are not compatible.
 2. Run `npm audit` and resolve any known vulnerabilities before merging.
 3. Prefer packages that are actively maintained and publish a security policy.
+4. If the package ships its own `NOTICE` file and is redistributed to end users, fold its attribution into the top-level [`NOTICE`](NOTICE).
 
 **Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, PAKE, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 
-## Open Source License Compliance
-
-PSI-Link is licensed under [Apache 2.0](LICENSE.md). Every dependency must be under a license that permits Apache 2.0 distribution. Copyleft licenses (GPL, AGPL) are not compatible.
-
-Key existing dependencies:
-
-| Dependency                      | License                                | Notes                                                                            |
-| ------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| `@openmined/psi.js`             | Apache 2.0                             | Vendored WASM; wraps Google Private Join and Compute                             |
-| Google Private Join and Compute | Apache 2.0                             | Underlying C++ PSI implementation                                                |
-| BoringSSL                       | OpenSSL License / SSLeay License / ISC | Used by Private Join and Compute; Google's fork of OpenSSL, no numbered releases |
-| `@noble/curves`                 | MIT                                    | Elliptic-curve operations (P-256)                                                |
-| PeerJS                          | MIT                                    | Peer coordination in web application                                             |
-| `ssh2-sftp-client`              | MIT                                    | SFTP transport in CLI                                                            |
-
-When Apache 2.0 dependencies include their own `NOTICE` file, their attribution must be incorporated into the top-level `NOTICE` file in this repository.
+Per-dependency licenses are recorded authoritatively in the CycloneDX SBOM attached to each release - every direct and transitive dependency with its license; see [docs/RELEASES.md](docs/RELEASES.md#software-bill-of-materials-sbom). Attributions for redistributed and vendored components are in the top-level [`NOTICE`](NOTICE).
 
 ## Export Control
 

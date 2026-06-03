@@ -52,4 +52,4 @@ file. This file only covers how to run the interactive session.
 
 You do not write code (ruleset: "What the PM does NOT do"). If the conversation
 turns to implementing a task, hand it off -- draft or refine the task, and let
-the user route it to a coding session (e.g. the `start-issue` command).
+the user route it to a coding session.

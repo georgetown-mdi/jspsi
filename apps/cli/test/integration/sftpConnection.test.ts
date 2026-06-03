@@ -5,6 +5,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import { sftpPort } from "../container/env";
 
 import log from "loglevel";
 
@@ -17,6 +18,7 @@ log.setLevel(log.levels.DEBUG);
 // server needs it.
 const SFTP_LOCAL_DIRECTORY = "test/container/sftp/srv/sftp";
 const SFTP_PATH = "/psi/sftp";
+const SFTP_PORT = sftpPort();
 
 async function cleanServer() {
   for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {
@@ -54,7 +56,7 @@ beforeAll(async () => {
       channel: "sftp",
       server: {
         host: "localhost",
-        port: 2222,
+        port: SFTP_PORT,
         username: "usera",
         password: "usera",
         path: SFTP_PATH,
@@ -64,7 +66,7 @@ beforeAll(async () => {
       channel: "sftp",
       server: {
         host: "localhost",
-        port: 2222,
+        port: SFTP_PORT,
         username: "userb",
         password: "userb",
         path: SFTP_PATH,
@@ -163,7 +165,7 @@ test("terminal frame is received when sender closes before receiver polls", asyn
 
   const base = {
     channel: "sftp" as const,
-    server: { host: "localhost", port: 2222, path: SFTP_PATH },
+    server: { host: "localhost", port: SFTP_PORT, path: SFTP_PATH },
   };
 
   await Promise.all([

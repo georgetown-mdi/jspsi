@@ -122,7 +122,7 @@ PSI-Link does not use covered telecommunications equipment or services as define
 
 ### Dependency origins and licenses
 
-The redistributed third-party components and their upstreams are documented in the top-level [NOTICE](../NOTICE) file. License compatibility for every direct dependency is recorded in [CONTRIBUTING.md#open-source-license-compliance](../CONTRIBUTING.md#open-source-license-compliance).
+The redistributed third-party components and their upstreams are documented in the top-level [NOTICE](../NOTICE) file. Per-dependency licenses are listed in the CycloneDX SBOM attached to each release (see [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom)); the dependency license-compatibility policy is in [CONTRIBUTING.md#dependency-policy](../CONTRIBUTING.md#dependency-policy).
 
 ### Software Bill of Materials
 

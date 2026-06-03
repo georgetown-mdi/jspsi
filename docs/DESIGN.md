@@ -32,7 +32,7 @@ The command line application enables the automation of all exchange operations a
 
 ## Web application
 
-The web application is a management interface for exchanges. It allows for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It also includes code to execute exchanges.
+The web application is a management interface for exchanges. It allows for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It also includes code to execute exchanges, which it conducts over WebRTC; the file-based channels (SFTP, filedrop) are CLI-only.
 
 Exchange specifications can be downloaded from the web app for use by the command line application, so the web application has user-friendly ways of creating those files. This includes a data explorer and metadata labeler, linkage rule creator, and data cleaning transformation creator.
 

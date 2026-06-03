@@ -6,6 +6,7 @@ import { FileSyncConnection } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import { sftpPort } from "../container/env";
 
 import log from "loglevel";
 
@@ -20,6 +21,7 @@ log.setLevel(log.levels.DEBUG);
 const SFTP_LOCAL_DIRECTORY = "test/container/sftp/srv/mixed";
 const SFTP_PATH = "/psi/mixed";
 const LOCAL_DIRECTORY = path.resolve(SFTP_LOCAL_DIRECTORY);
+const SFTP_PORT = sftpPort();
 
 async function cleanServer() {
   for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {
@@ -56,7 +58,7 @@ beforeAll(async () => {
       channel: "sftp",
       server: {
         host: "localhost",
-        port: 2222,
+        port: SFTP_PORT,
         username: "usera",
         password: "usera",
         path: SFTP_PATH,

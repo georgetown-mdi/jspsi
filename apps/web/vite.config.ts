@@ -34,6 +34,10 @@ const srcAliases = {
 };
 
 export default defineConfig((_configEnv) => {
+  // Vitest evaluates this config but starts no dev/preview server, so the server
+  // snagger plugins below have no httpServer to capture (the hook would just warn
+  // "http server is undefined"). Skip them under test.
+  const underVitest = !!process.env.VITEST;
   return {
     server: {
       host: "127.0.0.1",
@@ -85,22 +89,26 @@ export default defineConfig((_configEnv) => {
       }),
       nitroV2Plugin({ preset: "node-server" }),
       viteReact(),
-      {
-        name: "dev-server-snagger",
-        configureServer(server: ViteDevServer) {
-          if (server.httpServer) {
-            registerServer(server.httpServer);
-          } else {
-            console.warn("http server is undefined");
-          }
-        },
-      },
-      {
-        name: "preview-server-snagger",
-        configurePreviewServer(server: PreviewServer) {
-          registerServer(server.httpServer);
-        },
-      },
+      ...(underVitest
+        ? []
+        : [
+            {
+              name: "dev-server-snagger",
+              configureServer(server: ViteDevServer) {
+                if (server.httpServer) {
+                  registerServer(server.httpServer);
+                } else {
+                  console.warn("http server is undefined");
+                }
+              },
+            },
+            {
+              name: "preview-server-snagger",
+              configurePreviewServer(server: PreviewServer) {
+                registerServer(server.httpServer);
+              },
+            },
+          ]),
     ],
     resolve: {
       tsconfigPaths: true,

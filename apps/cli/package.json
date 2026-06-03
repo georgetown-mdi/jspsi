@@ -10,7 +10,9 @@
     "dev": "PKG_DIR=$(pwd) && cd \"$INIT_CWD\" && node --import=tsx \"$PKG_DIR/dist/index.js\"",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "test:container:up": "cd \"$(git rev-parse --show-toplevel)\" && docker compose --env-file apps/cli/test/container/.env -f apps/cli/test/container/compose.yaml up -d",
+    "test:container:down": "cd \"$(git rev-parse --show-toplevel)\" && docker compose --env-file apps/cli/test/container/.env -f apps/cli/test/container/compose.yaml down"
   },
   "dependencies": {
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",

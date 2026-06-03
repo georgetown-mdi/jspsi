@@ -54,7 +54,7 @@ docker build -t vdorie/psi-link:latest .
 
 ## Testing container
 
-This runs an SFTP server on localhost that can be used for testing. After starting it, you can connect via `sftp://usera:usera@localhost:2222/psi` and `sftp://userb:userb@localhost:2222/psi`. Files are "transfered" in `packages/core/test/container/sftp/srv`.
+This runs an SFTP server on localhost that can be used for testing. After starting it, you can connect via `sftp://usera:usera@localhost:2222/psi` and `sftp://userb:userb@localhost:2222/psi` (2222 is the default port; a worktree set up by `make-worktree` gets its own port -- see `apps/cli/test/container/.env`). Files are "transfered" in `apps/cli/test/container/sftp/srv`.
 
 ### If on Mac OS or other ARM
 
@@ -75,14 +75,18 @@ sh apps/cli/test/container/setup.sh
 Do every time:
 
 ```sh
-docker compose -f apps/cli/test/container/compose.yaml up -d
+npm run test:container:up -w apps/cli
 ```
 
 To stop:
 
 ```sh
-docker compose -f apps/cli/test/container/compose.yaml down
+npm run test:container:down -w apps/cli
 ```
+
+These wrap `docker compose` with the right `--env-file` and run from the
+checkout root; prefer them over a raw `docker compose` call, which skips the env
+file and so ignores this checkout's project name and port.
 
 Connection examples:
 

@@ -30,13 +30,15 @@ jobs:
       #
       # When ready, replace this comment block with:
       #
+      #   - name: Set up SFTP test container
+      #     run: sh apps/cli/test/container/setup.sh
       #   - name: Start SFTP test container
-      #     run: docker compose -f apps/cli/test/container/compose.yaml up -d
+      #     run: npm run test:container:up -w apps/cli
       #   - name: Integration tests (CLI)
       #     run: npm run test:integration -w apps/cli
       #   - name: Stop SFTP test container
       #     if: always()
-      #     run: docker compose -f apps/cli/test/container/compose.yaml down
+      #     run: npm run test:container:down -w apps/cli
 
   publish:
     name: Publish Docker image
