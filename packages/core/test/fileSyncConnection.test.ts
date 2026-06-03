@@ -2376,9 +2376,10 @@ test("synchronize() wave mode: round-trip hello write and read with JSON envelop
   expect(conn.peerId).toBe(peerId);
 });
 
-test("synchronize() lockless mode: round-trip hello and ack write and read with JSON envelope body", async () => {
-  // Both parties must write hellos and acks with JSON envelope bodies, and each
-  // must validate the peer's hello and ack through the read gate.
+test("synchronize() lockless mode: round-trip hello body and zero-length ack markers", async () => {
+  // Both parties write a hello carrying the bilateral-flag envelope and a
+  // zero-length ack marker named after the peer hello they acknowledge. The
+  // hello is read through the gate; the ack is matched by name existence only.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const sharedFiles = new Map<string, Buffer>();
@@ -2447,17 +2448,24 @@ test("synchronize() lockless mode: round-trip hello and ack write and read with 
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
-  // Both hellos and both acks must have been written with JSON envelope bodies.
+  // Both hellos carry the bilateral-flag envelope body.
   for (const id of [idA, idB]) {
     const helloBody = JSON.parse(
       sharedFiles.get(`/shared/${id}-hello.json`)!.toString(),
     );
-    expect(helloBody).toMatchObject({});
-    const ackBody = JSON.parse(
-      sharedFiles.get(`/shared/${id}-hello-ack.json`)!.toString(),
-    );
-    expect(ackBody).toMatchObject({});
+    expect(helloBody).toMatchObject({
+      locklessRendezvous: true,
+      retainFiles: false,
+    });
   }
+  // A acked B's hello; B acked A's hello. Each marker is named after the
+  // acknowledged hello and is zero bytes (no envelope body).
+  const ackAofB = sharedFiles.get(`/shared/${idA}-${idB}-hello-ack.json`);
+  expect(ackAofB).toBeDefined();
+  expect(ackAofB!.length).toBe(0);
+  const ackBofA = sharedFiles.get(`/shared/${idB}-${idA}-hello-ack.json`);
+  expect(ackBofA).toBeDefined();
+  expect(ackBofA!.length).toBe(0);
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
 });
@@ -2519,19 +2527,18 @@ test("synchronize() joiner: fully-synced but malformed hello body is a UsageErro
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
 
-test("synchronize() lockless: mid-sync ack body retried, not reported malformed", async () => {
-  // A lockless ack body that fails JSON.parse on first read must be retried.
-  // The gate applies to both the hello read (before writing own ack) and the
-  // ack read (before committing roles).
+test("synchronize() lockless: rendezvous completes on ack existence; ack body is never read", async () => {
+  // The ack is a zero-length marker matched by name existence: the barrier must
+  // complete without ever get()-ing an `-ack.json` file. There is no body and no
+  // read gate on the ack (only the hello body is read through the gate). This
+  // replaces the former mid-sync-ack-body-retry test, which guarded a read gate
+  // the unified zero-byte marker no longer has.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const sharedFiles = new Map<string, Buffer>();
+  const ackGets: string[] = [];
 
-  // Track how many times the ack is read through the gate.
-  let ackGetCalls = 0;
-  const peerAckName = `${idA}-hello-ack.json`;
-
-  const makeClient = (id: string): FileTransportClient => ({
+  const makeClient = (): FileTransportClient => ({
     connect: async () => {},
     end: async () => {},
     list: async (dir: string): Promise<FileInfo[]> => {
@@ -2548,15 +2555,9 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
         }));
     },
     get: async (path: string) => {
-      // connB reads connA's ack: first call returns truncated body, subsequent
-      // calls return the full body. connA reads connB's ack normally.
-      if (id === idB && path.endsWith(peerAckName)) {
-        ackGetCalls++;
-        if (ackGetCalls === 1)
-          return Buffer.from("{") as Buffer<ArrayBufferLike>;
-      }
+      if (path.endsWith("-ack.json")) ackGets.push(path);
       const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
+      if (data === undefined) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
     put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
@@ -2570,7 +2571,7 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
     },
     rename: async (from: string, to: string) => {
       const data = sharedFiles.get(from);
-      if (!data) throw new Error(`${from}: no such file`);
+      if (data === undefined) throw new Error(`${from}: no such file`);
       sharedFiles.delete(from);
       sharedFiles.set(to, data);
     },
@@ -2580,7 +2581,7 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
     exists: async (path: string) => sharedFiles.has(path),
   });
 
-  const connA = new FileSyncConnection(makeClient(idA), {
+  const connA = new FileSyncConnection(makeClient(), {
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
@@ -2590,7 +2591,7 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
   connA.connected = true;
   connA.path = "/shared";
 
-  const connB = new FileSyncConnection(makeClient(idB), {
+  const connB = new FileSyncConnection(makeClient(), {
     pollingFrequency: 10,
     timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
@@ -2602,10 +2603,11 @@ test("synchronize() lockless: mid-sync ack body retried, not reported malformed"
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
-  // connB retried the ack read at least once (first call returned truncated).
-  expect(ackGetCalls).toBeGreaterThanOrEqual(2);
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
+  // No `-ack.json` file was ever read through get(): the barrier matched on
+  // existence alone.
+  expect(ackGets).toEqual([]);
 });
 
 test("synchronize() wave-detection: mid-sync peer hello body retried, not malformed", async () => {
@@ -3331,7 +3333,7 @@ test("retain mode: multi-message exchange completes when delete() always fails",
     if (received.length === 3) resolveAll();
   });
 
-  // Send 3 messages concurrently with B's poller; the receipt gate serializes
+  // Send 3 messages concurrently with B's poller; the ack gate serializes
   // them even though delete() always fails.
   const sending = (async () => {
     await connA.send({ n: 1 });
@@ -3348,7 +3350,7 @@ test("retain mode: multi-message exchange completes when delete() always fails",
   expect((received[2] as { n: number }).n).toBe(3);
 });
 
-test("retain mode: receipt is written before the data event fires", async () => {
+test("retain mode: ack marker is written before the data event fires", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -3372,22 +3374,36 @@ test("retain mode: receipt is written before the data event fires", async () => 
   conn.path = "/test";
   conn.peerId = peerId;
 
-  let receiptPresentAtEmit = false;
+  let ackPresentAtEmit = false;
   let notifyReceived!: () => void;
   const delivered = new Promise<void>((r) => (notifyReceived = r));
   conn.on("data", () => {
-    receiptPresentAtEmit = [...files.keys()].some(
-      (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
+    ackPresentAtEmit = [...files.keys()].some(
+      (p) => p.includes(`${id}-`) && p.endsWith("-ack.json"),
     );
     notifyReceived();
   });
 
   await runPoller(conn, delivered);
 
-  expect(receiptPresentAtEmit).toBe(true);
+  expect(ackPresentAtEmit).toBe(true);
 });
 
-test("retain mode: sender blocks until a matching receipt appears, then proceeds", async () => {
+// Returns the stem (name minus .json) of the single message file this party
+// wrote, so a test can construct the ack the sender's gate waits for.
+const lastSentStem = (files: Map<string, Buffer>, dir: string, id: string) => {
+  const sent = [...files.keys()].find(
+    (p) =>
+      p.startsWith(`${dir}/${id}-`) &&
+      p.endsWith(".json") &&
+      !p.endsWith("-ack.json") &&
+      !p.endsWith("-hello.json"),
+  );
+  if (sent === undefined) throw new Error("no sent message found");
+  return sent.slice(`${dir}/`.length, -".json".length);
+};
+
+test("retain mode: sender blocks until the ack of its last message appears, then proceeds", async () => {
   const { client, files } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
@@ -3407,8 +3423,9 @@ test("retain mode: sender blocks until a matching receipt appears, then proceeds
 
   // First send proceeds without waiting (seq=0).
   await conn.send({ first: true });
+  const stem = lastSentStem(files, "/test", id);
 
-  // Second send blocks waiting for a receipt with NNN=000.
+  // Second send blocks waiting for the ack of the first message.
   let secondDone = false;
   const secondSend = conn.send({ second: true }).then(() => {
     secondDone = true;
@@ -3417,18 +3434,15 @@ test("retain mode: sender blocks until a matching receipt appears, then proceeds
   await new Promise((r) => setTimeout(r, 50));
   expect(secondDone).toBe(false);
 
-  // Add a receipt with NNN=000 and full size so the gate passes.
-  const receiptBody = Buffer.from("{}");
-  files.set(
-    `/test/${peerId}-20260101T000000-000-${receiptBody.length}-receipt.json`,
-    receiptBody,
-  );
+  // Plant the zero-length ack named after the sent message; the gate matches it
+  // by name existence (constructed from the stem, not parsed).
+  files.set(`/test/${peerId}-${stem}-ack.json`, Buffer.alloc(0));
 
   await secondSend;
   expect(secondDone).toBe(true);
 });
 
-test("retain mode: a receipt with a non-matching NNN does not release the sender", async () => {
+test("retain mode: an ack for a different message does not release the sender", async () => {
   const { client, files } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
@@ -3447,6 +3461,7 @@ test("retain mode: a receipt with a non-matching NNN does not release the sender
   conn.peerId = peerId;
 
   await conn.send({ first: true });
+  const stem = lastSentStem(files, "/test", id);
 
   let secondDone = false;
   const secondSend = conn.send({ second: true }).then(() => {
@@ -3456,27 +3471,24 @@ test("retain mode: a receipt with a non-matching NNN does not release the sender
   await new Promise((r) => setTimeout(r, 30));
   expect(secondDone).toBe(false);
 
-  // Receipt for NNN=001 -- wrong (sender needs NNN=000 for seq=0).
-  const receiptBody = Buffer.from("{}");
+  // An ack for a different message (a wrong stem) does not match the expected
+  // name, so the gate stays closed.
   files.set(
-    `/test/${peerId}-20260101T000000-001-${receiptBody.length}-receipt.json`,
-    receiptBody,
+    `/test/${peerId}-${id}-20260101T000000-999-5-ack.json`,
+    Buffer.alloc(0),
   );
 
   await new Promise((r) => setTimeout(r, 30));
   expect(secondDone).toBe(false);
 
-  // Correct receipt for NNN=000.
-  files.set(
-    `/test/${peerId}-20260101T000000-000-${receiptBody.length}-receipt.json`,
-    receiptBody,
-  );
+  // The ack of the actual last-sent message releases the gate.
+  files.set(`/test/${peerId}-${stem}-ack.json`, Buffer.alloc(0));
 
   await secondSend;
   expect(secondDone).toBe(true);
 });
 
-test("retain mode: receipt below declared byte count does not release sender; full size does", async () => {
+test("retain mode: first send proceeds immediately without any ack", async () => {
   const { client, files } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
@@ -3494,55 +3506,12 @@ test("retain mode: receipt below declared byte count does not release sender; fu
   conn.id = id;
   conn.peerId = peerId;
 
-  await conn.send({ first: true });
-
-  let secondDone = false;
-  const secondSend = conn.send({ second: true }).then(() => {
-    secondDone = true;
-  });
-
-  await new Promise((r) => setTimeout(r, 30));
-
-  // Receipt with NNN=000 but actual size=1, declared=5 (partial sync).
-  const receiptName = `/test/${peerId}-20260101T000000-000-5-receipt.json`;
-  files.set(receiptName, Buffer.alloc(1));
-
-  await new Promise((r) => setTimeout(r, 30));
-  expect(secondDone).toBe(false);
-
-  // Update to full declared size -- gate passes.
-  files.set(receiptName, Buffer.alloc(5));
-
-  await secondSend;
-  expect(secondDone).toBe(true);
-});
-
-test("retain mode: first send proceeds immediately without any receipt", async () => {
-  const { client, files } = makeMockClient();
-  const id = "sender-me";
-  const peerId = "peer-receiver";
-
-  const conn = new FileSyncConnection(client, {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-    timestampInFilename: true,
-    retainFiles: true,
-  });
-  conn.connected = true;
-  conn.path = "/test";
-  conn.id = id;
-  conn.peerId = peerId;
-
-  // No receipts present; first send must resolve without waiting.
+  // No acks present; first send must resolve without waiting.
   await conn.send({ first: true });
 
   const messageFiles = [...files.keys()].filter(
     (p) =>
-      p.includes(`${id}-`) &&
-      p.endsWith(".json") &&
-      !p.endsWith("-receipt.json"),
+      p.includes(`${id}-`) && p.endsWith(".json") && !p.endsWith("-ack.json"),
   );
   expect(messageFiles).toHaveLength(1);
 });
@@ -3587,17 +3556,17 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
   // cleanup() must not delete any files in retain mode.
   await conn.cleanup();
   expect(safeDeleted).toHaveLength(0);
-  // The receipt file is still on disk (cleanup did not remove it).
-  const receiptOnDisk = [...files.keys()].find(
-    (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
+  // The ack marker is still on disk (cleanup did not remove it).
+  const ackOnDisk = [...files.keys()].find(
+    (p) => p.includes(`${id}-`) && p.endsWith("-ack.json"),
   );
-  expect(receiptOnDisk).toBeDefined();
+  expect(ackOnDisk).toBeDefined();
 });
 
 test("retain mode: a consumed message file is retained on a delete-capable transport", async () => {
   // Regression: retain mode must never delete the message payload, even when the
   // transport's delete() succeeds (e.g. real SFTP). The directory is the durable
-  // transcript and the receipt is the consumption signal that replaces deletion.
+  // transcript and the ack is the consumption signal that replaces deletion.
   // Previously the receiver issued a best-effort delete that silently removed the
   // message on capable transports, so the "permanent transcript" guarantee held
   // only on no-delete transports. makeMockClient's delete() actually removes the
@@ -3644,18 +3613,18 @@ test("retain mode: a consumed message file is retained on a delete-capable trans
   expect(files.has(msgPath)).toBe(true);
   // ...because no deletion was ever attempted in retain mode.
   expect(deleted).toHaveLength(0);
-  // The receipt -- the consumption signal that replaces deletion -- was written.
-  const receiptOnDisk = [...files.keys()].some(
-    (p) => p.includes(`${id}-`) && p.endsWith("-receipt.json"),
+  // The ack -- the consumption signal that replaces deletion -- was written.
+  const ackOnDisk = [...files.keys()].some(
+    (p) => p.includes(`${id}-`) && p.endsWith("-ack.json"),
   );
-  expect(receiptOnDisk).toBe(true);
+  expect(ackOnDisk).toBe(true);
 });
 
-test("retain mode: a message reprocessed after an emit failure is not receipted twice", async () => {
-  // The receipt is written before emit, and on an emit failure recvSeq stays so
-  // the (never-deleted) message is reprocessed on the next poll. The receipt
-  // write must be idempotent across that retry: exactly one receipt per message,
-  // even though the message is processed twice.
+test("retain mode: a message reprocessed after an emit failure is not acked twice", async () => {
+  // The ack is written before emit, and on an emit failure recvSeq stays so the
+  // (never-deleted) message is reprocessed on the next poll. The ack write must
+  // produce exactly one marker across that retry, even though the message is
+  // processed twice.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -3666,14 +3635,14 @@ test("retain mode: a message reprocessed after an emit failure is not receipted 
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   files.set(`/test/${msgName}`, message);
 
-  // Count receipt writes via rename rather than the on-disk file set: a
-  // duplicate receipt reuses the same NNN and a second-resolution timestamp, so
-  // it overwrites the first under an identical name and would be invisible to a
-  // file-count check.
-  const receiptRenames: string[] = [];
+  // Count ack writes via rename rather than the on-disk file set: the ack name
+  // is a pure function of the consumed message's fixed name, so a duplicate
+  // write would overwrite the first under an identical name and be invisible to
+  // a file-count check.
+  const ackRenames: string[] = [];
   const origRename = client.rename.bind(client);
   client.rename = async (from: string, to: string) => {
-    if (to.endsWith("-receipt.json")) receiptRenames.push(to);
+    if (to.endsWith("-ack.json")) ackRenames.push(to);
     return origRename(from, to);
   };
 
@@ -3710,8 +3679,8 @@ test("retain mode: a message reprocessed after an emit failure is not receipted 
   // Processed twice (first emit threw, second delivered)...
   expect(emitCount).toBeGreaterThanOrEqual(2);
   expect(received).toHaveLength(1);
-  // ...but the receipt was written exactly once (idempotent across the retry).
-  expect(receiptRenames).toHaveLength(1);
+  // ...but the ack was written exactly once (idempotent across the retry).
+  expect(ackRenames).toHaveLength(1);
 });
 
 test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget", async () => {
@@ -3732,7 +3701,7 @@ test("retain mode: ack-wait timeout throws a UsageError on the timeToLive budget
   conn.id = id;
   conn.peerId = peerId;
 
-  // First send uses the budget without blocking; no receipt will arrive.
+  // First send uses the budget without blocking; no ack will arrive.
   await conn.send({ first: true });
 
   // Second send must time out and throw UsageError.
@@ -3849,8 +3818,8 @@ test("retain mode + lockless rendezvous: multi-message exchange completes end-to
 
 test("retain mode: send() does not advance seq when rename throws", async () => {
   // Regression guard: a write failure must not leave this.seq past the slot of
-  // the unwritten message, which would cause the receipt gate to wait forever
-  // for a receipt whose NNN was never written.
+  // the unwritten message, which would cause the retain-mode ack gate to wait
+  // forever for the ack of a message that was never written.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
@@ -3916,7 +3885,7 @@ test("retain mode: synchronize() throws UsageError when timestampInFilename is f
 
 // --- finding #5: close() resets session counters -----------------------------
 
-test("close() resets seq, recvSeq, and lastReceiptedNNN to their initial values", async () => {
+test("close() resets seq, recvSeq, and lastAckedNNN to their initial values", async () => {
   // A closed connection must not carry stale counters into a hypothetical
   // re-open. Set each to a non-zero value, close(), then assert they reset.
   const { client } = makeMockClient();
@@ -3928,17 +3897,15 @@ test("close() resets seq, recvSeq, and lastReceiptedNNN to their initial values"
   await conn.send({ n: 1 });
   // seq is now 1 after a successful send.
   expect(conn.seq).toBe(1);
-  // Manually set recvSeq and lastReceiptedNNN to non-zero/non-(-1) values.
+  // Manually set recvSeq and lastAckedNNN to non-zero/non-(-1) values.
   (conn as unknown as { recvSeq: number }).recvSeq = 3;
-  (conn as unknown as { lastReceiptedNNN: number }).lastReceiptedNNN = 2;
+  (conn as unknown as { lastAckedNNN: number }).lastAckedNNN = 2;
 
   await conn.close();
 
   expect(conn.seq).toBe(0);
   expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
-  expect((conn as unknown as { lastReceiptedNNN: number }).lastReceiptedNNN).toBe(
-    -1,
-  );
+  expect((conn as unknown as { lastAckedNNN: number }).lastAckedNNN).toBe(-1);
 });
 
 // --- finding #1/#6: terminal poll errors stop the poller ---------------------
@@ -4136,7 +4103,7 @@ test("non-retain send() before synchronize() (peerId unset) throws 'not synchron
 // --- I8 counter seam: error-injection tests -----------------------------------
 // Each test targets one of the three I8 rules: (a) seq advances only after a
 // durable rename in send(), (b) recvSeq advances only after a successful emit
-// in poll() and the receipt is written before emit, (c) all counters reset via
+// in poll() and the ack is written before emit, (c) all counters reset via
 // resetSessionState() at every session-boundary path.
 
 test("I8: send() whose put throws -- seq unchanged, temp file cleaned up", async () => {
@@ -4223,11 +4190,11 @@ test("I8: send() whose rename throws -- seq unchanged, temp file cleaned up", as
   expect(tmpFiles).toEqual([]);
 });
 
-test("I8: retain send() receipt-gate list throws -- send rejects rather than spinning", async () => {
-  // Rule (a) + gateway liveness: when list() throws inside the receipt-gate loop
-  // (waiting for the peer's receipt after the first send), send() must surface
-  // the error rather than looping silently. Without this, a broken list() path
-  // would spin until the TTL expires, which takes too long for a unit test.
+test("I8: retain send() ack-gate list throws -- send rejects rather than spinning", async () => {
+  // Rule (a) + gateway liveness: when list() throws inside the ack-gate loop
+  // (waiting for the peer's ack after the first send), send() must surface the
+  // error rather than looping silently. Without this, a broken list() path would
+  // spin until the TTL expires, which takes too long for a unit test.
   const { client } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
@@ -4246,10 +4213,10 @@ test("I8: retain send() receipt-gate list throws -- send rejects rather than spi
   conn.id = id;
   conn.peerId = peerId;
 
-  // First send: proceeds immediately (seq=0, no receipt wait).
+  // First send: proceeds immediately (seq=0, no ack wait).
   await conn.send({ first: true });
 
-  // Now stub list() to throw so the second send's receipt-gate list fails.
+  // Now stub list() to throw so the second send's ack-gate list fails.
   // The gate loop exits when list() rejects and the caught error is rethrown.
   client.list = async () => {
     throw new Error("synthetic list failure");
@@ -4316,12 +4283,12 @@ test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged
   expect(recvSeqAfter).toBe(recvSeqBefore);
 });
 
-test("I8: retain poll() receipt-write failure -- recvSeq held, message reprocessed and receipted once", async () => {
-  // Rule (b), receipt-write-failure variant (distinct from the emit-failure
-  // path covered above): if writeReceipt() throws before lastReceiptedNNN is
-  // set, recvSeq must NOT advance, so the never-deleted message is reprocessed
-  // on the next poll. The retry writes the receipt successfully -- exactly one
-  // receipt and one delivery, no double-receipt and no skipped message.
+test("I8: retain poll() ack-write failure -- recvSeq held, message reprocessed and acked once", async () => {
+  // Rule (b), ack-write-failure variant (distinct from the emit-failure path
+  // covered above): if writeAck() throws before lastAckedNNN is set, recvSeq
+  // must NOT advance, so the never-deleted message is reprocessed on the next
+  // poll. The retry writes the ack successfully -- exactly one ack and one
+  // delivery, no double-ack and no skipped message.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -4332,18 +4299,18 @@ test("I8: retain poll() receipt-write failure -- recvSeq held, message reprocess
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   files.set(`/test/${msgName}`, message);
 
-  // Fail the first receipt rename, then allow subsequent ones. During poll()
-  // the receipt is the only file renamed to a -receipt.json target (the message
-  // is read via get()), so this isolates the receipt write from the message read.
-  let receiptRenameAttempts = 0;
-  const receiptRenames: string[] = [];
+  // Fail the first ack rename, then allow subsequent ones. During poll() the ack
+  // is the only file renamed to a -ack.json target (the message is read via
+  // get()), so this isolates the ack write from the message read.
+  let ackRenameAttempts = 0;
+  const ackRenames: string[] = [];
   const origRename = client.rename.bind(client);
   client.rename = async (from: string, to: string) => {
-    if (to.endsWith("-receipt.json")) {
-      receiptRenameAttempts += 1;
-      if (receiptRenameAttempts === 1)
-        throw new Error("synthetic receipt rename failure");
-      receiptRenames.push(to);
+    if (to.endsWith("-ack.json")) {
+      ackRenameAttempts += 1;
+      if (ackRenameAttempts === 1)
+        throw new Error("synthetic ack rename failure");
+      ackRenames.push(to);
     }
     return origRename(from, to);
   };
@@ -4369,7 +4336,7 @@ test("I8: retain poll() receipt-write failure -- recvSeq held, message reprocess
     received.push(msg);
     notifyReceived();
   });
-  // Swallow the receipt-write error so the poller keeps running and reprocesses
+  // Swallow the ack-write error so the poller keeps running and reprocesses
   // the retained message rather than tearing down.
   conn.on("error", (err) => {
     errors.push(err);
@@ -4377,21 +4344,19 @@ test("I8: retain poll() receipt-write failure -- recvSeq held, message reprocess
 
   await runPoller(conn, delivered);
 
-  // The receipt write was attempted twice: it threw once, then succeeded.
-  expect(receiptRenameAttempts).toBe(2);
+  // The ack write was attempted twice: it threw once, then succeeded.
+  expect(ackRenameAttempts).toBe(2);
   // The failure surfaced on the error channel.
   expect(errors.length).toBeGreaterThanOrEqual(1);
   // The message was delivered exactly once...
   expect(received).toHaveLength(1);
-  // ...recvSeq advanced exactly once, only after the successful receipt + emit
+  // ...recvSeq advanced exactly once, only after the successful ack + emit
   // (so it was held across the failed attempt)...
   expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(1);
-  // ...and exactly one receipt persists on disk.
-  expect(receiptRenames).toHaveLength(1);
-  const onDiskReceipts = [...files.keys()].filter((p) =>
-    p.endsWith("-receipt.json"),
-  );
-  expect(onDiskReceipts).toHaveLength(1);
+  // ...and exactly one ack persists on disk.
+  expect(ackRenames).toHaveLength(1);
+  const onDiskAcks = [...files.keys()].filter((p) => p.endsWith("-ack.json"));
+  expect(onDiskAcks).toHaveLength(1);
 });
 
 // --- synchronize() entry precondition matrix ---------------------------------
@@ -4426,12 +4391,16 @@ const entryPreconditionKinds: Array<{
   { kind: "self-hello", present: [`${ENTRY_SELF_ID}-hello.json`], outcome: "reject" },
   { kind: "two peer hellos", present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`], outcome: "reject" },
   { kind: "wave file", present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`], outcome: "reject" },
-  { kind: "handshake-ack", present: [`${ENTRY_PEER_ID}-hello-ack.json`], outcome: "reject" },
+  // A rendezvous ack marker (a crashed lockless session): a peer acking this
+  // party's hello. Its terminal segment is `ack`, so it is not a peer hello.
+  { kind: "rendezvous ack", present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-hello-ack.json`], outcome: "reject" },
   // A stale non-timestamped message closes the pre-existing gap where the old
   // generic (delete-mode) guard let leftover messages through.
   { kind: "non-timestamped message", present: [`${ENTRY_PEER_ID}-42.json`], outcome: "reject" },
   { kind: "timestamped message", present: [`${ENTRY_PEER_ID}-20260101T000000-000-42.json`], outcome: "reject" },
-  { kind: "receipt", present: [`${ENTRY_PEER_ID}-20260101T000000-000-2-receipt.json`], outcome: "reject" },
+  // A retain-mode message ack: the peer acking a message this party sent. The
+  // embedded byte-count (2) is all digits but the terminal segment is `ack`.
+  { kind: "message ack", present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-20260101T000000-000-2-ack.json`], outcome: "reject" },
   // An in-flight temp file is rejected today (strict-empty). The planned tmp
   // sweep (193792285) will move this into the guard's `ignored` set.
   { kind: "temp file", present: ["temp-abc.tmp"], outcome: "reject" },
@@ -4538,10 +4507,10 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("not valid JSON");
-  // The poller stopped itself; no payload delivered and no receipt written.
+  // The poller stopped itself; no payload delivered and no ack written.
   expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
   expect(received).toHaveLength(0);
-  expect([...files.keys()].some((p) => p.endsWith("-receipt.json"))).toBe(false);
+  expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
   // No second error arrives (the finally block did not reschedule).
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
@@ -4578,7 +4547,7 @@ test("poll() terminal: a fully-synced message that fails schema validation stops
   expect((errors[0] as Error).message).toContain("failed schema validation");
   expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(false);
   expect(received).toHaveLength(0);
-  expect([...files.keys()].some((p) => p.endsWith("-receipt.json"))).toBe(false);
+  expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
 });
 
 test("poll() retryable: a transient list() failure reschedules and the message is delivered on a later cycle", async () => {
@@ -4666,10 +4635,10 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   expect(errors).toHaveLength(1);
 });
 
-test("retain mode: send() honors a receipt already on disk even when the TTL has elapsed", async () => {
-  // Regression guard for the receipt-gate ordering: the loop checks for a
-  // qualifying receipt BEFORE the deadline, so a receipt present when send() is
-  // entered is honored rather than discarded as a spurious timeout.
+test("retain mode: send() honors an ack already on disk even when the TTL has elapsed", async () => {
+  // Regression guard for the ack-gate ordering: the loop checks for the
+  // qualifying ack BEFORE the deadline, so an ack present when send() is entered
+  // is honored rather than discarded as a spurious timeout.
   const { client, files } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
@@ -4687,17 +4656,183 @@ test("retain mode: send() honors a receipt already on disk even when the TTL has
   conn.id = id;
   conn.peerId = peerId;
 
-  // Drive seq to 1 so the next send waits on a receipt for NNN=0, and plant
-  // that qualifying receipt on disk before sending.
-  (conn as unknown as { seq: number }).seq = 1;
-  const receiptBody = Buffer.from("{}");
-  files.set(
-    `/test/${peerId}-20260101T000000-000-${receiptBody.length}-receipt.json`,
-    receiptBody,
-  );
+  // First send (seq=0) proceeds without the gate even with an elapsed TTL, and
+  // records the sent message as lastSentFile. Plant the ack of that message so
+  // the next send's gate finds it on its first check.
+  await conn.send({ n: 1 });
+  const stem = lastSentStem(files, "/test", id);
+  files.set(`/test/${peerId}-${stem}-ack.json`, Buffer.alloc(0));
 
-  // Must not throw a timeout: the receipt is present, so send() proceeds and
-  // writes the next message even though the TTL has already elapsed.
+  // Must not throw a timeout: the ack is present, so send() proceeds and writes
+  // the next message even though the TTL has already elapsed.
   await expect(conn.send({ n: 2 })).resolves.toBeUndefined();
   expect(conn.seq).toBe(2);
 });
+
+// --- unified ack marker: determinism, grammar routing, construct-and-match ---
+
+test("retain mode: writeAck is deterministic and idempotent by name (hyphen-containing id)", async () => {
+  // The marker name is a pure function of this party's id and the acknowledged
+  // file's fixed name, so two writes for the same message yield the identical
+  // name and a single zero-length file -- no duplicate even if the per-message
+  // write guard is bypassed. `site-a` exercises a hyphen-containing id, proving
+  // the name is built by concatenation and never split back into ids.
+  const { client, files } = makeMockClient();
+  const conn = makeRetainConn(client, "site-a", "b"); // path "/shared"
+  const writeAck = (
+    conn as unknown as {
+      writeAck: (dir: string, originalName: string) => Promise<string>;
+    }
+  ).writeAck.bind(conn);
+
+  const messageName = "b-20260101T000000-000-42.json";
+  const originalName = messageName.slice(0, -".json".length);
+
+  const first = await writeAck("/shared", originalName);
+  const second = await writeAck("/shared", originalName);
+
+  expect(first).toBe("site-a-b-20260101T000000-000-42-ack.json");
+  expect(second).toBe(first);
+  const acks = [...files.keys()].filter((p) => p.endsWith("-ack.json"));
+  expect(acks).toHaveLength(1);
+  expect(files.get(`/shared/${first}`)!.length).toBe(0);
+});
+
+test("poll(): a message-ack with an all-digit embedded byte count is not routed as a message", async () => {
+  // Grammar routing keys on the terminal segment only. A message-ack's embedded
+  // <byteCount> (42) is all digits, but the terminal segment is `ack`, so poll()
+  // never delivers it and recvSeq does not advance.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+  files.set(
+    `/shared/${peerId}-${id}-20260101T000000-000-42-ack.json`,
+    Buffer.alloc(0),
+  );
+  const conn = makeRetainConn(client, id, peerId); // path "/shared"
+
+  const received: unknown[] = [];
+  conn.on("data", (m) => received.push(m));
+  conn.on("error", () => {});
+
+  conn.start();
+  await new Promise((r) => setTimeout(r, 60));
+  conn.stop();
+
+  expect(received).toHaveLength(0);
+  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
+});
+
+test("delete mode: hasOutstandingMessage ignores a `<id>-...-ack.json` file (numeric mid-name)", async () => {
+  // The delete-mode sender's outstanding-message scan uses the grammar
+  // discriminant, so a marker this party wrote -- whose embedded byte count (42)
+  // is all digits but whose terminal segment is `ack` -- is not mistaken for an
+  // unconsumed message. send() proceeds rather than spinning to the TTL.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { timeToLiveMs: 300 });
+  conn.id = "me";
+  conn.peerId = "peer";
+  files.set(`/test/me-peer-20260101T000000-000-42-ack.json`, Buffer.alloc(0));
+
+  await expect(conn.send({ n: 1 })).resolves.toBeUndefined();
+});
+
+test.each([
+  { a: "site-a", b: "b" }, // hyphen-containing id
+  { a: "ack", b: "b" }, // id equal to a type word
+])(
+  "lockless+retain construct-and-match: ids $a / $b complete rendezvous and exchange messages",
+  async ({ a, b }) => {
+    // Both the rendezvous ack and the message ack are matched by constructing the
+    // expected name from the ids and filenames each end already holds -- never by
+    // splitting the two concatenated ids out of a marker. A hyphen-containing id
+    // (`site-a`) and an id equal to a type word (`ack`) both round-trip.
+    const sharedFiles = new Map<string, Buffer>();
+    const makeClient = (): FileTransportClient => ({
+      connect: async () => {},
+      end: async () => {},
+      list: async (dir: string): Promise<FileInfo[]> => {
+        const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+        return [...sharedFiles.entries()]
+          .filter(
+            ([p]) =>
+              p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+          )
+          .map(([p, buf]) => ({
+            name: p.slice(prefix.length),
+            modifyTime: 0,
+            size: buf.length,
+          }));
+      },
+      get: async (path: string) => {
+        const data = sharedFiles.get(path);
+        if (data === undefined) throw new Error(`${path}: not found`);
+        return data as Buffer<ArrayBufferLike>;
+      },
+      put: async (
+        src: string | Buffer | NodeJS.ReadableStream,
+        dest: string,
+      ) => {
+        if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+      },
+      delete: async () => {
+        throw new Error("delete not supported on this transport");
+      },
+      safeDelete: async () => {},
+      rename: async (from: string, to: string) => {
+        const data = sharedFiles.get(from);
+        if (data === undefined) throw new Error(`${from}: no such file`);
+        sharedFiles.delete(from);
+        sharedFiles.set(to, data);
+      },
+      createExclusive: async () => {
+        throw new Error("createExclusive not supported on this transport");
+      },
+      exists: async (path: string) => sharedFiles.has(path),
+    });
+
+    const makeConn = (id: string) => {
+      const c = new FileSyncConnection(makeClient(), {
+        pollingFrequency: 10,
+        timeToLive: new Date(Date.now() + 5_000),
+        verbose: -1,
+        locklessRendezvous: true,
+        timestampInFilename: true,
+        retainFiles: true,
+      });
+      c.id = id;
+      c.connected = true;
+      c.path = "/shared";
+      return c;
+    };
+
+    const connA = makeConn(a);
+    const connB = makeConn(b);
+
+    await Promise.all([connA.synchronize(), connB.synchronize()]);
+    expect(connA.peerId).toBe(b);
+    expect(connB.peerId).toBe(a);
+
+    // B receives two messages from A; the ack gate serializes them with no
+    // id-splitting of any marker name.
+    const received: unknown[] = [];
+    let resolveAll!: () => void;
+    const allReceived = new Promise<void>((r) => (resolveAll = r));
+    connB.on("data", (m) => {
+      received.push(m);
+      if (received.length === 2) resolveAll();
+    });
+
+    const sending = (async () => {
+      await connA.send({ n: 1 });
+      await connA.send({ n: 2 });
+    })();
+
+    await runPoller(connB, allReceived);
+    await sending;
+
+    expect(received).toHaveLength(2);
+    expect((received[0] as { n: number }).n).toBe(1);
+    expect((received[1] as { n: number }).n).toBe(2);
+  },
+);

@@ -10,10 +10,8 @@ import type {
 import type { HandshakeRole } from "../types";
 import { UsageError, BilateralModeMismatchError } from "../errors";
 import {
-  ControlFileEnvelopeSchema,
   HelloEnvelopeSchema,
   serializeEnvelope,
-  type ControlFileEnvelope,
   type HelloEnvelope,
 } from "./controlEnvelope";
 
@@ -51,29 +49,22 @@ const parseTimestampedMessageNNN = (name: string): number | undefined => {
   return Number(nnnStr);
 };
 
-// Right-anchored parse of a receipt filename, extracting both the NNN
-// (sequence counter) and the declared byte count. The terminal segment is the
-// type word "receipt"; the segment immediately before it is the byte count;
-// the segment before that is NNN. Returns undefined when the name does not
-// match the receipt pattern or either numeric field is missing.
-const parseReceiptSegments = (
-  name: string,
-): { nnn: number; byteCount: number } | undefined => {
-  if (!name.endsWith("-receipt.json")) return undefined;
-  const stem = name.slice(0, -".json".length);
-  // Remove the "-receipt" type token to expose "<id>-<ts>-<NNN>-<byteCount>".
-  const withoutToken = stem.slice(0, -"-receipt".length);
-  const bcSep = withoutToken.lastIndexOf("-");
-  if (bcSep === -1) return undefined;
-  const byteCountStr = withoutToken.slice(bcSep + 1);
-  if (!/^\d+$/.test(byteCountStr)) return undefined;
-  const withoutByteCount = withoutToken.slice(0, bcSep);
-  const nnnSep = withoutByteCount.lastIndexOf("-");
-  if (nnnSep === -1) return undefined;
-  const nnnStr = withoutByteCount.slice(nnnSep + 1);
-  if (!/^\d+$/.test(nnnStr)) return undefined;
-  return { nnn: Number(nnnStr), byteCount: Number(byteCountStr) };
-};
+// Builds the acknowledgment-marker name for the file `<originalName>.json`:
+// `<writerId>-<originalName>-ack.json`. The marker is the single construct that
+// signals "I durably received your file" on transports that cannot delete --
+// the lockless rendezvous ack (acking a peer hello) and the retain-mode message
+// ack (acking a consumed message). `originalName` is the acknowledged file's
+// name minus the `.json` extension.
+//
+// Construct-and-match only: ids may contain `-`, so a two-id marker name is not
+// reverse-parseable into its ids -- and never needs to be, because both ends
+// already hold the exact name of the acknowledged file (the receiver read it
+// from the listing; the author wrote it). The waiter builds the expected name
+// with this function and tests it against the listing; no site splits a marker
+// name back into ids. Routing keys only on the terminal `ack` segment, so the
+// name is safe even when an id contains `-` or equals the word "ack".
+const ackMarkerName = (writerId: string, originalName: string): string =>
+  `${writerId}-${originalName}-ack.json`;
 
 /**
  * Default peer-inactivity budget (1 hour) used when `peerTimeoutMs` is not
@@ -103,26 +94,24 @@ const MAX_CONSECUTIVE_ENOENT = 3;
 // magic strings and numbers at the multiple slice/endsWith sites below.
 const HELLO_SUFFIX = "-hello.json";
 
-// Reads a control file (hello or hello-ack) through the I5 partial-sync gate.
-// Retries on any get() failure or JSON parse failure (indicating the sync tool
-// has not finished writing the file) until timeToLive expires, then throws a
-// transport Error. A fully-synced body that parses but fails the supplied
-// envelope schema is a terminal UsageError (protocol mismatch, not a transient
-// sync gap). Peer-id recovery is always filename-based; this function validates
-// the body only.
+// Reads the hello control file through the I5 partial-sync gate. Retries on any
+// get() failure or JSON parse failure (indicating the sync tool has not
+// finished writing the file) until timeToLive expires, then throws a transport
+// Error. A fully-synced body that parses but fails the envelope schema is a
+// terminal UsageError (protocol mismatch, not a transient sync gap). Peer-id
+// recovery is always filename-based; this function validates the body only.
 //
-// The schema is a parameter so the same gate validates two distinct bodies: a
-// peer-hello read passes HelloEnvelopeSchema (the two required bilateral flags)
-// while the lockless ack read passes the empty-body ControlFileEnvelopeSchema.
-// Adding the flags as required fields to one shared schema would instead break
-// the both-lockless ack read, whose body is an empty envelope.
-async function readControlFileWithGate<T extends ControlFileEnvelope>(
+// The hello is the only control file with a body, so the gate now reads only it
+// (the schema is HelloEnvelopeSchema at every call site). The acknowledgment
+// marker is a zero-length file matched by name existence, so it needs no gate:
+// a zero-byte file has no partial-sync window to guard.
+async function readControlFileWithGate(
   client: FileTransportClient,
   filePath: string,
   timeToLive: Date,
   pollingFrequency: number,
-  schema: z.ZodType<T>,
-): Promise<T> {
+  schema: z.ZodType<HelloEnvelope>,
+): Promise<HelloEnvelope> {
   const delay = (ms: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, ms));
   // do-while guarantees at least one read attempt even when timeToLive has
@@ -269,10 +258,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   log: ReturnType<typeof getLoggerForVerbosity>;
   seq = 0;
   private recvSeq = 0;
-  // Highest message NNN whose receipt has already been written, used to keep the
-  // retain-mode receipt write idempotent across a reprocess (see poll()). -1
-  // means none yet; the first message is NNN 0.
-  private lastReceiptedNNN = -1;
+  // Highest message NNN whose ack marker has already been written. The ack name
+  // is a pure function of the consumed message's fixed name, so a reprocess
+  // re-derives the identical name and cannot create a duplicate file; this guard
+  // only saves the redundant put+rename of an already-named marker (see poll()).
+  // -1 means none yet; the first message is NNN 0.
+  private lastAckedNNN = -1;
   connected = false;
 
   path: string | undefined;
@@ -283,6 +274,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
   private responsibleFiles: Set<string>;
+  // The name of the last message this party sent. Read by two consumers: the
+  // delete-mode drain in close() (waits for the peer to consume this exact file
+  // before sweeping), and the retain-mode send gate (constructs the peer's
+  // expected ack marker name from this stem and waits for it to exist). Assigned
+  // on every successful send regardless of mode; only the reader differs.
   private lastSentFile: string | undefined;
   private consecutiveEnoentCount = 0;
   // An `error` emitted while no listener is registered is held here so the
@@ -463,7 +459,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   async cleanup() {
     // In retain mode, cleanup() removes nothing: in-flight temp-*.tmp writes
-    // are cleaned up inline in send()/writeReceipt() before reaching here,
+    // are cleaned up inline in send()/writeAck() before reaching here,
     // and all protocol files are the durable transcript that must persist.
     if (this.options.retainFiles) {
       this.log.debug(
@@ -519,8 +515,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // decoupled from deletion. The drain exists in delete mode only to stop
       // cleanup() from deleting an unconsumed frame, a race that cannot occur
       // here. Skipping it forgoes only sender-side confirmation that the peer
-      // consumed the final message, which matches the durable-receipt contract
-      // (a receipt means "durably received", not "consumed by the application").
+      // consumed the final message, which matches the durable-ack contract
+      // (an ack means "durably received", not "consumed by the application").
       if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
@@ -567,9 +563,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   }
 
   // Builds this party's hello payload: the two bilateral mode flags it
-  // advertises so the peer can detect a mismatch and fail fast. Written into
-  // the hello body in both rendezvous branches; the lockless ack stays an empty
-  // envelope (its body carries no flags and is read with the base schema).
+  // advertises so the peer can detect a mismatch and fail fast. Written into the
+  // hello body in both rendezvous branches. The hello is the only control file
+  // with a body; the lockless ack is a zero-length marker that carries no flags.
   private helloEnvelope(): HelloEnvelope {
     return {
       locklessRendezvous: this.options.locklessRendezvous,
@@ -609,9 +605,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   /**
    * Negotiates rendezvous with the peer by exchanging `-hello.json` and
-   * `.wave` files (wave-race mode) or `-hello.json` and `-hello-ack.json`
-   * files (lockless mode) in the shared directory, assigning `peerId` and
-   * `handshakeRole` on success.
+   * `.wave` files (wave-race mode) or `-hello.json` and zero-length
+   * `-ack.json` acknowledgment markers (lockless mode) in the shared directory,
+   * assigning `peerId` and `handshakeRole` on success.
    *
    * Failures throw synchronously rather than being emitted on the `error`
    * channel: the `error` event is reserved for asynchronous failures from the
@@ -681,12 +677,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // peer hello -- a hello file whose id is not this party's own. That is the
     // only file kind that can legitimately predate this party's entry: a party
     // writes its own hello/wave/ack only after observing the peer's hello, and
-    // messages and receipts exist only once rendezvous has completed. So the
+    // messages and ack markers exist only once rendezvous has completed. So the
     // only thing that can already be present is the other party's hello.
     //
     // Anything else is a protocol error: a second peer hello, a self-hello (a
-    // same-id leftover from a crashed session), a wave, a handshake-ack, a
-    // message, a receipt, an in-flight temp file, or any foreign file. This is
+    // same-id leftover from a crashed session), a wave, an ack marker, a
+    // message, an in-flight temp file, or any foreign file. This is
     // strict-empty by design (the directory is the state machine), so a foreign
     // file is rejected rather than ignored. The two cases that legitimately
     // pre-exist as the protocol grows -- an orphaned temp-*.tmp swept by
@@ -708,14 +704,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "the start of the protocol, but contains " +
           `${unexpected.length} unexpected file(s): ` +
           `${unexpected.map((f) => f.name).join(", ")}. A pre-existing wave, ` +
-          "handshake-ack, message, receipt, self-hello, or temp file usually " +
+          "ack marker (-ack.json), message, self-hello, or temp file usually " +
           "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
           "before its cleanup ran, or -- in retain mode, which never deletes " +
           "-- that this directory was reused for a second exchange. Remove the " +
           "listed files after confirming no other session is using this path. " +
-          "A handshake-ack specifically indicates a crashed lockless session; " +
-          "if a live lockless peer is mid-rendezvous, wait for it to complete " +
-          "or time out before retrying.",
+          "An ack marker specifically indicates a crashed lockless rendezvous " +
+          "or a reused retain-mode directory; if a live lockless peer is " +
+          "mid-rendezvous, wait for it to complete or time out before retrying.",
       );
 
     if (peerHellos.length > 1)
@@ -971,26 +967,45 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               const mismatch = this.bilateralMismatch(peerEnvelope);
               if (mismatch) throw mismatch;
 
-              const ackName = `${this.id}-hello-ack.json`;
+              // Acknowledge the peer's hello with a zero-length marker named
+              // after it (`<myId>-<peerHelloStem>-ack.json`). Published
+              // temp-then-rename so its final name never appears before the file
+              // exists; the peer matches it by name existence, never by reading
+              // a body.
+              const peerHelloStem = peerHello.name.slice(0, -".json".length);
+              this.log.debug(
+                `[${this.role}] writing handshake ack for ${peerHello.name}`,
+              );
+              const ackName = await this.writeAck(this.path!, peerHelloStem);
               ackPath = `${this.path}/${ackName}`;
-              // Pre-track before writing so cleanup() sweeps it at close().
+              // Track after the durable rename (delete mode only; retain never
+              // sweeps) so cleanup() removes it at close(), exactly as the
+              // message write in send() does. Both publish temp-then-rename, so
+              // the final name only appears at the atomic rename and the add
+              // immediately follows it with no throwable statement between --
+              // unlike the wave/hello direct-writes, which pre-track because
+              // createExclusive can leave the final name on a throwing call.
+              // The in-flight temp-*.tmp is swept inline by writeAck.
               if (!this.options.retainFiles) this.responsibleFiles.add(ackName);
-              this.log.debug(`[${this.role}] writing handshake ack ${ackName}`);
-              await this.client.put(serializeEnvelope({}), ackPath, {
-                flags: "w",
-                encoding: "utf-8",
-              });
               // Re-enter the loop so hasPeerAck is checked against a fresh
               // listing; the pre-ack-write snapshot from this iteration may
               // miss a peer ack that arrived in the window between list() and
-              // put(), adding up to pollIntervalMs of unnecessary latency on
+              // the write, adding up to pollIntervalMs of unnecessary latency on
               // slow-sync transports.
               continue;
             }
 
-            // Barrier completes when the peer's ack is visible in the current
-            // listing (always a fresh one because of the continue above).
-            const peerAckName = `${peerId}-hello-ack.json`;
+            // Barrier completes when the peer's ack of THIS party's hello is
+            // visible in the current listing (always fresh because of the
+            // continue above). Construct the expected name from our own hello's
+            // stem and the peer id we already hold, then match by existence: the
+            // marker is zero-length, so its name appearing is completion and no
+            // body is read.
+            const myHelloName = `${this.id}${HELLO_SUFFIX}`;
+            const peerAckName = ackMarkerName(
+              peerId,
+              myHelloName.slice(0, -".json".length),
+            );
             const hasPeerAck = currentFiles.some(
               (file) => file.name === peerAckName,
             );
@@ -1002,18 +1017,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               await delay(this.options.pollingFrequency);
               continue;
             }
-
-            // I5: read the peer ack body through the partial-sync gate before
-            // committing roles; the ack name carries no byte-count segment. The
-            // ack body is the empty base envelope -- read with the base schema,
-            // and never flag-compared (the flags live on the hello, read above).
-            await readControlFileWithGate(
-              this.client,
-              `${this.path!}/${peerAckName}`,
-              this.options.timeToLive!,
-              this.options.pollingFrequency,
-              ControlFileEnvelopeSchema,
-            );
 
             // Peer ack confirmed -- commit roles and peerId as the last step,
             // the same invariant as the joiner path (see above): if the ack
@@ -1439,10 +1442,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // consumed cannot be found by an exact name. Scan for any `<id>-*.json` we
     // still own and wait for it to clear, preserving the one-outstanding-
     // message-at-a-time invariant the peer's poll() relies on.
-    // Typed protocol files (hello, ack, receipt) share the `<id>-` prefix and
-    // `.json` extension but have a non-numeric terminal segment. Exclude them
-    // via parseMessageByteCount so a renamed hello does not cause send() to
-    // spin waiting for a protocol file to disappear.
+    // Typed protocol files (hello and ack) share the `<id>-` prefix and `.json`
+    // extension but have a non-numeric terminal segment. Exclude them via
+    // parseMessageByteCount so a renamed hello or an ack marker does not cause
+    // send() to spin waiting for a protocol file to disappear.
     // The list() result also prunes responsibleFiles: any entry no longer on
     // the server was consumed by the peer and need not be swept at close time.
     const hasOutstandingMessage = async () => {
@@ -1460,42 +1463,39 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
     };
 
-    // In retain mode, the peer never deletes our message. Instead we wait for
-    // a receipt whose NNN matches the just-sent seq (and whose on-disk size has
-    // reached the declared byte count). The first send proceeds without waiting.
-    const hasQualifyingReceipt = async (expectedNNN: number) => {
-      const currentFiles = await this.client.list(path);
-      return currentFiles.some((file) => {
-        if (!file.name.startsWith(`${this.peerId!}-`)) return false;
-        const segs = parseReceiptSegments(file.name);
-        return (
-          segs !== undefined &&
-          segs.nnn === expectedNNN &&
-          file.size >= segs.byteCount
-        );
-      });
-    };
+    // In retain mode, the peer never deletes our message. Instead it writes a
+    // zero-length ack marker named after the message, and we gate the next send
+    // on that marker's existence. The expected name is constructed from the stem
+    // we wrote (held in lastSentFile) and the peer id -- never parsed from a
+    // marker on disk.
+    const ackForLastSentPresent = async (expectedAck: string) =>
+      (await this.client.list(path)).some((file) => file.name === expectedAck);
 
     try {
       if (this.options.retainFiles) {
-        // First send (seq === 0) proceeds immediately; subsequent sends wait
-        // for a receipt acknowledging the previous message.
+        // First send (seq === 0) proceeds immediately; subsequent sends wait for
+        // the receiver's ack of the previously-sent message. seq advances only
+        // after a durable rename, which also sets lastSentFile, so when seq > 0
+        // lastSentFile is the just-sent message's name.
         if (this.seq > 0) {
-          const expectedNNN = this.seq - 1;
-          this.log.debug(
-            `[${this.role}] waiting for receipt NNN=${expectedNNN} from ${this.peerId}`,
+          const expectedAck = ackMarkerName(
+            this.peerId!,
+            this.lastSentFile!.slice(0, -".json".length),
           );
-          // Check for the receipt before the deadline, so a receipt already on
-          // disk is honored even if the TTL elapsed in the same instant. This
-          // is the do-while rationale readControlFileWithGate uses: re-reading a
-          // present receipt costs one list(), whereas discarding it would fail a
+          this.log.debug(
+            `[${this.role}] waiting for ack ${expectedAck} from ${this.peerId}`,
+          );
+          // Check for the ack before the deadline, so an ack already on disk is
+          // honored even if the TTL elapsed in the same instant. This is the
+          // do-while rationale readControlFileWithGate uses: re-listing for a
+          // present ack costs one list(), whereas discarding it would fail a
           // live exchange with a spurious timeout.
           // open() set timeToLive before send() can run; assertion is safe.
           while (true) {
-            if (await hasQualifyingReceipt(expectedNNN)) break;
+            if (await ackForLastSentPresent(expectedAck)) break;
             if (Date.now() > this.options.timeToLive!.getTime()) {
               throw new UsageError(
-                `timed out waiting for receipt from ${this.peerId} for NNN=${expectedNNN}`,
+                `timed out waiting for ack ${expectedAck} from ${this.peerId}`,
               );
             }
             await new Promise((resolve) =>
@@ -1557,8 +1557,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (!this.options.retainFiles) this.responsibleFiles.add(outName);
       this.lastSentFile = outName;
       // Advance after the durable rename: a write failure above leaves seq
-      // unchanged so a retry can reuse this slot and the receipt gate cannot
-      // block on an NNN that was never written.
+      // unchanged so a retry can reuse this slot and the retain-mode ack gate
+      // cannot block on a message that was never written.
       this.seq = seq + 1;
     } catch (err: unknown) {
       await this.client.safeDelete(tempPath);
@@ -1589,23 +1589,27 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return `${this.id}-${timestamp}-${counter}-${byteCount}.json`;
   }
 
-  // Writes a receipt for a consumed message whose NNN is `nnn`. Follows the
-  // same temp-then-rename pattern as send() so the declared byte count in the
-  // filename always matches the on-disk size (I5a gate). Returns the final
-  // receipt filename (without directory).
-  private async writeReceipt(dir: string, nnn: number): Promise<string> {
-    const body = serializeEnvelope({});
-    const ts = Date.now();
-    const timestamp = new Date(ts)
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .slice(0, 15);
-    const counter = String(nnn).padStart(3, "0");
-    const name = `${this.id}-${timestamp}-${counter}-${body.byteLength}-receipt.json`;
+  // Writes a zero-length acknowledgment marker for the file `<originalName>.json`,
+  // named `<myId>-<originalName>-ack.json` (see {@link ackMarkerName}). The same
+  // construct is used for the lockless rendezvous ack and the retain-mode
+  // message ack; `originalName` is the acknowledged file's name minus `.json`.
+  //
+  // Published temp-then-rename so the final name never appears before the file
+  // is committed; the marker is matched by name existence only and is never read
+  // for content, so the body is zero bytes (no serialized empty envelope). The
+  // name is a pure function of this party's id and the acknowledged file's fixed
+  // name, so a re-write after a reprocess yields the identical name and cannot
+  // create a duplicate file (idempotent by construction). Returns the final
+  // marker filename (without directory).
+  private async writeAck(dir: string, originalName: string): Promise<string> {
+    const name = ackMarkerName(this.id, originalName);
     const tempFile = `temp-${uuidv4()}.tmp`;
     const tempPath = `${dir}/${tempFile}`;
     try {
-      await this.client.put(body, tempPath, { flags: "w", encoding: null });
+      await this.client.put(Buffer.alloc(0), tempPath, {
+        flags: "w",
+        encoding: null,
+      });
       await this.client.rename(tempPath, `${dir}/${name}`);
     } catch (err) {
       await this.client.safeDelete(tempPath);
@@ -1650,10 +1654,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       for (const file of allFiles) {
         if (!file.name.startsWith(`${peerId}-`) || !file.name.endsWith(".json"))
           continue;
-        // Receipt files share the peer prefix and `.json` extension but are
-        // control files, not messages. Exclude them here so they never reach
-        // the ignored array and do not produce repeated trace-log noise.
-        if (file.name.endsWith("-receipt.json")) continue;
+        // Ack markers share the peer prefix and `.json` extension but are
+        // control files, not messages (their terminal segment is `ack`). The
+        // peer's rendezvous ack and any message acks it wrote both land here;
+        // exclude them so they never reach the ignored array and do not produce
+        // repeated trace-log noise. Routing safety still rests on the grammar
+        // discriminant below (a non-numeric terminal is never a message); this
+        // is only a noise filter.
+        if (file.name.endsWith("-ack.json")) continue;
         const declaredSize = parseMessageByteCount(file.name);
         if (declaredSize === undefined) {
           ignored.push(file.name);
@@ -1750,10 +1758,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
           if (this.options.retainFiles) {
             // Retain mode never deletes the message file: the directory is the
-            // durable transcript, and the receipt -- written here after
+            // durable transcript, and the ack marker -- written here after
             // validation and before emit -- is the consumption signal the sender
             // waits for in place of the file disappearing. Because no message is
-            // ever removed, the directory accumulates one message and one receipt
+            // ever removed, the directory accumulates one message and one ack
             // per exchanged message on every transport (not only no-delete ones);
             // poll() re-lists and reclassifies it each cycle, so per-poll cost
             // scales with transcript length. Rotation/retention is an out-of-band
@@ -1765,7 +1773,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // Both the sender and receiver derive NNN from the same per-session
             // counter, so a body seq that does not match the filename NNN
             // indicates file corruption or a protocol bug. Surface it
-            // immediately rather than silently receipting or delivering a
+            // immediately rather than silently acking or delivering a
             // mismatched message.
             if (validatedMessage.seq !== msgNNN)
               throw new UsageError(
@@ -1778,24 +1786,30 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 `type=${validatedMessage.type}`,
             );
 
-            // Write the receipt before emit. The receipt is the sender's
-            // go-ahead signal and means "durably received", not "consumed by the
+            // Write the ack marker before emit. The ack is the sender's go-ahead
+            // signal and means "durably received", not "consumed by the
             // application": the message is a fully-synced file that retain mode
             // never deletes, so it is already durable at this point, and acking
             // before the local hand-off keeps the peer unblocked even when emit
             // fails (e.g. downstream backpressure). Do NOT reorder to
-            // emit-before-receipt -- a receipt-write failure after a successful
-            // emit would re-deliver an already-consumed message.
+            // emit-before-ack -- an ack-write failure after a successful emit
+            // would re-deliver an already-consumed message.
             //
-            // Write only once per message: if a prior poll wrote this NNN's
-            // receipt and then emit threw, recvSeq stayed at msgNNN and the
-            // message is reprocessed here. Writing again would leave two receipts
-            // for one message, so skip when this NNN was already receipted.
-            if (this.lastReceiptedNNN !== msgNNN) {
-              const receiptName = await this.writeReceipt(path, msgNNN);
-              this.lastReceiptedNNN = msgNNN;
+            // The ack name is derived from the consumed message's fixed name, so
+            // a reprocess re-derives the identical name and cannot create a
+            // duplicate file. The per-NNN guard is therefore only an
+            // optimization: if a prior poll wrote this NNN's ack and then emit
+            // threw, recvSeq stayed at msgNNN and the message is reprocessed
+            // here; skipping the re-write saves one put+rename of a marker that
+            // would otherwise overwrite itself under the same name.
+            if (this.lastAckedNNN !== msgNNN) {
+              const ackName = await this.writeAck(
+                path,
+                messageFile.name.slice(0, -".json".length),
+              );
+              this.lastAckedNNN = msgNNN;
               this.log.debug(
-                `[${this.role}] wrote receipt ${receiptName} for seq=${validatedMessage.seq}`,
+                `[${this.role}] wrote ack ${ackName} for seq=${validatedMessage.seq}`,
               );
             }
 
@@ -1899,7 +1913,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // validate, a body-seq/filename-NNN mismatch, or a duplicate NNN. Stop
         // the poller before emitting so the finally block does not reschedule
         // and re-read the same corrupt file. A transient non-UsageError -- a
-        // list/get/put/rename or receipt-write transport hiccup -- reschedules
+        // list/get/put/rename or ack-write transport hiccup -- reschedules
         // instead, so the never-deleted retain message is reprocessed (I8).
         // emit("data") sits in this try too, but the sole production consumer
         // (deliver() in messageConnection.ts) cannot throw synchronously; if a
@@ -1928,7 +1942,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private resetSessionState() {
     this.seq = 0;
     this.recvSeq = 0;
-    this.lastReceiptedNNN = -1;
+    this.lastAckedNNN = -1;
     this.lastSentFile = undefined;
   }
 
