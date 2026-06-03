@@ -2545,6 +2545,35 @@ test("synchronize() throws UsageError for multiple concurrent sessions detected 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
 
+test("synchronize() throws UsageError for more than one joining sentinel in the wave-race path", async () => {
+  // Parity with the multi-peer-hello guard for the new control file. Exactly
+  // one sentinel is the only valid mid-arrival state (one joiner, one starter,
+  // and the starter writes no sentinel), so two simultaneous sentinels are
+  // directory contamination from a third party and must be rejected the same
+  // way -- not silently timed against joiningFiles[0]. The initial list() is
+  // empty (passes the preexisting check); subsequent calls return our own hello
+  // plus two distinct sentinels, so otherFiles is empty and the joiningFiles
+  // guard fires.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const myHello = `${conn.id}-hello.json`;
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting check: empty
+    return [
+      { name: myHello, modifyTime: 0, size: 0 },
+      { name: "peer-aaa-joining.json", modifyTime: 0, size: 0 },
+      { name: "peer-bbb-joining.json", modifyTime: 0, size: 0 },
+    ];
+  };
+  client.put = async () => {};
+  client.safeDelete = async () => {};
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/more than one joining sentinel/);
+});
+
 test("synchronize() transport failure is not a UsageError", async () => {
   // A rejected list() (e.g. SFTP connection lost) is a transport failure and
   // must NOT be identified as a UsageError.
@@ -4649,6 +4678,15 @@ const entryPreconditionKinds: Array<{
   {
     kind: "rendezvous ack",
     present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-hello-ack.json`],
+    outcome: "reject",
+  },
+  // A joining sentinel left by a wave joiner that crashed mid-arrival. Its
+  // terminal segment is the type word `joining`, so it is neither a peer hello
+  // nor a message -- but the directory must be clean at entry, so the strict-
+  // empty guard rejects it (and a fresh joiner must not adopt a stale one).
+  {
+    kind: "joining sentinel",
+    present: [`${ENTRY_PEER_ID}-joining.json`],
     outcome: "reject",
   },
   // A stale non-timestamped message closes the pre-existing gap where the old

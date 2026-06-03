@@ -1101,10 +1101,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
         // Wave-race path.
         // Wall-clock instant this party first saw the joiner's mid-arrival
-        // sentinel, or undefined when no sentinel is present. Bounds the
-        // joiner-recovery window below; reset whenever a peer hello appears or
-        // the sentinel disappears so a later sentinel starts a fresh window.
+        // sentinel, paired with the sentinel name it belongs to (both undefined
+        // when no sentinel is present). Bounds the joiner-recovery window below;
+        // reset whenever a peer hello appears, the sentinel disappears, or a
+        // sentinel with a different name takes its place, so a later or
+        // different joiner always starts a fresh window rather than inheriting
+        // an earlier one's deadline.
         let joiningSeenAt: number | undefined;
+        let joiningSeenName: string | undefined;
         // open() set timeToLive before synchronize() can run, so the non-null
         // assertion is safe here.
         while (Date.now() <= this.options.timeToLive!.getTime()) {
@@ -1144,6 +1148,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
           if (otherFiles.length === 0) {
             if (joiningFiles.length > 0) {
+              // Exactly one sentinel is the only valid mid-arrival state: one
+              // joiner, one starter, and the starter never writes a sentinel.
+              // A second is contamination from a third party, the same illegal
+              // state the multi-peer-hello and multi-wave guards below reject;
+              // surface it the same way rather than silently timing the first.
+              if (joiningFiles.length > 1) {
+                throw new UsageError(
+                  `more than one joining sentinel in ${this.path} - are ` +
+                    "there other sessions using this path?",
+                );
+              }
               // Joiner is mid-arrival. Wait a bounded recovery window for the
               // rename to land -- the joiner then appears as a normal peer hello
               // and the branches below take over. If the sentinel persists past
@@ -1152,17 +1167,29 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // Error, CLI exit 69) instead of polling to the full peer timeout.
               // We do NOT re-create our own hello: that races the joiner's
               // rename and could trip the two-hello collision check (I1).
+              const joiningName = joiningFiles[0].name;
               const now = Date.now();
-              if (joiningSeenAt === undefined) {
+              // Start (or restart) the window on the first sighting, or whenever
+              // the sentinel's name changes: a different peer id is a fresh
+              // arrival, not a continuation of the one being timed, so it must
+              // not inherit the earlier deadline. (Two distinct sentinel names
+              // in one rendezvous likewise require a dedicated-directory
+              // violation, but keying the timer to identity keeps that case from
+              // prematurely aborting a legitimate later joiner.)
+              if (
+                joiningSeenAt === undefined ||
+                joiningSeenName !== joiningName
+              ) {
                 joiningSeenAt = now;
+                joiningSeenName = joiningName;
                 this.log.debug(
                   `[${this.role}] peer is mid-arrival ` +
-                    `(${joiningFiles[0].name}); awaiting completion`,
+                    `(${joiningName}); awaiting completion`,
                 );
               } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
                 throw new Error(
                   `[${this.role}] peer began arriving ` +
-                    `(${joiningFiles[0].name}) but did not complete within the ` +
+                    `(${joiningName}) but did not complete within the ` +
                     "recovery window; it appears to have failed between " +
                     "deleting this party's hello and writing its own. Retry " +
                     "the exchange.",
@@ -1173,6 +1200,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // vanished without producing a hello (only a crash mid-cleanup
               // does this). Reset so a later sentinel starts a fresh window.
               joiningSeenAt = undefined;
+              joiningSeenName = undefined;
               this.log.trace(`[${this.role}] no peer hello found; polling`);
             }
             await delay(this.options.pollingFrequency);
@@ -1182,6 +1210,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // A peer hello is present: the joiner's rename landed (or both
           // parties wrote hellos), so any sentinel sighting is now stale.
           joiningSeenAt = undefined;
+          joiningSeenName = undefined;
 
           if (waveFiles.length > 0) {
             /**
@@ -1299,8 +1328,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
              * A list
              * A hello
              * B list
+             * B joining
              * B delete A hello
-             * B hello
+             * B rename joining -> B hello
              * A delete B hello
              *
              * This is A
