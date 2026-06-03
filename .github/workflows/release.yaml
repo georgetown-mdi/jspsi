@@ -26,19 +26,12 @@ jobs:
 
       # Integration tests are not yet wired into CI — they require Docker Compose
       # and need validation in the GitHub Actions environment before being made a
-      # release gate.
+      # release gate. The container is now self-managing (a vitest globalSetup
+      # brings it up and tears it down, generating host keys on first run), so
+      # enabling them on a Docker-capable runner is a single step:
       #
-      # When ready, replace this comment block with:
-      #
-      #   - name: Set up SFTP test container
-      #     run: sh apps/cli/test/container/setup.sh
-      #   - name: Start SFTP test container
-      #     run: npm run test:container:up -w apps/cli
       #   - name: Integration tests (CLI)
       #     run: npm run test:integration -w apps/cli
-      #   - name: Stop SFTP test container
-      #     if: always()
-      #     run: npm run test:container:down -w apps/cli
 
   publish:
     name: Publish Docker image

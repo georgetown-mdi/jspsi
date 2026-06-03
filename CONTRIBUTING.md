@@ -57,22 +57,32 @@ npx vitest run path/to/file.test.ts   # single file
 Must pass before a PR merges to `main` or `staging`.
 
 CLI (requires Docker; spins up a local SFTP server, image `atmoz/sftp`). The
-first run in a checkout needs `setup.sh` to generate the host keys, storage dir,
-and a container `.env` (all gitignored):
+container is managed automatically -- `test:integration` brings it up before the
+suite and tears it down after (a vitest `globalSetup` on the integration
+project), generating the host keys, storage dir, and `.env` (all gitignored) on
+first run if they are absent. No manual steps are required:
 
 ```sh
-sh apps/cli/test/container/setup.sh        # once per checkout
-npm run test:container:up   -w apps/cli    # start the SFTP server
-npm run test:integration    -w apps/cli
-npm run test:container:down -w apps/cli    # stop it (left running otherwise)
+npm run test:integration -w apps/cli    # auto-manages the SFTP container
 ```
 
-The `:up`/`:down` scripts wrap `docker compose` with the `--env-file` and run
-from the checkout root, so the container always picks up that checkout's
-`COMPOSE_PROJECT_NAME` and `SFTP_PORT` (default 2222) -- never run the raw
-`docker compose` command, which would skip the env file. The `make-worktree`
-command gives each worktree a unique project and a free port, so checkouts can
-run the container concurrently.
+For a faster inner loop you can keep a warm container running across many runs:
+`test:integration` detects an already-running container, reuses it, and leaves
+it up rather than tearing it down.
+
+```sh
+npm run test:container:up   -w apps/cli    # start (and keep) the SFTP server
+npm run test:integration    -w apps/cli    # reuses the running container
+npm run test:container:down -w apps/cli    # stop it when done
+```
+
+The `:up`/`:down` scripts and the `globalSetup` both wrap `docker compose` with
+the `--env-file` and run from the checkout root, so the container always picks
+up that checkout's `COMPOSE_PROJECT_NAME` and `SFTP_PORT` (default 2222) --
+never run the raw `docker compose` command, which would skip the env file and
+default the Compose project name to the directory (`container`), colliding on
+the port. The `make-worktree` command gives each worktree a unique project and a
+free port, so checkouts can run the container concurrently.
 
 Web (requires the dev server, a foreground process on port 3000):
 

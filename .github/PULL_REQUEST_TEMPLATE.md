@@ -44,7 +44,7 @@ Focused PR (<= ~5 files): one bullet or table row per file, with the why. Broad 
 - [ ] `npm run typecheck && npm run lint` clean
 - [ ] `npm test -w packages/core` (N/N)
 - [ ] `npm run test:unit -w apps/cli` and/or `apps/web` as relevant
-- [ ] Integration tests (Docker SFTP), or a one-line note on why they could not run
+- [ ] Integration tests: `npm run test:integration -w apps/cli` (self-manages the Docker SFTP container), or a one-line note on why they could not run (e.g. no Docker)
 
 New tests cover: <name the specific behaviors, as the acceptance criteria do>
 

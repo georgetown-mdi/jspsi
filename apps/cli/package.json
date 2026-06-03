@@ -8,7 +8,7 @@
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
     "dev": "PKG_DIR=$(pwd) && cd \"$INIT_CWD\" && node --import=tsx \"$PKG_DIR/dist/index.js\"",
-    "test": "vitest run",
+    "test": "vitest run --project unit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:container:up": "cd \"$(git rev-parse --show-toplevel)\" && docker compose --env-file apps/cli/test/container/.env -f apps/cli/test/container/compose.yaml up -d",
