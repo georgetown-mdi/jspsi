@@ -109,9 +109,11 @@ export function applyConnectionOverrides(
  * Logs a one-time reminder, on the file-sync channels only, that retain mode is
  * a bilateral agreement with no negotiation: this party has it enabled (with the
  * `lockless_rendezvous` and `timestamp_in_filename` it implies), and the peer
- * must set all three identically or the exchange stalls until the peer timeout.
- * Shared by the `exchange` and `zero-setup` commands so the wording cannot drift
- * between them.
+ * must set all three identically. A `retain_files` or `lockless_rendezvous`
+ * mismatch is detected at rendezvous and fails fast on both sides with a clear
+ * error naming each side's setting (`timestamp_in_filename` is not advertised,
+ * but it cannot diverge independently of `retain_files`). Shared by the
+ * `exchange` and `zero-setup` commands so the wording cannot drift between them.
  */
 export function announceRetainMode(
   connection: ConnectionConfig,

@@ -9,7 +9,7 @@ import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
 } from "../src/config/connection";
-import { UsageError } from "../src/errors";
+import { UsageError, BilateralModeMismatchError } from "../src/errors";
 import { withCapturedLogs } from "../src/testing";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
@@ -109,6 +109,15 @@ async function makeConnectedConn(
   await conn.open(fakeConfig);
   return conn;
 }
+
+// A valid hello body advertising the default wave/non-retain flags. Tests whose
+// rendezvous reader runs in the default (wave) mode hand-plant this as the peer
+// hello so it passes the HelloEnvelope read gate without a spurious bilateral
+// mismatch. 193901017 made the hello body carry these two required flags, so a
+// bare `{}` no longer satisfies the hello schema.
+const WAVE_HELLO_BODY = Buffer.from(
+  JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
+);
 
 // --- connection lifecycle (unconnected) --------------------------------------
 
@@ -896,6 +905,10 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
     ];
   };
 
+  // Plant the peer hello body so the two-hellos branch's HelloEnvelope read
+  // gate (added by 193901017) passes before reaching createExclusive.
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+
   // createExclusive() throws EEXIST; also plant the wave file so
   // exists(wavePath) → true, simulating the peer having already claimed it.
   client.createExclusive = async (path) => {
@@ -939,7 +952,9 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
   // run from scratch.
   const basePath = conn.path;
   files.set(`${basePath}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${basePath}/${peerHelloName}`, Buffer.alloc(0));
+  // Peer hello carries a valid HelloEnvelope so the two-hellos read gate passes
+  // before createExclusive (193901017); the own hello is never gate-read.
+  files.set(`${basePath}/${peerHelloName}`, WAVE_HELLO_BODY);
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1001,9 +1016,10 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
   };
 
   // Plant the peer's hello in the mock filesystem so the assertion below is
-  // not vacuously true. The outer catch is responsible only for this party's
-  // files (wavePath and helloPath); it does not touch the peer's hello.
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  // not vacuously true (and so the two-hellos read gate passes). The outer catch
+  // is responsible only for this party's files (wavePath and helloPath); it does
+  // not touch the peer's hello.
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
 
   // Simulate a partial createExclusive: create the file on the mock filesystem
   // (mimicking a successful open) but then reject (mimicking a close failure).
@@ -1052,8 +1068,9 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
   // Plant the peer's hello so the safeDelete count is not skewed by a missing
   // file: if peerHelloName were absent, a safeDelete call for it would still
   // succeed (no-op on missing), so the count would be the same either way, but
-  // the test is clearer when files match what list() claims exists.
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
+  // the test is clearer when files match what list() claims exists. A valid
+  // HelloEnvelope body also lets the two-hellos read gate pass.
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
 
   client.createExclusive = async (path) => {
     files.set(path, Buffer.alloc(0));
@@ -1111,7 +1128,7 @@ test("synchronize() resolves cleanly when it observes a wave file already create
   // Plant the three files so safeDelete calls have something to remove.
   // Peer hello must be valid JSON so the I5 read gate does not retry to timeout.
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -1166,7 +1183,7 @@ test("synchronize() wave-detection branch completes rendezvous with arbitrary st
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -1216,7 +1233,7 @@ test("synchronize() wave-detection branch uses filename order (I7), not id order
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -1292,7 +1309,7 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
   // must sweep them. With the clear, the winner's responsibleFiles was empty
   // and the files were stranded.
   const peerId = "00000000-0000-4000-8000-000000000001";
-  const { client } = makeMockClient();
+  const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
@@ -1312,6 +1329,8 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
       { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
+  // Peer hello body so the two-hellos read gate passes before createExclusive.
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   // Default mock createExclusive succeeds (no EEXIST) — this conn is the
   // wave-race winner.
 
@@ -1351,7 +1370,7 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
     handshakeRole: string | undefined;
     waveName: string;
   }> => {
-    const { client } = makeMockClient();
+    const { client, files } = makeMockClient();
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.id = myId;
     const base = conn.path ?? "";
@@ -1369,6 +1388,8 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
         { name: peerHelloName, modifyTime: 5000, size: 0 },
       ];
     };
+    // Peer hello body so the two-hellos read gate passes before createExclusive.
+    files.set(`${base}/${peerHelloName}`, WAVE_HELLO_BODY);
 
     let waveName = "";
     const realCreateExclusive = client.createExclusive.bind(client);
@@ -1407,7 +1428,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -1433,7 +1454,7 @@ test("synchronize() joiner branch: leaves connection unsynchronized when put fai
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -1796,6 +1817,8 @@ test("synchronize() wave path writes hello as <id>-hello.json and self-hello det
       { name: peerHelloName, modifyTime: mtime, size: 0 },
     ];
   };
+  // Peer hello body so the two-hellos read gate passes before createExclusive.
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
 
   await conn.synchronize();
 
@@ -2187,7 +2210,7 @@ test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () =>
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2216,7 +2239,7 @@ test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", asy
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   files.set(wavePath, Buffer.alloc(0));
 
   const mtime = Date.now();
@@ -2246,7 +2269,7 @@ test("synchronize() joiner branch accepts shared-prefix ids that are not prefix-
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2263,7 +2286,7 @@ test("synchronize() joiner branch accepts space-containing ids", async () => {
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2337,7 +2360,7 @@ test("synchronize() wave mode: round-trip hello write and read with JSON envelop
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2465,7 +2488,7 @@ test("synchronize() joiner: mid-sync hello body retried, not reported malformed"
     return origGet(path);
   };
 
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2603,7 +2626,7 @@ test("synchronize() wave-detection: mid-sync peer hello body retried, not malfor
   const wavePath = `${conn.path}/${waveName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
   files.set(wavePath, Buffer.alloc(0));
 
   let getCalls = 0;
@@ -2679,7 +2702,7 @@ test("synchronize() wave starter: mid-sync joiner hello body retried, not malfor
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
 
-  files.set(`${conn.path}/${peerHelloName}`, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
 
   let getCalls = 0;
   const origGet = client.get;
@@ -2726,6 +2749,469 @@ test("synchronize() wave starter: malformed joiner hello body is a UsageError", 
   };
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+// --- bilateral mode flags: advertise + symmetric fast-fail (193901017) -------
+
+// Two sortable UUIDs reused across the bilateral-flag tests. idLow < idHigh
+// lexicographically, so the lower one is the "arrived first" party.
+const ID_LOW = "00000000-0000-4000-8000-000000000001";
+const ID_HIGH = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+
+// Builds two FileSyncConnections sharing one in-memory directory, each already
+// in the post-open connected state, for concurrent-rendezvous tests. The
+// generous timeToLive means a stall (instead of a fast-fail) would exceed the
+// vitest timeout and fail the test, so a passing concurrent mismatch test is
+// itself proof the failure is at rendezvous and not at the peer timeout.
+//
+// Determinism note: the concurrent tests rely on the mock client's synchronous
+// in-memory Map (no await/delay in list/put), so the two parties' list()/put()
+// interleave predictably under the microtask scheduler and each sees the
+// other's hello on its first poll. If the mock ever gains artificial latency, a
+// party could miss the peer hello on its first list() and poll to the (generous)
+// TTL, surfacing as a vitest timeout -- a test artifact to fix in the mock, not
+// a production regression.
+function makeRendezvousPair(
+  idA: string,
+  optsA: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
+  idB: string,
+  optsB: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
+): {
+  connA: FileSyncConnection;
+  connB: FileSyncConnection;
+  files: Map<string, Buffer>;
+} {
+  const { client, files } = makeMockClient();
+  const make = (
+    id: string,
+    opts: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
+  ): FileSyncConnection => {
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 30_000),
+      verbose: -1,
+      ...opts,
+    });
+    conn.id = id;
+    conn.connected = true;
+    conn.path = "/test";
+    return conn;
+  };
+  return { connA: make(idA, optsA), connB: make(idB, optsB), files };
+}
+
+// (a) Each rendezvous branch writes the hello with the advertised flags. Drive
+// the wave joiner fast-path against a matched peer so the hello it writes
+// survives (the joiner keeps its own hello) and can be inspected.
+test("(a) hello payload carries both bilateral flags", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+
+  await conn.synchronize();
+
+  const body = JSON.parse(
+    files.get(`${conn.path}/${conn.id}-hello.json`)!.toString(),
+  );
+  expect(body).toEqual({ locklessRendezvous: false, retainFiles: false });
+  expect(conn.peerId).toBe(ID_LOW);
+});
+
+// (b) Matched pairings succeed without spurious mismatch errors.
+
+test("(b) lockless/lockless pairing succeeds and advertises both flags", async () => {
+  const { connA, connB, files } = makeRendezvousPair(
+    ID_LOW,
+    { locklessRendezvous: true },
+    ID_HIGH,
+    { locklessRendezvous: true },
+  );
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  expect(connA.peerId).toBe(ID_HIGH);
+  expect(connB.peerId).toBe(ID_LOW);
+  for (const id of [ID_LOW, ID_HIGH]) {
+    const body = JSON.parse(files.get(`/test/${id}-hello.json`)!.toString());
+    expect(body).toEqual({ locklessRendezvous: true, retainFiles: false });
+  }
+});
+
+test("(b) delete/delete (wave) pairing succeeds", async () => {
+  const { connA, connB } = makeRendezvousPair(ID_LOW, {}, ID_HIGH, {});
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  expect(connA.peerId).toBe(ID_HIGH);
+  expect(connB.peerId).toBe(ID_LOW);
+});
+
+test("(b) retain/retain pairing succeeds and advertises the retain flag", async () => {
+  const retainOpts = {
+    locklessRendezvous: true,
+    retainFiles: true,
+    timestampInFilename: true,
+  };
+  const { connA, connB, files } = makeRendezvousPair(
+    ID_LOW,
+    retainOpts,
+    ID_HIGH,
+    retainOpts,
+  );
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+
+  expect(connA.peerId).toBe(ID_HIGH);
+  expect(connB.peerId).toBe(ID_LOW);
+  for (const id of [ID_LOW, ID_HIGH]) {
+    const body = JSON.parse(files.get(`/test/${id}-hello.json`)!.toString());
+    expect(body).toEqual({ locklessRendezvous: true, retainFiles: true });
+  }
+});
+
+// (c) Mismatched pairings fail fast at rendezvous on BOTH parties, in both
+// arrival orders, with the both-sides-named error, identified as usage errors.
+
+test("(c) lockless vs wave mismatch fails fast on BOTH parties, concurrently", async () => {
+  const { connA, connB, files } = makeRendezvousPair(
+    ID_LOW,
+    { locklessRendezvous: true },
+    ID_HIGH,
+    { locklessRendezvous: false },
+  );
+
+  const results = await Promise.allSettled([
+    connA.synchronize(),
+    connB.synchronize(),
+  ]);
+
+  for (const r of results) {
+    expect(r.status).toBe("rejected");
+    const reason = (r as PromiseRejectedResult).reason;
+    expect(reason).toBeInstanceOf(BilateralModeMismatchError);
+    expect(reason).toBeInstanceOf(UsageError);
+    expect(reason.message).toMatch(/lockless_rendezvous mismatch/);
+    // Distinct from the generic peer-timeout backstop.
+    expect(reason.message).not.toMatch(/timed out|synchronization has timed/);
+  }
+  // Both advertised hellos remain as the directory's terminal state.
+  expect(files.has(`/test/${ID_LOW}-hello.json`)).toBe(true);
+  expect(files.has(`/test/${ID_HIGH}-hello.json`)).toBe(true);
+});
+
+test("(c) retain vs non-retain mismatch (both lockless) fails fast on BOTH parties", async () => {
+  const { connA, connB, files } = makeRendezvousPair(
+    ID_LOW,
+    { locklessRendezvous: true, retainFiles: true, timestampInFilename: true },
+    ID_HIGH,
+    { locklessRendezvous: true, retainFiles: false },
+  );
+
+  const results = await Promise.allSettled([
+    connA.synchronize(),
+    connB.synchronize(),
+  ]);
+
+  for (const r of results) {
+    expect(r.status).toBe("rejected");
+    const reason = (r as PromiseRejectedResult).reason;
+    expect(reason).toBeInstanceOf(BilateralModeMismatchError);
+    expect(reason.message).toMatch(/retain_files mismatch/);
+  }
+  expect(files.has(`/test/${ID_LOW}-hello.json`)).toBe(true);
+  expect(files.has(`/test/${ID_HIGH}-hello.json`)).toBe(true);
+});
+
+test("(c) wave joiner reading a lockless peer hello fails fast and leaves both hellos", async () => {
+  // Arrival order 1: the wave party reads a peer hello already present (joiner
+  // fast-path) and detects the mismatch. It must write its own advertisement
+  // before throwing and must not delete the peer hello.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // wave (default)
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: false })),
+  );
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect((err as Error).message).toContain(
+    "this party has lockless_rendezvous=false",
+  );
+  expect((err as Error).message).toContain(
+    "the peer has lockless_rendezvous=true",
+  );
+  // Own advertisement written, peer hello not deleted: both remain.
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+});
+
+test("(c) lockless party reading a wave peer hello fails fast and leaves both hellos", async () => {
+  // Arrival order 2: the lockless party reads the wave peer's left-behind hello
+  // in its ack barrier and detects the mismatch, after having written its own
+  // hello before the loop. The same pairing's other side (above) detects via
+  // the joiner fast-path, so both parties surface it.
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 30_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  conn.id = ID_LOW;
+  conn.connected = true;
+  conn.path = "/test";
+  const peerHelloName = `${ID_HIGH}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect((err as Error).message).toContain(
+    "this party has lockless_rendezvous=true",
+  );
+  expect((err as Error).message).toContain(
+    "the peer has lockless_rendezvous=false",
+  );
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+
+  // The durable-hello guarantee is load-bearing: the outer catch must clear
+  // responsibleFiles so a later cleanup()/close() does not sweep the hello this
+  // party advertised. If it were swept, the peer's read would miss it and the
+  // peer would fall through to the timeout instead of fast-failing. Assert the
+  // clear directly, then prove its consequence -- cleanup() (non-retain here,
+  // so not a no-op) removes nothing and both hellos persist as the terminal
+  // state.
+  const responsible = (conn as unknown as { responsibleFiles: Set<string> })
+    .responsibleFiles;
+  expect(responsible.size).toBe(0);
+  await conn.cleanup();
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+});
+
+test("(c) wave two-hellos branch detects the mismatch before createExclusive (EEXIST-loser sub-path pre-empted)", async () => {
+  // The check precedes createExclusive, so neither the createExclusive-winner
+  // nor the EEXIST-loser sub-path runs on a mismatch. createExclusive is stubbed
+  // to throw EEXIST (and exists() to report a live wave) so that, were the check
+  // NOT pre-empting it, the loser sub-path would run; assert it never does.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // wave
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: false })),
+  );
+
+  let createExclusiveCalls = 0;
+  client.createExclusive = async () => {
+    createExclusiveCalls++;
+    throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+  };
+  client.exists = async () => true;
+
+  // First list (entry guard) is empty so conn writes its own hello and enters
+  // the wave loop; subsequent lists show both hellos and no wave, routing into
+  // the two-hellos branch.
+  let listCalls = 0;
+  client.list = async () => {
+    listCalls++;
+    if (listCalls === 1) return [];
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: 0, size: 0 },
+      { name: peerHelloName, modifyTime: 0, size: 0 },
+    ];
+  };
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect((err as Error).message).toMatch(/lockless_rendezvous mismatch/);
+  expect(createExclusiveCalls).toBe(0);
+  // The conn's own hello (written before the loop) is left behind, not swept.
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+});
+
+test("(c) wave-detection branch sweeps the wave and leaves both hellos on a mismatch", async () => {
+  // Defense-in-depth path (waitForPeer's "waveFiles.length > 0" arm). A wave on
+  // disk implies both parties are wave (lockless never creates one) and a wave
+  // party always has retain_files=false, so no flag can differ and this branch
+  // cannot reach a mismatch for any valid pairing. Drive it with a synthetic
+  // directory -- a peer-created wave plus a lockless-advertising peer hello --
+  // to cover the safeDelete(wave)-then-throw code added for the prior review.
+  // The wave is a transient, not an advertisement, so it is swept; both hellos
+  // remain as the directory's terminal state.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // wave, non-retain
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  // ID_LOW sorts first, so the producer's wave name is `${ID_LOW}-${ID_HIGH}`;
+  // this matches the branch's reconstruct-and-compare (I7) so the read gate and
+  // mismatch check are reached rather than a "wave does not reference" throw.
+  const waveName = `${ID_LOW}-${conn.id}.wave`;
+  const wavePath = `${conn.path}/${waveName}`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
+  );
+  files.set(wavePath, Buffer.alloc(0));
+
+  // First list (entry guard) empty so conn writes its own hello and enters the
+  // wave loop; subsequent lists expose both hellos plus the peer-created wave,
+  // routing into the wave-detection branch.
+  let listCalls = 0;
+  client.list = async () => {
+    listCalls++;
+    if (listCalls === 1) return [];
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: 0, size: 0 },
+      { name: peerHelloName, modifyTime: 0, size: 0 },
+      { name: waveName, modifyTime: 0, size: 0 },
+    ];
+  };
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect((err as Error).message).toMatch(/lockless_rendezvous mismatch/);
+  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+});
+
+test("(c) a both-flags-differ mismatch names retain_files (the implying flag)", async () => {
+  // retain=true/lockless=true vs retain=false/lockless=false: both flags differ,
+  // and the error names retain_files so a single rerun realigns both.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // wave, non-retain
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: true })),
+  );
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect((err as Error).message).toMatch(/retain_files mismatch/);
+  expect((err as Error).message).not.toMatch(/lockless_rendezvous mismatch/);
+});
+
+// (d) A fully-synced hello that parses as JSON but is missing a flag or carries
+// an out-of-type value fails the required-field schema as a terminal usage
+// error on the reading party -- no crash, no silent default.
+
+test("(d) a fully-synced hello missing a flag is a terminal usage error", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(JSON.stringify({ locklessRendezvous: true })), // retainFiles absent
+  );
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/malformed payload/);
+});
+
+test("(d) a fully-synced hello with an out-of-type flag is a terminal usage error", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = ID_HIGH;
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: "yes", retainFiles: false }),
+    ),
+  );
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/malformed payload/);
+});
+
+// (e) After a mismatch the directory retains both hellos, so a rerun against it
+// is rejected by the entry guard (I0) -- the terminal mismatch is not auto-
+// retried and the operator must clear the directory first.
+
+test("(e) leftover hellos after a mismatch make a rerun rejected by the entry guard", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // wave
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(JSON.stringify({ locklessRendezvous: true, retainFiles: false })),
+  );
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(
+    BilateralModeMismatchError,
+  );
+  expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+
+  // A rerun against the non-clean directory (fresh party id) is rejected by the
+  // entry guard: two peer hellos are now present.
+  const rerun = await makeConnectedConn(client, { pollingFrequency: 10 });
+  rerun.id = "11111111-1111-4111-8111-111111111111";
+
+  let rerunErr: unknown;
+  await rerun.synchronize().catch((e: unknown) => {
+    rerunErr = e;
+  });
+  expect(rerunErr).toBeInstanceOf(UsageError);
+  expect((rerunErr as Error).message).toMatch(/peer hello|must be empty/);
 });
 
 // --- retain mode (retainFiles: true) -----------------------------------------
@@ -3923,10 +4409,12 @@ const ENTRY_SELF_ID = "00000000-0000-4000-8000-000000000001";
 const ENTRY_PEER_ID = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 const ENTRY_PEER_ID_2 = "11111111-1111-4111-8111-111111111111";
 
-// One row per file kind. `present` is what sits in the directory at entry;
-// bodies are "{}" so a peer hello passes the I5 read gate immediately on the
-// proceed rows. Outcome does not vary by mode (the rule is mode-agnostic), so
-// each kind carries a single expected outcome and is run in both modes below.
+// One row per file kind. `present` is what sits in the directory at entry. A
+// peer hello on a proceed row is read through the HelloEnvelope gate, so the
+// test body (below) gives it a full mode-matched envelope; every other kind is
+// rejected on filename before any body read, so those bodies stay "{}". Outcome
+// does not vary by mode (the rule is mode-agnostic), so each kind carries a
+// single expected outcome and is run in both modes below.
 const entryPreconditionKinds: Array<{
   kind: string;
   present: string[];
@@ -3970,7 +4458,18 @@ test.each(entryPreconditionCells)(
   "synchronize() entry precondition: $name -> $outcome",
   async ({ present, retain, outcome }) => {
     const { client, files } = makeMockClient();
-    for (const name of present) files.set(`/test/${name}`, Buffer.from("{}"));
+    // A peer hello in the "proceed" row is read through the HelloEnvelope gate,
+    // so it must advertise flags matching this conn's mode (193901017); other
+    // present-file kinds are rejected on filename before any body read, so an
+    // empty body is fine for them.
+    const helloBody = Buffer.from(
+      JSON.stringify({ locklessRendezvous: retain, retainFiles: retain }),
+    );
+    for (const name of present)
+      files.set(
+        `/test/${name}`,
+        name.endsWith("-hello.json") ? helloBody : Buffer.from("{}"),
+      );
 
     const conn = new FileSyncConnection(client, {
       pollingFrequency: 5,
