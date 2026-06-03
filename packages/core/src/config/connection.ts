@@ -340,7 +340,10 @@ export interface FileSyncOptions extends SharedOptions {
   /**
    * When `true`, the rendezvous handshake uses an ack-handshake barrier
    * instead of the atomic-exclusive-create wave-file race. Both parties must
-   * set this identically; a mismatch causes rendezvous to time out.
+   * set this identically; the value is advertised in the hello payload and a
+   * mismatch fails fast at rendezvous, symmetrically on both parties, with a
+   * usage error naming each side's setting (rather than stalling until the
+   * peer timeout).
    *
    * Intended for sync-mediated transports (e.g. a cloud-sync service
    * reconciling two local directories) where `createExclusive` lacks
@@ -385,8 +388,10 @@ export interface FileSyncOptions extends SharedOptions {
    * (where the delete-as-signal protocol would stall indefinitely) and for
    * audit/transcript retention use cases.
    *
-   * Both parties must set this flag identically; a mismatch causes the
-   * exchange to stall until the peer timeout fires. Requires
+   * Both parties must set this flag identically; the value is advertised in
+   * the hello payload and a mismatch fails fast at rendezvous, symmetrically
+   * on both parties, with a usage error naming each side's setting (rather
+   * than stalling until the peer timeout). Requires
    * `timestampInFilename: true` -- without it, every message from the same
    * party collides on filename and a retained transcript would overwrite
    * itself. Also requires `locklessRendezvous: true` -- wave rendezvous is
