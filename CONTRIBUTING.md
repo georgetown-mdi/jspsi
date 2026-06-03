@@ -102,12 +102,12 @@ This starts a foreground web server process which listens on port 3000.
 
 - **TypeScript** with strict mode throughout. Avoid `any`; if you must use it, add a comment explaining why.
 - **Naming**: `camelCase` in TypeScript; `snake_case` in user-facing JSON and YAML files. Semicolons required.
-- **Comments**: write one only when the _why_ is non-obvious — a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for genuinely complex runtime constraints that cannot fit on one line.
+- **Comments**: write one only when the _why_ is non-obvious - a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for genuinely complex runtime constraints that cannot fit on one line.
 - **JSDoc**: `/** */` on all exports; `/** @internal */` (with no description) for test-only exports.
 - **Validation**: define the TypeScript interface first, then derive the Zod schema with `z.ZodType<Interface>`. Apply `camelizeKeys` before Zod parsing so user-facing YAML/JSON remains `snake_case` while TypeScript sees `camelCase`.
 - **Transport branching**: `connection.channel` is the discriminant. Use allowlists (not blocklists) in `exchange.ts` and `protocol.ts` so a new channel is rejected unless explicitly added.
 - **New channels**: add a discriminant value and config interface to `packages/core/src/config/connection.ts`, update the `ConnectionConfig` union, then update the guards. See existing `sftp`, `webrtc`, and `filedrop` entries for examples.
-- **Security primitives**: extract shared cryptographic helpers as soon as they are correct and tested. Do not defer to a "second caller" rule for security code — silent independent re-implementations are a failure mode.
+- **Security primitives**: extract shared cryptographic helpers as soon as they are correct and tested. Do not defer to a "second caller" rule for security code - silent independent re-implementations are a failure mode.
 - **Windows paths**: support wherever a user can supply a local path. Normalize backslashes on ingestion; use `fileURLToPath` for `file://` URLs.
 - **Markdown**: soft line wrapping, single space after periods, ASCII punctuation (`-` not em-dash, `->` not arrow character).
 
@@ -134,6 +134,29 @@ npm run format
 5. Update `docs/` when behavior changes. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
 6. A maintainer will review and merge. Force-pushes to `main` are not permitted.
 
+### Pull Request Description
+
+A pull request is a task closed out, so its description mirrors the project board's task template: the reviewer should be able to map each section back to the task it implements. Opening a PR populates [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) with this skeleton. Fill in what applies and delete any optional section that has nothing non-obvious to say -- keep small PRs small.
+
+| Section | What it answers |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| **Summary**             | What this delivers and why, outcome first -- the same sentence as the task's summary. |
+| **Changes**             | Which files or areas actually changed, and why. The "Affected areas" of the task, now concrete. |
+| **Background**          | Optional. Root cause, the invariant preserved, a constraint honored. Omit if the summary covers it. |
+| **Breaking change**     | Only when something breaks. What breaks and what a consumer must do. |
+| **Out of scope / follow-on** | Deferred work, each linked to its board item -- the task's open questions, resolved into next steps. |
+| **Test plan**           | How the change was verified: the commands you ran and the specific behaviors the new tests cover. Verification only. |
+| **Checklist**           | Pre-merge hygiene that keeps the repo consistent: a documentation sweep, the `CHANGELOG.md` line, and security review for crypto changes. |
+
+Conventions:
+
+- **Headings start at `##`.** Do not repeat the PR title as a heading at the top of the body.
+- **Board references use the full Project item URL**, never `Closes #<id>`. The board carries GitHub Project draft items, whose numeric IDs are not issue numbers; `#<id>` does not auto-close and renders as a broken link. Choose the verb by relationship: `Implements`, `Part of`, `Depends on`, or `Follow-on:`. Product board is project `9`, Release & Operations is `10`.
+- **Name what the tests cover**, not just that they pass -- list the specific behaviors, the way the task's acceptance criteria do. A bare "tests pass" is not a test plan.
+- **The test plan is verification, not housekeeping.** It records what you ran: typecheck and lint clean, the relevant unit suites with their counts, and integration tests (or why they could not run). Updating a changelog is not testing -- it belongs in the checklist.
+- **The checklist confirms the repo stays consistent.** Sweep `docs/` for every page the change affects and update it, or record that none was needed -- a deliberate "n/a" is the signal that you looked. Add the `CHANGELOG.md` `[Unreleased]` line, and for cryptographic changes request the security review that the Pull Request Process and Dependency Policy require.
+- Follow the repository's writing style: ASCII only (`-` not en-dash or em-dash, `->` not an arrow character), imperative mood, terse and technical, single space after periods.
+
 ## Dependency Policy
 
 Add third-party dependencies conservatively. For every new dependency:
@@ -142,7 +165,7 @@ Add third-party dependencies conservatively. For every new dependency:
 2. Run `npm audit` and resolve any known vulnerabilities before merging.
 3. Prefer packages that are actively maintained and publish a security policy.
 
-**Cryptographic dependencies** — `@openmined/psi.js`, `@noble/curves`, and any AEAD, PAKE, or key-derivation library — require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
+**Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, PAKE, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 
 ## Open Source License Compliance
 

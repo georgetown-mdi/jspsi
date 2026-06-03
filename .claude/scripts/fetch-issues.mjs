@@ -19,8 +19,8 @@
 //   node fetch-issues.mjs --json <project-number> <itemId> [itemId...]
 //   node fetch-issues.mjs --out-dir DIR <project-number> <itemId> [itemId...]
 //
-// Default output is human-readable (title, url, body per item). --json emits an
-// array of { id, type, title, body, url } for programmatic consumers. --out-dir
+// Default output is human-readable (title, url, body per item). --json emits a
+// compact array of { id, type, title, body, url } for programmatic consumers. --out-dir
 // writes each body to DIR/<id>.md (creating DIR) and prints one summary line per
 // file, which composes with edit-issue.mjs --body-file for a fetch-edit-push loop.
 
@@ -69,7 +69,9 @@ function main() {
   const items = fetchItems(projectNumber, numericIds);
 
   if (asJson) {
-    process.stdout.write(JSON.stringify(items, null, 2) + "\n");
+    // Compact, not pretty-printed: --json feeds programmatic/agent consumers,
+    // where indentation is dead weight in the reader's context.
+    process.stdout.write(JSON.stringify(items) + "\n");
     return;
   }
 

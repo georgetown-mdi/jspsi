@@ -19,13 +19,16 @@
 //   --body-file PATH              set the draft body from a file
 //   --status "In Progress"        shortcut for --field Status --value "In Progress"
 //   --field NAME --value VALUE     set a field by name (repeatable)
-//   --diff                         print a unified diff of the body before applying
-//                                  (body edits only; a no-op without --body/--body-file)
+//   --diff                         print a unified diff of the body, then apply
+//                                  (body edits only; ignored without --body/--body-file)
+//   --dry-run, -n                  resolve and report what would change, but make no
+//                                  edits; implies a body diff when a body edit is given
 //
-// Title/body edits are round-trip-safe: an edit whose new value is byte-
-// identical to the stored value is skipped (no API call), and after an edit
-// actually runs the stored value is re-fetched and verified against what was
-// sent. This guards against silent no-op "successes" on unchanged content.
+// Title/body edits are round-trip-safe: an edit whose new value is identical to
+// the stored value (ignoring trailing newlines) is skipped (no API call), and
+// after an edit actually runs the stored value is re-fetched and verified
+// against what was sent. This guards against silent no-op "successes" on
+// unchanged content.
 //
 // Field/option names are matched case-insensitively. Supported field types:
 // single-select (option resolved by name), text, number, and date. Iteration
@@ -76,12 +79,21 @@ function parseArgs(argv) {
         out.diff = true;
         i += 1;
         break;
+      case "--dry-run":
+      case "-n":
+        out.dryRun = true;
+        i += 1;
+        break;
       default:
         usage(`unknown flag: ${flag}`);
     }
   }
 
-  if (out.title === undefined && out.body === undefined && out.fields.length === 0) {
+  if (
+    out.title === undefined &&
+    out.body === undefined &&
+    out.fields.length === 0
+  ) {
     usage("no edits given");
   }
   return out;
@@ -91,7 +103,7 @@ function usage(msg) {
   if (msg) process.stderr.write(`error: ${msg}\n`);
   process.stderr.write(
     "Usage: node edit-issue.mjs <project-number> <itemId> " +
-      "[--title T] [--body B | --body-file PATH] [--status S] [--field NAME --value VAL]... [--diff]\n",
+      "[--title T] [--body B | --body-file PATH] [--status S] [--field NAME --value VAL]... [--diff] [--dry-run|-n]\n",
   );
   process.exit(2);
 }
@@ -102,7 +114,8 @@ function usage(msg) {
  */
 function draftContentId(pvti) {
   const query = `{ node(id: "${pvti}") { ... on ProjectV2Item { content { __typename ... on DraftIssue { id } } } } }`;
-  const content = JSON.parse(gh(["api", "graphql", "-f", `query=${query}`])).data.node?.content;
+  const content = JSON.parse(gh(["api", "graphql", "-f", `query=${query}`]))
+    .data.node?.content;
   if (!content || content.__typename !== "DraftIssue") {
     throw new Error(
       `item is not a draft issue (content type ${content?.__typename ?? "unknown"}); title/body editing is only supported for drafts`,
@@ -112,62 +125,114 @@ function draftContentId(pvti) {
 }
 
 /**
- * Compare a sent value against the value GitHub stored. GitHub may append a
- * single trailing newline to a draft body, so a lone trailing-newline
- * difference is tolerated; any other difference (including interior content or
- * more than one trailing newline) is treated as a real mismatch.
+ * Compare a sent value against the value GitHub stored. GitHub may append or
+ * normalize trailing newlines on a draft body, and round-trips can vary the
+ * count of trailing blank lines, so a difference confined to trailing newlines
+ * is tolerated; any difference in interior or non-blank trailing content is a
+ * real mismatch. Matches the trailing-newline normalization in printBodyDiff so
+ * the apply/skip decision and the rendered diff agree on what "unchanged" means.
  */
 function equalsStored(sent, stored) {
   if (sent === stored) return true;
-  const strip = (s) => s.replace(/\n$/, "");
+  const strip = (s) => s.replace(/\n+$/, "");
   return strip(sent) === strip(stored);
 }
 
 /**
- * Print a minimal line-based unified diff of old vs new. Not a true LCS diff:
- * lines present in both at the same position are context, others are shown as a
- * deletion block followed by an addition block. Adequate for an at-a-glance
- * review of a body edit without pulling in a diff dependency.
+ * Print a minimal line-based diff of old vs new. Not a true LCS diff: it trims
+ * the common leading and trailing lines and shows the differing middle as a
+ * deletion block followed by an addition block, framed by a few lines of
+ * context. This renders a contiguous block replacement, insertion, or deletion
+ * cleanly -- the common shapes for a body edit -- instead of cascading every
+ * line after an offset as changed, and needs no diff dependency.
  */
 function printBodyDiff(label, oldText, newText) {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  process.stdout.write(`--- ${label} (old)\n+++ ${label} (new)\n`);
-  const max = Math.max(oldLines.length, newLines.length);
-  for (let i = 0; i < max; i += 1) {
-    const o = oldLines[i];
-    const n = newLines[i];
-    if (o === n) {
-      if (o !== undefined) process.stdout.write(`  ${o}\n`);
-      continue;
-    }
-    if (o !== undefined) process.stdout.write(`- ${o}\n`);
-    if (n !== undefined) process.stdout.write(`+ ${n}\n`);
+  // Normalize trailing newlines before splitting. GitHub may append a newline to
+  // a stored body and round-trips can vary the count of trailing blank lines; an
+  // asymmetric tail would make the last lines differ and defeat the common-suffix
+  // trim, collapsing a localized edit into a whole-body replacement. Trailing
+  // blank lines are not meaningful to show, so strip them from both sides. This
+  // is display-only; the apply/skip decision still uses equalsStored.
+  const strip = (s) => s.replace(/\n+$/, "");
+  const oldLines = strip(oldText).split("\n");
+  const newLines = strip(newText).split("\n");
+
+  let start = 0;
+  const maxStart = Math.min(oldLines.length, newLines.length);
+  while (start < maxStart && oldLines[start] === newLines[start]) start += 1;
+  let oldEnd = oldLines.length;
+  let newEnd = newLines.length;
+  while (
+    oldEnd > start &&
+    newEnd > start &&
+    oldLines[oldEnd - 1] === newLines[newEnd - 1]
+  ) {
+    oldEnd -= 1;
+    newEnd -= 1;
   }
+
+  process.stdout.write(`--- ${label} (old)\n+++ ${label} (new)\n`);
+  if (start === oldEnd && start === newEnd) {
+    process.stdout.write("  (no line-level changes)\n");
+    return;
+  }
+
+  // Common prefix/suffix lines are identical in both, so either array serves as
+  // the source for the surrounding context.
+  const CONTEXT = 3;
+  for (let i = Math.max(0, start - CONTEXT); i < start; i += 1)
+    process.stdout.write(`  ${oldLines[i]}\n`);
+  for (let i = start; i < oldEnd; i += 1)
+    process.stdout.write(`- ${oldLines[i]}\n`);
+  for (let i = start; i < newEnd; i += 1)
+    process.stdout.write(`+ ${newLines[i]}\n`);
+  for (let i = oldEnd; i < Math.min(oldLines.length, oldEnd + CONTEXT); i += 1)
+    process.stdout.write(`  ${oldLines[i]}\n`);
 }
 
 /** Find a field (case-insensitive) in the project's field list. */
 function findField(projectNumber, name) {
   const fields = JSON.parse(
-    gh(["project", "field-list", String(projectNumber), "--owner", OWNER, "--format", "json"]),
+    gh([
+      "project",
+      "field-list",
+      String(projectNumber),
+      "--owner",
+      OWNER,
+      "--format",
+      "json",
+    ]),
   ).fields;
   const field = fields.find((f) => f.name.toLowerCase() === name.toLowerCase());
   if (!field) {
     const names = fields.map((f) => f.name).join(", ");
-    throw new Error(`field "${name}" not found on project ${projectNumber}; available: ${names}`);
+    throw new Error(
+      `field "${name}" not found on project ${projectNumber}; available: ${names}`,
+    );
   }
   return field;
 }
 
 /** Build the gh item-edit args that set one field value, resolving option IDs as needed. */
 function fieldEditArgs(field, value, itemId, projectId) {
-  const base = ["--id", itemId, "--project-id", projectId, "--field-id", field.id];
+  const base = [
+    "--id",
+    itemId,
+    "--project-id",
+    projectId,
+    "--field-id",
+    field.id,
+  ];
   switch (field.type) {
     case "ProjectV2SingleSelectField": {
-      const option = field.options.find((o) => o.name.toLowerCase() === value.toLowerCase());
+      const option = field.options.find(
+        (o) => o.name.toLowerCase() === value.toLowerCase(),
+      );
       if (!option) {
         const names = field.options.map((o) => o.name).join(", ");
-        throw new Error(`option "${value}" not valid for "${field.name}"; choices: ${names}`);
+        throw new Error(
+          `option "${value}" not valid for "${field.name}"; choices: ${names}`,
+        );
       }
       return [...base, "--single-select-option-id", option.id];
     }
@@ -188,6 +253,13 @@ function fieldEditArgs(field, value, itemId, projectId) {
 }
 
 function main() {
+  // A long diff is often piped to head/less; exit quietly when the reader closes
+  // the pipe rather than crashing with an EPIPE stack trace.
+  process.stdout.on("error", (err) => {
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+
   const args = parseArgs(process.argv.slice(2));
   const itemId = pvtiNodeId(args.projectNumber, args.numericId);
 
@@ -206,7 +278,9 @@ function main() {
     // post-push verification re-fetch below.
     const before = fetchItems(args.projectNumber, [args.numericId])[0];
     if (before.type === "missing") {
-      throw new Error(`item ${args.numericId} not found on project ${args.projectNumber}`);
+      throw new Error(
+        `item ${args.numericId} not found on project ${args.projectNumber}`,
+      );
     }
 
     // Decide what actually changes; skip byte-identical edits so an unchanged
@@ -216,7 +290,8 @@ function main() {
     const wantBody =
       args.body !== undefined && !equalsStored(args.body, before.body ?? "");
 
-    if (args.diff && args.body !== undefined) {
+    // --dry-run implies a body diff so the preview shows what would change.
+    if ((args.diff || args.dryRun) && args.body !== undefined) {
       printBodyDiff("body", before.body ?? "", args.body);
     }
     if (args.title !== undefined && !wantTitle) {
@@ -227,42 +302,62 @@ function main() {
     }
 
     if (wantTitle || wantBody) {
-      const edit = ["project", "item-edit", "--id", draftContentId(itemId)];
       const changed = [];
-      if (wantTitle) {
-        edit.push("--title", args.title);
-        changed.push("title");
-      }
-      if (wantBody) {
-        edit.push("--body", args.body);
-        changed.push("body");
-      }
-      gh(edit);
-      process.stdout.write(`set ${changed.join(", ")}\n`);
+      if (wantTitle) changed.push("title");
+      if (wantBody) changed.push("body");
 
-      // Verify: re-fetch and assert the store matches what we sent. Tolerates a
-      // single trailing-newline difference GitHub may introduce (see
-      // equalsStored); anything else is a real failure.
-      const after = fetchItems(args.projectNumber, [args.numericId])[0];
-      if (wantTitle && !equalsStored(args.title, after.title ?? "")) {
-        throw new Error("post-push verify failed: stored title differs from sent title");
+      if (args.dryRun) {
+        process.stdout.write(`dry-run: would set ${changed.join(", ")}\n`);
+      } else {
+        const edit = ["project", "item-edit", "--id", draftContentId(itemId)];
+        if (wantTitle) edit.push("--title", args.title);
+        if (wantBody) edit.push("--body", args.body);
+        gh(edit);
+        process.stdout.write(`set ${changed.join(", ")}\n`);
+
+        // Verify: re-fetch and assert the store matches what we sent. Tolerates
+        // trailing-newline-only differences GitHub may introduce (see
+        // equalsStored); anything else is a real failure.
+        const after = fetchItems(args.projectNumber, [args.numericId])[0];
+        if (wantTitle && !equalsStored(args.title, after.title ?? "")) {
+          throw new Error(
+            "post-push verify failed: stored title differs from sent title",
+          );
+        }
+        if (wantBody && !equalsStored(args.body, after.body ?? "")) {
+          throw new Error(
+            "post-push verify failed: stored body differs from sent body",
+          );
+        }
+        process.stdout.write("verified\n");
       }
-      if (wantBody && !equalsStored(args.body, after.body ?? "")) {
-        throw new Error("post-push verify failed: stored body differs from sent body");
-      }
-      process.stdout.write("verified\n");
     }
   }
 
   // Field edits each need the project node ID; resolve it once if any are requested.
   if (args.fields.length > 0) {
     const projectId = JSON.parse(
-      gh(["project", "view", String(args.projectNumber), "--owner", OWNER, "--format", "json"]),
+      gh([
+        "project",
+        "view",
+        String(args.projectNumber),
+        "--owner",
+        OWNER,
+        "--format",
+        "json",
+      ]),
     ).id;
     for (const { name, value } of args.fields) {
       const field = findField(args.projectNumber, name);
-      gh(["project", "item-edit", ...fieldEditArgs(field, value, itemId, projectId)]);
-      process.stdout.write(`set ${field.name} = ${value}\n`);
+      // Resolve (and validate) the field/option names even in a dry run, so a
+      // bad field or option name is reported without making any edit.
+      const editArgs = fieldEditArgs(field, value, itemId, projectId);
+      if (args.dryRun) {
+        process.stdout.write(`dry-run: would set ${field.name} = ${value}\n`);
+      } else {
+        gh(["project", "item-edit", ...editArgs]);
+        process.stdout.write(`set ${field.name} = ${value}\n`);
+      }
     }
   }
 }
