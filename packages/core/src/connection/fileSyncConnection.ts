@@ -744,12 +744,21 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // non-throwing safeDelete, then add its name to `ignored` so the
     // already-taken `files` snapshot does not re-trip the guard below on a name
     // we just removed.
+    //
+    // The delete is best-effort and the `ignored` add is unconditional (it does
+    // not branch on the delete's outcome): a safeDelete that silently fails (a
+    // transport error, swallowed by contract) leaves the temp on disk, but entry
+    // must still proceed past it (a stale temp is benign) and the next exchange's
+    // entry re-runs this same sweep, so the litter is self-healing rather than
+    // permanent. Tracking the orphan in `responsibleFiles` would not help: its
+    // writer already died, so that process's cleanup() never runs -- which is the
+    // whole reason this rendezvous-time sweep exists.
     const orphanedTempFiles = files.filter(
       (file) => file.name.startsWith("temp-") && file.name.endsWith(".tmp"),
     );
     if (orphanedTempFiles.length > 0) {
-      // Single breadcrumb: a process died mid-send here. Entry is not aborted on
-      // its account, but the prior crash is worth surfacing.
+      // Single breadcrumb: a process died mid-write here. Entry is not aborted
+      // on its account, but the prior crash is worth surfacing.
       this.log.info(
         `[${this.role}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
           "file(s) left by a prior crashed exchange: " +

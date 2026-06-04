@@ -5227,6 +5227,46 @@ test("synchronize() sweeps a temp file alongside a single peer hello and complet
   expect(files.has(`${conn.path}/${myId}-hello.json`)).toBe(true);
 });
 
+test("synchronize() sweeps multiple orphaned temp files at the entry guard", async () => {
+  // The spec's motivating case: temp artifacts accumulate across several crashed
+  // exchanges (distinct uuids). All are swept in one entry and none aborts the
+  // guard -- exercising the N>1 path (Promise.all over many, the plural log
+  // branch, multiple `ignored` entries) the single-temp tests above do not.
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + 60),
+    verbose: -1,
+  });
+  conn.id = "00000000-0000-4000-8000-000000000001";
+  conn.connected = true;
+  conn.path = "/test";
+
+  const tempPaths = [
+    `/test/temp-${"a".repeat(8)}.tmp`,
+    `/test/temp-${"b".repeat(8)}.tmp`,
+    `/test/temp-${"c".repeat(8)}.tmp`,
+  ];
+  for (const p of tempPaths) files.set(p, Buffer.alloc(0));
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  // Entry proceeded past the guard (a timeout Error), not rejected as non-empty.
+  expect(err).not.toBeInstanceOf(UsageError);
+  // Every orphan was swept via safeDelete and is gone from the store.
+  for (const p of tempPaths) {
+    expect(safeDeleted).toContain(p);
+    expect(files.has(p)).toBe(false);
+  }
+});
+
 // --- poll() error classification: terminal vs retryable ----------------------
 // poll() stops the poller on a terminal error (re-reading the same bytes cannot
 // help) and reschedules on a retryable one (a later attempt may succeed). The
