@@ -5053,9 +5053,11 @@ const entryPreconditionKinds: Array<{
     ],
     outcome: "reject",
   },
-  // An in-flight temp file is rejected today (strict-empty). The planned tmp
-  // sweep (193792285) will move this into the guard's `ignored` set.
-  { kind: "temp file", present: ["temp-abc.tmp"], outcome: "reject" },
+  // An orphaned in-flight temp file (a crashed send()/writeAck() artifact) is
+  // swept at the entry guard (193792285): deleted via safeDelete and added to
+  // the guard's `ignored` set, so it proceeds past the guard rather than being
+  // rejected as a strict-empty violation.
+  { kind: "temp file", present: ["temp-abc.tmp"], outcome: "proceed" },
   // A foreign (non-protocol) file: the directory is the state machine, so it
   // must be clean at entry.
   { kind: "foreign file", present: ["notes.txt"], outcome: "reject" },
@@ -5118,6 +5120,112 @@ test.each(entryPreconditionCells)(
     }
   },
 );
+
+// --- entry guard: orphaned temp-*.tmp sweep (193792285) ----------------------
+// At the I0 strict-empty entry guard the message loop has not started, so any
+// temp-<uuid>.tmp (a send()/writeAck() in-flight write whose process was
+// hard-killed before the rename to <id>.json) is necessarily orphaned. The
+// guard sweeps it -- safeDelete then add to `ignored` -- rather than rejecting
+// the directory as non-empty, so a prior crash's temp artifact is removed and
+// entry is not aborted on its account.
+
+test("synchronize() sweeps an orphaned temp file at the entry guard and does not abort", async () => {
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    // Short TTL: with no peer hello the conn writes its own hello, enters the
+    // rendezvous wait, and times out with a transport Error -- never the
+    // strict-empty UsageError, which the guard would have thrown synchronously
+    // had the temp not been swept.
+    timeToLive: new Date(Date.now() + 60),
+    verbose: -1,
+  });
+  conn.id = "00000000-0000-4000-8000-000000000001";
+  conn.connected = true;
+  conn.path = "/test";
+
+  const tempPath = `/test/temp-${"a".repeat(8)}.tmp`;
+  files.set(tempPath, Buffer.alloc(0));
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  // The guard did not abort on the temp's account: the error is the rendezvous
+  // timeout (a transport Error), not the strict-empty UsageError.
+  expect(err).not.toBeInstanceOf(UsageError);
+  // The orphan was swept via safeDelete and is gone from the store.
+  expect(safeDeleted).toContain(tempPath);
+  expect(files.has(tempPath)).toBe(false);
+});
+
+test("synchronize() leaves a temp-free directory unaffected by the sweep", async () => {
+  // No temp-*.tmp present: the sweep is a transparent no-op. The conn proceeds
+  // exactly as before -- past the guard, into the rendezvous wait, timing out
+  // with a transport Error rather than a UsageError -- and the sweep deletes no
+  // .tmp file. (The lone safeDelete on this path is the outer catch sweeping
+  // this party's own .json hello on the timeout, which the sweep never touches.)
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + 60),
+    verbose: -1,
+  });
+  conn.id = "00000000-0000-4000-8000-000000000001";
+  conn.connected = true;
+  conn.path = "/test";
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  // Proceeded past the guard into the rendezvous wait (a timeout Error), rather
+  // than being rejected there with the strict-empty UsageError.
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(String(err)).toContain("timed out");
+  // The sweep matched nothing: no .tmp file was deleted.
+  expect(safeDeleted.filter((p) => p.endsWith(".tmp"))).toHaveLength(0);
+});
+
+test("synchronize() sweeps a temp file alongside a single peer hello and completes rendezvous", async () => {
+  // A temp-<uuid>.tmp orphan coexists with a lone peer hello. The sweep removes
+  // the temp and excludes it from the I0 guard; the peer hello remains the one
+  // tolerated entry file (per I0), so the joiner fast-path completes rendezvous
+  // instead of the guard rejecting the directory as non-empty.
+  const myId = "00000000-0000-4000-8000-000000000001";
+  const peerId = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = myId;
+
+  const tempPath = `${conn.path}/temp-${"b".repeat(8)}.tmp`;
+  const peerHelloPath = `${conn.path}/${peerId}-hello.json`;
+  files.set(tempPath, Buffer.alloc(0));
+  files.set(peerHelloPath, LOCK_HELLO_BODY);
+
+  await conn.synchronize();
+
+  // Rendezvous completed via the joiner fast-path.
+  expect(conn.peerId).toBe(peerId);
+  expect(conn.handshakeRole).toBe("initiator");
+  expect(conn.role).toBe("joiner");
+  // The orphaned temp was swept ...
+  expect(files.has(tempPath)).toBe(false);
+  // ... the peer hello was consumed (the joiner deletes it) ...
+  expect(files.has(peerHelloPath)).toBe(false);
+  // ... and the joiner's own hello is now present (renamed from the sentinel).
+  expect(files.has(`${conn.path}/${myId}-hello.json`)).toBe(true);
+});
 
 // --- poll() error classification: terminal vs retryable ----------------------
 // poll() stops the poller on a terminal error (re-reading the same bytes cannot

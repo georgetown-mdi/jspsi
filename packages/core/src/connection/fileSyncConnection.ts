@@ -717,17 +717,52 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     //
     // Anything else is a protocol error: a second peer hello, a self-hello (a
     // same-id leftover from a crashed session), a lock, an ack marker, a
-    // message, an in-flight temp file, or any foreign file. This is
-    // strict-empty by design (the directory is the state machine), so a foreign
-    // file is rejected rather than ignored. The two cases that legitimately
-    // pre-exist as the protocol grows -- an orphaned temp-*.tmp swept by
-    // 193792285, and a directory snapshot -- are accommodated by adding their
-    // names to `ignored`; until those land it stays empty and every
-    // non-peer-hello file is rejected.
+    // message, or any foreign file. This is strict-empty by design (the
+    // directory is the state machine), so a foreign file is rejected rather
+    // than ignored.
+    //
+    // The one kind that legitimately pre-exists and is NOT rejected is an
+    // orphaned temp-*.tmp -- a send()/writeAck() in-flight write whose process
+    // was hard-killed between the temp put() and the rename to <id>.json. At
+    // entry the message loop has not started, so any such file is necessarily
+    // orphaned (no live in-flight write can race it); it is swept just below
+    // (safeDelete then added to `ignored`) so a prior crash's temp artifact is
+    // cleaned up rather than left as litter and entry is not aborted on its
+    // account. `ignored` is the sanctioned extension point for kinds that may
+    // legitimately pre-exist as the protocol grows -- a future directory
+    // snapshot would extend it the same way.
     const isPeerHello = (name: string) =>
       name.endsWith(HELLO_SUFFIX) &&
       name.slice(0, -HELLO_SUFFIX.length) !== this.id;
     const ignored = new Set<string>();
+
+    // Sweep orphaned in-flight temp writes left by a prior crashed exchange.
+    // Match the temp-<uuid>.tmp shape send()/writeAck() produce by its exact
+    // `temp-` prefix and `.tmp` extension, never a final <id>.json message -- in
+    // retain mode the directory is intentionally full of *.json (the
+    // transcript), which can never match `.tmp`. Delete each with the
+    // non-throwing safeDelete, then add its name to `ignored` so the
+    // already-taken `files` snapshot does not re-trip the guard below on a name
+    // we just removed.
+    const orphanedTempFiles = files.filter(
+      (file) => file.name.startsWith("temp-") && file.name.endsWith(".tmp"),
+    );
+    if (orphanedTempFiles.length > 0) {
+      // Single breadcrumb: a process died mid-send here. Entry is not aborted on
+      // its account, but the prior crash is worth surfacing.
+      this.log.info(
+        `[${this.role}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
+          "file(s) left by a prior crashed exchange: " +
+          `${orphanedTempFiles.map((f) => f.name).join(", ")}`,
+      );
+      await Promise.all(
+        orphanedTempFiles.map((file) =>
+          this.client.safeDelete(`${this.path}/${file.name}`),
+        ),
+      );
+      orphanedTempFiles.forEach((file) => ignored.add(file.name));
+    }
+
     const peerHellos = files.filter((file) => isPeerHello(file.name));
     const unexpected = files.filter(
       (file) => !isPeerHello(file.name) && !ignored.has(file.name),
@@ -740,8 +775,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `${unexpected.length} unexpected file(s): ` +
           `${unexpected.map((f) => f.name).join(", ")}. A pre-existing lock ` +
           "file (-lock.json), ack marker (-ack.json), joining sentinel " +
-          "(-joining.json), message, " +
-          "self-hello, or temp file usually " +
+          "(-joining.json), message, or " +
+          "self-hello usually " +
           "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
           "before its cleanup ran, or -- in retain mode, which never deletes " +
           "-- that this directory was reused for a second exchange. Remove the " +
