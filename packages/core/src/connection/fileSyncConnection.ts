@@ -893,6 +893,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // and own the hello so cleanup() sweeps it at close().
         if (!this.options.retainFiles) this.responsibleFiles.add(helloName);
       } catch (err: unknown) {
+        // No resetSessionState() here: this.role, this.peerId,
+        // this.handshakeRole, and the sequence counters are all committed only
+        // after this try/catch (see below), so a throw leaves the connection in
+        // its pre-synchronize state with nothing to reset.
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
 
@@ -1570,7 +1574,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // than joinerRecoveryMs left on the TTL, so the outer loop exits before
         // the recovery check (above) can fire; prefer the sentinel error so the
         // user still gets the same diagnosis the bounded window would have.
-        if (joiningSeenAt !== undefined) {
+        // Check both: the two are set and cleared as a pair, so testing
+        // joiningSeenName as well makes that coupling type-enforced (it narrows
+        // to string inside the block) rather than relied on by convention, and
+        // degrades gracefully to the bare timeout below if they ever diverged.
+        if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
           throw new Error(
             `[starter] peer began arriving (${joiningSeenName}) but the ` +
               "exchange timed out before it completed; it appears to have " +

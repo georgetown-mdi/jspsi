@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection, UsageError } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { sftpPort } from "../container/env";
@@ -272,6 +272,10 @@ test("wave starter aborts on a stuck mid-arrival joiner over real SFTP", async (
     expect((err as Error).message).toMatch(
       /did not complete within the recovery window/,
     );
+    // Transport failure (CLI exit 69), not a usage error (exit 64) -- mirrors
+    // the unit-test assertion so a regression that reclassified the abort would
+    // be caught over the real transport too.
+    expect(err).not.toBeInstanceOf(UsageError);
   } finally {
     await serverSFTP.safeDelete(`${SFTP_PATH}/${sentinelName}`);
     await abortConn.close();
