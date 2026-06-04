@@ -850,6 +850,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const joiningPath = `${this.path}/${joiningName}`;
       const helloName = `${this.id}${HELLO_SUFFIX}`;
       try {
+        // The three `!this.options.retainFiles` guards in this block are vacuous
+        // here: this wave joiner fast-path runs only when !locklessRendezvous,
+        // and the entry guard rejects retain mode without lockless (retain
+        // requires lockless), so retain never reaches this block. They are kept
+        // only to match the file-wide responsibleFiles tracking idiom -- every
+        // mutation is `!retainFiles`-guarded (see I4a) -- not because retain mode
+        // is reachable here.
+        //
         // The sentinel carries the hello body so the rename below yields a
         // fully-valid `<id>-hello.json` the peer reads through its gate; the
         // peer itself matches the sentinel by name existence and never reads it.
@@ -1194,13 +1202,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                     `(${joiningName}); awaiting completion`,
                 );
               } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
-                // The crash could be on either side of the joiner's delete, so
-                // the message names the bracketing operations rather than a
-                // single step. Labelled [starter]: this branch is reached only
-                // by the party that wrote its hello first and is waiting for a
-                // joiner -- the joiner takes the entry fast-path and never
-                // enters this loop -- even though `this.role` is not committed
-                // until rendezvous succeeds.
+                // The window is a lower bound, not exact: the check runs once
+                // per poll after a delay(), so the abort fires somewhere in
+                // (joinerRecoveryMs, joinerRecoveryMs + pollingFrequency]. That
+                // imprecision is deliberate -- this is a bounded recovery
+                // window, not a hard deadline, and one extra poll is immaterial
+                // against the 30 s default. The crash could be on either side
+                // of the joiner's delete, so the message names the bracketing
+                // operations rather than a single step. Labelled [starter]:
+                // this branch is reached only by the party that wrote its hello
+                // first and is waiting for a joiner -- the joiner takes the
+                // entry fast-path and never enters this loop -- even though
+                // `this.role` is not committed until rendezvous succeeds.
                 throw new Error(
                   `[starter] peer began arriving (${joiningName}) but did ` +
                     "not complete within the recovery window; it appears to " +
@@ -1232,6 +1245,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // contamination the multi-hello and multi-wave guards reject -- so
           // surface it as a UsageError rather than completing against an
           // inconsistent directory.
+          //
+          // No joiningFiles.length > 1 guard is needed here (unlike the
+          // otherFiles === 0 branch above): a sentinel that escapes the
+          // foreign-id check matches a present peer hello, so two such sentinels
+          // would require two distinct peer hellos -- already terminal under the
+          // otherFiles.length > 1 multi-peer-hello guard in the branches below,
+          // which fires before any role is committed.
           const peerHelloIds = new Set(
             otherFiles.map((file) => file.name.slice(0, -HELLO_SUFFIX.length)),
           );
@@ -1538,11 +1558,26 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           }
         }
 
-        // Tagged [starter]: reached only when no peer hello was ever seen --
-        // every branch that observes one commits a role and returns, so the
-        // sole path that loops to here is the lone waiter, which never deleted
-        // a peer hello and so is never the joiner -- even though `this.role` is
-        // not committed until rendezvous succeeds.
+        // TTL expired while still waiting. Both throws below are tagged
+        // [starter]: reaching here means no peer hello was ever seen (every
+        // branch that observes one commits a role and returns), so the waiter is
+        // the lone starter -- never the joiner -- even though `this.role` is not
+        // committed until rendezvous succeeds.
+        //
+        // If a joiner sentinel was visible on the final poll (joiningSeenAt
+        // still set), the actionable cause is a stuck mid-arrival joiner, not a
+        // bare timeout. This happens when the sentinel first appears with less
+        // than joinerRecoveryMs left on the TTL, so the outer loop exits before
+        // the recovery check (above) can fire; prefer the sentinel error so the
+        // user still gets the same diagnosis the bounded window would have.
+        if (joiningSeenAt !== undefined) {
+          throw new Error(
+            `[starter] peer began arriving (${joiningSeenName}) but the ` +
+              "exchange timed out before it completed; it appears to have " +
+              "failed after announcing its arrival but before publishing its " +
+              "hello. Retry the exchange.",
+          );
+        }
         throw new Error("[starter] synchronization has timed out");
       };
       try {

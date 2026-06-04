@@ -1710,6 +1710,148 @@ test("synchronize() wave starter: aborts on a stuck sentinel even while its own 
   expect(elapsed).toBeLessThan(2_000);
 });
 
+test("synchronize() wave starter: a sentinel visible when the TTL expires yields the stuck-joiner error, not a bare timeout", async () => {
+  // The recovery window (joinerRecoveryMs) is independent of the outer TTL
+  // (peerTimeoutMs). If a sentinel first appears with less than joinerRecoveryMs
+  // left on the TTL, the poll loop exits before the recovery check can fire.
+  // Here joinerRecoveryMs (10 s) far exceeds the TTL (150 ms), so the recovery
+  // check never fires and the loop exits via the TTL while the sentinel is still
+  // tracked. The fallback must still surface the actionable stuck-joiner cause,
+  // not the generic "synchronization has timed out".
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 10_000,
+    timeToLiveMs: 150,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joiningName = `${idB}-joining.json`;
+  files.set(`${conn.path}/${joiningName}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting guard: empty
+    return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  // Names the stuck sentinel and the mid-arrival failure like the bounded-window
+  // abort, but via the TTL fallback ("the exchange timed out before it
+  // completed" rather than "within the recovery window").
+  expect((err as Error).message).toMatch(/^\[starter\] peer began arriving/);
+  expect((err as Error).message).toContain(joiningName);
+  expect((err as Error).message).toMatch(
+    /the exchange timed out before it completed/,
+  );
+  // NOT the generic bare timeout the pre-fix path produced.
+  expect((err as Error).message).not.toMatch(/synchronization has timed out/);
+});
+
+test("synchronize() wave starter: a sentinel that vanishes and reappears gets a fresh recovery window", async () => {
+  // The empty-poll reset of joiningSeenAt/joiningSeenName times a reappearing
+  // sentinel from its REappearance, not its first sighting. Without the reset,
+  // the reappearing sentinel would inherit the now-elapsed timestamp and abort
+  // immediately. The gap of empty polls advances real time past the 50 ms
+  // window, so the regression is observable: with the reset the rendezvous
+  // completes; without it, it would reject on reappearance.
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 50,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joiningName = `${idB}-joining.json`;
+  const peerHelloName = `${idB}-hello.json`;
+  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting guard: empty
+    // Sentinel appears once (poll 2), vanishes for several polls (long enough
+    // that a stale timestamp would be past the 50 ms window), then returns.
+    if (listCallCount === 2)
+      return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+    if (listCallCount <= 9) return []; // vanished -> joiningSeenAt reset
+    if (listCallCount === 10)
+      return [{ name: joiningName, modifyTime: Date.now(), size: 0 }];
+    // The fresh-windowed joiner then completes its rename.
+    return [{ name: peerHelloName, modifyTime: Date.now(), size: 0 }];
+  };
+
+  // With the reset this completes; without it, it would reject on reappearance.
+  await conn.synchronize();
+  expect(conn.role).toBe("starter");
+  expect(conn.peerId).toBe(idB);
+});
+
+test("synchronize() wave starter: a different-id sentinel replacing an earlier one completes with the second joiner", async () => {
+  // The joiningSeenName !== joiningName arm restarts the recovery window when a
+  // sentinel from a different id replaces an earlier one (a second joiner taking
+  // over). This pins the functional outcome: the starter completes against
+  // whichever joiner ultimately publishes its hello, even after seeing a
+  // different sentinel first. (The sub-poll timing of the restart is covered by
+  // reasoning, not asserted: A directly replaced by B has no empty poll between,
+  // so the restart's effect is a single poll interval, below real-timer
+  // resolution.) joinerRecoveryMs is large so no abort fires during the swap.
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const idC = "00000000-0000-4000-8000-000000000002";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 10_000,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const sentinelB = `${idB}-joining.json`;
+  const sentinelC = `${idC}-joining.json`;
+  const helloC = `${idC}-hello.json`;
+  files.set(`${conn.path}/${helloC}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting guard: empty
+    if (listCallCount === 2)
+      return [{ name: sentinelB, modifyTime: Date.now(), size: 0 }];
+    if (listCallCount <= 4)
+      return [{ name: sentinelC, modifyTime: Date.now(), size: 0 }];
+    // The second joiner (idC) completes its rename.
+    return [{ name: helloC, modifyTime: Date.now(), size: 0 }];
+  };
+
+  await conn.synchronize();
+  expect(conn.role).toBe("starter");
+  expect(conn.peerId).toBe(idC);
+});
+
+test("synchronize() wave starter: TTL expiry with no joiner produces the bare [starter] timeout", async () => {
+  // The wave-path TTL fallback when no peer hello and no sentinel were ever
+  // seen: the lone starter polled until the TTL. Pins the exact "[starter]
+  // synchronization has timed out" text (a regression swapping or stripping the
+  // tag would be caught) and that this is a transport failure, not a usage
+  // error. With Issue-1's fix the bare timeout is reached only when no sentinel
+  // was tracked at exit, so this complements the stuck-joiner-at-TTL test above.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 80,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  client.list = async () => []; // empty forever: no peer, no sentinel
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect((err as Error).message).toBe(
+    "[starter] synchronization has timed out",
+  );
+});
+
 test("synchronize() wave starter: a peer hello alongside a foreign-id joining sentinel is a UsageError", async () => {
   // Three-party contamination: a legitimate peer hello (idB) and a joining
   // sentinel from a different id (idC) are visible together. A sentinel whose
@@ -2460,6 +2602,30 @@ test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminan
 
   // send() does not own the sentinel and must not have consumed it.
   expect(files.has(joiningPath)).toBe(true);
+});
+
+test("synchronize() lockless timeout message carries no role prefix", async () => {
+  // The lockless-barrier timeout fires while the role is genuinely indeterminate
+  // (it can occur after the peer hello was seen and acked, where filename order
+  // may make this party the joiner), so the message has no [role] prefix --
+  // unlike the wave TTL fallback, which is reachable only as the lone starter.
+  // Pins the exact bare "synchronization has timed out" text.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 80),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  conn.connected = true;
+  conn.path = "/test";
+  client.list = async () => []; // never a peer hello: barrier loops to the TTL
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect((err as Error).message).toBe("synchronization has timed out");
 });
 
 test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
