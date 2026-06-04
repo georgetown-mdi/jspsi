@@ -289,6 +289,74 @@ test("createMessagePipe: receive has no inactivity deadline", async () => {
   await parked;
 });
 
+// --- I8 contract: the production `data` consumer never throws synchronously ---
+//
+// docs/FILE_SYNC.md invariant I8 makes a non-throwing `data` consumer
+// load-bearing for FileSyncConnection's retain-mode poll(): the emit("data",
+// ...) hand-off sits inside the try whose catch reprocesses the never-deleted
+// message, and recvSeq advances only after the emit returns. A consumer that
+// threw synchronously would re-poll the same message until peer_timeout_ms and
+// then surface a generic peer-silence error. The sole production consumer is
+// deliver() (this file's QueuedMessageConnection, wired as fromEventConnection's
+// onData closure `(data) => controls.deliver(data)`); these tests pin that it
+// latches every failure mode it handles via a non-throwing fail() rather than
+// throwing back into emit. They lock the contract for the consumer that exists
+// today: a regression making deliver() throw on a handled mode would fail them.
+// They do NOT, and cannot, exercise a second `data` consumer that does not yet
+// exist -- a new throwing listener would be its own code path. The load-bearing
+// comment at deliver() and I8 itself, not this test, are what put a future
+// author adding such a consumer on notice. The eventB.emit("data", ...) call
+// below is structurally the same call FileSyncConnection.poll() makes at the
+// retain-mode emit site.
+
+test("data consumer (deliver): inbound overflow latches without throwing into emit", async () => {
+  const [, eventB] = makeEventConnections();
+  const connB = fromEventConnection(eventB, { capacity: 2 });
+
+  // Fill the inbound buffer to capacity with no parked receive: each delivery
+  // enqueues and must not throw.
+  expect(() => eventB.emit("data", "1")).not.toThrow();
+  expect(() => eventB.emit("data", "2")).not.toThrow();
+
+  // The capacity+1 frame is I8's named overflow mode. The consumer must absorb
+  // it as a non-throwing fail(), so emit("data", ...) returns normally rather
+  // than throwing back into the retain-mode poll loop.
+  expect(() => eventB.emit("data", "3")).not.toThrow();
+
+  // The absorbed overflow surfaces only as a sticky terminal protocol error on
+  // the next receive() -- confirming the consumer latched rather than threw.
+  const err = await connB.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+
+  // The frames buffered before the overflow ("1"/"2") are discarded by the
+  // latch, not replayed: a further receive() yields the same terminal error
+  // rather than a stale frame. (This is fail()'s documented discard semantics;
+  // asserted here so the drop reads as intended, not an untested side effect.)
+  await expect(connB.receive()).rejects.toBe(err);
+});
+
+test("data consumer (deliver): a frame after a terminal latch is a non-throwing no-op", async () => {
+  const [, eventB] = makeEventConnections();
+  const connB = fromEventConnection(eventB);
+
+  // A terminal failure has already latched the connection. In production this
+  // would be a transport drop from an earlier poll cycle; here it is emitted
+  // inline -- the test models the latched-then-late-frame ordering, not the
+  // timing.
+  eventB.emit("error", new Error("earlier transport drop"));
+
+  // A late data frame from a subsequent emit("data", ...) must be silently
+  // absorbed by the consumer, never thrown back into the poll loop.
+  expect(() => eventB.emit("data", "late")).not.toThrow();
+
+  // The connection is unchanged: still the original terminal transport error,
+  // with the late frame dropped rather than surfaced.
+  const err = await connB.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+});
+
 // --- per-receive timeout -----------------------------------------------------
 
 test("receive(timeoutMs) shorter than the connection default fires and latches", async () => {
