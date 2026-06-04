@@ -283,8 +283,8 @@ export class QueuedMessageConnection implements MessageConnection {
     if (this.queue.length >= this.capacity) {
       this.fail(
         new ConnectionError(
-          `inbound buffer overflow: more than ${this.capacity} unconsumed ` +
-            "messages; the peer is sending out of turn",
+          `inbound buffer overflow: at capacity (${this.capacity} unconsumed ` +
+            "messages); the peer is sending out of turn",
           "protocol",
         ),
       );
