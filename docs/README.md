@@ -21,7 +21,7 @@ PSI-Link is a privacy-preserving record linkage (PPRL) tool that enables partner
 
 - [DESIGN.md](DESIGN.md) - project overview, architecture, exchange specification summary, and high-level user journey
 - [PROTOCOL.md](PROTOCOL.md) - PSI and PSI-C algorithms, linkage mechanics, datasets, post-linkage steps, and SPAKE2 wire-level specification
-- [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, channel security, and key rotation
+- [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - security overview, the private set intersection (PSI) privacy guarantee, threat model, authentication design, channel security, and key rotation
 - [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, data classification, and considerations for agency reviewers
 - [COMMUNICATION.md](COMMUNICATION.md) - channels, synchronization, error handling, and supporting services
 - [FILE_SYNC.md](FILE_SYNC.md) - file-sync transport state model: the directory-as-state-machine, filename taxonomy, enforcement sites, invariants, and exchange preconditions for the `sftp` and `filedrop` channels

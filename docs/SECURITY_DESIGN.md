@@ -4,7 +4,36 @@ title: "PSI-Link Security Design"
 
 # PSI-Link security
 
-This document covers the threat model, authentication design, and channel security for PSI-Link exchanges. It does not cover the PSI protocol itself or the wire-level SPAKE2 protocol specification (see [PROTOCOL.md](PROTOCOL.md)), the network channels over which exchanges run (see [COMMUNICATION.md](COMMUNICATION.md)), or CLI configuration for authentication (see [CLI.md](CLI.md)). Intended readers are security teams and compliance officers.
+This document covers the threat model, authentication design, and channel security for PSI-Link exchanges, and introduces the private set intersection (PSI) protocol on which the privacy guarantee rests at a conceptual level. It does not specify the PSI and PSI-C algorithms or the wire-level SPAKE2 protocol in detail (see [PROTOCOL.md](PROTOCOL.md)), the network channels over which exchanges run (see [COMMUNICATION.md](COMMUNICATION.md)), or CLI configuration for authentication (see [CLI.md](CLI.md)). Intended readers are security teams and compliance officers.
+
+# Overview
+
+PSI-Link protects an exchange with three independent layers:
+
+1. **The PSI protocol protects the data itself.** Before any record leaves a participant's machine it is encrypted under that party's own ephemeral key, and the protocol then layers the partner's key on top, so each side only ever handles the other's records in a form it cannot decrypt. Neither side can recover the other's underlying values; both learn only which records the two of them hold in common. This is what makes the approach privacy-preserving regardless of which channel carries the traffic. See [Private set intersection](#private-set-intersection) below.
+
+2. **PAKE authentication proves you are talking to the right partner.** For recurring exchanges the two parties hold a shared secret, established once out of band, and prove to each other that they both hold it without ever sending it over the wire. The secret is rotated after every successful exchange, so it is never reused. Authentication is a hard gate: if it fails, no data is exchanged. See [Authentication](#authentication).
+
+3. **Transport encryption protects the data in transit.** The underlying channel - an SSH/SFTP connection, a WebRTC link, or a network-mounted share - encrypts traffic as it crosses the network. For zero-setup exchanges, which carry no shared secret, this transport layer is the sole protection, which is why trust there rests on whoever administers the server or share. See [Channel security](#channel-security).
+
+A fourth layer - application-layer message encryption keyed from the PAKE session, so that even the operator of an SFTP server or shared drive would see only opaque ciphertext - is designed but not yet wired into the protocol. Its intended role is described under [Channel security](#channel-security).
+
+The remainder of this document treats each layer in turn, beginning with the PSI protocol the other two are built to protect.
+
+# Private set intersection
+
+Private set intersection (PSI) is the cryptographic primitive the privacy guarantee rests on. It lets two parties compute the overlap between their datasets - the records they have in common - while revealing nothing about the records they do not.
+
+The intuition is a layered, order-independent ("commutative") encryption. Each party holds an ephemeral key, generated fresh for the exchange and never shared. Each side encrypts its own linkage keys under its own key, and the protocol applies the partner's key as a second layer, so a record is only ever seen by the other party in a form that party cannot decrypt. Because the scheme is commutative, two values that started out equal remain equal once both keys have been applied, which is what lets the parties recognise shared records by comparing encrypted forms alone. Neither side can strip the other's key to recover a plaintext value, and records outside the intersection are never revealed.
+
+PSI-Link uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI) - which in turn layers over Google's Private Join and Compute - as this primitive. The base function is run repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reveals the size of the overlap without revealing which members are shared; it is designed but not yet implemented.
+
+Two properties of the primitive are deliberately not hidden, and both are load-bearing for the threat model that follows:
+
+- **Set sizes are revealed.** The base PSI function inherently leaks how many records each party holds. This is treated as acceptable for linking administrative data, where membership and identity are sensitive but the size of a database is not.
+- **The result is only as private as the linkage keys.** Because each party learns the linkage key for every shared member, a weak key - for example one built from a single identifier - can leak membership through a differencing or brute-force attack. Combining several PII elements into each key is what keeps "you learn only the overlap" a meaningful guarantee.
+
+The algorithm itself - role assignment, the encryption and key-removal steps, the matching cascade, and the PSI-C design - is specified in [PROTOCOL.md](PROTOCOL.md#psi-base-function). The two properties above are developed further in the [Threat model](#threat-model).
 
 # Threat model
 
@@ -110,13 +139,13 @@ If an exchange partnership goes dormant for an extended period, organizations ma
 
 # Channel security
 
-As noted in [Transport-layer authentication](#transport-layer-authentication), server administrators have visibility into exchanges conducted over SFTP and file-drops. When using these channels, PAKE-authenticated, recurring exchanges provide an additional application-layer of encryption: both parties use HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages are encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message includes a sequence number as the nonce, preventing replay. The server admin sees only opaque ciphertext files. If they tamper with a file, the authentication tag fails and the exchange aborts.
+As noted in [Transport-layer authentication](#transport-layer-authentication), server administrators have visibility into exchanges conducted over SFTP and file-drops. Today the protection on these channels is the transport layer itself (SSH for SFTP; the operator's access controls for file-drops). An additional application-layer of encryption is designed to close that visibility for PAKE-authenticated, recurring exchanges, but it is not yet wired into the protocol and is not active in current releases. As designed, both parties would use the HMAC-based Extract-and-Expand Key Derivation Function (HKDF) to derive a common encryption key from the PAKE session key, and messages would be encrypted using Authenticated Encryption with Associated Data (AEAD) ciphers. Each message would include a sequence number as the nonce, preventing replay. The server admin would then see only opaque ciphertext files, and tampering with a file would cause the authentication tag to fail and the exchange to abort.
 
 WebRTC connections use DTLS which provides end-to-end encryption, so the peer-coordination server never sees data-channel traffic. A TURN relay, when used to traverse NAT or firewall restrictions, preserves this property: it forwards encrypted DTLS packets without terminating the session.
 
 A WebSocket relay is a distinct and rarer fallback that arises when a firewall blocks TURN through deep-packet inspection of the DTLS handshake. Unlike a TURN relay, a WebSocket relay terminates DTLS and sees plaintext. When a WebSocket relay is in use, the exchange policy follows its authentication state:
 
-- If PAKE authentication is active (a recurring exchange), the exchange proceeds with application-layer AEAD encryption, the same mechanism used for SFTP and file-drop channels.
+- If PAKE authentication is active (a recurring exchange), the exchange proceeds with the application-layer AEAD encryption described above (the same mechanism planned for SFTP and file-drop channels).
 - If PAKE is absent (a zero-setup exchange), the exchange aborts. Application-layer encryption cannot be applied without a shared session key, and proceeding without transport protection would expose data to the relay.
 
 Zero-setup WebRTC is already constrained in practice: it requires a peer-coordination server accessible to both parties, which is an uncommon deployment. The WebSocket relay scenario therefore applies almost exclusively to recurring exchanges, where PAKE is always active. (This policy will be enforced when WebSocket relay support is added; relays are not yet a supported transport option.)
@@ -125,7 +154,7 @@ Zero-setup WebRTC is already constrained in practice: it requires a peer-coordin
 
 PSI-Link does not transmit, log, or retain any personally identifiable information (PII) outside of the configured output file.
 
-**Protocol messages**: All data exchanged between parties during the PSI protocol consists of cryptographic protocol messages — elliptic-curve points and AEAD ciphertext. Raw PII values are never sent to a partner in any form. The PSI protocol's privacy guarantee ensures that each party learns only the existence of shared members; records not in the intersection are not revealed to the other party.
+**Protocol messages**: All data exchanged between parties during the PSI protocol consists of cryptographic protocol messages - elliptic-curve points, to be wrapped in AEAD ciphertext once the planned application-layer encryption is in place (see [Channel security](#channel-security)). Raw PII values are never sent to a partner in any form. The PSI protocol's privacy guarantee ensures that each party learns only the existence of shared members; records not in the intersection are not revealed to the other party.
 
 **Third parties**: No PII is transmitted to any third party. The peer-coordination server used by the web application's WebRTC channel sees only connection metadata (peer IDs); it has no visibility into data-channel traffic (see [Channel security](#channel-security)). SFTP and filedrop channels use operator-managed infrastructure.
 
