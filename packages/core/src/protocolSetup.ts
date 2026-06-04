@@ -108,7 +108,10 @@ export async function exchangeTerms(
       );
     }
 
-    const { errors, warnings } = validateCompatibility(localTerms, partnerTerms);
+    const { errors, warnings } = validateCompatibility(
+      localTerms,
+      partnerTerms,
+    );
 
     if (errors.length > 0) {
       await sendAbort(conn, errors);
@@ -129,7 +132,9 @@ export async function exchangeTerms(
     let partnerTerms: LinkageTerms;
     let parseError: string | undefined;
     try {
-      partnerTerms = parseLinkageTerms(termsMessage.parse(rawData).linkageTerms);
+      partnerTerms = parseLinkageTerms(
+        termsMessage.parse(rawData).linkageTerms,
+      );
     } catch (parseErr) {
       parseError =
         parseErr instanceof Error ? parseErr.message : String(parseErr);

@@ -5,11 +5,11 @@ export function withSuppressedLogs<T>(
   fn: () => Promise<T>,
   minLevel?: number,
 ): Promise<T>;
+export function withSuppressedLogs<T>(fn: () => T, minLevel?: number): T;
 export function withSuppressedLogs<T>(
-  fn: () => T,
-  minLevel?: number,
-): T;
-export function withSuppressedLogs<T>(fn: () => T | Promise<T>, minLevel: number = logLibrary.levels.ERROR): unknown {
+  fn: () => T | Promise<T>,
+  minLevel: number = logLibrary.levels.ERROR,
+): unknown {
   const original = logLibrary.getLevel();
   logLibrary.setLevel(minLevel as Parameters<typeof logLibrary.setLevel>[0]);
   try {
@@ -28,7 +28,10 @@ export function withSuppressedLogs<T>(fn: () => T | Promise<T>, minLevel: number
 /** @internal */
 export type LogEntry = { level: string; message: string };
 
-const captures: Array<{ filter: (level: string) => boolean; logs: LogEntry[] }> = [];
+const captures: Array<{
+  filter: (level: string) => boolean;
+  logs: LogEntry[];
+}> = [];
 let interceptorInstalled = false;
 
 function ensureInterceptor(): void {
@@ -82,7 +85,10 @@ export function withCapturedLogs<T>(
 ): [T, LogEntry[]] | Promise<[T, LogEntry[]]> {
   ensureInterceptor();
   const logs: LogEntry[] = [];
-  const entry = { filter: levelFilter ?? ((level: string) => level === "WARN"), logs };
+  const entry = {
+    filter: levelFilter ?? ((level: string) => level === "WARN"),
+    logs,
+  };
   captures.push(entry);
 
   const cleanup = () => {

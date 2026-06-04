@@ -18,7 +18,7 @@ export default tseslint.config(
       "**/node_modules/**",
       "apps/web/eslint.config.js",
       "scratch/**",
-      "**/.rollup.cache/**"
+      "**/.rollup.cache/**",
     ],
   },
   {

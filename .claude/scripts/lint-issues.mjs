@@ -107,9 +107,7 @@ function checkResidue(body) {
   for (const line of lines) {
     for (const re of RESIDUE_PATTERNS) {
       if (re.test(line)) {
-        out.push(
-          finding("warning", `context-free phrase: ${line.trim()}`),
-        );
+        out.push(finding("warning", `context-free phrase: ${line.trim()}`));
         break; // one finding per line is enough to draw a reviewer's eye
       }
     }
@@ -287,7 +285,9 @@ function main() {
     findings.push(...checkOpenQuestions(item.body));
 
     // Stable order: errors first, then warnings, then info.
-    findings.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+    findings.sort(
+      (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
+    );
     for (const f of findings) {
       process.stdout.write(`  [${f.severity}] ${f.message}\n`);
       if (f.severity === "error") totalErrors += 1;

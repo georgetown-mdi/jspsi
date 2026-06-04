@@ -35,8 +35,7 @@ async function createSession(
 
 async function createSessionOk(): Promise<SessionBody> {
   const response = await createSession();
-  if (!response.ok)
-    throw new Error(`createSession failed: ${response.status}`);
+  if (!response.ok) throw new Error(`createSession failed: ${response.status}`);
   return response.json() as Promise<SessionBody>;
 }
 

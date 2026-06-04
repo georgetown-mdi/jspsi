@@ -24,7 +24,10 @@ export const OWNER = "georgetown-mdi";
 
 /** Run gh with the given argv and return stdout as a string. */
 export function gh(args) {
-  return execFileSync("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  return execFileSync("gh", args, {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
 }
 
 /** Derive an item's PVTI_ global node ID from its project number and numeric ID. */
@@ -37,7 +40,10 @@ export function pvtiNodeId(projectNumber, numericId) {
   }
   const idBuf = Buffer.alloc(4);
   idBuf.writeUInt32BE(numericId);
-  return "PVTI_" + Buffer.concat([Buffer.from(prefixHex, "hex"), idBuf]).toString("base64url");
+  return (
+    "PVTI_" +
+    Buffer.concat([Buffer.from(prefixHex, "hex"), idBuf]).toString("base64url")
+  );
 }
 
 /**

@@ -119,9 +119,9 @@ test("peerId without timestampInFilename is rejected on filedrop too", () => {
     channel: "filedrop",
     path: "/mnt/share",
   };
-  expect(() =>
-    applyConnectionOverrides(base, { peerId: "agency-a" }),
-  ).toThrow("timestamp_in_filename");
+  expect(() => applyConnectionOverrides(base, { peerId: "agency-a" })).toThrow(
+    "timestamp_in_filename",
+  );
 });
 
 test("empty peerId is rejected by applyConnectionOverrides", () => {

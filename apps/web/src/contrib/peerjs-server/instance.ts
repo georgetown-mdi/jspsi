@@ -22,7 +22,6 @@ import type { IClient } from "./models/client.ts";
 import type { IConfig } from "./config/index.ts";
 import type { IMessage } from "./models/message.ts";
 
-
 /* export interface PeerServerEvents {
 	on:
 		((event: "connection", listener: (client: IClient) => void) => this)
@@ -32,78 +31,80 @@ import type { IMessage } from "./models/message.ts";
 } */
 
 export interface PeerServerInstance {
-	config: IConfig
-	realm: IRealm
+  config: IConfig;
+  realm: IRealm;
 }
 
-export function CreateInstanceWSOnly(
-	{ server, options } :
-	{ server: HttpServer | Http2Server, options?: Partial<IConfig> }
-): PeerServerInstance
-{
-	const config: IConfig = {
-		...defaultConfig,
-		...options,
-	};
-	const realm: IRealm = new Realm();
-	const messageHandler = new MessageHandler(realm);
+export function CreateInstanceWSOnly({
+  server,
+  options,
+}: {
+  server: HttpServer | Http2Server;
+  options?: Partial<IConfig>;
+}): PeerServerInstance {
+  const config: IConfig = {
+    ...defaultConfig,
+    ...options,
+  };
+  const realm: IRealm = new Realm();
+  const messageHandler = new MessageHandler(realm);
 
-	const messagesExpire: IMessagesExpire = new MessagesExpire({
-		realm,
-		config,
-		messageHandler,
-	});
-	const checkBrokenConnections = new CheckBrokenConnections({
-		realm,
-		config,
-		onClose: (_client) => {
-			// emit("disconnect", client);
-		},
-	});
+  const messagesExpire: IMessagesExpire = new MessagesExpire({
+    realm,
+    config,
+    messageHandler,
+  });
+  const checkBrokenConnections = new CheckBrokenConnections({
+    realm,
+    config,
+    onClose: (_client) => {
+      // emit("disconnect", client);
+    },
+  });
 
-	const customConfig = {
-		...config,
-		path: path.posix.join(config.path, "/"),
-	};
+  const customConfig = {
+    ...config,
+    path: path.posix.join(config.path, "/"),
+  };
 
-	const wss: IWebSocketServer = new WebSocketServer({
-		server: server as HttpServer | HttpsServer,
-		realm: realm,
-		config: customConfig,
-	});
+  const wss: IWebSocketServer = new WebSocketServer({
+    server: server as HttpServer | HttpsServer,
+    realm: realm,
+    config: customConfig,
+  });
 
-	wss.on("connection", (client: IClient) => {
-		const messageQueue = realm.getMessageQueueById(client.getId());
+  wss.on("connection", (client: IClient) => {
+    const messageQueue = realm.getMessageQueueById(client.getId());
 
-		if (messageQueue) {
-			let message: IMessage | undefined;
+    if (messageQueue) {
+      let message: IMessage | undefined;
 
-			while ((message = messageQueue.readMessage())) {
-				messageHandler.handle(client, message);
-			}
-			realm.clearMessageQueue(client.getId());
-		}
-        
-        // emit("connection", client)
-	});
+      while ((message = messageQueue.readMessage())) {
+        messageHandler.handle(client, message);
+      }
+      realm.clearMessageQueue(client.getId());
+    }
 
-	wss.on("message", (client: IClient, message: IMessage) => {
-		// emit("message", client, message);
-		messageHandler.handle(client, message);
-	});
+    // emit("connection", client)
+  });
 
-	wss.on("close", (_client: IClient) => {
-		// emit("disconnect", client);
-	});
+  wss.on("message", (client: IClient, message: IMessage) => {
+    // emit("message", client, message);
+    messageHandler.handle(client, message);
+  });
 
-	wss.on("error", (_error: Error) => {
-		// emit("error", error);
-	});
+  wss.on("close", (_client: IClient) => {
+    // emit("disconnect", client);
+  });
 
-	messagesExpire.startMessagesExpiration();
-	checkBrokenConnections.start();
+  wss.on("error", (_error: Error) => {
+    // emit("error", error);
+  });
 
-	return { config, realm };
+  messagesExpire.startMessagesExpiration();
+  checkBrokenConnections.start();
+
+  return { config, realm };
 }
 
 /* export const createInstance = ({

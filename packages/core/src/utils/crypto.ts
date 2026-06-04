@@ -1,6 +1,6 @@
- // NOTE: `hexToBytes`, `bytesToHex`, and `hmacSha256` in `pake.ts`
- // are also candidates to move here once the AEAD layer provides a second
- // caller for them.
+// NOTE: `hexToBytes`, `bytesToHex`, and `hmacSha256` in `pake.ts`
+// are also candidates to move here once the AEAD layer provides a second
+// caller for them.
 
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();

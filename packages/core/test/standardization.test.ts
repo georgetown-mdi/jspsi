@@ -225,9 +225,7 @@ describe("runPipeline — string functions", () => {
 
   test("pad_left throws when length is not a number", () => {
     expect(() =>
-      runPipeline("123", [
-        { function: "pad_left", params: { length: "9" } },
-      ]),
+      runPipeline("123", [{ function: "pad_left", params: { length: "9" } }]),
     ).toThrow('pad_left: "length" must be a positive integer');
   });
 });

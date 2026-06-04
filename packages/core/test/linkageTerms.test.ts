@@ -422,7 +422,9 @@ test("linkage fields in different order are still compatible", () => {
         { name: "ssn", type: "ssn" },
         { name: "dob", type: "dateOfBirth" },
       ],
-      linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
+      linkageKeys: [
+        { name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] },
+      ],
     },
     {
       ...termsB,
@@ -430,7 +432,9 @@ test("linkage fields in different order are still compatible", () => {
         { name: "dob", type: "dateOfBirth" },
         { name: "ssn", type: "ssn" },
       ],
-      linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
+      linkageKeys: [
+        { name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] },
+      ],
     },
   );
   expect(errors.filter((e) => e.includes("linkage fields"))).toHaveLength(0);
@@ -507,11 +511,17 @@ test("payload send/receive mismatch is an error", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      payload: { send: [{ name: "enrollment_date" }], receive: [{ name: "case_id" }] },
+      payload: {
+        send: [{ name: "enrollment_date" }],
+        receive: [{ name: "case_id" }],
+      },
     },
     {
       ...termsB,
-      payload: { send: [{ name: "case_id" }], receive: [{ name: "wrong_column" }] },
+      payload: {
+        send: [{ name: "case_id" }],
+        receive: [{ name: "wrong_column" }],
+      },
     },
   );
   expect(errors.some((e) => e.includes("payload mismatch"))).toBe(true);
@@ -521,11 +531,17 @@ test("matching payload send/receive columns are compatible", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      payload: { send: [{ name: "enrollment_date" }], receive: [{ name: "case_id" }] },
+      payload: {
+        send: [{ name: "enrollment_date" }],
+        receive: [{ name: "case_id" }],
+      },
     },
     {
       ...termsB,
-      payload: { send: [{ name: "case_id" }], receive: [{ name: "enrollment_date" }] },
+      payload: {
+        send: [{ name: "case_id" }],
+        receive: [{ name: "enrollment_date" }],
+      },
     },
   );
   expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
@@ -538,16 +554,32 @@ test("matching payload send/receive columns are compatible", () => {
 
 test("mismatched deduplicate values are not an error", () => {
   const { errors } = validateCompatibility(
-    { ...termsA, deduplicate: true,  output: { expectsOutput: true, shareWithPartner: true } },
-    { ...termsB, deduplicate: false, output: { expectsOutput: true, shareWithPartner: true } },
+    {
+      ...termsA,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
+    {
+      ...termsB,
+      deduplicate: false,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
   );
   expect(errors).toHaveLength(0);
 });
 
 test("both parties deduplicating is compatible when both expect output", () => {
   const { errors } = validateCompatibility(
-    { ...termsA, deduplicate: true, output: { expectsOutput: true, shareWithPartner: true } },
-    { ...termsB, deduplicate: true, output: { expectsOutput: true, shareWithPartner: true } },
+    {
+      ...termsA,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
+    {
+      ...termsB,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
   );
   expect(errors).toHaveLength(0);
 });

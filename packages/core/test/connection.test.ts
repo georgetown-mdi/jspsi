@@ -478,7 +478,11 @@ test("peerId 'temp' is rejected", () => {
 test("retainFiles is accepted on sftp when timestampInFilename and locklessRendezvous are true", () => {
   const result = safeParseConnectionConfig({
     ...sftpBase,
-    options: { timestampInFilename: true, locklessRendezvous: true, retainFiles: true },
+    options: {
+      timestampInFilename: true,
+      locklessRendezvous: true,
+      retainFiles: true,
+    },
   });
   expect(result.success).toBe(true);
 });

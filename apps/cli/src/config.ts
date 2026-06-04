@@ -97,7 +97,9 @@ export function applyConnectionOverrides(
     // are not silently bypassed.
     const validation = safeParseFileSyncOptions(result.options);
     if (!validation.success) {
-      const message = validation.error.issues.map((i: { message: string }) => i.message).join("; ");
+      const message = validation.error.issues
+        .map((i: { message: string }) => i.message)
+        .join("; ");
       throw new Error(message);
     }
   }

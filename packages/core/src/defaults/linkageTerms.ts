@@ -1,4 +1,8 @@
-import type { LinkageTerms, LinkageField, LinkageKey } from "../config/linkageTerms";
+import type {
+  LinkageTerms,
+  LinkageField,
+  LinkageKey,
+} from "../config/linkageTerms";
 import type { Metadata } from "../config/metadata";
 import type { SemanticType } from "../types";
 
@@ -164,7 +168,7 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     ],
   },
   {
-    name: "SSN + FN + YOB + MOB", 
+    name: "SSN + FN + YOB + MOB",
     elements: [
       { field: "ssn" },
       { field: "firstName" },
@@ -200,7 +204,7 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
  */
 export function getDefaultLinkageTerms(
   identity: string,
-  metadata?: Metadata
+  metadata?: Metadata,
 ): LinkageTerms {
   let linkageKeys: LinkageKey[];
   if (metadata !== undefined && metadata.length > 0) {
