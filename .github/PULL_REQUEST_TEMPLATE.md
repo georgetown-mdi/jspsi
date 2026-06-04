@@ -44,7 +44,7 @@ Focused PR (<= ~5 files): one bullet or table row per file, with the why. Broad 
 - [ ] `npm run typecheck && npm run lint` clean
 - [ ] `npm test -w packages/core` (N/N)
 - [ ] `npm run test:unit -w apps/cli` and/or `apps/web` as relevant
-- [ ] Integration tests: `npm run test:integration -w apps/cli` (self-manages the Docker SFTP container), or a one-line note on why they could not run (e.g. no Docker)
+- [ ] CLI integration tests: `npm run test:integration -w apps/cli`
 
 New tests cover: <name the specific behaviors, as the acceptance criteria do>
 
@@ -52,6 +52,7 @@ New tests cover: <name the specific behaviors, as the acceptance criteria do>
 
 <!-- Pre-merge hygiene that keeps the rest of the repo consistent. Not testing. Check or mark n/a -- do not delete; a deliberate "n/a" is the signal you looked. -->
 
-- [ ] Swept `docs/` for pages this change affects (e.g. `EXCHANGE_SPEC`, `FILE_SYNC`, `PROTOCOL`, `COMMUNICATION`); updated them, or confirmed none needed
+- [ ] Ran `ls docs/` and checked each file for impact; updated affected pages or confirmed none needed
+  <!-- docs/ currently: CLI, COMMUNICATION, COMPLIANCE, DEPLOYMENT, DESIGN, EXCHANGE_SPEC, FILE_SYNC, PROTOCOL, README, RELEASES, ROADMAP, SECURITY_DESIGN; do not rely on these being the only documents -- enumerate the directory -->
 - [ ] `CHANGELOG.md` `[Unreleased]` updated, or n/a
 - [ ] Cryptographic code changed? Security review requested (see Dependency Policy), or n/a
