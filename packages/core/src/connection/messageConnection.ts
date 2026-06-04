@@ -257,6 +257,14 @@ export class QueuedMessageConnection implements MessageConnection {
     for (const waiter of pending) waiter.reject(error);
   }
 
+  // deliver() is the consumer of FileSyncConnection's "data" event in
+  // production (bridged via fromEventConnection's onData closure). It MUST NOT
+  // throw synchronously on any failure mode it handles -- notably the inbound
+  // overflow below, which latches a non-throwing fail() rather than throwing.
+  // FileSyncConnection's retain-mode poll() advances recvSeq only after
+  // emit("data", ...) returns, so a synchronous throw here would re-poll the
+  // same never-deleted message until peer_timeout_ms (docs/FILE_SYNC.md I8).
+  // messageConnection.test.ts pins this non-throwing contract.
   private deliver(message: unknown): void {
     // Once a half-close is pending, ignore further inbound: drain exactly what
     // was buffered at close time, then fail. PeerJS will not deliver after a
@@ -275,8 +283,8 @@ export class QueuedMessageConnection implements MessageConnection {
     if (this.queue.length >= this.capacity) {
       this.fail(
         new ConnectionError(
-          `inbound buffer overflow: more than ${this.capacity} unconsumed ` +
-            "messages; the peer is sending out of turn",
+          `inbound buffer overflow: at capacity (${this.capacity} unconsumed ` +
+            "messages); the peer is sending out of turn",
           "protocol",
         ),
       );
