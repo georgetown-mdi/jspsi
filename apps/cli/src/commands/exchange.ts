@@ -94,7 +94,7 @@ export function builder(cmd: Argv): Argv {
     .option("lockless-rendezvous", {
       type: "boolean",
       describe:
-        "use the ack-handshake rendezvous instead of the atomic wave-file " +
+        "use the ack-handshake rendezvous instead of the atomic lock-file " +
         "race; required on sync-mediated transports that lack atomic " +
         "exclusive-create or deletion visibility during rendezvous. Both " +
         "parties must set this flag identically",

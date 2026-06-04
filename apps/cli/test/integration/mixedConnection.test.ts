@@ -76,7 +76,7 @@ afterAll(async () => {
   await cleanServer();
 });
 
-test("wave synchronization with race condition", async () => {
+test("lock synchronization with race condition", async () => {
   await Promise.all([sftpConn.synchronize(), localConn.synchronize()]);
 
   expect(sftpConn.peerId).toEqual(localConn.id);
@@ -94,7 +94,7 @@ test("basic synchronization", async () => {
   await sftpAdapter.put(
     // The planted peer hello must advertise the bilateral mode flags
     // (193901017); an empty {} body now fails the HelloEnvelope schema. Both
-    // parties run default wave mode, so both flags are false.
+    // parties run default lock mode, so both flags are false.
     Buffer.from(
       JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
     ),

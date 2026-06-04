@@ -119,9 +119,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // SSH_FX_FAILURE (status 4), which is the generic SFTPv3 failure code and
     // does not distinguish "file already exists" from quota, permissions, or
     // other I/O errors. For code 4 this method calls exists() after the failure:
-    // if the file is present, the exclusive-create lost a genuine wave-file race
+    // if the file is present, the exclusive-create lost a genuine lock-file race
     // (EEXIST); if the file is absent, the failure was a real I/O error and the
-    // original error is propagated unchanged. This preserves correct wave-file
+    // original error is propagated unchanged. This preserves correct lock-file
     // race recovery while surfacing I/O errors at synchronization time rather
     // than deferring them to the first send().
     //
@@ -189,7 +189,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
                           `SFTP exclusive-create failed (SSH_FX_FAILURE) ` +
                             `and the target file is not present, so the ` +
                             `cause is a server-side I/O error rather than a ` +
-                            `wave-file race. Check the SFTP server logs for ` +
+                            `lock-file race. Check the SFTP server logs for ` +
                             `the underlying cause (disk full, permissions, ` +
                             `quota) before retrying; SFTPv3 cannot ` +
                             `distinguish a transient race from a permanent ` +

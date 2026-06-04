@@ -339,7 +339,7 @@ export interface FileSyncOptions extends SharedOptions {
   timestampInFilename?: boolean;
   /**
    * When `true`, the rendezvous handshake uses an ack-handshake barrier
-   * instead of the atomic-exclusive-create wave-file race. Both parties must
+   * instead of the atomic-exclusive-create lock-file race. Both parties must
    * set this identically; the value is advertised in the hello payload and a
    * mismatch fails fast at rendezvous, symmetrically on both parties, with a
    * usage error naming each side's setting (rather than stalling until the
@@ -394,7 +394,7 @@ export interface FileSyncOptions extends SharedOptions {
    * than stalling until the peer timeout). Requires
    * `timestampInFilename: true` -- without it, every message from the same
    * party collides on filename and a retained transcript would overwrite
-   * itself. Also requires `locklessRendezvous: true` -- wave rendezvous is
+   * itself. Also requires `locklessRendezvous: true` -- lock rendezvous is
    * delete-based and cannot produce the whole-directory no-delete transcript
    * retain mode guarantees.
    *
@@ -436,7 +436,7 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
   })
   .refine((opts) => !opts.retainFiles || opts.locklessRendezvous === true, {
     message:
-      "retain_files requires lockless_rendezvous: true; wave rendezvous is " +
+      "retain_files requires lockless_rendezvous: true; lock rendezvous is " +
       "delete-based (the joiner deletes the peer hello as a role-assignment " +
       "signal) and cannot produce the whole-directory no-delete transcript " +
       "retain mode guarantees",
@@ -496,7 +496,7 @@ export interface SFTPConnectionConfig {
  * Connection configuration for an exchange over a locally-mounted folder.
  * Both parties must have read/write access to the same directory (e.g. a
  * network share mounted by IT that is backed by an SFTP server). The
- * `.hello`/`.wave`/`.json` rendezvous protocol is identical to the SFTP
+ * `-hello.json`/`-lock.json`/message-`.json` protocol is identical to the SFTP
  * channel; no SSH connection is made. Use `file://` URLs with the CLI.
  *
  * PAKE authentication applies in the same way as the `sftp` channel: the

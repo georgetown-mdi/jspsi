@@ -25,6 +25,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 
 ### Changed
 
+- Renamed the default file-sync rendezvous mode from "wave" to "lock" (the counterpart to the existing "lockless" mode) and its on-disk tiebreaker file from `<id1>-<id2>.wave` to `<peer1>-<peer2>-lock.json`, bringing the tiebreaker under the same control-file filename grammar as every other protocol file. Terminology and on-disk naming only: no protocol behavior or config-schema change, and `lockless_rendezvous: false` still selects this mode. Old and new builds do not interoperate at rendezvous (one writes `.wave`, the other `-lock.json`), so both ends must run the same build.
 - Library API: `runExchange` and `authenticateConnection` now take a `MessageConnection` instead of the event-based `Connection`. CLI exchanges are unaffected.
 - An exchange now fails with a clear error (bounded by `peer_timeout_ms`) when the partner stops responding, instead of hanging.
 - A peer sending messages out of turn is rejected rather than buffered without limit.

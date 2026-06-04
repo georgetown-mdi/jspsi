@@ -499,7 +499,7 @@ export async function runProtocol(
     await conn.synchronize();
 
     // If a signal fired during the synchronize() round-trip, doCleanup already
-    // ran (closing the connection and removing our hello/wave files). Bail
+    // ran (closing the connection and removing our hello/lock files). Bail
     // out before start() so the poller is not launched against a closed
     // transport. Without this, conn.start() would schedule polls that fail
     // when they hit the closed underlying client, producing spurious error
