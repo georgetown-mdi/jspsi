@@ -1096,7 +1096,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             return;
           }
 
-          throw new Error(`[${this.role}] synchronization has timed out`);
+          // No role tag: this lockless timeout can fire after the peer hello
+          // was seen and acked but the peer's return ack never arrived, where
+          // hello-filename order may make this party the joiner. The role is
+          // genuinely indeterminate here, so emit no `[role]` prefix (unlike
+          // the wave timeout below, which is reachable only as the lone
+          // starter).
+          throw new Error("synchronization has timed out");
         }
 
         // Wave-race path.
@@ -1532,7 +1538,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           }
         }
 
-        throw new Error(`[${this.role}] synchronization has timed out`);
+        // Tagged [starter]: reached only when no peer hello was ever seen --
+        // every branch that observes one commits a role and returns, so the
+        // sole path that loops to here is the lone waiter, which never deleted
+        // a peer hello and so is never the joiner -- even though `this.role` is
+        // not committed until rendezvous succeeds.
+        throw new Error("[starter] synchronization has timed out");
       };
       try {
         await waitForPeer();

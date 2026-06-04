@@ -1658,6 +1658,58 @@ test("synchronize() wave starter: aborts with a distinct transport error within 
   expect(conn.handshakeRole).toBeUndefined();
 });
 
+test("synchronize() wave starter: aborts on a stuck sentinel even while its own hello is still present (state a)", async () => {
+  // State (a) of the joiner's sequence: it has written its sentinel (put) but
+  // not yet deleted this party's hello, so the starter's own hello and the
+  // sentinel are visible together (otherFiles === 0, theseFiles === 1,
+  // joiningFiles === 1). The recovery branch is gated only on the sentinel, not
+  // on whether our hello is gone, so the bounded-window abort must still fire
+  // here -- and the message must NOT claim the joiner already deleted our hello,
+  // because it may have crashed before that step. This pins finding 1's premise
+  // (the recovery branch is reachable before the delete) and its reworded text.
+  const idB = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 30,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myHello = `${conn.id}-hello.json`;
+  const joiningName = `${idB}-joining.json`;
+  files.set(`${conn.path}/${joiningName}`, WAVE_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // preexisting guard: empty
+    // Our own hello is still present (the joiner has not deleted it yet) and the
+    // joiner's sentinel sits beside it, never resolving to a hello.
+    return [
+      { name: myHello, modifyTime: Date.now(), size: 0 },
+      { name: joiningName, modifyTime: Date.now(), size: 0 },
+    ];
+  };
+
+  const start = Date.now();
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  const elapsed = Date.now() - start;
+
+  expect(err).toBeInstanceOf(Error);
+  // Transport failure (exit 69), not a usage error.
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(
+    /did not complete within the recovery window/,
+  );
+  // Crucially: does NOT assert the delete already happened, since in state (a)
+  // it has not. The reworded message brackets both sub-windows.
+  expect((err as Error).message).toMatch(
+    /failed after announcing its arrival but before publishing its hello/,
+  );
+  expect((err as Error).message).toMatch(/^\[starter\]/);
+  // Bounded by the recovery window, far below the 5 s TTL.
+  expect(elapsed).toBeLessThan(2_000);
+});
+
 test("synchronize() wave starter: a peer hello alongside a foreign-id joining sentinel is a UsageError", async () => {
   // Three-party contamination: a legitimate peer hello (idB) and a joining
   // sentinel from a different id (idC) are visible together. A sentinel whose
