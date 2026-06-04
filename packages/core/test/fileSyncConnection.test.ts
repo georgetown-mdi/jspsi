@@ -114,12 +114,12 @@ async function makeConnectedConn(
   return conn;
 }
 
-// A valid hello body advertising the default wave/non-retain flags. Tests whose
-// rendezvous reader runs in the default (wave) mode hand-plant this as the peer
+// A valid hello body advertising the default lock/non-retain flags. Tests whose
+// rendezvous reader runs in the default (lock) mode hand-plant this as the peer
 // hello so it passes the HelloEnvelope read gate without a spurious bilateral
 // mismatch. 193901017 made the hello body carry these two required flags, so a
 // bare `{}` no longer satisfies the hello schema.
-const WAVE_HELLO_BODY = Buffer.from(
+const LOCK_HELLO_BODY = Buffer.from(
   JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
 );
 
@@ -876,26 +876,26 @@ test("createExclusive creates an empty entry and does not affect other files", a
   expect(files.get("/other")).toEqual(Buffer.from("data"));
 });
 
-// --- synchronize(): wave-file race cleanup ------------------------------------
+// --- synchronize(): lock-file race cleanup ------------------------------------
 
-test("synchronize() cleans up hello and wave files when createExclusive() throws EEXIST", async () => {
-  // Simulates the losing party in the wave-file race: createExclusive() throws
-  // because the peer already claimed the wave slot, and all three residue files
-  // (-hello.json x2, .wave) must be deleted before synchronize() returns.
+test("synchronize() cleans up hello and lock files when createExclusive() throws EEXIST", async () => {
+  // Simulates the losing party in the lock-file race: createExclusive() throws
+  // because the peer already claimed the lock slot, and all three residue files
+  // (-hello.json x2, -lock.json) must be deleted before synchronize() returns.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   // Pin conn.id to the lexicographic maximum so peerId always sorts below it,
-  // guaranteeing the wave-file name and role assignment are deterministic.
+  // guaranteeing the lock-file name and role assignment are deterministic.
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myId = conn.id;
 
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId (pinned to max), so peer "arrived first" by name tiebreak.
-  // Wave name: peer-mine.
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  // Lock name: peer-mine.
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   // Provide a consistent modifyTime: same for both so the name tiebreak decides.
   const mtime = Date.now();
@@ -911,12 +911,12 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
 
   // Plant the peer hello body so the two-hellos branch's HelloEnvelope read
   // gate (added by 193901017) passes before reaching createExclusive.
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
-  // createExclusive() throws EEXIST; also plant the wave file so
-  // exists(wavePath) → true, simulating the peer having already claimed it.
+  // createExclusive() throws EEXIST; also plant the lock file so
+  // exists(lockPath) → true, simulating the peer having already claimed it.
   client.createExclusive = async (path) => {
-    files.set(wavePath, Buffer.alloc(0));
+    files.set(lockPath, Buffer.alloc(0));
     throw Object.assign(new Error(`${path}: file already exists`), {
       code: "EEXIST",
     });
@@ -925,7 +925,7 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
   await conn.synchronize();
 
   // All residue files must be gone.
-  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
   // Roles are set correctly for the losing party.
@@ -934,8 +934,8 @@ test("synchronize() cleans up hello and wave files when createExclusive() throws
   expect(conn.handshakeRole).toBe("initiator");
 });
 
-test("synchronize() throws when createExclusive throws EEXIST but wave file is already gone (peer abandoned)", async () => {
-  // The wave file is only gone after EEXIST if the winner crashed during the
+test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {
+  // The lock file is only gone after EEXIST if the winner crashed during the
   // narrow window between createExclusive succeeding and responsibleFiles
   // being cleared. Polling for a peer that is not coming would stall until
   // peerTimeoutMs; synchronize() must fail fast and leave the directory clean.
@@ -949,7 +949,7 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId (pinned to max), so peer "arrived first" by name tiebreak.
-  // Wave name would be peer-mine.
+  // Lock name would be peer-mine.
 
   // Plant both hello files so the defensive safeDelete calls have something
   // to remove; the directory must be clean after the throw so a retry can
@@ -958,7 +958,7 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
   files.set(`${basePath}/${myHelloName}`, Buffer.alloc(0));
   // Peer hello carries a valid HelloEnvelope so the two-hellos read gate passes
   // before createExclusive (193901017); the own hello is never gate-read.
-  files.set(`${basePath}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${basePath}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -971,7 +971,7 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
     ];
   };
 
-  // createExclusive() throws EEXIST but does NOT plant the wave file,
+  // createExclusive() throws EEXIST but does NOT plant the lock file,
   // simulating the peer having already cleaned it up before exists() runs.
   client.createExclusive = async (path) => {
     throw Object.assign(new Error(`${path}: file already exists`), {
@@ -985,16 +985,16 @@ test("synchronize() throws when createExclusive throws EEXIST but wave file is a
 
   // The directory must be clean after the throw so a retry can run from
   // scratch. Both hellos were deleted by the inner branch before the throw;
-  // the outer catch safeDeletes wavePath and helloPath (no-ops here).
+  // the outer catch safeDeletes lockPath and helloPath (no-ops here).
   expect(files.has(`${basePath}/${myHelloName}`)).toBe(false);
   expect(files.has(`${basePath}/${peerHelloName}`)).toBe(false);
 });
 
-test("synchronize() rejects and cleans up hello and wave files when createExclusive throws a non-EEXIST error", async () => {
+test("synchronize() rejects and cleans up hello and lock files when createExclusive throws a non-EEXIST error", async () => {
   // Simulates an SFTP close-after-open failure: createExclusive atomically
-  // creates the wave file on the server (open succeeds) but then fails to
+  // creates the lock file on the server (open succeeds) but then fails to
   // close the handle, rejecting with a non-EEXIST error. The outer catch in
-  // synchronize() must safeDelete the wave file and reject.
+  // synchronize() must safeDelete the lock file and reject.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -1005,8 +1005,8 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
   // peerId < myId (pinned to max), so peer arrived first.
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1021,9 +1021,9 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
 
   // Plant the peer's hello in the mock filesystem so the assertion below is
   // not vacuously true (and so the two-hellos read gate passes). The outer catch
-  // is responsible only for this party's files (wavePath and helloPath); it does
+  // is responsible only for this party's files (lockPath and helloPath); it does
   // not touch the peer's hello.
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   // Simulate a partial createExclusive: create the file on the mock filesystem
   // (mimicking a successful open) but then reject (mimicking a close failure).
@@ -1034,8 +1034,8 @@ test("synchronize() rejects and cleans up hello and wave files when createExclus
 
   await expect(conn.synchronize()).rejects.toThrow();
 
-  // The wave file must be cleaned up (outer catch calls safeDelete(wavePath)).
-  expect(files.has(wavePath)).toBe(false);
+  // The lock file must be cleaned up (outer catch calls safeDelete(lockPath)).
+  expect(files.has(lockPath)).toBe(false);
   // The outer catch cleans up only this party's hello (helloPath).
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
   // The peer's hello is left intact — it is the peer's responsibility and will
@@ -1055,8 +1055,8 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
 
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1074,7 +1074,7 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
   // succeed (no-op on missing), so the count would be the same either way, but
   // the test is clearer when files match what list() claims exists. A valid
   // HelloEnvelope body also lets the two-hellos read gate pass.
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   client.createExclusive = async (path) => {
     files.set(path, Buffer.alloc(0));
@@ -1090,7 +1090,7 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
 
   await expect(conn.synchronize()).rejects.toThrow();
 
-  // The outer catch deletes wavePath and helloPath (my hello): 2 safeDeletes.
+  // The outer catch deletes lockPath and helloPath (my hello): 2 safeDeletes.
   // The peer's hello is left intact — it is the peer's responsibility, not this
   // party's — so no safeDelete is issued for it.
   const countAfterSync = safeDeleteCount;
@@ -1098,25 +1098,25 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
 
   // responsibleFiles was cleared by the outer catch: cleanup() must not call
   // safeDelete again. Without the clear, cleanup() would re-attempt safeDelete
-  // on waveName and myHelloName (both already deleted), adding 2 more calls.
+  // on lockName and myHelloName (both already deleted), adding 2 more calls.
   await conn.cleanup();
   expect(safeDeleteCount).toBe(countAfterSync);
 
-  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
 });
 
-test("synchronize() resolves cleanly when it observes a wave file already created by the peer", async () => {
-  // Regression guard: the wave-detection branch
-  // (waitForPeer's "waveFiles.length > 0" arm) used to compare bare UUIDs
-  // from the wave filename against -hello.json entries, which never matched,
-  // so any party that observed a peer-created wave file threw
-  // "wave file does not reference this connection" instead of completing
+test("synchronize() resolves cleanly when it observes a lock file already created by the peer", async () => {
+  // Regression guard: the lock-detection branch
+  // (waitForPeer's "lockFiles.length > 0" arm) used to compare bare UUIDs
+  // from the lock filename against -hello.json entries, which never matched,
+  // so any party that observed a peer-created lock file threw
+  // "lock file does not reference this connection" instead of completing
   // the rendezvous.
   //
   // Scenario reproduced here: peer arrived first, both wrote -hello.json,
-  // peer won the wave race and created `${peerId}-${myId}.wave`. This party
-  // observes peer-hello.json + my-hello.json + wave file on its next list().
+  // peer won the lock race and created `${peerId}-${myId}-lock.json`. This party
+  // observes peer-hello.json + my-hello.json + lock file on its next list().
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -1125,27 +1125,27 @@ test("synchronize() resolves cleanly when it observes a wave file already create
 
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  // Peer arrived first (sorted lower) so the wave name is `${peer}-${my}`.
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  // Peer arrived first (sorted lower) so the lock name is `${peer}-${my}`.
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   // Plant the three files so safeDelete calls have something to remove.
   // Peer hello must be valid JSON so the I5 read gate does not retry to timeout.
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(lockPath, Buffer.alloc(0));
 
   const mtime = Date.now();
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
     // Initial check (sees only our own newly-written hello mid-flow).
-    // Subsequent listings expose the peer hello and the peer-created wave.
+    // Subsequent listings expose the peer hello and the peer-created lock.
     if (listCallCount === 1) return [];
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: waveName, modifyTime: mtime, size: 0 },
+      { name: lockName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -1153,27 +1153,27 @@ test("synchronize() resolves cleanly when it observes a wave file already create
 
   // Peer arrived first so this party is the initiator (second to arrive).
   expect(conn.handshakeRole).toBe("initiator");
-  // The wave-detection branch must label roles with the same convention as
+  // The lock-detection branch must label roles with the same convention as
   // the other rendezvous branches: responder=starter, initiator=joiner.
   expect(conn.role).toBe("joiner");
   expect(conn.peerId).toBe(peerId);
-  // All three files cleaned up by the wave-detection branch.
-  expect(files.has(wavePath)).toBe(false);
+  // All three files cleaned up by the lock-detection branch.
+  expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
 });
 
-// --- synchronize(): wave-detection with arbitrary-string ids -----------------
+// --- synchronize(): lock-detection with arbitrary-string ids -----------------
 
-test("synchronize() wave-detection branch completes rendezvous with arbitrary string ids", async () => {
+test("synchronize() lock-detection branch completes rendezvous with arbitrary string ids", async () => {
   // Acceptance criterion: a two-party unit test with arbitrary string ids
-  // (not UUIDs) completes the wave handshake and assigns roles deterministically.
+  // (not UUIDs) completes the lock handshake and assigns roles deterministically.
   //
   // "Agency A-hello.json" < "Agency B-hello.json" lexicographically, so
-  // "Agency A" arrived first. The wave producer (the winner of the wave race,
-  // which is unmodelled here -- we plant the wave directly) creates
-  // "Agency A-Agency B.wave". This connection is "Agency B" and observes both
-  // hellos plus the peer-created wave, triggering the wave-detection branch.
+  // "Agency A" arrived first. The lock producer (the winner of the lock race,
+  // which is unmodelled here -- we plant the lock directly) creates
+  // "Agency A-Agency B-lock.json". This connection is "Agency B" and observes both
+  // hellos plus the peer-created lock, triggering the lock-detection branch.
   const myId = "Agency B";
   const peerId = "Agency A";
   const { client, files } = makeMockClient();
@@ -1182,13 +1182,13 @@ test("synchronize() wave-detection branch completes rendezvous with arbitrary st
 
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  // Peer arrived first (sorts lower) so the wave name is `${peerId}-${myId}`.
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  // Peer arrived first (sorts lower) so the lock name is `${peerId}-${myId}`.
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(lockPath, Buffer.alloc(0));
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1198,7 +1198,7 @@ test("synchronize() wave-detection branch completes rendezvous with arbitrary st
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: waveName, modifyTime: mtime, size: 0 },
+      { name: lockName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -1208,20 +1208,20 @@ test("synchronize() wave-detection branch completes rendezvous with arbitrary st
   expect(conn.handshakeRole).toBe("initiator");
   expect(conn.role).toBe("joiner");
   expect(conn.peerId).toBe(peerId);
-  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
 });
 
-test("synchronize() wave-detection branch uses filename order (I7), not id order, for prefix-related ids", async () => {
+test("synchronize() lock-detection branch uses filename order (I7), not id order, for prefix-related ids", async () => {
   // Acceptance criterion: with prefix-related ids where filename order and raw
   // id-compare diverge, roles are derived from filename order (I7) and the
-  // wave-detection branch does NOT throw.
+  // lock-detection branch does NOT throw.
   //
   // "Agency A-hello.json" < "Agency-hello.json" because space (U+0020) sorts
   // before "-" (U+002D). So "Agency A" arrived first by filename order.
   // A raw `"Agency" < "Agency A"` id-compare would say "Agency" arrived first,
-  // producing the wrong expected wave name and a false rejection. Filename order
+  // producing the wrong expected lock name and a false rejection. Filename order
   // is the source of truth (I7) and must win.
   const myId = "Agency";
   const peerId = "Agency A";
@@ -1232,13 +1232,13 @@ test("synchronize() wave-detection branch uses filename order (I7), not id order
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
   // "Agency A-hello.json" < "Agency-hello.json" => peer arrived first.
-  // Wave name is `${peerId}-${myId}.wave`, matching what the producer wrote.
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  // Lock name is `${peerId}-${myId}-lock.json`, matching what the producer wrote.
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(lockPath, Buffer.alloc(0));
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1248,26 +1248,26 @@ test("synchronize() wave-detection branch uses filename order (I7), not id order
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: waveName, modifyTime: mtime, size: 0 },
+      { name: lockName, modifyTime: mtime, size: 0 },
     ];
   };
 
-  // Must not throw "wave does not reference this connection".
+  // Must not throw "lock does not reference this connection".
   await conn.synchronize();
 
   expect(conn.handshakeRole).toBe("initiator");
   expect(conn.role).toBe("joiner");
   expect(conn.peerId).toBe(peerId);
-  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(lockPath)).toBe(false);
 });
 
-test("synchronize() wave-detection branch rejects a stale wave from a different id-pair", async () => {
-  // Acceptance criterion: a stale .wave from a different id-pair, present
+test("synchronize() lock-detection branch rejects a stale lock from a different id-pair", async () => {
+  // Acceptance criterion: a stale -lock.json from a different id-pair, present
   // alongside the current pair's hellos, fails the pair-validation check.
   //
-  // The current pair is "Agency B" + "Agency A". A stale wave file
-  // "StaleX-StaleY.wave" from a prior session of a different pair is present.
-  // Reconstruct-and-compare produces "Agency A-Agency B.wave" (peer arrived
+  // The current pair is "Agency B" + "Agency A". A stale lock file
+  // "StaleX-StaleY-lock.json" from a prior session of a different pair is present.
+  // Reconstruct-and-compare produces "Agency A-Agency B-lock.json" (peer arrived
   // first by filename order), which does not match the stale name.
   const myId = "Agency B";
   const peerId = "Agency A";
@@ -1277,12 +1277,12 @@ test("synchronize() wave-detection branch rejects a stale wave from a different 
 
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  const staleWaveName = "StaleX-StaleY.wave";
-  const staleWavePath = `${conn.path}/${staleWaveName}`;
+  const staleLockName = "StaleX-StaleY-lock.json";
+  const staleLockPath = `${conn.path}/${staleLockName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
   files.set(`${conn.path}/${peerHelloName}`, Buffer.alloc(0));
-  files.set(staleWavePath, Buffer.alloc(0));
+  files.set(staleLockPath, Buffer.alloc(0));
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1292,23 +1292,23 @@ test("synchronize() wave-detection branch rejects a stale wave from a different 
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: staleWaveName, modifyTime: mtime, size: 0 },
+      { name: staleLockName, modifyTime: mtime, size: 0 },
     ];
   };
 
   await expect(conn.synchronize()).rejects.toThrow(
-    "wave file does not reference this connection",
+    "lock file does not reference this connection",
   );
 });
 
 // --- synchronize(): createExclusive winner retains responsibleFiles --------
 
-test("synchronize() createExclusive winner: leaves own hello and wave name in responsibleFiles so cleanup() can sweep them if peer never arrives", async () => {
+test("synchronize() createExclusive winner: leaves own hello and lock name in responsibleFiles so cleanup() can sweep them if peer never arrives", async () => {
   // Regression guard: previously, the outer try block in synchronize() cleared
   // responsibleFiles on every successful waitForPeer() return — including the
   // createExclusive-winner path, which is the one path that legitimately needs
   // to retain its files. The loser (whose createExclusive throws EEXIST) is
-  // normally responsible for cleaning the wave and both hellos, but if the
+  // normally responsible for cleaning the lock and both hellos, but if the
   // loser never arrives (crash, partition), the winner's eventual cleanup()
   // must sweep them. With the clear, the winner's responsibleFiles was empty
   // and the files were stranded.
@@ -1319,9 +1319,9 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
   const myId = conn.id;
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  // peerId < myId so the peer "arrived first" by name tiebreak; wave name
-  // is `${peerId}-${myId}.wave` and is created by THIS connection.
-  const waveName = `${peerId}-${myId}.wave`;
+  // peerId < myId so the peer "arrived first" by name tiebreak; lock name
+  // is `${peerId}-${myId}-lock.json` and is created by THIS connection.
+  const lockName = `${peerId}-${myId}-lock.json`;
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -1334,20 +1334,20 @@ test("synchronize() createExclusive winner: leaves own hello and wave name in re
     ];
   };
   // Peer hello body so the two-hellos read gate passes before createExclusive.
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   // Default mock createExclusive succeeds (no EEXIST) — this conn is the
-  // wave-race winner.
+  // lock-race winner.
 
   await conn.synchronize();
 
   expect(conn.handshakeRole).toBe("initiator");
   expect(conn.peerId).toBe(peerId);
-  // Winner retains its own hello AND the wave name; cleanup() can sweep
+  // Winner retains its own hello AND the lock name; cleanup() can sweep
   // them later if the loser never arrives.
   const responsible = (conn as unknown as { responsibleFiles: Set<string> })
     .responsibleFiles;
   expect(responsible.has(myHelloName)).toBe(true);
-  expect(responsible.has(waveName)).toBe(true);
+  expect(responsible.has(lockName)).toBe(true);
 });
 
 test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring divergent modifyTimes", async () => {
@@ -1356,23 +1356,23 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
   // tools stamp the transfer time rather than the original creation time. Here
   // each side sees ITS OWN hello as the earlier file, the worst case for a
   // modifyTime tiebreaker: it would make both parties believe they arrived
-  // first, both claim the starter role, and derive two different wave names --
+  // first, both claim the starter role, and derive two different lock names --
   // a deadlock. The UUID-only tiebreaker must instead assign the starter role
   // to the lexicographically-smaller UUID on both sides regardless of
-  // modifyTime, so the parties agree on roles and on a single wave name.
+  // modifyTime, so the parties agree on roles and on a single lock name.
   const idLow = "00000000-0000-4000-8000-000000000001";
   const idHigh = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 
   // Run one side's synchronize() against a listing in which this side's own
   // hello is the earlier (smaller modifyTime) file. Returns the assigned roles
-  // plus the wave name the side derived (captured from createExclusive).
+  // plus the lock name the side derived (captured from createExclusive).
   const runSide = async (
     myId: string,
     peerId: string,
   ): Promise<{
     role: string;
     handshakeRole: string | undefined;
-    waveName: string;
+    lockName: string;
   }> => {
     const { client, files } = makeMockClient();
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -1393,17 +1393,17 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
       ];
     };
     // Peer hello body so the two-hellos read gate passes before createExclusive.
-    files.set(`${base}/${peerHelloName}`, WAVE_HELLO_BODY);
+    files.set(`${base}/${peerHelloName}`, LOCK_HELLO_BODY);
 
-    let waveName = "";
+    let lockName = "";
     const realCreateExclusive = client.createExclusive.bind(client);
     client.createExclusive = async (path: string) => {
-      waveName = path.slice(base.length + 1);
+      lockName = path.slice(base.length + 1);
       return realCreateExclusive(path);
     };
 
     await conn.synchronize();
-    return { role: conn.role, handshakeRole: conn.handshakeRole, waveName };
+    return { role: conn.role, handshakeRole: conn.handshakeRole, lockName };
   };
 
   const low = await runSide(idLow, idHigh);
@@ -1416,10 +1416,10 @@ test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring
   expect(high.handshakeRole).toBe("initiator");
   expect(high.role).toBe("joiner");
 
-  // Both sides independently derive the SAME wave name, `${low}-${high}.wave`,
-  // which is what lets the loser locate and clean up the winner's wave file.
-  expect(low.waveName).toBe(`${idLow}-${idHigh}.wave`);
-  expect(high.waveName).toBe(`${idLow}-${idHigh}.wave`);
+  // Both sides independently derive the SAME lock name, `${low}-${high}-lock.json`,
+  // which is what lets the loser locate and clean up the winner's lock file.
+  expect(low.lockName).toBe(`${idLow}-${idHigh}-lock.json`);
+  expect(high.lockName).toBe(`${idLow}-${idHigh}-lock.json`);
 });
 
 // --- synchronize(): joiner branch (initial list shows one peer hello) -------
@@ -1432,7 +1432,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -1452,7 +1452,7 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
 // --- synchronize(): joiner partial-failure (sentinel) ------------------------
 
 // Helper: stand up a joiner whose initial list shows exactly one peer hello,
-// so synchronize() takes the wave-path joiner branch (this party arrived
+// so synchronize() takes the lock-path joiner branch (this party arrived
 // second). Returns the live store and the planted peer-hello name.
 async function makeJoiner(joinerRecoveryMs?: number): Promise<{
   conn: FileSyncConnection;
@@ -1469,7 +1469,7 @@ async function makeJoiner(joinerRecoveryMs?: number): Promise<{
   });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -1563,10 +1563,10 @@ test("synchronize() joiner branch: a failure after the peer hello is deleted lea
   expect(conn.handshakeRole).toBeUndefined();
 });
 
-// --- synchronize(): wave starter peer-side joiner recovery -------------------
+// --- synchronize(): lock starter peer-side joiner recovery -------------------
 
-test("synchronize() wave starter: completes rendezvous when a mid-arrival joiner recovers", async () => {
-  // The peer (arrived first, wave starter) sees the joiner's sentinel for a few
+test("synchronize() lock starter: completes rendezvous when a mid-arrival joiner recovers", async () => {
+  // The peer (arrived first, lock starter) sees the joiner's sentinel for a few
   // polls -- the joiner is mid-arrival, having deleted our hello but not yet
   // renamed its sentinel to its hello -- then the rename lands and the joiner
   // appears as a normal peer hello. The starter must wait through the sentinel
@@ -1579,12 +1579,12 @@ test("synchronize() wave starter: completes rendezvous when a mid-arrival joiner
   const peerHelloName = `${idB}-hello.json`;
   // The joiner's hello body must be readable through the gate once the rename
   // makes it appear under its final name.
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
     // First list (preexisting guard) sees an empty directory, so this party
-    // becomes the wave starter and writes its hello.
+    // becomes the lock starter and writes its hello.
     if (listCallCount === 1) return [];
     // Joiner mid-arrival: only the sentinel is visible (our hello is gone).
     if (listCallCount <= 3)
@@ -1603,7 +1603,7 @@ test("synchronize() wave starter: completes rendezvous when a mid-arrival joiner
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(false);
 });
 
-test("synchronize() wave starter: aborts with a distinct transport error within a bounded window when a joiner never completes", async () => {
+test("synchronize() lock starter: aborts with a distinct transport error within a bounded window when a joiner never completes", async () => {
   // The critical case the fix closes. A joiner deleted our hello and then died
   // before renaming its sentinel to its hello, so the sentinel persists. The
   // peer must surface a distinct, terminal error and abort on the bounded
@@ -1618,7 +1618,7 @@ test("synchronize() wave starter: aborts with a distinct transport error within 
   });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const joiningName = `${idB}-joining.json`;
-  files.set(`${conn.path}/${joiningName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${joiningName}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1658,7 +1658,7 @@ test("synchronize() wave starter: aborts with a distinct transport error within 
   expect(conn.handshakeRole).toBeUndefined();
 });
 
-test("synchronize() wave starter: aborts on a stuck sentinel even while its own hello is still present (state a)", async () => {
+test("synchronize() lock starter: aborts on a stuck sentinel even while its own hello is still present (state a)", async () => {
   // State (a) of the joiner's sequence: it has written its sentinel (put) but
   // not yet deleted this party's hello, so the starter's own hello and the
   // sentinel are visible together (otherFiles === 0, theseFiles === 1,
@@ -1677,7 +1677,7 @@ test("synchronize() wave starter: aborts on a stuck sentinel even while its own 
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const myHello = `${conn.id}-hello.json`;
   const joiningName = `${idB}-joining.json`;
-  files.set(`${conn.path}/${joiningName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${joiningName}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1710,7 +1710,7 @@ test("synchronize() wave starter: aborts on a stuck sentinel even while its own 
   expect(elapsed).toBeLessThan(2_000);
 });
 
-test("synchronize() wave starter: a sentinel visible when the TTL expires yields the stuck-joiner error, not a bare timeout", async () => {
+test("synchronize() lock starter: a sentinel visible when the TTL expires yields the stuck-joiner error, not a bare timeout", async () => {
   // The recovery window (joinerRecoveryMs) is independent of the outer TTL
   // (peerTimeoutMs). If a sentinel first appears with less than joinerRecoveryMs
   // left on the TTL, the poll loop exits before the recovery check can fire.
@@ -1727,7 +1727,7 @@ test("synchronize() wave starter: a sentinel visible when the TTL expires yields
   });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const joiningName = `${idB}-joining.json`;
-  files.set(`${conn.path}/${joiningName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${joiningName}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1751,7 +1751,7 @@ test("synchronize() wave starter: a sentinel visible when the TTL expires yields
   expect((err as Error).message).not.toMatch(/synchronization has timed out/);
 });
 
-test("synchronize() wave starter: a sentinel that vanishes and reappears gets a fresh recovery window", async () => {
+test("synchronize() lock starter: a sentinel that vanishes and reappears gets a fresh recovery window", async () => {
   // The empty-poll reset of joiningSeenAt/joiningSeenName times a reappearing
   // sentinel from its REappearance, not its first sighting. Without the reset,
   // the reappearing sentinel would inherit the now-elapsed timestamp and abort
@@ -1768,7 +1768,7 @@ test("synchronize() wave starter: a sentinel that vanishes and reappears gets a 
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const joiningName = `${idB}-joining.json`;
   const peerHelloName = `${idB}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1790,7 +1790,7 @@ test("synchronize() wave starter: a sentinel that vanishes and reappears gets a 
   expect(conn.peerId).toBe(idB);
 });
 
-test("synchronize() wave starter: a different-id sentinel replacing an earlier one completes with the second joiner", async () => {
+test("synchronize() lock starter: a different-id sentinel replacing an earlier one completes with the second joiner", async () => {
   // The joiningSeenName !== joiningName arm restarts the recovery window when a
   // sentinel from a different id replaces an earlier one (a second joiner taking
   // over). This pins the functional outcome: the starter completes against
@@ -1811,7 +1811,7 @@ test("synchronize() wave starter: a different-id sentinel replacing an earlier o
   const sentinelB = `${idB}-joining.json`;
   const sentinelC = `${idC}-joining.json`;
   const helloC = `${idC}-hello.json`;
-  files.set(`${conn.path}/${helloC}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${helloC}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1829,8 +1829,8 @@ test("synchronize() wave starter: a different-id sentinel replacing an earlier o
   expect(conn.peerId).toBe(idC);
 });
 
-test("synchronize() wave starter: TTL expiry with no joiner produces the bare [starter] timeout", async () => {
-  // The wave-path TTL fallback when no peer hello and no sentinel were ever
+test("synchronize() lock starter: TTL expiry with no joiner produces the bare [starter] timeout", async () => {
+  // The lock-path TTL fallback when no peer hello and no sentinel were ever
   // seen: the lone starter polled until the TTL. Pins the exact "[starter]
   // synchronization has timed out" text (a regression swapping or stripping the
   // tag would be caught) and that this is a transport failure, not a usage
@@ -1852,12 +1852,12 @@ test("synchronize() wave starter: TTL expiry with no joiner produces the bare [s
   );
 });
 
-test("synchronize() wave starter: a peer hello alongside a foreign-id joining sentinel is a UsageError", async () => {
+test("synchronize() lock starter: a peer hello alongside a foreign-id joining sentinel is a UsageError", async () => {
   // Three-party contamination: a legitimate peer hello (idB) and a joining
   // sentinel from a different id (idC) are visible together. A sentinel whose
   // id matches no peer hello cannot be the peer we are completing against, so
   // it is rejected as a usage error (exit 64) -- like a second peer hello or
-  // wave -- rather than silently ignored.
+  // lock -- rather than silently ignored.
   const idB = "00000000-0000-4000-8000-000000000001";
   const idC = "00000000-0000-4000-8000-000000000002";
   const { client, files } = makeMockClient();
@@ -1865,8 +1865,8 @@ test("synchronize() wave starter: a peer hello alongside a foreign-id joining se
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${idB}-hello.json`;
   const foreignSentinel = `${idC}-joining.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(`${conn.path}/${foreignSentinel}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(`${conn.path}/${foreignSentinel}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1883,7 +1883,7 @@ test("synchronize() wave starter: a peer hello alongside a foreign-id joining se
   expect((err as Error).message).toMatch(/matches no peer hello/);
 });
 
-test("synchronize() wave starter: a peer hello alongside the peer's own same-id sentinel completes (transient rename tolerated)", async () => {
+test("synchronize() lock starter: a peer hello alongside the peer's own same-id sentinel completes (transient rename tolerated)", async () => {
   // On a sync-mediated transport the joiner's rename can momentarily expose
   // both `<idB>-joining.json` and `<idB>-hello.json`. That same-id sentinel is
   // the peer we are completing against, not contamination, so the starter must
@@ -1895,8 +1895,8 @@ test("synchronize() wave starter: a peer hello alongside the peer's own same-id 
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${idB}-hello.json`;
   const sameSentinel = `${idB}-joining.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(`${conn.path}/${sameSentinel}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(`${conn.path}/${sameSentinel}`, LOCK_HELLO_BODY);
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -1927,7 +1927,7 @@ test("synchronize() preexisting-file guard rejects a leftover joining sentinel a
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const staleName = `${staleId}-joining.json`;
-  files.set(`${conn.path}/${staleName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${staleName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: staleName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2264,7 +2264,7 @@ test("close() drains the last sent file before cleanup, preventing premature del
 
 // --- synchronize(): unconditional hello rename --------------------------------
 
-test("synchronize() wave path writes hello as <id>-hello.json and self-hello detection still works", async () => {
+test("synchronize() lock path writes hello as <id>-hello.json and self-hello detection still works", async () => {
   // Regression guard: the unconditional hello rename must not break the
   // self-hello filter inside waitForPeer (the pair of checks that prevents a
   // party from treating its own hello as the peer's).
@@ -2287,11 +2287,11 @@ test("synchronize() wave path writes hello as <id>-hello.json and self-hello det
     ];
   };
   // Peer hello body so the two-hellos read gate passes before createExclusive.
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   await conn.synchronize();
 
-  // The wave-race winner (this conn: wave created by createExclusive)
+  // The lock-race winner (this conn: lock created by createExclusive)
   // committed peerId correctly from the -hello.json filename.
   expect(conn.peerId).toBe(peerId);
   expect(conn.handshakeRole).toBe("initiator");
@@ -2387,7 +2387,7 @@ test("synchronize() lockless mode completes rendezvous when createExclusive and 
   expect(connB.peerId).toBe(idA);
 });
 
-test("synchronize() lockless mode role assignment matches the lexicographic rule for the same id pair as the wave path", async () => {
+test("synchronize() lockless mode role assignment matches the lexicographic rule for the same id pair as the lock path", async () => {
   // Role must be determined by lexicographic id order regardless of arrival
   // timing. The throwing delete/createExclusive is robustness scaffolding
   // (see the previous test); real lockless transports support delete.
@@ -2596,7 +2596,7 @@ test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminan
   // Plant a sentinel under this party's own id, as a crashed prior arrival
   // would leave it.
   const joiningPath = `/test/${conn.id}-joining.json`;
-  files.set(joiningPath, WAVE_HELLO_BODY);
+  files.set(joiningPath, LOCK_HELLO_BODY);
 
   await expect(conn.send({ check: true })).resolves.toBeUndefined();
 
@@ -2604,11 +2604,64 @@ test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminan
   expect(files.has(joiningPath)).toBe(true);
 });
 
+test("a <a>-<b>-lock.json tiebreaker is grammar-excluded from the .json message scans (poll() and hasOutstandingMessage)", async () => {
+  // The lock tiebreaker is a `.json` control file (`<peer1>-<peer2>-lock.json`),
+  // so unlike a by-extension control name it reaches the `.json`-gated message
+  // scans in send()'s hasOutstandingMessage and in poll(). The grammar
+  // discriminant must classify it as a control file via its non-numeric terminal
+  // token `lock`: never counted as an outstanding message, never delivered as a
+  // message. A by-extension control name never reached these scans, so this path
+  // had no prior coverage.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-a";
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "self-b";
+  conn.peerId = peerId;
+
+  // (1) hasOutstandingMessage (in send()) must not count a lock file we own.
+  // `<myId>-<peerId>-lock.json` shares our `<id>-` prefix and `.json` extension,
+  // so a bare prefix glob would mistake it for an unconsumed message and spin
+  // send() until the peer timeout; the non-numeric `lock` terminal excludes it.
+  const ourLockPath = `/test/${conn.id}-${peerId}-lock.json`;
+  files.set(ourLockPath, Buffer.alloc(0));
+  await expect(conn.send({ check: true })).resolves.toBeUndefined();
+  // send() does not own the lock file and must leave it in place.
+  expect(files.has(ourLockPath)).toBe(true);
+
+  // (2) poll() must ignore a peer-prefixed lock file, delivering only the real
+  // message. `<peerId>-<myId>-lock.json` matches the peer scan's prefix and
+  // `.json` extension but its terminal `lock` token is non-numeric.
+  const peerLockPath = `/test/${peerId}-${conn.id}-lock.json`;
+  files.set(peerLockPath, Buffer.alloc(0));
+  const message = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { ok: true } }),
+  );
+  files.set(`/test/${peerId}-${message.length}.json`, message);
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notifyReceived!: () => void;
+  const delivered = new Promise<void>((r) => (notifyReceived = r));
+  conn.on("data", (msg) => {
+    received.push(msg);
+    notifyReceived();
+  });
+  conn.on("error", (err) => errors.push(err));
+
+  await runPoller(conn, delivered);
+
+  expect(errors).toHaveLength(0);
+  expect(received).toHaveLength(1);
+  expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
+  // The lock file is a control file: poll() neither reads nor deletes it.
+  expect(files.has(peerLockPath)).toBe(true);
+});
+
 test("synchronize() lockless timeout message carries no role prefix", async () => {
   // The lockless-barrier timeout fires while the role is genuinely indeterminate
   // (it can occur after the peer hello was seen and acked, where filename order
   // may make this party the joiner), so the message has no [role] prefix --
-  // unlike the wave TTL fallback, which is reachable only as the lone starter.
+  // unlike the lock TTL fallback, which is reachable only as the lone starter.
   // Pins the exact bare "synchronization has timed out" text.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, {
@@ -2630,7 +2683,7 @@ test("synchronize() lockless timeout message carries no role prefix", async () =
 
 test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
   // Regression guard for the multi-peer-hello guard added to the lockless
-  // loop: mirrors the wave path's otherFiles.length > 1 check and catches a
+  // loop: mirrors the lock path's otherFiles.length > 1 check and catches a
   // third party that slipped in after the initial synchronize() guard.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, {
@@ -2724,7 +2777,7 @@ test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () =>
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2738,9 +2791,9 @@ test("synchronize() joiner branch rejects a prefix-at-dash id pair", async () =>
   expect(files.has(`${conn.path}/${myId}-hello.json`)).toBe(false);
 });
 
-test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", async () => {
+test("synchronize() lock-detection branch rejects a prefix-at-dash id pair", async () => {
   // "site-2-hello.json" < "site-hello.json" (because '2' < 'h'), so myId
-  // ("site-2") arrived first; wave name is "site-2-site.wave".
+  // ("site-2") arrived first; lock name is "site-2-site-lock.json".
   const myId = "site-2";
   const peerId = "site";
   const { client, files } = makeMockClient();
@@ -2749,12 +2802,12 @@ test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", asy
 
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  const waveName = `${myId}-${peerId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  const lockName = `${myId}-${peerId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(lockPath, Buffer.alloc(0));
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -2764,7 +2817,7 @@ test("synchronize() wave-detection branch rejects a prefix-at-dash id pair", asy
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: waveName, modifyTime: mtime, size: 0 },
+      { name: lockName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -2783,7 +2836,7 @@ test("synchronize() joiner branch accepts shared-prefix ids that are not prefix-
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2800,7 +2853,7 @@ test("synchronize() joiner branch accepts space-containing ids", async () => {
   conn.id = myId;
 
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -2811,7 +2864,7 @@ test("synchronize() joiner branch accepts space-containing ids", async () => {
 
 // --- UsageError taxonomy -------------------------------------------------------
 
-test("synchronize() throws UsageError for multiple concurrent sessions detected in wave-race path", async () => {
+test("synchronize() throws UsageError for multiple concurrent sessions detected in lock-race path", async () => {
   // Trigger the "more than one peer hello" guard inside waitForPeer(). The
   // initial list() returns empty (passes the preexisting check); subsequent
   // calls return our own hello plus two peer hellos, simulating a third party
@@ -2835,7 +2888,7 @@ test("synchronize() throws UsageError for multiple concurrent sessions detected 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
 
-test("synchronize() throws UsageError for more than one joining sentinel in the wave-race path", async () => {
+test("synchronize() throws UsageError for more than one joining sentinel in the lock-race path", async () => {
   // Parity with the multi-peer-hello guard for the new control file. Exactly
   // one sentinel is the only valid mid-arrival state (one joiner, one starter,
   // and the starter writes no sentinel), so two simultaneous sentinels are
@@ -2893,7 +2946,7 @@ test("send() message timeout throws UsageError", async () => {
 
 // --- control file envelope: round-trip, partial-sync gate, malformed body -----
 
-test("synchronize() wave mode: round-trip hello write and read with JSON envelope body", async () => {
+test("synchronize() lock mode: round-trip hello write and read with JSON envelope body", async () => {
   // Both the joiner fast-path (writes and reads the peer hello) and the starter
   // (reads the joiner hello before deleting) must write and read the JSON envelope.
   // Run joiner path: initial list shows one peer hello; joiner reads it, deletes
@@ -2903,7 +2956,7 @@ test("synchronize() wave mode: round-trip hello write and read with JSON envelop
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -3039,7 +3092,7 @@ test("synchronize() joiner: mid-sync hello body retried, not reported malformed"
     return origGet(path);
   };
 
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
   client.list = async () => [
     { name: peerHelloName, modifyTime: Date.now(), size: 0 },
   ];
@@ -3153,8 +3206,8 @@ test("synchronize() lockless: rendezvous completes on ack existence; ack body is
   expect(ackGets).toEqual([]);
 });
 
-test("synchronize() wave-detection: mid-sync peer hello body retried, not malformed", async () => {
-  // The wave-detection branch (waveFiles.length > 0) calls readControlFileWithGate
+test("synchronize() lock-detection: mid-sync peer hello body retried, not malformed", async () => {
+  // The lock-detection branch (lockFiles.length > 0) calls readControlFileWithGate
   // on the peer hello before committing roles. A partially-synced body (invalid
   // JSON on first get()) must cause a retry, not a terminal failure.
   const peerId = "00000000-0000-4000-8000-000000000001";
@@ -3167,12 +3220,12 @@ test("synchronize() wave-detection: mid-sync peer hello body retried, not malfor
   const myId = conn.id;
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set(lockPath, Buffer.alloc(0));
 
   let getCalls = 0;
   const origGet = client.get;
@@ -3192,7 +3245,7 @@ test("synchronize() wave-detection: mid-sync peer hello body retried, not malfor
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: waveName, modifyTime: mtime, size: 0 },
+      { name: lockName, modifyTime: mtime, size: 0 },
     ];
   };
 
@@ -3202,8 +3255,8 @@ test("synchronize() wave-detection: mid-sync peer hello body retried, not malfor
   expect(conn.peerId).toBe(peerId);
 });
 
-test("synchronize() wave-detection: malformed peer hello body is a UsageError", async () => {
-  // A fully-synced hello body in the wave-detection branch that parses as JSON
+test("synchronize() lock-detection: malformed peer hello body is a UsageError", async () => {
+  // A fully-synced hello body in the lock-detection branch that parses as JSON
   // but fails the envelope schema must throw a terminal UsageError, not retry.
   const peerId = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
@@ -3212,12 +3265,12 @@ test("synchronize() wave-detection: malformed peer hello body is a UsageError", 
   const myId = conn.id;
   const myHelloName = `${myId}-hello.json`;
   const peerHelloName = `${peerId}-hello.json`;
-  const waveName = `${peerId}-${myId}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
 
   files.set(`${conn.path}/${myHelloName}`, Buffer.alloc(0));
   files.set(`${conn.path}/${peerHelloName}`, Buffer.from("[]"));
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(lockPath, Buffer.alloc(0));
 
   const mtime = Date.now();
   let listCallCount = 0;
@@ -3227,14 +3280,14 @@ test("synchronize() wave-detection: malformed peer hello body is a UsageError", 
     return [
       { name: myHelloName, modifyTime: mtime, size: 0 },
       { name: peerHelloName, modifyTime: mtime, size: 0 },
-      { name: waveName, modifyTime: mtime, size: 0 },
+      { name: lockName, modifyTime: mtime, size: 0 },
     ];
   };
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
 
-test("synchronize() wave starter: mid-sync joiner hello body retried, not malformed", async () => {
+test("synchronize() lock starter: mid-sync joiner hello body retried, not malformed", async () => {
   // The starter fast-path (theseFiles.length === 0 in waitForPeer) calls
   // readControlFileWithGate on the joiner's hello before deleting it. A
   // partially-synced body must be retried, not treated as a terminal failure.
@@ -3247,7 +3300,7 @@ test("synchronize() wave starter: mid-sync joiner hello body retried, not malfor
   conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
   const peerHelloName = `${peerId}-hello.json`;
 
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   let getCalls = 0;
   const origGet = client.get;
@@ -3275,7 +3328,7 @@ test("synchronize() wave starter: mid-sync joiner hello body retried, not malfor
   expect(conn.handshakeRole).toBe("responder");
 });
 
-test("synchronize() wave starter: malformed joiner hello body is a UsageError", async () => {
+test("synchronize() lock starter: malformed joiner hello body is a UsageError", async () => {
   // A fully-synced but schema-invalid joiner hello body in the starter
   // theseFiles===0 branch must throw a terminal UsageError, not retry.
   const peerId = "00000000-0000-4000-8000-000000000001";
@@ -3346,14 +3399,14 @@ function makeRendezvousPair(
 }
 
 // (a) Each rendezvous branch writes the hello with the advertised flags. Drive
-// the wave joiner fast-path against a matched peer so the hello it writes
+// the lock joiner fast-path against a matched peer so the hello it writes
 // survives (the joiner keeps its own hello) and can be inspected.
 test("(a) hello payload carries both bilateral flags", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = ID_HIGH;
   const peerHelloName = `${ID_LOW}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   await conn.synchronize();
 
@@ -3384,7 +3437,7 @@ test("(b) lockless/lockless pairing succeeds and advertises both flags", async (
   }
 });
 
-test("(b) delete/delete (wave) pairing succeeds", async () => {
+test("(b) delete/delete (lock) pairing succeeds", async () => {
   const { connA, connB } = makeRendezvousPair(ID_LOW, {}, ID_HIGH, {});
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
@@ -3419,7 +3472,7 @@ test("(b) retain/retain pairing succeeds and advertises the retain flag", async 
 // (c) Mismatched pairings fail fast at rendezvous on BOTH parties, in both
 // arrival orders, with the both-sides-named error, identified as usage errors.
 
-test("(c) lockless vs wave mismatch fails fast on BOTH parties, concurrently", async () => {
+test("(c) lockless vs lock mismatch fails fast on BOTH parties, concurrently", async () => {
   const { connA, connB, files } = makeRendezvousPair(
     ID_LOW,
     { locklessRendezvous: true },
@@ -3469,8 +3522,8 @@ test("(c) retain vs non-retain mismatch (both lockless) fails fast on BOTH parti
   expect(files.has(`/test/${ID_HIGH}-hello.json`)).toBe(true);
 });
 
-test("(c) wave joiner reading a lockless peer hello fails fast and leaves both hellos", async () => {
-  // Arrival order 1: the wave party reads a peer hello already present (joiner
+test("(c) lock joiner reading a lockless peer hello fails fast and leaves both hellos", async () => {
+  // Arrival order 1: the lock party reads a peer hello already present (joiner
   // fast-path) and detects the mismatch. It must write its own advertisement
   // before throwing and must not delete the peer hello.
   const { client, files } = makeMockClient();
@@ -3478,7 +3531,7 @@ test("(c) wave joiner reading a lockless peer hello fails fast and leaves both h
     pollingFrequency: 10,
     timeToLiveMs: 30_000,
   });
-  conn.id = ID_HIGH; // wave (default)
+  conn.id = ID_HIGH; // lock (default)
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
@@ -3504,8 +3557,8 @@ test("(c) wave joiner reading a lockless peer hello fails fast and leaves both h
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
 
-test("(c) lockless party reading a wave peer hello fails fast and leaves both hellos", async () => {
-  // Arrival order 2: the lockless party reads the wave peer's left-behind hello
+test("(c) lockless party reading a lock peer hello fails fast and leaves both hellos", async () => {
+  // Arrival order 2: the lockless party reads the lock peer's left-behind hello
   // in its ack barrier and detects the mismatch, after having written its own
   // hello before the loop. The same pairing's other side (above) detects via
   // the joiner fast-path, so both parties surface it.
@@ -3520,7 +3573,7 @@ test("(c) lockless party reading a wave peer hello fails fast and leaves both he
   conn.connected = true;
   conn.path = "/test";
   const peerHelloName = `${ID_HIGH}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, WAVE_HELLO_BODY);
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   let err: unknown;
   await conn.synchronize().catch((e: unknown) => {
@@ -3552,17 +3605,17 @@ test("(c) lockless party reading a wave peer hello fails fast and leaves both he
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
 
-test("(c) wave two-hellos branch detects the mismatch before createExclusive (EEXIST-loser sub-path pre-empted)", async () => {
+test("(c) lock two-hellos branch detects the mismatch before createExclusive (EEXIST-loser sub-path pre-empted)", async () => {
   // The check precedes createExclusive, so neither the createExclusive-winner
   // nor the EEXIST-loser sub-path runs on a mismatch. createExclusive is stubbed
-  // to throw EEXIST (and exists() to report a live wave) so that, were the check
+  // to throw EEXIST (and exists() to report a live lock) so that, were the check
   // NOT pre-empting it, the loser sub-path would run; assert it never does.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
     timeToLiveMs: 30_000,
   });
-  conn.id = ID_HIGH; // wave
+  conn.id = ID_HIGH; // lock
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
@@ -3579,7 +3632,7 @@ test("(c) wave two-hellos branch detects the mismatch before createExclusive (EE
   client.exists = async () => true;
 
   // First list (entry guard) is empty so conn writes its own hello and enters
-  // the wave loop; subsequent lists show both hellos and no wave, routing into
+  // the lock loop; subsequent lists show both hellos and no lock, routing into
   // the two-hellos branch.
   let listCalls = 0;
   client.list = async () => {
@@ -3603,38 +3656,38 @@ test("(c) wave two-hellos branch detects the mismatch before createExclusive (EE
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
 });
 
-test("(c) wave-detection branch sweeps the wave and leaves both hellos on a mismatch", async () => {
-  // Defense-in-depth path (waitForPeer's "waveFiles.length > 0" arm). A wave on
-  // disk implies both parties are wave (lockless never creates one) and a wave
+test("(c) lock-detection branch sweeps the lock and leaves both hellos on a mismatch", async () => {
+  // Defense-in-depth path (waitForPeer's "lockFiles.length > 0" arm). A lock on
+  // disk implies both parties are lock (lockless never creates one) and a lock
   // party always has retain_files=false, so no flag can differ and this branch
   // cannot reach a mismatch for any valid pairing. Drive it with a synthetic
-  // directory -- a peer-created wave plus a lockless-advertising peer hello --
-  // to cover the safeDelete(wave)-then-throw code added for the prior review.
-  // The wave is a transient, not an advertisement, so it is swept; both hellos
+  // directory -- a peer-created lock plus a lockless-advertising peer hello --
+  // to cover the safeDelete(lock)-then-throw code added for the prior review.
+  // The lock is a transient, not an advertisement, so it is swept; both hellos
   // remain as the directory's terminal state.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
     timeToLiveMs: 30_000,
   });
-  conn.id = ID_HIGH; // wave, non-retain
+  conn.id = ID_HIGH; // lock, non-retain
   const peerHelloName = `${ID_LOW}-hello.json`;
-  // ID_LOW sorts first, so the producer's wave name is `${ID_LOW}-${ID_HIGH}`;
+  // ID_LOW sorts first, so the producer's lock name is `${ID_LOW}-${ID_HIGH}`;
   // this matches the branch's reconstruct-and-compare (I7) so the read gate and
-  // mismatch check are reached rather than a "wave does not reference" throw.
-  const waveName = `${ID_LOW}-${conn.id}.wave`;
-  const wavePath = `${conn.path}/${waveName}`;
+  // mismatch check are reached rather than a "lock does not reference" throw.
+  const lockName = `${ID_LOW}-${conn.id}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
   files.set(
     `${conn.path}/${peerHelloName}`,
     Buffer.from(
       JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
     ),
   );
-  files.set(wavePath, Buffer.alloc(0));
+  files.set(lockPath, Buffer.alloc(0));
 
   // First list (entry guard) empty so conn writes its own hello and enters the
-  // wave loop; subsequent lists expose both hellos plus the peer-created wave,
-  // routing into the wave-detection branch.
+  // lock loop; subsequent lists expose both hellos plus the peer-created lock,
+  // routing into the lock-detection branch.
   let listCalls = 0;
   client.list = async () => {
     listCalls++;
@@ -3642,7 +3695,7 @@ test("(c) wave-detection branch sweeps the wave and leaves both hellos on a mism
     return [
       { name: `${conn.id}-hello.json`, modifyTime: 0, size: 0 },
       { name: peerHelloName, modifyTime: 0, size: 0 },
-      { name: waveName, modifyTime: 0, size: 0 },
+      { name: lockName, modifyTime: 0, size: 0 },
     ];
   };
 
@@ -3653,7 +3706,7 @@ test("(c) wave-detection branch sweeps the wave and leaves both hellos on a mism
 
   expect(err).toBeInstanceOf(BilateralModeMismatchError);
   expect((err as Error).message).toMatch(/lockless_rendezvous mismatch/);
-  expect(files.has(wavePath)).toBe(false);
+  expect(files.has(lockPath)).toBe(false);
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
@@ -3666,7 +3719,7 @@ test("(c) a both-flags-differ mismatch names retain_files (the implying flag)", 
     pollingFrequency: 10,
     timeToLiveMs: 30_000,
   });
-  conn.id = ID_HIGH; // wave, non-retain
+  conn.id = ID_HIGH; // lock, non-retain
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
@@ -3739,7 +3792,7 @@ test("(e) leftover hellos after a mismatch make a rerun rejected by the entry gu
     pollingFrequency: 10,
     timeToLiveMs: 30_000,
   });
-  conn.id = ID_HIGH; // wave
+  conn.id = ID_HIGH; // lock
   const peerHelloName = `${ID_LOW}-hello.json`;
   files.set(
     `${conn.path}/${peerHelloName}`,
@@ -4959,8 +5012,8 @@ const entryPreconditionKinds: Array<{
     outcome: "reject",
   },
   {
-    kind: "wave file",
-    present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}.wave`],
+    kind: "lock file",
+    present: [`${ENTRY_SELF_ID}-${ENTRY_PEER_ID}-lock.json`],
     outcome: "reject",
   },
   // A rendezvous ack marker (a crashed lockless session): a peer acking this
@@ -4970,7 +5023,7 @@ const entryPreconditionKinds: Array<{
     present: [`${ENTRY_PEER_ID}-${ENTRY_SELF_ID}-hello-ack.json`],
     outcome: "reject",
   },
-  // A joining sentinel left by a wave joiner that crashed mid-arrival. Its
+  // A joining sentinel left by a lock joiner that crashed mid-arrival. Its
   // terminal segment is the type word `joining`, so it is neither a peer hello
   // nor a message -- but the directory must be clean at entry, so the strict-
   // empty guard rejects it (and a fresh joiner must not adopt a stale one).

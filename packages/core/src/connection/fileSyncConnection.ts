@@ -94,7 +94,15 @@ const MAX_CONSECUTIVE_ENOENT = 3;
 // magic strings and numbers at the multiple slice/endsWith sites below.
 const HELLO_SUFFIX = "-hello.json";
 
-// Suffix of the wave-path joiner-arrival sentinel (`<id>-joining.json`). The
+// Suffix of the lock-mode tiebreaker file (`<peer1>-<peer2>-lock.json`). Named
+// for parity with HELLO_SUFFIX/JOINING_SUFFIX so the endsWith filter and both
+// name-construction sites stay in sync under a future rename. Its terminal
+// segment is the type word `lock` (never a `.lock` extension), so the grammar
+// discriminant excludes it from the message scan -- not all-digits -- the same
+// way it excludes hello and joining files.
+const LOCK_SUFFIX = "-lock.json";
+
+// Suffix of the lock-path joiner-arrival sentinel (`<id>-joining.json`). The
 // joiner publishes it before deleting the peer hello and renames it to its own
 // hello once that delete lands, so the peer can tell "joiner mid-arrival" from
 // "joiner crashed" across the window where the peer hello is gone but the
@@ -103,7 +111,7 @@ const HELLO_SUFFIX = "-hello.json";
 // excludes it from the message scan (it is not all-digits).
 const JOINING_SUFFIX = "-joining.json";
 
-// Bounded window the wave-path peer waits for a joiner that has begun arriving
+// Bounded window the lock-path peer waits for a joiner that has begun arriving
 // (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
 // to its hello. The joiner's remaining work is one delete plus one rename --
 // milliseconds on a direct transport, seconds on a sync-mediated one -- so a
@@ -184,7 +192,7 @@ interface Options {
   locklessRendezvous: boolean;
   peerId?: string;
   retainFiles: boolean;
-  // How long the wave-path peer waits for a mid-arrival joiner (a visible
+  // How long the lock-path peer waits for a mid-arrival joiner (a visible
   // `<id>-joining.json` sentinel) to finish before treating it as crashed. Not
   // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
   // Tests lower it to exercise the abort path without a real-time wait.
@@ -264,7 +272,7 @@ export interface FileTransportClient {
   /**
    * Creates an empty file at `path` atomically. Throws with
    * `code === "EEXIST"` (or an equivalent server error) if `path` already
-   * exists, giving atomic "only one winner" semantics for the wave-file race.
+   * exists, giving atomic "only one winner" semantics for the lock-file race.
    */
   createExclusive: (path: string) => Promise<void>;
   exists: (remotePath: string) => Promise<boolean>;
@@ -272,7 +280,7 @@ export interface FileTransportClient {
 
 /**
  * File-based rendezvous and message-passing connection. Implements the
- * `-hello.json`/`.wave` handshake (or the lockless ack-handshake barrier) and
+ * `-hello.json`/`-lock.json` handshake (or the lockless ack-handshake barrier) and
  * `.json` polling protocol over any {@link FileTransportClient} — an SFTP
  * server via {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
  * `LocalFSClient`.
@@ -632,9 +640,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   /**
    * Negotiates rendezvous with the peer by exchanging `-hello.json` and
-   * `.wave` files (wave-race mode) or `-hello.json` and zero-length
-   * `-ack.json` acknowledgment markers (lockless mode) in the shared directory,
-   * assigning `peerId` and `handshakeRole` on success.
+   * `<peer1>-<peer2>-lock.json` files (lock mode) or `-hello.json` and
+   * zero-length `-ack.json` acknowledgment markers (lockless mode) in the
+   * shared directory, assigning `peerId` and `handshakeRole` on success.
    *
    * Failures throw synchronously rather than being emitted on the `error`
    * channel: the `error` event is reserved for asynchronous failures from the
@@ -651,12 +659,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // Library-level defense-in-depth: the schema refine and CLI imply cover the
     // config/CLI entry points, but a direct library consumer that constructs
     // FileSyncConnection with retainFiles: true and locklessRendezvous: false
-    // would otherwise reach the delete-based wave path, which is incompatible
-    // with retain mode (wave rendezvous is delete-based and cannot produce the
+    // would otherwise reach the delete-based lock path, which is incompatible
+    // with retain mode (lock rendezvous is delete-based and cannot produce the
     // whole-directory no-delete transcript). Make that combination unreachable.
     if (this.options.retainFiles && !this.options.locklessRendezvous)
       throw new UsageError(
-        "retain mode requires lockless rendezvous: wave rendezvous is " +
+        "retain mode requires lockless rendezvous: lock rendezvous is " +
           "delete-based and cannot produce the whole-directory no-delete " +
           "transcript required by retain mode",
       );
@@ -703,12 +711,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // synchronize() entry the directory must be empty except for at most one
     // peer hello -- a hello file whose id is not this party's own. That is the
     // only file kind that can legitimately predate this party's entry: a party
-    // writes its own hello/wave/ack only after observing the peer's hello, and
+    // writes its own hello/lock/ack only after observing the peer's hello, and
     // messages and ack markers exist only once rendezvous has completed. So the
     // only thing that can already be present is the other party's hello.
     //
     // Anything else is a protocol error: a second peer hello, a self-hello (a
-    // same-id leftover from a crashed session), a wave, an ack marker, a
+    // same-id leftover from a crashed session), a lock, an ack marker, a
     // message, an in-flight temp file, or any foreign file. This is
     // strict-empty by design (the directory is the state machine), so a foreign
     // file is rejected rather than ignored. The two cases that legitimately
@@ -730,8 +738,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         `path ${this.path} must be empty except for a single peer hello at ` +
           "the start of the protocol, but contains " +
           `${unexpected.length} unexpected file(s): ` +
-          `${unexpected.map((f) => f.name).join(", ")}. A pre-existing wave, ` +
-          "ack marker (-ack.json), joining sentinel (-joining.json), message, " +
+          `${unexpected.map((f) => f.name).join(", ")}. A pre-existing lock ` +
+          "file (-lock.json), ack marker (-ack.json), joining sentinel " +
+          "(-joining.json), message, " +
           "self-hello, or temp file usually " +
           "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
           "before its cleanup ran, or -- in retain mode, which never deletes " +
@@ -787,8 +796,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
 
       // Bilateral flag check. A mismatch here means the peer runs a different
-      // rendezvous protocol than this (wave) party -- it is lockless, since
-      // only a lockless peer leaves its hello in place for a wave joiner to
+      // rendezvous protocol than this (lock) party -- it is lockless, since
+      // only a lockless peer leaves its hello in place for a lock joiner to
       // discover. For symmetric detection the joiner must write its own
       // advertised hello BEFORE throwing (so the lockless peer reads it through
       // its own peer-hello read and fails too) and must NOT delete the peer
@@ -851,7 +860,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const helloName = `${this.id}${HELLO_SUFFIX}`;
       try {
         // The three `!this.options.retainFiles` guards in this block are vacuous
-        // here: this wave joiner fast-path runs only when !locklessRendezvous,
+        // here: this lock joiner fast-path runs only when !locklessRendezvous,
         // and the entry guard rejects retain mode without lockless (retain
         // requires lockless), so retain never reaches this block. They are kept
         // only to match the file-wide responsibleFiles tracking idiom -- every
@@ -934,14 +943,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
        * A ~ B list
        * A ~ B hello
        * A list
-       * A wave
+       * A lock
        *
        * or
        *
        * A ~ B list
        * A ~ B hello
        * A ~ B list
-       * A ~ B wave
+       * A ~ B lock
        *
        * or (lockless mode, joiner fast-path bypassed):
        *
@@ -965,7 +974,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
       if (!this.options.retainFiles)
         this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
-      let wavePath: string | undefined;
+      let lockPath: string | undefined;
       let ackPath: string | undefined;
 
       const waitForPeer = async () => {
@@ -1033,7 +1042,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // and fails too. We do not write the ack, leaving both hellos as
               // the directory's terminal state. Covers a retain_files mismatch
               // (both parties lockless, both in this barrier) as well as a
-              // lockless_rendezvous mismatch (peer is a wave party that read our
+              // lockless_rendezvous mismatch (peer is a lock party that read our
               // hello at its own two-hellos branch).
               const mismatch = this.bilateralMismatch(peerEnvelope);
               if (mismatch) throw mismatch;
@@ -1054,7 +1063,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // message write in send() does. Both publish temp-then-rename, so
               // the final name only appears at the atomic rename and the add
               // immediately follows it with no throwable statement between --
-              // unlike the wave/hello direct-writes, which pre-track because
+              // unlike the lock/hello direct-writes, which pre-track because
               // createExclusive can leave the final name on a throwing call.
               // The in-flight temp-*.tmp is swept inline by writeAck.
               if (!this.options.retainFiles) this.responsibleFiles.add(ackName);
@@ -1104,7 +1113,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             // Do NOT clear responsibleFiles: hello and ack remain so
             // cleanup() can sweep them at close() time, the same as the
-            // wave-winner path.
+            // lock-winner path.
             return;
           }
 
@@ -1112,12 +1121,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // was seen and acked but the peer's return ack never arrived, where
           // hello-filename order may make this party the joiner. The role is
           // genuinely indeterminate here, so emit no `[role]` prefix (unlike
-          // the wave timeout below, which is reachable only as the lone
+          // the lock timeout below, which is reachable only as the lone
           // starter).
           throw new Error("synchronization has timed out");
         }
 
-        // Wave-race path.
+        // Lock path.
         // Wall-clock instant this party first saw the joiner's mid-arrival
         // sentinel, paired with the sentinel name it belongs to (both undefined
         // when no sentinel is present). Bounds the joiner-recovery window below;
@@ -1147,16 +1156,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           const theseFiles = currentFiles.filter(
             (file) => file.name === `${this.id}${HELLO_SUFFIX}`,
           );
-          const waveFiles = currentFiles.filter((file) =>
-            file.name.endsWith(".wave"),
+          const lockFiles = currentFiles.filter((file) =>
+            file.name.endsWith(LOCK_SUFFIX),
           );
           // A `<peerId>-joining.json` sentinel marks a joiner mid-arrival: it
           // has begun the put(sentinel) -> delete(our hello) -> rename(sentinel
-          // -> its hello) sequence the wave joiner uses in place of a bare
+          // -> its hello) sequence the lock joiner uses in place of a bare
           // delete-then-put. Its presence is the signal that distinguishes a
           // live-but-incomplete joiner from a crashed one, which a bare
           // otherFiles.length === 0 cannot. (A self-named sentinel is excluded
-          // for symmetry with the hello filters, though the wave starter never
+          // for symmetry with the hello filters, though the lock starter never
           // writes one.)
           const joiningFiles = currentFiles.filter(
             (file) =>
@@ -1169,7 +1178,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // Exactly one sentinel is the only valid mid-arrival state: one
               // joiner, one starter, and the starter never writes a sentinel.
               // A second is contamination from a third party, the same illegal
-              // state the multi-peer-hello and multi-wave guards below reject;
+              // state the multi-peer-hello and multi-lock guards below reject;
               // surface it the same way rather than silently timing the first.
               if (joiningFiles.length > 1) {
                 throw new UsageError(
@@ -1246,7 +1255,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // the sync-tool layer). That same-id sentinel is the peer we are
           // about to rendezvous with, so tolerate it. A sentinel whose id
           // matches no peer hello is a third party in the directory -- the same
-          // contamination the multi-hello and multi-wave guards reject -- so
+          // contamination the multi-hello and multi-lock guards reject -- so
           // surface it as a UsageError rather than completing against an
           // inconsistent directory.
           //
@@ -1273,63 +1282,63 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           joiningSeenAt = undefined;
           joiningSeenName = undefined;
 
-          if (waveFiles.length > 0) {
+          if (lockFiles.length > 0) {
             /**
              * A ~ B list
              * A ~ B hello
              * A list
-             * A wave
+             * A lock
              * B list
-             * B delete A hello, B hello, wave
+             * B delete A hello, B hello, lock
              *
              * This is B
              */
-            if (waveFiles.length > 1) {
+            if (lockFiles.length > 1) {
               throw new UsageError(
-                "more than one wave file - are there other sessions using " +
+                "more than one lock file - are there other sessions using " +
                   "this path?",
               );
             }
             if (otherFiles.length !== 1) {
               throw new UsageError(
-                "wave file detected but no peer hello - are there other " +
+                "lock file detected but no peer hello - are there other " +
                   "sessions using this path?",
               );
             }
             if (theseFiles.length !== 1) {
               throw new UsageError(
-                "wave file detected but no self hello - are there other " +
+                "lock file detected but no self hello - are there other " +
                   "sessions using this path?",
               );
             }
 
-            const waveFile = waveFiles[0];
+            const lockFile = lockFiles[0];
             const otherFile = otherFiles[0];
             const thisFile = theseFiles[0];
 
             const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
             const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
-            // Use hello filename order -- the same tiebreak the wave producer
-            // uses (I7) -- to reconstruct the expected wave name. Do NOT fall
+            // Use hello filename order -- the same tiebreak the lock producer
+            // uses (I7) -- to reconstruct the expected lock name. Do NOT fall
             // back to a raw `thisId < otherId` compare: for ids where one is a
             // prefix of the other (e.g. "Agency" / "Agency A"), space (U+0020)
             // sorts before "-" (U+002D), so hello-filename order and id-order
-            // can diverge, causing a false "wave does not reference this
+            // can diverge, causing a false "lock does not reference this
             // connection" throw that UUID tests would never catch.
             const arrivedFirst = thisFile.name < otherFile.name;
-            const expectedWaveName = arrivedFirst
-              ? `${thisId}-${otherId}.wave`
-              : `${otherId}-${thisId}.wave`;
+            const expectedLockName = arrivedFirst
+              ? `${thisId}-${otherId}${LOCK_SUFFIX}`
+              : `${otherId}-${thisId}${LOCK_SUFFIX}`;
 
-            // Pair validation via reconstruct-and-compare. A stale wave from a
+            // Pair validation via reconstruct-and-compare. A stale lock from a
             // different id-pair that happens to concatenate to the same
-            // <a>-<b>.wave string is a theoretical residual; the single-wave
-            // guard above (waveFiles.length > 1) is the primary protection, so
+            // <a>-<b>-lock.json string is a theoretical residual; the single-lock
+            // guard above (lockFiles.length > 1) is the primary protection, so
             // the peer_id charset is left unrestricted rather than working
             // around this edge case here.
-            if (waveFile.name !== expectedWaveName)
-              throw new Error("wave file does not reference this connection");
+            if (lockFile.name !== expectedLockName)
+              throw new Error("lock file does not reference this connection");
 
             // I5: read the peer hello body through the partial-sync gate
             // before committing roles. The hello name carries no byte-count
@@ -1343,20 +1352,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             // Bilateral flag check before committing roles and before the
-            // sweep below. Defense-in-depth: a wave present in the directory
-            // implies both parties are in wave mode (lockless never creates a
-            // wave) and a wave party always has retain_files=false (retain
+            // sweep below. Defense-in-depth: a lock present in the directory
+            // implies both parties are in lock mode (lockless never creates a
+            // lock) and a lock party always has retain_files=false (retain
             // requires lockless), so neither flag can differ and a mismatch
             // cannot reach here for any valid pairing. If a corrupt directory
             // somehow produced one, leave exactly the two hellos the design
-            // names as the terminal state: delete the peer-written wave first --
+            // names as the terminal state: delete the peer-written lock first --
             // it is a transient, not an advertisement the peer must read, and
             // the outer catch skips every safeDelete on a mismatch. safeDelete
             // is contractually non-throwing, so it cannot mask the mismatch. Our
             // own hello stays via that skip-sweep for the peer to read.
             const mismatch = this.bilateralMismatch(peerEnvelope);
             if (mismatch) {
-              await this.client.safeDelete(`${this.path}/${waveFile.name}`);
+              await this.client.safeDelete(`${this.path}/${lockFile.name}`);
               throw mismatch;
             }
 
@@ -1366,9 +1375,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.handshakeRole === "initiator" ? "joiner" : "starter";
             this.peerId = otherId;
 
-            this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
+            this.log.debug(`[${this.role}] parsed ${lockFile.name}`);
 
-            await this.client.safeDelete(`${this.path}/${waveFile.name}`);
+            await this.client.safeDelete(`${this.path}/${lockFile.name}`);
             await this.client.safeDelete(`${this.path}/${otherFile.name}`);
             await this.client.safeDelete(helloPath);
 
@@ -1412,7 +1421,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             // Bilateral flag check before deleting the peer hello. Defense-in-
             // depth: reaching this branch means our own hello was deleted, which
-            // only a wave joiner does, so the peer is in wave mode and a
+            // only a lock joiner does, so the peer is in lock mode and a
             // mismatch cannot normally arise; on the throw the peer-hello delete
             // and the sweep are both skipped.
             const mismatch = this.bilateralMismatch(peerEnvelope);
@@ -1456,11 +1465,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             // I5 (closes the documented two-hellos gap): read the peer hello
             // body through the partial-sync gate, validating the bilateral
-            // flags, BEFORE racing a wave. A lockless peer's hello can coexist
-            // with our wave hello here, so this is a reachable
+            // flags, BEFORE racing a lock. A lockless peer's hello can coexist
+            // with our lock hello here, so this is a reachable
             // lockless_rendezvous mismatch. Running the check before
             // createExclusive pre-empts both the createExclusive-winner and the
-            // EEXIST-loser sub-paths, so a mismatched pair never races a wave.
+            // EEXIST-loser sub-paths, so a mismatched pair never races a lock.
             // On the throw our own hello (already present -- it is one of the
             // two hellos) is left in place by the outer catch's skip-sweep, so
             // the lockless peer reads it and fails too.
@@ -1474,14 +1483,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const mismatch = this.bilateralMismatch(peerEnvelope);
             if (mismatch) throw mismatch;
 
-            const waveName =
+            const lockName =
               `${arrivedFirst ? this.id : this.peerId}-` +
-              `${arrivedFirst ? this.peerId : this.id}.wave`;
-            wavePath = `${this.path}/${waveName}`;
+              `${arrivedFirst ? this.peerId : this.id}${LOCK_SUFFIX}`;
+            lockPath = `${this.path}/${lockName}`;
 
-            this.log.debug(`[${this.role}] attempting to create ${waveName}`);
+            this.log.debug(`[${this.role}] attempting to create ${lockName}`);
 
-            // Pre-emptively track waveName in delete mode: if createExclusive
+            // Pre-emptively track lockName in delete mode: if createExclusive
             // only partially succeeds (file created on server but handle-close
             // fails with a non-EEXIST error), cleanup() will still attempt
             // safeDelete even though the EEXIST handler's
@@ -1489,11 +1498,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // below call responsibleFiles.clear(), which also removes this
             // pre-emptive entry. In retain mode cleanup() is a no-op so
             // tracking serves no purpose.
-            if (!this.options.retainFiles) this.responsibleFiles.add(waveName);
+            if (!this.options.retainFiles) this.responsibleFiles.add(lockName);
             try {
-              await this.client.createExclusive(wavePath);
+              await this.client.createExclusive(lockPath);
               this.log.debug(
-                `[${this.role}] created wave file ${waveName}; waiting for ` +
+                `[${this.role}] created lock file ${lockName}; waiting for ` +
                   "peer to finalize handshake",
               );
 
@@ -1501,7 +1510,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                * A ~ B list
                * A ~ B hello
                * A ~ list
-               * A ~ createExclusive wave
+               * A ~ createExclusive lock
                * ...
                *
                * This is A
@@ -1511,9 +1520,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                * A ~ B list
                * A ~ B hello
                * A ~ B list
-               * A createExclusive wave
-               * B createExclusive wave, EEXIST
-               * B delete A hello, B hello, wave
+               * A createExclusive lock
+               * B createExclusive lock, EEXIST
+               * B delete A hello, B hello, lock
                *
                * This is B
                */
@@ -1523,14 +1532,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               )
                 throw err;
 
-              const waveAlreadyExists = await this.client.exists(wavePath);
+              const lockAlreadyExists = await this.client.exists(lockPath);
 
-              if (!waveAlreadyExists) {
-                // The winner never deletes the wave file in its normal path
-                // (it returns from waitForPeer leaving the wave for the loser
-                // to clean up). If the wave is gone after we received EEXIST,
+              if (!lockAlreadyExists) {
+                // The winner never deletes the lock file in its normal path
+                // (it returns from waitForPeer leaving the lock for the loser
+                // to clean up). If the lock is gone after we received EEXIST,
                 // the winner must have either crashed (their doCleanup ran
-                // during the narrow window where waveName was in
+                // during the narrow window where lockName was in
                 // responsibleFiles) or otherwise abandoned the handshake.
                 // Either way, polling for their first protocol message would
                 // stall until peerTimeoutMs. Fail fast with a clear cause so
@@ -1541,17 +1550,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 await this.client.safeDelete(helloPath);
                 if (!this.options.retainFiles) this.responsibleFiles.clear();
                 throw new UsageError(
-                  "peer appears to have abandoned the handshake: wave file " +
+                  "peer appears to have abandoned the handshake: lock file " +
                     "was claimed by the peer but disappeared before this " +
                     "side could complete synchronization. Retry the exchange.",
                 );
               } else {
                 this.log.debug(
-                  `[${this.role}] wave file creation failed, assuming race ` +
+                  `[${this.role}] lock file creation failed, assuming race ` +
                     "condition",
                 );
 
-                await this.client.safeDelete(wavePath);
+                await this.client.safeDelete(lockPath);
                 await this.client.safeDelete(`${this.path}/${otherFile.name}`);
                 await this.client.safeDelete(helloPath);
 
@@ -1591,9 +1600,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       try {
         await waitForPeer();
         // No clear() here: branches that finish their own cleanup
-        // (responder, wave-detection, EEXIST loser, lockless) clear or retain
+        // (responder, lock-detection, EEXIST loser, lockless) clear or retain
         // explicitly before returning. The createExclusive-winner and lockless
-        // paths are the exception -- they leave hello (and wave or ack) in
+        // paths are the exception -- they leave hello (and lock or ack) in
         // responsibleFiles so cleanup() can sweep them if the peer never
         // arrives (e.g. crash before reaching the handshake files). Clearing
         // here would lose that safety net.
@@ -1616,13 +1625,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // sweep the directory: this party's advertised hello (written before
         // the loop) is the directory's terminal state, left in place so the
         // peer reads it through its own peer-hello read and fails too. Skip the
-        // on-disk safeDelete of hello/ack/wave; clearing responsibleFiles (so a
+        // on-disk safeDelete of hello/ack/lock; clearing responsibleFiles (so a
         // later close()/cleanup() does not delete the advertised hello) and the
         // in-memory reset still run, so the instance is not wedged. A rerun
         // against the leftover hellos is rejected by the entry guard (I0) until
         // the operator clears the directory and fixes the mismatched flag.
         if (!(err instanceof BilateralModeMismatchError)) {
-          if (wavePath) await this.client.safeDelete(wavePath);
+          if (lockPath) await this.client.safeDelete(lockPath);
           if (ackPath) await this.client.safeDelete(ackPath);
           await this.client.safeDelete(helloPath);
         }
@@ -1863,8 +1872,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // message filename now encodes a per-message byte count (and optionally
       // a timestamp and counter), so the receiver cannot predict the exact
       // name. `<peerId>-*.json` matches only the peer's message files - its
-      // `.hello`/`.wave` handshake files and our own `<id>-*.json` writes are
-      // excluded by prefix or extension.
+      // `-hello.json`/`-lock.json` control files are excluded by their
+      // non-numeric terminal segment (the grammar discriminant below) and our
+      // own `<id>-*.json` writes by prefix.
       //
       // A name that matches the prefix but whose final segment is not a byte
       // count (e.g. a leftover `<peerId>-backup.json`) is ignored, not treated

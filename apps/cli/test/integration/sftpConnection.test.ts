@@ -96,7 +96,7 @@ afterAll(async () => {
 // to test race condition, Promise.all is used when synchronizing
 // to set an explicit order, one party is delayed a tick by using setImmediate
 
-test("wave synchronization with race condition", async () => {
+test("lock synchronization with race condition", async () => {
   await Promise.all([serverConn.synchronize(), clientConn.synchronize()]);
 
   const currentFiles = await serverSFTP.list(SFTP_PATH);
@@ -115,7 +115,7 @@ test("basic synchronization", async () => {
   await serverSFTP.put(
     // The planted peer hello must advertise the bilateral mode flags
     // (193901017); an empty {} body now fails the HelloEnvelope schema. Both
-    // parties run default wave mode, so both flags are false.
+    // parties run default lock mode, so both flags are false.
     Buffer.from(
       JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
     ),
@@ -213,14 +213,14 @@ test("terminal frame is received when sender closes before receiver polls", asyn
   expect(message).toEqual({ terminal: true });
 });
 
-test("wave starter aborts on a stuck mid-arrival joiner over real SFTP", async () => {
+test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async () => {
   // End-to-end recovery path on the real SFTP transport. A joiner writes its
   // sentinel and deletes the starter's hello, then crashes before renaming the
   // sentinel to its own hello. The starter must observe the orphaned sentinel
   // over real SFTP and abort on the bounded recovery window with the actionable
   // error -- not poll to the full peer timeout. (The happy-path sentinel
   // put/delete/rename runs under the hood whenever a real joiner arrives second
-  // in the wave tests above; this exercises the failure side, which those do
+  // in the lock tests above; this exercises the failure side, which those do
   // not.)
   await cleanServer();
 

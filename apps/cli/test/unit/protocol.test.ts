@@ -24,8 +24,8 @@ vi.mock("@openmined/psi.js", () => ({
 // is empty before resolving: the receiver's poller deletes each message file
 // after consuming it, so an empty directory is a deterministic signal that the
 // peer has consumed the final PAKE message - no fixed sleep required. .hello
-// and .wave files from synchronize() are ignored; after the wave race the
-// winner's wave file remains until cleanup() runs in the finally block (after
+// and -lock.json files from synchronize() are ignored; after the lock race the
+// winner's lock file remains until cleanup() runs in the finally block (after
 // runExchange returns), so it may still be present while this mock polls for
 // .json files. These files are harmless residue and will not be consumed by
 // the message poller.
@@ -843,7 +843,7 @@ test("SIGINT handler exits with code 130", async () => {
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 
   // Two parties are required: a single party blocks forever in synchronize()
-  // (waiting for a peer's hello/wave file), so runExchange is never reached
+  // (waiting for a peer's hello/lock file), so runExchange is never reached
   // and the mockImplementationOnce entry is never consumed.
   // mockImplementationOnce is provided for both parties so both entries are
   // consumed after synchronize() completes.
@@ -891,7 +891,7 @@ test("SIGINT handler exits with code 130", async () => {
   try {
     // Wait for both parties to enter runExchange before emitting the signal.
     // Emitting SIGINT while a party is still in synchronize() could cause its
-    // cleanup to delete wave files the other party is still waiting for.
+    // cleanup to delete lock files the other party is still waiting for.
     await vi.waitFor(
       () =>
         expect(vi.mocked(runExchange).mock.calls.length).toBeGreaterThanOrEqual(
@@ -1030,7 +1030,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
     });
 
     // After cleanup runs the hello file must be gone — otherwise a retry
-    // would trip the "preexisting hello or wave files" guard.
+    // would trip the "preexisting hello or lock files" guard.
     expect(
       fs.readdirSync(dropDir).filter((f) => f.endsWith("-hello.json")),
     ).toHaveLength(0);
