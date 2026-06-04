@@ -540,3 +540,44 @@ test("parses snake_case peer_id from disk", () => {
   if (result.channel !== "sftp") return;
   expect(result.options?.peerId).toBe("agency-a");
 });
+
+// --- FileSyncOptions: unexpected_files ---------------------------------------
+
+test.each(["error", "warn", "ignore"] as const)(
+  "unexpected_files accepts the enum value %s",
+  (value) => {
+    const result = safeParseConnectionConfig({
+      ...sftpBase,
+      options: { unexpectedFiles: value },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success || result.data.channel !== "sftp") return;
+    expect(result.data.options?.unexpectedFiles).toBe(value);
+  },
+);
+
+test("unexpected_files rejects a value outside the enum", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { unexpectedFiles: "abort" },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("parses snake_case unexpected_files from disk", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { unexpected_files: "warn" },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.unexpectedFiles).toBe("warn");
+});
+
+test("unexpected_files is accepted on filedrop", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share",
+    options: { unexpectedFiles: "ignore" },
+  });
+  expect(result.success).toBe(true);
+});

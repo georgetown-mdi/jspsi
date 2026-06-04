@@ -192,6 +192,13 @@ interface Options {
   locklessRendezvous: boolean;
   peerId?: string;
   retainFiles: boolean;
+  // Policy for a file that appears mid-loop and is neither recognized for the
+  // exchange nor an in-flight temp write. Left optional (the raw preference):
+  // an unset value resolves to a mode-coupled effective default at the use
+  // site (see resolveUnexpectedFilesPolicy), so the resolution does not depend
+  // on the order in which retainFiles/locklessRendezvous are assigned during
+  // open(). An explicit value always wins.
+  unexpectedFiles?: "error" | "warn" | "ignore";
   // How long the lock-path peer waits for a mid-arrival joiner (a visible
   // `<id>-joining.json` sentinel) to finish before treating it as crashed. Not
   // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
@@ -316,6 +323,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // on every successful send regardless of mode; only the reader differs.
   private lastSentFile: string | undefined;
   private consecutiveEnoentCount = 0;
+  // Distinct names already warned about under `unexpectedFiles: "warn"`. poll()
+  // re-lists every cycle, so a recurring unexpected file would log on each pass
+  // without this; membership caps it at one warning per name. Reset per session
+  // (resetSessionState) so a name reused across exchanges on the same instance
+  // can warn again.
+  private warnedUnexpectedFiles = new Set<string>();
   // An `error` emitted while no listener is registered is held here so the
   // next protocol-layer receive can detect failures that arrived in the gap
   // between listener-registration cycles. Reading clears the value; only the
@@ -406,6 +419,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.locklessRendezvous = config.options.locklessRendezvous;
     if (config.options?.retainFiles !== undefined)
       this.options.retainFiles = config.options.retainFiles;
+    if (config.options?.unexpectedFiles !== undefined)
+      this.options.unexpectedFiles = config.options.unexpectedFiles;
     if (config.options?.peerId !== undefined) {
       this.options.peerId = config.options.peerId;
       this.id = config.options.peerId;
@@ -1898,6 +1913,156 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return name;
   }
 
+  // Resolves the effective mid-loop unexpected-file policy. An explicit
+  // `unexpectedFiles` always wins; when unset, the default is mode-coupled:
+  // `warn` on sync-mediated transports (retain mode or lockless rendezvous),
+  // which legitimately produce transient conflict copies and partial downloads
+  // mid-session, and `error` on plain delete-mode transports. Computed at the
+  // use site rather than stored so it never depends on the order open() assigns
+  // the mode flags. The policy is unilateral -- a local observation of one's
+  // own directory view -- so the two parties may resolve to different values.
+  // Re-evaluated per call rather than cached: the inputs are stable mid-session
+  // so the value never changes, it is only consulted on the rare cycles that
+  // find an unexpected file, and recomputing keeps the resolution stateless
+  // (no field to invalidate).
+  private resolveUnexpectedFilesPolicy(): "error" | "warn" | "ignore" {
+    if (this.options.unexpectedFiles !== undefined)
+      return this.options.unexpectedFiles;
+    return this.options.retainFiles || this.options.locklessRendezvous
+      ? "warn"
+      : "error";
+  }
+
+  // True when `name` is a file legitimately present during the message loop
+  // (Phase 2), judged against the two known party ids and the filename grammar.
+  // The recognized set is: an in-flight `temp-*.tmp` write; and any `.json`
+  // file written by either party (prefixed by `<this.id>-` or `<peerId>-`)
+  // that is one of: the two hellos (`<id>-hello.json`) and the single lock
+  // tiebreaker (`<first>-<second>-lock.json`), matched by exact name since each
+  // has exactly one legal form; or -- for the cases whose names are unbounded --
+  // matched by terminal grammar token: a message byte count (all digits, our
+  // own writes; a peer message is taken by the scan above) or `ack` (the
+  // rendezvous ack and the message ack, either writer, whose
+  // `<writer>-<original>-ack.json` name is multi-segment by construction).
+  // This covers both hellos, both acks, the lock,
+  // both parties' messages and message-acks, and our own writes. `joining` is
+  // deliberately absent: it is a rendezvous-phase sentinel a correct exchange
+  // never leaves on disk once the loop is running.
+  //
+  // Anchored to the grammar discriminant, not a bare `<id>-*` glob, so a
+  // conflict copy or partial download of a protocol file (e.g.
+  // `<peerId>-100 (conflicted copy 2026-...).json`, whose terminal token is not
+  // a grammar word) is NOT recognized and falls to the unexpected-file policy
+  // -- the case this detection exists to catch.
+  //
+  // This is the single extensible baseline for site 3. A later relaxation that
+  // tolerates foreign files already present at entry (a directory snapshot,
+  // deferred and out of scope here -- I0 stays strict-empty) must feed those
+  // tolerated names into THIS predicate rather than standing up a parallel set,
+  // so the loop keeps one notion of "recognized". That relaxation also owns the
+  // remaining seams this item leaves for a foreign `<peerId>-<digits>.json` that
+  // mimics a message: with a matching NNN it is selected as a message in poll()
+  // and rejected; in retain mode with a non-matching NNN it is silently skipped
+  // by the recvSeq `continue` there. Both escape the unexpected-file policy, and
+  // neither is fixable by name -- such a file is indistinguishable from a
+  // legitimately retained, already-consumed peer message, so telling them apart
+  // needs the snapshot's identity. Both only matter once such a file can
+  // legitimately pre-exist.
+  private isRecognizedLoopFile(name: string, peerId: string): boolean {
+    if (name.startsWith("temp-") && name.endsWith(".tmp")) return true;
+    if (!name.endsWith(".json")) return false;
+    const ownPrefixed = name.startsWith(`${this.id}-`);
+    if (!ownPrefixed && !name.startsWith(`${peerId}-`)) return false;
+    // Hellos and the lock tiebreaker each have exactly one legal name, so match
+    // them by exact name rather than terminal token -- a stray
+    // `<id>-x-hello.json` or `<id>-x-lock.json` is no longer admitted. The lock
+    // pair may appear in either arrival order (poll() does not track who
+    // arrived first), but both reconstructions name the same single file. The
+    // lock is recognized in either rendezvous mode on purpose: the recognized
+    // set is mode-agnostic by spec, and admitting a stray lock conservatively
+    // avoids a false-positive abort on a cross-mode or legacy residue.
+    if (
+      name === `${this.id}${HELLO_SUFFIX}` ||
+      name === `${peerId}${HELLO_SUFFIX}`
+    )
+      return true;
+    if (
+      name === `${this.id}-${peerId}${LOCK_SUFFIX}` ||
+      name === `${peerId}-${this.id}${LOCK_SUFFIX}`
+    )
+      return true;
+    const stem = name.slice(0, -".json".length);
+    const token = stem.slice(stem.lastIndexOf("-") + 1);
+    // Our own messages carry a variable counter/byte-count terminal whose exact
+    // name the receiver cannot predict, so they stay anchored to the numeric
+    // grammar token. Scoped to our OWN prefix: a peer numeric-terminal file is
+    // the message scan's job -- poll() routes or rejects it above and it never
+    // falls here -- so recognizing one here would be unreachable today and a
+    // false "recognized" for a future caller consulting this baseline directly
+    // (e.g. a `<peerId>-foo-5.json` the scan rejects as malformed).
+    if (ownPrefixed && /^\d+$/.test(token)) return true;
+    if (token !== "ack") return false;
+    // An ack marker is `<writerId>-<originalName>-ack.json`. Recognize it only
+    // when `<originalName>` is itself a full, legal target for one of the two
+    // ids -- the peer's or our own hello stem, or a message name -- rather than
+    // accepting any >=4-segment shape. This rejects `<id>-x-y-ack.json` and
+    // `<id>-<peerId>-x-ack.json` alike. The only stray names that still pass are
+    // acks of a correctly-shaped target that was never actually sent (e.g.
+    // `<id>-<peerId>-999-ack.json`): distinguishing those is the identity
+    // question the directory snapshot (195255994) owns, and such an ack is inert
+    // -- zero-length and matching no expected-ack lookup. Prefix tests and the
+    // byte-count parse are prefix/terminal anchored, so this stays correct even
+    // if a peer_id itself contains a dash.
+    const inner = stem.slice(0, -"-ack".length); // <writerId>-<originalName>
+    for (const writer of [this.id, peerId]) {
+      if (!inner.startsWith(`${writer}-`)) continue;
+      const original = inner.slice(`${writer}-`.length);
+      const isHello =
+        original === `${this.id}-hello` || original === `${peerId}-hello`;
+      const isMessage =
+        (original.startsWith(`${this.id}-`) ||
+          original.startsWith(`${peerId}-`)) &&
+        parseMessageByteCount(`${original}.json`) !== undefined;
+      if (isHello || isMessage) return true;
+    }
+    return false;
+  }
+
+  // Applies the resolved `unexpectedFiles` policy to files found mid-loop that
+  // are neither recognized for the exchange nor in-flight temp writes
+  // (enforcement site 3). `error` throws a terminal UsageError (CLI exit 64, a
+  // usage/config condition like a wrong or shared directory) naming the files
+  // and the path; `warn` logs each distinct name at most once across the
+  // session; `ignore` does nothing (the pre-existing silent-skip behavior).
+  private handleUnexpectedFiles(names: string[], path: string): void {
+    const policy = this.resolveUnexpectedFilesPolicy();
+    if (policy === "ignore") return;
+    if (policy === "error")
+      throw new UsageError(
+        `unexpected file(s) appeared in ${path} during the exchange: ` +
+          `${names.join(", ")}. The directory must be dedicated to a single ` +
+          'exchange between exactly two parties (see EXCHANGE_SPEC.md "Directory ' +
+          'exclusivity"); a foreign file usually means another process or ' +
+          "session is writing to this path, or a sync tool produced a conflict " +
+          "copy or partial download. Remove the file, or set " +
+          'connection.options.unexpected_files to "warn" or "ignore" if the ' +
+          "directory cannot be dedicated.",
+      );
+    // warn: log each distinct name at most once per session (warnedUnexpected-
+    // Files), since poll() re-lists every cycle and a persisting file would
+    // otherwise log on each pass.
+    for (const name of names) {
+      if (this.warnedUnexpectedFiles.has(name)) continue;
+      this.warnedUnexpectedFiles.add(name);
+      this.log.warn(
+        `[${this.role}] unexpected file ${name} in ${path} during the ` +
+          "exchange; continuing (unexpected_files: warn). If this directory is " +
+          "dedicated to the exchange, this may be a conflict copy, a partial " +
+          "download, or another session sharing the path.",
+      );
+    }
+  }
+
   private async poll() {
     if (!this.pollerActive) return;
 
@@ -1915,15 +2080,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // Detect via a pattern scan rather than an exact-name exists(): the
       // message filename now encodes a per-message byte count (and optionally
       // a timestamp and counter), so the receiver cannot predict the exact
-      // name. `<peerId>-*.json` matches only the peer's message files - its
-      // `-hello.json`/`-lock.json` control files are excluded by their
-      // non-numeric terminal segment (the grammar discriminant below) and our
-      // own `<id>-*.json` writes by prefix.
+      // name. `<peerId>-*.json` with a numeric terminal segment (the grammar
+      // discriminant) matches only the peer's message files; its
+      // `-hello.json`/`-ack.json`/`-lock.json` control files have non-numeric
+      // terminals and are recognized for the loop instead.
       //
-      // A name that matches the prefix but whose final segment is not a byte
-      // count (e.g. a leftover `<peerId>-backup.json`) is ignored, not treated
-      // as an error: the previous exact-name lookup never matched such a file,
-      // so failing the exchange over an unrelated file would be a regression.
+      // Enforcement site 3 (see docs/FILE_SYNC.md). The scan now classifies
+      // EVERY file in the listing, not only peer-prefixed ones: a file that is
+      // neither a peer message nor recognized for the loop (both hellos, both
+      // acks, the lock, both parties' messages and message-acks, our own
+      // writes, and in-flight `temp-*.tmp`) is an unexpected file and handled
+      // per `unexpectedFiles` -- a revision of the old "non-numeric terminals
+      // are ignored, not errors" rule for the post-entry window. The previous
+      // behavior (unconditional silent skip) is preserved by
+      // `unexpected_files: ignore`.
       //
       // In retain mode, messages are never deleted so the directory accumulates
       // one entry per send. synchronize() asserts a clean directory, so recvSeq
@@ -1931,40 +2101,85 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const allFiles = await this.client.list(path);
 
       const messages: Array<{ file: FileInfo; declaredSize: number }> = [];
-      const ignored: string[] = [];
+      const unexpected: string[] = [];
       for (const file of allFiles) {
-        if (!file.name.startsWith(`${peerId}-`) || !file.name.endsWith(".json"))
-          continue;
-        // Ack markers share the peer prefix and `.json` extension but are
-        // control files, not messages (their terminal segment is `ack`). The
-        // peer's rendezvous ack and any message acks it wrote both land here;
-        // exclude them so they never reach the ignored array and do not produce
-        // repeated trace-log noise. Routing safety still rests on the grammar
-        // discriminant below (a non-numeric terminal is never a message); this
-        // is only a noise filter.
-        if (file.name.endsWith("-ack.json")) continue;
-        const declaredSize = parseMessageByteCount(file.name);
-        if (declaredSize === undefined) {
-          ignored.push(file.name);
-        } else {
-          if (this.options.retainFiles) {
-            const nnn = parseTimestampedMessageNNN(file.name);
-            if (nnn === undefined) {
-              this.log.trace(
-                `[${this.role}] skipping ${file.name}: no numeric NNN segment (unexpected in retain mode)`,
-              );
-              continue;
+        const name = file.name;
+
+        // Peer message scan. A peer-prefixed `.json` whose terminal segment is
+        // a byte count is a message (the grammar discriminant). Ack markers
+        // (terminal `ack`) share the prefix but are control files, so they are
+        // excluded here and fall through to the recognized-for-the-loop check.
+        if (
+          name.startsWith(`${peerId}-`) &&
+          name.endsWith(".json") &&
+          !name.endsWith("-ack.json")
+        ) {
+          const declaredSize = parseMessageByteCount(name);
+          if (declaredSize !== undefined) {
+            if (this.options.retainFiles) {
+              const nnn = parseTimestampedMessageNNN(name);
+              if (nnn === undefined) {
+                // A byte-count terminal but no parseable NNN segment. In retain
+                // mode every peer message carries an NNN: the bilateral retain
+                // agreement is verified at rendezvous and synchronize() hard-
+                // requires retain => timestamp on both sides, so a correctly
+                // configured peer cannot produce this name. It is therefore a
+                // malformed protocol file (corruption, or a foreign message-
+                // shaped file), terminal regardless of the `unexpectedFiles`
+                // policy, and reported BEFORE the recvSeq selection guard so it
+                // is not silently skipped as a "different NNN".
+                //
+                // Deliberately a plain malformed-protocol UsageError, NOT a
+                // BilateralModeMismatchError: by this point both sides have
+                // already agreed on retain/timestamp at rendezvous, so a "your
+                // settings disagree" message would misdirect the operator away
+                // from the real cause (a corrupt or stray file). It is a
+                // protocol error at this point, deeper than a misconfiguration.
+                //
+                // Names only this file -- the priority signal -- and does not
+                // enumerate any other unexpected files this cycle may hold: the
+                // throw fires mid-scan, so that list is itself incomplete, and a
+                // clean re-run surfaces any remaining foreign files via
+                // handleUnexpectedFiles. The message flags the possibility
+                // rather than listing them.
+                throw new UsageError(
+                  `message file ${name} from ${peerId} in ${path} has a ` +
+                    "byte-count terminal segment but no parseable NNN segment; " +
+                    "a correctly configured retain-mode peer cannot produce " +
+                    "this name, so the file is corrupt or does not belong to " +
+                    "this exchange. The directory may contain further " +
+                    "unexpected files this error does not enumerate; inspect it " +
+                    "before retrying",
+                );
+              }
+              // NNN < recvSeq is an already-consumed retained message; a higher
+              // NNN is not yet current. Either way it is not this cycle's
+              // message, so skip it. A foreign message-shaped file with a non-
+              // matching NNN is skipped here too and so escapes the unexpected-
+              // file policy -- it is indistinguishable by name from a retained
+              // message, so detecting it needs 195255994's directory snapshot
+              // (see the isRecognizedLoopFile seam note); out of scope under
+              // strict-empty I0, where no such file can pre-exist.
+              if (nnn !== this.recvSeq) continue;
             }
-            if (nnn !== this.recvSeq) continue;
+            messages.push({ file, declaredSize });
+            continue;
           }
-          messages.push({ file, declaredSize });
+          // Peer-prefixed `.json`, non-ack, non-numeric terminal (e.g. the peer
+          // hello, or a stray `<peerId>-backup.json`): fall through to the
+          // recognized/unexpected classification below.
         }
+
+        // Foreign-file detection: a file neither recognized for the loop nor an
+        // in-flight temp write is unexpected and handled per `unexpectedFiles`.
+        if (!this.isRecognizedLoopFile(name, peerId)) unexpected.push(name);
       }
-      if (ignored.length > 0)
-        this.log.trace(
-          `[${this.role}] ignoring ${ignored.length} non-message file(s) ` +
-            `matching ${peerId}-*.json: ${ignored.join(", ")}`,
-        );
+
+      // Apply the mid-loop unexpected-file policy before processing messages:
+      // `error` throws here (terminal), `warn` logs once per name and falls
+      // through, `ignore` is a no-op. Malformed protocol files (the unparseable-
+      // NNN case above) are handled separately and unconditionally.
+      if (unexpected.length > 0) this.handleUnexpectedFiles(unexpected, path);
 
       if (messages.length > 1) {
         // Two messages selected at once is a terminal protocol violation in
@@ -2225,6 +2440,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.recvSeq = 0;
     this.lastAckedNNN = -1;
     this.lastSentFile = undefined;
+    this.warnedUnexpectedFiles.clear();
   }
 
   start() {

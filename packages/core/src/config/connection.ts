@@ -403,6 +403,41 @@ export interface FileSyncOptions extends SharedOptions {
    * from a prior session are present in the directory.
    */
   retainFiles?: boolean;
+  /**
+   * How to handle a file that appears in the shared directory *during* the
+   * message loop and is neither recognized as part of this exchange nor a
+   * known transient (an in-flight `temp-*.tmp` write). Directory exclusivity
+   * is a stated precondition (see EXCHANGE_SPEC.md "Directory exclusivity"),
+   * so such a file usually means the directory is being shared with another
+   * process or session, or a sync tool produced a conflict copy or partial
+   * download.
+   *
+   * - `error`: fail the exchange with a usage error (exit 64) naming the file
+   *   and the directory path.
+   * - `warn`: log the file once per distinct name and continue.
+   * - `ignore`: skip silently (the pre-existing behavior).
+   *
+   * **Local, not bilateral.** Detecting a foreign file is a local observation
+   * of one's own directory view; it needs no peer agreement and carries none
+   * of the mismatch-stall risk of `lockless_rendezvous`/`retain_files`. The
+   * two parties may run different values.
+   *
+   * When unset, the effective default is mode-coupled: `error` on plain
+   * delete-mode transports (ordinary `sftp`/`filedrop`), and `warn` when
+   * `retain_files` or `lockless_rendezvous` is set -- those flags signal a
+   * sync-mediated transport that legitimately produces transient conflict
+   * copies and partial downloads mid-session, where a hard fail would abort
+   * exactly the exchanges retain mode targets. An explicit value always
+   * overrides the mode-coupled default.
+   *
+   * This setting governs foreign-file detection only. A peer-prefixed file
+   * that is a malformed *protocol* file (a message-shaped name a correctly
+   * configured peer cannot produce) is always reported, regardless of this
+   * setting.
+   *
+   * Default: `error` (plain) / `warn` (sync-mediated), as above.
+   */
+  unexpectedFiles?: "error" | "warn" | "ignore";
 }
 
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
@@ -413,6 +448,7 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
     locklessRendezvous: z.boolean().optional(),
     peerId: z.string().min(1).optional(),
     retainFiles: z.boolean().optional(),
+    unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
   })
   .refine((opts) => !opts.peerId || opts.timestampInFilename === true, {
     message:
