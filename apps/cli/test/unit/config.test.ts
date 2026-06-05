@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
 import YAML from "yaml";
-import { getDefaultLinkageTerms, parseExchangeSpec } from "@psilink/core";
+import {
+  getDefaultLinkageTerms,
+  parseExchangeSpec,
+  UsageError,
+} from "@psilink/core";
 import { applyConnectionOverrides, saveConfig } from "../../src/config";
 import type {
   ConnectionConfig,
@@ -112,6 +116,10 @@ test("peerId 'temp' is rejected by applyConnectionOverrides", () => {
     server: { host: "sftp.example.org" },
     options: { timestampInFilename: true },
   };
+  // Invalid option combinations are usage errors (CLI exit 64), not exit 69.
+  expect(() => applyConnectionOverrides(base, { peerId: "temp" })).toThrow(
+    UsageError,
+  );
   expect(() => applyConnectionOverrides(base, { peerId: "temp" })).toThrow(
     "reserved",
   );
@@ -164,6 +172,12 @@ test("retainFiles: true preserves an already-set locklessRendezvous: true", () =
 });
 
 test("retainFiles: true with explicit locklessRendezvous: false throws", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      retainFiles: true,
+      locklessRendezvous: false,
+    }),
+  ).toThrow(UsageError);
   expect(() =>
     applyConnectionOverrides(baseSFTP, {
       retainFiles: true,

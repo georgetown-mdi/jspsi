@@ -1,6 +1,6 @@
 import YAML from "yaml";
 import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
-import { safeParseFileSyncOptions } from "@psilink/core";
+import { safeParseFileSyncOptions, UsageError } from "@psilink/core";
 
 import { writeFileOwnerOnly } from "./keyFile";
 
@@ -111,7 +111,9 @@ export function applyConnectionOverrides(
       const message = validation.error.issues
         .map((i: { message: string }) => i.message)
         .join("; ");
-      throw new Error(message);
+      // An invalid option combination (from psilink.yaml or a CLI override) is
+      // invalid caller configuration: a UsageError so the CLI exits 64, not 69.
+      throw new UsageError(message);
     }
   }
 
