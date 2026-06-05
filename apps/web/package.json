@@ -13,7 +13,7 @@
     "type-check": "tsc --noEmit",
     "start": "node --env-file=.env .output/server/index.mjs",
     "cli_server": "node --import=tsx scripts/psi.ts",
-    "test": "vitest run",
+    "test": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration"

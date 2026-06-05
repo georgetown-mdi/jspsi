@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 
 import { EventSource } from "eventsource";
 
-const HOST = "http://127.0.0.1:3000";
+// Derive from PORT (default 3000) so this stays in sync with the dev server the
+// integration globalSetup launches on 127.0.0.1:PORT. Bind host is 127.0.0.1,
+// not localhost, which may resolve to ::1 and miss the IPv4 bind.
+const HOST = `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

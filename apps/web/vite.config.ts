@@ -64,6 +64,7 @@ export default defineConfig((_configEnv) => {
             ],
             name: "integration",
             environment: "node",
+            globalSetup: ["./test/devServer/globalSetup.ts"],
           },
         },
         {

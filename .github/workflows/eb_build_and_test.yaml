@@ -66,6 +66,13 @@ jobs:
       - name: Run tests
         run: |
           npm run -w packages/core test
+      # Web integration tests gate the web deploy on the app's own behavior,
+      # independent of the CLI (whose tests live in release.yaml). The suite is
+      # self-managing -- a vitest globalSetup spawns the dev server, waits for
+      # readiness, and tears it down -- and needs no Docker (it runs in the node
+      # environment and hits the HTTP/SSE routes), so a stock runner suffices.
+      - name: Web integration tests
+        run: npm run test:integration -w apps/web
       - name: Package for Elastic Beanstalk
         run: |
           cp -a apps/web/deploy/aws_eb/. apps/web/.output
