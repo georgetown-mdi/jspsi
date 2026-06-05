@@ -14,6 +14,7 @@ import {
   serializeEnvelope,
   type HelloEnvelope,
 } from "./controlEnvelope";
+import { ADVERTISE_HELLO_RETRY_ATTEMPTS } from "./fileSyncConstants";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -866,28 +867,63 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const mismatch = this.bilateralMismatch(peerEnvelope);
       if (mismatch) {
         // Advertise our own hello so the lockless peer reads it and fails
-        // symmetrically. This is best-effort: if the put itself fails there is
-        // no way to leave a durable advertisement -- whatever the write order --
-        // so the peer degrades to the legacy peer-timeout. Swallow that write
-        // failure so THIS party still throws the genuine mismatch it detected (a
-        // UsageError, CLI exit 64) rather than letting a transport rejection --
-        // which escapes the catch-less joiner fast-path directly -- mask it as a
-        // generic Error (exit 69). The mismatch is the actionable cause; the
-        // operator must fix the diverging flag regardless of the transport.
-        try {
-          await this.client.put(
-            serializeEnvelope(this.helloEnvelope()),
-            helloPath,
-            {
-              flags: "w",
-              encoding: "utf-8",
-            },
-          );
-        } catch (writeErr: unknown) {
-          this.log.debug(
-            `[${this.role}] could not advertise hello on mismatch; peer may ` +
-              `time out instead of fast-failing: ${errMessage(writeErr)}`,
-          );
+        // symmetrically. This is the one mismatch site that needs a NEW write at
+        // detection time, so it is the single point of asymmetric failure in the
+        // symmetric-detection guarantee: if the put fails at exactly this moment
+        // there is no durable advertisement for the peer to read -- whatever the
+        // write order -- and the peer degrades to the legacy peer-timeout. Retry
+        // the write up to a small bounded budget at the polling cadence to raise
+        // the odds it lands before the peer would otherwise time out (the peer is
+        // concurrently polling, so the advertisement need not arrive on the first
+        // try). This hardens 193901017's documented best-effort floor; it does
+        // not change detection -- see ADVERTISE_HELLO_RETRY_ATTEMPTS.
+        //
+        // Only after the budget is exhausted do we fall through to the
+        // log-and-degrade path. Whatever the write's outcome, THIS party still
+        // throws the genuine mismatch it detected (a UsageError, CLI exit 64):
+        // the retry must not let a transport rejection escape the catch-less
+        // joiner fast-path and mask the mismatch as a generic Error (exit 69).
+        // The mismatch is the actionable cause; the operator must fix the
+        // diverging flag regardless of the transport.
+        for (
+          let attempt = 1;
+          attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
+          attempt++
+        ) {
+          try {
+            await this.client.put(
+              serializeEnvelope(this.helloEnvelope()),
+              helloPath,
+              {
+                flags: "w",
+                encoding: "utf-8",
+              },
+            );
+            break;
+          } catch (writeErr: unknown) {
+            // Label is the literal `joiner`, not `this.role`: the handshake role
+            // this party plays is fixed by reaching this lock-joiner branch, but
+            // `this.role` is not committed until rendezvous succeeds (below the
+            // mismatch gate), so it still holds "unknown role" here. This mirrors
+            // the `[joiner]`/`[starter]` literals used elsewhere in synchronize()
+            // before the role is committed.
+            if (attempt < ADVERTISE_HELLO_RETRY_ATTEMPTS) {
+              this.log.debug(
+                `[joiner] advertise-hello write failed (attempt ` +
+                  `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
+                  `${errMessage(writeErr)}`,
+              );
+              await new Promise<void>((resolve) =>
+                setTimeout(resolve, this.options.pollingFrequency),
+              );
+            } else {
+              this.log.debug(
+                `[joiner] could not advertise hello on mismatch after ` +
+                  `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
+                  `instead of fast-failing: ${errMessage(writeErr)}`,
+              );
+            }
+          }
         }
         // Reset role/peer fields defensively, mirroring the outer catch. They
         // are not yet assigned on this branch (the assignments below the
