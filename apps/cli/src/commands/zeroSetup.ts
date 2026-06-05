@@ -277,7 +277,8 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
     case "file:":
       return "filedrop";
     default:
-      throw new Error(
+      // Invalid caller input (exit 64), not a transport failure.
+      throw new UsageError(
         `unsupported URL scheme: ${url.protocol}; expected sftp://, ` +
           "ssh://, ws://, wss://, or file://",
       );
@@ -293,7 +294,7 @@ export function createConnection(
 
   if (channel === "filedrop") {
     if (server.hostname && server.hostname !== "localhost") {
-      throw new Error(
+      throw new UsageError(
         `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
           `or file://localhost/path; got: ${server.href}`,
       );
@@ -314,7 +315,7 @@ export function createConnection(
   }
 
   if (channel !== "sftp")
-    throw new Error(`${channel} channel not yet supported in the CLI`);
+    throw new UsageError(`${channel} channel not yet supported in the CLI`);
 
   const base: SFTPConnectionConfig = {
     channel: "sftp",
@@ -435,7 +436,13 @@ export async function handler(argv: Arguments): Promise<void> {
     prepared = await prepareDataset(identity, input);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit((err as { exitCode?: number }).exitCode ?? 69);
+    // A bad URL scheme or unsupported channel is a usage error (exit 64);
+    // prepareDataset failures carry their own exitCode; otherwise exit 69.
+    process.exit(
+      err instanceof UsageError
+        ? 64
+        : ((err as { exitCode?: number }).exitCode ?? 69),
+    );
   }
 
   announceRetainMode(connection, log);

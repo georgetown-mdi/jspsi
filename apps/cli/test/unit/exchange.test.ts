@@ -329,7 +329,7 @@ test("authentication.role in YAML config is ignored and does not cause a ZodErro
 
 // --- webrtc channel ----------------------------------------------------------
 
-test("webrtc config throws 'not yet supported' error", () => {
+test("webrtc config throws a UsageError 'not yet supported'", () => {
   fs.writeFileSync(
     configFile,
     YAML.stringify({
@@ -337,5 +337,7 @@ test("webrtc config throws 'not yet supported' error", () => {
       linkageTerms: minimalLinkageTerms,
     }),
   );
+  // An unsupported channel is invalid caller config (exit 64), not exit 69.
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("not yet supported");
 });

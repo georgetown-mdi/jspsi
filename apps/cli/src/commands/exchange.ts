@@ -355,7 +355,9 @@ export function loadConfig(
   }
 
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
-    throw new Error(
+    // An unsupported channel in the config is invalid caller configuration
+    // (exit 64), not a transport failure.
+    throw new UsageError(
       `the ${connection.channel} channel is not yet supported in the CLI`,
     );
 
