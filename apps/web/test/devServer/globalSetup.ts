@@ -11,8 +11,8 @@ import { spawn } from "node:child_process";
 // The dev server runs on 127.0.0.1 (the Vite bind host -- not `localhost`,
 // which may resolve to ::1 and miss the IPv4 bind). The port comes from the
 // PORT env var (default 3000), matching vite.config.ts. The integration tests
-// hardcode http://127.0.0.1:3000; both derive from the same default, so they
-// stay in sync as long as PORT is not overridden.
+// derive their target from the same `process.env.PORT ?? "3000"`, so the
+// launched/probed port and the tested port cannot drift.
 //
 // If a server is already listening on 127.0.0.1:PORT when the suite starts,
 // it is reused and left running on teardown, so a developer's long-lived
@@ -24,10 +24,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(here, "../..");
 
 const READY_TIMEOUT_MS = 60_000;
-const PROBE_INTERVAL_MS = 250;
+// Per-probe abort: how long a single readiness request waits for an HTTP
+// response when the server has accepted the TCP connection but is slow to
+// answer (e.g. Vite still compiling). A refused connection rejects near-
+// instantly, well before this fires.
+const PROBE_TIMEOUT_MS = 1_000;
+// Sleep between probes. With a refused connection returning immediately, this
+// is roughly the effective poll cadence while the server is still coming up.
+const PROBE_SLEEP_MS = 250;
 // Short probe to detect an already-running server so we reuse rather than
 // start a second one -- and, crucially, leave it running on teardown.
 const REUSE_PROBE_TIMEOUT_MS = 500;
+// After SIGTERM, how long to wait for the process group to exit before
+// escalating to SIGKILL, so teardown cannot hang on a stuck dev server.
+const STOP_TIMEOUT_MS = 5_000;
 
 function getPort(): number {
   return parseInt(process.env.PORT ?? "3000", 10);
@@ -51,14 +61,14 @@ async function httpAccepts(url: string, timeoutMs: number): Promise<boolean> {
 async function waitForServer(url: string): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
-    if (await httpAccepts(url, PROBE_INTERVAL_MS)) return;
+    if (await httpAccepts(url, PROBE_TIMEOUT_MS)) return;
     if (Date.now() >= deadline)
       throw new Error(
         `Dev server did not become ready at ${url} within ` +
           `${READY_TIMEOUT_MS / 1000}s. Check that \`npm run dev\` starts ` +
           `cleanly from ${webRoot}.`,
       );
-    await new Promise((r) => setTimeout(r, PROBE_INTERVAL_MS));
+    await new Promise((r) => setTimeout(r, PROBE_SLEEP_MS));
   }
 }
 
@@ -98,14 +108,36 @@ export default async function setup(): Promise<() => Promise<void>> {
     launchError = err;
   });
 
-  const killGroup = () => {
-    if (child.pid !== undefined) {
+  // Sends SIGTERM to the whole process group, then waits for the child to exit
+  // before resolving -- otherwise a back-to-back run's reuse probe could see
+  // the still-dying server holding the port and treat it as a warm one, or the
+  // fresh spawn could fail with EADDRINUSE. Escalates to SIGKILL if the group
+  // does not exit within STOP_TIMEOUT_MS, so teardown cannot hang.
+  const stopServer = (): Promise<void> => {
+    if (child.pid === undefined || child.exitCode !== null)
+      return Promise.resolve();
+    const pid = child.pid;
+    return new Promise<void>((resolveStop) => {
+      const timer = setTimeout(() => {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+      }, STOP_TIMEOUT_MS);
+      timer.unref();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolveStop();
+      });
       try {
-        process.kill(-child.pid, "SIGTERM");
+        process.kill(-pid, "SIGTERM");
       } catch {
-        // already gone
+        // already gone -- the exit listener may never fire, so settle here.
+        clearTimeout(timer);
+        resolveStop();
       }
-    }
+    });
   };
 
   try {
@@ -114,7 +146,7 @@ export default async function setup(): Promise<() => Promise<void>> {
     if (launchError) throw launchError;
     await waitForServer(url);
   } catch (err) {
-    killGroup();
+    await stopServer();
     throw err;
   }
 
@@ -122,7 +154,6 @@ export default async function setup(): Promise<() => Promise<void>> {
 
   return () => {
     console.log("[dev-server] stopping dev server");
-    killGroup();
-    return Promise.resolve();
+    return stopServer();
   };
 }
