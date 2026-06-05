@@ -36,6 +36,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 
 - A malformed message from a peer is reported as a protocol error instead of crashing.
 - A failed exchange surfaces its original cause instead of a generic connection error.
+- Closing a file-sync connection now cancels any in-flight rendezvous or send wait promptly instead of letting the timer fire and resume against a connection that is tearing down. Internal hardening only: cancellation threads a single `AbortController` through every wait site, and a new internal `ConnectionClosedError` may appear in debug logs on a close-during-wait. Not a user-facing exit-code change (a deliberate close under a signal still exits 130/143).
 - Wave-path rendezvous: a party whose hello is deleted by a joiner that then fails mid-arrival no longer stalls until the peer timeout. The joiner now signals its arrival with a `<id>-joining.json` sentinel, and the waiting party recovers within a bounded window or aborts with a distinct transport error.
 - File-sync rendezvous now sweeps an orphaned in-flight temp file (`temp-*.tmp`) left in the exchange directory by a `send()`/`writeAck()` whose process was hard-killed between the temp write and its atomic rename. The artifact is deleted at rendezvous setup instead of accumulating as litter across crashed exchanges or aborting entry with a spurious usage error. Only `temp-*.tmp` is swept, never the `*.json` message files (so retain mode's transcript is untouched).
 

@@ -22,3 +22,43 @@
 // site in synchronize()'s joiner fast-path.
 /** @internal */
 export const ADVERTISE_HELLO_RETRY_ATTEMPTS = 5;
+
+// Leak-safe cancellable sleep: resolves after `ms`, or rejects with
+// `signal.reason` if the signal aborts first. Every in-session wait site in
+// fileSyncConnection.ts uses it (the module-level readControlFileWithGate
+// directly, the class via its wait() delegate) so an in-flight sleep cancels
+// promptly when close() aborts the session controller. It lives here, in this
+// non-barrelled module, rather than in fileSyncConnection.ts (which IS
+// barrelled via main.ts's `export *`) so the unit test can deep-import it
+// without leaking it into the package's public runtime surface -- the same
+// reason ADVERTISE_HELLO_RETRY_ATTEMPTS lives here.
+//
+// Exactly one of {timer fires, abort fires} ever runs, and each tears down the
+// other: a pre-aborted signal returns an already-rejected promise with no timer
+// or listener allocated (the awaiter still observes it on the next microtask, as
+// with any rejected promise); a timer fire removes the listener before
+// resolving; an abort clears the timer
+// and the `{ once: true }` listener auto-detaches. (onAbort closes over `timer`,
+// a binding declared textually below it -- a safe forward reference, not a TDZ
+// hazard: the listener that can invoke onAbort is registered only after
+// `const timer` has been initialized, so onAbort can never run while `timer` is
+// still in its temporal dead zone.) It always rejects on abort, so the
+// surrounding poll loop unwinds into its next statement and propagates.
+/** @internal */
+export function cancellableDelay(
+  ms: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}

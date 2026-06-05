@@ -1,7 +1,10 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { FileSyncConnection } from "../src/connection/fileSyncConnection";
-import { ADVERTISE_HELLO_RETRY_ATTEMPTS } from "../src/connection/fileSyncConstants";
+import {
+  ADVERTISE_HELLO_RETRY_ATTEMPTS,
+  cancellableDelay,
+} from "../src/connection/fileSyncConstants";
 import type {
   FileTransportClient,
   FileInfo,
@@ -10,7 +13,11 @@ import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
 } from "../src/config/connection";
-import { UsageError, BilateralModeMismatchError } from "../src/errors";
+import {
+  UsageError,
+  BilateralModeMismatchError,
+  ConnectionClosedError,
+} from "../src/errors";
 import { withCapturedLogs } from "../src/testing";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
@@ -6208,4 +6215,294 @@ test("poll(): an ack-shaped foreign file whose target is not a real protocol fil
   expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
     false,
   );
+});
+
+// --- cancellable waits: close() cancels in-flight waits (D1-D6) ---------------
+
+test("close() cancels an in-flight retain ack-wait promptly (site 4)", async () => {
+  const { client } = makeMockClient();
+  const HUGE_TTL = 60_000;
+  const conn = makeRetainConn(client, "me", "peer", HUGE_TTL);
+  // seq>0 with a recorded lastSentFile drives send() into the ack-wait loop; the
+  // peer never writes the ack, so it parks in this.wait (site 4).
+  conn.seq = 1;
+  (conn as unknown as { lastSentFile: string }).lastSentFile =
+    "me-20260101T000000-000-10.json";
+
+  // Barrier: resolve once the ack-wait has polled list() at least once, so we
+  // close() with the loop committed to the wait rather than before it begins.
+  let parked!: () => void;
+  const reachedWait = new Promise<void>((r) => (parked = r));
+  const origList = client.list;
+  client.list = async (p: string) => {
+    const result = await origList(p);
+    parked();
+    return result;
+  };
+
+  const start = Date.now();
+  const outcome = conn.send({ blocked: true }).then(
+    () => null,
+    (err: unknown) => err,
+  );
+
+  await reachedWait;
+  await conn.close();
+
+  const err = await outcome;
+  expect(err).toBeInstanceOf(ConnectionClosedError);
+  // Cancellation, not the deadline, unblocked the wait.
+  expect(Date.now() - start).toBeLessThan(HUGE_TTL / 2);
+});
+
+test("close() cancels an in-flight delete-mode consume-wait promptly (site 5)", async () => {
+  const { client, files } = makeMockClient();
+  const HUGE_TTL = 60_000;
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: HUGE_TTL,
+    peerTimeoutMs: 50,
+  });
+  conn.peerId = "peer";
+  // An outstanding message nobody consumes drives send() into the consume-wait.
+  files.set(
+    `/test/${conn.id}-99.json`,
+    Buffer.from(JSON.stringify({ stale: true })),
+  );
+
+  let parked!: () => void;
+  const reachedWait = new Promise<void>((r) => (parked = r));
+  const origList = client.list;
+  client.list = async (p: string) => {
+    const result = await origList(p);
+    parked();
+    return result;
+  };
+
+  const start = Date.now();
+  const outcome = conn.send({ blocked: true }).then(
+    () => null,
+    (err: unknown) => err,
+  );
+
+  await reachedWait;
+  await conn.close();
+
+  const err = await outcome;
+  expect(err).toBeInstanceOf(ConnectionClosedError);
+  expect(Date.now() - start).toBeLessThan(HUGE_TTL / 2);
+});
+
+test("close() cancels a parked rendezvous wait promptly (site 3)", async () => {
+  const { client } = makeMockClient();
+  const HUGE_TTL = 60_000;
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: HUGE_TTL,
+    peerTimeoutMs: 50,
+  });
+
+  // The peer hello never appears, so waitForPeer parks in this.wait every poll.
+  let parked!: () => void;
+  const reachedWait = new Promise<void>((r) => (parked = r));
+  let listCalls = 0;
+  client.list = async () => {
+    listCalls++;
+    // entry list (1) + first waitForPeer poll (2): now parked in this.wait.
+    if (listCalls >= 2) parked();
+    return [];
+  };
+
+  const start = Date.now();
+  const outcome = conn.synchronize().then(
+    () => null,
+    (err: unknown) => err,
+  );
+
+  await reachedWait;
+  await conn.close();
+
+  const err = await outcome;
+  expect(err).toBeInstanceOf(ConnectionClosedError);
+  // Not the TTL "synchronization timed out" path.
+  expect((err as Error).message).not.toContain("timed out");
+  expect(Date.now() - start).toBeLessThan(HUGE_TTL / 2);
+});
+
+test("close() during a parked poll delete-retry emits no spurious error (site 6 + D5)", async () => {
+  const errors: unknown[] = [];
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    // Large polling frequency so the site-6 backoff parks until the abort,
+    // never elapsing into the second delete attempt on its own.
+    const conn = await makeConnectedConn(client, {
+      pollingFrequency: 10_000,
+      timeToLiveMs: 60_000,
+      peerTimeoutMs: 50,
+    });
+    const peerId = "peer";
+    conn.peerId = peerId;
+
+    // A valid peer message the poller reads and then tries to delete.
+    const body = Buffer.from(
+      JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { hi: 1 } }),
+    );
+    files.set(`/test/${peerId}-${body.length}.json`, body);
+
+    // The first delete attempt fails AND signals the test, guaranteeing close()
+    // fires while the loop is parked inside the site-6 wait (not at list/get).
+    let reachedDeleteRetry!: () => void;
+    const parked = new Promise<void>((r) => (reachedDeleteRetry = r));
+    client.delete = async () => {
+      reachedDeleteRetry();
+      throw new Error("delete failed");
+    };
+
+    conn.on("error", (err) => errors.push(err));
+    conn.start();
+
+    await parked;
+    await conn.close();
+    // Let any erroneously-rescheduled poll cycle run (it must not).
+    await new Promise((r) => setTimeout(r, 30));
+
+    // (b) nothing buffered either.
+    expect(conn.takeBufferedError()).toBeUndefined();
+  });
+
+  // (a) no error surfaced on the event channel.
+  expect(errors).toHaveLength(0);
+  // (c) the second delete was skipped, so its warn never fired.
+  expect(logs.some((l) => l.message.includes("failed to delete"))).toBe(false);
+});
+
+test("cancellableDelay resolves after the delay when never aborted", async () => {
+  const controller = new AbortController();
+  const start = Date.now();
+  await expect(
+    cancellableDelay(20, controller.signal),
+  ).resolves.toBeUndefined();
+  expect(Date.now() - start).toBeGreaterThanOrEqual(15);
+});
+
+test("cancellableDelay rejects synchronously when the signal is already aborted", async () => {
+  const controller = new AbortController();
+  const reason = new ConnectionClosedError("already aborted");
+  controller.abort(reason);
+  await expect(cancellableDelay(1_000, controller.signal)).rejects.toBe(reason);
+});
+
+test("cancellableDelay rejects with signal.reason and clears its timer when aborted mid-wait", async () => {
+  const controller = new AbortController();
+  const reason = new ConnectionClosedError("aborted mid-wait");
+  const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+  try {
+    const pending = cancellableDelay(10_000, controller.signal);
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    // The pending timer was cleared on abort (no dangling handle).
+    expect(clearSpy).toHaveBeenCalled();
+  } finally {
+    clearSpy.mockRestore();
+  }
+});
+
+test("synchronize() re-arms a fresh controller per session so a retry's waits stay live (D1)", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 60_000,
+    peerTimeoutMs: 50,
+  });
+  conn.id = "starter";
+
+  // Simulate a controller left aborted by a prior life (the state a failed-then-
+  // retried session must recover from). Without the re-arm at synchronize()
+  // entry, waitForPeer's first this.wait would observe this aborted signal and
+  // reject immediately instead of polling for the peer.
+  (
+    conn as unknown as { abortController: AbortController }
+  ).abortController.abort(new ConnectionClosedError("stale"));
+
+  // The peer hello appears after a few empty polls, so the rendezvous parks in
+  // this.wait (against the re-armed controller) before completing.
+  setTimeout(() => {
+    files.set("/test/other-hello.json", LOCK_HELLO_BODY);
+  }, 40);
+
+  await expect(conn.synchronize()).resolves.toBeUndefined();
+  expect(conn.peerId).toBe("other");
+});
+
+test("wait() reads the controller fresh per call so a swapped-in controller is independent (do-not-hoist, D4)", async () => {
+  // Weak but cheap proxy for the do-not-hoist invariant: the real regression is
+  // a hoisted `const signal` above a loop, which a unit test cannot fully catch
+  // (the guard is the comment on wait()); this pins "fresh signal per call".
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const internals = conn as unknown as {
+    wait(ms: number): Promise<void>;
+    abortController: AbortController;
+  };
+
+  const controllerA = internals.abortController;
+  // Swap in a fresh controller, as synchronize() does at session start.
+  internals.abortController = new AbortController();
+
+  // A wait started against the NEW controller must not be cancelled by aborting
+  // the OLD one -- proving wait() did not cache controllerA's signal.
+  const waitB = internals.wait(20);
+  controllerA.abort(new ConnectionClosedError("old controller"));
+  await expect(waitB).resolves.toBeUndefined();
+
+  // And a wait against the current controller still cancels when IT aborts.
+  const waitC = internals.wait(10_000);
+  internals.abortController.abort(new ConnectionClosedError("current"));
+  await expect(waitC).rejects.toBeInstanceOf(ConnectionClosedError);
+});
+
+test("close() during a parked rendezvous gate read completes teardown cleanly despite the sweep (site 1b)", async () => {
+  const errors: unknown[] = [];
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    // Large frequency: the gate's retry backoff parks until the abort.
+    pollingFrequency: 10_000,
+    timeToLive: new Date(Date.now() + 60_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  conn.id = "me";
+  conn.connected = true;
+  conn.path = "/test";
+  conn.on("error", (err) => errors.push(err));
+
+  // A peer hello is present (so the lockless barrier enters the gate read at
+  // site 1b), but get() always fails, so the gate retries via cancellableDelay
+  // and parks. This read IS under the rendezvous outer catch, so an abort drives
+  // its safeDelete sweep during teardown. The hello body is never read (get()
+  // always throws), so its contents are irrelevant.
+  files.set("/test/peer-hello.json", LOCK_HELLO_BODY);
+  let reachedGate!: () => void;
+  const parked = new Promise<void>((r) => (reachedGate = r));
+  client.get = async () => {
+    reachedGate();
+    throw new Error("partial sync; retry");
+  };
+
+  const outcome = conn.synchronize().then(
+    () => null,
+    (err: unknown) => err,
+  );
+
+  await parked;
+  // (a) close() resolves without throwing even though the aborted rendezvous
+  // issues its sweep safeDelete()s concurrently.
+  await expect(conn.close()).resolves.toBeUndefined();
+
+  const err = await outcome;
+  expect(err).toBeInstanceOf(ConnectionClosedError);
+  // (c) no spurious error surfaced/buffered despite the teardown-side
+  // safeDeletes.
+  expect(errors).toHaveLength(0);
+  expect(conn.takeBufferedError()).toBeUndefined();
 });
