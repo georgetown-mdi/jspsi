@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { canonicalString } from "../utils/canonical.js";
 
 // --- Output ------------------------------------------------------------------
 
@@ -517,22 +518,6 @@ export function safeParseLinkageTerms(raw: unknown) {
 
 // --- Compatibility -----------------------------------------------------------
 
-// Serialize with sorted object keys so that property-insertion order (which
-// differs between plain objects and Zod-parsed ones) does not affect equality.
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return "[" + value.map(stableStringify).join(",") + "]";
-  }
-  if (value !== null && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const sorted = Object.keys(obj)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`);
-    return "{" + sorted.join(",") + "}";
-  }
-  return JSON.stringify(value);
-}
-
 export interface CompatibilityResult {
   errors: string[];
   warnings: string[];
@@ -596,18 +581,25 @@ export function validateCompatibility(
     );
   }
 
+  // Compare by canonical form (RFC 8785): two field/key sets are equal iff their
+  // canonical encodings match -- the same encoding that is hashed into the
+  // exchange-agreement receipt, so equality here means hash-equality there. The
+  // canonical encoder sorts keys, so property-insertion order (which differs
+  // between plain and Zod-parsed objects) does not affect the result; fields are
+  // pre-sorted by name because their array order is not significant, whereas
+  // linkage keys are ordered most-to-least precise and compared in place.
   const localFields = [...local.linkageFields].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
   const partnerFields = [...partner.linkageFields].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  if (stableStringify(localFields) !== stableStringify(partnerFields)) {
+  if (canonicalString(localFields) !== canonicalString(partnerFields)) {
     errors.push("linkage fields do not match");
   }
 
   if (
-    stableStringify(local.linkageKeys) !== stableStringify(partner.linkageKeys)
+    canonicalString(local.linkageKeys) !== canonicalString(partner.linkageKeys)
   ) {
     errors.push("linkage keys do not match");
   }

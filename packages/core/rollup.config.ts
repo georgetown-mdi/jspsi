@@ -14,7 +14,13 @@ const pkg = require("./package.json");
 // @noble/curves is bundled in the UMD browser build only because it ships
 // ESM-only and has no UMD global name; the ESM/CJS builds keep it external.
 const ALWAYS_BUNDLED = new Set(["@openmined/psi.js"]);
-const UMD_BUNDLED = new Set(["@openmined/psi.js", "@noble/curves"]);
+// canonicalize is bundled into the standalone UMD browser build because it
+// ships CommonJS with no UMD global name; the ESM/CJS builds keep it external.
+const UMD_BUNDLED = new Set([
+  "@openmined/psi.js",
+  "@noble/curves",
+  "canonicalize",
+]);
 
 // Returns an `external` predicate that matches bare package names and their
 // subpath exports (e.g. both "@noble/curves" and "@noble/curves/p256").
