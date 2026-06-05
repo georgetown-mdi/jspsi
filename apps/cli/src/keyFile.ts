@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { getLogger, PAKE_TOKEN_REGEX } from "@psilink/core";
+import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
 
 const log = getLogger("key-file");
 
@@ -345,8 +345,13 @@ export function saveKeyFile(keyFilePath: string, data: KeyFile): void {
   // value. A future caller (e.g. `invite` / `accept`, not yet implemented)
   // could write a malformed token that loadKeyFile would later reject; fail
   // here instead so the malformed token never reaches disk.
+  //
+  // UsageError (not a plain Error) so the CLI catch sites classify it as a
+  // caller/usage problem (exit 64) rather than a transport failure (exit 69) --
+  // a malformed token supplied via invite/accept is bad input, and
+  // provisionConfigAndKey makes this the reachable write path.
   if (!PAKE_TOKEN_REGEX.test(data.pakeToken))
-    throw new Error(
+    throw new UsageError(
       "saveKeyFile: pakeToken must be a base64url-encoded 32-byte value " +
         "(43 base64url characters; final character must be in " +
         "[AEIMQUYcgkosw048])",

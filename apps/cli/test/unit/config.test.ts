@@ -257,3 +257,36 @@ test("saveConfig strips pakeToken/expires and does not mutate the caller's spec"
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("saveConfig keeps authentication when role remains after stripping (WebRTC)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    // WebRTC is the only channel where authentication survives the strip: role
+    // is a valid field, so the container is kept rather than pruned to `{}`.
+    const spec = {
+      connection: {
+        channel: "webrtc",
+        server: { host: "api.peerjs.com" },
+        authentication: {
+          role: "inviter",
+          pakeToken: token,
+          expires: "2028-01-01T00:00:00.000Z",
+        },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    } as unknown as ExchangeSpec;
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // role survives and keeps the authentication container alive ...
+    expect(raw).toContain("authentication:");
+    expect(raw).toContain("role: inviter");
+    // ... while the key material is still stripped.
+    expect(raw).not.toContain("pake_token");
+    expect(raw).not.toContain(token);
+    expect(raw).not.toContain("expires");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

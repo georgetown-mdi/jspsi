@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { UsageError } from "@psilink/core";
 import {
   detectFileConflicts,
   loadKeyFile,
@@ -99,6 +100,11 @@ test("saveKeyFile writes valid JSON with a trailing newline", () => {
 
 test("saveKeyFile rejects a malformed pakeToken before writing to disk", () => {
   const keyPath = path.join(dir, ".psilink.key");
+  // UsageError (not a plain Error) so the CLI classifies it as exit 64, not a
+  // transport failure (exit 69).
+  expect(() => saveKeyFile(keyPath, { pakeToken: "too-short" })).toThrow(
+    UsageError,
+  );
   expect(() => saveKeyFile(keyPath, { pakeToken: "too-short" })).toThrow(
     "base64url-encoded 32-byte value",
   );

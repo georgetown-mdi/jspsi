@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
 import type { ExchangeSpec } from "@psilink/core";
 import {
   assertNoProvisionConflicts,
@@ -75,6 +75,31 @@ test("assertNoProvisionConflicts passes when neither target exists", () => {
   ).not.toThrow();
 });
 
+test("provisionConfigAndKey rejects the same path for config and key", () => {
+  const both = path.join(dir, "shared.yaml");
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { pakeToken: TOKEN },
+      { configPath: both, keyPath: both },
+    ),
+  ).toThrow(UsageError);
+  // Nothing is written: the key write would otherwise clobber the config.
+  expect(fs.existsSync(both)).toBe(false);
+});
+
+test("assertNoProvisionConflicts rejects the same path for config and key", () => {
+  // Caught up front, before any network activity, with `./x` and `x` treated
+  // as the same path.
+  const both = path.join(dir, "shared.yaml");
+  expect(() =>
+    assertNoProvisionConflicts({
+      configPath: both,
+      keyPath: `${both}/../shared.yaml`,
+    }),
+  ).toThrow(UsageError);
+});
+
 // --- key file writing --------------------------------------------------------
 
 test("provisionConfigAndKey writes a key file with expires when set", () => {
@@ -139,4 +164,29 @@ test("provisionConfigAndKey rolls back the written config when the key write fai
   // The config that was written is removed; neither file is left behind.
   expect(fs.existsSync(configPath)).toBe(false);
   expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test("provisionConfigAndKey writes no key file when the config write fails", () => {
+  // Induce a config-write failure with a non-writable destination directory.
+  // POSIX-permission-based; Windows ignores the directory mode, so Unix-only.
+  if (process.platform === "win32") return;
+  const ro = path.join(dir, "ro");
+  fs.mkdirSync(ro);
+  fs.chmodSync(ro, 0o500); // r-x: lstat sees children as absent, but writes EACCES
+  try {
+    const badConfig = path.join(ro, "psilink.yaml");
+    // keyPath is in a writable directory; it must stay unwritten because the
+    // config write fails first (saveConfig runs before saveKeyFile).
+    expect(() =>
+      provisionConfigAndKey(
+        sampleSpec(),
+        { pakeToken: TOKEN },
+        { configPath: badConfig, keyPath },
+      ),
+    ).toThrow();
+    expect(fs.existsSync(badConfig)).toBe(false);
+    expect(fs.existsSync(keyPath)).toBe(false);
+  } finally {
+    fs.chmodSync(ro, 0o700); // restore so afterEach cleanup can remove it
+  }
 });
