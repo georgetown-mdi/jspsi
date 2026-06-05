@@ -31,6 +31,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 - An exchange now fails with a clear error (bounded by `peer_timeout_ms`) when the partner stops responding, instead of hanging.
 - A peer sending messages out of turn is rejected rather than buffered without limit.
 - The CLI now exits with code 64 (EX_USAGE) instead of 69 (EX_UNAVAILABLE) when `synchronize()` or `send()` fails due to a configuration or usage problem: a dirty exchange directory (preexisting handshake files), multiple concurrent sessions on the same path, or a send timeout. Transport failures continue to exit with code 69.
+- `psilink exchange` now exits 64 (EX_USAGE) for every malformed, unreadable, or missing configuration (`psilink.yaml`) or key (`.psilink.key`) file. Previously only a missing config file exited 64, while a missing or malformed key file and a malformed config exited 69 (EX_UNAVAILABLE), the code reserved for transport failures. A malformed PAKE token is now classified the same way whether the key file is read or written.
 
 ### Fixed
 

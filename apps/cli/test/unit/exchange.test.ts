@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import YAML from "yaml";
+import { UsageError } from "@psilink/core";
 import { saveKeyFile } from "../../src/keyFile";
 import { loadConfig } from "../../src/commands/exchange";
 
@@ -121,43 +122,49 @@ test("throws with ENOENT code when config file is absent", () => {
   expect((caught as NodeJS.ErrnoException).code).toBe("ENOENT");
 });
 
-test("throws on malformed YAML in config file", () => {
+test("throws a UsageError on malformed YAML in config file", () => {
   fs.writeFileSync(configFile, ": {invalid yaml{{");
   saveKeyFile(keyFile, { pakeToken: TOKEN_A });
-  expect(() => loadConfig(baseOptions())).toThrow();
+  // Malformed local config is a usage error (CLI exit 64), not exit 69.
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
-test("throws when config file fails schema validation", () => {
+test("throws a UsageError when config file fails schema validation", () => {
   fs.writeFileSync(
     configFile,
     YAML.stringify({ connection: { channel: "ftp", server: {} } }),
   );
   saveKeyFile(keyFile, { pakeToken: TOKEN_A });
-  expect(() => loadConfig(baseOptions())).toThrow();
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
 // --- key file errors ---------------------------------------------------------
 
-test("throws with 'does not exist' message when key file is absent", () => {
+test("throws a UsageError with 'does not exist' when key file is absent", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  // A missing key file is a usage error (exit 64), like a missing config.
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("does not exist");
 });
 
-test("throws with 'malformed' message when key file contains invalid JSON", () => {
+test("throws a UsageError with 'malformed' when key file contains invalid JSON", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   fs.writeFileSync(keyFile, "not-json");
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("malformed");
 });
 
-test("throws with 'malformed' message when key file fails schema validation", () => {
+test("throws a UsageError with 'malformed' when key file fails schema validation", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   fs.writeFileSync(keyFile, JSON.stringify({ pakeToken: "" }));
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("malformed");
 });
 
-test("throws with 'malformed' message when key file token is wrong length", () => {
+test("throws a UsageError with 'malformed' when key file token is wrong length", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   fs.writeFileSync(keyFile, JSON.stringify({ pakeToken: "tooshort" }));
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("malformed");
 });
 
@@ -189,8 +196,9 @@ test("filedrop config injects pakeToken from key file", () => {
   expect(result.connection.authentication.keyFilePath).toBe(keyFile);
 });
 
-test("filedrop config throws when key file is absent", () => {
+test("filedrop config throws a UsageError when key file is absent", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("does not exist");
 });
 

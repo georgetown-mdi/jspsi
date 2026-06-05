@@ -223,7 +223,13 @@ export function loadConfig(
         ),
         { code: "ENOENT" },
       );
-    throw err;
+    // A non-ENOENT failure here is a malformed or unreadable local config
+    // (invalid YAML, EACCES, EISDIR): invalid caller configuration the operator
+    // must fix, so a UsageError (CLI exit 64), not a transport failure (69).
+    throw new UsageError(
+      `config file ${options.configFile} could not be read or parsed: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
   }
 
   // Warn about and strip auth fields the CLI always ignores. This runs before
@@ -298,9 +304,18 @@ export function loadConfig(
     }
   }
 
-  const { connection: baseConn, ...exchangeDataSpec } = parseExchangeSpec(
-    resolveAtSignRefs(rawConfig),
-  );
+  let parsedSpec: ReturnType<typeof parseExchangeSpec>;
+  try {
+    parsedSpec = parseExchangeSpec(resolveAtSignRefs(rawConfig));
+  } catch (err) {
+    // Well-formed YAML that fails schema validation is still invalid caller
+    // configuration (exit 64), not a transport failure.
+    throw new UsageError(
+      `config file ${options.configFile} is not a valid exchange spec: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  const { connection: baseConn, ...exchangeDataSpec } = parsedSpec;
   log.info("loaded exchange spec from", options.configFile);
 
   const connection = applyConnectionOverrides(baseConn, {
@@ -348,13 +363,18 @@ export function loadConfig(
   try {
     keyData = loadKeyFile(options.keyFile);
   } catch (err) {
-    throw new Error(
+    // A malformed existing key file is bad input the operator must fix or
+    // re-provision (exit 64), the same classification saveKeyFile gives a
+    // malformed token on write -- not a transport failure (69).
+    throw new UsageError(
       `key file at ${options.keyFile} is malformed: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
   if (keyData === undefined)
-    throw new Error(
+    // A missing key file is a configuration problem (exit 64), consistent with
+    // the missing-config case above.
+    throw new UsageError(
       `key file ${options.keyFile} does not exist. ` +
         "The CLI commands that create a key file (psilink invite, psilink " +
         "accept, and psilink --save) are not yet implemented; until they " +
@@ -419,7 +439,15 @@ export async function handler(argv: Arguments): Promise<void> {
     configResult = loadConfig(options);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit((err as NodeJS.ErrnoException).code === "ENOENT" ? 64 : 69);
+    // A malformed or missing config/key file is a usage error (exit 64); the
+    // ENOENT arm keeps the missing-config case, which is tagged rather than a
+    // UsageError. Anything else (e.g. an unsupported channel) stays exit 69.
+    process.exit(
+      err instanceof UsageError ||
+        (err as NodeJS.ErrnoException).code === "ENOENT"
+        ? 64
+        : 69,
+    );
   }
   const { connection, ...exchangeDataSpec } = configResult;
 
