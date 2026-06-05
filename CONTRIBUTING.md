@@ -84,10 +84,20 @@ default the Compose project name to the directory (`container`), colliding on
 the port. The `make-worktree` command gives each worktree a unique project and a
 free port, so checkouts can run the container concurrently.
 
-Web (requires the dev server, a foreground process on port 3000):
+Web (dev server managed automatically -- same pattern as the CLI container):
 
 ```sh
-npm run dev -w apps/web
+npm run test:integration -w apps/web    # auto-starts, waits for, and stops the dev server
+```
+
+For a faster inner loop you can keep a warm server running across many runs:
+`test:integration` detects an already-running server, reuses it, and leaves it
+up rather than stopping it.
+
+```sh
+npm run dev           -w apps/web    # start (and keep) the dev server in a terminal
+npm run test:integration -w apps/web    # reuses the running server
+# stop the dev server in the terminal when done (Ctrl-C)
 ```
 
 ## Code Conventions
