@@ -144,6 +144,50 @@ test("parses shared options including maxReconnectAttempts on an SFTP config", (
   expect(result.data.options?.maxReconnectAttempts).toBe(5);
 });
 
+// --- provider_options (opaque, verbatim) -------------------------------------
+
+test("provider_options keys pass through verbatim (snake_case preserved)", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    // An opaque map is forwarded verbatim to the transport library, which
+    // defines its own key names; its keys must NOT be camelized.
+    provider_options: { ready_timeout: 5000, debug_mode: true },
+    // A sibling schema field in the same parse is still normalized.
+    options: { peer_timeout_ms: 120000 },
+  });
+  expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.providerOptions).toEqual({
+    ready_timeout: 5000,
+    debug_mode: true,
+  });
+  // The known schema field was camelized as usual.
+  expect(result.options?.peerTimeoutMs).toBe(120000);
+});
+
+test("provider_options preserves a literal camelCase key unchanged", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    // ssh2's option keys are camelCase; a user writing them literally must have
+    // them survive byte-for-byte rather than being normalized to snake_case.
+    provider_options: { readyTimeout: 5000, algorithms: { kex: ["a"] } },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.providerOptions).toEqual({
+    readyTimeout: 5000,
+    algorithms: { kex: ["a"] },
+  });
+});
+
+test("provider_options is opaque all the way down (nested keys not camelized)", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    provider_options: { nested_outer: { nested_inner: 1 } },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.providerOptions).toEqual({ nested_outer: { nested_inner: 1 } });
+});
+
 // --- Discriminated union -----------------------------------------------------
 
 test("unknown channel is rejected", () => {

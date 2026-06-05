@@ -272,6 +272,54 @@ test("saveConfig strips pakeToken/expires and does not mutate the caller's spec"
   }
 });
 
+test("saveConfig round-trips provider_options verbatim in both directions", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
+    // and a snake_case key must both survive the writer + reader unchanged. The
+    // writer must not snakeize readyTimeout, and the reader must not camelize
+    // keepalive_interval.
+    const spec: ExchangeSpec = {
+      connection: {
+        channel: "sftp",
+        server: { host: "h" },
+        providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+
+    // write: keys land on disk byte-for-byte (camelCase stays camelCase, snake
+    // stays snake) -- not transformed by snakeizeKeys.
+    saveConfig(configPath, spec);
+    const raw1 = fs.readFileSync(configPath, "utf8");
+    expect(raw1).toContain("readyTimeout:");
+    expect(raw1).toContain("keepalive_interval:");
+    expect(raw1).not.toContain("ready_timeout:");
+    expect(raw1).not.toContain("keepaliveInterval:");
+
+    // read: parsing reproduces the spec exactly, opaque map included.
+    const parsed = parseExchangeSpec(YAML.parse(raw1));
+    expect(parsed).toEqual(spec);
+    if (parsed.connection.channel !== "sftp")
+      throw new Error("expected sftp channel");
+    expect(parsed.connection.providerOptions).toEqual({
+      readyTimeout: 5000,
+      keepalive_interval: 1000,
+    });
+
+    // read -> write: writing the re-read spec produces an identical opaque map,
+    // confirming the round-trip is stable in both directions.
+    saveConfig(configPath, parsed);
+    const raw2 = fs.readFileSync(configPath, "utf8");
+    expect(YAML.parse(raw2).connection.provider_options).toEqual(
+      YAML.parse(raw1).connection.provider_options,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("saveConfig keeps authentication when role remains after stripping (WebRTC)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {

@@ -1,6 +1,10 @@
 import YAML from "yaml";
 import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
-import { safeParseFileSyncOptions, UsageError } from "@psilink/core";
+import {
+  OPAQUE_VALUE_KEYS,
+  safeParseFileSyncOptions,
+  UsageError,
+} from "@psilink/core";
 
 import { writeFileOwnerOnly } from "./keyFile";
 
@@ -161,19 +165,23 @@ function camelToSnake(s: string): string {
  * occurs in the schema. Only keys are rewritten; string values (e.g. the
  * `firstName` in `type: firstName`) are left verbatim, matching the read path.
  *
- * Like the read path's `camelizeKeys`, this recurses into every nested object,
- * including opaque maps such as `connection.provider_options` and transform
- * `params`. A literal camelCase key a user placed in such a map would be
- * normalized to snake_case here. That mirrors `camelizeKeys` (which already
- * camelCases those keys on read), so the write/read round-trip stays stable;
- * making either side skip opaque subtrees must be done symmetrically in core
- * (tracked separately).
+ * Opaque-value maps (`OPAQUE_VALUE_KEYS`, currently `connection.provider_options`)
+ * are skipped symmetrically with `camelizeKeys`: the map's own key is snakeized,
+ * but its contents are left verbatim so a user-authored key (snake or camel)
+ * survives byte-for-byte to disk and back. The shared `OPAQUE_VALUE_KEYS` set
+ * keeps the read and write paths excluding exactly the same subtrees, preserving
+ * the write -> read round-trip invariant. Function-specific `params` blocks are
+ * NOT opaque -- they are psilink's own vocabulary and stay normalized.
  */
 function snakeizeKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(snakeizeKeys);
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [camelToSnake(k), snakeizeKeys(v)]),
+      Object.entries(value).map(([k, v]) =>
+        OPAQUE_VALUE_KEYS.has(k)
+          ? [camelToSnake(k), v]
+          : [camelToSnake(k), snakeizeKeys(v)],
+      ),
     );
   return value;
 }

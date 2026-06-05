@@ -8,6 +8,7 @@ export type { HelloEnvelope } from "./connection/controlEnvelope";
 export * from "./connection/messageConnection";
 export { getLogger, setLogPrefixer } from "./utils/logger";
 export { retryPromise, withTimeout } from "./utils/promise";
+export { OPAQUE_VALUE_KEYS } from "./utils/camelizeKeys";
 
 export * from "./config/standardization";
 export * from "./config/connection";
