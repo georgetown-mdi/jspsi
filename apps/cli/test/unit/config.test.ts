@@ -199,3 +199,59 @@ test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("saveConfig writes the config owner-read-only (0600)", () => {
+  // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
+  // synthetic mode there, so this assertion is Unix-only.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // A spec carrying an inline SFTP credential is exactly why the config must
+    // be owner-only: the 0600 mode is what keeps the password from other users.
+    const spec: ExchangeSpec = {
+      connection: {
+        channel: "sftp",
+        server: { host: "h", username: "u", password: "s3cret-inline" },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+    saveConfig(configPath, spec);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("saveConfig strips pakeToken/expires and does not mutate the caller's spec", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const spec = {
+      connection: {
+        channel: "sftp",
+        server: { host: "h" },
+        authentication: {
+          pakeToken: token,
+          expires: "2028-01-01T00:00:00.000Z",
+        },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    } as unknown as ExchangeSpec;
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // Key material never lands in the config, even when the caller leaves it set.
+    expect(raw).not.toContain("pake_token");
+    expect(raw).not.toContain(token);
+    expect(raw).not.toContain("expires");
+    // The strip runs on a clone; the caller's spec is untouched.
+    expect(spec.connection.authentication?.pakeToken).toBe(token);
+    expect(spec.connection.authentication?.expires).toBe(
+      "2028-01-01T00:00:00.000Z",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

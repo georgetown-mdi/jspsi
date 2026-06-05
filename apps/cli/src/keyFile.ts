@@ -172,13 +172,27 @@ export const DEFAULT_KEY_PATH = "./.psilink.key";
 /**
  * Pure existence check used to detect a provisioning conflict before anything is
  * written -- and before any network activity. Returns the subset of `paths`
- * that already exist, preserving order; an empty array means no conflict. Kept
+ * that are occupied, preserving order; an empty array means no conflict. Kept
  * separate from {@link saveKeyFile} and the config writer (it neither writes nor
  * connects) so callers can run it up front and it is straightforward to
  * unit-test.
+ *
+ * Uses `lstatSync` rather than `existsSync` so a path is reported occupied if
+ * any directory entry is present -- including a dangling symlink, which
+ * `existsSync` resolves to false yet which a write would still follow or fail
+ * on. A path whose parent denies access (e.g. EACCES) is also reported occupied
+ * rather than silently passing the gate: we cannot prove it is free, and
+ * refusing is the safe direction. Only a confirmed `ENOENT` clears a path.
  */
 export function detectFileConflicts(paths: string[]): string[] {
-  return paths.filter((p) => fs.existsSync(p));
+  return paths.filter((p) => {
+    try {
+      fs.lstatSync(p);
+      return true;
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code !== "ENOENT";
+    }
+  });
 }
 
 /** Contents of a `.psilink.key` file. */
@@ -236,7 +250,94 @@ export function loadKeyFile(keyFilePath: string): KeyFile | undefined {
   return result;
 }
 
-/** Serialize and write a {@link KeyFile} to disk. */
+/**
+ * Atomically write `content` to `destPath` with owner-only permissions: `0600`
+ * on Unix, a restricted ACL (current user, inheritance stripped) on Windows.
+ * Writes to a sibling temp file and renames so the destination never exists
+ * with wrong permissions, and removes the temp file on any failure so a crashed
+ * write leaves no `.tmp.<pid>` orphan.
+ *
+ * Shared by {@link saveKeyFile} (the key file is always a secret) and the
+ * config writer (a `psilink.yaml` may carry inline SFTP credentials), so both
+ * get the same protection from one implementation rather than diverging.
+ */
+export function writeFileOwnerOnly(destPath: string, content: string): void {
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  // Write to a sibling temp file then rename so the destination is never
+  // visible with wrong permissions (rename is atomic on the same filesystem).
+  // Placing the temp file in the same directory as the destination guarantees
+  // they share a filesystem; a cross-filesystem rename (EXDEV) would not be
+  // atomic and is not attempted. A PID-qualified suffix prevents concurrent
+  // invocations against the same path from clobbering each other's temp file.
+  const tmp = `${destPath}.tmp.${process.pid}`;
+  // Remove any stale temp file left by a previous crashed run so the subsequent
+  // create always produces a fresh file rather than reusing one whose
+  // permissions may not match what we are about to set.
+  try {
+    fs.unlinkSync(tmp);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  try {
+    if (process.platform === "win32") {
+      // whoami returns the domain-qualified name (DOMAIN\user or COMPUTER\user),
+      // which icacls requires to resolve domain accounts unambiguously. Resolve
+      // it before creating the temp file so a whoami failure does not leave a
+      // placeholder on disk.
+      const owner = whoami();
+      // Create an empty placeholder and narrow its ACL before writing any
+      // sensitive content. The brief window while the empty file carries
+      // inherited ACEs (e.g. BUILTIN\Users read) exposes only the file's
+      // existence, not its contents.
+      const fd = fs.openSync(
+        tmp,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      );
+      fs.closeSync(fd);
+      try {
+        // /inheritance:r strips inherited ACEs (e.g. BUILTIN\Users group read);
+        // /grant:r replaces any existing explicit grant for owner only.
+        // (M) is the standard Modify level: FILE_GENERIC_READ |
+        // FILE_GENERIC_WRITE | DELETE; it unambiguously includes the DELETE
+        // right that MoveFileEx requires on the source file to complete the
+        // subsequent rename.
+        execFileSync(
+          "icacls",
+          [tmp, "/inheritance:r", "/grant:r", `${owner}:(M)`],
+          { stdio: "ignore", timeout: 5000 },
+        );
+      } catch {
+        // Surface a clear remediation; the outer catch removes the placeholder.
+        throw new Error(
+          `Could not restrict ACLs on ${destPath}; restrict manually to ` +
+            "owner-read-only via icacls or File Properties",
+        );
+      }
+      // ACL is now restricted; write the content into the already-protected file.
+      fs.writeFileSync(tmp, content, "utf8");
+    } else {
+      // chmodSync corrects for a restrictive umask (e.g. 0277 -> 0400) that
+      // would prevent the CLI from rewriting the file (e.g. the rotated token)
+      // on a later run.
+      fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
+      fs.chmodSync(tmp, 0o600);
+    }
+    fs.renameSync(tmp, destPath);
+  } catch (err) {
+    // Remove the temp file on any failure -- not just the icacls case -- so a
+    // partial write never leaves a `.tmp.<pid>` orphan beside the destination.
+    // A caller's own rollback cannot do this: it does not know the pid-qualified
+    // temp name.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort cleanup before re-throwing */
+    }
+    throw err;
+  }
+}
+
+/** Serialize and write a {@link KeyFile} to disk, owner-read-only. */
 export function saveKeyFile(keyFilePath: string, data: KeyFile): void {
   // Belt-and-suspenders runtime validation: the type system already requires
   // `pakeToken` to be a string, and today's only caller (runProtocol) derives
@@ -250,75 +351,5 @@ export function saveKeyFile(keyFilePath: string, data: KeyFile): void {
         "(43 base64url characters; final character must be in " +
         "[AEIMQUYcgkosw048])",
     );
-  fs.mkdirSync(path.dirname(keyFilePath), { recursive: true });
-  // Write to a sibling temp file then rename so the token is never visible at
-  // keyFilePath with wrong permissions (rename is atomic on the same
-  // filesystem).
-  // Placing the temp file in the same directory as the destination
-  // guarantees they share a filesystem; a cross-filesystem rename (EXDEV) would
-  // not be atomic and is not attempted.
-  // A PID-qualified suffix prevents concurrent invocations against the same key
-  // file path from clobbering each other's temp file.
-  const tmp = `${keyFilePath}.tmp.${process.pid}`;
-  // Remove any stale temp file left by a previous crashed run so the
-  // subsequent create always produces a fresh file rather than reusing one
-  // whose permissions may not match what we are about to set.
-  try {
-    fs.unlinkSync(tmp);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-  }
-  const content = JSON.stringify(data, null, 2) + "\n";
-  if (process.platform === "win32") {
-    // whoami returns the domain-qualified name (DOMAIN\user or COMPUTER\user),
-    // which icacls requires to resolve domain accounts unambiguously. Resolve
-    // it before creating the temp file so a whoami failure does not leave a
-    // placeholder on disk.
-    const owner = whoami();
-    // Create an empty placeholder and narrow its ACL before writing any key
-    // material. The brief window while the empty file carries inherited ACEs
-    // (e.g. BUILTIN\Users read) exposes only the file's existence, not the
-    // token.
-    const fd = fs.openSync(
-      tmp,
-      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
-    );
-    fs.closeSync(fd);
-    try {
-      // /inheritance:r strips inherited ACEs (e.g. BUILTIN\Users group read);
-      // /grant:r replaces any existing explicit grant for owner only.
-      // (M) is the standard Modify level: FILE_GENERIC_READ |
-      // FILE_GENERIC_WRITE | DELETE; it unambiguously includes the DELETE right
-      // that MoveFileEx requires on the source file to complete the subsequent
-      // rename.
-      execFileSync(
-        "icacls",
-        [tmp, "/inheritance:r", "/grant:r", `${owner}:(M)`],
-        {
-          stdio: "ignore",
-          timeout: 5000,
-        },
-      );
-    } catch {
-      // Clean up the empty placeholder so it is not left at the .tmp path.
-      try {
-        fs.unlinkSync(tmp);
-      } catch {
-        /* best-effort cleanup before re-throwing */
-      }
-      throw new Error(
-        `Could not restrict ACLs on ${keyFilePath}; restrict manually to ` +
-          "owner-read-only via icacls or File Properties",
-      );
-    }
-    // ACL is now restricted; write the token into the already-protected file.
-    fs.writeFileSync(tmp, content, "utf8");
-  } else {
-    // chmodSync corrects for a restrictive umask (e.g. 0277 -> 0400) that
-    // would prevent the CLI from writing the rotated token on the next
-    // exchange.
-    fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
-    fs.chmodSync(tmp, 0o600);
-  }
-  fs.renameSync(tmp, keyFilePath);
+  writeFileOwnerOnly(keyFilePath, JSON.stringify(data, null, 2) + "\n");
 }

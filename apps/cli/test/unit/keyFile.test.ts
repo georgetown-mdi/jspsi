@@ -120,3 +120,11 @@ test("detectFileConflicts returns an empty array when nothing exists", () => {
     detectFileConflicts([path.join(dir, "a"), path.join(dir, "b")]),
   ).toEqual([]);
 });
+
+test("detectFileConflicts reports a dangling symlink as a conflict", () => {
+  // existsSync follows the link and would report this absent; lstatSync sees the
+  // link itself, so the gate refuses rather than letting a write follow it.
+  const link = path.join(dir, "dangling.yaml");
+  fs.symlinkSync(path.join(dir, "no-such-target"), link);
+  expect(detectFileConflicts([link])).toEqual([link]);
+});

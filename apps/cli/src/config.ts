@@ -1,8 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
 import YAML from "yaml";
 import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
 import { safeParseFileSyncOptions } from "@psilink/core";
+
+import { writeFileOwnerOnly } from "./keyFile";
 
 /**
  * Default path for the exchange config file written by the provisioning
@@ -151,12 +151,13 @@ function camelToSnake(s: string): string {
 }
 
 /**
- * Recursively rewrites object keys from camelCase to snake_case. The exact
- * inverse of core's `camelizeKeys`, which is applied when a config is read; the
- * writer is its inverse so a value round-trips through write then read
- * unchanged and the on-disk YAML keeps the snake_case convention. Only keys are
- * rewritten; string values (e.g. the `firstName` in `type: firstName`) are left
- * verbatim, matching the read path.
+ * Recursively rewrites object keys from camelCase to snake_case. The inverse of
+ * core's `camelizeKeys` for the keys the exchange schema uses: every config key
+ * originates as snake_case, so write-then-read round-trips unchanged (the
+ * round-trip is covered by a test). It is not a general camelCase inverse -- an
+ * embedded acronym such as `URL` would snakeize to `u_r_l` -- but no such key
+ * occurs in the schema. Only keys are rewritten; string values (e.g. the
+ * `firstName` in `type: firstName`) are left verbatim, matching the read path.
  */
 function snakeizeKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(snakeizeKeys);
@@ -169,14 +170,25 @@ function snakeizeKeys(value: unknown): unknown {
 
 /**
  * Serialize an {@link ExchangeSpec} and write it to `configPath` as snake_case
- * YAML. Creates parent directories as needed. Does not guard against
- * overwriting an existing file; callers provision through
- * `provisionConfigAndKey`, which runs the conflict gate first.
+ * YAML, owner-read-only -- a config may carry inline SFTP credentials
+ * (`server.password`, `server.privateKey`), so it gets the same `0600` / ACL
+ * protection as the key file via {@link writeFileOwnerOnly}.
  *
- * The PAKE token never belongs in the config (it lives only in the key file);
- * callers construct the spec without it.
+ * The PAKE token and its expiration live only in the key file and never belong
+ * in the config; they are stripped from `connection.authentication` here even
+ * if a caller leaves them populated, so the secret cannot be duplicated onto
+ * disk (and cannot go stale after token rotation). The caller's spec is not
+ * mutated.
+ *
+ * Does not guard against overwriting an existing file; callers provision through
+ * `provisionConfigAndKey`, which runs the conflict gate first.
  */
 export function saveConfig(configPath: string, spec: ExchangeSpec): void {
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, YAML.stringify(snakeizeKeys(spec)), "utf8");
+  const sanitized = structuredClone(spec);
+  const auth = sanitized.connection.authentication;
+  if (auth) {
+    delete auth.pakeToken;
+    delete auth.expires;
+  }
+  writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
 }

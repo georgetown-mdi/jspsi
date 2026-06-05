@@ -13,8 +13,12 @@ import {
 } from "@psilink/core";
 import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
 
-import { applyConnectionOverrides, announceRetainMode } from "../config";
-import { loadKeyFile, type KeyFile } from "../keyFile";
+import {
+  applyConnectionOverrides,
+  announceRetainMode,
+  DEFAULT_CONFIG_PATH,
+} from "../config";
+import { loadKeyFile, DEFAULT_KEY_PATH, type KeyFile } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import {
@@ -43,11 +47,11 @@ export function builder(cmd: Argv): Argv {
     })
     .option("config-file", {
       type: "string",
-      describe: "exchange configuration file (default: ./psilink.yaml)",
+      describe: `exchange configuration file (default: ${DEFAULT_CONFIG_PATH})`,
     })
     .option("key-file", {
       type: "string",
-      describe: "shared key file (default: ./.psilink.key)",
+      describe: `shared key file (default: ${DEFAULT_KEY_PATH})`,
     })
     .option("identity", {
       type: "string",
@@ -175,8 +179,9 @@ function parseArgs(argv: Arguments): ExchangeArgs {
   return {
     input: argv["input"] as string,
     output: argv["output"] as string | undefined,
-    configFile: (argv["config-file"] as string | undefined) ?? "./psilink.yaml",
-    keyFile: (argv["key-file"] as string | undefined) ?? "./.psilink.key",
+    configFile:
+      (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
+    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
     identity: argv["identity"] as string | undefined,
     serverPort: argv["server-port"] as number | undefined,
     serverUsername: argv["server-username"] as string | undefined,

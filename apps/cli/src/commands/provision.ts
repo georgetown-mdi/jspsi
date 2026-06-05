@@ -38,6 +38,11 @@ function resolveTargets(targets: ProvisionTargets): {
  * so a command can call this up front -- before any network activity -- to abort
  * a bootstrap that would otherwise clobber an existing configuration partway
  * through an exchange.
+ *
+ * This is a check, not a lock: a file appearing between this check and the
+ * subsequent write would still be overwritten. That race is immaterial for an
+ * interactive single-user CLI bootstrap; the gate's purpose is to catch a
+ * pre-existing config, not to serialize concurrent provisioners.
  */
 export function assertNoProvisionConflicts(
   targets: ProvisionTargets = {},
@@ -60,9 +65,11 @@ export function assertNoProvisionConflicts(
  * up-front {@link assertNoProvisionConflicts}) and writes nothing if either
  * target exists. `keyData.expires` is written when set and omitted otherwise.
  *
- * If either write fails, both target paths are removed before the error
- * propagates: the conflict gate guaranteed neither pre-existed, so a failed
- * provision never leaves a half-written config or orphaned key behind.
+ * If either write fails, both target files are removed before the error
+ * propagates: the conflict gate guaranteed neither pre-existed, so deleting them
+ * only ever removes a file this call wrote. The two writers each clean up their
+ * own temp file, so no `.tmp` orphan survives. Parent directories created for a
+ * nested target path are left in place.
  *
  * @returns the resolved paths actually written.
  */
