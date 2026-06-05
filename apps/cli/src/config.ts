@@ -1,5 +1,16 @@
-import type { ConnectionConfig } from "@psilink/core";
-import { safeParseFileSyncOptions } from "@psilink/core";
+import YAML from "yaml";
+import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
+import { safeParseFileSyncOptions, UsageError } from "@psilink/core";
+
+import { writeFileOwnerOnly } from "./keyFile";
+
+/**
+ * Default path for the exchange config file written by the provisioning
+ * commands (`invite`, `accept`, and `exchange --save`). Matches the default the
+ * `exchange` command reads from, so a config written here is found without an
+ * explicit `--config-file`.
+ */
+export const DEFAULT_CONFIG_PATH = "./psilink.yaml";
 
 export interface ConnectionOverrides {
   connectionTimeout?: number;
@@ -100,7 +111,9 @@ export function applyConnectionOverrides(
       const message = validation.error.issues
         .map((i: { message: string }) => i.message)
         .join("; ");
-      throw new Error(message);
+      // An invalid option combination (from psilink.yaml or a CLI override) is
+      // invalid caller configuration: a UsageError so the CLI exits 64, not 69.
+      throw new UsageError(message);
     }
   }
 
@@ -131,4 +144,66 @@ export function announceRetainMode(
         "(these flags are not negotiated).",
     );
   }
+}
+
+// --- Config writer -----------------------------------------------------------
+
+function camelToSnake(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+/**
+ * Recursively rewrites object keys from camelCase to snake_case. The inverse of
+ * core's `camelizeKeys` for the keys the exchange schema uses: every config key
+ * originates as snake_case, so write-then-read round-trips unchanged (the
+ * round-trip is covered by a test). It is not a general camelCase inverse -- an
+ * embedded acronym such as `URL` would snakeize to `u_r_l` -- but no such key
+ * occurs in the schema. Only keys are rewritten; string values (e.g. the
+ * `firstName` in `type: firstName`) are left verbatim, matching the read path.
+ *
+ * Like the read path's `camelizeKeys`, this recurses into every nested object,
+ * including opaque maps such as `connection.provider_options` and transform
+ * `params`. A literal camelCase key a user placed in such a map would be
+ * normalized to snake_case here. That mirrors `camelizeKeys` (which already
+ * camelCases those keys on read), so the write/read round-trip stays stable;
+ * making either side skip opaque subtrees must be done symmetrically in core
+ * (tracked separately).
+ */
+function snakeizeKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(snakeizeKeys);
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [camelToSnake(k), snakeizeKeys(v)]),
+    );
+  return value;
+}
+
+/**
+ * Serialize an {@link ExchangeSpec} and write it to `configPath` as snake_case
+ * YAML, owner-read-only -- a config may carry inline SFTP credentials
+ * (`server.password`, `server.privateKey`), so it gets the same `0600` / ACL
+ * protection as the key file via {@link writeFileOwnerOnly}.
+ *
+ * The PAKE token and its expiration live only in the key file and never belong
+ * in the config; they are stripped from `connection.authentication` here even
+ * if a caller leaves them populated, so the secret cannot be duplicated onto
+ * disk (and cannot go stale after token rotation). The caller's spec is not
+ * mutated.
+ *
+ * Does not guard against overwriting an existing file; callers provision through
+ * `provisionConfigAndKey`, which runs the conflict gate first.
+ */
+export function saveConfig(configPath: string, spec: ExchangeSpec): void {
+  const sanitized = structuredClone(spec);
+  const auth = sanitized.connection.authentication;
+  if (auth) {
+    delete auth.pakeToken;
+    delete auth.expires;
+    // Drop the container if those were its only keys, so the config carries no
+    // noisy empty `authentication: {}` block. WebRTC's `role` (the only other
+    // field) keeps it non-empty when present.
+    if (Object.keys(auth).length === 0)
+      delete sanitized.connection.authentication;
+  }
+  writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
 }

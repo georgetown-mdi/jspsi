@@ -17,7 +17,12 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-import { applyConnectionOverrides, announceRetainMode } from "../config";
+import {
+  applyConnectionOverrides,
+  announceRetainMode,
+  DEFAULT_CONFIG_PATH,
+} from "../config";
+import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
@@ -46,13 +51,15 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "where to write psilink.yaml when --save is given (default: " +
-        "./psilink.yaml)",
+        DEFAULT_CONFIG_PATH +
+        ")",
     })
     .option("key-file", {
       type: "string",
       describe:
         "where to write .psilink.key when --save is given (default: " +
-        "./.psilink.key)",
+        DEFAULT_KEY_PATH +
+        ")",
     })
     .option("identity", {
       type: "string",
@@ -178,8 +185,9 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   return {
     positionals: argv._,
     save: (argv["save"] as boolean | undefined) ?? false,
-    configFile: (argv["config-file"] as string | undefined) ?? "./psilink.yaml",
-    keyFile: (argv["key-file"] as string | undefined) ?? "./.psilink.key",
+    configFile:
+      (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
+    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
     identity: argv["identity"] as string | undefined,
     serverPort: argv["server-port"] as number | undefined,
     serverUsername: argv["server-username"] as string | undefined,
@@ -269,7 +277,8 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
     case "file:":
       return "filedrop";
     default:
-      throw new Error(
+      // Invalid caller input (exit 64), not a transport failure.
+      throw new UsageError(
         `unsupported URL scheme: ${url.protocol}; expected sftp://, ` +
           "ssh://, ws://, wss://, or file://",
       );
@@ -285,7 +294,7 @@ export function createConnection(
 
   if (channel === "filedrop") {
     if (server.hostname && server.hostname !== "localhost") {
-      throw new Error(
+      throw new UsageError(
         `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
           `or file://localhost/path; got: ${server.href}`,
       );
@@ -306,7 +315,7 @@ export function createConnection(
   }
 
   if (channel !== "sftp")
-    throw new Error(`${channel} channel not yet supported in the CLI`);
+    throw new UsageError(`${channel} channel not yet supported in the CLI`);
 
   const base: SFTPConnectionConfig = {
     channel: "sftp",
@@ -427,7 +436,13 @@ export async function handler(argv: Arguments): Promise<void> {
     prepared = await prepareDataset(identity, input);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit((err as { exitCode?: number }).exitCode ?? 69);
+    // A bad URL scheme or unsupported channel is a usage error (exit 64);
+    // prepareDataset failures carry their own exitCode; otherwise exit 69.
+    process.exit(
+      err instanceof UsageError
+        ? 64
+        : ((err as { exitCode?: number }).exitCode ?? 69),
+    );
   }
 
   announceRetainMode(connection, log);

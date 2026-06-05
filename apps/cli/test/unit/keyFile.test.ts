@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import { UsageError } from "@psilink/core";
+import {
+  detectFileConflicts,
+  loadKeyFile,
+  saveKeyFile,
+} from "../../src/keyFile";
 
 // 43-char base64url token satisfying the pakeToken format constraint.
 const TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -95,9 +100,37 @@ test("saveKeyFile writes valid JSON with a trailing newline", () => {
 
 test("saveKeyFile rejects a malformed pakeToken before writing to disk", () => {
   const keyPath = path.join(dir, ".psilink.key");
+  // UsageError (not a plain Error) so the CLI classifies it as exit 64, not a
+  // transport failure (exit 69).
+  expect(() => saveKeyFile(keyPath, { pakeToken: "too-short" })).toThrow(
+    UsageError,
+  );
   expect(() => saveKeyFile(keyPath, { pakeToken: "too-short" })).toThrow(
     "base64url-encoded 32-byte value",
   );
   // No file should have been written.
   expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+// --- detectFileConflicts -----------------------------------------------------
+
+test("detectFileConflicts returns only the paths that already exist", () => {
+  const existing = path.join(dir, "psilink.yaml");
+  const missing = path.join(dir, ".psilink.key");
+  fs.writeFileSync(existing, "channel: filedrop\n");
+  expect(detectFileConflicts([existing, missing])).toEqual([existing]);
+});
+
+test("detectFileConflicts returns an empty array when nothing exists", () => {
+  expect(
+    detectFileConflicts([path.join(dir, "a"), path.join(dir, "b")]),
+  ).toEqual([]);
+});
+
+test("detectFileConflicts reports a dangling symlink as a conflict", () => {
+  // existsSync follows the link and would report this absent; lstatSync sees the
+  // link itself, so the gate refuses rather than letting a write follow it.
+  const link = path.join(dir, "dangling.yaml");
+  fs.symlinkSync(path.join(dir, "no-such-target"), link);
+  expect(detectFileConflicts([link])).toEqual([link]);
 });
