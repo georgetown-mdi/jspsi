@@ -53,6 +53,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 ### Documentation
 
 - Documented the transport delivery contract - a send completes on local hand-off rather than peer delivery, and a clean close flushes the final frame before teardown - in docs/COMMUNICATION.md and the `Connection` and `TransportHooks` interfaces, stating the guarantee any future channel must satisfy.
+- Corrected the non-repudiation receipt design in docs/PROTOCOL.md ahead of implementation: the receipt is a post-exchange audit artifact produced after the result already exists on both sides and does not gate or withhold result delivery; the session-derived (symmetric) signing mode is tamper-evident only and does not provide non-repudiation (its MAC is forgeable by either party), so true non-repudiation requires the certificate-backed asymmetric mode; and the receipt swap is best-effort evidence, not a fairness or atomicity guarantee. Clarified in docs/EXCHANGE_SPEC.md that `linkage_terms.identity` is self-asserted and carries evidentiary weight only when bound to a certificate.
 
 ## [0.1.0] - 2026-05-08
 

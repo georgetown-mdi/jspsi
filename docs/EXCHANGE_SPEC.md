@@ -49,7 +49,7 @@ A semver string identifying the schema of the linkage aggreement. Two versions a
 *Required:* yes  
 *Consistency:* none
 
-A free-text string identifying the party holding these terms. Included verbatim in the non-repudiation receipt (receipts are a planned 1.0 feature and are not yet implemented; see [ROADMAP.md](ROADMAP.md)). Parties may format this however they wish; common contents include name, organization, and contact information.
+A free-text string identifying the party holding these terms. It is self-asserted - a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is included verbatim in the non-repudiation receipt (receipts are a planned 1.0 feature and are not yet implemented; see [ROADMAP.md](ROADMAP.md)), where it carries evidentiary weight only under a certificate-backed signature that binds the asserted identity to a verified key; under a session-derived receipt it remains an unverified label (see [Non-repudiation](PROTOCOL.md#non-repudiation)). Parties may format this however they wish; common contents include name, organization, and contact information.
 
 ```yaml
 linkage_terms:
