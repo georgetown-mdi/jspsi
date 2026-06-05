@@ -96,6 +96,43 @@ describe("openPeerMessageConnection", () => {
     expect((err as ConnectionError).cause).toBe(cause);
   });
 
+  test("a remote error drains a buffered frame before failing (abnormal tail)", async () => {
+    // The abnormal-tail rule generalized to a fail() drop: a frame already
+    // queued when an ICE/transport error fires is still drained by receive()
+    // before the transport error surfaces, matching the clean-close ordering.
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn);
+
+    fake.emit("data", "final frame"); // buffered, no waiter
+    fake.emit("error", new Error("ICE failure")); // abnormal drop behind it
+
+    expect(await mc.receive()).toBe("final frame");
+    const err = await mc.receive().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("transport");
+    expect((err as ConnectionError).message).toBe("ICE failure");
+  });
+
+  test("a buffered frame survives a close-then-error sequence", async () => {
+    // PeerJS can emit close and then error around an ICE teardown. The first
+    // control to latch wins and the buffered frame drains ahead of it; eager
+    // finish() teardown detaches the error listener, so the trailing error is a
+    // no-op rather than a frame-dropping fail().
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn);
+
+    fake.emit("data", "final frame");
+    fake.emit("close"); // finish: defers the error, tears down, detaches listeners
+    fake.emit("error", new Error("late ICE error")); // no-op: listener detached
+
+    expect(await mc.receive()).toBe("final frame");
+    const err = await mc.receive().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("transport");
+    // The clean close (first to latch) supplies the error, not the late ICE one.
+    expect((err as ConnectionError).message).toBe("peer connection closed");
+  });
+
   test("send after close rejects and does not reach the channel", async () => {
     const { fake, conn } = makeConn();
     const mc = await openPeerMessageConnection(conn);

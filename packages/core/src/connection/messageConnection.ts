@@ -106,15 +106,27 @@ export interface TransportControls {
    * {@link MessageConnection.receive}).
    */
   deliver: (message: unknown) => void;
-  /** Latch a terminal error; idempotent after the first call. */
+  /**
+   * Latch an abnormal terminal error and tear the transport down; idempotent
+   * after the first call (a later {@link fail}/{@link finish} no-ops). A frame
+   * already buffered when this fires is still drained by
+   * {@link MessageConnection.receive} before the error surfaces (the
+   * abnormal-tail rule); only frames that arrive after the latch are dropped.
+   */
   fail: (error: ConnectionError) => void;
   /**
-   * Half-close: latch a terminal error that surfaces only once any already
-   * buffered messages have been drained by {@link MessageConnection.receive}.
-   * If the queue is already empty it behaves exactly like {@link fail}. Use
-   * for a clean remote close that may arrive with the peer's final frame still
-   * queued, where {@link fail} would discard it. Idempotent once a terminal
-   * state is reached.
+   * Half-close: latch a terminal error to surface once any buffered messages
+   * have been drained by {@link MessageConnection.receive}, and tear the
+   * transport down now so an abandoned half-close cannot leak it. If the queue
+   * is already empty it behaves exactly like {@link fail}. Idempotent once any
+   * terminal state is reached.
+   *
+   * Kept distinct from {@link fail} as a named transition - a clean remote
+   * close versus an abnormal drop - so a future close-capable transport can map
+   * its clean-close signal here. Behaviorally the two now converge: a buffered
+   * frame is drained ahead of either terminal error, so a clean close arriving
+   * with the peer's final frame still queued returns that frame first either
+   * way.
    */
   finish: (error: ConnectionError) => void;
 }
@@ -179,10 +191,32 @@ const DEFAULT_CAPACITY = 1024;
 export const DEFAULT_INACTIVITY_TIMEOUT_MS = 120_000;
 
 /**
+ * The terminal lifecycle of a {@link QueuedMessageConnection} as a single
+ * source of truth: `undefined` is the only non-terminal (open) state, and every
+ * transition into one of these terminal states runs transport teardown
+ * ({@link TransportHooks.close}) exactly once. Each method derives its terminal
+ * behavior from this one field rather than from independently-maintained flags,
+ * so a new terminal condition cannot leave a stale per-method guard behind.
+ *
+ * - `draining`: a half-close ({@link TransportControls.finish}) latched a
+ *   deferred error while frames were still buffered; teardown has already run.
+ *   {@link QueuedMessageConnection.receive} keeps draining the queue and the
+ *   final drain promotes this to `failed`.
+ * - `failed`: an abnormal terminal error ({@link TransportControls.fail}, a
+ *   promoted `draining` error, or a failed send); `error` is surfaced by
+ *   `receive`/`send` once the queue is drained.
+ * - `closed`: a deliberate local {@link MessageConnection.close}.
+ */
+type TerminalState =
+  | { readonly kind: "draining"; readonly error: ConnectionError }
+  | { readonly kind: "failed"; readonly error: ConnectionError }
+  | { readonly kind: "closed" };
+
+/**
  * Core {@link MessageConnection} implementation: a bounded inbound FIFO plus a
- * sticky terminal-error latch. A transport supplies its `send`/`close` (and an
- * optional `start`) via the `connect` callback, and pushes inbound events
- * through the {@link TransportControls} it receives. Used by both
+ * single sticky {@link TerminalState}. A transport supplies its `send`/`close`
+ * (and an optional `start`) via the `connect` callback, and pushes inbound
+ * events through the {@link TransportControls} it receives. Used by both
  * {@link fromEventConnection} and {@link createMessagePipe}.
  */
 export class QueuedMessageConnection implements MessageConnection {
@@ -191,14 +225,11 @@ export class QueuedMessageConnection implements MessageConnection {
   private readonly capacity: number;
   private readonly inactivityTimeoutMs: number | undefined;
   private readonly hooks: TransportHooks;
-  private error: ConnectionError | undefined;
-  // Deferred terminal error from a half-close (finish): held while the queue
-  // still has buffered frames and promoted to a real error by receive() once
-  // the queue drains, so a clean remote close surfaces after its final frame.
-  private pendingError: ConnectionError | undefined;
-  private closed = false;
-  // Guards the single transport teardown shared by close() and fail().
-  private terminated = false;
+  // Single source of truth for the terminal lifecycle; undefined means open.
+  // Every transition into a terminal state runs transport teardown exactly
+  // once, so this one field replaces the former error/pendingError/closed/
+  // terminated flags and the guards that read them (see {@link TerminalState}).
+  private state: TerminalState | undefined;
   // Armed while a receive() is parked with an empty queue; fires a terminal
   // transport failure if the peer stays silent past inactivityTimeoutMs.
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -266,11 +297,12 @@ export class QueuedMessageConnection implements MessageConnection {
   // same never-deleted message until peer_timeout_ms (docs/FILE_SYNC.md I8).
   // messageConnection.test.ts pins this non-throwing contract.
   private deliver(message: unknown): void {
-    // Once a half-close is pending, ignore further inbound: drain exactly what
-    // was buffered at close time, then fail. PeerJS will not deliver after a
-    // close, so this is belt-and-suspenders, but it keeps the half-closed
-    // semantics crisp.
-    if (this.error || this.closed || this.pendingError !== undefined) return;
+    // Ignore inbound once any terminal state is reached: a `draining` half-close
+    // drains exactly what was buffered at close time and accepts nothing new,
+    // while `failed`/`closed` accept nothing. PeerJS will not deliver after a
+    // close, so for that transport this is belt-and-suspenders, but it keeps the
+    // half-closed semantics crisp.
+    if (this.state !== undefined) return;
     const waiter = this.waiters.shift();
     if (waiter) {
       // A message just arrived: the peer is alive, so reset the idle clock,
@@ -294,63 +326,74 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   private fail(error: ConnectionError): void {
-    if (this.error || this.closed) return;
+    if (this.state !== undefined) return;
+    this.state = { kind: "failed", error };
     this.disarmIdle();
-    this.error = error;
     this.rejectWaiters(error);
-    if (!this.terminated) {
-      this.terminated = true;
-      // Best-effort teardown; we are already failing, so swallow its outcome.
-      void Promise.resolve(this.hooks.close()).catch(() => {});
-    }
+    // Best-effort teardown; we are already failing, so swallow its outcome. No
+    // flush: an error means the link is already unusable.
+    void Promise.resolve(this.hooks.close()).catch(() => {});
   }
 
   // Half-close: latch a terminal error to be surfaced only after the queue
-  // drains. A genuine error uses fail() (discarding buffered frames is the
-  // intended stance); a clean remote close that may have left the peer's final
-  // frame queued uses this so receive() returns that frame before failing.
+  // drains, so a clean remote close that may have left the peer's final frame
+  // queued returns that frame before failing. fail() is the abnormal
+  // counterpart; both tear the transport down at call time.
   private finish(error: ConnectionError): void {
-    // Idempotent once a half-close is already pending: a second finish() (a
+    // Idempotent once any terminal state is reached: a second finish() (a
     // duplicate transport close, or a transport that finishes on both a close
-    // and a timeout) must not overwrite the first deferred error. Mirrors the
-    // pendingError guard in deliver().
-    if (this.error || this.closed || this.pendingError !== undefined) return;
-    if (this.queue.length > 0) {
-      this.pendingError = error;
-    } else {
+    // and a timeout), or a fail()/close() that already ran, must not overwrite
+    // the first transition.
+    if (this.state !== undefined) return;
+    if (this.queue.length === 0) {
       // Nothing buffered to drain (a parked waiter implies an empty queue), so
       // there is nothing to wait for: fail now, exactly like fail().
       this.fail(error);
+      return;
     }
+    // Frames remain buffered: hold them and the deferred error in `draining` for
+    // receive() to drain, but tear the transport down now (F2). Eager teardown
+    // means an abandoned half-close - never drained, never closed - cannot leak
+    // the transport's listeners/channel. The deferred error is promoted to
+    // `failed` by receive() once the queue empties; teardown does not run again.
+    this.state = { kind: "draining", error };
+    // A defensive no-op here (a non-empty queue implies no parked waiter, so the
+    // idle timer cannot be armed), kept so every terminal transition uniformly
+    // disarms idle and a future reachable-with-timer path stays correct.
+    this.disarmIdle();
+    // No flush: a half-close means the peer has gone, so there is nothing to
+    // drain outbound to (matching the no-flush teardown the former
+    // promote-via-fail path ran).
+    void Promise.resolve(this.hooks.close()).catch(() => {});
   }
 
   receive(timeoutMs?: number): Promise<unknown> {
-    if (this.error) return Promise.reject(this.error);
-    // Drain buffered messages even after a clean close, but never after an
-    // error: a latched error may mean the buffered data is untrustworthy.
+    // Drain already-arrived frames before surfacing any terminal state: a frame
+    // that reached the queue before the connection went terminal is returned
+    // ahead of the terminal error or close, uniformly across transports and
+    // orderings (a clean half-close, an abnormal drop, or a capacity overflow).
+    // Safe because deliver() only ever enqueues complete, parsed frames, and a
+    // security/replay check runs at the protocol layer on this output, never as
+    // a transport control latched behind a queued frame.
     if (this.queue.length > 0) {
       const message = this.queue.shift();
-      // The just-drained frame was the last one a half-close was waiting on, so
-      // promote its deferred error through fail() (not a bare this.error
-      // assignment) to keep terminated/hooks.close() in sync with every other
-      // error path. The next receive() then rejects with it.
-      if (this.queue.length === 0 && this.pendingError !== undefined) {
-        const deferred = this.pendingError;
-        this.pendingError = undefined;
-        // fail() no-ops once closed, so a close() that raced ahead of this final
-        // drain would otherwise drop the deferred error and leave the next
-        // receive() reporting a generic close. Latch it directly in that case;
-        // teardown already ran in close().
-        if (this.closed) {
-          this.error = deferred;
-        } else {
-          this.fail(deferred);
-        }
+      // The just-drained frame was the last one a half-close was waiting on:
+      // promote the deferred error to `failed`. Teardown already ran at finish()
+      // time, so this is a pure state transition - which is what collapses the
+      // former close-racing-the-drain special case (a bare this.error
+      // assignment guarded by a non-local "close already tore down" invariant).
+      if (this.state?.kind === "draining" && this.queue.length === 0) {
+        this.state = { kind: "failed", error: this.state.error };
       }
       return Promise.resolve(message);
     }
-    if (this.closed)
-      return Promise.reject(new ConnectionError("connection closed", "usage"));
+    // Queue empty: surface the terminal state, if any. A deliberate close is a
+    // usage error; `failed`/`draining` surface the latched/deferred error.
+    if (this.state !== undefined) {
+      return this.state.kind === "closed"
+        ? Promise.reject(new ConnectionError("connection closed", "usage"))
+        : Promise.reject(this.state.error);
+    }
     return new Promise<unknown>((resolve, reject) => {
       this.waiters.push({ resolve, reject, timeoutMs });
       this.armIdle();
@@ -358,12 +401,18 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   async send(data: unknown): Promise<void> {
-    if (this.error) throw this.error;
-    // A half-close has latched a terminal error behind still-buffered inbound
-    // frames; the peer is gone, so reject rather than write into the void.
-    if (this.pendingError) throw this.pendingError;
-    if (this.closed)
-      throw new ConnectionError("cannot send on a closed connection", "usage");
+    // Reject on any terminal state. A deliberate close is local misuse;
+    // `failed`/`draining` surface the terminal error - the peer is gone (a
+    // half-close has latched an error behind still-buffered inbound frames), so
+    // reject rather than write into the void.
+    if (this.state !== undefined) {
+      if (this.state.kind === "closed")
+        throw new ConnectionError(
+          "cannot send on a closed connection",
+          "usage",
+        );
+      throw this.state.error;
+    }
     try {
       await this.hooks.send(data);
     } catch (err) {
@@ -374,9 +423,14 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   async close(): Promise<void> {
-    if (this.terminated) return;
-    this.terminated = true;
-    this.closed = true;
+    // Idempotent, and a no-op once any terminal state is reached: fail() and
+    // finish() each already ran teardown, so re-running it - or overwriting
+    // their error with a generic close - would be wrong. This is what collapses
+    // the close-racing-the-final-drain case: a close() during a pending drain
+    // simply returns, leaving `draining` to promote its deferred error on the
+    // final receive().
+    if (this.state !== undefined) return;
+    this.state = { kind: "closed" };
     this.disarmIdle();
     // A waiter parked before this deliberate close did nothing wrong, so reject
     // it as "closed" (a cancelled operation), not "usage" (caller misuse).
