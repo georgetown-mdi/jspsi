@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import { FileSyncConnection } from "../src/connection/fileSyncConnection";
+import { ADVERTISE_HELLO_RETRY_ATTEMPTS } from "../src/connection/fileSyncConstants";
 import type {
   FileTransportClient,
   FileInfo,
@@ -3562,6 +3563,108 @@ test("(c) lock joiner reading a lockless peer hello fails fast and leaves both h
   );
   // Own advertisement written, peer hello not deleted: both remain.
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+});
+
+test("(c) lock joiner fast-path retries a transient advertise-hello write, then leaves the durable hello", async () => {
+  // 193901017's symmetric-detection floor is best-effort and contingent on this
+  // one advertising write landing: the lock joiner fast-path is the single
+  // mismatch site that needs a NEW write at detection time. A transient put
+  // failure here would otherwise leave no durable hello for the lockless peer to
+  // read, degrading it to the legacy peer-timeout instead of a symmetric
+  // fast-fail. The bounded retry re-attempts the write at the polling cadence;
+  // failing the first N-1 attempts and succeeding on the last (Nth) proves the
+  // budget is fully usable and the advertisement still lands.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 1,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // lock (default)
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
+  );
+
+  // Fail the advertise-hello put on every attempt but the last in the budget,
+  // then delegate to the in-memory store so the final attempt lands. Scoped to
+  // the hello path: on a mismatch this branch issues no other put.
+  const helloPath = `${conn.path}/${conn.id}-hello.json`;
+  const originalPut = client.put;
+  let helloPutAttempts = 0;
+  client.put = async (src, dest, options) => {
+    if (dest === helloPath) {
+      helloPutAttempts++;
+      if (helloPutAttempts < ADVERTISE_HELLO_RETRY_ATTEMPTS)
+        throw new Error(`synthetic transient put failure #${helloPutAttempts}`);
+    }
+    return originalPut(src, dest, options);
+  };
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  // The typed mismatch is still thrown (UsageError, exit 64): the retry must not
+  // let a transport rejection mask or replace the actionable mismatch.
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect(err).toBeInstanceOf(UsageError);
+  // The write was retried across the budget and the final attempt landed.
+  expect(helloPutAttempts).toBe(ADVERTISE_HELLO_RETRY_ATTEMPTS);
+  // Durable advertised hello is left on disk for the peer to read, alongside the
+  // (undeleted) peer hello -- both are the directory's terminal state.
+  expect(files.has(helloPath)).toBe(true);
+  expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
+});
+
+test("(c) lock joiner fast-path degrades to log-and-throw once the advertise-hello budget is exhausted", async () => {
+  // The documented best-effort floor: once the bounded retry budget is spent,
+  // the party gives up the advertisement -- no durable hello, so the peer
+  // degrades to the legacy peer-timeout -- but STILL throws the typed mismatch.
+  // A transport rejection must never escape this catch-less fast-path and mask
+  // the BilateralModeMismatchError (exit 64) as a generic Error (exit 69).
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 1,
+    timeToLiveMs: 30_000,
+  });
+  conn.id = ID_HIGH; // lock (default)
+  const peerHelloName = `${ID_LOW}-hello.json`;
+  files.set(
+    `${conn.path}/${peerHelloName}`,
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+    ),
+  );
+
+  const helloPath = `${conn.path}/${conn.id}-hello.json`;
+  const originalPut = client.put;
+  let helloPutAttempts = 0;
+  client.put = async (src, dest, options) => {
+    if (dest === helloPath) {
+      helloPutAttempts++;
+      throw new Error("synthetic persistent put failure");
+    }
+    return originalPut(src, dest, options);
+  };
+
+  let err: unknown;
+  await conn.synchronize().catch((e: unknown) => {
+    err = e;
+  });
+
+  expect(err).toBeInstanceOf(BilateralModeMismatchError);
+  expect(err).toBeInstanceOf(UsageError);
+  // The full budget was exhausted before giving up.
+  expect(helloPutAttempts).toBe(ADVERTISE_HELLO_RETRY_ATTEMPTS);
+  // No durable advertisement left (every write failed); the peer hello is
+  // untouched. The peer degrades to the legacy peer-timeout, exactly as the
+  // best-effort floor describes.
+  expect(files.has(helloPath)).toBe(false);
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
 
