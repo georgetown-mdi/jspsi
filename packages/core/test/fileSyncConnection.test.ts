@@ -2128,6 +2128,12 @@ test("poll ignores message files belonging to a different peer", async () => {
 
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
+  // This test isolates message-routing: a different peer's message file
+  // (`peer-b-*`) must never be consumed as ours. Under the default policy that
+  // file is now also flagged as a foreign file (another session sharing the
+  // path); pin `ignore` so this test exercises the routing exclusion alone --
+  // the foreign-file detection is covered by its own tests below.
+  conn.options.unexpectedFiles = "ignore";
 
   const received: unknown[] = [];
   const errors: unknown[] = [];
@@ -2174,11 +2180,12 @@ test("poll extracts the byte count from the last segment when the filename has m
   expect((received[0] as Record<string, unknown>)["ok"]).toBe(true);
 });
 
-test("poll ignores a prefix-matching file whose final segment is not a byte count", async () => {
+test("poll under the ignore policy skips a prefix-matching file whose final segment is not a byte count", async () => {
   // A leftover or foreign file sharing the peer's id prefix but not encoding a
-  // byte count (e.g. `<peerId>-backup.json`) must be ignored, not treated as a
-  // fatal protocol error: the exact-name lookup it replaced never matched such
-  // a file. The real message alongside it is still delivered.
+  // byte count (e.g. `<peerId>-backup.json`) is not routed as a message. Under
+  // the post-entry policy it is now a foreign file (terminal under the default
+  // `error`); the `ignore` policy preserves the previous silent-skip behavior,
+  // which this test pins. The real message alongside it is still delivered.
   const { client, files } = makeMockClient();
   const peerId = "peer-leftover";
   const message = Buffer.from(
@@ -2189,6 +2196,7 @@ test("poll ignores a prefix-matching file whose final segment is not a byte coun
 
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
+  conn.options.unexpectedFiles = "ignore";
 
   const received: unknown[] = [];
   const errors: unknown[] = [];
@@ -5651,3 +5659,450 @@ test.each([
     expect((received[1] as { n: number }).n).toBe(2);
   },
 );
+
+// --- unexpected files mid-exchange (enforcement site 3) ----------------------
+//
+// poll() classifies every file in the listing: a peer message, a file
+// recognized for the loop (both hellos, both acks, the lock, both parties'
+// messages and message-acks, our own writes, in-flight temp), or an unexpected
+// foreign file handled per `unexpectedFiles`. Separately, a peer-prefixed
+// retain-mode message with a byte-count terminal but no parseable NNN is a
+// terminal malformed-protocol error regardless of `unexpectedFiles`.
+
+test("poll(): an unrecognized file mid-loop is a terminal UsageError under the default error policy (plain transport)", async () => {
+  // makeConnectedConn yields a plain delete-mode filedrop conn (no retain or
+  // lockless, unexpectedFiles unset), so the effective policy resolves to error.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = "peer-test";
+
+  // A net-new foreign file appears during the loop.
+  files.set("/test/intruder.json", Buffer.from("x"));
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  // Do NOT call stop() -- a terminal error must stop the poller on its own.
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("intruder.json");
+  expect((errors[0] as Error).message).toContain("/test");
+  // The poller stopped itself before emitting (UsageError is terminal).
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
+});
+
+test("poll(): an unrecognized file mid-loop warns once per name under the warn policy", async () => {
+  let listCount = 0;
+  const errors: unknown[] = [];
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+    conn.peerId = "peer-test";
+    conn.options.unexpectedFiles = "warn";
+    files.set("/test/intruder.json", Buffer.from("x"));
+    conn.on("error", (err) => errors.push(err));
+
+    // Resolve after several poll cycles so the once-per-name dedup is exercised
+    // across multiple passes, not just one.
+    let notifyEnough!: () => void;
+    const enough = new Promise<void>((r) => (notifyEnough = r));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      if (++listCount === 5) notifyEnough();
+      return origList(p);
+    };
+    conn.start();
+    try {
+      await Promise.race([
+        enough,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("timed out waiting for poll cycles")),
+            2_000,
+          ),
+        ),
+      ]);
+    } finally {
+      conn.stop();
+    }
+  });
+
+  // warn does not abort the exchange.
+  expect(errors).toHaveLength(0);
+  // Several poll cycles ran...
+  expect(listCount).toBeGreaterThanOrEqual(5);
+  // ...but the file was warned about exactly once, not every cycle.
+  const warns = logs.filter((l) => l.message.includes("intruder.json"));
+  expect(warns).toHaveLength(1);
+});
+
+test("poll(): an unrecognized file mid-loop is silently skipped under the ignore policy", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+  conn.peerId = "peer-test";
+  conn.options.unexpectedFiles = "ignore";
+  files.set("/test/intruder.json", Buffer.from("x"));
+
+  const errors: unknown[] = [];
+  conn.on("error", (err) => errors.push(err));
+
+  let listCount = 0;
+  let notifyEnough!: () => void;
+  const enough = new Promise<void>((r) => (notifyEnough = r));
+  const origList = client.list.bind(client);
+  client.list = async (p: string) => {
+    if (++listCount === 5) notifyEnough();
+    return origList(p);
+  };
+  conn.start();
+  try {
+    await Promise.race([
+      enough,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for poll cycles")),
+          2_000,
+        ),
+      ),
+    ]);
+    // The poller is still running -- the foreign file did not stop it...
+    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+      true,
+    );
+  } finally {
+    conn.stop();
+  }
+  // ...and no error was emitted.
+  expect(errors).toHaveLength(0);
+});
+
+test("poll(): with retain_files set and unexpected_files unset, a mid-session conflict file warns rather than aborts", async () => {
+  const errors: unknown[] = [];
+  let listCount = 0;
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    // retainFiles set, unexpectedFiles unset -> effective default resolves to warn.
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+    });
+    conn.id = "me";
+    conn.connected = true;
+    conn.path = "/test";
+    conn.peerId = "peer";
+    conn.on("error", (err) => errors.push(err));
+
+    // A cloud-sync conflict copy: peer-prefixed but a non-grammar terminal.
+    files.set("/test/peer-100 (conflicted copy).json", Buffer.from("x"));
+
+    let notifyEnough!: () => void;
+    const enough = new Promise<void>((r) => (notifyEnough = r));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      if (++listCount === 5) notifyEnough();
+      return origList(p);
+    };
+    conn.start();
+    try {
+      await Promise.race([
+        enough,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("timed out waiting for poll cycles")),
+            2_000,
+          ),
+        ),
+      ]);
+    } finally {
+      conn.stop();
+    }
+  });
+
+  expect(errors).toHaveLength(0);
+  const warns = logs.filter((l) => l.message.includes("conflicted copy"));
+  expect(warns).toHaveLength(1);
+});
+
+test("poll(): with lockless_rendezvous set (retain off) and unexpected_files unset, the warn default still applies", async () => {
+  // Isolates the lockless-only branch of the mode-coupled default: with
+  // retainFiles false, the `retainFiles || locklessRendezvous` resolution must
+  // still yield warn. An `||` -> `&&` regression would resolve to error here.
+  const errors: unknown[] = [];
+  let listCount = 0;
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+    });
+    conn.id = "me";
+    conn.connected = true;
+    conn.path = "/test";
+    conn.peerId = "peer";
+    conn.on("error", (err) => errors.push(err));
+
+    files.set("/test/intruder.json", Buffer.from("x"));
+
+    let notifyEnough!: () => void;
+    const enough = new Promise<void>((r) => (notifyEnough = r));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      if (++listCount === 5) notifyEnough();
+      return origList(p);
+    };
+    conn.start();
+    try {
+      await Promise.race([
+        enough,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("timed out waiting for poll cycles")),
+            2_000,
+          ),
+        ),
+      ]);
+    } finally {
+      conn.stop();
+    }
+  });
+
+  expect(errors).toHaveLength(0);
+  const warns = logs.filter((l) => l.message.includes("intruder.json"));
+  expect(warns).toHaveLength(1);
+});
+
+test("retain mode: a peer message with a valid byte count but unparseable NNN is a terminal error regardless of unexpected_files", async () => {
+  for (const policy of ["error", "warn", "ignore"] as const) {
+    const { client, files } = makeMockClient();
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 10,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+      unexpectedFiles: policy,
+    });
+    conn.id = "me";
+    conn.connected = true;
+    conn.path = "/test";
+    conn.peerId = "peer";
+
+    // Byte-count terminal (5) but the NNN segment ("foo") is non-numeric.
+    files.set("/test/peer-foo-5.json", Buffer.from("xxxxx"));
+
+    const errors: unknown[] = [];
+    let notifyError!: () => void;
+    const errorArrived = new Promise<void>((r) => (notifyError = r));
+    conn.on("error", (err) => {
+      errors.push(err);
+      notifyError();
+    });
+
+    conn.start();
+    await Promise.race([
+      errorArrived,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`timed out (policy=${policy})`)),
+          2_000,
+        ),
+      ),
+    ]);
+
+    expect(errors).toHaveLength(1);
+    // A malformed-protocol UsageError, NOT a bilateral-mismatch: both sides
+    // already agreed on retain/timestamp at rendezvous, so a "your settings
+    // disagree" message would misdirect the operator.
+    expect(errors[0]).toBeInstanceOf(UsageError);
+    expect(errors[0]).not.toBeInstanceOf(BilateralModeMismatchError);
+    expect((errors[0] as Error).message).toContain("peer-foo-5.json");
+    expect((errors[0] as Error).message).toContain("NNN");
+    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+      false,
+    );
+  }
+});
+
+test("poll(): recognized loop files (hellos, acks, lock, our writes, temp) never trip the foreign-file path", async () => {
+  // Under the strictest policy (plain default = error), plant every file kind
+  // legal during the loop plus a real peer message. None must be misclassified
+  // as foreign, and the real message must still be delivered.
+  const errors: unknown[] = [];
+  const received: unknown[] = [];
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+    conn.id = "me";
+    conn.peerId = "peer";
+
+    const recognized = [
+      "me-hello.json", // our hello
+      "peer-hello.json", // peer hello
+      "me-peer-lock.json", // lock tiebreaker (we arrived first)
+      "peer-me-lock.json", // lock tiebreaker, reverse arrival order (peer first)
+      "me-peer-hello-ack.json", // our rendezvous ack of the peer hello
+      "peer-me-hello-ack.json", // peer rendezvous ack of our hello
+      "me-peer-20260101T000000-000-42-ack.json", // our message-ack
+      "peer-me-20260101T000000-000-42-ack.json", // peer message-ack
+      "temp-abc123.tmp", // in-flight write
+    ];
+    for (const name of recognized) files.set(`/test/${name}`, Buffer.alloc(0));
+
+    // A real, fully-synced delete-mode peer message that must be delivered.
+    const message = Buffer.from(
+      JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { ok: true } }),
+    );
+    files.set(`/test/peer-${message.length}.json`, message);
+
+    conn.on("error", (err) => errors.push(err));
+    let notifyReceived!: () => void;
+    const delivered = new Promise<void>((r) => (notifyReceived = r));
+    conn.on("data", (m) => {
+      received.push(m);
+      notifyReceived();
+    });
+
+    conn.start();
+    await Promise.race([
+      delivered,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for message")),
+          2_000,
+        ),
+      ),
+    ]);
+    // Let a few more poll cycles run over the persisting recognized files.
+    await new Promise((r) => setTimeout(r, 40));
+    conn.stop();
+  });
+
+  expect(errors).toHaveLength(0);
+  expect(received).toHaveLength(1);
+  expect((received[0] as { ok: boolean }).ok).toBe(true);
+  // No foreign-file warnings either: recognized files produce no per-cycle noise.
+  expect(logs).toHaveLength(0);
+});
+
+test("poll(): retain mode recognizes our own accumulated message files rather than flagging them", async () => {
+  // In retain mode our own sent messages are never deleted, so they are
+  // re-listed on every poll cycle. Under the strict default (error) they must
+  // be recognized via the own-prefix numeric-terminal branch, never flagged as
+  // unexpected -- which would terminate the exchange on our own transcript.
+  const errors: unknown[] = [];
+  let listCount = 0;
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = new FileSyncConnection(client, {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+      unexpectedFiles: "error",
+    });
+    conn.id = "me";
+    conn.connected = true;
+    conn.path = "/test";
+    conn.peerId = "peer";
+    conn.on("error", (err) => errors.push(err));
+
+    // Our own retained, already-sent messages and a message-ack accumulate.
+    files.set("/test/me-20260101T000000-000-42.json", Buffer.alloc(42));
+    files.set("/test/me-20260101T000100-001-37.json", Buffer.alloc(37));
+    files.set("/test/me-peer-20260101T000000-000-10-ack.json", Buffer.alloc(0));
+
+    let notifyEnough!: () => void;
+    const enough = new Promise<void>((r) => (notifyEnough = r));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      if (++listCount === 5) notifyEnough();
+      return origList(p);
+    };
+    conn.start();
+    try {
+      await Promise.race([
+        enough,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("timed out waiting for poll cycles")),
+            2_000,
+          ),
+        ),
+      ]);
+    } finally {
+      conn.stop();
+    }
+  });
+
+  // No terminal error from the strict policy, and no per-cycle warn noise:
+  // every own file was classified as recognized across all cycles.
+  expect(errors).toHaveLength(0);
+  expect(listCount).toBeGreaterThanOrEqual(5);
+  expect(logs).toHaveLength(0);
+});
+
+test("poll(): an ack-shaped foreign file whose target is not a real protocol file is flagged, not recognized", async () => {
+  // `me-peer-x-ack.json` has a known-party prefix and >=4 dash segments, so the
+  // old segment-count floor admitted it. Its embedded target `peer-x` is neither
+  // a hello nor a message name, so it is not a real ack and must fall to the
+  // unexpected-file policy (default error) rather than being recognized.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+  conn.id = "me";
+  conn.peerId = "peer";
+  files.set("/test/me-peer-x-ack.json", Buffer.alloc(0));
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+
+  conn.start();
+  try {
+    await Promise.race([
+      errorArrived,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timed out")), 2_000),
+      ),
+    ]);
+  } finally {
+    conn.stop();
+  }
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("me-peer-x-ack.json");
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
+});
