@@ -8,13 +8,20 @@ import type {
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
-import { UsageError, BilateralModeMismatchError } from "../errors";
+import {
+  UsageError,
+  BilateralModeMismatchError,
+  ConnectionClosedError,
+} from "../errors";
 import {
   HelloEnvelopeSchema,
   serializeEnvelope,
   type HelloEnvelope,
 } from "./controlEnvelope";
-import { ADVERTISE_HELLO_RETRY_ATTEMPTS } from "./fileSyncConstants";
+import {
+  ADVERTISE_HELLO_RETRY_ATTEMPTS,
+  cancellableDelay,
+} from "./fileSyncConstants";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -141,9 +148,8 @@ async function readControlFileWithGate(
   timeToLive: Date,
   pollingFrequency: number,
   schema: z.ZodType<HelloEnvelope>,
+  signal: AbortSignal,
 ): Promise<HelloEnvelope> {
-  const delay = (ms: number) =>
-    new Promise<void>((resolve) => setTimeout(resolve, ms));
   // do-while guarantees at least one read attempt even when timeToLive has
   // already expired by the time the gate is entered (e.g. a slow polling loop
   // that exhausts the budget before reaching this call). Without this a fully-
@@ -154,7 +160,7 @@ async function readControlFileWithGate(
       raw = await client.get(filePath, { encoding: "utf-8" });
     } catch {
       // File may not be readable yet (TOCTOU or partial sync); retry.
-      await delay(pollingFrequency);
+      await cancellableDelay(pollingFrequency, signal);
       continue;
     }
     let parsed: unknown;
@@ -162,7 +168,7 @@ async function readControlFileWithGate(
       parsed = JSON.parse(raw.toString());
     } catch {
       // Partial write: body is not valid JSON yet; retry until fully synced.
-      await delay(pollingFrequency);
+      await cancellableDelay(pollingFrequency, signal);
       continue;
     }
     const result = schema.safeParse(parsed);
@@ -316,6 +322,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   handshakeRole: HandshakeRole | undefined;
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
+  // Cancellation primitive threaded through every wait site (see wait() and
+  // cancellableDelay). close() aborts it so an in-flight sleep rejects
+  // promptly; synchronize() re-arms a fresh one per session. Constructed inline
+  // so a never-opened/never-synchronized instance is safe (close() before any
+  // session cannot NPE), and re-armed at session start rather than in
+  // resetSessionState() so a recovery reset mid-rendezvous cannot wipe a
+  // concurrent close()'s abort (see synchronize()).
+  private abortController = new AbortController();
   private responsibleFiles: Set<string>;
   // The name of the last message this party sent. Read by two consumers: the
   // delete-mode drain in close() (waits for the peer to consume this exact file
@@ -406,6 +420,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const e = this.bufferedError;
     this.bufferedError = undefined;
     return e;
+  }
+
+  // Cancellable replacement for `new Promise((r) => setTimeout(r, ms))` at every
+  // in-session wait site. Reads this.abortController.signal fresh per call. Do
+  // not hoist the signal: the controller is swapped at session start
+  // (synchronize()), so a cached `const signal = this.abortController.signal`
+  // above a loop would observe a stale controller and become uncancellable.
+  private wait(ms: number): Promise<void> {
+    return cancellableDelay(ms, this.abortController.signal);
   }
 
   /** Opens a connection from a typed config. Dispatches on `config.channel`. */
@@ -552,6 +575,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   async close() {
     this.stop();
 
+    // Cancel any in-flight wait (a rendezvous/send sleep parked between polls)
+    // so it rejects promptly instead of resuming against a connection that is
+    // tearing down. stop() (above) already cleared pollerActive and the poller
+    // timer -- both synchronous -- so by the time an abort-induced rejection
+    // reaches poll()'s catch, the !pollerActive guard swallows it. The drain
+    // loop below stays on a plain setTimeout (it is the teardown wait itself;
+    // see its comment). INVARIANT: every abort() in this class passes a
+    // ConnectionClosedError reason -- cancellableDelay rejects with
+    // signal.reason, and the plain-Error (exit 69) classification depends on it.
+    this.abortController.abort(
+      new ConnectionClosedError("connection closed during wait"),
+    );
+
     if (this.path !== undefined) {
       // Drain the last sent file before sweeping: a clean close must not
       // delete a terminal frame the peer has not yet consumed. Uses a fresh
@@ -582,6 +618,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               `[${this.role}] draining ${lastSentFile} before cleanup`,
             );
             while (Date.now() < deadline && (await filePresent())) {
+              // Deliberately a plain setTimeout, not this.wait(): this drain IS
+              // the teardown wait and runs after the session controller is
+              // already aborted (above), so wiring it to that signal would make
+              // it reject on the first iteration and skip its bounded wait. It
+              // is hard-bounded by `Date.now() < deadline` and its catch
+              // swallows failures, so a separate controller buys nothing.
               await new Promise((resolve) =>
                 setTimeout(resolve, this.options.pollingFrequency),
               );
@@ -671,6 +713,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       throw new Error("not connected");
 
     if (this.peerId) throw new Error("already synchronized");
+
+    // Re-arm cancellation per session: each genuine rendezvous (including a
+    // retry on the same instance after a failed synchronize()) starts with a
+    // fresh signal. Placed here, after the re-entry guard, NOT in
+    // resetSessionState() -- that helper runs three times INSIDE a live
+    // synchronize() (the recovery resets), so re-arming there could wipe a
+    // concurrent close()'s abort mid-unwind. A no-op re-entry call throws at the
+    // guard above and never reaches this line, so it cannot swap a live
+    // session's controller. The teardown-stays-aborted invariant relies on a
+    // single, non-concurrent synchronize() caller per instance (the CLI drives
+    // exactly one at a time); a concurrent re-sync during a close() window is
+    // out of scope and not reachable in production.
+    this.abortController = new AbortController();
 
     // Library-level defense-in-depth: the schema refine and CLI imply cover the
     // config/CLI entry points, but a direct library consumer that constructs
@@ -853,6 +908,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.options.timeToLive!,
         this.options.pollingFrequency,
         HelloEnvelopeSchema,
+        this.abortController.signal,
       );
 
       // Bilateral flag check. A mismatch here means the peer runs a different
@@ -913,9 +969,30 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                   `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
                   `${errMessage(writeErr)}`,
               );
-              await new Promise<void>((resolve) =>
-                setTimeout(resolve, this.options.pollingFrequency),
-              );
+              try {
+                await this.wait(this.options.pollingFrequency);
+              } catch {
+                // The only way this.wait rejects is an abort from a concurrent
+                // close() -- a plain delay never rejects -- so this catch cannot
+                // swallow a real put() failure (those are caught by the inner
+                // try and logged above). Stop retrying and fall through to the
+                // reset + `throw mismatch` below so the genuine
+                // BilateralModeMismatchError (exit 64) stays the surfaced root
+                // cause rather than the close's ConnectionClosedError (exit 69):
+                // the diverging flag is the actionable cause the operator must
+                // fix, and the close-during-mismatch case is unreachable except
+                // under a signal anyway (where neither code is the exit code).
+                // Log the cut-short retry so a close-during-mismatch is
+                // diagnosable in debug logs, mirroring the exhausted-budget
+                // path's degradation message in the else branch below.
+                this.log.debug(
+                  `[joiner] advertise-hello retry aborted by connection ` +
+                    `close after attempt ${attempt}/` +
+                    `${ADVERTISE_HELLO_RETRY_ATTEMPTS}; peer may time out ` +
+                    `instead of fast-failing`,
+                );
+                break;
+              }
             } else {
               this.log.debug(
                 `[joiner] could not advertise hello on mismatch after ` +
@@ -1073,8 +1150,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       let ackPath: string | undefined;
 
       const waitForPeer = async () => {
-        const delay = (ms: number) =>
-          new Promise((resolve) => setTimeout(resolve, ms));
         if (this.options.locklessRendezvous) {
           // Lockless ack-handshake barrier: completes rendezvous using neither
           // createExclusive nor delete. Each party writes a hello, then an ack
@@ -1102,7 +1177,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             if (peerHellos.length === 0) {
               this.log.trace(`[${this.role}] no peer hello found; polling`);
-              await delay(this.options.pollingFrequency);
+              await this.wait(this.options.pollingFrequency);
               continue;
             }
 
@@ -1129,6 +1204,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 this.options.timeToLive!,
                 this.options.pollingFrequency,
                 HelloEnvelopeSchema,
+                this.abortController.signal,
               );
 
               // Bilateral flag check before writing our ack. On mismatch throw:
@@ -1189,7 +1265,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.log.trace(
                 `[${this.role}] waiting for peer ack ${peerAckName}`,
               );
-              await delay(this.options.pollingFrequency);
+              await this.wait(this.options.pollingFrequency);
               continue;
             }
 
@@ -1337,7 +1413,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               joiningSeenName = undefined;
               this.log.trace(`[${this.role}] no peer hello found; polling`);
             }
-            await delay(this.options.pollingFrequency);
+            await this.wait(this.options.pollingFrequency);
             continue;
           }
 
@@ -1444,6 +1520,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.options.timeToLive!,
               this.options.pollingFrequency,
               HelloEnvelopeSchema,
+              this.abortController.signal,
             );
 
             // Bilateral flag check before committing roles and before the
@@ -1512,6 +1589,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.options.timeToLive!,
               this.options.pollingFrequency,
               HelloEnvelopeSchema,
+              this.abortController.signal,
             );
 
             // Bilateral flag check before deleting the peer hello. Defense-in-
@@ -1574,6 +1652,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.options.timeToLive!,
               this.options.pollingFrequency,
               HelloEnvelopeSchema,
+              this.abortController.signal,
             );
             const mismatch = this.bilateralMismatch(peerEnvelope);
             if (mismatch) throw mismatch;
@@ -1829,9 +1908,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 `timed out waiting for ack ${expectedAck} from ${this.peerId}`,
               );
             }
-            await new Promise((resolve) =>
-              setTimeout(resolve, this.options.pollingFrequency),
-            );
+            await this.wait(this.options.pollingFrequency);
           }
         }
       } else {
@@ -1846,9 +1923,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 `timed out waiting for message from ${this.id} to be consumed`,
               );
             }
-            await new Promise((resolve) =>
-              setTimeout(resolve, this.options.pollingFrequency),
-            );
+            await this.wait(this.options.pollingFrequency);
           }
         }
       }
@@ -1892,6 +1967,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // cannot block on a message that was never written.
       this.seq = seq + 1;
     } catch (err: unknown) {
+      // tempPath may never have been written: both pre-write gate loops above
+      // (the retain ack-wait and the delete-mode consume-wait) can throw before
+      // the put -- a UsageError on timeout, or a ConnectionClosedError if
+      // close() aborts the wait. safeDelete is idempotent over an absent file,
+      // so the unconditional sweep is correct; the call on an unwritten temp is
+      // a harmless no-op (the abort case is new, the timeout case pre-existing).
       await this.client.safeDelete(tempPath);
       throw err instanceof Error ? err : new Error(errMessage(err));
     }
@@ -2376,9 +2457,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             try {
               await this.client.delete(inPath);
             } catch {
-              await new Promise((resolve) =>
-                setTimeout(resolve, this.options.pollingFrequency),
-              );
+              // First delete failed; retry once after a backoff. On abort
+              // (close() mid-poll) this.wait rejects here, unwinding past the
+              // emit("data") below into poll()'s catch, where the !pollerActive
+              // guard swallows it (see below). The second delete AND the emit
+              // are both skipped, so the message is left undelivered for this
+              // session -- but it is still on disk (this first delete failed),
+              // so a fresh connection re-reads it. Teardown defers delivery; it
+              // does not lose the message.
+              await this.wait(this.options.pollingFrequency);
               try {
                 await this.client.delete(inPath);
               } catch (deleteErr: unknown) {
@@ -2404,6 +2491,23 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       }
       this.consecutiveEnoentCount = 0;
     } catch (err: unknown) {
+      // Shutdown guard (by state, not error type): close() aborts the session
+      // controller, so a wait parked in the delete-retry backoff above rejects
+      // with a ConnectionClosedError that lands here. Swallow it -- close()
+      // already cleared pollerActive (synchronously, before this rejection
+      // could surface), so the guard is true only during teardown. A genuine
+      // error during active polling reaches here with pollerActive still true
+      // (the pollerActive = false assignments below run later), so this cannot
+      // suppress a real failure; and it is robust to a transport client that
+      // wraps/rethrows the rejection, which an `instanceof` check would miss.
+      // The finally then sees pollerActive === false and does not reschedule.
+      // pollerActive is also cleared by the public stop(), so this guard is
+      // really "stop() or close() ran" -- but stop() is only ever called from
+      // close() in this codebase, so the guard still means teardown. Were a
+      // future caller to invoke stop() independently mid-poll, a concurrent
+      // real error would be swallowed here; that is an accepted limitation of
+      // the deliberate by-state (not by-error-type) choice.
+      if (!this.pollerActive) return;
       if ((err as NodeJS.ErrnoException).code === "ENOENT" && reachedGet) {
         // TOCTOU race: list() surfaced the file but get() found it gone,
         // meaning the peer cleaned up between the two calls. After a single
@@ -2436,9 +2540,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       } else {
         // Non-TOCTOU failure: either a non-ENOENT error from any operation, or
         // any error where reachedGet is false (e.g., exists() or message
-        // parsing). Note: delete() errors cannot reach here — delete() has its
-        // own inner try/catch (see above) that handles and swallows them.
-        // All cases are propagated immediately as hard failures.
+        // parsing). Note: a delete() FAILURE cannot reach here -- delete() has
+        // its own inner try/catch (see above) that handles and swallows it. The
+        // one rejection the delete-retry block can now propagate is an abort
+        // (close() firing during its this.wait backoff), but that is a
+        // ConnectionClosedError caught by the !pollerActive guard at the top of
+        // this catch and never reaches this branch. All other cases are
+        // propagated immediately as hard failures.
         this.consecutiveEnoentCount = 0;
         // A UsageError reaching this catch is terminal -- re-reading the same
         // bytes cannot help: a fully-synced message that fails to parse or
