@@ -1,5 +1,16 @@
-import type { ConnectionConfig } from "@psilink/core";
+import fs from "node:fs";
+import path from "node:path";
+import YAML from "yaml";
+import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
 import { safeParseFileSyncOptions } from "@psilink/core";
+
+/**
+ * Default path for the exchange config file written by the provisioning
+ * commands (`invite`, `accept`, and `exchange --save`). Matches the default the
+ * `exchange` command reads from, so a config written here is found without an
+ * explicit `--config-file`.
+ */
+export const DEFAULT_CONFIG_PATH = "./psilink.yaml";
 
 export interface ConnectionOverrides {
   connectionTimeout?: number;
@@ -131,4 +142,41 @@ export function announceRetainMode(
         "(these flags are not negotiated).",
     );
   }
+}
+
+// --- Config writer -----------------------------------------------------------
+
+function camelToSnake(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+/**
+ * Recursively rewrites object keys from camelCase to snake_case. The exact
+ * inverse of core's `camelizeKeys`, which is applied when a config is read; the
+ * writer is its inverse so a value round-trips through write then read
+ * unchanged and the on-disk YAML keeps the snake_case convention. Only keys are
+ * rewritten; string values (e.g. the `firstName` in `type: firstName`) are left
+ * verbatim, matching the read path.
+ */
+function snakeizeKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(snakeizeKeys);
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [camelToSnake(k), snakeizeKeys(v)]),
+    );
+  return value;
+}
+
+/**
+ * Serialize an {@link ExchangeSpec} and write it to `configPath` as snake_case
+ * YAML. Creates parent directories as needed. Does not guard against
+ * overwriting an existing file; callers provision through
+ * `provisionConfigAndKey`, which runs the conflict gate first.
+ *
+ * The PAKE token never belongs in the config (it lives only in the key file);
+ * callers construct the spec without it.
+ */
+export function saveConfig(configPath: string, spec: ExchangeSpec): void {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, YAML.stringify(snakeizeKeys(spec)), "utf8");
 }

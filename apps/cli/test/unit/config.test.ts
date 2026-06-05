@@ -1,6 +1,15 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { expect, test } from "vitest";
-import { applyConnectionOverrides } from "../../src/config";
-import type { ConnectionConfig, SFTPConnectionConfig } from "@psilink/core";
+import YAML from "yaml";
+import { getDefaultLinkageTerms, parseExchangeSpec } from "@psilink/core";
+import { applyConnectionOverrides, saveConfig } from "../../src/config";
+import type {
+  ConnectionConfig,
+  ExchangeSpec,
+  SFTPConnectionConfig,
+} from "@psilink/core";
 
 const baseSFTP: ConnectionConfig = {
   channel: "sftp",
@@ -161,4 +170,32 @@ test("retainFiles: true with explicit locklessRendezvous: false throws", () => {
       locklessRendezvous: false,
     }),
   ).toThrow("lockless_rendezvous");
+});
+
+// --- saveConfig --------------------------------------------------------------
+
+test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const spec: ExchangeSpec = {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // camelCase TS keys are written in their snake_case YAML form ...
+    expect(raw).toContain("linkage_fields:");
+    expect(raw).toContain("linkage_keys:");
+    expect(raw).toContain("expects_output:");
+    expect(raw).toContain("share_with_partner:");
+    // ... never camelCase.
+    expect(raw).not.toContain("linkageFields");
+    expect(raw).not.toContain("expectsOutput");
+    // The writer is the inverse of the reader's camelizeKeys: parsing the
+    // written file reproduces the original spec exactly.
+    expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

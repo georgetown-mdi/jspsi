@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import {
+  detectFileConflicts,
+  loadKeyFile,
+  saveKeyFile,
+} from "../../src/keyFile";
 
 // 43-char base64url token satisfying the pakeToken format constraint.
 const TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -100,4 +104,19 @@ test("saveKeyFile rejects a malformed pakeToken before writing to disk", () => {
   );
   // No file should have been written.
   expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+// --- detectFileConflicts -----------------------------------------------------
+
+test("detectFileConflicts returns only the paths that already exist", () => {
+  const existing = path.join(dir, "psilink.yaml");
+  const missing = path.join(dir, ".psilink.key");
+  fs.writeFileSync(existing, "channel: filedrop\n");
+  expect(detectFileConflicts([existing, missing])).toEqual([existing]);
+});
+
+test("detectFileConflicts returns an empty array when nothing exists", () => {
+  expect(
+    detectFileConflicts([path.join(dir, "a"), path.join(dir, "b")]),
+  ).toEqual([]);
 });

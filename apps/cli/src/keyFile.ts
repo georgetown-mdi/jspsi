@@ -162,6 +162,25 @@ function warnIfWindowsAclOverPermissive(keyFilePath: string): void {
   }
 }
 
+/**
+ * Default path for the key file written by the provisioning commands (`invite`,
+ * `accept`, and `exchange --save`). Matches the default the `exchange` command
+ * reads from, so a key written here is found without an explicit `--key-file`.
+ */
+export const DEFAULT_KEY_PATH = "./.psilink.key";
+
+/**
+ * Pure existence check used to detect a provisioning conflict before anything is
+ * written -- and before any network activity. Returns the subset of `paths`
+ * that already exist, preserving order; an empty array means no conflict. Kept
+ * separate from {@link saveKeyFile} and the config writer (it neither writes nor
+ * connects) so callers can run it up front and it is straightforward to
+ * unit-test.
+ */
+export function detectFileConflicts(paths: string[]): string[] {
+  return paths.filter((p) => fs.existsSync(p));
+}
+
 /** Contents of a `.psilink.key` file. */
 export interface KeyFile {
   /** Shared SPAKE2 token; injected into the connection config at runtime. */
