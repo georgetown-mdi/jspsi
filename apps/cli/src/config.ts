@@ -158,6 +158,14 @@ function camelToSnake(s: string): string {
  * embedded acronym such as `URL` would snakeize to `u_r_l` -- but no such key
  * occurs in the schema. Only keys are rewritten; string values (e.g. the
  * `firstName` in `type: firstName`) are left verbatim, matching the read path.
+ *
+ * Like the read path's `camelizeKeys`, this recurses into every nested object,
+ * including opaque maps such as `connection.provider_options` and transform
+ * `params`. A literal camelCase key a user placed in such a map would be
+ * normalized to snake_case here. That mirrors `camelizeKeys` (which already
+ * camelCases those keys on read), so the write/read round-trip stays stable;
+ * making either side skip opaque subtrees must be done symmetrically in core
+ * (tracked separately).
  */
 function snakeizeKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(snakeizeKeys);
@@ -189,6 +197,11 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
   if (auth) {
     delete auth.pakeToken;
     delete auth.expires;
+    // Drop the container if those were its only keys, so the config carries no
+    // noisy empty `authentication: {}` block. WebRTC's `role` (the only other
+    // field) keeps it non-empty when present.
+    if (Object.keys(auth).length === 0)
+      delete sanitized.connection.authentication;
   }
   writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
 }

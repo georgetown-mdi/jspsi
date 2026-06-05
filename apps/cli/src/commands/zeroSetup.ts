@@ -51,13 +51,15 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "where to write psilink.yaml when --save is given (default: " +
-        `${DEFAULT_CONFIG_PATH})`,
+        DEFAULT_CONFIG_PATH +
+        ")",
     })
     .option("key-file", {
       type: "string",
       describe:
         "where to write .psilink.key when --save is given (default: " +
-        `${DEFAULT_KEY_PATH})`,
+        DEFAULT_KEY_PATH +
+        ")",
     })
     .option("identity", {
       type: "string",

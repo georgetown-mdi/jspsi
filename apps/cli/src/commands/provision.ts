@@ -32,6 +32,18 @@ function resolveTargets(targets: ProvisionTargets): {
   };
 }
 
+function throwIfConflicts(configPath: string, keyPath: string): void {
+  const conflicts = detectFileConflicts([configPath, keyPath]);
+  if (conflicts.length > 0) {
+    const noun = conflicts.length === 1 ? "file" : "files";
+    throw new UsageError(
+      `refusing to overwrite existing ${noun}: ${conflicts.join(", ")}; ` +
+        "move or remove it, or pass --config-file / --key-file to write " +
+        "elsewhere",
+    );
+  }
+}
+
 /**
  * Throw a {@link UsageError} if a config or key file already exists at a target
  * path, naming the conflicting path(s). Writes nothing and opens no connection,
@@ -48,15 +60,7 @@ export function assertNoProvisionConflicts(
   targets: ProvisionTargets = {},
 ): void {
   const { configPath, keyPath } = resolveTargets(targets);
-  const conflicts = detectFileConflicts([configPath, keyPath]);
-  if (conflicts.length > 0) {
-    const noun = conflicts.length === 1 ? "file" : "files";
-    throw new UsageError(
-      `refusing to overwrite existing ${noun}: ${conflicts.join(", ")}; ` +
-        "move or remove it, or pass --config-file / --key-file to write " +
-        "elsewhere",
-    );
-  }
+  throwIfConflicts(configPath, keyPath);
 }
 
 /**
@@ -79,7 +83,7 @@ export function provisionConfigAndKey(
   targets: ProvisionTargets = {},
 ): { configPath: string; keyPath: string } {
   const resolved = resolveTargets(targets);
-  assertNoProvisionConflicts(resolved);
+  throwIfConflicts(resolved.configPath, resolved.keyPath);
   try {
     saveConfig(resolved.configPath, spec);
     saveKeyFile(resolved.keyPath, keyData);

@@ -122,3 +122,21 @@ test("provisionConfigAndKey writes both files and returns the resolved paths", (
   expect(fs.existsSync(configPath)).toBe(true);
   expect(loadKeyFile(keyPath)?.pakeToken).toBe(TOKEN);
 });
+
+// --- rollback ----------------------------------------------------------------
+
+test("provisionConfigAndKey rolls back the written config when the key write fails", () => {
+  // A malformed token makes saveKeyFile throw -- but only after saveConfig has
+  // already written the config (config is written first), so this exercises the
+  // catch block's rollback rather than the up-front conflict gate.
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { pakeToken: "too-short" },
+      { configPath, keyPath },
+    ),
+  ).toThrow("base64url-encoded 32-byte value");
+  // The config that was written is removed; neither file is left behind.
+  expect(fs.existsSync(configPath)).toBe(false);
+  expect(fs.existsSync(keyPath)).toBe(false);
+});

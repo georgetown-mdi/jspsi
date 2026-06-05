@@ -246,6 +246,8 @@ test("saveConfig strips pakeToken/expires and does not mutate the caller's spec"
     expect(raw).not.toContain("pake_token");
     expect(raw).not.toContain(token);
     expect(raw).not.toContain("expires");
+    // The now-empty authentication container is pruned, not left as `{}`.
+    expect(raw).not.toContain("authentication");
     // The strip runs on a clone; the caller's spec is untouched.
     expect(spec.connection.authentication?.pakeToken).toBe(token);
     expect(spec.connection.authentication?.expires).toBe(
