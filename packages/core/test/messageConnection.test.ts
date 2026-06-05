@@ -90,6 +90,11 @@ test("exceeding capacity fails the connection as a protocol violation", async ()
   await a.send("2");
   await a.send("3"); // one past capacity
   await Promise.resolve();
+  // The frames buffered before the overflow drain first (the abnormal-tail
+  // rule: receive() returns an already-arrived frame ahead of a terminal
+  // error); the protocol violation then surfaces once they are drained.
+  expect(await b.receive()).toBe("1");
+  expect(await b.receive()).toBe("2");
   const err = await b.receive().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
@@ -120,6 +125,8 @@ test("finish drains a buffered frame before surfacing the transport error", asyn
   const { conn, controls, close } = makeQueued();
   controls.deliver("final"); // buffered, no parked waiter
   controls.finish(new ConnectionError("peer closed", "transport"));
+  // Teardown runs eagerly, at finish() time - not on the later drain promotion.
+  expect(close).toHaveBeenCalledTimes(1);
 
   // The buffered frame is still delivered...
   expect(await conn.receive()).toBe("final");
@@ -127,8 +134,45 @@ test("finish drains a buffered frame before surfacing the transport error", asyn
   const err = await conn.receive().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("transport");
-  // Teardown runs exactly once, on promotion.
+  // Promotion does not re-run teardown.
   expect(close).toHaveBeenCalledTimes(1);
+});
+
+test("a deferred half-close tears down the transport even if abandoned (F2)", () => {
+  const { controls, close } = makeQueued();
+  controls.deliver("buffered"); // queued, no waiter
+  controls.finish(new ConnectionError("peer closed", "transport"));
+  // The half-close is never drained and never close()d, yet teardown has
+  // already run: an abandoned half-close cannot leak the transport's
+  // listeners/channel. A no-flush teardown, since the peer has gone.
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(close).toHaveBeenCalledWith();
+});
+
+test("an abnormal drop drains a buffered frame before the error (deliver->fail)", async () => {
+  const { conn, controls } = makeQueued();
+  controls.deliver("tail"); // buffered, no parked waiter
+  controls.fail(new ConnectionError("dropped", "transport"));
+  // The abnormal-tail rule applies to fail() too: an already-arrived frame is
+  // returned before the abnormal error surfaces.
+  expect(await conn.receive()).toBe("tail");
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+});
+
+test("a fail after a pending half-close still drains the frame (deliver->finish->fail)", async () => {
+  const { conn, controls } = makeQueued();
+  controls.deliver("tail");
+  controls.finish(new ConnectionError("peer closed", "transport"));
+  controls.fail(new ConnectionError("late drop", "transport")); // no-ops: terminal
+  // The buffered frame drains, then the first error to latch (the finish) wins;
+  // the later fail() is a no-op rather than a frame-dropping override.
+  expect(await conn.receive()).toBe("tail");
+  const err = await conn.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toBe("peer closed");
 });
 
 test("finish with an empty queue fails immediately, like fail", async () => {
@@ -323,16 +367,18 @@ test("data consumer (deliver): inbound overflow latches without throwing into em
   // than throwing back into the retain-mode poll loop.
   expect(() => eventB.emit("data", "3")).not.toThrow();
 
-  // The absorbed overflow surfaces only as a sticky terminal protocol error on
-  // the next receive() -- confirming the consumer latched rather than threw.
+  // The frames buffered before the overflow ("1"/"2") drain first under the
+  // abnormal-tail rule: receive() returns each already-arrived frame before the
+  // latched protocol error surfaces.
+  expect(await connB.receive()).toBe("1");
+  expect(await connB.receive()).toBe("2");
+
+  // Once the buffer is drained, the absorbed overflow surfaces as a sticky
+  // terminal protocol error -- confirming the consumer latched rather than
+  // threw, and that the latch is sticky across further calls.
   const err = await connB.receive().catch((e: unknown) => e);
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
-
-  // The frames buffered before the overflow ("1"/"2") are discarded by the
-  // latch, not replayed: a further receive() yields the same terminal error
-  // rather than a stale frame. (This is fail()'s documented discard semantics;
-  // asserted here so the drop reads as intended, not an untested side effect.)
   await expect(connB.receive()).rejects.toBe(err);
 });
 

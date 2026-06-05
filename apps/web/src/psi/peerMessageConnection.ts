@@ -28,11 +28,12 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * handshake is awaited, so a frame the peer sends the instant the channel opens
  * is queued rather than dropped: PeerJS does not replay events to a listener
  * attached later, and the initiator sends its first frame unprompted - possibly
- * before this side has finished loading its PSI WASM. A remote `error` fails the
- * connection immediately with a `transport` {@link ConnectionError}; a remote
- * `close` drains any buffered frames and then fails with a `transport` error;
- * `send` writes to the channel; and `close` detaches the listeners and closes
- * the channel, flushing buffered writes first on a clean close.
+ * before this side has finished loading its PSI WASM. A remote `error` or
+ * `close` both surface a `transport` {@link ConnectionError}; either way an
+ * already-buffered frame is drained by `receive` before the error surfaces
+ * (`close` is a clean half-close, `error` an abnormal drop). `send` writes to
+ * the channel; and `close` detaches the listeners and closes the channel,
+ * flushing buffered writes first on a clean close.
  *
  * If the channel never opens (timeout, or a pre-open `error`/`close`), the
  * returned promise rejects and the half-open channel is torn down before the
@@ -55,9 +56,10 @@ export async function openPeerMessageConnection(
       const onError = (err: unknown) =>
         controls.fail(asConnectionError(err, "transport"));
       // A clean remote close can carry the peer's final frame still queued, so
-      // it must drain that frame before failing - finish() defers the error
-      // until the queue empties. A genuine error (onError) instead discards
-      // buffered data, which is the intended stance for an abnormal drop.
+      // it uses finish(): receive() drains that frame before the close error
+      // surfaces. A genuine error (onError) uses fail(), the abnormal
+      // counterpart; receive() still drains an already-queued frame ahead of
+      // the error, but fail() carries no clean-close semantics.
       const onClose = () =>
         controls.finish(
           new ConnectionError("peer connection closed", "transport"),
