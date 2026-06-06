@@ -624,9 +624,12 @@ The receiver only reads files whose on-disk size matches the declared byte count
 ### `connection.provider_options`
 
 *Type:* object  
-*Required:* no
+*Required:* no  
+*Applies to:* `webrtc`, `sftp`
 
 An opaque key-value map passed verbatim to the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
+
+Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`).
 
 ---
 
@@ -746,6 +749,8 @@ When exactly one fan-out entry matches, the original row is accepted and all its
 **Distinction from `generate_fuzzy_comparisons`**: fan-out at the standardization stage and `generate_fuzzy_comparisons` on a key element both generate multiple PSI entries per row, but they serve different purposes. Standardization fan-out reflects that a field legitimately has multiple canonical values (e.g. a hyphenated name and its parts). `generate_fuzzy_comparisons` generates approximate variants of a single canonical value to tolerate data entry errors (e.g. digit transpositions in an SSN). Only one match is expected from a `generate_fuzzy_comparisons` expansion; multiple matches from the same row in a standardization fan-out may all be meaningful.
 
 ### Available functions
+
+Parameter names below are written in snake_case in YAML (e.g. `input_format`, `include_original`), following the same convention as the rest of the spec; they are normalized for the function library internally. Unlike `connection.provider_options`, a `params` block is not opaque and its keys are not passed verbatim.
 
 #### String transformation
 

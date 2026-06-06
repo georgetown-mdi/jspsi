@@ -320,6 +320,44 @@ test("parses snake_case keys from disk", () => {
   expect(result.legalAgreement?.expirationDate).toBe("2027-01-01");
 });
 
+test("transform params keys are normalized (params are not opaque)", () => {
+  // Unlike connection.provider_options, a transform `params` block is psilink's
+  // own function vocabulary and follows the snake_case-YAML -> camelCase-TS
+  // convention: the standardizing-function library reads camelCase param keys.
+  const result = parseLinkageTerms({
+    version: "1.0.0",
+    identity: "Test Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expects_output: true, share_with_partner: false },
+    deduplicate: false,
+    linkage_fields: [{ name: "dob", type: "dateOfBirth" }],
+    linkage_keys: [
+      {
+        name: "DOB",
+        elements: [
+          {
+            field: "dob",
+            transform: [
+              {
+                function: "parse_date",
+                params: {
+                  input_format: "MM/DD/YYYY",
+                  output_format: "YYYYMMDD",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    inputFormat: "MM/DD/YYYY",
+    outputFormat: "YYYYMMDD",
+  });
+});
+
 // ─── validateCompatibility ───────────────────────────────────────────────────
 
 const sharedFields: LinkageTerms["linkageFields"] = [
