@@ -35,29 +35,35 @@ export interface AuthResult {
 }
 
 /**
- * The fixed set of AEAD channel-context labels accepted by
- * {@link deriveAeadKey}.  Each label is an ASCII-only domain-separation string
- * that binds a derived key to one encrypted channel; both endpoints of a
- * channel must pass the same label to derive the same AES-256-GCM key.
+ * The fixed set of AEAD direction-context labels accepted by
+ * {@link deriveAeadKey}.  The application-layer AEAD channel derives one
+ * AES-256-GCM key per direction, so each label is an ASCII-only
+ * domain-separation string for one direction of the encrypted stream; both
+ * endpoints must pass the same label for a direction to derive the same key.
  *
- * Adding a channel that needs application-layer encryption is a deliberate,
- * reviewed change (it already adds a `connection.channel` discriminant and its
- * config interface); append its label here so the new caller cannot introduce
- * a variable, non-ASCII, or non-NFC context that would make the two parties
- * derive different keys and fail AEAD with an opaque auth-tag/decrypt error.
- * `webrtc` is absent because it relies on DTLS transport security and ignores
- * the session key.
+ * The set is per-direction, not per-channel: the encrypted-connection decorator
+ * wraps any channel (`sftp`, `filedrop`, or `webrtc`) and keys only by
+ * direction, so there is no per-channel label.  The per-direction split is
+ * load-bearing: both directions number their messages from zero and build the
+ * AEAD nonce from that sequence, so a single shared key would reuse a key-nonce
+ * pair - catastrophic for AES-GCM - whereas one key per sender keeps every pair
+ * unique.
+ *
+ * Adding a label is a deliberate, reviewed change: append it here so a new
+ * caller cannot introduce a variable, non-ASCII, or non-NFC context that would
+ * make the two parties derive different keys and fail AEAD with an opaque
+ * auth-tag/decrypt error.
  *
  * Frozen so the readonly compile-time type also holds at runtime: a plain-JS
  * caller cannot `push` a label and widen the set the runtime guard checks.
  */
 export const AEAD_CONTEXTS = Object.freeze([
-  "sftp-aead",
-  "filedrop-aead",
+  "initiator-to-responder",
+  "responder-to-initiator",
 ] as const);
 
 /**
- * An AEAD channel-context label.  One of the fixed {@link AEAD_CONTEXTS}; the
+ * An AEAD direction-context label.  One of the fixed {@link AEAD_CONTEXTS}; the
  * open `string` is deliberately not accepted so a variable label cannot reach
  * {@link deriveAeadKey} without a reviewed change to that tuple.
  */
@@ -71,13 +77,14 @@ export type AeadContext = (typeof AEAD_CONTEXTS)[number];
  * channel's encryption layer.
  *
  * @param sessionKey  The `sessionKey` field from {@link AuthResult}.
- * @param context     A fixed AEAD channel-context label from
- *                    {@link AEAD_CONTEXTS} (e.g. `"sftp-aead"`) that binds the
- *                    derived key to its intended channel.  The {@link AeadContext}
- *                    type rejects a free-form label at compile time; the runtime
- *                    check below catches an untyped (plain-JS or `as`-cast)
- *                    caller, failing fast rather than silently deriving a key
- *                    the two parties may not agree on.
+ * @param context     A fixed AEAD direction-context label from
+ *                    {@link AEAD_CONTEXTS} (e.g. `"initiator-to-responder"`)
+ *                    that binds the derived key to one direction of the
+ *                    encrypted stream.  The {@link AeadContext} type rejects a
+ *                    free-form label at compile time; the runtime check below
+ *                    catches an untyped (plain-JS or `as`-cast) caller, failing
+ *                    fast rather than silently deriving a key the two parties
+ *                    may not agree on.
  * @throws {Error} if `context` is not one of {@link AEAD_CONTEXTS}.
  */
 export async function deriveAeadKey(

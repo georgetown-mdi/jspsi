@@ -484,7 +484,7 @@ test("authenticateConnection: newToken differs between successive handshake roun
 // --- deriveAeadKey -----------------------------------------------------------
 
 test("deriveAeadKey returns 32 bytes", async () => {
-  const key = await deriveAeadKey(new Uint8Array(32), "sftp-aead");
+  const key = await deriveAeadKey(new Uint8Array(32), "initiator-to-responder");
   expect(key).toHaveLength(32);
 });
 
@@ -498,16 +498,45 @@ test("deriveAeadKey derives a stable 32-byte key for each allowed label", async 
   }
 });
 
+test("deriveAeadKey matches an independent HKDF known-answer vector", async () => {
+  // Pin the `psilink-aead-v1:<context>` derivation so an accidental change to the
+  // info-string prefix, the delimiter, or a label changes the bytes and fails
+  // here. Vectors were computed independently with Node's OpenSSL HKDF-SHA-256
+  // (zero 32-byte salt, info "psilink-aead-v1:<context>", 32-byte output) over a
+  // sessionKey of 32 0x42 bytes -- a cross-implementation check on the WebCrypto
+  // hkdfDerive. Regenerate only if the labels or the info string change.
+  const sessionKey = new Uint8Array(32).fill(0x42);
+  const vectors: Record<AeadContext, string> = {
+    "initiator-to-responder":
+      "8930a442439a6f917cfcce8f4d12a950a936317e2e5cceaf583cf13708764fa6",
+    "responder-to-initiator":
+      "2a21a1c0e66391e03c9d24d618da04827278d6f1ae0f4bf77df8cd3d0b0d7bad",
+  };
+  for (const context of AEAD_CONTEXTS) {
+    const key = await deriveAeadKey(sessionKey, context);
+    const hex = Array.from(key, (b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
+    expect(hex).toBe(vectors[context]);
+  }
+});
+
 test("deriveAeadKey differs for different context labels", async () => {
   const sessionKey = new Uint8Array(32).fill(0x01);
-  const k1 = await deriveAeadKey(sessionKey, "sftp-aead");
-  const k2 = await deriveAeadKey(sessionKey, "filedrop-aead");
+  const k1 = await deriveAeadKey(sessionKey, "initiator-to-responder");
+  const k2 = await deriveAeadKey(sessionKey, "responder-to-initiator");
   expect(k1).not.toEqual(k2);
 });
 
 test("deriveAeadKey differs for different session keys", async () => {
-  const k1 = await deriveAeadKey(new Uint8Array(32).fill(0x01), "sftp-aead");
-  const k2 = await deriveAeadKey(new Uint8Array(32).fill(0x02), "sftp-aead");
+  const k1 = await deriveAeadKey(
+    new Uint8Array(32).fill(0x01),
+    "initiator-to-responder",
+  );
+  const k2 = await deriveAeadKey(
+    new Uint8Array(32).fill(0x02),
+    "initiator-to-responder",
+  );
   expect(k1).not.toEqual(k2);
 });
 
@@ -539,7 +568,12 @@ test("deriveAeadKey rejects a context outside the fixed set", async () => {
   // AeadContext constraint with a free-form, empty, or non-ASCII label; the
   // runtime guard must fail fast rather than silently derive a key the two
   // parties may not agree on.
-  for (const bad of ["sftp", "", "cafe-aead́", "é-aead"]) {
+  for (const bad of [
+    "initiator",
+    "",
+    "responder-to-initiatoŕ",
+    "é-to-responder",
+  ]) {
     await expect(
       deriveAeadKey(sessionKey, bad as unknown as AeadContext),
     ).rejects.toThrow(/unknown AEAD context/);
@@ -553,7 +587,7 @@ test("both sides produce the same AEAD key after a successful handshake", async 
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
   ]);
-  const keyA = await deriveAeadKey(a.sessionKey, "sftp-aead");
-  const keyB = await deriveAeadKey(b.sessionKey, "sftp-aead");
+  const keyA = await deriveAeadKey(a.sessionKey, "initiator-to-responder");
+  const keyB = await deriveAeadKey(b.sessionKey, "initiator-to-responder");
   expect(keyA).toEqual(keyB);
 });
