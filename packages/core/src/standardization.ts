@@ -78,7 +78,15 @@ function toLowerCase(s: string): string {
 }
 
 function removeAccents(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // Re-normalize to NFC after the NFD strip: a combining mark outside the
+  // stripped U+0300-U+036F range (e.g. the Arabic maddah U+0653) survives, so
+  // without this the step would leak a decomposed residue into the key. Every
+  // pipeline already receives NFC input (see runCompiledPipeline); this keeps
+  // the step's output NFC as well.
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC");
 }
 
 const suffixes = [
@@ -277,7 +285,12 @@ function padLeftFactory(params: Params): StandardizingFn {
   const length = params.length as number | undefined;
   if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
-  const char = (params.char as string | undefined) ?? "0";
+  // Normalize before validating the length, not after: NFC can change the
+  // code-unit count -- a singleton like U+2126 -> U+03A9 stays one unit, but a
+  // combining mark like U+0344 -> U+0308 U+0301 expands to two -- and padStart
+  // treats a multi-unit fill as a cycling pattern, so the one-character contract
+  // must hold on the normalized value that actually pads.
+  const char = ((params.char as string | undefined) ?? "0").normalize("NFC");
   if (char.length !== 1)
     throw new Error(`pad_left: "char" must be exactly one character`);
   return (s) => s.padStart(length, char);
@@ -290,13 +303,24 @@ function nullIfFactory(params: Params): StandardizingFn {
       : params.value !== undefined
         ? [params.value as string]
         : [];
-  const set = new Set(values);
+  // NFC-normalize the exclusion values so one authored in a different form
+  // (e.g. NFD from a YAML file written on macOS) still matches the runtime
+  // value, which is NFC at the pipeline input. Known limitation: a preceding
+  // case-folding step (to_upper_case/to_lower_case) can emit non-NFC for some
+  // scripts, so a comparison here can still miss after such a step; making the
+  // value NFC at every step boundary is tracked as a separate follow-up.
+  const set = new Set(values.map((v) => v.normalize("NFC")));
   return (s) => (set.has(s) ? null : s);
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
-  const replacement = (params.replacement as string | undefined) ?? "";
+  // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
+  // sequence into the key (the pattern itself is matched as authored; author it
+  // in NFC to match NFC runtime values).
+  const replacement = (
+    (params.replacement as string | undefined) ?? ""
+  ).normalize("NFC");
   const re = new RegExp(pattern, "g");
   return (s) => s.replace(re, replacement);
 }
@@ -365,7 +389,14 @@ function compileStep(step: {
 }): CompiledStep {
   const params = step.params ?? {};
   if (step.function === "coalesce") {
-    return { kind: "coalesce", default: params.default as string | undefined };
+    // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
+    // value into the key (it replaces the whole value, often as the last step).
+    const rawDefault = params.default as string | undefined;
+    return {
+      kind: "coalesce",
+      default:
+        rawDefault === undefined ? undefined : rawDefault.normalize("NFC"),
+    };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];
   if (!factory)
@@ -413,7 +444,16 @@ function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
 // --- Pipeline ----------------------------------------------------------------
 
 function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
-  let current: FieldValue = input;
+  // Unicode NFC normalization is the unconditional first transform of every
+  // standardized field. The cleaned string becomes the PSI set element verbatim,
+  // so two parties holding the same logical value in different normalization
+  // forms (precomposed NFC vs decomposed NFD -- the common macOS-filesystem vs
+  // Windows/most-DB split) would otherwise emit different bytes and the same
+  // person would silently fail to match. It runs here, before any step and for
+  // every pipeline -- including the identity (no-steps) passthrough and custom
+  // pipelines that never strip to ASCII -- rather than being gated on a
+  // remove_accents step that is not guaranteed to run.
+  let current: FieldValue = input.normalize("NFC");
   for (const step of steps) {
     current = applyStep(current, step);
   }
@@ -646,8 +686,15 @@ export function buildKeyStrings(
     elementValues.push(transformed);
   }
 
+  // Final NFC pass on the assembled key. Each part is already NFC, but this is
+  // the one chokepoint every PSI key string flows through, so it also covers the
+  // element-transform path (which assembles keys outside runCompiledPipeline) and
+  // the case where concatenating two NFC parts crosses a base + combining-mark
+  // boundary that itself composes (NFC is not closed under concatenation).
   const result = new Set(
-    cartesianProduct(elementValues).map((parts) => parts.join("")),
+    cartesianProduct(elementValues).map((parts) =>
+      parts.join("").normalize("NFC"),
+    ),
   );
 
   if (result.size > KEY_STRING_WARN_THRESHOLD) {
