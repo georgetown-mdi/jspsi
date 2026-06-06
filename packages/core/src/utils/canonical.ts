@@ -106,15 +106,34 @@ function assertCanonical(value: unknown, path: string): void {
     case "object": {
       if (value === null) return;
       if (Array.isArray(value)) {
-        value.forEach((element, index) =>
-          assertCanonical(element, `${path}[${index}]`),
-        );
+        // Index loop, not forEach/for-of: both skip sparse holes (`[1,,3]`),
+        // which canonicalize would silently drop. A hole is a missing element,
+        // so reject it the same way an explicit `undefined` element is rejected.
+        for (let index = 0; index < value.length; index++) {
+          if (!(index in value))
+            fail(
+              "sparse array hole; use null for an explicit gap",
+              `${path}[${index}]`,
+            );
+          assertCanonical(value[index], `${path}[${index}]`);
+        }
         return;
       }
       if (!isPlainObject(value))
         fail(
           `unsupported object type (${value.constructor?.name ?? "unknown"}); ` +
             "binary data must be base64url-encoded to a string first",
+          path,
+        );
+      // Symbol-keyed properties are dropped by canonicalize (JSON.stringify
+      // never emits them), so reject them rather than canonicalize a different
+      // object than the caller passed. Object.entries below covers only string
+      // keys, which is the canonical domain.
+      const symbols = Object.getOwnPropertySymbols(value);
+      if (symbols.length > 0)
+        fail(
+          `symbol-keyed property (${symbols[0].toString()}); ` +
+            "canonical objects use string keys only",
           path,
         );
       // Object.entries includes a key explicitly set to `undefined`, so the
@@ -141,8 +160,9 @@ function assertCanonical(value: unknown, path: string): void {
 export function canonicalString(value: unknown): string {
   assertCanonical(value, "$");
   const encoded = canonicalize(value);
-  // canonicalize returns undefined only for a top-level undefined input, which
-  // assertCanonical has already rejected; this guards the declared type.
+  // canonicalize returns undefined for any top-level value that JSON.stringify
+  // drops entirely -- undefined, a function, or a symbol. assertCanonical has
+  // already rejected all of those, so this only guards the declared return type.
   if (encoded === undefined) fail("value is not canonicalizable", "$");
   return encoded;
 }
@@ -167,7 +187,7 @@ export function canonicalBytes(value: unknown): Uint8Array<ArrayBuffer> {
  */
 export const safeIntegerSchema: z.ZodType<number> = z
   .number()
-  .int()
+  // Number.isSafeInteger already implies integer-valued, so no separate .int().
   .refine((n) => Number.isSafeInteger(n), {
     message: "must be a safe integer (|n| <= 2^53 - 1)",
   });

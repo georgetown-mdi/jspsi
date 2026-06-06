@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
-import { canonicalString } from "../utils/canonical.js";
+import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 
 // --- Output ------------------------------------------------------------------
 
@@ -588,18 +588,59 @@ export function validateCompatibility(
   // between plain and Zod-parsed objects) does not affect the result; fields are
   // pre-sorted by name because their array order is not significant, whereas
   // linkage keys are ordered most-to-least precise and compared in place.
+  //
+  // canonicalString throws CanonicalEncodingError on a value outside the
+  // reproducible domain. A partner can reach this: transform `params` is
+  // `z.unknown()`, so a JSON integer beyond 2^53 survives schema parsing and
+  // then fails to canonicalize. validateCompatibility's contract is to report
+  // problems via `errors` (its callers abort the exchange on a non-empty list),
+  // not to throw, so surface such a value as an error instead of crashing.
+  const canonicalOrError = (value: unknown, label: string): string | null => {
+    try {
+      return canonicalString(value);
+    } catch (err) {
+      if (err instanceof CanonicalEncodingError) {
+        errors.push(`${label} cannot be canonically encoded: ${err.message}`);
+        return null;
+      }
+      throw err;
+    }
+  };
+
   const localFields = [...local.linkageFields].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
   const partnerFields = [...partner.linkageFields].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  if (canonicalString(localFields) !== canonicalString(partnerFields)) {
+  const localFieldsCanonical = canonicalOrError(
+    localFields,
+    "local linkage fields",
+  );
+  const partnerFieldsCanonical = canonicalOrError(
+    partnerFields,
+    "partner linkage fields",
+  );
+  if (
+    localFieldsCanonical !== null &&
+    partnerFieldsCanonical !== null &&
+    localFieldsCanonical !== partnerFieldsCanonical
+  ) {
     errors.push("linkage fields do not match");
   }
 
+  const localKeysCanonical = canonicalOrError(
+    local.linkageKeys,
+    "local linkage keys",
+  );
+  const partnerKeysCanonical = canonicalOrError(
+    partner.linkageKeys,
+    "partner linkage keys",
+  );
   if (
-    canonicalString(local.linkageKeys) !== canonicalString(partner.linkageKeys)
+    localKeysCanonical !== null &&
+    partnerKeysCanonical !== null &&
+    localKeysCanonical !== partnerKeysCanonical
   ) {
     errors.push("linkage keys do not match");
   }

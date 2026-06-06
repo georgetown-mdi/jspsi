@@ -199,7 +199,15 @@ It is a JSON object with a `vectors` array; each entry has:
 
 An independent implementation reproduces the bytes by encoding each `value` and
 checking the result equals `bytesHex` (and, if it also hashes, that the SHA-256
-equals `sha256Hex`). The PSI-Link test suite runs these vectors in both Node.js
+equals `sha256Hex`).
+
+One normative case is absent from the file: the `-0` to `0` normalization
+([Numbers](#numbers) and the worked example `{"n":-0}` -> `{"n":0}`). JSON has no
+negative zero -- a `-0` literal parses to `0` -- so it cannot be carried as a
+JSON `value`. Verify it from a `-0` literal in your own language; the Node suite
+does so directly.
+
+The PSI-Link test suite runs these vectors in both Node.js
 ([`packages/core/test/canonical.test.ts`](../packages/core/test/canonical.test.ts))
 and a real browser
 ([`apps/web/test/browser/canonical.test.ts`](../apps/web/test/browser/canonical.test.ts)),

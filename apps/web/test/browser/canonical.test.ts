@@ -31,19 +31,16 @@ const toHex = (bytes: Uint8Array): string =>
 describe("canonical encoding in the browser", () => {
   test.each(vectors)(
     "$name: browser output matches the checked-in vector",
-    (vector) => {
+    async (vector) => {
       expect(canonicalString(vector.value)).toBe(vector.canonical);
-      expect(toHex(canonicalBytes(vector.value))).toBe(vector.bytesHex);
+
+      const bytes = canonicalBytes(vector.value);
+      expect(toHex(bytes)).toBe(vector.bytesHex);
+
+      // Hash every vector with the browser's SubtleCrypto, not just one, so a
+      // platform-specific crypto.subtle regression is caught for all inputs.
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      expect(toHex(new Uint8Array(digest))).toBe(vector.sha256Hex);
     },
   );
-
-  test("the browser SHA-256 of the canonical bytes matches the vector", async () => {
-    const vector = vectors.find((v) => v.name === "agreement-fragment");
-    if (!vector) throw new Error("agreement-fragment vector missing");
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      canonicalBytes(vector.value),
-    );
-    expect(toHex(new Uint8Array(digest))).toBe(vector.sha256Hex);
-  });
 });
