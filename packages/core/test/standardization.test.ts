@@ -657,6 +657,154 @@ describe("NFC normalization of config literals", () => {
   });
 });
 
+// --- Mid-pipeline NFC-safe comparisons ---------------------------------------
+
+describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_regex)", () => {
+  // U+0390 (GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS) is itself valid
+  // NFC, but to_upper_case emits the non-NFC sequence U+0399 U+0308 U+0301,
+  // whose NFC form is U+03AA U+0301 -- the form an exclusion or pattern is
+  // authored in. The comparison steps read this value before the final
+  // key-string NFC pass, so each must normalize the value it inspects or an
+  // authored-NFC comparison silently misses.
+  const GREEK_INPUT = "\u0390";
+  const UPPER_NONNFC = "\u0399\u0308\u0301"; // to_upper_case output, non-NFC
+  const UPPER_NFC = "\u03aa\u0301"; // its NFC form (authored)
+
+  test("sanity: the case-folded value is non-NFC and differs from its NFC form", () => {
+    // Guards the constants below and documents the bug precondition: the value
+    // reaching the comparison step is genuinely non-NFC.
+    expect(GREEK_INPUT.toUpperCase()).toBe(UPPER_NONNFC);
+    expect(UPPER_NONNFC.normalize("NFC")).toBe(UPPER_NFC);
+    expect(UPPER_NONNFC).not.toBe(UPPER_NFC);
+  });
+
+  test("null_if drops a case-folded value via an NFC-authored exclusion", () => {
+    // Without the in-step normalize the non-NFC runtime value survives.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        { function: "null_if", params: { value: UPPER_NFC } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("filter_regex matches a case-folded value via an NFC-authored pattern", () => {
+    // The pattern matches the NFC form; a match returns the original
+    // (pre-normalize) value, leaving downstream bytes untouched.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        { function: "filter_regex", params: { pattern: "^\u03aa\u0301$" } },
+      ]),
+    ).toBe(UPPER_NONNFC);
+  });
+
+  test("extract_regex matches a case-folded value and returns the NFC capture", () => {
+    // The capture is sliced from the normalized value: the non-NFC original has
+    // no U+03AA at all (its diaeresis is a separate U+0308), so a capture taken
+    // from the original would misalign.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        { function: "extract_regex", params: { pattern: "^(\u03aa)\u0301$" } },
+      ]),
+    ).toBe("\u03aa");
+  });
+
+  test("replace_regex matches a case-folded value via an NFC-authored pattern", () => {
+    // Without the in-step normalize the non-NFC runtime value never matches, so
+    // the substitution silently does not fire and the value passes through.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        {
+          function: "replace_regex",
+          params: { pattern: UPPER_NFC, replacement: "X" },
+        },
+      ]),
+    ).toBe("X");
+  });
+
+  test("split_on splits on an NFC-authored delimiter after a case-fold", () => {
+    // The delimiter is the case-folded letter in NFC form; without the in-step
+    // normalize it would not match the non-NFC value and the split would not
+    // happen.
+    expect(
+      runPipeline(`A${GREEK_INPUT}B`, [
+        { function: "to_upper_case" },
+        { function: "split_on", params: { delimiter: UPPER_NFC } },
+      ]),
+    ).toEqual(new Set(["A", "B"]));
+  });
+
+  test("split_on with no delimiter match returns the NFC-normalized value", () => {
+    // Pins the no-split path: as a derive-type step it returns the normalized
+    // form, not the original non-NFC bytes left by to_upper_case. Returning the
+    // original (the pre-change behavior) would yield UPPER_NONNFC instead.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        { function: "split_on", params: { delimiter: "," } },
+      ]),
+    ).toEqual(new Set([UPPER_NFC]));
+  });
+
+  test("regression: an already-NFC value flows through with unchanged bytes", () => {
+    // U+00E9 is already NFC, so the in-step normalize is a no-op and emitted
+    // bytes are byte-identical to pre-change behavior; pure ASCII is a subset.
+    const NFC_JOSE = "Jos\u00e9";
+    expect(
+      runPipeline(NFC_JOSE, [{ function: "null_if", params: { value: "X" } }]),
+    ).toBe(NFC_JOSE);
+    expect(
+      runPipeline(NFC_JOSE, [
+        { function: "filter_regex", params: { pattern: "\u00e9$" } },
+      ]),
+    ).toBe(NFC_JOSE);
+    expect(
+      runPipeline(NFC_JOSE, [
+        { function: "extract_regex", params: { pattern: "^(Jos\u00e9)$" } },
+      ]),
+    ).toBe(NFC_JOSE);
+    expect(
+      runPipeline(NFC_JOSE, [
+        {
+          function: "replace_regex",
+          params: { pattern: "Z", replacement: "Q" },
+        },
+      ]),
+    ).toBe(NFC_JOSE);
+    expect(
+      runPipeline(NFC_JOSE, [
+        { function: "split_on", params: { delimiter: "," } },
+      ]),
+    ).toEqual(new Set([NFC_JOSE]));
+    expect(
+      runPipeline("SMITH-JONES", [
+        { function: "extract_regex", params: { pattern: "^(\\w+)-" } },
+      ]),
+    ).toBe("SMITH");
+  });
+
+  test("length-sensitive step after a case-fold is cross-party-safe (NFC == NFD input)", () => {
+    // to_upper_case leaves a non-NFC intermediate (U+0399 U+0308 U+0301) that a
+    // length-sensitive step such as substring then operates on -- the Option-1
+    // residual. This is cross-party-safe: the intermediate is deterministic from
+    // the NFC-normalized input, so the same logical value authored as NFC
+    // (U+0390) vs NFD (U+03B9 U+0308 U+0301) converges before to_upper_case and
+    // yields an identical key. substring(1,1) returns the lone leading iota,
+    // confirming it sees the non-NFC intermediate.
+    const nfc = "\u0390";
+    const nfd = "\u03b9\u0308\u0301";
+    const steps = [
+      { function: "to_upper_case" },
+      { function: "substring", params: { start: 1, length: 1 } },
+    ];
+    expect(runPipeline(nfd, steps)).toBe(runPipeline(nfc, steps));
+    expect(runPipeline(nfc, steps)).toBe("\u0399");
+  });
+});
+
 // --- Key-string NFC normalization --------------------------------------------
 
 describe("buildKeyStrings: NFC normalization of the assembled key", () => {
