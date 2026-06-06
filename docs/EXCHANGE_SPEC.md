@@ -628,7 +628,7 @@ The receiver only reads files whose on-disk size matches the declared byte count
 
 An opaque key-value map passed verbatim to the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
 
-Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written. The SFTP channel forwards them to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`), so write those keys in the casing the library expects rather than snake_case.
+Unlike every other map in this spec, the keys here are **not** case-normalized on any channel: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`).
 
 ---
 

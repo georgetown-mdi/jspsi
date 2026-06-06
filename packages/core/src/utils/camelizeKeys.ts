@@ -18,6 +18,13 @@
  * (snake) / `providerOptions` (camel) at any depth is treated as opaque. No
  * other schema field uses that name, and the contents of an opaque map are
  * themselves opaque, so a nested occurrence is correctly left verbatim too.
+ *
+ * Exported only so the CLI config writer's `snakeizeKeys` can share this exact
+ * set -- one source of truth keeps the read and write paths skipping identical
+ * subtrees. It is not a stable public API; consumers outside the workspace
+ * should not depend on its contents.
+ *
+ * @internal
  */
 export const OPAQUE_VALUE_KEYS: ReadonlySet<string> = new Set([
   "providerOptions",

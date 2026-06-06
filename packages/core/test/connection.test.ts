@@ -172,6 +172,7 @@ test("provider_options preserves a literal camelCase key unchanged", () => {
     // them survive byte-for-byte rather than being normalized to snake_case.
     provider_options: { readyTimeout: 5000, algorithms: { kex: ["a"] } },
   });
+  expect(result.channel).toBe("sftp");
   if (result.channel !== "sftp") return;
   expect(result.providerOptions).toEqual({
     readyTimeout: 5000,
@@ -184,6 +185,7 @@ test("provider_options is opaque all the way down (nested keys not camelized)", 
     ...sftpBase,
     provider_options: { nested_outer: { nested_inner: 1 } },
   });
+  expect(result.channel).toBe("sftp");
   if (result.channel !== "sftp") return;
   expect(result.providerOptions).toEqual({ nested_outer: { nested_inner: 1 } });
 });

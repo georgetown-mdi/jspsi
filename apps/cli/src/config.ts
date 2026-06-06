@@ -156,6 +156,13 @@ function camelToSnake(s: string): string {
   return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
+// Mirrors core's private `snakeToCamel`. Used only to normalize a key to its
+// canonical camelCase form before consulting the camelCase-keyed
+// `OPAQUE_VALUE_KEYS`; it is a no-op on an already-camelCase key.
+function snakeToCamel(s: string): string {
+  return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
 /**
  * Recursively rewrites object keys from camelCase to snake_case. The inverse of
  * core's `camelizeKeys` for the keys the exchange schema uses: every config key
@@ -172,13 +179,20 @@ function camelToSnake(s: string): string {
  * keeps the read and write paths excluding exactly the same subtrees, preserving
  * the write -> read round-trip invariant. Function-specific `params` blocks are
  * NOT opaque -- they are psilink's own vocabulary and stay normalized.
+ *
+ * The opaque check normalizes each key to its canonical camelCase form first
+ * (`OPAQUE_VALUE_KEYS` is camelCase-keyed), so it matches regardless of the
+ * input key's casing -- symmetric with `camelizeKeys`, which also normalizes
+ * before consulting the set. In practice this writer only ever sees a camelCase
+ * `ExchangeSpec`, but normalizing removes the silent precondition that the guard
+ * would otherwise depend on.
  */
 function snakeizeKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(snakeizeKeys);
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) =>
-        OPAQUE_VALUE_KEYS.has(k)
+        OPAQUE_VALUE_KEYS.has(snakeToCamel(k))
           ? [camelToSnake(k), v]
           : [camelToSnake(k), snakeizeKeys(v)],
       ),
