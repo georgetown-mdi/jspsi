@@ -16,10 +16,11 @@ export interface AuthResult {
   /**
    * 32-byte SPAKE2 session key (`Ke`).  Both parties hold the same value after
    * a successful handshake.  Callers that need application-layer encryption
-   * (e.g. `sftp` and `filedrop` channels) should pass this to
-   * {@link deriveAeadKey} to obtain a full-strength AES-GCM key; callers
-   * that rely on transport-layer security (e.g. WebRTC with DTLS) may ignore
-   * it.
+   * (the `sftp` and `filedrop` channels) pass this to {@link deriveAeadKey} to
+   * derive the AES-256-GCM keys; those keys are per direction, not per channel,
+   * so the channels share one AEAD mechanism rather than each having its own
+   * key.  Callers that rely on transport-layer security (e.g. WebRTC with DTLS)
+   * may ignore it.
    */
   sessionKey: Uint8Array<ArrayBuffer>;
   /**
