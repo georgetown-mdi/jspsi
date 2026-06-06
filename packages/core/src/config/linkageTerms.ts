@@ -614,12 +614,16 @@ export function validateCompatibility(
     }
   };
 
-  const localFields = [...local.linkageFields].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
-  const partnerFields = [...partner.linkageFields].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  // Sort by UTF-16 code unit, not localeCompare: this comparator decides the
+  // element order and therefore the canonical bytes (canonical encoding
+  // preserves array order), and localeCompare is locale-dependent for non-ASCII
+  // names -- two parties under different locales could otherwise derive
+  // different bytes, and different receipt hashes, for the same terms. This is
+  // the same code-unit ordering the canonical encoder applies to object keys.
+  const byName = (a: LinkageField, b: LinkageField): number =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  const localFields = [...local.linkageFields].sort(byName);
+  const partnerFields = [...partner.linkageFields].sort(byName);
   const localFieldsCanonical = canonicalOrError(
     localFields,
     "local linkage fields",

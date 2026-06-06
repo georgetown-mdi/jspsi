@@ -1,4 +1,5 @@
 /// <reference types="@vitest/browser-playwright/context" />
+/// <reference types="vite/client" />
 
 import { describe, expect, test } from "vitest";
 
@@ -12,7 +13,12 @@ import { canonicalBytes, canonicalString } from "@psilink/core";
 // primitives (TextEncoder, JSON, and the pure-JS `canonicalize` package), so
 // this holds by construction; the test guards against a regression that
 // introduces a platform dependency.
-import vectorsFile from "../../../../packages/core/test/vectors/canonical-vectors.json";
+//
+// Imported as raw text and parsed with the browser's own JSON.parse (mirroring
+// the Node suite's readFileSync + JSON.parse) rather than via the bundler's
+// JSON import: the lone-surrogate vector is valid JSON but the bundler's JSON
+// loader cannot represent an unpaired surrogate in the module it emits.
+import vectorsRaw from "../../../../packages/core/test/vectors/canonical-vectors.json?raw";
 
 interface Vector {
   name: string;
@@ -23,7 +29,7 @@ interface Vector {
   sha256Hex: string;
 }
 
-const vectors = vectorsFile.vectors as Array<Vector>;
+const vectors = (JSON.parse(vectorsRaw) as { vectors: Array<Vector> }).vectors;
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");

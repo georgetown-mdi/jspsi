@@ -1,6 +1,8 @@
 import canonicalize from "canonicalize";
 import { z } from "zod";
 
+import { UsageError } from "../errors.js";
+
 // Canonical encoding for receipt and record artifacts (RFC 8785, JSON
 // Canonicalization Scheme). The same logical object must serialize to a
 // byte-identical string on both parties and in any independent third-party
@@ -42,8 +44,14 @@ export type CanonicalValue =
  * the reproducible domain (see {@link assertCanonical}). The message names the
  * offending value's JSON path (e.g. `$.linkageKeys[0].elements[1]`) so the
  * caller can locate it.
+ *
+ * It extends {@link UsageError}: a value outside the canonical domain is a
+ * configuration/data problem, so any call site that lets it propagate to the
+ * CLI is classified as exit 64 (EX_USAGE), not 69 (EX_UNAVAILABLE). This holds
+ * even for future callers that, unlike `validateCompatibility`, do not wrap
+ * `canonicalString` in their own try/catch.
  */
-export class CanonicalEncodingError extends Error {
+export class CanonicalEncodingError extends UsageError {
   constructor(message: string) {
     super(message);
     this.name = "CanonicalEncodingError";
@@ -124,6 +132,24 @@ function assertCanonical(value: unknown, path: string): void {
       if (value === null) return;
       if (Array.isArray(value)) {
         assertNoToJson(value, path);
+        // canonicalize serializes only elements [0, length) (via Array.reduce),
+        // so any own property it cannot reach -- a non-index string key
+        // (`arr.foo`, enumerable or not) or a symbol key -- would be silently
+        // dropped. Reject them so the array case is as complete as the object
+        // case below. (`length` is the intrinsic own property, not an element.)
+        for (const key of Object.getOwnPropertyNames(value)) {
+          if (key === "length") continue;
+          const index = Number(key);
+          if (
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= value.length ||
+            String(index) !== key
+          )
+            fail(`non-index array property (${JSON.stringify(key)})`, path);
+        }
+        if (Object.getOwnPropertySymbols(value).length > 0)
+          fail("symbol-keyed array property", path);
         // Index loop, not forEach/for-of: both skip sparse holes (`[1,,3]`),
         // which canonicalize would silently drop. A hole is a missing element,
         // so reject it the same way an explicit `undefined` element is rejected.
@@ -186,6 +212,11 @@ function assertCanonical(value: unknown, path: string): void {
  *   canonical domain.
  */
 export function canonicalString(value: unknown): string {
+  // assertCanonical MUST run first: the safety of the output rests entirely on
+  // it catching every value canonicalize would coerce. canonicalize 2.1.0 does
+  // not uniformly skip out-of-domain values -- e.g. a function-valued property
+  // is stringified to the literal `undefined`, producing invalid JSON -- so the
+  // pre-validator, not canonicalize, is what guarantees well-formed output.
   assertCanonical(value, "$");
   const encoded = canonicalize(value);
   // canonicalize returns undefined for any top-level value that JSON.stringify
@@ -214,12 +245,18 @@ export function canonicalBytes(value: unknown): Uint8Array<ArrayBuffer> {
  * Zod schema for a numeric field that is hashed, committed, or signed: a finite
  * safe integer (|n| <= 2^53 - 1). Receipt and record fields that carry counts
  * or sizes MUST validate with this (or be string-encoded) so the canonical
- * number format is unambiguous across implementations. See
- * docs/CANONICAL_ENCODING.md and {@link canonicalString}.
+ * number format is unambiguous across implementations.
+ *
+ * `-0` is accepted (it is a safe integer) but canonical-encodes to `0` (see the
+ * worked examples in docs/CANONICAL_ENCODING.md); do not rely on a sign on zero
+ * surviving encoding. See also {@link canonicalString}.
  */
 export const safeIntegerSchema: z.ZodType<number> = z
   .number()
-  // Number.isSafeInteger already implies integer-valued, so no separate .int().
+  // Reject non-finite values first so Infinity/-Infinity report "must be a
+  // finite number" rather than the misleading "safe integer" message. (NaN is
+  // rejected by z.number() itself.) Number.isSafeInteger then implies integer.
+  .refine((n) => Number.isFinite(n), { message: "must be a finite number" })
   .refine((n) => Number.isSafeInteger(n), {
     message: "must be a safe integer (|n| <= 2^53 - 1)",
   });

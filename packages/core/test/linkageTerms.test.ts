@@ -506,11 +506,23 @@ test("a non-canonical linkage-key param is reported, not thrown", () => {
       ],
     },
   ];
-  const run = () =>
+  const runLocalBad = () =>
     validateCompatibility({ ...termsA, linkageKeys: badKeys }, termsB);
-  expect(run).not.toThrow();
+  expect(runLocalBad).not.toThrow();
   expect(
-    run().errors.some((e) => e.includes("cannot be canonically encoded")),
+    runLocalBad().errors.some((e) =>
+      e.includes("local linkage keys cannot be canonically encoded"),
+    ),
+  ).toBe(true);
+
+  // Symmetric: the partner's keys are the un-encodable ones.
+  const runPartnerBad = () =>
+    validateCompatibility(termsA, { ...termsB, linkageKeys: badKeys });
+  expect(runPartnerBad).not.toThrow();
+  expect(
+    runPartnerBad().errors.some((e) =>
+      e.includes("partner linkage keys cannot be canonically encoded"),
+    ),
   ).toBe(true);
 });
 

@@ -113,6 +113,16 @@
       "sha256Hex": "d1c25591a24ebb69b51908848883914f2a5ab6dd16eb73bcfad77441ce8d13ca"
     },
     {
+      "name": "lone-surrogate",
+      "description": "an unpaired UTF-16 surrogate is escaped as \\uXXXX with lowercase hex (ECMA-262 well-formed JSON), not emitted as raw bytes",
+      "value": {
+        "s": "\ud834"
+      },
+      "canonical": "{\"s\":\"\\ud834\"}",
+      "bytesHex": "7b2273223a225c7564383334227d",
+      "sha256Hex": "0529b152a7e0d22407f9d829f2728e21191a34fe2dfbdea3773dca8a998fda9e"
+    },
+    {
       "name": "control-character-escapes",
       "description": "C0 control characters use short escapes where defined and \\u00xx (lowercase hex) otherwise",
       "value": {

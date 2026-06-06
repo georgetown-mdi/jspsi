@@ -177,11 +177,16 @@ describe("values outside the canonical domain are rejected", () => {
     );
   });
 
-  test("a function value is rejected", () => {
-    expect(() => canonicalString({ f: () => 1 })).toThrow(
-      CanonicalEncodingError,
-    );
-  });
+  test.each([
+    ["top-level", () => 1],
+    ["an array element", { a: [1, () => 1, 3] }],
+    ["an object property", { f: () => 1 }],
+  ])(
+    "a function (%s) is rejected; canonicalize would emit invalid JSON for it",
+    (_label, value) => {
+      expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
+    },
+  );
 
   test.each([
     ["a Date", { d: new Date(0) }],
@@ -236,6 +241,32 @@ describe("values outside the canonical domain are rejected", () => {
     });
     expect(() => canonicalString(obj)).toThrow(CanonicalEncodingError);
     expect(() => canonicalString(obj)).toThrow(/toJSON/);
+  });
+
+  test("an array with a non-index property is rejected, not dropped", () => {
+    // canonicalize's index-only reduce would silently drop arr.foo.
+    const arr: unknown[] = [1, 2, 3];
+    (arr as unknown as Record<string, unknown>).foo = "bar";
+    expect(() => canonicalString({ a: arr })).toThrow(CanonicalEncodingError);
+    expect(() => canonicalString({ a: arr })).toThrow(
+      /non-index array property/,
+    );
+  });
+
+  test("an array with a non-enumerable extra property is rejected", () => {
+    const arr: unknown[] = [1, 2, 3];
+    Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+    expect(() => canonicalString({ a: arr })).toThrow(
+      /non-index array property/,
+    );
+  });
+
+  test("an array with a symbol-keyed property is rejected", () => {
+    const arr: unknown[] = [1, 2, 3];
+    (arr as unknown as { [k: symbol]: unknown })[Symbol("s")] = 1;
+    expect(() => canonicalString({ a: arr })).toThrow(
+      /symbol-keyed array property/,
+    );
   });
 });
 
