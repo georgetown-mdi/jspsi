@@ -587,7 +587,11 @@ test("both sides produce the same AEAD key after a successful handshake", async 
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
   ]);
-  const keyA = await deriveAeadKey(a.sessionKey, "initiator-to-responder");
-  const keyB = await deriveAeadKey(b.sessionKey, "initiator-to-responder");
-  expect(keyA).toEqual(keyB);
+  // Each party derives both per-direction keys from its own session key; the
+  // two parties must agree on the key for every direction, not just one.
+  for (const context of AEAD_CONTEXTS) {
+    const keyA = await deriveAeadKey(a.sessionKey, context);
+    const keyB = await deriveAeadKey(b.sessionKey, context);
+    expect(keyA).toEqual(keyB);
+  }
 });
