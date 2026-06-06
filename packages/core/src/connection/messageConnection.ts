@@ -16,7 +16,10 @@ import type { Connection } from "../types";
  *   {@link MessageConnection.close} (e.g. a signal-driven shutdown). Nothing
  *   went wrong; it is distinct from `usage` so a clean shutdown is not
  *   mistaken for a programming error, and distinct from `transport` so it is
- *   not remapped to a peer-timeout diagnostic.
+ *   not remapped to a peer-timeout diagnostic. A clean *remote* close is
+ *   deliberately not mapped here - it stays `transport`, and a future consumer
+ *   needing to act on it should add a dedicated kind (e.g. `peer-closed`); see
+ *   docs/COMMUNICATION.md ("Error handling") for the rationale.
  */
 export type ConnectionErrorKind =
   | "transport"
