@@ -139,6 +139,11 @@ describe("values outside the canonical domain are rejected", () => {
     expect(() => canonicalString({ a: 1, b: undefined })).toThrow(/\$\.b/);
   });
 
+  test("a key containing a dot gets an unambiguous bracketed path", () => {
+    // `$["a.b"]`, not `$.a.b`, so it cannot be confused with nested keys.
+    expect(() => canonicalString({ "a.b": undefined })).toThrow(/\["a\.b"\]/);
+  });
+
   test("a nested undefined is rejected", () => {
     expect(() => canonicalString({ outer: { inner: undefined } })).toThrow(
       CanonicalEncodingError,
@@ -212,6 +217,26 @@ describe("values outside the canonical domain are rejected", () => {
       /symbol-keyed property/,
     );
   });
+
+  test("an array carrying a toJSON method is rejected, not coerced", () => {
+    // canonicalize would serialize toJSON()'s return instead of the elements.
+    const arr: unknown[] = [1, 2, 3];
+    (arr as { toJSON?: unknown }).toJSON = () => "hijacked";
+    expect(() => canonicalString({ a: arr })).toThrow(CanonicalEncodingError);
+    expect(() => canonicalString({ a: arr })).toThrow(/toJSON/);
+  });
+
+  test("a plain object with a non-enumerable toJSON is rejected", () => {
+    // Object.entries and the symbol scan both miss a non-enumerable toJSON, but
+    // canonicalize would still invoke it; the toJSON guard catches it.
+    const obj = { a: 1 };
+    Object.defineProperty(obj, "toJSON", {
+      value: () => ({ replaced: true }),
+      enumerable: false,
+    });
+    expect(() => canonicalString(obj)).toThrow(CanonicalEncodingError);
+    expect(() => canonicalString(obj)).toThrow(/toJSON/);
+  });
 });
 
 // --- safeIntegerSchema -------------------------------------------------------
@@ -227,8 +252,10 @@ describe("safeIntegerSchema", () => {
   test.each([
     ["a fraction", 1.5],
     ["2^53", 2 ** 53],
+    ["-(2^53)", -(2 ** 53)],
     ["NaN", Number.NaN],
     ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
   ])("rejects %s", (_label, n) => {
     expect(safeIntegerSchema.safeParse(n).success).toBe(false);
   });

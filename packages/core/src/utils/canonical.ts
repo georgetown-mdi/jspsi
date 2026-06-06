@@ -1,8 +1,6 @@
 import canonicalize from "canonicalize";
 import { z } from "zod";
 
-import { enc } from "./crypto.js";
-
 // Canonical encoding for receipt and record artifacts (RFC 8785, JSON
 // Canonicalization Scheme). The same logical object must serialize to a
 // byte-identical string on both parties and in any independent third-party
@@ -68,6 +66,25 @@ function isPlainObject(value: object): boolean {
 }
 
 /**
+ * Reject a value that carries a callable `toJSON`. `canonicalize` tests
+ * `object.toJSON instanceof Function` before it ever inspects `Array.isArray`
+ * or enumerates keys (see canonicalize.js), so it would serialize the return of
+ * `toJSON()` instead of the array or object actually passed -- a silent
+ * coercion, and undetectable by an element/property walk (the method may be
+ * non-enumerable, and on an array is never an indexed element). The
+ * pre-validator must mirror that precedence and reject it. `typeof value.toJSON`
+ * matches canonicalize's check, covering own and inherited, enumerable or not.
+ */
+function assertNoToJson(value: object, path: string): void {
+  if (typeof (value as { toJSON?: unknown }).toJSON === "function")
+    fail(
+      "value defines a toJSON method, which would replace it during encoding; " +
+        "convert it to plain data first",
+      path,
+    );
+}
+
+/**
  * Recursively assert that `value` is within the canonical domain, throwing a
  * {@link CanonicalEncodingError} otherwise. This runs before delegating to
  * `canonicalize` so that the cases `JSON.stringify`/`canonicalize` would
@@ -106,6 +123,7 @@ function assertCanonical(value: unknown, path: string): void {
     case "object": {
       if (value === null) return;
       if (Array.isArray(value)) {
+        assertNoToJson(value, path);
         // Index loop, not forEach/for-of: both skip sparse holes (`[1,,3]`),
         // which canonicalize would silently drop. A hole is a missing element,
         // so reject it the same way an explicit `undefined` element is rejected.
@@ -121,10 +139,13 @@ function assertCanonical(value: unknown, path: string): void {
       }
       if (!isPlainObject(value))
         fail(
-          `unsupported object type (${value.constructor?.name ?? "unknown"}); ` +
+          // `|| "unknown"`, not `?? "unknown"`: an anonymous constructor has
+          // name === "" (falsy but not nullish), which `??` would not replace.
+          `unsupported object type (${value.constructor?.name || "unknown"}); ` +
             "binary data must be base64url-encoded to a string first",
           path,
         );
+      assertNoToJson(value, path);
       // Symbol-keyed properties are dropped by canonicalize (JSON.stringify
       // never emits them), so reject them rather than canonicalize a different
       // object than the caller passed. Object.entries below covers only string
@@ -138,8 +159,15 @@ function assertCanonical(value: unknown, path: string): void {
         );
       // Object.entries includes a key explicitly set to `undefined`, so the
       // recursive call rejects it rather than letting canonicalize drop it.
-      for (const [key, child] of Object.entries(value))
-        assertCanonical(child, `${path}.${key}`);
+      // Identifier-like keys extend the path with dot notation; any other key
+      // (containing a dot, a digit-leading name, etc.) uses bracket notation so
+      // the path stays unambiguous, e.g. `$["a.b"]` rather than `$.a.b`.
+      for (const [key, child] of Object.entries(value)) {
+        const childPath = /^[A-Za-z_$][\w$]*$/.test(key)
+          ? `${path}.${key}`
+          : `${path}[${JSON.stringify(key)}]`;
+        assertCanonical(child, childPath);
+      }
       return;
     }
     default:
@@ -166,6 +194,10 @@ export function canonicalString(value: unknown): string {
   if (encoded === undefined) fail("value is not canonicalizable", "$");
   return encoded;
 }
+
+// Local TextEncoder so this module depends only on a platform API rather than
+// on crypto.ts. UTF-8 with no BOM is the canonical byte encoding (see the spec).
+const enc = new TextEncoder();
 
 /**
  * Encode `value` to its canonical UTF-8 byte string per RFC 8785 (JCS). This is

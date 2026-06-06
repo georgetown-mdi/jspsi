@@ -28,6 +28,18 @@
       "sha256Hex": "6a0005fd791ad8bad303dceddf9d20b5cd61c4df129a428ae48582376ff4cc0e"
     },
     {
+      "name": "integer-like-keys",
+      "description": "digit-only string keys sort by UTF-16 code unit (\"1\" < \"10\" < \"2\"), not numerically",
+      "value": {
+        "10": "ten",
+        "2": "two",
+        "1": "one"
+      },
+      "canonical": "{\"1\":\"one\",\"10\":\"ten\",\"2\":\"two\"}",
+      "bytesHex": "7b2231223a226f6e65222c223130223a2274656e222c2232223a2274776f227d",
+      "sha256Hex": "88f1d5d864d29ee7e34bed097931cc725766463ad2b97c08685f0c20dbc66b21"
+    },
+    {
       "name": "large-safe-integer",
       "description": "the maximum safe integer (2^53 - 1) emits as a plain integer",
       "value": {

@@ -595,6 +595,13 @@ export function validateCompatibility(
   // then fails to canonicalize. validateCompatibility's contract is to report
   // problems via `errors` (its callers abort the exchange on a non-empty list),
   // not to throw, so surface such a value as an error instead of crashing.
+  //
+  // When canonicalOrError returns null the value could not be encoded, so the
+  // mismatch comparisons below are skipped for that side: an un-encodable value
+  // cannot be compared, and emitting "do not match" on top of the encoding
+  // error would be misleading. The encoding error already aborts the exchange.
+  // The cost is diagnostic only -- if one side is both un-encodable AND differs,
+  // the operator sees the encoding error first and the divergence on a re-run.
   const canonicalOrError = (value: unknown, label: string): string | null => {
     try {
       return canonicalString(value);
