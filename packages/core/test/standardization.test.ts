@@ -737,6 +737,18 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
     ).toEqual(new Set(["A", "B"]));
   });
 
+  test("split_on with no delimiter match returns the NFC-normalized value", () => {
+    // Pins the no-split path: as a derive-type step it returns the normalized
+    // form, not the original non-NFC bytes left by to_upper_case. Returning the
+    // original (the pre-change behavior) would yield UPPER_NONNFC instead.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        { function: "split_on", params: { delimiter: "," } },
+      ]),
+    ).toEqual(new Set([UPPER_NFC]));
+  });
+
   test("regression: an already-NFC value flows through with unchanged bytes", () => {
     // U+00E9 is already NFC, so the in-step normalize is a no-op and emitted
     // bytes are byte-identical to pre-change behavior; pure ASCII is a subset.
