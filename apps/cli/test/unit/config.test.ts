@@ -321,6 +321,42 @@ test("saveConfig round-trips provider_options verbatim in both directions", () =
   }
 });
 
+test("saveConfig round-trips webrtc provider_options verbatim", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // providerOptions is opaque on webrtc as well as sftp; the writer/reader
+    // key-normalization is channel-agnostic, so a literal camelCase key and a
+    // snake_case key must both survive the round-trip byte-for-byte.
+    const spec: ExchangeSpec = {
+      connection: {
+        channel: "webrtc",
+        server: { host: "api.peerjs.com" },
+        providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("readyTimeout:");
+    expect(raw).toContain("keepalive_interval:");
+    expect(raw).not.toContain("ready_timeout:");
+    expect(raw).not.toContain("keepaliveInterval:");
+
+    const parsed = parseExchangeSpec(YAML.parse(raw));
+    expect(parsed).toEqual(spec);
+    if (parsed.connection.channel !== "webrtc")
+      throw new Error("expected webrtc channel");
+    expect(parsed.connection.providerOptions).toEqual({
+      readyTimeout: 5000,
+      keepalive_interval: 1000,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("saveConfig keeps authentication when role remains after stripping (WebRTC)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {

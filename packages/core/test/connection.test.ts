@@ -190,6 +190,22 @@ test("provider_options is opaque all the way down (nested keys not camelized)", 
   expect(result.providerOptions).toEqual({ nested_outer: { nested_inner: 1 } });
 });
 
+test("provider_options is opaque on the webrtc channel too", () => {
+  // The opaque skip is channel-agnostic (a key-name match in camelizeKeys), and
+  // WebRTCConnectionConfig also declares providerOptions. Guard the webrtc path
+  // so a future schema change cannot silently start normalizing its keys.
+  const result = parseConnectionConfig({
+    ...webrtcBase,
+    provider_options: { readyTimeout: 5000, nested_outer: { nested_inner: 1 } },
+  });
+  expect(result.channel).toBe("webrtc");
+  if (result.channel !== "webrtc") return;
+  expect(result.providerOptions).toEqual({
+    readyTimeout: 5000,
+    nested_outer: { nested_inner: 1 },
+  });
+});
+
 // --- Discriminated union -----------------------------------------------------
 
 test("unknown channel is rejected", () => {
