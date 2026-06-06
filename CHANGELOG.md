@@ -36,6 +36,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 - `psilink exchange` now exits 64 (EX_USAGE) for every malformed, unreadable, or missing configuration (`psilink.yaml`) or key (`.psilink.key`) file. Previously only a missing config file exited 64, while a missing or malformed key file and a malformed config exited 69 (EX_UNAVAILABLE), the code reserved for transport failures. A malformed PAKE token is now classified the same way whether the key file is read or written.
 - The CLI now exits 64 (EX_USAGE) instead of 69 when the requested channel or URL scheme is unsupported -- a `webrtc` config or a `ws://`/`wss://` URL, an unknown URL scheme, or a malformed `file://` authority -- in both `psilink exchange` and the zero-setup command, classifying it as invalid caller input rather than a transport failure.
 - Invalid connection-option combinations -- a reserved or unaccompanied `peer_id`, a `retain_files`/`lockless_rendezvous` contradiction, and similar -- now exit 64 (EX_USAGE) instead of 69, whether they originate in `psilink.yaml` or a command-line override.
+- Library API: `deriveAeadKey`'s `context` parameter is narrowed from an open `string` to the fixed `AeadContext` union, and `@psilink/core` now exports `AeadContext` and `AEAD_CONTEXTS`. Source-breaking for a direct TypeScript caller that passed a non-literal label; there is no live caller yet. Rationale under Security.
 
 ### Fixed
 

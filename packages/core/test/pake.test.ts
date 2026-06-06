@@ -513,12 +513,24 @@ test("deriveAeadKey differs for different session keys", async () => {
 
 test("every AEAD_CONTEXTS label is printable ASCII", () => {
   // The runtime guard's soundness against a non-NFC context rests on every
-  // allowed label being ASCII (ASCII has a single NFC form). Enforce the
-  // documented "ASCII-only" invariant mechanically so a future non-ASCII label
-  // fails here at the point of addition rather than silently.
+  // allowed label being ASCII (ASCII has a single NFC form). Enforce that
+  // mechanically so a future non-ASCII label fails here at the point of
+  // addition rather than silently. The class is printable, non-space ASCII
+  // (U+0021..U+007E) -- stricter than "ASCII": it also rejects a stray
+  // leading/trailing space or control char that would survive NFC unchanged.
   for (const context of AEAD_CONTEXTS) {
     expect(context).toMatch(/^[\x21-\x7e]+$/);
   }
+});
+
+test("AEAD_CONTEXTS is frozen against runtime mutation", () => {
+  expect(Object.isFrozen(AEAD_CONTEXTS)).toBe(true);
+  // The readonly tuple type has no `push`; cast past it to model an untyped
+  // plain-JS caller trying to widen the guard's allowlist at runtime. A frozen
+  // array throws on mutation under the strict mode ES modules always run in.
+  expect(() =>
+    (AEAD_CONTEXTS as unknown as string[]).push("evil-aead"),
+  ).toThrow(TypeError);
 });
 
 test("deriveAeadKey rejects a context outside the fixed set", async () => {

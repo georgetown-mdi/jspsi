@@ -44,9 +44,9 @@ export interface AuthResult {
  * reviewed change (it already adds a `connection.channel` discriminant and its
  * config interface); append its label here so the new caller cannot introduce
  * a variable, non-ASCII, or non-NFC context that would make the two parties
- * derive different keys and fail AEAD with an opaque auth-tag error.  `webrtc`
- * is absent because it relies on DTLS transport security and ignores the
- * session key.
+ * derive different keys and fail AEAD with an opaque auth-tag/decrypt error.
+ * `webrtc` is absent because it relies on DTLS transport security and ignores
+ * the session key.
  *
  * Frozen so the readonly compile-time type also holds at runtime: a plain-JS
  * caller cannot `push` a label and widen the set the runtime guard checks.
