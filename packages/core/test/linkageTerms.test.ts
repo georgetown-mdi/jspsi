@@ -488,6 +488,44 @@ test("linkage keys mismatch is an error", () => {
   );
 });
 
+test("a non-canonical linkage-key param is reported, not thrown", () => {
+  // transform.params is Record<string, unknown>, so an integer beyond 2^53
+  // survives schema parsing but cannot be canonically encoded. The canonical
+  // comparison must surface that as an error rather than letting the thrown
+  // CanonicalEncodingError escape validateCompatibility's {errors,warnings}
+  // contract (the callers in protocolSetup abort the exchange on a non-empty
+  // errors list; an uncaught throw would crash the process instead).
+  const badKeys: LinkageTerms["linkageKeys"] = [
+    {
+      name: "SSN",
+      elements: [
+        {
+          field: "ssn",
+          transform: [{ function: "noop", params: { big: 2 ** 53 } }],
+        },
+      ],
+    },
+  ];
+  const runLocalBad = () =>
+    validateCompatibility({ ...termsA, linkageKeys: badKeys }, termsB);
+  expect(runLocalBad).not.toThrow();
+  expect(
+    runLocalBad().errors.some((e) =>
+      e.includes("local linkage keys cannot be canonically encoded"),
+    ),
+  ).toBe(true);
+
+  // Symmetric: the partner's keys are the un-encodable ones.
+  const runPartnerBad = () =>
+    validateCompatibility(termsA, { ...termsB, linkageKeys: badKeys });
+  expect(runPartnerBad).not.toThrow();
+  expect(
+    runPartnerBad().errors.some((e) =>
+      e.includes("partner linkage keys cannot be canonically encoded"),
+    ),
+  ).toBe(true);
+});
+
 test("legal agreement present on one side only is an error", () => {
   const { errors } = validateCompatibility(
     {

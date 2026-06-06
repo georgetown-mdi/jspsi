@@ -1,0 +1,188 @@
+{
+  "_comment": "RFC 8785 (JCS) canonicalization test vectors for PSI-Link receipts. For each vector, encoding `value` per docs/CANONICAL_ENCODING.md must produce the UTF-8 byte string `bytesHex`, whose string form is `canonical` and whose SHA-256 is `sha256Hex`. Reusable by any independent implementation. See docs/CANONICAL_ENCODING.md. Note: the -0 -> 0 normalization is normative (see the Numbers section and worked examples in docs/CANONICAL_ENCODING.md) but cannot appear here because JSON has no negative zero -- a -0 literal parses to 0 -- so verify it from a -0 literal in your own language (the Node suite does so in packages/core/test/canonical.test.ts).",
+  "vectors": [
+    {
+      "name": "scalars-sorted",
+      "description": "object keys are sorted by UTF-16 code unit",
+      "value": {
+        "b": 1,
+        "a": 2,
+        "c": 3
+      },
+      "canonical": "{\"a\":2,\"b\":1,\"c\":3}",
+      "bytesHex": "7b2261223a322c2262223a312c2263223a337d",
+      "sha256Hex": "e145110e712e3ed0a6b233551b27a90aa39b4c93ed67e111ba2002d16e5ed1fa"
+    },
+    {
+      "name": "nested-sort-arrays-preserved",
+      "description": "nested object keys sort; array element order is preserved",
+      "value": {
+        "z": {
+          "b": 1,
+          "a": 2
+        },
+        "a": [3, 2, 1]
+      },
+      "canonical": "{\"a\":[3,2,1],\"z\":{\"a\":2,\"b\":1}}",
+      "bytesHex": "7b2261223a5b332c322c315d2c227a223a7b2261223a322c2262223a317d7d",
+      "sha256Hex": "6a0005fd791ad8bad303dceddf9d20b5cd61c4df129a428ae48582376ff4cc0e"
+    },
+    {
+      "name": "integer-like-keys",
+      "description": "digit-only string keys sort by UTF-16 code unit (\"1\" < \"10\" < \"2\"), not numerically",
+      "value": {
+        "10": "ten",
+        "2": "two",
+        "1": "one"
+      },
+      "canonical": "{\"1\":\"one\",\"10\":\"ten\",\"2\":\"two\"}",
+      "bytesHex": "7b2231223a226f6e65222c223130223a2274656e222c2232223a2274776f227d",
+      "sha256Hex": "88f1d5d864d29ee7e34bed097931cc725766463ad2b97c08685f0c20dbc66b21"
+    },
+    {
+      "name": "large-safe-integer",
+      "description": "the maximum safe integer (2^53 - 1) emits as a plain integer",
+      "value": {
+        "n": 9007199254740991
+      },
+      "canonical": "{\"n\":9007199254740991}",
+      "bytesHex": "7b226e223a393030373139393235343734303939317d",
+      "sha256Hex": "e1da48c6a6089f06ecb4e0a2259e658e3786b2420f52baccdf929ec6460d7b41"
+    },
+    {
+      "name": "zero",
+      "description": "zero emits as 0",
+      "value": {
+        "n": 0
+      },
+      "canonical": "{\"n\":0}",
+      "bytesHex": "7b226e223a307d",
+      "sha256Hex": "f3013f933b9fb80ab6d995e7ad9da36f683837ba1d81e950c943d40111eac2f0"
+    },
+    {
+      "name": "non-integer-number",
+      "description": "finite non-integers follow the ECMAScript number rule (receipt numeric fields are nonetheless constrained to safe integers by schema)",
+      "value": {
+        "ratio": 1.5
+      },
+      "canonical": "{\"ratio\":1.5}",
+      "bytesHex": "7b22726174696f223a312e357d",
+      "sha256Hex": "8ed95bcd27e7144354767a7422d378f43857da08d96d10a7017a473c89bd6740"
+    },
+    {
+      "name": "literals",
+      "description": "null, true, and false",
+      "value": {
+        "a": null,
+        "c": false,
+        "b": true
+      },
+      "canonical": "{\"a\":null,\"b\":true,\"c\":false}",
+      "bytesHex": "7b2261223a6e756c6c2c2262223a747275652c2263223a66616c73657d",
+      "sha256Hex": "17073ac6186d8c60c0c0da712ce30cdb52ed5a9155f616983da39a9785dce715"
+    },
+    {
+      "name": "empty-containers",
+      "description": "empty array and empty object",
+      "value": {
+        "arr": [],
+        "obj": {}
+      },
+      "canonical": "{\"arr\":[],\"obj\":{}}",
+      "bytesHex": "7b22617272223a5b5d2c226f626a223a7b7d7d",
+      "sha256Hex": "7c557880ceed861401b04be6735c9708e326427e072562fd259da6f6a2612b96"
+    },
+    {
+      "name": "non-ascii-string",
+      "description": "non-ASCII characters are emitted as raw UTF-8, not \\u escapes",
+      "value": {
+        "s": "café €"
+      },
+      "canonical": "{\"s\":\"café €\"}",
+      "bytesHex": "7b2273223a22636166c3a920e282ac227d",
+      "sha256Hex": "310a453664eb3610e9bbce911b8ba218f874a5bdd5caf771ab5c8d25b18d6f89"
+    },
+    {
+      "name": "astral-emoji",
+      "description": "an astral-plane character (surrogate pair) emits as raw UTF-8",
+      "value": {
+        "s": "🔒"
+      },
+      "canonical": "{\"s\":\"🔒\"}",
+      "bytesHex": "7b2273223a22f09f9492227d",
+      "sha256Hex": "d1c25591a24ebb69b51908848883914f2a5ab6dd16eb73bcfad77441ce8d13ca"
+    },
+    {
+      "name": "lone-surrogate",
+      "description": "an unpaired UTF-16 surrogate is escaped as \\uXXXX with lowercase hex (ECMA-262 well-formed JSON), not emitted as raw bytes",
+      "value": {
+        "s": "\ud834"
+      },
+      "canonical": "{\"s\":\"\\ud834\"}",
+      "bytesHex": "7b2273223a225c7564383334227d",
+      "sha256Hex": "0529b152a7e0d22407f9d829f2728e21191a34fe2dfbdea3773dca8a998fda9e"
+    },
+    {
+      "name": "control-character-escapes",
+      "description": "C0 control characters use short escapes where defined and \\u00xx (lowercase hex) otherwise",
+      "value": {
+        "s": "a\nb\tc\u0000d\u001fe"
+      },
+      "canonical": "{\"s\":\"a\\nb\\tc\\u0000d\\u001fe\"}",
+      "bytesHex": "7b2273223a22615c6e625c74635c7530303030645c753030316665227d",
+      "sha256Hex": "4a69a3496c32b4ab390cef5df84bd86f626b258a98c259a68b89e4d47f730233"
+    },
+    {
+      "name": "quote-backslash-slash",
+      "description": "quote and backslash are escaped; forward slash is not",
+      "value": {
+        "s": "\"q\" \\ /slash"
+      },
+      "canonical": "{\"s\":\"\\\"q\\\" \\\\ /slash\"}",
+      "bytesHex": "7b2273223a225c22715c22205c5c202f736c617368227d",
+      "sha256Hex": "61c0411655ed6856bb89a2efacad27edfdd840562c00f1bd4418c4e31ae501ea"
+    },
+    {
+      "name": "base64url-binary-fields",
+      "description": "binary fields carried as base64url strings pass through verbatim, including - and _",
+      "value": {
+        "sig": "f39_",
+        "salt": "3q2-7w"
+      },
+      "canonical": "{\"salt\":\"3q2-7w\",\"sig\":\"f39_\"}",
+      "bytesHex": "7b2273616c74223a223371322d3777222c22736967223a226633395f227d",
+      "sha256Hex": "972fa4164568a9ada69c307a0cf0d585d92bdfd6c970e15029040983eeec6c7a"
+    },
+    {
+      "name": "agreement-fragment",
+      "description": "a linkage-terms fragment: keys sort recursively, safe-integer transform params are preserved",
+      "value": {
+        "version": "1.0.0",
+        "algorithm": "psi",
+        "deduplicate": false,
+        "linkageKeys": [
+          {
+            "name": "k1",
+            "elements": [
+              {
+                "field": "ssn",
+                "transform": [
+                  {
+                    "function": "substring",
+                    "params": {
+                      "start": 1,
+                      "length": 4
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "canonical": "{\"algorithm\":\"psi\",\"deduplicate\":false,\"linkageKeys\":[{\"elements\":[{\"field\":\"ssn\",\"transform\":[{\"function\":\"substring\",\"params\":{\"length\":4,\"start\":1}}]}],\"name\":\"k1\"}],\"version\":\"1.0.0\"}",
+      "bytesHex": "7b22616c676f726974686d223a22707369222c2264656475706c6963617465223a66616c73652c226c696e6b6167654b657973223a5b7b22656c656d656e7473223a5b7b226669656c64223a2273736e222c227472616e73666f726d223a5b7b2266756e6374696f6e223a22737562737472696e67222c22706172616d73223a7b226c656e677468223a342c227374617274223a317d7d5d7d5d2c226e616d65223a226b31227d5d2c2276657273696f6e223a22312e302e30227d",
+      "sha256Hex": "22060791c05660f814595f6c3ee2f79c2c551d941c4dee45012d6d347d1a774c"
+    }
+  ]
+}

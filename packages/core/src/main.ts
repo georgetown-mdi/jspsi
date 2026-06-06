@@ -11,6 +11,13 @@ export { retryPromise, withTimeout } from "./utils/promise";
 // @internal: shared with the CLI config writer so read/write skip identical
 // subtrees; not a stable public API (see the declaration's JSDoc).
 export { OPAQUE_VALUE_KEYS } from "./utils/camelizeKeys";
+export {
+  canonicalString,
+  canonicalBytes,
+  safeIntegerSchema,
+  CanonicalEncodingError,
+} from "./utils/canonical";
+export type { CanonicalValue } from "./utils/canonical";
 
 export * from "./config/standardization";
 export * from "./config/connection";

@@ -10,6 +10,8 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 
 ### Added
 
+- Canonical encoding for receipts: a language-independent, deterministic byte serialization (RFC 8785, JSON Canonicalization Scheme) used for everything that is hashed, committed, or signed, so receipt hashes and signatures verify across independent implementations. Exposed as `canonicalString`/`canonicalBytes` (with `safeIntegerSchema` for hashed numeric fields) in `@psilink/core`, specified normatively in `docs/CANONICAL_ENCODING.md`, and backed by checked-in cross-implementation test vectors verified byte-identically on Node and in the browser. Foundation for the self-attested record and the signed non-repudiation receipt.
+
 - `@psilink/core/testing` subpath export: `withSuppressedLogs` and `withCapturedLogs` helpers for controlling loglevel output in tests.
 - SPAKE2 (RFC 9382) authentication over P-256 with mutual MAC confirmation. Recurring exchanges now perform a password-authenticated key exchange (PAKE) before data is transmitted, using a pre-shared token stored in the key file.
 - Key rotation: the shared token is automatically replaced with a new one derived from the SPAKE2 session key at the end of each successful handshake.
