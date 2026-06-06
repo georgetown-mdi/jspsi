@@ -278,6 +278,12 @@ const resultSizeSchema = safeIntegerSchema.refine((n) => n >= 0, {
   message: "result size must be non-negative",
 });
 
+// Shared by the parser and the builder so both agree on what `createdAt` may be:
+// an ISO 8601 datetime string. Reused at build time (see buildExchangeRecord) so
+// a malformed timestamp throws there rather than producing a record the parser
+// would later reject.
+const createdAtSchema = z.iso.datetime();
+
 const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
   z.object({
     localPayloadSent: base64UrlSchema,
@@ -287,7 +293,7 @@ const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
 
 const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
-  createdAt: z.iso.datetime(),
+  createdAt: createdAtSchema,
   termsHash: base64UrlSchema,
   localIdentity: z.string().min(1),
   partnerIdentity: z.string().min(1),
@@ -418,17 +424,20 @@ export async function buildExchangeRecord(
 
   const record: ExchangeRecord = {
     version: EXCHANGE_RECORD_VERSION,
-    createdAt: inputs.createdAt,
+    // Validate on build with the same schema the parser uses, so the builder and
+    // parser agree on what a record may contain: a non-ISO timestamp throws here
+    // (caught by the non-fatal build guard in runExchange) rather than producing
+    // a record the parser would later reject at round-trip.
+    createdAt: createdAtSchema.parse(inputs.createdAt),
     termsHash,
     localIdentity: inputs.localTerms.identity,
     partnerIdentity: inputs.partnerTerms.identity,
     // Omit the key entirely when absent rather than setting it to undefined: an
     // absent field and a null/undefined field are distinct in the canonical
     // encoding the signing phase will hash over this record. Validate on build
-    // with the same schema the parser uses, so the builder and parser agree on
-    // what a record may contain: a negative or non-safe-integer size throws here
-    // (caught by the non-fatal build guard in runExchange) rather than producing
-    // a record the parser would later reject or that cannot canonically encode.
+    // with the same schema the parser uses (as createdAt above): a negative or
+    // non-safe-integer size throws here rather than producing a record the parser
+    // would later reject or that cannot canonically encode.
     ...(inputs.resultSize !== undefined
       ? { resultSize: resultSizeSchema.parse(inputs.resultSize) }
       : {}),

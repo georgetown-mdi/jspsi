@@ -124,8 +124,10 @@ test("single-output: result size omitted; only the receiver commits the table", 
   expect(initiator.resolvedRole).toBe("receiver");
   expect(responder.resolvedRole).toBe("sender");
 
-  // Neither party records the result size: the sender never learns it, so it is
-  // not "learned by both".
+  // Neither party records the result size: it is recorded only when both
+  // parties' terms have them both receive output, and here only the receiver
+  // does. The gate is the terms agreement, not whether a party can observe the
+  // size during the protocol.
   expect("resultSize" in init.record).toBe(false);
   expect("resultSize" in resp.record).toBe(false);
 

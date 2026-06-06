@@ -70,6 +70,13 @@ export function resolveRecordOutput(opts: {
  * atomically and owner-only (temp file + rename, like {@link writeFileOwnerOnly}
  * / `saveKeyFile`), so a mid-write abort leaves each file complete or absent.
  *
+ * Both files are owner-only (0600) by design, including the record. "Shareable"
+ * means the record holds no secret material (no salts, no matched data), so it is
+ * the file you may hand to an auditor -- not that it is world-readable on disk.
+ * It still discloses, in cleartext, that an exchange occurred, with whom (both
+ * identities), and its size, so the conservative default keeps it private to the
+ * owner; share it by copying the file, not by loosening its permissions.
+ *
  * Non-fatal by design: the privacy-sensitive exchange and the results file have
  * already succeeded by the time this runs, so a record-write failure is logged
  * as a warning rather than thrown -- the user is never told to re-run a
@@ -86,17 +93,23 @@ export function writeExchangeRecord(
   loggerName: string,
 ): void {
   const log = getLogger(loggerName);
+  // Track the opening write so a partial failure (opening written, record write
+  // throws) can tell the user about the orphaned sensitive file below.
+  let openingWritten = false;
   try {
     writeFileOwnerOnly(output.openingFilePath, serializeOpeningData(opening));
+    openingWritten = true;
     writeFileOwnerOnly(output.recordFilePath, serializeExchangeRecord(record));
-    log.info(
-      "wrote self-attested exchange record (a local audit artifact, NOT a " +
-        `signed or non-repudiable receipt) to ${output.recordFilePath}`,
-    );
+    // Log in write order (opening first, then record), matching the sequence
+    // above so the messages reflect what actually hit disk and when.
     log.info(
       `wrote private commitment opening data to ${output.openingFilePath}; ` +
         "keep it private -- it holds the matched data in plaintext (the " +
         "commitment openings), so it is as sensitive as the matched data itself",
+    );
+    log.info(
+      "wrote self-attested exchange record (a local audit artifact, NOT a " +
+        `signed or non-repudiable receipt) to ${output.recordFilePath}`,
     );
   } catch (err) {
     log.warn(
@@ -104,5 +117,15 @@ export function writeExchangeRecord(
         `written (${err instanceof Error ? err.message : String(err)}); ` +
         "the results above are unaffected and the exchange need not be re-run",
     );
+    // The opening is written before the record, so a record-write failure leaves
+    // the opening file on disk. Name it: it holds the matched data in plaintext,
+    // so the user must delete it or protect it -- do not silently orphan it.
+    if (openingWritten) {
+      log.warn(
+        `the private opening data was already written to ${output.openingFilePath} ` +
+          "before this failure and holds the matched data in plaintext; delete it " +
+          "or keep it private",
+      );
+    }
   }
 }
