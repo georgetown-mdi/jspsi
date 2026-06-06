@@ -4,7 +4,12 @@ afterEach(() => vi.useRealTimers());
 
 import { p256_hasher } from "@noble/curves/nist.js";
 import { runSpake2 } from "../src/pake";
-import { authenticateConnection, deriveAeadKey } from "../src/auth";
+import {
+  authenticateConnection,
+  deriveAeadKey,
+  AEAD_CONTEXTS,
+} from "../src/auth";
+import type { AeadContext } from "../src/auth";
 import { PAKE_TOKEN_REGEX } from "../src/config/connection";
 import type { Authentication } from "../src/config/connection";
 import {
@@ -483,24 +488,40 @@ test("deriveAeadKey returns 32 bytes", async () => {
   expect(key).toHaveLength(32);
 });
 
-test("deriveAeadKey is deterministic for the same inputs", async () => {
+test("deriveAeadKey derives a stable 32-byte key for each allowed label", async () => {
   const sessionKey = new Uint8Array(32).fill(0x42);
-  const k1 = await deriveAeadKey(sessionKey, "test");
-  const k2 = await deriveAeadKey(sessionKey, "test");
-  expect(k1).toEqual(k2);
+  for (const context of AEAD_CONTEXTS) {
+    const k1 = await deriveAeadKey(sessionKey, context);
+    const k2 = await deriveAeadKey(sessionKey, context);
+    expect(k1).toHaveLength(32);
+    expect(k1).toEqual(k2);
+  }
 });
 
-test("deriveAeadKey differs for different context strings", async () => {
+test("deriveAeadKey differs for different context labels", async () => {
   const sessionKey = new Uint8Array(32).fill(0x01);
-  const k1 = await deriveAeadKey(sessionKey, "ctx-a");
-  const k2 = await deriveAeadKey(sessionKey, "ctx-b");
+  const k1 = await deriveAeadKey(sessionKey, "sftp-aead");
+  const k2 = await deriveAeadKey(sessionKey, "filedrop-aead");
   expect(k1).not.toEqual(k2);
 });
 
 test("deriveAeadKey differs for different session keys", async () => {
-  const k1 = await deriveAeadKey(new Uint8Array(32).fill(0x01), "ctx");
-  const k2 = await deriveAeadKey(new Uint8Array(32).fill(0x02), "ctx");
+  const k1 = await deriveAeadKey(new Uint8Array(32).fill(0x01), "sftp-aead");
+  const k2 = await deriveAeadKey(new Uint8Array(32).fill(0x02), "sftp-aead");
   expect(k1).not.toEqual(k2);
+});
+
+test("deriveAeadKey rejects a context outside the fixed set", async () => {
+  const sessionKey = new Uint8Array(32).fill(0x01);
+  // An untyped (plain-JS or `as`-cast) caller can bypass the compile-time
+  // AeadContext constraint with a free-form, empty, or non-ASCII label; the
+  // runtime guard must fail fast rather than silently derive a key the two
+  // parties may not agree on.
+  for (const bad of ["sftp", "", "cafe-aead́", "é-aead"]) {
+    await expect(
+      deriveAeadKey(sessionKey, bad as unknown as AeadContext),
+    ).rejects.toThrow(/unknown AEAD context/);
+  }
 });
 
 test("both sides produce the same AEAD key after a successful handshake", async () => {

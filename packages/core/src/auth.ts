@@ -35,6 +35,28 @@ export interface AuthResult {
 }
 
 /**
+ * The fixed set of AEAD channel-context labels accepted by
+ * {@link deriveAeadKey}.  Each label is an ASCII-only domain-separation string
+ * that binds a derived key to one encrypted channel; both endpoints of a
+ * channel must pass the same label to derive the same AES-256-GCM key.
+ *
+ * Adding a channel that needs application-layer encryption is a deliberate,
+ * reviewed change (it already adds a `connection.channel` discriminant and its
+ * config interface); append its label here so the new caller cannot introduce
+ * a variable, non-ASCII, or non-NFC context that would make the two parties
+ * derive different keys and fail AEAD silently.  `webrtc` is absent because it
+ * relies on DTLS transport security and ignores the session key.
+ */
+export const AEAD_CONTEXTS = ["sftp-aead", "filedrop-aead"] as const;
+
+/**
+ * An AEAD channel-context label.  One of the fixed {@link AEAD_CONTEXTS}; the
+ * open `string` is deliberately not accepted so a variable label cannot reach
+ * {@link deriveAeadKey} without a reviewed change to that tuple.
+ */
+export type AeadContext = (typeof AEAD_CONTEXTS)[number];
+
+/**
  * Derive a 32-byte AES-256-GCM key from the SPAKE2 session key using HKDF.
  *
  * Use this when the connection channel requires application-layer encryption.
@@ -42,13 +64,25 @@ export interface AuthResult {
  * channel's encryption layer.
  *
  * @param sessionKey  The `sessionKey` field from {@link AuthResult}.
- * @param context     An application-specific context string that binds the
- *                    derived key to its intended use (e.g. `"sftp-aead"`).
+ * @param context     A fixed AEAD channel-context label from
+ *                    {@link AEAD_CONTEXTS} (e.g. `"sftp-aead"`) that binds the
+ *                    derived key to its intended channel.  The {@link AeadContext}
+ *                    type rejects a free-form label at compile time; the runtime
+ *                    check below catches an untyped (plain-JS or `as`-cast)
+ *                    caller, failing fast rather than silently deriving a key
+ *                    the two parties may not agree on.
+ * @throws {Error} if `context` is not one of {@link AEAD_CONTEXTS}.
  */
 export async function deriveAeadKey(
   sessionKey: Uint8Array<ArrayBuffer>,
-  context: string,
+  context: AeadContext,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  if (!(AEAD_CONTEXTS as readonly string[]).includes(context)) {
+    throw new Error(
+      `deriveAeadKey: unknown AEAD context ${JSON.stringify(context)}; ` +
+        `expected one of ${AEAD_CONTEXTS.join(", ")}`,
+    );
+  }
   return hkdfDerive(sessionKey, `psilink-aead-v1:${context}`, 32);
 }
 
