@@ -589,12 +589,101 @@ describe("NFC normalization (unconditional first pipeline step)", () => {
 
   test("remove_accents re-normalizes to NFC (no decomposed residue)", () => {
     // U+0622 (Arabic alef with madda above) decomposes to U+0627 + U+0653; the
-    // maddah (U+0653) is outside the stripped U+0300-U+036F range and survives.
-    // Without the re-NFC, remove_accents would emit the two-code-point
-    // decomposed sequence instead of the single precomposed character.
+    // maddah (U+0653) is outside the stripped U+0300-U+036F range and survives,
+    // so the re-NFC then recomposes U+0627 + U+0653 back into the single
+    // precomposed U+0622. Without that re-NFC, remove_accents would instead emit
+    // the two-code-point decomposed sequence.
     const out = runPipeline("\u0622", [{ function: "remove_accents" }]);
     expect(out).toBe("\u0622");
     expect((out as string).length).toBe(1);
+  });
+});
+
+// --- Config-literal NFC normalization ----------------------------------------
+
+describe("NFC normalization of config literals", () => {
+  // Config strings are compared against, or injected into, the now-NFC runtime
+  // value, so they must themselves be NFC. "Jose" with an accented e:
+  // precomposed (U+00E9) vs decomposed (e + U+0301), as \u escapes.
+  const NFC_JOSE = "Jos\u00e9";
+  const NFD_JOSE = "Jose\u0301";
+
+  test("null_if matches an NFD exclusion value against the NFC runtime value", () => {
+    expect(
+      runPipeline(NFC_JOSE, [
+        { function: "null_if", params: { value: NFD_JOSE } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("coalesce normalizes its default to NFC", () => {
+    expect(
+      runPipeline("", [
+        { function: "null_if", params: { value: "" } },
+        { function: "coalesce", params: { default: NFD_JOSE } },
+      ]),
+    ).toBe(NFC_JOSE);
+  });
+
+  test("replace_regex normalizes its replacement to NFC", () => {
+    expect(
+      runPipeline("X", [
+        {
+          function: "replace_regex",
+          params: { pattern: "X", replacement: NFD_JOSE },
+        },
+      ]),
+    ).toBe(NFC_JOSE);
+  });
+
+  test("pad_left normalizes its pad character to NFC", () => {
+    // U+2126 (Ohm sign) is one code unit whose NFC form is U+03A9 (Omega).
+    expect(
+      runPipeline("AB", [
+        { function: "pad_left", params: { length: 4, char: "\u2126" } },
+      ]),
+    ).toBe("\u03a9\u03a9AB");
+  });
+});
+
+// --- Key-string NFC normalization --------------------------------------------
+
+describe("buildKeyStrings: NFC normalization of the assembled key", () => {
+  const NFC_JOSE = "Jos\u00e9";
+  const NFD_JOSE = "Jose\u0301";
+
+  test("element-transform replacement literal is NFC in the key", () => {
+    const key = {
+      name: "FN",
+      elements: [
+        {
+          field: "first_name",
+          transform: [
+            {
+              function: "replace_regex",
+              params: { pattern: "^.*$", replacement: NFD_JOSE },
+            },
+          ],
+        },
+      ],
+    };
+    const dataset = new StandardizedDataset([
+      new StandardizedField("first_name", "FN", [], [{ FN: "anything" }]),
+    ]);
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set([NFC_JOSE]));
+  });
+
+  test("key is NFC when concatenation crosses a combining-mark boundary", () => {
+    // Element a is a base letter and element b is a lone combining acute; each
+    // value is NFC on its own, but the joined "e" + U+0301 composes, so the
+    // final NFC pass recomposes it to the precomposed U+00E9.
+    const key = { name: "AB", elements: [{ field: "a" }, { field: "b" }] };
+    const rows = [{ a: "e", b: "\u0301" }];
+    const dataset = new StandardizedDataset([
+      new StandardizedField("a", "a", [], rows),
+      new StandardizedField("b", "b", [], rows),
+    ]);
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set(["\u00e9"]));
   });
 });
 

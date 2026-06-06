@@ -285,9 +285,13 @@ function padLeftFactory(params: Params): StandardizingFn {
   const length = params.length as number | undefined;
   if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
-  const char = (params.char as string | undefined) ?? "0";
-  if (char.length !== 1)
+  const rawChar = (params.char as string | undefined) ?? "0";
+  if (rawChar.length !== 1)
     throw new Error(`pad_left: "char" must be exactly one character`);
+  // NFC-normalize the pad character so a precomposed-vs-compatibility singleton
+  // (e.g. U+2126 -> U+03A9) is not injected into the key in a non-NFC form. The
+  // length check runs on the raw value to preserve the one-code-unit contract.
+  const char = rawChar.normalize("NFC");
   return (s) => s.padStart(length, char);
 }
 
@@ -298,13 +302,22 @@ function nullIfFactory(params: Params): StandardizingFn {
       : params.value !== undefined
         ? [params.value as string]
         : [];
-  const set = new Set(values);
+  // NFC-normalize the exclusion values: the runtime string is guaranteed NFC
+  // (see runCompiledPipeline), so an exclusion authored in a different form
+  // (e.g. NFD in a YAML file written on macOS) would otherwise never match and
+  // the exclusion would silently not fire.
+  const set = new Set(values.map((v) => v.normalize("NFC")));
   return (s) => (set.has(s) ? null : s);
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
-  const replacement = (params.replacement as string | undefined) ?? "";
+  // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
+  // sequence into the key (the pattern itself is matched as authored; author it
+  // in NFC to match NFC runtime values).
+  const replacement = (
+    (params.replacement as string | undefined) ?? ""
+  ).normalize("NFC");
   const re = new RegExp(pattern, "g");
   return (s) => s.replace(re, replacement);
 }
@@ -373,7 +386,14 @@ function compileStep(step: {
 }): CompiledStep {
   const params = step.params ?? {};
   if (step.function === "coalesce") {
-    return { kind: "coalesce", default: params.default as string | undefined };
+    // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
+    // value into the key (it replaces the whole value, often as the last step).
+    const rawDefault = params.default as string | undefined;
+    return {
+      kind: "coalesce",
+      default:
+        rawDefault === undefined ? undefined : rawDefault.normalize("NFC"),
+    };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];
   if (!factory)
@@ -663,8 +683,15 @@ export function buildKeyStrings(
     elementValues.push(transformed);
   }
 
+  // Final NFC pass on the assembled key. Each part is already NFC, but this is
+  // the one chokepoint every PSI key string flows through, so it also covers the
+  // element-transform path (which assembles keys outside runCompiledPipeline) and
+  // the case where concatenating two NFC parts crosses a base + combining-mark
+  // boundary that itself composes (NFC is not closed under concatenation).
   const result = new Set(
-    cartesianProduct(elementValues).map((parts) => parts.join("")),
+    cartesianProduct(elementValues).map((parts) =>
+      parts.join("").normalize("NFC"),
+    ),
   );
 
   if (result.size > KEY_STRING_WARN_THRESHOLD) {
