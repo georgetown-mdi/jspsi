@@ -188,7 +188,11 @@ function parseDateFactory(params: Params): StandardizingFn {
   const re = new RegExp(`^${regexStr}$`);
 
   return (s) => {
-    const m = s.match(re);
+    // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract). Date
+    // separators are ASCII in practice, so this is a no-op on real input, but it
+    // keeps parse_date inside the same authored-pattern-matching family as the
+    // other regex steps rather than a silent exception.
+    const m = s.normalize("NFC").match(re);
     if (!m) return null;
 
     const parts: Partial<Record<Token, string>> = {};
@@ -324,7 +328,11 @@ function replaceRegexFactory(params: Params): StandardizingFn {
     (params.replacement as string | undefined) ?? ""
   ).normalize("NFC");
   const re = new RegExp(pattern, "g");
-  return (s) => s.replace(re, replacement);
+  // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract) so an
+  // authored-NFC pattern matches a value left non-NFC by an upstream case-fold;
+  // the result is derived from the normalized value, byte-identical for
+  // already-canonical inputs.
+  return (s) => s.normalize("NFC").replace(re, replacement);
 }
 
 function extractRegexFactory(params: Params): StandardizingFn {
@@ -359,26 +367,38 @@ function splitOnFactory(params: Params): StandardizingFn {
     (params.includeOriginal as boolean | undefined) ?? false;
   const re = new RegExp(delimiter);
   return (s) => {
-    const parts = s.split(re).filter((p) => p.length > 0);
-    if (parts.length <= 1) return new Set([s]);
-    return includeOriginal ? new Set([s, ...parts]) : new Set(parts);
+    // Normalize before splitting (see the STANDARDIZING_FUNCTIONS contract) so
+    // an authored-NFC delimiter matches a value left non-NFC by an upstream
+    // case-fold. Parts (and the unsplit value) come from the normalized form,
+    // like extract_regex, since the split offsets are computed on it; this is a
+    // no-op for already-canonical inputs.
+    const n = s.normalize("NFC");
+    const parts = n.split(re).filter((p) => p.length > 0);
+    if (parts.length <= 1) return new Set([n]);
+    return includeOriginal ? new Set([n, ...parts]) : new Set(parts);
   };
 }
 
 // Each entry here must also be documented in
 // docs/EXCHANGE_SPEC.md § "Available functions".
 //
-// NFC-comparison contract: any step that compares or matches an intermediate
-// value against an authored list or pattern -- the null_if / filter_regex /
-// extract_regex family -- must NFC-normalize that value before comparing,
-// because an upstream step such as to_upper_case can emit non-NFC bytes (the six
-// Greek code points U+0390, U+03B0, U+1FD2, U+1FD7, U+1FE2, U+1FE7) even from
-// NFC input. The final key-string normalize in buildKeyStrings fixes the
-// EMITTED key, but it runs after these mid-pipeline reads, so each reading step
-// must normalize the value it inspects itself. A step that returns the value
-// unchanged should return the ORIGINAL (not the normalized) value, so emitted
-// bytes for already-canonical inputs are byte-identical. This is an authoring
-// reminder for future functions, not enforcement.
+// NFC-comparison contract: any step that matches an authored value, pattern, or
+// delimiter against the intermediate value must NFC-normalize that value before
+// matching, because an upstream step such as to_upper_case can emit non-NFC
+// bytes (the six Greek code points U+0390, U+03B0, U+1FD2, U+1FD7, U+1FE2,
+// U+1FE7) even from NFC input -- to_lower_case does not today, but a future
+// case-fold could. The final key-string normalize in buildKeyStrings fixes the
+// EMITTED key, but it runs after these mid-pipeline reads, so each step must
+// normalize the value it inspects itself. The family today is null_if,
+// filter_regex, extract_regex, replace_regex, split_on, and parse_date -- define
+// membership by the property above, not this list, when adding a function. Two
+// return styles: a step that passes the value through on a match/non-match
+// (null_if, filter_regex) returns the ORIGINAL value so downstream bytes are
+// untouched; a step that derives a new value (extract_regex, replace_regex,
+// split_on, parse_date) derives it from the normalized value, since matching one
+// form and slicing the other can misalign offsets. Either way the output for
+// already-canonical (NFC or ASCII) inputs is byte-identical. This is an authoring
+// reminder for new functions, not enforcement.
 const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   remove_non_ascii: noParamFactory(removeNonAscii),
   replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
@@ -489,6 +509,12 @@ function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
  *
  * Returns `null` if any step filters the value out, `Set<string>` if a fan-out
  * step (e.g. `split_on`) was applied, or a plain `string` otherwise.
+ *
+ * The input is normalized to NFC before the first step, but the returned value
+ * is not guaranteed NFC: a step such as `to_upper_case` can leave non-NFC bytes,
+ * and the canonical-key NFC guarantee is applied downstream by
+ * {@link buildKeyStrings}, not here. A direct caller that needs a canonical
+ * string must normalize the result itself.
  */
 export function runPipeline(
   input: string,

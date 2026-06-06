@@ -711,6 +711,32 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
     ).toBe("\u03aa");
   });
 
+  test("replace_regex matches a case-folded value via an NFC-authored pattern", () => {
+    // Without the in-step normalize the non-NFC runtime value never matches, so
+    // the substitution silently does not fire and the value passes through.
+    expect(
+      runPipeline(GREEK_INPUT, [
+        { function: "to_upper_case" },
+        {
+          function: "replace_regex",
+          params: { pattern: UPPER_NFC, replacement: "X" },
+        },
+      ]),
+    ).toBe("X");
+  });
+
+  test("split_on splits on an NFC-authored delimiter after a case-fold", () => {
+    // The delimiter is the case-folded letter in NFC form; without the in-step
+    // normalize it would not match the non-NFC value and the split would not
+    // happen.
+    expect(
+      runPipeline(`A${GREEK_INPUT}B`, [
+        { function: "to_upper_case" },
+        { function: "split_on", params: { delimiter: UPPER_NFC } },
+      ]),
+    ).toEqual(new Set(["A", "B"]));
+  });
+
   test("regression: an already-NFC value flows through with unchanged bytes", () => {
     // U+00E9 is already NFC, so the in-step normalize is a no-op and emitted
     // bytes are byte-identical to pre-change behavior; pure ASCII is a subset.
@@ -728,6 +754,19 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
         { function: "extract_regex", params: { pattern: "^(Jos\u00e9)$" } },
       ]),
     ).toBe(NFC_JOSE);
+    expect(
+      runPipeline(NFC_JOSE, [
+        {
+          function: "replace_regex",
+          params: { pattern: "Z", replacement: "Q" },
+        },
+      ]),
+    ).toBe(NFC_JOSE);
+    expect(
+      runPipeline(NFC_JOSE, [
+        { function: "split_on", params: { delimiter: "," } },
+      ]),
+    ).toEqual(new Set([NFC_JOSE]));
     expect(
       runPipeline("SMITH-JONES", [
         { function: "extract_regex", params: { pattern: "^(\\w+)-" } },
