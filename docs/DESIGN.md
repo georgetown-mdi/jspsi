@@ -32,7 +32,7 @@ The command line application enables the automation of all exchange operations a
 
 ## Web application
 
-The web application is a management interface for exchanges. It allows for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It also includes code to execute exchanges.
+The web application is a management interface for exchanges. It allows for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It also includes code to execute exchanges, which it conducts over WebRTC; the file-based channels (SFTP, filedrop) are CLI-only.
 
 Exchange specifications can be downloaded from the web app for use by the command line application, so the web application has user-friendly ways of creating those files. This includes a data explorer and metadata labeler, linkage rule creator, and data cleaning transformation creator.
 
@@ -85,6 +85,8 @@ As mentioned in the threat model, brute-force attacks are possible for simple ke
 Communication over SFTP requires polling for messages, which introduces significant latency. If both parties are able to access a shared SSH server, SSH channels - bidirectional byte streams that require no polling - can be used instead to eliminate this restriction.
 
 SSH offers no built-in solution for synchronizing two parties who arrive at the same time. However, SSH servers often expose an SFTP subsystem so that the strategy used there can also be applied. Once order has been established, both parties can close their SFTP subsystems and switch to SSH channels for message passing. If the SSH server does not expose an SFTP subsystem but does permit remote command execution, shell-level primitives such as `mkdir` can provide the same atomicity guarantee that SFTP synchronization requires.
+
+Any such SSH transport, like any new channel, must satisfy the message-delivery contract described in [COMMUNICATION.md](COMMUNICATION.md#message-delivery-and-teardown): either its send blocks until the message is durably delivered, or a clean close flushes buffered sends before closing, so the final frame of an exchange is not lost.
 
 ## WebSocket relay
 

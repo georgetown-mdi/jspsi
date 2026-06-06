@@ -1,42 +1,216 @@
 import * as z from "zod";
+import { default as EventEmitter } from "eventemitter3";
 import { v4 as uuidv4 } from "uuid";
 
-import { BufferedErrorEmitter } from "./bufferedErrorEmitter";
 import { getLoggerForVerbosity } from "../utils/logger";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
+import {
+  UsageError,
+  BilateralModeMismatchError,
+  ConnectionClosedError,
+} from "../errors";
+import {
+  HelloEnvelopeSchema,
+  serializeEnvelope,
+  type HelloEnvelope,
+} from "./controlEnvelope";
+import {
+  ADVERTISE_HELLO_RETRY_ATTEMPTS,
+  cancellableDelay,
+} from "./fileSyncConstants";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
-/** 1 hour */
-const DEFAULT_TIME_TO_LIVE_MS = 1000 * 60 * 60;
+// Extracts the declared byte count from a message filename by reading the last
+// `-`-delimited segment before `.json`. Parsing is right-anchored so an id
+// containing hyphens (a UUID, or a configured peer id) cannot corrupt the
+// result regardless of how many segments precede the count. Returns undefined
+// when that segment is not a non-negative integer.
+const parseMessageByteCount = (name: string): number | undefined => {
+  const stem = name.slice(0, -".json".length);
+  const lastSegment = stem.slice(stem.lastIndexOf("-") + 1);
+  if (!/^\d+$/.test(lastSegment)) return undefined;
+  return Number(lastSegment);
+};
+
+// Right-anchored parse of the NNN (per-session sequence counter) from a
+// timestamped message filename (<id>-<ts>-<NNN>-<byteCount>.json). NNN is
+// the segment immediately before the terminal byte-count segment. Returns
+// undefined when the segment is not a non-negative integer.
+//
+// Caller contract: only meaningful for a timestamped filename, i.e. retain
+// mode, where timestampInFilename is always true. On a non-timestamped name
+// (<id>-<byteCount>.json) the segment before the byte count is part of the id,
+// so this returns a WRONG value rather than undefined. There is no runtime
+// guard (the sole caller, poll() in retain mode, satisfies the contract); a new
+// caller outside retain mode must check timestampInFilename itself.
+const parseTimestampedMessageNNN = (name: string): number | undefined => {
+  const stem = name.slice(0, -".json".length);
+  const withoutByteCount = stem.slice(0, stem.lastIndexOf("-"));
+  const nnnStr = withoutByteCount.slice(withoutByteCount.lastIndexOf("-") + 1);
+  if (!/^\d+$/.test(nnnStr)) return undefined;
+  return Number(nnnStr);
+};
+
+// Builds the acknowledgment-marker name for the file `<originalName>.json`:
+// `<writerId>-<originalName>-ack.json`. The marker is the single construct that
+// signals "I durably received your file" on transports that cannot delete --
+// the lockless rendezvous ack (acking a peer hello) and the retain-mode message
+// ack (acking a consumed message). `originalName` is the acknowledged file's
+// name minus the `.json` extension.
+//
+// Construct-and-match only: ids may contain `-`, so a two-id marker name is not
+// reverse-parseable into its ids -- and never needs to be, because both ends
+// already hold the exact name of the acknowledged file (the receiver read it
+// from the listing; the author wrote it). The waiter builds the expected name
+// with this function and tests it against the listing; no site splits a marker
+// name back into ids. Routing keys only on the terminal `ack` segment, so the
+// name is safe even when an id contains `-` or equals the word "ack".
+const ackMarkerName = (writerId: string, originalName: string): string =>
+  `${writerId}-${originalName}-ack.json`;
+
+/**
+ * Default peer-inactivity budget (1 hour) used when `peerTimeoutMs` is not
+ * supplied in the connection options. Bounds how long this side waits for the
+ * peer before treating silence as a transport failure: it is the fallback both
+ * for the file-sync rendezvous time-to-live and for the CLI's
+ * {@link fromEventConnection} inactivity deadline.
+ */
+export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
-// Consecutive ENOENT from get() after exists() returned true indicates a
+// Consecutive ENOENT from get() after list() surfaced the file indicates a
 // filesystem state that is unlikely to self-resolve: emit an error rather
 // than looping silently until the peer timeout fires.
 //
 // 3 is structural rather than performance-tuning, so it is not exposed as a
-// config option: one ENOENT after exists()=true is the expected TOCTOU race
-// when the peer's cleanup runs between the two calls (a single race per
-// message-consumption cycle); two more in a row indicates the directory
-// listing is not converging, which is pathological. A smaller threshold
-// (1-2) produces false positives on slow filesystems where one peer's
-// cleanup may briefly overlap with our next poll; a larger threshold (>5)
-// approaches the peer timeout and gives no practical benefit.
+// config option: one ENOENT after the file appeared in list() is the expected
+// TOCTOU race when the peer's cleanup runs between the listing and the get()
+// (a single race per message-consumption cycle); two more in a row indicates
+// the directory listing is not converging, which is pathological. A smaller
+// threshold (1-2) produces false positives on slow filesystems where one
+// peer's cleanup may briefly overlap with our next poll; a larger threshold
+// (>5) approaches the peer timeout and gives no practical benefit.
 const MAX_CONSECUTIVE_ENOENT = 3;
+
+// Suffix shared by all hello files. Using a named constant avoids repeating
+// magic strings and numbers at the multiple slice/endsWith sites below.
+const HELLO_SUFFIX = "-hello.json";
+
+// Suffix of the lock-mode tiebreaker file (`<peer1>-<peer2>-lock.json`). Named
+// for parity with HELLO_SUFFIX/JOINING_SUFFIX so the endsWith filter and both
+// name-construction sites stay in sync under a future rename. Its terminal
+// segment is the type word `lock` (never a `.lock` extension), so the grammar
+// discriminant excludes it from the message scan -- not all-digits -- the same
+// way it excludes hello and joining files.
+const LOCK_SUFFIX = "-lock.json";
+
+// Suffix of the lock-path joiner-arrival sentinel (`<id>-joining.json`). The
+// joiner publishes it before deleting the peer hello and renames it to its own
+// hello once that delete lands, so the peer can tell "joiner mid-arrival" from
+// "joiner crashed" across the window where the peer hello is gone but the
+// joiner hello is not yet written. The terminal segment is the type word
+// `joining` (never a `.joining` extension), so the grammar discriminant already
+// excludes it from the message scan (it is not all-digits).
+const JOINING_SUFFIX = "-joining.json";
+
+// Bounded window the lock-path peer waits for a joiner that has begun arriving
+// (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
+// to its hello. The joiner's remaining work is one delete plus one rename --
+// milliseconds on a direct transport, seconds on a sync-mediated one -- so a
+// window well under peerTimeoutMs distinguishes a slow-but-live joiner from a
+// crashed one without making the peer wait the full inactivity budget. This is
+// the timing heuristic the sentinel narrows to a short, well-defined window
+// rather than the full hour. Internal-only (not a user-facing config option):
+// the default suits both transport classes and the value only matters when a
+// joiner fails mid-arrival, which a correct peer never causes.
+const DEFAULT_JOINER_RECOVERY_MS = 1000 * 30;
+
+// Reads the hello control file through the I5 partial-sync gate. Retries on any
+// get() failure or JSON parse failure (indicating the sync tool has not
+// finished writing the file) until timeToLive expires, then throws a transport
+// Error. A fully-synced body that parses but fails the envelope schema is a
+// terminal UsageError (protocol mismatch, not a transient sync gap). Peer-id
+// recovery is always filename-based; this function validates the body only.
+//
+// The hello is the only control file with a body, so the gate now reads only it
+// (the schema is HelloEnvelopeSchema at every call site). The acknowledgment
+// marker is a zero-length file matched by name existence, so it needs no gate:
+// a zero-byte file has no partial-sync window to guard.
+async function readControlFileWithGate(
+  client: FileTransportClient,
+  filePath: string,
+  timeToLive: Date,
+  pollingFrequency: number,
+  schema: z.ZodType<HelloEnvelope>,
+  signal: AbortSignal,
+): Promise<HelloEnvelope> {
+  // do-while guarantees at least one read attempt even when timeToLive has
+  // already expired by the time the gate is entered (e.g. a slow polling loop
+  // that exhausts the budget before reaching this call). Without this a fully-
+  // present file would produce a spurious "timed out" error.
+  do {
+    let raw: Buffer<ArrayBufferLike>;
+    try {
+      raw = await client.get(filePath, { encoding: "utf-8" });
+    } catch {
+      // File may not be readable yet (TOCTOU or partial sync); retry.
+      await cancellableDelay(pollingFrequency, signal);
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.toString());
+    } catch {
+      // Partial write: body is not valid JSON yet; retry until fully synced.
+      await cancellableDelay(pollingFrequency, signal);
+      continue;
+    }
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      throw new UsageError(
+        `control file at ${filePath} has a malformed payload: ` +
+          result.error.message,
+      );
+    }
+    return result.data;
+  } while (Date.now() <= timeToLive.getTime());
+  throw new Error(`timed out waiting for ${filePath} to fully sync`);
+}
+
+interface Events {
+  data: (data: unknown) => void;
+  error: (err: unknown) => void;
+}
 
 interface Options {
   // Optional: when not supplied to the constructor, open() sets this from
-  // `config.options.peerTimeoutMs` (or DEFAULT_TIME_TO_LIVE_MS) so the budget
+  // `config.options.peerTimeoutMs` (or DEFAULT_PEER_TIMEOUT_MS) so the budget
   // is not consumed by the time between construction and synchronize().
   timeToLive?: Date;
   pollingFrequency: number;
   verbose: number;
+  timestampInFilename: boolean;
+  locklessRendezvous: boolean;
+  peerId?: string;
+  retainFiles: boolean;
+  // Policy for a file that appears mid-loop and is neither recognized for the
+  // exchange nor an in-flight temp write. Left optional (the raw preference):
+  // an unset value resolves to a mode-coupled effective default at the use
+  // site (see resolveUnexpectedFilesPolicy), so the resolution does not depend
+  // on the order in which retainFiles/locklessRendezvous are assigned during
+  // open(). An explicit value always wins.
+  unexpectedFiles?: "error" | "warn" | "ignore";
+  // How long the lock-path peer waits for a mid-arrival joiner (a visible
+  // `<id>-joining.json` sentinel) to finish before treating it as crashed. Not
+  // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
+  // Tests lower it to exercise the abort path without a real-time wait.
+  joinerRecoveryMs: number;
 }
 
 const Message = z.object({
@@ -50,12 +224,23 @@ const getDefaultOptions = (): Options => {
   return {
     pollingFrequency: DEFAULT_POLLING_FREQUENCY_MS,
     verbose: DEFAULT_VERBOSITY,
+    timestampInFilename: false,
+    locklessRendezvous: false,
+    retainFiles: false,
+    joinerRecoveryMs: DEFAULT_JOINER_RECOVERY_MS,
   };
 };
 
 export interface FileInfo {
   name: string;
+  // Retained for downstream transport consumers; no longer used by the
+  // rendezvous tiebreaker (see waitForPeer), which orders on UUID alone
+  // because sync tools stamp transfer time rather than creation time.
   modifyTime: number;
+  // On-disk byte count, populated by every FileTransportClient.list(). poll()
+  // compares it against the declared count encoded in a message filename so a
+  // partially synced file is not read as a complete message.
+  size: number;
 }
 
 export interface PutOptions {
@@ -91,12 +276,17 @@ export interface FileTransportClient {
     options?: PutOptions,
   ) => Promise<unknown>;
   delete: (path: string) => Promise<void>;
+  /**
+   * Removes `path`, swallowing all errors (file-absent, permission, transport).
+   * Implementations must never reject so callers may use this in `catch` blocks
+   * to clean up without masking the original error.
+   */
   safeDelete: (path: string) => Promise<void>;
   rename: (fromPath: string, toPath: string) => Promise<void>;
   /**
    * Creates an empty file at `path` atomically. Throws with
    * `code === "EEXIST"` (or an equivalent server error) if `path` already
-   * exists, giving atomic "only one winner" semantics for the wave-file race.
+   * exists, giving atomic "only one winner" semantics for the lock-file race.
    */
   createExclusive: (path: string) => Promise<void>;
   exists: (remotePath: string) => Promise<boolean>;
@@ -104,33 +294,71 @@ export interface FileTransportClient {
 
 /**
  * File-based rendezvous and message-passing connection. Implements the
- * `.hello`/`.wave` handshake and `.json` polling protocol over any
- * {@link FileTransportClient} — an SFTP server via
- * {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
+ * `-hello.json`/`-lock.json` handshake (or the lockless ack-handshake barrier) and
+ * `.json` polling protocol over any {@link FileTransportClient} — an SFTP
+ * server via {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
  * `LocalFSClient`.
  */
-export class FileSyncConnection extends BufferedErrorEmitter {
+export class FileSyncConnection extends EventEmitter<Events, never> {
   private client: FileTransportClient;
   id: string;
   role: string;
   options: Options;
   log: ReturnType<typeof getLoggerForVerbosity>;
   seq = 0;
+  private recvSeq = 0;
+  // Highest message NNN whose ack marker has already been written. The ack name
+  // is a pure function of the consumed message's fixed name, so a reprocess
+  // re-derives the identical name and cannot create a duplicate file; this guard
+  // only saves the redundant put+rename of an already-named marker (see poll()).
+  // -1 means none yet; the first message is NNN 0.
+  private lastAckedNNN = -1;
   connected = false;
 
   path: string | undefined;
+  private config: SFTPConnectionConfig | FileDropConnectionConfig | undefined;
 
   peerId: string | undefined;
   handshakeRole: HandshakeRole | undefined;
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
+  // Cancellation primitive threaded through every wait site (see wait() and
+  // cancellableDelay). close() aborts it so an in-flight sleep rejects
+  // promptly; synchronize() re-arms a fresh one per session. Constructed inline
+  // so a never-opened/never-synchronized instance is safe (close() before any
+  // session cannot NPE), and re-armed at session start rather than in
+  // resetSessionState() so a recovery reset mid-rendezvous cannot wipe a
+  // concurrent close()'s abort (see synchronize()).
+  private abortController = new AbortController();
   private responsibleFiles: Set<string>;
+  // The name of the last message this party sent. Read by two consumers: the
+  // delete-mode drain in close() (waits for the peer to consume this exact file
+  // before sweeping), and the retain-mode send gate (constructs the peer's
+  // expected ack marker name from this stem and waits for it to exist). Assigned
+  // on every successful send regardless of mode; only the reader differs.
+  private lastSentFile: string | undefined;
   private consecutiveEnoentCount = 0;
+  // Distinct names already warned about under `unexpectedFiles: "warn"`. poll()
+  // re-lists every cycle, so a recurring unexpected file would log on each pass
+  // without this; membership caps it at one warning per name. Reset per session
+  // (resetSessionState) so a name reused across exchanges on the same instance
+  // can warn again.
+  private warnedUnexpectedFiles = new Set<string>();
+  // An `error` emitted while no listener is registered is held here so the
+  // next protocol-layer receive can detect failures that arrived in the gap
+  // between listener-registration cycles. Reading clears the value; only the
+  // most recent unhandled error is retained, since a subsequent error would
+  // supersede the first as the proximate cause.
+  private bufferedError: unknown;
 
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
     this.client = client;
-    this.id = uuidv4();
+    // No peerId validation here: Options is an internal type, not the public
+    // FileSyncOptions. The validation boundary is FileSyncOptionsSchema
+    // (enforced by parseFileSyncOptions / applyConnectionOverrides). All
+    // production callers go through that path before reaching this constructor.
+    this.id = options?.peerId ?? uuidv4();
     this.role = "unknown role";
     this.pollerActive = false;
     this.responsibleFiles = new Set();
@@ -142,14 +370,65 @@ export class FileSyncConnection extends BufferedErrorEmitter {
     );
   }
 
-  // Surface a log line when a buffered error is superseded so a chained
-  // failure is not invisible; the base class handles the buffering and the
-  // cause-chaining itself.
-  protected override onErrorSuperseded(previous: unknown): void {
-    this.log.warn(
-      `[${this.role}] superseding earlier buffered error: ` +
-        errMessage(previous),
-    );
+  // Override emit so that an error fired with no listener is retained rather
+  // than dropped. EventEmitter3 silently discards unhandled errors (unlike
+  // Node's EventEmitter, which throws); buffering them lets the next
+  // protocol-layer receive observe failures that occurred in the gap between
+  // listener-registration cycles. `eventNames()` returns the events that
+  // currently have listeners; an error-with-no-listener has the event absent.
+  emit<E extends keyof Events>(
+    event: E,
+    ...args: Parameters<Events[E]>
+  ): boolean {
+    const hadListeners = super.emit(event, ...args);
+    if (event === "error" && !hadListeners) {
+      // Only the most recent unhandled error is retained because a subsequent
+      // error usually supersedes the first as the proximate cause. Surface a
+      // log line when this happens so a chained failure is not invisible.
+      // When both the prior and new errors are Error instances and the new
+      // one has no `cause` set, chain the prior error as its cause so
+      // downstream diagnostic output (e.g. an "Error: ... { cause: ... }"
+      // formatter) can still surface the earlier failure rather than losing
+      // it entirely. Mutation is gated on `cause === undefined` so we never
+      // overwrite a cause the caller already set, and on `incoming !==
+      // bufferedError` so a re-emit of the same Error reference cannot create
+      // a self-referential cause chain that loops a downstream walker.
+      const incoming = args[0];
+      if (this.bufferedError !== undefined) {
+        this.log.warn(
+          `[${this.role}] superseding earlier buffered error: ` +
+            errMessage(this.bufferedError),
+        );
+        if (
+          incoming instanceof Error &&
+          incoming.cause === undefined &&
+          incoming !== this.bufferedError
+        ) {
+          try {
+            incoming.cause = this.bufferedError;
+          } catch {
+            /* error object is frozen; chain is best-effort. */
+          }
+        }
+      }
+      this.bufferedError = incoming;
+    }
+    return hadListeners;
+  }
+
+  takeBufferedError(): unknown {
+    const e = this.bufferedError;
+    this.bufferedError = undefined;
+    return e;
+  }
+
+  // Cancellable replacement for `new Promise((r) => setTimeout(r, ms))` at every
+  // in-session wait site. Reads this.abortController.signal fresh per call. Do
+  // not hoist the signal: the controller is swapped at session start
+  // (synchronize()), so a cached `const signal = this.abortController.signal`
+  // above a loop would observe a stale controller and become uncancellable.
+  private wait(ms: number): Promise<void> {
+    return cancellableDelay(ms, this.abortController.signal);
   }
 
   /** Opens a connection from a typed config. Dispatches on `config.channel`. */
@@ -158,6 +437,23 @@ export class FileSyncConnection extends BufferedErrorEmitter {
   ): Promise<void> {
     if (config.options?.pollIntervalMs !== undefined)
       this.options.pollingFrequency = config.options.pollIntervalMs;
+    if (config.options?.timestampInFilename !== undefined)
+      this.options.timestampInFilename = config.options.timestampInFilename;
+    if (config.options?.locklessRendezvous !== undefined)
+      this.options.locklessRendezvous = config.options.locklessRendezvous;
+    if (config.options?.retainFiles !== undefined)
+      this.options.retainFiles = config.options.retainFiles;
+    if (config.options?.unexpectedFiles !== undefined)
+      this.options.unexpectedFiles = config.options.unexpectedFiles;
+    if (config.options?.peerId !== undefined) {
+      this.options.peerId = config.options.peerId;
+      this.id = config.options.peerId;
+      this.log = getLoggerForVerbosity(
+        `filesync-${this.id.substring(0, 8)}`,
+        this.options.verbose,
+      );
+    }
+    this.config = config;
     // timeToLive is computed after a successful connect (below) so that
     // retry latency during connection setup does not eat into the
     // peer-waiting budget. Applies to both peerTimeoutMs-supplied and
@@ -224,20 +520,27 @@ export class FileSyncConnection extends BufferedErrorEmitter {
     this.connected = true;
     // Compute timeToLive only after connect() has resolved so that retry
     // latency during connection setup does not eat into the peer-waiting
-    // budget. An explicit timeToLive passed to the constructor (test path)
-    // wins over both peerTimeoutMs and the default.
+    // budget. Two cases:
+    //   1. No constructor timeToLive: derive from config peerTimeoutMs (or the
+    //      default fallback) so the full budget is available for peer-waiting.
+    //   2. Constructor timeToLive present: it wins - do not recompute it.
     if (this.options.timeToLive === undefined) {
-      const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_TIME_TO_LIVE_MS;
+      const ttlMs = config.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
       this.options.timeToLive = new Date(Date.now() + ttlMs);
-    } else if (config.options?.peerTimeoutMs !== undefined) {
-      this.options.timeToLive = new Date(
-        Date.now() + config.options.peerTimeoutMs,
-      );
     }
     this.log.debug(`[${this.role}] connected`);
   }
 
   async cleanup() {
+    // In retain mode, cleanup() removes nothing: in-flight temp-*.tmp writes
+    // are cleaned up inline in send()/writeAck() before reaching here,
+    // and all protocol files are the durable transcript that must persist.
+    if (this.options.retainFiles) {
+      this.log.debug(
+        `[${this.role}] retain mode: directory is transcript, skipping cleanup`,
+      );
+      return;
+    }
     const responsibleFilesString =
       this.responsibleFiles.size > 0
         ? `: ${[...this.responsibleFiles].join(", ")}`
@@ -253,21 +556,151 @@ export class FileSyncConnection extends BufferedErrorEmitter {
     );
   }
 
+  /**
+   * Tears the connection down in full: stops the poll loop, sweeps the files
+   * this side is responsible for, then ends the underlying client. Ordering is
+   * load-bearing - the poller must stop before the client is ended (or its next
+   * cycle would run against a dead client and emit a spurious error), and
+   * cleanup must run before the client is ended (it deletes remote files
+   * through that client).
+   *
+   * Before cleanup, drains the last sent file: waits for the peer to consume
+   * it so a clean close never deletes an unconsumed terminal frame. The wait is
+   * bounded by a fresh `peerTimeoutMs` budget from close() start (not the
+   * remaining timeToLive, which may be near-zero for long exchanges). An
+   * unresponsive peer causes the drain to time out and cleanup() to delete the
+   * file as a fallback. Idempotent: safe to call repeatedly and on a
+   * connection that was never opened.
+   */
   async close() {
-    if (!this.connected || this.path === undefined)
-      throw new Error("not connected");
+    this.stop();
 
-    this.log.debug(`[${this.role}] closing connection`);
-    const result = await this.client.end();
-    this.connected = false;
+    // Cancel any in-flight wait (a rendezvous/send sleep parked between polls)
+    // so it rejects promptly instead of resuming against a connection that is
+    // tearing down. stop() (above) already cleared pollerActive and the poller
+    // timer -- both synchronous -- so by the time an abort-induced rejection
+    // reaches poll()'s catch, the !pollerActive guard swallows it. The drain
+    // loop below stays on a plain setTimeout (it is the teardown wait itself;
+    // see its comment). INVARIANT: every abort() in this class passes a
+    // ConnectionClosedError reason -- cancellableDelay rejects with
+    // signal.reason, and the plain-Error (exit 69) classification depends on it.
+    this.abortController.abort(
+      new ConnectionClosedError("connection closed during wait"),
+    );
+
+    if (this.path !== undefined) {
+      // Drain the last sent file before sweeping: a clean close must not
+      // delete a terminal frame the peer has not yet consumed. Uses a fresh
+      // peerTimeoutMs budget from close() start so a long exchange does not
+      // leave the budget near-zero for teardown. Drain failure (list() error
+      // or timeout) falls through to cleanup(), which deletes as a fallback.
+      // In retain mode the last sent file is never deleted, so the drain would
+      // spin to its deadline; skip it since cleanup() is a no-op anyway. This
+      // is safe, not a lost terminal frame: retain mode never deletes a
+      // message, so the final send persists on disk as part of the transcript
+      // and the peer's poller reads it whenever it next lists -- durability is
+      // decoupled from deletion. The drain exists in delete mode only to stop
+      // cleanup() from deleting an unconsumed frame, a race that cannot occur
+      // here. Skipping it forgoes only sender-side confirmation that the peer
+      // consumed the final message, which matches the durable-ack contract
+      // (an ack means "durably received", not "consumed by the application").
+      if (this.lastSentFile !== undefined && !this.options.retainFiles) {
+        const path = this.path;
+        const lastSentFile = this.lastSentFile;
+        const deadline =
+          Date.now() +
+          (this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
+        const filePresent = async () =>
+          (await this.client.list(path)).some((f) => f.name === lastSentFile);
+        try {
+          if (await filePresent()) {
+            this.log.debug(
+              `[${this.role}] draining ${lastSentFile} before cleanup`,
+            );
+            while (Date.now() < deadline && (await filePresent())) {
+              // Deliberately a plain setTimeout, not this.wait(): this drain IS
+              // the teardown wait and runs after the session controller is
+              // already aborted (above), so wiring it to that signal would make
+              // it reject on the first iteration and skip its bounded wait. It
+              // is hard-bounded by `Date.now() < deadline` and its catch
+              // swallows failures, so a separate controller buys nothing.
+              await new Promise((resolve) =>
+                setTimeout(resolve, this.options.pollingFrequency),
+              );
+            }
+          }
+        } catch {
+          // list() failure during drain; fall through to cleanup.
+        }
+      }
+
+      // Best-effort sweep: a delete failure must not stop us from ending the
+      // client, so it is logged rather than propagated.
+      try {
+        await this.cleanup();
+      } catch (err: unknown) {
+        this.log.debug(
+          `[${this.role}] cleanup during close: ${errMessage(err)}`,
+        );
+      }
+    }
+
+    if (this.connected) {
+      this.log.debug(`[${this.role}] closing connection`);
+      await this.client.end();
+      this.connected = false;
+    }
     this.path = undefined;
-    return result;
+    this.config = undefined;
+    this.resetSessionState();
+  }
+
+  // Builds this party's hello payload: the two bilateral mode flags it
+  // advertises so the peer can detect a mismatch and fail fast. Written into the
+  // hello body in both rendezvous branches. The hello is the only control file
+  // with a body; the lockless ack is a zero-length marker that carries no flags.
+  private helloEnvelope(): HelloEnvelope {
+    return {
+      locklessRendezvous: this.options.locklessRendezvous,
+      retainFiles: this.options.retainFiles,
+    };
+  }
+
+  // Compares a peer's advertised hello flags against this party's own
+  // configuration. Returns a BilateralModeMismatchError naming both sides'
+  // settings for the offending flag, or undefined when both flags match.
+  // Called at every site that reads a peer hello.
+  //
+  // retain_files is compared first because it is the implying flag: the only
+  // way both flags differ is retain=true/lockless=true vs
+  // retain=false/lockless=false (retain_files implies lockless_rendezvous), and
+  // naming the retain_files mismatch lets the operator realign both with a
+  // single rerun rather than risk the invalid retain=true/lockless=false state.
+  // A lockless-only divergence (retain matches) still reports lockless.
+  private bilateralMismatch(
+    peer: HelloEnvelope,
+  ): BilateralModeMismatchError | undefined {
+    if (peer.retainFiles !== this.options.retainFiles)
+      return new BilateralModeMismatchError(
+        `retain_files mismatch: this party has retain_files=` +
+          `${this.options.retainFiles} but the peer has retain_files=` +
+          `${peer.retainFiles}; both parties must use the same setting`,
+      );
+    if (peer.locklessRendezvous !== this.options.locklessRendezvous)
+      return new BilateralModeMismatchError(
+        `lockless_rendezvous mismatch: this party has lockless_rendezvous=` +
+          `${this.options.locklessRendezvous} but the peer has ` +
+          `lockless_rendezvous=${peer.locklessRendezvous}; both parties must ` +
+          `use the same setting`,
+      );
+    return undefined;
   }
 
   /**
-   * Negotiates rendezvous with the peer by exchanging `.hello` and `.wave`
-   * files in the shared directory, assigning `peerId` and `handshakeRole` on
-   * success.
+   * Negotiates rendezvous with the peer by exchanging `-hello.json` and
+   * `<peer1>-<peer2>-lock.json` files (lock mode) or `-hello.json` and
+   * zero-length `-ack.json` acknowledgment markers (lockless mode) in the
+   * shared directory, assigning `peerId` and `handshakeRole` on success.
    *
    * Failures throw synchronously rather than being emitted on the `error`
    * channel: the `error` event is reserved for asynchronous failures from the
@@ -280,6 +713,52 @@ export class FileSyncConnection extends BufferedErrorEmitter {
       throw new Error("not connected");
 
     if (this.peerId) throw new Error("already synchronized");
+
+    // Re-arm cancellation per session: each genuine rendezvous (including a
+    // retry on the same instance after a failed synchronize()) starts with a
+    // fresh signal. Placed here, after the re-entry guard, NOT in
+    // resetSessionState() -- that helper runs three times INSIDE a live
+    // synchronize() (the recovery resets), so re-arming there could wipe a
+    // concurrent close()'s abort mid-unwind. A no-op re-entry call throws at the
+    // guard above and never reaches this line, so it cannot swap a live
+    // session's controller. The teardown-stays-aborted invariant relies on a
+    // single, non-concurrent synchronize() caller per instance (the CLI drives
+    // exactly one at a time); a concurrent re-sync during a close() window is
+    // out of scope and not reachable in production.
+    this.abortController = new AbortController();
+
+    // Library-level defense-in-depth: the schema refine and CLI imply cover the
+    // config/CLI entry points, but a direct library consumer that constructs
+    // FileSyncConnection with retainFiles: true and locklessRendezvous: false
+    // would otherwise reach the delete-based lock path, which is incompatible
+    // with retain mode (lock rendezvous is delete-based and cannot produce the
+    // whole-directory no-delete transcript). Make that combination unreachable.
+    if (this.options.retainFiles && !this.options.locklessRendezvous)
+      throw new UsageError(
+        "retain mode requires lockless rendezvous: lock rendezvous is " +
+          "delete-based and cannot produce the whole-directory no-delete " +
+          "transcript required by retain mode",
+      );
+
+    // Without timestampInFilename the message filename has no NNN segment, so
+    // poll()'s parseTimestampedMessageNNN() returns undefined for every file and the
+    // receiver silently skips every incoming message. Enforce at the class
+    // boundary so a direct library consumer hits a clear error rather than a
+    // stall.
+    //
+    // Note: a warning nudging a stable peer_id when retainFiles is true was
+    // removed here. The UUID-collision-on-reuse failure that warning addressed
+    // is now hard-blocked by the fresh-directory guard (synchronize() rejects a
+    // non-empty directory in retain mode) plus this timestampInFilename guard
+    // (which prevents the NNN parse from ever producing undefined). A stable
+    // peer_id only affects audit-transcript readability, which is a docs concern
+    // and not a runtime warning.
+    if (this.options.retainFiles && !this.options.timestampInFilename)
+      throw new UsageError(
+        "retain mode requires timestamp_in_filename: without it message " +
+          "filenames carry no NNN segment and the receiver cannot sequence " +
+          "them (every message would be silently skipped)",
+      );
 
     this.log.info(`[${this.role}] synchronizing at path ${this.path}`);
 
@@ -294,69 +773,311 @@ export class FileSyncConnection extends BufferedErrorEmitter {
       `[${this.role}] found ${files.length} file(s)` +
         `${files.length > 0 ? `: ${fileNames.join(", ")}` : ""}`,
     );
-    this.responsibleFiles.forEach((fileName) => {
-      if (!fileNames.includes(fileName)) this.responsibleFiles.delete(fileName);
-    });
-    const helloFiles = files.filter((file) => file.name.endsWith(".hello"));
+    if (!this.options.retainFiles)
+      this.responsibleFiles.forEach((fileName) => {
+        if (!fileNames.includes(fileName))
+          this.responsibleFiles.delete(fileName);
+      });
+    // Unified entry precondition (mode-agnostic, both delete and retain). At
+    // synchronize() entry the directory must be empty except for at most one
+    // peer hello -- a hello file whose id is not this party's own. That is the
+    // only file kind that can legitimately predate this party's entry: a party
+    // writes its own hello/lock/ack only after observing the peer's hello, and
+    // messages and ack markers exist only once rendezvous has completed. So the
+    // only thing that can already be present is the other party's hello.
+    //
+    // Anything else is a protocol error: a second peer hello, a self-hello (a
+    // same-id leftover from a crashed session), a lock, an ack marker, a
+    // message, or any foreign file. This is strict-empty by design (the
+    // directory is the state machine), so a foreign file is rejected rather
+    // than ignored.
+    //
+    // The one kind that legitimately pre-exists and is NOT rejected is an
+    // orphaned temp-*.tmp -- a send()/writeAck() in-flight write whose process
+    // was hard-killed between the temp put() and the rename to <id>.json. At
+    // entry the message loop has not started, so any such file is necessarily
+    // orphaned (no live in-flight write can race it); it is swept just below
+    // (safeDelete then added to `ignored`) so a prior crash's temp artifact is
+    // cleaned up rather than left as litter and entry is not aborted on its
+    // account. `ignored` is the sanctioned extension point for kinds that may
+    // legitimately pre-exist as the protocol grows -- a future directory
+    // snapshot would extend it the same way.
+    const isPeerHello = (name: string) =>
+      name.endsWith(HELLO_SUFFIX) &&
+      name.slice(0, -HELLO_SUFFIX.length) !== this.id;
+    const ignored = new Set<string>();
 
-    if (
-      helloFiles.length > 1 ||
-      files.some((file) => file.name.endsWith(".wave"))
-    ) {
-      const leftover = files
-        .filter((f) => f.name.endsWith(".hello") || f.name.endsWith(".wave"))
-        .map((f) => f.name)
-        .join(", ");
-      throw new Error(
-        `path ${this.path} had preexisting hello or wave files ` +
-          `(${leftover}); the directory must be empty of .hello and .wave ` +
-          "files before executing the protocol. Most likely cause: a " +
-          "previous exchange was terminated by SIGKILL/OOM/power loss " +
-          "before its cleanup ran. Remove the listed files manually after " +
-          "verifying that no other session is concurrently using this path.",
+    // Sweep orphaned in-flight temp writes left by a prior crashed exchange.
+    // Match the temp-<uuid>.tmp shape send()/writeAck() produce by its exact
+    // `temp-` prefix and `.tmp` extension, never a final <id>.json message -- in
+    // retain mode the directory is intentionally full of *.json (the
+    // transcript), which can never match `.tmp`. Delete each with the
+    // non-throwing safeDelete, then add its name to `ignored` so the
+    // already-taken `files` snapshot does not re-trip the guard below on a name
+    // we just removed.
+    //
+    // The delete is best-effort and the `ignored` add is unconditional (it does
+    // not branch on the delete's outcome): a safeDelete that silently fails (a
+    // transport error, swallowed by contract) leaves the temp on disk, but entry
+    // must still proceed past it (a stale temp is benign) and the next exchange's
+    // entry re-runs this same sweep, so the litter is self-healing rather than
+    // permanent. Tracking the orphan in `responsibleFiles` would not help: its
+    // writer already died, so that process's cleanup() never runs -- which is the
+    // whole reason this rendezvous-time sweep exists.
+    const orphanedTempFiles = files.filter(
+      (file) => file.name.startsWith("temp-") && file.name.endsWith(".tmp"),
+    );
+    if (orphanedTempFiles.length > 0) {
+      // Single breadcrumb: a process died mid-write here. Entry is not aborted
+      // on its account, but the prior crash is worth surfacing.
+      this.log.info(
+        `[${this.role}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
+          "file(s) left by a prior crashed exchange: " +
+          `${orphanedTempFiles.map((f) => f.name).join(", ")}`,
       );
+      await Promise.all(
+        orphanedTempFiles.map((file) =>
+          this.client.safeDelete(`${this.path}/${file.name}`),
+        ),
+      );
+      orphanedTempFiles.forEach((file) => ignored.add(file.name));
     }
 
-    const helloPath = `${this.path}/${this.id}.hello`;
+    const peerHellos = files.filter((file) => isPeerHello(file.name));
+    const unexpected = files.filter(
+      (file) => !isPeerHello(file.name) && !ignored.has(file.name),
+    );
 
-    if (helloFiles.length === 1) {
+    if (unexpected.length > 0)
+      throw new UsageError(
+        `path ${this.path} must be empty except for a single peer hello at ` +
+          "the start of the protocol, but contains " +
+          `${unexpected.length} unexpected file(s): ` +
+          `${unexpected.map((f) => f.name).join(", ")}. A pre-existing lock ` +
+          "file (-lock.json), ack marker (-ack.json), joining sentinel " +
+          "(-joining.json), message, or " +
+          "self-hello usually " +
+          "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
+          "before its cleanup ran, or -- in retain mode, which never deletes " +
+          "-- that this directory was reused for a second exchange. Remove the " +
+          "listed files after confirming no other session is using this path. " +
+          "An ack marker specifically indicates a crashed lockless rendezvous " +
+          "or a reused retain-mode directory; if a live lockless peer is " +
+          "mid-rendezvous, wait for it to complete or time out before retrying.",
+      );
+
+    if (peerHellos.length > 1)
+      throw new UsageError(
+        `path ${this.path} contains ${peerHellos.length} peer hello files ` +
+          `(${peerHellos.map((f) => f.name).join(", ")}); only one peer may ` +
+          "share a rendezvous directory -- are there other sessions using " +
+          "this path?",
+      );
+
+    const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;
+
+    if (peerHellos.length === 1 && !this.options.locklessRendezvous) {
       /**
        * A list
        * A hello
        * B list
+       * B joining                       (sentinel carrying B's hello body)
        * B delete A hello
-       * B hello
+       * B rename joining -> B hello
        * A list
        * A delete B hello
        *
        * This is B.
        */
 
-      const otherFile = helloFiles[0];
+      const otherFile = peerHellos[0];
       const otherPath = `${this.path}/${otherFile.name}`;
-      const peerId = otherFile.name.slice(0, -6);
+      const peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
       this.log.debug(
-        `[joiner] creating response ${this.id}.hello and deleting ` +
-          `discovered ${otherFile.name}`,
+        `[joiner] arriving via ${this.id}${JOINING_SUFFIX} sentinel, ` +
+          `deleting discovered ${otherFile.name}`,
       );
 
-      // Partial-failure note: if delete(otherPath) succeeds but put(helloPath)
-      // fails, the peer's hello is gone and we never wrote our own. The peer's
-      // waitForPeer loop will see an empty directory and poll until
-      // peerTimeoutMs before reporting a synchronization timeout. Recovery is
-      // by retry of the whole exchange. We do not re-create the peer's hello
-      // here because doing so races the peer's next list() and can produce a
-      // two-hello state the wave protocol treats as a collision.
+      // I5: read the peer hello body through the partial-sync gate before
+      // deleting it, validating the two required bilateral flags. open() sets
+      // timeToLive before synchronize() runs, so the non-null assertion is safe.
+      const peerEnvelope = await readControlFileWithGate(
+        this.client,
+        otherPath,
+        this.options.timeToLive!,
+        this.options.pollingFrequency,
+        HelloEnvelopeSchema,
+        this.abortController.signal,
+      );
+
+      // Bilateral flag check. A mismatch here means the peer runs a different
+      // rendezvous protocol than this (lock) party -- it is lockless, since
+      // only a lockless peer leaves its hello in place for a lock joiner to
+      // discover. For symmetric detection the joiner must write its own
+      // advertised hello BEFORE throwing (so the lockless peer reads it through
+      // its own peer-hello read and fails too) and must NOT delete the peer
+      // hello: both hellos are the directory's terminal state. The hello is
+      // left untracked so close()/cleanup() does not sweep it. This is
+      // detection, not negotiation -- neither side adapts to the other's mode.
+      const mismatch = this.bilateralMismatch(peerEnvelope);
+      if (mismatch) {
+        // Advertise our own hello so the lockless peer reads it and fails
+        // symmetrically. This is the one mismatch site that needs a NEW write at
+        // detection time, so it is the single point of asymmetric failure in the
+        // symmetric-detection guarantee: if the put fails at exactly this moment
+        // there is no durable advertisement for the peer to read -- whatever the
+        // write order -- and the peer degrades to the legacy peer-timeout. Retry
+        // the write up to a small bounded budget at the polling cadence to raise
+        // the odds it lands before the peer would otherwise time out (the peer is
+        // concurrently polling, so the advertisement need not arrive on the first
+        // try). This hardens 193901017's documented best-effort floor; it does
+        // not change detection -- see ADVERTISE_HELLO_RETRY_ATTEMPTS.
+        //
+        // Only after the budget is exhausted do we fall through to the
+        // log-and-degrade path. Whatever the write's outcome, THIS party still
+        // throws the genuine mismatch it detected (a UsageError, CLI exit 64):
+        // the retry must not let a transport rejection escape the catch-less
+        // joiner fast-path and mask the mismatch as a generic Error (exit 69).
+        // The mismatch is the actionable cause; the operator must fix the
+        // diverging flag regardless of the transport.
+        for (
+          let attempt = 1;
+          attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
+          attempt++
+        ) {
+          try {
+            await this.client.put(
+              serializeEnvelope(this.helloEnvelope()),
+              helloPath,
+              {
+                flags: "w",
+                encoding: "utf-8",
+              },
+            );
+            break;
+          } catch (writeErr: unknown) {
+            // Label is the literal `joiner`, not `this.role`: the handshake role
+            // this party plays is fixed by reaching this lock-joiner branch, but
+            // `this.role` is not committed until rendezvous succeeds (below the
+            // mismatch gate), so it still holds "unknown role" here. This mirrors
+            // the `[joiner]`/`[starter]` literals used elsewhere in synchronize()
+            // before the role is committed.
+            if (attempt < ADVERTISE_HELLO_RETRY_ATTEMPTS) {
+              this.log.debug(
+                `[joiner] advertise-hello write failed (attempt ` +
+                  `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
+                  `${errMessage(writeErr)}`,
+              );
+              try {
+                await this.wait(this.options.pollingFrequency);
+              } catch {
+                // The only way this.wait rejects is an abort from a concurrent
+                // close() -- a plain delay never rejects -- so this catch cannot
+                // swallow a real put() failure (those are caught by the inner
+                // try and logged above). Stop retrying and fall through to the
+                // reset + `throw mismatch` below so the genuine
+                // BilateralModeMismatchError (exit 64) stays the surfaced root
+                // cause rather than the close's ConnectionClosedError (exit 69):
+                // the diverging flag is the actionable cause the operator must
+                // fix, and the close-during-mismatch case is unreachable except
+                // under a signal anyway (where neither code is the exit code).
+                // Log the cut-short retry so a close-during-mismatch is
+                // diagnosable in debug logs, mirroring the exhausted-budget
+                // path's degradation message in the else branch below.
+                this.log.debug(
+                  `[joiner] advertise-hello retry aborted by connection ` +
+                    `close after attempt ${attempt}/` +
+                    `${ADVERTISE_HELLO_RETRY_ATTEMPTS}; peer may time out ` +
+                    `instead of fast-failing`,
+                );
+                break;
+              }
+            } else {
+              this.log.debug(
+                `[joiner] could not advertise hello on mismatch after ` +
+                  `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
+                  `instead of fast-failing: ${errMessage(writeErr)}`,
+              );
+            }
+          }
+        }
+        // Reset role/peer fields defensively, mirroring the outer catch. They
+        // are not yet assigned on this branch (the assignments below the
+        // mismatch gate have not run), so this is a no-op today; setting them
+        // removes the asymmetry with the outer catch and avoids leaving stale
+        // state if those assignments were ever reordered above the gate.
+        this.peerId = undefined;
+        this.role = "unknown role";
+        this.handshakeRole = undefined;
+        this.resetSessionState();
+        throw mismatch;
+      }
+
+      // Sentinel-mediated arrival (closes the joiner partial-failure window).
+      // A bare delete(peer hello) then put(my hello) is observable as an
+      // inconsistent state: if the delete lands but the put fails, the peer's
+      // hello is gone and ours was never written, and the peer's waitForPeer
+      // cannot tell "joiner mid-write" from "joiner crashed" -- so it polls to
+      // the full peerTimeoutMs. Instead, publish a `<id>-joining.json` sentinel
+      // carrying our hello body, delete the peer hello, then rename the sentinel
+      // to our hello. The rename is atomic, so the sentinel exists across
+      // exactly the window where the peer hello may already be gone but our
+      // hello is not yet present, and the peer recognizes it as a wait signal
+      // (see waitForPeer). We never re-create the peer's hello on failure: that
+      // races the peer's next list() and can trip the two-hello collision check
+      // (I1).
+      const joiningName = `${this.id}${JOINING_SUFFIX}`;
+      const joiningPath = `${this.path}/${joiningName}`;
+      const helloName = `${this.id}${HELLO_SUFFIX}`;
       try {
+        // The three `!this.options.retainFiles` guards in this block are vacuous
+        // here: this lock joiner fast-path runs only when !locklessRendezvous,
+        // and the entry guard rejects retain mode without lockless (retain
+        // requires lockless), so retain never reaches this block. They are kept
+        // only to match the file-wide responsibleFiles tracking idiom -- every
+        // mutation is `!retainFiles`-guarded (see I4a) -- not because retain mode
+        // is reachable here.
+        //
+        // The sentinel carries the hello body so the rename below yields a
+        // fully-valid `<id>-hello.json` the peer reads through its gate; the
+        // peer itself matches the sentinel by name existence and never reads it.
+        await this.client.put(
+          serializeEnvelope(this.helloEnvelope()),
+          joiningPath,
+          {
+            flags: "w",
+            encoding: "utf-8",
+          },
+        );
+        // Track the sentinel only until the peer hello is deleted: before that
+        // point a failure leaves the peer hello intact, so cleanup() may safely
+        // sweep the sentinel (the peer is no worse off than if we never
+        // started). The add follows the put with no throwable statement between,
+        // matching the hello write in the else branch.
+        if (!this.options.retainFiles) this.responsibleFiles.add(joiningName);
+
         await this.client.delete(otherPath);
 
-        await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
-          flags: "w",
-          encoding: "utf-8",
-        });
-        this.responsibleFiles.add(`${this.id}.hello`);
+        // The peer hello is now gone, so the sentinel is the peer's recovery
+        // signal and MUST survive a subsequent failure. Release it from
+        // responsibleFiles so a failure-path cleanup() (conn.close() in the
+        // caller's finally) leaves it on disk for the peer's bounded-window
+        // recovery -- and, if this process dies, for the next run's Phase 0
+        // guard to reject. A crashed joiner cannot clean up after itself; this
+        // is the "best-effort partial-state cleanup" contract.
+        if (!this.options.retainFiles)
+          this.responsibleFiles.delete(joiningName);
+
+        await this.client.rename(joiningPath, helloPath);
+        // The sentinel is now our hello: stop tracking the (gone) sentinel name
+        // and own the hello so cleanup() sweeps it at close().
+        if (!this.options.retainFiles) this.responsibleFiles.add(helloName);
       } catch (err: unknown) {
+        // No resetSessionState() here: this.role, this.peerId,
+        // this.handshakeRole, and the sequence counters are all committed only
+        // after this try/catch (see below), so a throw leaves the connection in
+        // its pre-synchronize state with nothing to reset.
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
 
@@ -366,6 +1087,24 @@ export class FileSyncConnection extends BufferedErrorEmitter {
       // "already synchronized" guard does not block a retry on the same
       // instance, and `handshakeRole` does not point at a peer that may
       // not actually exist.
+      if (
+        peerId.startsWith(this.id + "-") ||
+        this.id.startsWith(peerId + "-")
+      ) {
+        // Remove our hello before throwing: without this, a retry on the
+        // same path (or the same instance) would find the stale file and
+        // either mistake it for the peer's hello or trip the preexisting-
+        // file guard. The throw escapes synchronize() directly (the joiner
+        // fast-path has no enclosing catch), so no outer handler cleans up.
+        await this.client.safeDelete(helloPath);
+        if (!this.options.retainFiles) this.responsibleFiles.delete(helloName);
+        this.resetSessionState();
+        throw new Error(
+          `peer id '${peerId}' and this party's id '${this.id}' share a ` +
+            "prefix at a '-' boundary; ids must not be prefix-extensions " +
+            "of each other (e.g. 'site' / 'site-2')",
+        );
+      }
       this.handshakeRole = "initiator";
       this.role = "joiner";
       this.peerId = peerId;
@@ -376,141 +1115,453 @@ export class FileSyncConnection extends BufferedErrorEmitter {
        * A ~ B list
        * A ~ B hello
        * A list
-       * A wave
+       * A lock
        *
        * or
        *
        * A ~ B list
        * A ~ B hello
        * A ~ B list
-       * A ~ B wave
+       * A ~ B lock
+       *
+       * or (lockless mode, joiner fast-path bypassed):
+       *
+       * A list
+       * A hello
+       * B list (sees A hello)
+       * B hello (does not delete A hello)
+       * A ~ B ack-handshake barrier
        */
 
-      this.log.debug(`[${this.role}] creating initial ${this.id}.hello`);
-      await this.client.put(Buffer.from(new ArrayBuffer(0)), helloPath, {
-        flags: "w",
-        encoding: "utf-8",
-      });
-      this.responsibleFiles.add(`${this.id}.hello`);
-      let wavePath: string | undefined;
+      this.log.debug(
+        `[${this.role}] creating initial ${this.id}${HELLO_SUFFIX}`,
+      );
+      await this.client.put(
+        serializeEnvelope(this.helloEnvelope()),
+        helloPath,
+        {
+          flags: "w",
+          encoding: "utf-8",
+        },
+      );
+      if (!this.options.retainFiles)
+        this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
+      let lockPath: string | undefined;
+      let ackPath: string | undefined;
 
       const waitForPeer = async () => {
+        if (this.options.locklessRendezvous) {
+          // Lockless ack-handshake barrier: completes rendezvous using neither
+          // createExclusive nor delete. Each party writes a hello, then an ack
+          // on seeing the peer's hello, then completes when it sees the peer's
+          // ack. A peer hello already present before entering this loop (joiner
+          // fast-path bypassed) satisfies the condition on the first iteration.
+          //
+          // open() set timeToLive before synchronize() can run, so the
+          // non-null assertion is safe here.
+          while (Date.now() <= this.options.timeToLive!.getTime()) {
+            const currentFiles = await this.client.list(this.path!);
+
+            const fileNames = currentFiles.map((file) => file.name);
+            if (!this.options.retainFiles)
+              this.responsibleFiles.forEach((fileName) => {
+                if (!fileNames.includes(fileName))
+                  this.responsibleFiles.delete(fileName);
+              });
+
+            const peerHellos = currentFiles.filter(
+              (file) =>
+                file.name !== `${this.id}${HELLO_SUFFIX}` &&
+                file.name.endsWith(HELLO_SUFFIX),
+            );
+
+            if (peerHellos.length === 0) {
+              this.log.trace(`[${this.role}] no peer hello found; polling`);
+              await this.wait(this.options.pollingFrequency);
+              continue;
+            }
+
+            if (peerHellos.length > 1) {
+              throw new UsageError(
+                `more than one peer hello file in ${this.path} - are there ` +
+                  "other sessions using this path?",
+              );
+            }
+
+            const peerHello = peerHellos[0];
+            const peerId = peerHello.name.slice(0, -HELLO_SUFFIX.length);
+
+            // Write our ack once on the first sighting of the peer's hello.
+            if (ackPath === undefined) {
+              // I5: read the peer hello body through the partial-sync gate
+              // before writing our ack, so a truncated body is not treated as
+              // malformed and does not abort the handshake prematurely. The
+              // flag comparison runs on this peer-HELLO read, never the peer-ack
+              // read below.
+              const peerEnvelope = await readControlFileWithGate(
+                this.client,
+                `${this.path!}/${peerHello.name}`,
+                this.options.timeToLive!,
+                this.options.pollingFrequency,
+                HelloEnvelopeSchema,
+                this.abortController.signal,
+              );
+
+              // Bilateral flag check before writing our ack. On mismatch throw:
+              // our hello (written before this loop) stays via the outer catch's
+              // skip-sweep, so the peer reads it through its own peer-hello read
+              // and fails too. We do not write the ack, leaving both hellos as
+              // the directory's terminal state. Covers a retain_files mismatch
+              // (both parties lockless, both in this barrier) as well as a
+              // lockless_rendezvous mismatch (peer is a lock party that read our
+              // hello at its own two-hellos branch).
+              const mismatch = this.bilateralMismatch(peerEnvelope);
+              if (mismatch) throw mismatch;
+
+              // Acknowledge the peer's hello with a zero-length marker named
+              // after it (`<myId>-<peerHelloStem>-ack.json`). Published
+              // temp-then-rename so its final name never appears before the file
+              // exists; the peer matches it by name existence, never by reading
+              // a body.
+              const peerHelloStem = peerHello.name.slice(0, -".json".length);
+              this.log.debug(
+                `[${this.role}] writing handshake ack for ${peerHello.name}`,
+              );
+              const ackName = await this.writeAck(this.path!, peerHelloStem);
+              ackPath = `${this.path}/${ackName}`;
+              // Track after the durable rename (delete mode only; retain never
+              // sweeps) so cleanup() removes it at close(), exactly as the
+              // message write in send() does. Both publish temp-then-rename, so
+              // the final name only appears at the atomic rename and the add
+              // immediately follows it with no throwable statement between --
+              // unlike the lock/hello direct-writes, which pre-track because
+              // createExclusive can leave the final name on a throwing call.
+              // The in-flight temp-*.tmp is swept inline by writeAck.
+              if (!this.options.retainFiles) this.responsibleFiles.add(ackName);
+              // Re-enter the loop so hasPeerAck is checked against a fresh
+              // listing; the pre-ack-write snapshot from this iteration may
+              // miss a peer ack that arrived in the window between list() and
+              // the write, adding up to pollIntervalMs of unnecessary latency on
+              // slow-sync transports.
+              continue;
+            }
+
+            // Barrier completes when the peer's ack of THIS party's hello is
+            // visible in the current listing (always fresh because of the
+            // continue above). Construct the expected name from our own hello's
+            // stem and the peer id we already hold, then match by existence: the
+            // marker is zero-length, so its name appearing is completion and no
+            // body is read.
+            const myHelloName = `${this.id}${HELLO_SUFFIX}`;
+            const peerAckName = ackMarkerName(
+              peerId,
+              myHelloName.slice(0, -".json".length),
+            );
+            const hasPeerAck = currentFiles.some(
+              (file) => file.name === peerAckName,
+            );
+
+            if (!hasPeerAck) {
+              this.log.trace(
+                `[${this.role}] waiting for peer ack ${peerAckName}`,
+              );
+              await this.wait(this.options.pollingFrequency);
+              continue;
+            }
+
+            // Peer ack confirmed -- commit roles and peerId as the last step,
+            // the same invariant as the joiner path (see above): if the ack
+            // write fails before this point, this.peerId stays undefined and
+            // the "already synchronized" guard allows a retry on this instance.
+            const arrivedFirst = `${this.id}${HELLO_SUFFIX}` < peerHello.name;
+            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
+            this.role = arrivedFirst ? "starter" : "joiner";
+            this.peerId = peerId;
+
+            this.log.debug(
+              `[${this.role}] lockless rendezvous complete with ${peerId}`,
+            );
+
+            // Do NOT clear responsibleFiles: hello and ack remain so
+            // cleanup() can sweep them at close() time, the same as the
+            // lock-winner path.
+            return;
+          }
+
+          // No role tag: this lockless timeout can fire after the peer hello
+          // was seen and acked but the peer's return ack never arrived, where
+          // hello-filename order may make this party the joiner. The role is
+          // genuinely indeterminate here, so emit no `[role]` prefix (unlike
+          // the lock timeout below, which is reachable only as the lone
+          // starter).
+          throw new Error("synchronization has timed out");
+        }
+
+        // Lock path.
+        // Wall-clock instant this party first saw the joiner's mid-arrival
+        // sentinel, paired with the sentinel name it belongs to (both undefined
+        // when no sentinel is present). Bounds the joiner-recovery window below;
+        // reset whenever a peer hello appears, the sentinel disappears, or a
+        // sentinel with a different name takes its place, so a later or
+        // different joiner always starts a fresh window rather than inheriting
+        // an earlier one's deadline.
+        let joiningSeenAt: number | undefined;
+        let joiningSeenName: string | undefined;
         // open() set timeToLive before synchronize() can run, so the non-null
         // assertion is safe here.
         while (Date.now() <= this.options.timeToLive!.getTime()) {
           const currentFiles = await this.client.list(this.path!);
 
           const fileNames = currentFiles.map((file) => file.name);
-          this.responsibleFiles.forEach((fileName) => {
-            if (!fileNames.includes(fileName))
-              this.responsibleFiles.delete(fileName);
-          });
+          if (!this.options.retainFiles)
+            this.responsibleFiles.forEach((fileName) => {
+              if (!fileNames.includes(fileName))
+                this.responsibleFiles.delete(fileName);
+            });
 
           const otherFiles = currentFiles.filter(
             (file) =>
-              file.name !== `${this.id}.hello` && file.name.endsWith(".hello"),
+              file.name !== `${this.id}${HELLO_SUFFIX}` &&
+              file.name.endsWith(HELLO_SUFFIX),
           );
           const theseFiles = currentFiles.filter(
-            (file) => file.name === `${this.id}.hello`,
+            (file) => file.name === `${this.id}${HELLO_SUFFIX}`,
           );
-          const waveFiles = currentFiles.filter((file) =>
-            file.name.endsWith(".wave"),
+          const lockFiles = currentFiles.filter((file) =>
+            file.name.endsWith(LOCK_SUFFIX),
+          );
+          // A `<peerId>-joining.json` sentinel marks a joiner mid-arrival: it
+          // has begun the put(sentinel) -> delete(our hello) -> rename(sentinel
+          // -> its hello) sequence the lock joiner uses in place of a bare
+          // delete-then-put. Its presence is the signal that distinguishes a
+          // live-but-incomplete joiner from a crashed one, which a bare
+          // otherFiles.length === 0 cannot. (A self-named sentinel is excluded
+          // for symmetry with the hello filters, though the lock starter never
+          // writes one.)
+          const joiningFiles = currentFiles.filter(
+            (file) =>
+              file.name !== `${this.id}${JOINING_SUFFIX}` &&
+              file.name.endsWith(JOINING_SUFFIX),
           );
 
           if (otherFiles.length === 0) {
-            this.log.trace(`[${this.role}] no peer hello found; polling`);
-            const delay = (ms: number) =>
-              new Promise((resolve) => setTimeout(resolve, ms));
-            await delay(this.options.pollingFrequency);
+            if (joiningFiles.length > 0) {
+              // Exactly one sentinel is the only valid mid-arrival state: one
+              // joiner, one starter, and the starter never writes a sentinel.
+              // A second is contamination from a third party, the same illegal
+              // state the multi-peer-hello and multi-lock guards below reject;
+              // surface it the same way rather than silently timing the first.
+              if (joiningFiles.length > 1) {
+                throw new UsageError(
+                  `more than one joining sentinel in ${this.path} - are ` +
+                    "there other sessions using this path?",
+                );
+              }
+              // Joiner is mid-arrival. Wait a bounded recovery window for the
+              // rename to land -- the joiner then appears as a normal peer hello
+              // and the branches below take over. If the sentinel persists past
+              // the window, the joiner failed mid-arrival -- after writing the
+              // sentinel but before publishing its hello, on either side of the
+              // delete; abort with a distinct transport error (a plain Error,
+              // CLI exit 69) instead of polling to the full peer timeout. We do
+              // NOT re-create our own hello: that races the joiner's rename and
+              // could trip the two-hello collision check (I1).
+              const joiningName = joiningFiles[0].name;
+              const now = Date.now();
+              // Start (or restart) the window on the first sighting, or whenever
+              // the sentinel's name changes: a different peer id is a fresh
+              // arrival, not a continuation of the one being timed, so it must
+              // not inherit the earlier deadline. (Two distinct sentinel names
+              // in one rendezvous likewise require a dedicated-directory
+              // violation, but keying the timer to identity keeps that case from
+              // prematurely aborting a legitimate later joiner.)
+              if (
+                joiningSeenAt === undefined ||
+                joiningSeenName !== joiningName
+              ) {
+                joiningSeenAt = now;
+                joiningSeenName = joiningName;
+                this.log.debug(
+                  `[${this.role}] peer is mid-arrival ` +
+                    `(${joiningName}); awaiting completion`,
+                );
+              } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
+                // The window is a lower bound, not exact: the check runs once
+                // per poll after a delay(), so the abort fires somewhere in
+                // (joinerRecoveryMs, joinerRecoveryMs + pollingFrequency]. That
+                // imprecision is deliberate -- this is a bounded recovery
+                // window, not a hard deadline, and one extra poll is immaterial
+                // against the 30 s default. The crash could be on either side
+                // of the joiner's delete, so the message names the bracketing
+                // operations rather than a single step. Labelled [starter]:
+                // this branch is reached only by the party that wrote its hello
+                // first and is waiting for a joiner -- the joiner takes the
+                // entry fast-path and never enters this loop -- even though
+                // `this.role` is not committed until rendezvous succeeds.
+                throw new Error(
+                  `[starter] peer began arriving (${joiningName}) but did ` +
+                    "not complete within the recovery window; it appears to " +
+                    "have failed after announcing its arrival but before " +
+                    "publishing its hello. Retry the exchange.",
+                );
+              }
+            } else {
+              // No sentinel: the joiner has not started, or a prior sighting
+              // vanished without producing a hello (only a crash mid-cleanup
+              // does this). Reset so a later sentinel starts a fresh window.
+              joiningSeenAt = undefined;
+              joiningSeenName = undefined;
+              this.log.trace(`[${this.role}] no peer hello found; polling`);
+            }
+            await this.wait(this.options.pollingFrequency);
             continue;
           }
 
-          if (waveFiles.length > 0) {
+          // A peer hello is present: the joiner's rename landed (or both
+          // parties wrote hellos), so the recovery timer is stale. A sentinel
+          // may still be visible here in exactly one benign case: the peer's
+          // own rename is mid-propagation on a sync-mediated transport, so its
+          // `<peerId>-joining.json` and `<peerId>-hello.json` momentarily
+          // coexist (the rename is atomic at the SFTP layer, not necessarily at
+          // the sync-tool layer). That same-id sentinel is the peer we are
+          // about to rendezvous with, so tolerate it. A sentinel whose id
+          // matches no peer hello is a third party in the directory -- the same
+          // contamination the multi-hello and multi-lock guards reject -- so
+          // surface it as a UsageError rather than completing against an
+          // inconsistent directory.
+          //
+          // No joiningFiles.length > 1 guard is needed here (unlike the
+          // otherFiles === 0 branch above): a sentinel that escapes the
+          // foreign-id check matches a present peer hello, so two such sentinels
+          // would require two distinct peer hellos -- already terminal under the
+          // otherFiles.length > 1 multi-peer-hello guard in the branches below,
+          // which fires before any role is committed.
+          const peerHelloIds = new Set(
+            otherFiles.map((file) => file.name.slice(0, -HELLO_SUFFIX.length)),
+          );
+          const foreignSentinel = joiningFiles.find(
+            (file) =>
+              !peerHelloIds.has(file.name.slice(0, -JOINING_SUFFIX.length)),
+          );
+          if (foreignSentinel) {
+            throw new UsageError(
+              `joining sentinel ${foreignSentinel.name} in ${this.path} ` +
+                "matches no peer hello - are there other sessions using " +
+                "this path?",
+            );
+          }
+          joiningSeenAt = undefined;
+          joiningSeenName = undefined;
+
+          if (lockFiles.length > 0) {
             /**
              * A ~ B list
              * A ~ B hello
              * A list
-             * A wave
+             * A lock
              * B list
-             * B delete A hello, B hello, wave
+             * B delete A hello, B hello, lock
              *
              * This is B
              */
-            if (waveFiles.length > 1) {
-              throw new Error(
-                "more than one wave file - are there other sessions using " +
+            if (lockFiles.length > 1) {
+              throw new UsageError(
+                "more than one lock file - are there other sessions using " +
                   "this path?",
-                { cause: "usage" },
               );
             }
             if (otherFiles.length !== 1) {
-              throw new Error(
-                "wave file detected but no peer hello - are there other " +
+              throw new UsageError(
+                "lock file detected but no peer hello - are there other " +
                   "sessions using this path?",
-                { cause: "usage" },
               );
             }
             if (theseFiles.length !== 1) {
-              throw new Error(
-                "wave file detected but no self hello - are there other " +
+              throw new UsageError(
+                "lock file detected but no self hello - are there other " +
                   "sessions using this path?",
-                { cause: "usage" },
               );
             }
 
-            const waveFile = waveFiles[0];
+            const lockFile = lockFiles[0];
             const otherFile = otherFiles[0];
             const thisFile = theseFiles[0];
 
-            const waveRegex = new RegExp(
-              [
-                /^/,
-                /([0-9a-f]{8}-?[0-9a-f]{4}-?4[0-9a-f]{3}-?[89ab][0-9a-f]{3}-?[0-9a-f]{12})/,
-                /-/,
-                /([0-9a-f]{8}-?[0-9a-f]{4}-?4[0-9a-f]{3}-?[89ab][0-9a-f]{3}-?[0-9a-f]{12})/,
-                /\.wave/,
-                /$/,
-              ]
-                .map((r) => r.source)
-                .join(""),
-              "i",
+            const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
+            const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
+
+            // Use hello filename order -- the same tiebreak the lock producer
+            // uses (I7) -- to reconstruct the expected lock name. Do NOT fall
+            // back to a raw `thisId < otherId` compare: for ids where one is a
+            // prefix of the other (e.g. "Agency" / "Agency A"), space (U+0020)
+            // sorts before "-" (U+002D), so hello-filename order and id-order
+            // can diverge, causing a false "lock does not reference this
+            // connection" throw that UUID tests would never catch.
+            const arrivedFirst = thisFile.name < otherFile.name;
+            const expectedLockName = arrivedFirst
+              ? `${thisId}-${otherId}${LOCK_SUFFIX}`
+              : `${otherId}-${thisId}${LOCK_SUFFIX}`;
+
+            // Pair validation via reconstruct-and-compare. A stale lock from a
+            // different id-pair that happens to concatenate to the same
+            // <a>-<b>-lock.json string is a theoretical residual; the single-lock
+            // guard above (lockFiles.length > 1) is the primary protection, so
+            // the peer_id charset is left unrestricted rather than working
+            // around this edge case here.
+            if (lockFile.name !== expectedLockName)
+              throw new Error("lock file does not reference this connection");
+
+            // I5: read the peer hello body through the partial-sync gate
+            // before committing roles. The hello name carries no byte-count
+            // segment, so a half-synced body cannot be caught by a size check.
+            const peerEnvelope = await readControlFileWithGate(
+              this.client,
+              `${this.path}/${otherFile.name}`,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+              HelloEnvelopeSchema,
+              this.abortController.signal,
             );
-            const waveMatches = waveFile.name.match(waveRegex);
-            if (!waveMatches || waveMatches.length !== 3)
-              throw new Error("wave file name not in expected format");
-            // The two capture groups are bare UUIDs, but theseFiles /
-            // otherFiles entries carry the ".hello" suffix; strip it before
-            // comparing so the cross-checks can succeed.
-            const thisId = thisFile.name.slice(0, -".hello".length);
-            const otherId = otherFile.name.slice(0, -".hello".length);
-            if (waveMatches[1] !== thisId && waveMatches[2] !== thisId)
-              throw new Error("wave file does not reference this connection");
-            if (waveMatches[1] !== otherId && waveMatches[2] !== otherId)
-              throw new Error("wave file does not reference other connection");
+
+            // Bilateral flag check before committing roles and before the
+            // sweep below. Defense-in-depth: a lock present in the directory
+            // implies both parties are in lock mode (lockless never creates a
+            // lock) and a lock party always has retain_files=false (retain
+            // requires lockless), so neither flag can differ and a mismatch
+            // cannot reach here for any valid pairing. If a corrupt directory
+            // somehow produced one, leave exactly the two hellos the design
+            // names as the terminal state: delete the peer-written lock first --
+            // it is a transient, not an advertisement the peer must read, and
+            // the outer catch skips every safeDelete on a mismatch. safeDelete
+            // is contractually non-throwing, so it cannot mask the mismatch. Our
+            // own hello stays via that skip-sweep for the peer to read.
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) {
+              await this.client.safeDelete(`${this.path}/${lockFile.name}`);
+              throw mismatch;
+            }
 
             // first to arrive => should wait for first message
-            this.handshakeRole =
-              waveMatches[1] === this.id ? "responder" : "initiator";
+            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role =
-              this.handshakeRole === "initiator" ? "starter" : "joiner";
-            this.peerId = otherFile.name.slice(0, -6);
+              this.handshakeRole === "initiator" ? "joiner" : "starter";
+            this.peerId = otherId;
 
-            this.log.debug(`[${this.role}] parsed ${waveFile.name}`);
+            this.log.debug(`[${this.role}] parsed ${lockFile.name}`);
 
-            await this.client.safeDelete(`${this.path}/${waveFile.name}`);
+            await this.client.safeDelete(`${this.path}/${lockFile.name}`);
             await this.client.safeDelete(`${this.path}/${otherFile.name}`);
             await this.client.safeDelete(helloPath);
 
-            this.responsibleFiles.clear();
+            if (!this.options.retainFiles) this.responsibleFiles.clear();
 
             return;
           }
 
           if (otherFiles.length > 1) {
-            throw new Error(
+            throw new UsageError(
               `more than one peer hello file in ${this.path} - are there ` +
                 "other sessions using this path?",
-              { cause: "usage" },
             );
           }
           const otherFile = otherFiles[0];
@@ -519,18 +1570,40 @@ export class FileSyncConnection extends BufferedErrorEmitter {
              * A list
              * A hello
              * B list
+             * B joining
              * B delete A hello
-             * B hello
+             * B rename joining -> B hello
              * A delete B hello
              *
              * This is A
              */
             const otherPath = `${this.path}/${otherFile.name}`;
 
+            // I5: read the joiner's hello body through the partial-sync gate
+            // before deleting it. The joiner's hello carries no byte-count
+            // segment so a half-synced body would be silently misread without
+            // this gate.
+            const peerEnvelope = await readControlFileWithGate(
+              this.client,
+              otherPath,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+              HelloEnvelopeSchema,
+              this.abortController.signal,
+            );
+
+            // Bilateral flag check before deleting the peer hello. Defense-in-
+            // depth: reaching this branch means our own hello was deleted, which
+            // only a lock joiner does, so the peer is in lock mode and a
+            // mismatch cannot normally arise; on the throw the peer-hello delete
+            // and the sweep are both skipped.
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) throw mismatch;
+
             // arrived first, should wait for a message
             this.handshakeRole = "responder";
             this.role = "starter";
-            this.peerId = otherFile.name.slice(0, -6);
+            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
             this.log.debug(
               `[${this.role}] detected ${otherFile.name}; deleting it`,
@@ -538,46 +1611,72 @@ export class FileSyncConnection extends BufferedErrorEmitter {
 
             await this.client.safeDelete(otherPath);
 
-            this.responsibleFiles.clear();
+            if (!this.options.retainFiles) this.responsibleFiles.clear();
 
             return;
           } else {
             if (theseFiles.length > 1) {
-              throw new Error(
+              throw new UsageError(
                 `more than one self hello file in ${this.path} - are there ` +
                   "other sessions using this path?",
-                { cause: "usage" },
               );
             }
 
             const thisFile = theseFiles[0];
 
-            const arrivedFirst =
-              thisFile.modifyTime < otherFile.modifyTime ||
-              (thisFile.modifyTime === otherFile.modifyTime &&
-                thisFile.name < otherFile.name);
+            // Tiebreak on hello filename order alone, never modifyTime: both
+            // parties compute the identical hello filenames, so this comparison
+            // is deterministic and symmetric regardless of which party runs it.
+            // modifyTime is unreliable here -- sync tools stamp files with the
+            // transfer time rather than the original creation time, so the two
+            // parties may observe different (even contradictory) timestamps for
+            // the same files.
+            const arrivedFirst = thisFile.name < otherFile.name;
             this.handshakeRole = arrivedFirst ? "responder" : "initiator";
             this.role = arrivedFirst ? "starter" : "joiner";
-            this.peerId = otherFile.name.slice(0, -6);
+            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
-            const waveName =
+            // I5 (closes the documented two-hellos gap): read the peer hello
+            // body through the partial-sync gate, validating the bilateral
+            // flags, BEFORE racing a lock. A lockless peer's hello can coexist
+            // with our lock hello here, so this is a reachable
+            // lockless_rendezvous mismatch. Running the check before
+            // createExclusive pre-empts both the createExclusive-winner and the
+            // EEXIST-loser sub-paths, so a mismatched pair never races a lock.
+            // On the throw our own hello (already present -- it is one of the
+            // two hellos) is left in place by the outer catch's skip-sweep, so
+            // the lockless peer reads it and fails too.
+            const peerEnvelope = await readControlFileWithGate(
+              this.client,
+              `${this.path}/${otherFile.name}`,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+              HelloEnvelopeSchema,
+              this.abortController.signal,
+            );
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) throw mismatch;
+
+            const lockName =
               `${arrivedFirst ? this.id : this.peerId}-` +
-              `${arrivedFirst ? this.peerId : this.id}.wave`;
-            wavePath = `${this.path}/${waveName}`;
+              `${arrivedFirst ? this.peerId : this.id}${LOCK_SUFFIX}`;
+            lockPath = `${this.path}/${lockName}`;
 
-            this.log.debug(`[${this.role}] attempting to create ${waveName}`);
+            this.log.debug(`[${this.role}] attempting to create ${lockName}`);
 
-            // Pre-emptively track waveName: if createExclusive only partially
-            // succeeds (file created on server but handle-close fails with a
-            // non-EEXIST error), cleanup() will still attempt safeDelete even
-            // though the EEXIST handler's responsibleFiles.clear() is never
-            // reached. Both EEXIST branches below call responsibleFiles.clear(),
-            // which also removes this pre-emptive entry.
-            this.responsibleFiles.add(waveName);
+            // Pre-emptively track lockName in delete mode: if createExclusive
+            // only partially succeeds (file created on server but handle-close
+            // fails with a non-EEXIST error), cleanup() will still attempt
+            // safeDelete even though the EEXIST handler's
+            // responsibleFiles.clear() is never reached. Both EEXIST branches
+            // below call responsibleFiles.clear(), which also removes this
+            // pre-emptive entry. In retain mode cleanup() is a no-op so
+            // tracking serves no purpose.
+            if (!this.options.retainFiles) this.responsibleFiles.add(lockName);
             try {
-              await this.client.createExclusive(wavePath);
+              await this.client.createExclusive(lockPath);
               this.log.debug(
-                `[${this.role}] created wave file ${waveName}; waiting for ` +
+                `[${this.role}] created lock file ${lockName}; waiting for ` +
                   "peer to finalize handshake",
               );
 
@@ -585,7 +1684,7 @@ export class FileSyncConnection extends BufferedErrorEmitter {
                * A ~ B list
                * A ~ B hello
                * A ~ list
-               * A ~ createExclusive wave
+               * A ~ createExclusive lock
                * ...
                *
                * This is A
@@ -595,9 +1694,9 @@ export class FileSyncConnection extends BufferedErrorEmitter {
                * A ~ B list
                * A ~ B hello
                * A ~ B list
-               * A createExclusive wave
-               * B createExclusive wave, EEXIST
-               * B delete A hello, B hello, wave
+               * A createExclusive lock
+               * B createExclusive lock, EEXIST
+               * B delete A hello, B hello, lock
                *
                * This is B
                */
@@ -607,14 +1706,14 @@ export class FileSyncConnection extends BufferedErrorEmitter {
               )
                 throw err;
 
-              const waveAlreadyExists = await this.client.exists(wavePath);
+              const lockAlreadyExists = await this.client.exists(lockPath);
 
-              if (!waveAlreadyExists) {
-                // The winner never deletes the wave file in its normal path
-                // (it returns from waitForPeer leaving the wave for the loser
-                // to clean up). If the wave is gone after we received EEXIST,
+              if (!lockAlreadyExists) {
+                // The winner never deletes the lock file in its normal path
+                // (it returns from waitForPeer leaving the lock for the loser
+                // to clean up). If the lock is gone after we received EEXIST,
                 // the winner must have either crashed (their doCleanup ran
-                // during the narrow window where waveName was in
+                // during the narrow window where lockName was in
                 // responsibleFiles) or otherwise abandoned the handshake.
                 // Either way, polling for their first protocol message would
                 // stall until peerTimeoutMs. Fail fast with a clear cause so
@@ -623,47 +1722,102 @@ export class FileSyncConnection extends BufferedErrorEmitter {
                 // directory is left clean for a retry.
                 await this.client.safeDelete(`${this.path}/${otherFile.name}`);
                 await this.client.safeDelete(helloPath);
-                this.responsibleFiles.clear();
-                throw new Error(
-                  "peer appears to have abandoned the handshake: wave file " +
+                if (!this.options.retainFiles) this.responsibleFiles.clear();
+                throw new UsageError(
+                  "peer appears to have abandoned the handshake: lock file " +
                     "was claimed by the peer but disappeared before this " +
                     "side could complete synchronization. Retry the exchange.",
-                  { cause: "usage" },
                 );
               } else {
                 this.log.debug(
-                  `[${this.role}] wave file creation failed, assuming race ` +
+                  `[${this.role}] lock file creation failed, assuming race ` +
                     "condition",
                 );
 
-                await this.client.safeDelete(wavePath);
+                await this.client.safeDelete(lockPath);
                 await this.client.safeDelete(`${this.path}/${otherFile.name}`);
                 await this.client.safeDelete(helloPath);
 
-                this.responsibleFiles.clear();
+                if (!this.options.retainFiles) this.responsibleFiles.clear();
               }
             }
             return;
           }
         }
 
-        throw new Error(`[${this.role}] synchronization has timed out`);
+        // TTL expired while still waiting. Both throws below are tagged
+        // [starter]: reaching here means no peer hello was ever seen (every
+        // branch that observes one commits a role and returns), so the waiter is
+        // the lone starter -- never the joiner -- even though `this.role` is not
+        // committed until rendezvous succeeds.
+        //
+        // If a joiner sentinel was visible on the final poll (joiningSeenAt
+        // still set), the actionable cause is a stuck mid-arrival joiner, not a
+        // bare timeout. This happens when the sentinel first appears with less
+        // than joinerRecoveryMs left on the TTL, so the outer loop exits before
+        // the recovery check (above) can fire; prefer the sentinel error so the
+        // user still gets the same diagnosis the bounded window would have.
+        // Check both: the two are set and cleared as a pair, so testing
+        // joiningSeenName as well makes that coupling type-enforced (it narrows
+        // to string inside the block) rather than relied on by convention, and
+        // degrades gracefully to the bare timeout below if they ever diverged.
+        if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
+          throw new Error(
+            `[starter] peer began arriving (${joiningSeenName}) but the ` +
+              "exchange timed out before it completed; it appears to have " +
+              "failed after announcing its arrival but before publishing its " +
+              "hello. Retry the exchange.",
+          );
+        }
+        throw new Error("[starter] synchronization has timed out");
       };
       try {
         await waitForPeer();
         // No clear() here: branches that finish their own cleanup
-        // (responder, wave-detection, EEXIST loser) clear explicitly
-        // before returning. The createExclusive-winner path is the
-        // exception — it leaves `${this.id}.hello` and waveName in
-        // responsibleFiles so the eventual cleanup() can sweep them
-        // if the loser never arrives (e.g. crash before reaching the
-        // wave file). Clearing here would lose that safety net.
+        // (responder, lock-detection, EEXIST loser, lockless) clear or retain
+        // explicitly before returning. The createExclusive-winner and lockless
+        // paths are the exception -- they leave hello (and lock or ack) in
+        // responsibleFiles so cleanup() can sweep them if the peer never
+        // arrives (e.g. crash before reaching the handshake files). Clearing
+        // here would lose that safety net.
+        //
+        // Both rendezvous modes have assigned this.peerId by this point.
+        // Reject prefix-at-dash id pairs before any message is sent; both
+        // parties evaluate this symmetrically.
+        if (
+          this.peerId!.startsWith(this.id + "-") ||
+          this.id.startsWith(this.peerId! + "-")
+        )
+          throw new UsageError(
+            `peer id '${this.peerId}' and this party's id '${this.id}' share ` +
+              "a prefix at a '-' boundary; ids must not be prefix-extensions " +
+              "of each other (e.g. 'site' / 'site-2')",
+          );
         return;
       } catch (err: unknown) {
-        if (wavePath) await this.client.safeDelete(wavePath);
-        await this.client.safeDelete(helloPath);
-        this.responsibleFiles.clear();
-        if (err instanceof Error && err.cause === "usage") delete err.cause;
+        // A bilateral-mode mismatch is the one terminal failure that must NOT
+        // sweep the directory: this party's advertised hello (written before
+        // the loop) is the directory's terminal state, left in place so the
+        // peer reads it through its own peer-hello read and fails too. Skip the
+        // on-disk safeDelete of hello/ack/lock; clearing responsibleFiles (so a
+        // later close()/cleanup() does not delete the advertised hello) and the
+        // in-memory reset still run, so the instance is not wedged. A rerun
+        // against the leftover hellos is rejected by the entry guard (I0) until
+        // the operator clears the directory and fixes the mismatched flag.
+        if (!(err instanceof BilateralModeMismatchError)) {
+          if (lockPath) await this.client.safeDelete(lockPath);
+          if (ackPath) await this.client.safeDelete(ackPath);
+          await this.client.safeDelete(helloPath);
+        }
+        if (!this.options.retainFiles) this.responsibleFiles.clear();
+        // The prefix-at-dash guard fires after waitForPeer() has already
+        // committed this.peerId, this.role, and this.handshakeRole. Reset
+        // them so the "already synchronized" guard does not block a retry
+        // and the stale role does not appear in the retry's first log line.
+        this.peerId = undefined;
+        this.role = "unknown role";
+        this.handshakeRole = undefined;
+        this.resetSessionState();
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
     }
@@ -682,26 +1836,95 @@ export class FileSyncConnection extends BufferedErrorEmitter {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
 
-    const outPath = `${this.path}/${this.id}.json`;
-    const tempFile = `temp-${uuidv4()}.json`;
-    const tempPath = `${this.path}/${tempFile}`;
+    // peerId is committed by synchronize() in all rendezvous paths; guard here
+    // (before mode-specific branches) so both retain and non-retain modes
+    // require synchronize() to have completed first.
+    if (!this.peerId) throw new Error("not synchronized");
+
+    const path = this.path;
+    // A `.tmp` extension (not `.json`) keeps this in-flight write from matching
+    // a `*.json` sync-tool watch before the rename to the final name lands.
+    const tempFile = `temp-${uuidv4()}.tmp`;
+    const tempPath = `${path}/${tempFile}`;
+
+    // Each message carries a distinct filename (the byte count, and optionally
+    // a counter, differ per send), so a previous message the peer has not yet
+    // consumed cannot be found by an exact name. Scan for any `<id>-*.json` we
+    // still own and wait for it to clear, preserving the one-outstanding-
+    // message-at-a-time invariant the peer's poll() relies on.
+    // Typed protocol files (hello and ack) share the `<id>-` prefix and `.json`
+    // extension but have a non-numeric terminal segment. Exclude them via
+    // parseMessageByteCount so a renamed hello or an ack marker does not cause
+    // send() to spin waiting for a protocol file to disappear.
+    // The list() result also prunes responsibleFiles: any entry no longer on
+    // the server was consumed by the peer and need not be swept at close time.
+    const hasOutstandingMessage = async () => {
+      const currentFiles = await this.client.list(path);
+      const fileNames = currentFiles.map((f) => f.name);
+      this.responsibleFiles.forEach((fileName) => {
+        if (!fileNames.includes(fileName))
+          this.responsibleFiles.delete(fileName);
+      });
+      return currentFiles.some(
+        (file) =>
+          file.name.startsWith(`${this.id}-`) &&
+          file.name.endsWith(".json") &&
+          parseMessageByteCount(file.name) !== undefined,
+      );
+    };
+
+    // In retain mode, the peer never deletes our message. Instead it writes a
+    // zero-length ack marker named after the message, and we gate the next send
+    // on that marker's existence. The expected name is constructed from the stem
+    // we wrote (held in lastSentFile) and the peer id -- never parsed from a
+    // marker on disk.
+    const ackForLastSentPresent = async (expectedAck: string) =>
+      (await this.client.list(path)).some((file) => file.name === expectedAck);
 
     try {
-      if (await this.client.exists(outPath)) {
-        this.log.debug(
-          `[${this.role}] waiting for previous message to be consumed`,
-        );
-        while (await this.client.exists(outPath)) {
-          // open() set timeToLive before send() can run; assertion is safe.
-          if (Date.now() > this.options.timeToLive!.getTime()) {
-            throw new Error(
-              `timed out waiting for message from ${this.id} to be consumed`,
-              { cause: "usage" },
-            );
-          }
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.options.pollingFrequency),
+      if (this.options.retainFiles) {
+        // First send (seq === 0) proceeds immediately; subsequent sends wait for
+        // the receiver's ack of the previously-sent message. seq advances only
+        // after a durable rename, which also sets lastSentFile, so when seq > 0
+        // lastSentFile is the just-sent message's name.
+        if (this.seq > 0) {
+          const expectedAck = ackMarkerName(
+            this.peerId!,
+            this.lastSentFile!.slice(0, -".json".length),
           );
+          this.log.debug(
+            `[${this.role}] waiting for ack ${expectedAck} from ${this.peerId}`,
+          );
+          // Check for the ack before the deadline, so an ack already on disk is
+          // honored even if the TTL elapsed in the same instant. This is the
+          // do-while rationale readControlFileWithGate uses: re-listing for a
+          // present ack costs one list(), whereas discarding it would fail a
+          // live exchange with a spurious timeout.
+          // open() set timeToLive before send() can run; assertion is safe.
+          while (true) {
+            if (await ackForLastSentPresent(expectedAck)) break;
+            if (Date.now() > this.options.timeToLive!.getTime()) {
+              throw new UsageError(
+                `timed out waiting for ack ${expectedAck} from ${this.peerId}`,
+              );
+            }
+            await this.wait(this.options.pollingFrequency);
+          }
+        }
+      } else {
+        if (await hasOutstandingMessage()) {
+          this.log.debug(
+            `[${this.role}] waiting for previous message to be consumed`,
+          );
+          while (await hasOutstandingMessage()) {
+            // open() set timeToLive before send() can run; assertion is safe.
+            if (Date.now() > this.options.timeToLive!.getTime()) {
+              throw new UsageError(
+                `timed out waiting for message from ${this.id} to be consumed`,
+              );
+            }
+            await this.wait(this.options.pollingFrequency);
+          }
         }
       }
 
@@ -711,29 +1934,249 @@ export class FileSyncConnection extends BufferedErrorEmitter {
         type = "Uint8Array";
       }
 
-      const message = JSON.stringify({
-        ts: Date.now(),
-        seq: this.seq++,
-        type,
-        payload: data,
-      });
+      const ts = Date.now();
+      // Do not increment this.seq yet: advance only after the durable rename so
+      // a failed send does not leave the counter past an unwritten message.
+      const seq = this.seq;
+      // Serialize before constructing the filename so the encoded byte count is
+      // the exact on-disk size; the peer waits until the synced file reaches
+      // that many bytes before reading it, so a partial sync delivery is never
+      // read as a complete message.
+      const payload = Buffer.from(
+        JSON.stringify({ ts, seq, type, payload: data }),
+      );
+      const outName = this.messageFilename(payload.byteLength, seq, ts);
+      const outPath = `${path}/${outName}`;
+
       this.log.trace(
-        `[${this.role}] message seq=${this.seq - 1}, type=${type}, ` +
-          `${message.length} bytes`,
+        `[${this.role}] message seq=${seq}, type=${type}, ` +
+          `${payload.byteLength} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
-      await this.client.put(Buffer.from(message), tempPath, {
+      await this.client.put(payload, tempPath, {
         flags: "w",
         encoding: null,
       });
 
-      this.log.debug(`[${this.role}] renaming ${tempFile} to ${this.id}.json`);
+      this.log.debug(`[${this.role}] renaming ${tempFile} to ${outName}`);
       await this.client.rename(tempPath, outPath);
-      this.responsibleFiles.add(`${this.id}.json`);
+      if (!this.options.retainFiles) this.responsibleFiles.add(outName);
+      this.lastSentFile = outName;
+      // Advance after the durable rename: a write failure above leaves seq
+      // unchanged so a retry can reuse this slot and the retain-mode ack gate
+      // cannot block on a message that was never written.
+      this.seq = seq + 1;
     } catch (err: unknown) {
+      // tempPath may never have been written: both pre-write gate loops above
+      // (the retain ack-wait and the delete-mode consume-wait) can throw before
+      // the put -- a UsageError on timeout, or a ConnectionClosedError if
+      // close() aborts the wait. safeDelete is idempotent over an absent file,
+      // so the unconditional sweep is correct; the call on an unwritten temp is
+      // a harmless no-op (the abort case is new, the timeout case pre-existing).
       await this.client.safeDelete(tempPath);
-      if (err instanceof Error && err.cause === "usage") delete err.cause;
       throw err instanceof Error ? err : new Error(errMessage(err));
+    }
+  }
+
+  // Builds an outgoing message filename. The byte count is always the final
+  // `-`-delimited segment before `.json` so the receiver can extract it with a
+  // right-anchored parse (see parseMessageByteCount). When timestampInFilename
+  // is set, a compact UTC timestamp and a zero-padded per-session counter are
+  // inserted so sync-mediated logging can recover write order even when the
+  // sync tool rewrites file mtimes.
+  private messageFilename(byteCount: number, seq: number, ts: number): string {
+    if (!this.options.timestampInFilename)
+      return `${this.id}-${byteCount}.json`;
+    // YYYYMMDDTHHMMSS in UTC: no colons or hyphens, so it is Windows-safe,
+    // lexicographically time-sortable, and occupies one hyphen-delimited
+    // segment.
+    const timestamp = new Date(ts)
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .slice(0, 15);
+    // Zero-padded to three digits for the common case; widens to four or more
+    // past message 999, which keeps names unique (the byte count is still the
+    // final segment) at the cost of strict three-digit width on long sessions.
+    const counter = String(seq).padStart(3, "0");
+    return `${this.id}-${timestamp}-${counter}-${byteCount}.json`;
+  }
+
+  // Writes a zero-length acknowledgment marker for the file `<originalName>.json`,
+  // named `<myId>-<originalName>-ack.json` (see {@link ackMarkerName}). The same
+  // construct is used for the lockless rendezvous ack and the retain-mode
+  // message ack; `originalName` is the acknowledged file's name minus `.json`.
+  //
+  // Published temp-then-rename so the final name never appears before the file
+  // is committed; the marker is matched by name existence only and is never read
+  // for content, so the body is zero bytes (no serialized empty envelope). The
+  // name is a pure function of this party's id and the acknowledged file's fixed
+  // name, so a re-write after a reprocess yields the identical name and cannot
+  // create a duplicate file (idempotent by construction). Returns the final
+  // marker filename (without directory).
+  private async writeAck(dir: string, originalName: string): Promise<string> {
+    const name = ackMarkerName(this.id, originalName);
+    const tempFile = `temp-${uuidv4()}.tmp`;
+    const tempPath = `${dir}/${tempFile}`;
+    try {
+      await this.client.put(Buffer.alloc(0), tempPath, {
+        flags: "w",
+        encoding: null,
+      });
+      await this.client.rename(tempPath, `${dir}/${name}`);
+    } catch (err) {
+      await this.client.safeDelete(tempPath);
+      throw err instanceof Error ? err : new Error(errMessage(err));
+    }
+    return name;
+  }
+
+  // Resolves the effective mid-loop unexpected-file policy. An explicit
+  // `unexpectedFiles` always wins; when unset, the default is mode-coupled:
+  // `warn` on sync-mediated transports (retain mode or lockless rendezvous),
+  // which legitimately produce transient conflict copies and partial downloads
+  // mid-session, and `error` on plain delete-mode transports. Computed at the
+  // use site rather than stored so it never depends on the order open() assigns
+  // the mode flags. The policy is unilateral -- a local observation of one's
+  // own directory view -- so the two parties may resolve to different values.
+  // Re-evaluated per call rather than cached: the inputs are stable mid-session
+  // so the value never changes, it is only consulted on the rare cycles that
+  // find an unexpected file, and recomputing keeps the resolution stateless
+  // (no field to invalidate).
+  private resolveUnexpectedFilesPolicy(): "error" | "warn" | "ignore" {
+    if (this.options.unexpectedFiles !== undefined)
+      return this.options.unexpectedFiles;
+    return this.options.retainFiles || this.options.locklessRendezvous
+      ? "warn"
+      : "error";
+  }
+
+  // True when `name` is a file legitimately present during the message loop
+  // (Phase 2), judged against the two known party ids and the filename grammar.
+  // The recognized set is: an in-flight `temp-*.tmp` write; and any `.json`
+  // file written by either party (prefixed by `<this.id>-` or `<peerId>-`)
+  // that is one of: the two hellos (`<id>-hello.json`) and the single lock
+  // tiebreaker (`<first>-<second>-lock.json`), matched by exact name since each
+  // has exactly one legal form; or -- for the cases whose names are unbounded --
+  // matched by terminal grammar token: a message byte count (all digits, our
+  // own writes; a peer message is taken by the scan above) or `ack` (the
+  // rendezvous ack and the message ack, either writer, whose
+  // `<writer>-<original>-ack.json` name is multi-segment by construction).
+  // This covers both hellos, both acks, the lock,
+  // both parties' messages and message-acks, and our own writes. `joining` is
+  // deliberately absent: it is a rendezvous-phase sentinel a correct exchange
+  // never leaves on disk once the loop is running.
+  //
+  // Anchored to the grammar discriminant, not a bare `<id>-*` glob, so a
+  // conflict copy or partial download of a protocol file (e.g.
+  // `<peerId>-100 (conflicted copy 2026-...).json`, whose terminal token is not
+  // a grammar word) is NOT recognized and falls to the unexpected-file policy
+  // -- the case this detection exists to catch.
+  //
+  // This is the single extensible baseline for site 3. A later relaxation that
+  // tolerates foreign files already present at entry (a directory snapshot,
+  // deferred and out of scope here -- I0 stays strict-empty) must feed those
+  // tolerated names into THIS predicate rather than standing up a parallel set,
+  // so the loop keeps one notion of "recognized". That relaxation also owns the
+  // remaining seams this item leaves for a foreign `<peerId>-<digits>.json` that
+  // mimics a message: with a matching NNN it is selected as a message in poll()
+  // and rejected; in retain mode with a non-matching NNN it is silently skipped
+  // by the recvSeq `continue` there. Both escape the unexpected-file policy, and
+  // neither is fixable by name -- such a file is indistinguishable from a
+  // legitimately retained, already-consumed peer message, so telling them apart
+  // needs the snapshot's identity. Both only matter once such a file can
+  // legitimately pre-exist.
+  private isRecognizedLoopFile(name: string, peerId: string): boolean {
+    if (name.startsWith("temp-") && name.endsWith(".tmp")) return true;
+    if (!name.endsWith(".json")) return false;
+    const ownPrefixed = name.startsWith(`${this.id}-`);
+    if (!ownPrefixed && !name.startsWith(`${peerId}-`)) return false;
+    // Hellos and the lock tiebreaker each have exactly one legal name, so match
+    // them by exact name rather than terminal token -- a stray
+    // `<id>-x-hello.json` or `<id>-x-lock.json` is no longer admitted. The lock
+    // pair may appear in either arrival order (poll() does not track who
+    // arrived first), but both reconstructions name the same single file. The
+    // lock is recognized in either rendezvous mode on purpose: the recognized
+    // set is mode-agnostic by spec, and admitting a stray lock conservatively
+    // avoids a false-positive abort on a cross-mode or legacy residue.
+    if (
+      name === `${this.id}${HELLO_SUFFIX}` ||
+      name === `${peerId}${HELLO_SUFFIX}`
+    )
+      return true;
+    if (
+      name === `${this.id}-${peerId}${LOCK_SUFFIX}` ||
+      name === `${peerId}-${this.id}${LOCK_SUFFIX}`
+    )
+      return true;
+    const stem = name.slice(0, -".json".length);
+    const token = stem.slice(stem.lastIndexOf("-") + 1);
+    // Our own messages carry a variable counter/byte-count terminal whose exact
+    // name the receiver cannot predict, so they stay anchored to the numeric
+    // grammar token. Scoped to our OWN prefix: a peer numeric-terminal file is
+    // the message scan's job -- poll() routes or rejects it above and it never
+    // falls here -- so recognizing one here would be unreachable today and a
+    // false "recognized" for a future caller consulting this baseline directly
+    // (e.g. a `<peerId>-foo-5.json` the scan rejects as malformed).
+    if (ownPrefixed && /^\d+$/.test(token)) return true;
+    if (token !== "ack") return false;
+    // An ack marker is `<writerId>-<originalName>-ack.json`. Recognize it only
+    // when `<originalName>` is itself a full, legal target for one of the two
+    // ids -- the peer's or our own hello stem, or a message name -- rather than
+    // accepting any >=4-segment shape. This rejects `<id>-x-y-ack.json` and
+    // `<id>-<peerId>-x-ack.json` alike. The only stray names that still pass are
+    // acks of a correctly-shaped target that was never actually sent (e.g.
+    // `<id>-<peerId>-999-ack.json`): distinguishing those is the identity
+    // question the directory snapshot (195255994) owns, and such an ack is inert
+    // -- zero-length and matching no expected-ack lookup. Prefix tests and the
+    // byte-count parse are prefix/terminal anchored, so this stays correct even
+    // if a peer_id itself contains a dash.
+    const inner = stem.slice(0, -"-ack".length); // <writerId>-<originalName>
+    for (const writer of [this.id, peerId]) {
+      if (!inner.startsWith(`${writer}-`)) continue;
+      const original = inner.slice(`${writer}-`.length);
+      const isHello =
+        original === `${this.id}-hello` || original === `${peerId}-hello`;
+      const isMessage =
+        (original.startsWith(`${this.id}-`) ||
+          original.startsWith(`${peerId}-`)) &&
+        parseMessageByteCount(`${original}.json`) !== undefined;
+      if (isHello || isMessage) return true;
+    }
+    return false;
+  }
+
+  // Applies the resolved `unexpectedFiles` policy to files found mid-loop that
+  // are neither recognized for the exchange nor in-flight temp writes
+  // (enforcement site 3). `error` throws a terminal UsageError (CLI exit 64, a
+  // usage/config condition like a wrong or shared directory) naming the files
+  // and the path; `warn` logs each distinct name at most once across the
+  // session; `ignore` does nothing (the pre-existing silent-skip behavior).
+  private handleUnexpectedFiles(names: string[], path: string): void {
+    const policy = this.resolveUnexpectedFilesPolicy();
+    if (policy === "ignore") return;
+    if (policy === "error")
+      throw new UsageError(
+        `unexpected file(s) appeared in ${path} during the exchange: ` +
+          `${names.join(", ")}. The directory must be dedicated to a single ` +
+          'exchange between exactly two parties (see EXCHANGE_SPEC.md "Directory ' +
+          'exclusivity"); a foreign file usually means another process or ' +
+          "session is writing to this path, or a sync tool produced a conflict " +
+          "copy or partial download. Remove the file, or set " +
+          'connection.options.unexpected_files to "warn" or "ignore" if the ' +
+          "directory cannot be dedicated.",
+      );
+    // warn: log each distinct name at most once per session (warnedUnexpected-
+    // Files), since poll() re-lists every cycle and a persisting file would
+    // otherwise log on each pass.
+    for (const name of names) {
+      if (this.warnedUnexpectedFiles.has(name)) continue;
+      this.warnedUnexpectedFiles.add(name);
+      this.log.warn(
+        `[${this.role}] unexpected file ${name} in ${path} during the ` +
+          "exchange; continuing (unexpected_files: warn). If this directory is " +
+          "dedicated to the exchange, this may be a conflict copy, a partial " +
+          "download, or another session sharing the path.",
+      );
     }
   }
 
@@ -745,62 +2188,331 @@ export class FileSyncConnection extends BufferedErrorEmitter {
 
     if (!this.peerId) throw new Error("not synchronized");
 
-    const inPath = `${this.path}/${this.peerId}.json`;
+    const path = this.path;
+    const peerId = this.peerId;
 
     let reachedGet = false;
     try {
-      this.log.trace(`[${this.role}] polling for message from ${this.peerId}`);
-      const messageFile = await this.client.exists(inPath);
-      if (messageFile) {
-        this.log.debug(
-          `[${this.role}] getting message from ${this.peerId}.json`,
-        );
+      this.log.trace(`[${this.role}] polling for message from ${peerId}`);
+      // Detect via a pattern scan rather than an exact-name exists(): the
+      // message filename now encodes a per-message byte count (and optionally
+      // a timestamp and counter), so the receiver cannot predict the exact
+      // name. `<peerId>-*.json` with a numeric terminal segment (the grammar
+      // discriminant) matches only the peer's message files; its
+      // `-hello.json`/`-ack.json`/`-lock.json` control files have non-numeric
+      // terminals and are recognized for the loop instead.
+      //
+      // Enforcement site 3 (see docs/FILE_SYNC.md). The scan now classifies
+      // EVERY file in the listing, not only peer-prefixed ones: a file that is
+      // neither a peer message nor recognized for the loop (both hellos, both
+      // acks, the lock, both parties' messages and message-acks, our own
+      // writes, and in-flight `temp-*.tmp`) is an unexpected file and handled
+      // per `unexpectedFiles` -- a revision of the old "non-numeric terminals
+      // are ignored, not errors" rule for the post-entry window. The previous
+      // behavior (unconditional silent skip) is preserved by
+      // `unexpected_files: ignore`.
+      //
+      // In retain mode, messages are never deleted so the directory accumulates
+      // one entry per send. synchronize() asserts a clean directory, so recvSeq
+      // starts at 0 and the next unprocessed message always has NNN === recvSeq.
+      const allFiles = await this.client.list(path);
 
-        reachedGet = true;
-        const message = await this.client.get(inPath, { encoding: "utf-8" });
-        reachedGet = false;
+      const messages: Array<{ file: FileInfo; declaredSize: number }> = [];
+      const unexpected: string[] = [];
+      for (const file of allFiles) {
+        const name = file.name;
 
-        this.log.debug(`[${this.role}] deleting message ${this.peerId}.json`);
-        try {
-          await this.client.delete(inPath);
-        } catch {
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.options.pollingFrequency),
-          );
-          try {
-            await this.client.delete(inPath);
-          } catch (deleteErr: unknown) {
-            this.log.warn(
-              `[${this.role}] failed to delete ${this.peerId}.json; ` +
-                "please notify the administrator that manual cleanup " +
-                `may be required: ${errMessage(deleteErr)}`,
-            );
+        // Peer message scan. A peer-prefixed `.json` whose terminal segment is
+        // a byte count is a message (the grammar discriminant). Ack markers
+        // (terminal `ack`) share the prefix but are control files, so they are
+        // excluded here and fall through to the recognized-for-the-loop check.
+        if (
+          name.startsWith(`${peerId}-`) &&
+          name.endsWith(".json") &&
+          !name.endsWith("-ack.json")
+        ) {
+          const declaredSize = parseMessageByteCount(name);
+          if (declaredSize !== undefined) {
+            if (this.options.retainFiles) {
+              const nnn = parseTimestampedMessageNNN(name);
+              if (nnn === undefined) {
+                // A byte-count terminal but no parseable NNN segment. In retain
+                // mode every peer message carries an NNN: the bilateral retain
+                // agreement is verified at rendezvous and synchronize() hard-
+                // requires retain => timestamp on both sides, so a correctly
+                // configured peer cannot produce this name. It is therefore a
+                // malformed protocol file (corruption, or a foreign message-
+                // shaped file), terminal regardless of the `unexpectedFiles`
+                // policy, and reported BEFORE the recvSeq selection guard so it
+                // is not silently skipped as a "different NNN".
+                //
+                // Deliberately a plain malformed-protocol UsageError, NOT a
+                // BilateralModeMismatchError: by this point both sides have
+                // already agreed on retain/timestamp at rendezvous, so a "your
+                // settings disagree" message would misdirect the operator away
+                // from the real cause (a corrupt or stray file). It is a
+                // protocol error at this point, deeper than a misconfiguration.
+                //
+                // Names only this file -- the priority signal -- and does not
+                // enumerate any other unexpected files this cycle may hold: the
+                // throw fires mid-scan, so that list is itself incomplete, and a
+                // clean re-run surfaces any remaining foreign files via
+                // handleUnexpectedFiles. The message flags the possibility
+                // rather than listing them.
+                throw new UsageError(
+                  `message file ${name} from ${peerId} in ${path} has a ` +
+                    "byte-count terminal segment but no parseable NNN segment; " +
+                    "a correctly configured retain-mode peer cannot produce " +
+                    "this name, so the file is corrupt or does not belong to " +
+                    "this exchange. The directory may contain further " +
+                    "unexpected files this error does not enumerate; inspect it " +
+                    "before retrying",
+                );
+              }
+              // NNN < recvSeq is an already-consumed retained message; a higher
+              // NNN is not yet current. Either way it is not this cycle's
+              // message, so skip it. A foreign message-shaped file with a non-
+              // matching NNN is skipped here too and so escapes the unexpected-
+              // file policy -- it is indistinguishable by name from a retained
+              // message, so detecting it needs 195255994's directory snapshot
+              // (see the isRecognizedLoopFile seam note); out of scope under
+              // strict-empty I0, where no such file can pre-exist.
+              if (nnn !== this.recvSeq) continue;
+            }
+            messages.push({ file, declaredSize });
+            continue;
           }
+          // Peer-prefixed `.json`, non-ack, non-numeric terminal (e.g. the peer
+          // hello, or a stray `<peerId>-backup.json`): fall through to the
+          // recognized/unexpected classification below.
         }
 
-        const validatedMessage = Message.parse(JSON.parse(message.toString()));
-        this.log.trace(
-          `[${this.role}] received message seq=${validatedMessage.seq}, ` +
-            `type=${validatedMessage.type}`,
-        );
+        // Foreign-file detection: a file neither recognized for the loop nor an
+        // in-flight temp write is unexpected and handled per `unexpectedFiles`.
+        if (!this.isRecognizedLoopFile(name, peerId)) unexpected.push(name);
+      }
 
-        if (validatedMessage.type === "Uint8Array") {
-          const bytes = Buffer.from(
-            validatedMessage.payload as string,
-            "base64",
+      // Apply the mid-loop unexpected-file policy before processing messages:
+      // `error` throws here (terminal), `warn` logs once per name and falls
+      // through, `ignore` is a no-op. Malformed protocol files (the unparseable-
+      // NNN case above) are handled separately and unconditionally.
+      if (unexpected.length > 0) this.handleUnexpectedFiles(unexpected, path);
+
+      if (messages.length > 1) {
+        // Two messages selected at once is a terminal protocol violation in
+        // either mode -- re-reading cannot reconcile it -- so it is a UsageError
+        // that stops the poller (I5b/I6), not a retryable transport failure.
+        if (this.options.retainFiles) {
+          // In retain mode the scan is filtered to a single NNN (recvSeq), so
+          // two matches mean two files share one NNN -- a protocol violation or
+          // directory reuse, not necessarily a separate session.
+          throw new UsageError(
+            `more than one message file with NNN=${this.recvSeq} from ` +
+              `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
           );
-          this.emit("data", bytes);
+        }
+        // Delete mode keeps at most one outstanding message per direction (I9),
+        // so two peer messages means a concurrent session or a protocol bug.
+        throw new UsageError(
+          `more than one message file from ${peerId} in ${path} - are there ` +
+            "other sessions using this path?",
+        );
+      }
+
+      if (messages.length === 1) {
+        const { file: messageFile, declaredSize } = messages[0];
+
+        if (messageFile.size < declaredSize) {
+          // The file has appeared but the sync tool has not finished
+          // transferring it. Leave it untouched and re-check next cycle rather
+          // than reading a truncated message. For a direct transport (SFTP),
+          // the atomic rename means the size already matches on the first poll.
+          this.log.trace(
+            `[${this.role}] ${messageFile.name} is ${messageFile.size}/` +
+              `${declaredSize} bytes; waiting for full sync`,
+          );
         } else {
-          this.emit("data", validatedMessage.payload);
+          const inPath = `${path}/${messageFile.name}`;
+          this.log.debug(`[${this.role}] getting message ${messageFile.name}`);
+
+          reachedGet = true;
+          const message = await this.client.get(inPath, { encoding: "utf-8" });
+          reachedGet = false;
+
+          // The file has already passed the byte-count gate above, so it is
+          // fully synced: a JSON-parse or schema-validation failure here is
+          // genuine corruption, not a partial write, and re-reading the same
+          // bytes cannot fix it. Classify it as a terminal UsageError (the
+          // catch below stops the poller on a UsageError) -- the same rule
+          // readControlFileWithGate applies to control files. This is
+          // mode-agnostic: in retain mode the never-deleted file would
+          // otherwise be re-read every poll cycle until the peer timeout; in
+          // delete mode it is deleted before this runs, but the classification
+          // stays uniform so a corrupt frame is a clean terminal failure rather
+          // than a silently dropped message.
+          const parseMessage = (): z.infer<typeof Message> => {
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(message.toString());
+            } catch (parseErr: unknown) {
+              throw new UsageError(
+                `message file ${messageFile.name} from ${peerId} is fully ` +
+                  `synced but is not valid JSON: ${errMessage(parseErr)}`,
+              );
+            }
+            const result = Message.safeParse(parsed);
+            if (!result.success)
+              throw new UsageError(
+                `message file ${messageFile.name} from ${peerId} is fully ` +
+                  `synced but failed schema validation: ${result.error.message}`,
+              );
+            return result.data;
+          };
+
+          if (this.options.retainFiles) {
+            // Retain mode never deletes the message file: the directory is the
+            // durable transcript, and the ack marker -- written here after
+            // validation and before emit -- is the consumption signal the sender
+            // waits for in place of the file disappearing. Because no message is
+            // ever removed, the directory accumulates one message and one ack
+            // per exchanged message on every transport (not only no-delete ones);
+            // poll() re-lists and reclassifies it each cycle, so per-poll cost
+            // scales with transcript length. Rotation/retention is an out-of-band
+            // operator responsibility.
+            const msgNNN = this.recvSeq;
+
+            const validatedMessage = parseMessage();
+
+            // Both the sender and receiver derive NNN from the same per-session
+            // counter, so a body seq that does not match the filename NNN
+            // indicates file corruption or a protocol bug. Surface it
+            // immediately rather than silently acking or delivering a
+            // mismatched message.
+            if (validatedMessage.seq !== msgNNN)
+              throw new UsageError(
+                `message body seq=${validatedMessage.seq} does not match ` +
+                  `filename NNN=${msgNNN}: possible corruption or protocol bug`,
+              );
+
+            this.log.trace(
+              `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+                `type=${validatedMessage.type}`,
+            );
+
+            // Write the ack marker before emit. The ack is the sender's go-ahead
+            // signal and means "durably received", not "consumed by the
+            // application": the message is a fully-synced file that retain mode
+            // never deletes, so it is already durable at this point, and acking
+            // before the local hand-off keeps the peer unblocked even when emit
+            // fails (e.g. downstream backpressure). Do NOT reorder to
+            // emit-before-ack -- an ack-write failure after a successful emit
+            // would re-deliver an already-consumed message.
+            //
+            // The ack name is derived from the consumed message's fixed name, so
+            // a reprocess re-derives the identical name and cannot create a
+            // duplicate file. The per-NNN guard is therefore only an
+            // optimization: if a prior poll wrote this NNN's ack and then emit
+            // threw, recvSeq stayed at msgNNN and the message is reprocessed
+            // here; skipping the re-write saves one put+rename of a marker that
+            // would otherwise overwrite itself under the same name.
+            if (this.lastAckedNNN !== msgNNN) {
+              const ackName = await this.writeAck(
+                path,
+                messageFile.name.slice(0, -".json".length),
+              );
+              this.lastAckedNNN = msgNNN;
+              this.log.debug(
+                `[${this.role}] wrote ack ${ackName} for seq=${validatedMessage.seq}`,
+              );
+            }
+
+            if (validatedMessage.type === "Uint8Array") {
+              const bytes = Buffer.from(
+                validatedMessage.payload as string,
+                "base64",
+              );
+              this.emit("data", bytes);
+            } else {
+              this.emit("data", validatedMessage.payload);
+            }
+            // Advance only after the application has seen the payload: if emit
+            // throws, recvSeq stays at msgNNN so the (never-deleted) message file
+            // is reprocessed on the next poll rather than permanently lost.
+            this.recvSeq++;
+          } else {
+            // Parse before deleting. A corrupt fully-synced message is terminal
+            // (I5b), so parsing first leaves the offending file on disk for
+            // inspection instead of destroying it; a valid message is then
+            // consumed by deleting it (the delete-mode go-ahead signal to the
+            // sender) before emit, the same ordering relative to emit as before.
+            const validatedMessage = parseMessage();
+            this.log.trace(
+              `[${this.role}] received message seq=${validatedMessage.seq}, ` +
+                `type=${validatedMessage.type}`,
+            );
+
+            this.log.debug(
+              `[${this.role}] deleting message ${messageFile.name}`,
+            );
+            try {
+              await this.client.delete(inPath);
+            } catch {
+              // First delete failed; retry once after a backoff. On abort
+              // (close() mid-poll) this.wait rejects here, unwinding past the
+              // emit("data") below into poll()'s catch, where the !pollerActive
+              // guard swallows it (see below). The second delete AND the emit
+              // are both skipped, so the message is left undelivered for this
+              // session -- but it is still on disk (this first delete failed),
+              // so a fresh connection re-reads it. Teardown defers delivery; it
+              // does not lose the message.
+              await this.wait(this.options.pollingFrequency);
+              try {
+                await this.client.delete(inPath);
+              } catch (deleteErr: unknown) {
+                this.log.warn(
+                  `[${this.role}] failed to delete ${messageFile.name}; ` +
+                    "please notify the administrator that manual cleanup " +
+                    `may be required: ${errMessage(deleteErr)}`,
+                );
+              }
+            }
+
+            if (validatedMessage.type === "Uint8Array") {
+              const bytes = Buffer.from(
+                validatedMessage.payload as string,
+                "base64",
+              );
+              this.emit("data", bytes);
+            } else {
+              this.emit("data", validatedMessage.payload);
+            }
+          }
         }
       }
       this.consecutiveEnoentCount = 0;
     } catch (err: unknown) {
+      // Shutdown guard (by state, not error type): close() aborts the session
+      // controller, so a wait parked in the delete-retry backoff above rejects
+      // with a ConnectionClosedError that lands here. Swallow it -- close()
+      // already cleared pollerActive (synchronously, before this rejection
+      // could surface), so the guard is true only during teardown. A genuine
+      // error during active polling reaches here with pollerActive still true
+      // (the pollerActive = false assignments below run later), so this cannot
+      // suppress a real failure; and it is robust to a transport client that
+      // wraps/rethrows the rejection, which an `instanceof` check would miss.
+      // The finally then sees pollerActive === false and does not reschedule.
+      // pollerActive is also cleared by the public stop(), so this guard is
+      // really "stop() or close() ran" -- but stop() is only ever called from
+      // close() in this codebase, so the guard still means teardown. Were a
+      // future caller to invoke stop() independently mid-poll, a concurrent
+      // real error would be swallowed here; that is an accepted limitation of
+      // the deliberate by-state (not by-error-type) choice.
+      if (!this.pollerActive) return;
       if ((err as NodeJS.ErrnoException).code === "ENOENT" && reachedGet) {
-        // TOCTOU race: exists() returned true but get() found the file gone,
-        // meaning the peer cleaned up between our two calls. After a single
-        // race the file is genuinely gone and subsequent exists() calls return
-        // false, resetting the counter on the next clean poll cycle.
+        // TOCTOU race: list() surfaced the file but get() found it gone,
+        // meaning the peer cleaned up between the two calls. After a single
+        // race the file is genuinely gone and subsequent list() cycles no
+        // longer match it, resetting the counter on the next clean poll.
         // Consecutive ENOENTs that keep incrementing the counter indicate a
         // pathological filesystem state that will not self-resolve; emit an
         // error after MAX_CONSECUTIVE_ENOENT rather than looping silently
@@ -817,17 +2529,37 @@ export class FileSyncConnection extends BufferedErrorEmitter {
           );
         } else {
           this.log.warn(
-            `[${this.role}] ${this.peerId}.json disappeared between exists and ` +
-              "get; assuming peer cleaned up",
+            `[${this.role}] message from ${peerId} disappeared between list ` +
+              "and get; " +
+              (this.options.retainFiles
+                ? "unexpected in retain mode (files are never deleted) -- " +
+                  "possible external interference; retrying"
+                : "assuming peer cleaned up"),
           );
         }
       } else {
         // Non-TOCTOU failure: either a non-ENOENT error from any operation, or
         // any error where reachedGet is false (e.g., exists() or message
-        // parsing). Note: delete() errors cannot reach here — delete() has its
-        // own inner try/catch (see above) that handles and swallows them.
-        // All cases are propagated immediately as hard failures.
+        // parsing). Note: a delete() FAILURE cannot reach here -- delete() has
+        // its own inner try/catch (see above) that handles and swallows it. The
+        // one rejection the delete-retry block can now propagate is an abort
+        // (close() firing during its this.wait backoff), but that is a
+        // ConnectionClosedError caught by the !pollerActive guard at the top of
+        // this catch and never reaches this branch. All other cases are
+        // propagated immediately as hard failures.
         this.consecutiveEnoentCount = 0;
+        // A UsageError reaching this catch is terminal -- re-reading the same
+        // bytes cannot help: a fully-synced message that fails to parse or
+        // validate, a body-seq/filename-NNN mismatch, or a duplicate NNN. Stop
+        // the poller before emitting so the finally block does not reschedule
+        // and re-read the same corrupt file. A transient non-UsageError -- a
+        // list/get/put/rename or ack-write transport hiccup -- reschedules
+        // instead, so the never-deleted retain message is reprocessed (I8).
+        // emit("data") sits in this try too, but the sole production consumer
+        // (deliver() in messageConnection.ts) cannot throw synchronously; if a
+        // future handler ever threw a UsageError it would be terminal here,
+        // which is the safe default.
+        if (err instanceof UsageError) this.pollerActive = false;
         this.emit(
           "error",
           err instanceof Error ? err : new Error(errMessage(err)),
@@ -841,6 +2573,18 @@ export class FileSyncConnection extends BufferedErrorEmitter {
         );
       }
     }
+  }
+
+  // Resets all per-session counters and tracking to their initial state.
+  // Called at the rendezvous outer catch (to allow retry on the same instance),
+  // at the joiner prefix-at-dash error path, and at close() (so a closed
+  // instance does not carry stale counters into a hypothetical re-open).
+  private resetSessionState() {
+    this.seq = 0;
+    this.recvSeq = 0;
+    this.lastAckedNNN = -1;
+    this.lastSentFile = undefined;
+    this.warnedUnexpectedFiles.clear();
   }
 
   start() {

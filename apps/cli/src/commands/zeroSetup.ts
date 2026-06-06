@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
-import { getLogger, loadCSVFile, prepareForExchange } from "@psilink/core";
+import {
+  getLogger,
+  loadCSVFile,
+  prepareForExchange,
+  UsageError,
+} from "@psilink/core";
 import type {
   ConnectionConfig,
   FileDropConnectionConfig,
@@ -12,7 +17,12 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-import { applyConnectionOverrides } from "../config";
+import {
+  applyConnectionOverrides,
+  announceRetainMode,
+  DEFAULT_CONFIG_PATH,
+} from "../config";
+import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
@@ -41,13 +51,15 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "where to write psilink.yaml when --save is given (default: " +
-        "./psilink.yaml)",
+        DEFAULT_CONFIG_PATH +
+        ")",
     })
     .option("key-file", {
       type: "string",
       describe:
         "where to write .psilink.key when --save is given (default: " +
-        "./.psilink.key)",
+        DEFAULT_KEY_PATH +
+        ")",
     })
     .option("identity", {
       type: "string",
@@ -88,6 +100,42 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe: "silent | error | warn | info | debug | trace; default=info",
     })
+    .option("lockless-rendezvous", {
+      type: "boolean",
+      describe:
+        "use the ack-handshake rendezvous instead of the atomic lock-file " +
+        "race; required on sync-mediated transports that lack atomic " +
+        "exclusive-create or deletion visibility during rendezvous. Both " +
+        "parties must set this flag identically",
+    })
+    .option("peer-id", {
+      type: "string",
+      describe:
+        "stable identifier for this party; appears in filenames and logs. " +
+        "Requires timestamp_in_filename: true. Both parties must use " +
+        "distinct ids",
+    })
+    .option("timestamp-in-filename", {
+      type: "boolean",
+      describe:
+        "encode a UTC timestamp and per-session counter in each outgoing " +
+        "message filename; --retain-files implies it, so it need not be passed " +
+        "explicitly. Both parties must use the same value",
+    })
+    .option("retain-files", {
+      type: "boolean",
+      describe:
+        "keep all exchange files as a permanent transcript instead of " +
+        "deleting them after consumption; intended for sync-mediated " +
+        "transports that do not propagate deletions and for audit use cases. " +
+        "Requires --timestamp-in-filename. Both parties must set this flag " +
+        "identically -- a mismatch is detected at rendezvous and fails fast on " +
+        "both sides with a clear error naming each side's setting, rather than " +
+        "stalling until the peer timeout. A fresh " +
+        "directory is required for each exchange and is enforced: reusing a " +
+        "directory with retained files from a prior session is rejected with " +
+        "an error at startup",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -113,6 +161,10 @@ interface ZeroSetupArgs {
   connectionTimeout?: number;
   peerTimeout?: number;
   maxReconnectAttempts?: number;
+  locklessRendezvous?: boolean;
+  peerId?: string;
+  timestampInFilename?: boolean;
+  retainFiles?: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -133,8 +185,9 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   return {
     positionals: argv._,
     save: (argv["save"] as boolean | undefined) ?? false,
-    configFile: (argv["config-file"] as string | undefined) ?? "./psilink.yaml",
-    keyFile: (argv["key-file"] as string | undefined) ?? "./.psilink.key",
+    configFile:
+      (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
+    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
     identity: argv["identity"] as string | undefined,
     serverPort: argv["server-port"] as number | undefined,
     serverUsername: argv["server-username"] as string | undefined,
@@ -147,6 +200,10 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     connectionTimeout: argv["connection-timeout"] as number | undefined,
     peerTimeout: argv["peer-timeout"] as number | undefined,
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
+    locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
+    peerId: argv["peer-id"] as string | undefined,
+    timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
+    retainFiles: argv["retain-files"] as boolean | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -220,7 +277,8 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
     case "file:":
       return "filedrop";
     default:
-      throw new Error(
+      // Invalid caller input (exit 64), not a transport failure.
+      throw new UsageError(
         `unsupported URL scheme: ${url.protocol}; expected sftp://, ` +
           "ssh://, ws://, wss://, or file://",
       );
@@ -236,7 +294,7 @@ export function createConnection(
 
   if (channel === "filedrop") {
     if (server.hostname && server.hostname !== "localhost") {
-      throw new Error(
+      throw new UsageError(
         `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
           `or file://localhost/path; got: ${server.href}`,
       );
@@ -249,11 +307,15 @@ export function createConnection(
       connectionTimeout: options.connectionTimeout,
       peerTimeout: options.peerTimeout,
       maxReconnectAttempts: options.maxReconnectAttempts,
+      locklessRendezvous: options.locklessRendezvous,
+      peerId: options.peerId,
+      timestampInFilename: options.timestampInFilename,
+      retainFiles: options.retainFiles,
     });
   }
 
   if (channel !== "sftp")
-    throw new Error(`${channel} channel not yet supported in the CLI`);
+    throw new UsageError(`${channel} channel not yet supported in the CLI`);
 
   const base: SFTPConnectionConfig = {
     channel: "sftp",
@@ -274,6 +336,10 @@ export function createConnection(
     serverPassword: options.serverPassword,
     serverPrivateKey: options.serverPrivateKey,
     serverPort: options.serverPort,
+    locklessRendezvous: options.locklessRendezvous,
+    peerId: options.peerId,
+    timestampInFilename: options.timestampInFilename,
+    retainFiles: options.retainFiles,
   });
 }
 
@@ -325,6 +391,36 @@ export async function handler(argv: Arguments): Promise<void> {
 
   const { server, input, output } = resolved;
 
+  // Warn before createConnection can throw so the user sees the flag issue
+  // even if the channel is not yet supported.
+  if (options.locklessRendezvous === true) {
+    try {
+      const ch = channelFromURL(server);
+      if (ch !== "sftp" && ch !== "filedrop") {
+        log.warn(
+          `--lockless-rendezvous has no effect on the ${ch} channel and ` +
+            "will be ignored; it is only supported on sftp and filedrop",
+        );
+      }
+    } catch {
+      // Unknown URL scheme; createConnection handles this.
+    }
+  }
+
+  if (options.retainFiles === true) {
+    try {
+      const ch = channelFromURL(server);
+      if (ch !== "sftp" && ch !== "filedrop") {
+        log.warn(
+          `--retain-files is not supported on the ${ch} channel; ` +
+            "it is only valid for sftp and filedrop",
+        );
+      }
+    } catch {
+      // Unknown URL scheme; createConnection handles this.
+    }
+  }
+
   if (options.save) {
     log.warn(
       "--save: bootstrapping a shared secret is not yet implemented; " +
@@ -340,8 +436,16 @@ export async function handler(argv: Arguments): Promise<void> {
     prepared = await prepareDataset(identity, input);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit((err as { exitCode?: number }).exitCode ?? 69);
+    // A bad URL scheme or unsupported channel is a usage error (exit 64);
+    // prepareDataset failures carry their own exitCode; otherwise exit 69.
+    process.exit(
+      err instanceof UsageError
+        ? 64
+        : ((err as { exitCode?: number }).exitCode ?? 69),
+    );
   }
+
+  announceRetainMode(connection, log);
 
   try {
     // Spread + cast: `connection` is `ConnectionConfig` (which includes the
@@ -366,7 +470,7 @@ export async function handler(argv: Arguments): Promise<void> {
     );
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit(69);
+    process.exit(err instanceof UsageError ? 64 : 69);
   }
 
   if (!options.save) {

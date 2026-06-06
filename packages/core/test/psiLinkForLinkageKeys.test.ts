@@ -11,16 +11,21 @@ import { linkViaPSI } from "../src/link";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 
-import { PassthroughConnection } from "./utils/passthroughConnection";
+import { createMessagePipe } from "../src/connection/messageConnection";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const metadata: ColumnMetadata[] = [
-  { name: "id",            type: "identifier",  role: "identifier", isPayload: false },
-  { name: "first_name",    type: "firstName",   role: "linkage",    isPayload: false },
-  { name: "last_name",     type: "lastName",    role: "linkage",    isPayload: false },
-  { name: "ssn",           type: "ssn",         role: "linkage",    isPayload: false },
-  { name: "date_of_birth", type: "dateOfBirth", role: "linkage",    isPayload: false },
+  { name: "id", type: "identifier", role: "identifier", isPayload: false },
+  { name: "first_name", type: "firstName", role: "linkage", isPayload: false },
+  { name: "last_name", type: "lastName", role: "linkage", isPayload: false },
+  { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+  {
+    name: "date_of_birth",
+    type: "dateOfBirth",
+    role: "linkage",
+    isPayload: false,
+  },
 ];
 
 // Two keys: SSN+LN+DOB (precise), then SSN+LN1+FN1 (looser). This replicates
@@ -33,24 +38,36 @@ const terms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [
-    { name: "ssn",         type: "ssn" },
-    { name: "lastName",    type: "lastName" },
-    { name: "firstName",   type: "firstName" },
+    { name: "ssn", type: "ssn" },
+    { name: "lastName", type: "lastName" },
+    { name: "firstName", type: "firstName" },
     { name: "dateOfBirth", type: "dateOfBirth" },
   ],
   linkageKeys: [
     {
       name: "SSN + LN + DOB",
-      elements: [{ field: "ssn" }, { field: "lastName" }, { field: "dateOfBirth" }],
+      elements: [
+        { field: "ssn" },
+        { field: "lastName" },
+        { field: "dateOfBirth" },
+      ],
     },
     {
       name: "SSN + LN1 + FN1",
       elements: [
         { field: "ssn" },
-        { field: "lastName",
-          transform: [{ function: "substring", params: { start: 1, length: 1 } }] },
-        { field: "firstName",
-          transform: [{ function: "substring", params: { start: 1, length: 1 } }] },
+        {
+          field: "lastName",
+          transform: [
+            { function: "substring", params: { start: 1, length: 1 } },
+          ],
+        },
+        {
+          field: "firstName",
+          transform: [
+            { function: "substring", params: { start: 1, length: 1 } },
+          ],
+        },
       ],
     },
   ],
@@ -62,7 +79,8 @@ function makeIterables(
 ): StandardizedKeyIterable[] {
   const dataset = buildStandardizedDataset(undefined, rawRows, metadata, terms);
   return terms.linkageKeys.map(
-    (key) => new StandardizedKeyIterable(key, dataset, rawRows.length, isReceiver),
+    (key) =>
+      new StandardizedKeyIterable(key, dataset, rawRows.length, isReceiver),
   );
 }
 
@@ -70,12 +88,16 @@ function makeIterables(
 
 const psiLibrary = await PSI();
 
-const serverConn = new PassthroughConnection();
-const clientConn = new PassthroughConnection(serverConn);
-serverConn.setOther(clientConn);
+const [serverConn, clientConn] = createMessagePipe();
 
-const server = new PSIParticipant("server", psiLibrary, { role: "starter",  verbose: -1 });
-const client = new PSIParticipant("client", psiLibrary, { role: "joiner",   verbose: -1 });
+const server = new PSIParticipant("server", psiLibrary, {
+  role: "starter",
+  verbose: -1,
+});
+const client = new PSIParticipant("client", psiLibrary, {
+  role: "joiner",
+  verbose: -1,
+});
 
 log.setLevel("DEBUG");
 
@@ -84,8 +106,20 @@ log.setLevel("DEBUG");
 test("rules match in order", async () => {
   // Data is pre-cleaned: SSNs without dashes, DOBs in YYYYMMDD.
   const serverRows = [
-    { id: "159859483", first_name: "James",  last_name: "HEARD", ssn: "559811301", date_of_birth: "19750716" },
-    { id: "165562801", first_name: "Albert", last_name: "IORIO", ssn: "322842281", date_of_birth: "19750817" },
+    {
+      id: "159859483",
+      first_name: "James",
+      last_name: "HEARD",
+      ssn: "559811301",
+      date_of_birth: "19750716",
+    },
+    {
+      id: "165562801",
+      first_name: "Albert",
+      last_name: "IORIO",
+      ssn: "322842281",
+      date_of_birth: "19750817",
+    },
   ];
 
   // Client row 0 matches only by key 2 (SSN+LN1+FN1, wrong DOB).
@@ -93,19 +127,55 @@ test("rules match in order", async () => {
   // Client row 2 matches only by key 2 (SSN+LN1+FN1, wrong DOB) — same SSN as
   // server row 0, but key 1 consumed that server record already.
   const clientRows = [
-    { id: "159859483", first_name: "Jim",   last_name: "HEARD", ssn: "559811301", date_of_birth: "19750717" }, // wrong DOB
-    { id: "159859483", first_name: "Jim",   last_name: "HEARD", ssn: "559811301", date_of_birth: "19750716" },
-    { id: "165562801", first_name: "Albert",last_name: "IORIO", ssn: "322842281", date_of_birth: "19750818" }, // wrong DOB
+    {
+      id: "159859483",
+      first_name: "Jim",
+      last_name: "HEARD",
+      ssn: "559811301",
+      date_of_birth: "19750717",
+    }, // wrong DOB
+    {
+      id: "159859483",
+      first_name: "Jim",
+      last_name: "HEARD",
+      ssn: "559811301",
+      date_of_birth: "19750716",
+    },
+    {
+      id: "165562801",
+      first_name: "Albert",
+      last_name: "IORIO",
+      ssn: "322842281",
+      date_of_birth: "19750818",
+    }, // wrong DOB
   ];
 
   const serverKeys = makeIterables(serverRows);
   const clientKeys = makeIterables(clientRows);
 
   const [serverResult, clientResult] = await Promise.all([
-    linkViaPSI({ cardinality: "one-to-one" }, server, serverConn, serverKeys, -1),
-    linkViaPSI({ cardinality: "one-to-one" }, client, clientConn, clientKeys, -1),
+    linkViaPSI(
+      { cardinality: "one-to-one" },
+      server,
+      serverConn,
+      serverKeys,
+      -1,
+    ),
+    linkViaPSI(
+      { cardinality: "one-to-one" },
+      client,
+      clientConn,
+      clientKeys,
+      -1,
+    ),
   ]);
 
-  expect(serverResult).toEqual([[0, 1], [1, 2]]);
-  expect(clientResult).toEqual([[1, 2], [0, 1]]);
+  expect(serverResult).toEqual([
+    [0, 1],
+    [1, 2],
+  ]);
+  expect(clientResult).toEqual([
+    [1, 2],
+    [0, 1],
+  ]);
 });

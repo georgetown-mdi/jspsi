@@ -8,7 +8,11 @@ import {
   fromBase64Url,
   bytesEqual,
 } from "./utils/crypto.js";
-import type { Connection, HandshakeRole } from "./types.js";
+import type { HandshakeRole } from "./types.js";
+import {
+  ConnectionError,
+  type MessageConnection,
+} from "./connection/messageConnection.js";
 
 // Blinding points M and N for SPAKE2 over P-256. They are derived via
 // hash-to-curve (RFC 9380 §8.2, SSWU for P-256 —
@@ -145,7 +149,7 @@ function concat(
 // telling them to give up shortens their recovery from the 30 s handshake
 // timeout to immediately. A failure to send the abort is non-fatal — the peer
 // will time out on their own — so the send error is swallowed.
-async function sendAbort(conn: Connection): Promise<void> {
+async function sendAbort(conn: MessageConnection): Promise<void> {
   try {
     await conn.send({ pakeMsg: "abort" } satisfies Spake2Abort);
   } catch {
@@ -231,53 +235,23 @@ async function deriveKeys(
 // realistic network; exceeding it almost certainly means the peer is gone.
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
-// The `once("data", ...)` listener must be registered synchronously, before
-// any `await`, to avoid a race: if the partner sends and the setImmediate for
-// delivery fires before the listener is registered, the message is dropped.
-// An `error` listener is registered alongside so that an asynchronous transport
-// failure (emitted by FileSyncConnection's poller) rejects the pending receive
-// rather than stalling until the handshake timeout fires.
+// Receive one handshake message, bounded by the 30 s handshake timeout. The
+// connection's inbound queue buffers any frame that arrives before this call,
+// so no listener pre-registration is needed to avoid a race with a fast peer.
 //
-// A buffered error from the previous gap (between the last receive's success
-// and this registration) is consumed synchronously here so a failure that
-// arrived while no listener was attached rejects the new receive immediately
-// rather than being silently dropped.
-function receive(conn: Connection): Promise<unknown> {
-  const p = new Promise<unknown>((resolve, reject) => {
-    const buffered = conn.takeBufferedError();
-    if (buffered !== undefined) {
-      reject(
-        buffered instanceof Error ? buffered : new Error(String(buffered)),
-      );
-      return;
+// A transport-kind ConnectionError (the timeout firing, or the peer dropping
+// the connection) is re-thrown as the distinct "PAKE handshake timed out"
+// error and never triggers an abort: the peer is already gone, so there is no
+// one left to notify.
+async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
+  try {
+    return await conn.receive(HANDSHAKE_TIMEOUT_MS);
+  } catch (e) {
+    if (e instanceof ConnectionError && e.kind === "transport") {
+      throw new Error("PAKE handshake timed out", { cause: e });
     }
-    const timer = setTimeout(() => {
-      // EventEmitter3's removeListener requires the `once` flag (fourth
-      // argument) to locate a listener registered with `once()` rather than
-      // `on()`.  Without it the listener is not found and leaks until the
-      // peer eventually sends a message.
-      conn.removeListener("data", onData, undefined, true);
-      conn.removeListener("error", onError, undefined, true);
-      reject(new Error("PAKE handshake timed out"));
-    }, HANDSHAKE_TIMEOUT_MS);
-    function onData(raw: unknown) {
-      clearTimeout(timer);
-      conn.removeListener("error", onError, undefined, true);
-      resolve(raw);
-    }
-    function onError(err: unknown) {
-      clearTimeout(timer);
-      conn.removeListener("data", onData, undefined, true);
-      reject(err instanceof Error ? err : new Error(String(err)));
-    }
-    conn.once("data", onData);
-    conn.once("error", onError);
-  });
-  // The timeout may fire before the caller reaches `await p` (while
-  // derivePasswordScalar is in-flight).  Attaching a no-op catch marks p as
-  // handled immediately; the rejection is still re-thrown for the caller.
-  p.catch(() => {});
-  return p;
+    throw e;
+  }
 }
 
 // --- SPAKE2 result -----------------------------------------------------------
@@ -307,9 +281,9 @@ export interface Spake2Result {
  *      `{ pakeMsg: "abort" }`
  *
  * `MAC_A` and `MAC_B` are HMAC-SHA-256 under the confirmation key `Ka`
- * derived from the SPAKE2 transcript.  Each receive listener is registered
- * synchronously before the preceding send so that no message can be missed
- * if both parties compute quickly.  If the initiator finds `MAC_B` invalid it
+ * derived from the SPAKE2 transcript.  The connection's inbound queue buffers
+ * any frame that arrives before this side is ready to read it, so a fast peer
+ * cannot race ahead of a receive.  If the initiator finds `MAC_B` invalid it
  * sends an abort so the responder is not left waiting for msg3.
  *
  * For most callers, prefer `authenticateConnection` (from `auth.ts`),
@@ -329,34 +303,11 @@ export interface Spake2Result {
  *   respond within 30 seconds.
  */
 export async function runSpake2(
-  conn: Connection,
+  conn: MessageConnection,
   handshakeRole: HandshakeRole,
   pakeToken: string,
 ): Promise<Spake2Result> {
   if (handshakeRole === "initiator") {
-    // Surface a buffered transport error from a prior listener-gap window
-    // before any further work — otherwise we would derive scalars and send
-    // msg1 to a peer that is gone. The responder branch does not need this
-    // synchronous check because it sends no protocol message until after the
-    // first receive resolves; an early buffered error simply makes the
-    // pending `await msg1Promise` throw.
-    //
-    // The receive() helper below also calls takeBufferedError() inside its
-    // executor; that second check is a no-op when this branch runs because
-    // takeBufferedError clears the buffer on read. The duplication is
-    // intentional: extracting a shared "guard then receive" helper would
-    // obscure that the initiator MUST short-circuit before send(msg1), while
-    // the responder need not.
-    const buffered = conn.takeBufferedError();
-    if (buffered !== undefined)
-      throw buffered instanceof Error ? buffered : new Error(String(buffered));
-
-    // Register the msg2 listener BEFORE the first await so that a transport
-    // error (from FileSyncConnection's poller) emitted during the scalar
-    // derivation rejects the pending receive instead of being buffered for
-    // the next round. Mirrors the responder branch below.
-    const msg2Promise = receive(conn);
-
     // Initiator uses blinding point M (RFC 9382 §3.2).
     const w = await derivePasswordScalar(pakeToken);
     const x = randomScalar();
@@ -373,7 +324,7 @@ export async function runSpake2(
     // Every failure path below sends an abort so the responder stops waiting
     // for msg3 immediately rather than blocking until the 30 s handshake
     // timeout. Aborts are best-effort: see sendAbort() for the rationale.
-    const msg2 = Spake2Msg2Schema.safeParse(await msg2Promise);
+    const msg2 = Spake2Msg2Schema.safeParse(await receiveHandshake(conn));
     if (!msg2.success) {
       await sendAbort(conn);
       throw new Error("PAKE authentication failed");
@@ -430,10 +381,6 @@ export async function runSpake2(
     return { sessionKey: ke };
   } else {
     // Responder uses blinding point N (RFC 9382 §3.2).
-    // Register the msg1 listener BEFORE the first await to avoid a race where
-    // the initiator sends msg1 before the listener is registered.
-    const msg1Promise = receive(conn);
-
     const w = await derivePasswordScalar(pakeToken);
     const x = randomScalar();
     const S = N.multiply(w).add(p256.Point.BASE.multiply(x));
@@ -443,7 +390,7 @@ export async function runSpake2(
     // Every failure path below sends an abort so the initiator stops waiting
     // for msg2 immediately rather than blocking until the 30 s handshake
     // timeout. Aborts are best-effort: see sendAbort() for the rationale.
-    const msg1 = Spake2Msg1Schema.safeParse(await msg1Promise);
+    const msg1 = Spake2Msg1Schema.safeParse(await receiveHandshake(conn));
     if (!msg1.success) {
       await sendAbort(conn);
       throw new Error("PAKE authentication failed");
@@ -475,9 +422,6 @@ export async function runSpake2(
 
     const macB = await hmacSha256(ka, enc.encode("psilink-spake2-confirm-B"));
 
-    // Register the msg3 listener BEFORE sending msg2.
-    const msg3Promise = receive(conn);
-
     // Message 2: send point + MAC_B.
     await conn.send({
       pakeMsg: "2",
@@ -490,7 +434,7 @@ export async function runSpake2(
     // so the initiator has already moved on regardless of the outcome here.
     const msg3 = z
       .union([Spake2Msg3Schema, Spake2AbortSchema])
-      .safeParse(await msg3Promise);
+      .safeParse(await receiveHandshake(conn));
     if (!msg3.success || msg3.data.pakeMsg !== "3") {
       throw new Error("PAKE authentication failed");
     }

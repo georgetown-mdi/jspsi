@@ -156,7 +156,7 @@ describe("createExclusive", () => {
 
   test("normalizes SFTPv3 FAILURE (numeric 4) to code === 'EEXIST' when the file exists (genuine race)", async () => {
     // SFTPv3 SSH_FX_FAILURE (4) is ambiguous. When exists() confirms the file
-    // is present, the exclusive-create lost a genuine wave-file race and the
+    // is present, the exclusive-create lost a genuine lock-file race and the
     // adapter must normalize to EEXIST so FileSyncConnection's race handler
     // fires.
     const sftpV3Err = Object.assign(new Error("Failure"), { code: 4 });

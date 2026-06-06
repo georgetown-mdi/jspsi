@@ -1,7 +1,10 @@
 import * as z from "zod";
 
-import type { Connection } from "./types";
 import type { PSIParticipant } from "./participant";
+import {
+  receiveParsed,
+  type MessageConnection,
+} from "./connection/messageConnection";
 
 import { getLoggerForVerbosity } from "./utils/logger";
 
@@ -91,7 +94,7 @@ export async function linkViaPSI(
     cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
   },
   participant: PSIParticipant,
-  conn: Connection,
+  conn: MessageConnection,
   data: Array<IndexableIterable<string | undefined>>,
   verbosity: number = 0,
   setStage?: (id: string) => void,
@@ -235,7 +238,7 @@ export async function linkViaPSI(
 
 async function exchangeMappedElements(
   id: string,
-  conn: Connection,
+  conn: MessageConnection,
   log: {
     info: (...msg: Array<unknown>) => void;
     debug: (...msg: Array<unknown>) => void;
@@ -244,25 +247,20 @@ async function exchangeMappedElements(
   values: IterationMap,
 ): Promise<IterationMap> {
   if (sendFirst) {
-    return new Promise(async (resolve) => {
-      conn.once("data", (rawData: unknown) => {
-        log.debug(`${id}: received other mapped elements`);
-        resolve(associationAndIterationArray.parse(rawData));
-      });
-      log.debug(`${id}: sending own mapped elements`);
-      await conn.send(values);
-      log.debug(`${id}: waiting for response`);
-    });
+    log.debug(`${id}: sending own mapped elements`);
+    await conn.send(values);
+    log.debug(`${id}: waiting for response`);
+    const result = await receiveParsed(conn, associationAndIterationArray);
+    log.debug(`${id}: received other mapped elements`);
+    return result;
   } else {
-    return new Promise((resolve) => {
-      conn.once("data", async (rawData: unknown) => {
-        log.debug(`${id}: received other mapped elements`);
-
-        log.debug(`${id}: sending own mapped elements`);
-        await conn.send(values);
-
-        resolve(associationAndIterationArray.parse(rawData));
-      });
-    });
+    // Send-before-parse: receive the partner's elements, send ours, then
+    // validate. Sending before parsing ensures a malformed final frame does
+    // not strand the partner waiting for our response.
+    const rawData = await conn.receive();
+    log.debug(`${id}: received other mapped elements`);
+    log.debug(`${id}: sending own mapped elements`);
+    await conn.send(values);
+    return associationAndIterationArray.parse(rawData);
   }
 }

@@ -111,18 +111,33 @@ test.each([
   ["FIRST_NAME", "firstName"],
   ["Email", "emailAddress"],
   ["DOB", "dateOfBirth"],
-] as const)('column name "%s" is matched case-insensitively', (name, expectedType) => {
-  const [col] = inferMetadata([name]);
-  expect(col.type).toBe(expectedType);
-});
+] as const)(
+  'column name "%s" is matched case-insensitively',
+  (name, expectedType) => {
+    const [col] = inferMetadata([name]);
+    expect(col.type).toBe(expectedType);
+  },
+);
 
 // ─── inferMetadata: mixed columns ────────────────────────────────────────────
 
 test("known and unknown columns are inferred correctly in a single call", () => {
   const result = inferMetadata(["ssn", "program_start_date", "first_name"]);
-  expect(result[0]).toMatchObject({ type: "ssn", role: "linkage", isPayload: false });
-  expect(result[1]).toMatchObject({ type: "other", role: "payload", isPayload: true });
-  expect(result[2]).toMatchObject({ type: "firstName", role: "linkage", isPayload: false });
+  expect(result[0]).toMatchObject({
+    type: "ssn",
+    role: "linkage",
+    isPayload: false,
+  });
+  expect(result[1]).toMatchObject({
+    type: "other",
+    role: "payload",
+    isPayload: true,
+  });
+  expect(result[2]).toMatchObject({
+    type: "firstName",
+    role: "linkage",
+    isPayload: false,
+  });
 });
 
 // ─── ALIAS_TYPE_META_MAP ──────────────────────────────────────────────────────

@@ -144,6 +144,68 @@ test("parses shared options including maxReconnectAttempts on an SFTP config", (
   expect(result.data.options?.maxReconnectAttempts).toBe(5);
 });
 
+// --- provider_options (opaque, verbatim) -------------------------------------
+
+test("provider_options keys pass through verbatim (snake_case preserved)", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    // An opaque map is forwarded verbatim to the transport library, which
+    // defines its own key names; its keys must NOT be camelized.
+    provider_options: { ready_timeout: 5000, debug_mode: true },
+    // A sibling schema field in the same parse is still normalized.
+    options: { peer_timeout_ms: 120000 },
+  });
+  expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.providerOptions).toEqual({
+    ready_timeout: 5000,
+    debug_mode: true,
+  });
+  // The known schema field was camelized as usual.
+  expect(result.options?.peerTimeoutMs).toBe(120000);
+});
+
+test("provider_options preserves a literal camelCase key unchanged", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    // ssh2's option keys are camelCase; a user writing them literally must have
+    // them survive byte-for-byte rather than being normalized to snake_case.
+    provider_options: { readyTimeout: 5000, algorithms: { kex: ["a"] } },
+  });
+  expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.providerOptions).toEqual({
+    readyTimeout: 5000,
+    algorithms: { kex: ["a"] },
+  });
+});
+
+test("provider_options is opaque all the way down (nested keys not camelized)", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    provider_options: { nested_outer: { nested_inner: 1 } },
+  });
+  expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.providerOptions).toEqual({ nested_outer: { nested_inner: 1 } });
+});
+
+test("provider_options is opaque on the webrtc channel too", () => {
+  // The opaque skip is channel-agnostic (a key-name match in camelizeKeys), and
+  // WebRTCConnectionConfig also declares providerOptions. Guard the webrtc path
+  // so a future schema change cannot silently start normalizing its keys.
+  const result = parseConnectionConfig({
+    ...webrtcBase,
+    provider_options: { readyTimeout: 5000, nested_outer: { nested_inner: 1 } },
+  });
+  expect(result.channel).toBe("webrtc");
+  if (result.channel !== "webrtc") return;
+  expect(result.providerOptions).toEqual({
+    readyTimeout: 5000,
+    nested_outer: { nested_inner: 1 },
+  });
+});
+
 // --- Discriminated union -----------------------------------------------------
 
 test("unknown channel is rejected", () => {
@@ -405,4 +467,179 @@ test("parses snake_case SFTP server keys from disk", () => {
   expect(result.server.privateKeyPassphrase).toBeDefined();
   expect(result.server.hostKeyFingerprint).toBe("SHA256:abc");
   expect(result.server.knownHosts).toBe("/etc/ssh/known_hosts");
+});
+
+// --- FileSyncOptions: peerId refines -----------------------------------------
+
+test("peerId is accepted on sftp when timestampInFilename is true", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "agency-a" },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  if (result.data.channel !== "sftp") return;
+  expect(result.data.options?.peerId).toBe("agency-a");
+});
+
+test("peerId is accepted on filedrop when timestampInFilename is true", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share",
+    options: { timestampInFilename: true, peerId: "agency-a" },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("peerId with hyphens is accepted", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "agency-a-outbound" },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("empty string peerId is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "" },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("peerId is rejected without timestampInFilename", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peerId: "agency-a" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("timestamp_in_filename"))).toBe(true);
+});
+
+test("peerId is rejected when timestampInFilename is false", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peerId: "agency-a", timestampInFilename: false },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("peerId 'temp' is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { timestampInFilename: true, peerId: "temp" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("reserved"))).toBe(true);
+});
+
+test("retainFiles is accepted on sftp when timestampInFilename and locklessRendezvous are true", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: {
+      timestampInFilename: true,
+      locklessRendezvous: true,
+      retainFiles: true,
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("retainFiles is rejected without timestampInFilename", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { retainFiles: true },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("timestamp_in_filename"))).toBe(true);
+});
+
+test("retainFiles is rejected when timestampInFilename is false", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { retainFiles: true, timestampInFilename: false },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("retainFiles is rejected without locklessRendezvous", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { retainFiles: true, timestampInFilename: true },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("lockless_rendezvous"))).toBe(true);
+});
+
+test("retainFiles is rejected when locklessRendezvous is false", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: {
+      retainFiles: true,
+      timestampInFilename: true,
+      locklessRendezvous: false,
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("lockless_rendezvous"))).toBe(true);
+});
+
+test("parses snake_case peer_id from disk", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { timestamp_in_filename: true, peer_id: "agency-a" },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.peerId).toBe("agency-a");
+});
+
+// --- FileSyncOptions: unexpected_files ---------------------------------------
+
+test.each(["error", "warn", "ignore"] as const)(
+  "unexpected_files accepts the enum value %s",
+  (value) => {
+    const result = safeParseConnectionConfig({
+      ...sftpBase,
+      options: { unexpectedFiles: value },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success || result.data.channel !== "sftp") return;
+    expect(result.data.options?.unexpectedFiles).toBe(value);
+  },
+);
+
+test("unexpected_files rejects a value outside the enum", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { unexpectedFiles: "abort" },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("parses snake_case unexpected_files from disk", () => {
+  const result = parseConnectionConfig({
+    ...sftpBase,
+    options: { unexpected_files: "warn" },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.options?.unexpectedFiles).toBe("warn");
+});
+
+test("unexpected_files is accepted on filedrop", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share",
+    options: { unexpectedFiles: "ignore" },
+  });
+  expect(result.success).toBe(true);
 });

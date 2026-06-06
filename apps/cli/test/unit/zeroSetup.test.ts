@@ -7,6 +7,7 @@ import {
   type MockInstance,
 } from "vitest";
 import fs from "node:fs";
+import { UsageError } from "@psilink/core";
 import {
   channelFromURL,
   createConnection,
@@ -45,7 +46,10 @@ test("file: maps to filedrop channel", () => {
   expect(channelFromURL(new URL("file:///mnt/share/drop"))).toBe("filedrop");
 });
 
-test("unsupported URL scheme throws", () => {
+test("unsupported URL scheme throws a UsageError", () => {
+  expect(() => channelFromURL(new URL("https://example.org/path"))).toThrow(
+    UsageError,
+  );
   expect(() => channelFromURL(new URL("https://example.org/path"))).toThrow(
     "unsupported URL scheme",
   );
@@ -115,10 +119,24 @@ test("createConnection filedrop: channel and path are set", () => {
   expect(result.path).toBe("/mnt/share/drop");
 });
 
-test("createConnection filedrop: non-localhost authority throws", () => {
+test("createConnection filedrop: non-localhost authority throws a UsageError", () => {
+  expect(() =>
+    createConnection(new URL("file://host/mnt/share"), baseOptions),
+  ).toThrow(UsageError);
   expect(() =>
     createConnection(new URL("file://host/mnt/share"), baseOptions),
   ).toThrow("three slashes");
+});
+
+test("createConnection webrtc throws a UsageError 'not yet supported'", () => {
+  // ws:// resolves to the webrtc channel, which the CLI does not yet support;
+  // that is invalid caller input (exit 64), not a transport failure.
+  expect(() =>
+    createConnection(new URL("ws://example.org/path"), baseOptions),
+  ).toThrow(UsageError);
+  expect(() =>
+    createConnection(new URL("ws://example.org/path"), baseOptions),
+  ).toThrow("not yet supported");
 });
 
 test("createConnection filedrop: file://localhost/path is accepted", () => {

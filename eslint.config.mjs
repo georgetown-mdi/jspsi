@@ -13,7 +13,13 @@ function scopeToDir(dir, configs) {
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "apps/web/eslint.config.js"],
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "apps/web/eslint.config.js",
+      "scratch/**",
+      "**/.rollup.cache/**",
+    ],
   },
   {
     files: ["packages/**/*.{ts,tsx}", "apps/cli/**/*.{ts,tsx}"],

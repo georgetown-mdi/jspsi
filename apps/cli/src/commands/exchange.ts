@@ -9,11 +9,16 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
+  UsageError,
 } from "@psilink/core";
 import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
 
-import { applyConnectionOverrides } from "../config";
-import { loadKeyFile, type KeyFile } from "../keyFile";
+import {
+  applyConnectionOverrides,
+  announceRetainMode,
+  DEFAULT_CONFIG_PATH,
+} from "../config";
+import { loadKeyFile, DEFAULT_KEY_PATH, type KeyFile } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import {
@@ -42,11 +47,11 @@ export function builder(cmd: Argv): Argv {
     })
     .option("config-file", {
       type: "string",
-      describe: "exchange configuration file (default: ./psilink.yaml)",
+      describe: `exchange configuration file (default: ${DEFAULT_CONFIG_PATH})`,
     })
     .option("key-file", {
       type: "string",
-      describe: "shared key file (default: ./.psilink.key)",
+      describe: `shared key file (default: ${DEFAULT_KEY_PATH})`,
     })
     .option("identity", {
       type: "string",
@@ -90,6 +95,42 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe: "silent | error | warn | info | debug | trace; default=info",
     })
+    .option("lockless-rendezvous", {
+      type: "boolean",
+      describe:
+        "use the ack-handshake rendezvous instead of the atomic lock-file " +
+        "race; required on sync-mediated transports that lack atomic " +
+        "exclusive-create or deletion visibility during rendezvous. Both " +
+        "parties must set this flag identically",
+    })
+    .option("peer-id", {
+      type: "string",
+      describe:
+        "stable identifier for this party; appears in filenames and logs. " +
+        "Overrides connection.options.peer_id in config. Requires " +
+        "timestamp_in_filename: true. Both parties must use distinct ids",
+    })
+    .option("timestamp-in-filename", {
+      type: "boolean",
+      describe:
+        "encode a UTC timestamp and per-session counter in each outgoing " +
+        "message filename; --retain-files implies it, so it need not be passed " +
+        "explicitly. Both parties must use the same value",
+    })
+    .option("retain-files", {
+      type: "boolean",
+      describe:
+        "keep all exchange files as a permanent transcript instead of " +
+        "deleting them after consumption; intended for sync-mediated " +
+        "transports that do not propagate deletions and for audit use cases. " +
+        "Requires --timestamp-in-filename. Both parties must set this flag " +
+        "identically -- a mismatch is detected at rendezvous and fails fast on " +
+        "both sides with a clear error naming each side's setting, rather than " +
+        "stalling until the peer timeout. A fresh " +
+        "directory is required for each exchange and is enforced: reusing a " +
+        "directory with retained files from a prior session is rejected with " +
+        "an error at startup",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -114,6 +155,10 @@ interface ExchangeArgs {
   connectionTimeout?: number;
   peerTimeout?: number;
   maxReconnectAttempts?: number;
+  locklessRendezvous?: boolean;
+  peerId?: string;
+  timestampInFilename?: boolean;
+  retainFiles?: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -134,8 +179,9 @@ function parseArgs(argv: Arguments): ExchangeArgs {
   return {
     input: argv["input"] as string,
     output: argv["output"] as string | undefined,
-    configFile: (argv["config-file"] as string | undefined) ?? "./psilink.yaml",
-    keyFile: (argv["key-file"] as string | undefined) ?? "./.psilink.key",
+    configFile:
+      (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
+    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
     identity: argv["identity"] as string | undefined,
     serverPort: argv["server-port"] as number | undefined,
     serverUsername: argv["server-username"] as string | undefined,
@@ -148,6 +194,10 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     connectionTimeout: argv["connection-timeout"] as number | undefined,
     peerTimeout: argv["peer-timeout"] as number | undefined,
     maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
+    locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
+    peerId: argv["peer-id"] as string | undefined,
+    timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
+    retainFiles: argv["retain-files"] as boolean | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -173,7 +223,13 @@ export function loadConfig(
         ),
         { code: "ENOENT" },
       );
-    throw err;
+    // A non-ENOENT failure here is a malformed or unreadable local config
+    // (invalid YAML, EACCES, EISDIR): invalid caller configuration the operator
+    // must fix, so a UsageError (CLI exit 64), not a transport failure (69).
+    throw new UsageError(
+      `config file ${options.configFile} could not be read or parsed: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
   }
 
   // Warn about and strip auth fields the CLI always ignores. This runs before
@@ -248,9 +304,18 @@ export function loadConfig(
     }
   }
 
-  const { connection: baseConn, ...exchangeDataSpec } = parseExchangeSpec(
-    resolveAtSignRefs(rawConfig),
-  );
+  let parsedSpec: ReturnType<typeof parseExchangeSpec>;
+  try {
+    parsedSpec = parseExchangeSpec(resolveAtSignRefs(rawConfig));
+  } catch (err) {
+    // Well-formed YAML that fails schema validation is still invalid caller
+    // configuration (exit 64), not a transport failure.
+    throw new UsageError(
+      `config file ${options.configFile} is not a valid exchange spec: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  const { connection: baseConn, ...exchangeDataSpec } = parsedSpec;
   log.info("loaded exchange spec from", options.configFile);
 
   const connection = applyConnectionOverrides(baseConn, {
@@ -261,10 +326,38 @@ export function loadConfig(
     serverPassword: options.serverPassword,
     serverPrivateKey: options.serverPrivateKey,
     serverPort: options.serverPort,
+    locklessRendezvous: options.locklessRendezvous,
+    peerId: options.peerId,
+    timestampInFilename: options.timestampInFilename,
+    retainFiles: options.retainFiles,
   });
 
+  if (
+    options.locklessRendezvous === true &&
+    connection.channel !== "sftp" &&
+    connection.channel !== "filedrop"
+  ) {
+    log.warn(
+      `--lockless-rendezvous has no effect on the ${connection.channel} ` +
+        "channel and will be ignored; it is only supported on sftp and filedrop",
+    );
+  }
+
+  if (
+    options.retainFiles === true &&
+    connection.channel !== "sftp" &&
+    connection.channel !== "filedrop"
+  ) {
+    log.warn(
+      `--retain-files has no effect on the ${connection.channel} channel ` +
+        "and will be ignored; it is only supported on sftp and filedrop",
+    );
+  }
+
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
-    throw new Error(
+    // An unsupported channel in the config is invalid caller configuration
+    // (exit 64), not a transport failure.
+    throw new UsageError(
       `the ${connection.channel} channel is not yet supported in the CLI`,
     );
 
@@ -272,13 +365,18 @@ export function loadConfig(
   try {
     keyData = loadKeyFile(options.keyFile);
   } catch (err) {
-    throw new Error(
+    // A malformed existing key file is bad input the operator must fix or
+    // re-provision (exit 64), the same classification saveKeyFile gives a
+    // malformed token on write -- not a transport failure (69).
+    throw new UsageError(
       `key file at ${options.keyFile} is malformed: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
   if (keyData === undefined)
-    throw new Error(
+    // A missing key file is a configuration problem (exit 64), consistent with
+    // the missing-config case above.
+    throw new UsageError(
       `key file ${options.keyFile} does not exist. ` +
         "The CLI commands that create a key file (psilink invite, psilink " +
         "accept, and psilink --save) are not yet implemented; until they " +
@@ -343,9 +441,19 @@ export async function handler(argv: Arguments): Promise<void> {
     configResult = loadConfig(options);
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit((err as NodeJS.ErrnoException).code === "ENOENT" ? 64 : 69);
+    // A malformed or missing config/key file is a usage error (exit 64); the
+    // ENOENT arm keeps the missing-config case, which is tagged rather than a
+    // UsageError. Anything else (e.g. an unsupported channel) stays exit 69.
+    process.exit(
+      err instanceof UsageError ||
+        (err as NodeJS.ErrnoException).code === "ENOENT"
+        ? 64
+        : 69,
+    );
   }
   const { connection, ...exchangeDataSpec } = configResult;
+
+  announceRetainMode(connection, log);
 
   let identity: string;
   if (options.identity) {
@@ -371,6 +479,6 @@ export async function handler(argv: Arguments): Promise<void> {
     await runProtocol(connection, prepared, output, verbosity, "exchange");
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
-    process.exit(69);
+    process.exit(err instanceof UsageError ? 64 : 69);
   }
 }

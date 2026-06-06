@@ -36,9 +36,9 @@ export const INFER_DATE_SCAN_CAP = 1000;
 const CANDIDATE_LUXON_FORMATS: Record<CandidateDateFormat, string> = {
   "MM/DD/YYYY": "M/d/yyyy",
   "YYYY-MM-DD": "yyyy-M-d",
-  "YYYYMMDD":   "yyyyMMdd",
+  YYYYMMDD: "yyyyMMdd",
   "MM-DD-YYYY": "M-d-yyyy",
-  "MM/DD/YY":   "M/d/yy",
+  "MM/DD/YY": "M/d/yy",
   "YYYY/MM/DD": "yyyy/M/d",
   "DD/MM/YYYY": "d/M/yyyy",
   "DD-MM-YYYY": "d-M-yyyy",

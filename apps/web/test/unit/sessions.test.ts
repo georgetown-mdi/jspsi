@@ -11,7 +11,7 @@ const defaults = {
 };
 
 describe("SessionManagerFactory", () => {
-  const created: string[] = [];
+  const created: Array<string> = [];
 
   afterEach(async () => {
     const mgr = await useSessionManager();

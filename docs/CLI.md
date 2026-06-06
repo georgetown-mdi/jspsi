@@ -183,6 +183,15 @@ The pre-existing `psilink.yaml` configuration file is reused; only the key file 
 
 See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full procedure. In summary: notify the partner out-of-band, both parties delete their key files, and re-invite over a channel known to be uncompromised.
 
+## Exit codes
+
+The CLI distinguishes two failure classes, following the BSD `sysexits` convention:
+
+- **64 (`EX_USAGE`)** - invalid caller input or configuration: a problem the operator fixes locally by editing or provisioning a file. Retrying without changing anything will not help.
+- **69 (`EX_UNAVAILABLE`)** - a transport or availability failure: the exchange server, peer, or shared storage was unreachable, rejected an operation, or went silent. Retrying once the transport recovers may succeed.
+
+For `psilink exchange`, a missing, malformed, or unreadable configuration file (`psilink.yaml`) or key file (`.psilink.key`) - including a key file whose stored token is malformed - is a usage error and exits 64. An unsupported channel or URL scheme - a `webrtc` config or `ws://` URL the CLI does not yet support, an unknown scheme, or a malformed `file://` authority - is likewise a usage error and exits 64, as is an invalid combination of connection options (for example a reserved `peer_id` or a `retain_files`/`lockless_rendezvous` contradiction). Failures during the exchange itself - connecting to the server, the rendezvous, or the message loop - exit 69. A successful run exits 0; a run terminated by a signal exits 130 (SIGINT) or 143 (SIGTERM).
+
 ## See also
 
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - exchange specification format consumed by the CLI

@@ -3,7 +3,16 @@ import pluginRouter from "@tanstack/eslint-plugin-router";
 import { tanstackConfig } from "@tanstack/eslint-config";
 
 export default [
-  { ignores: ["eslint.config.js"] },
+  {
+    ignores: [
+      "eslint.config.js",
+      "src/contrib/**",
+      ".output/**",
+      ".nitro/**",
+      ".tanstack/**",
+      "dist/**",
+    ],
+  },
   ...tanstackConfig,
   ...pluginRouter.configs["flat/recommended"],
   {

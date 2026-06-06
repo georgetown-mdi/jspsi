@@ -1,7 +1,8 @@
 import { hkdfDerive, toBase64Url } from "./utils/crypto.js";
 import { runSpake2 } from "./pake.js";
 
-import type { Connection, HandshakeRole } from "./types.js";
+import type { HandshakeRole } from "./types.js";
+import type { MessageConnection } from "./connection/messageConnection.js";
 import { PAKE_TOKEN_REGEX } from "./config/connection.js";
 import type { Authentication } from "./config/connection.js";
 
@@ -15,10 +16,11 @@ export interface AuthResult {
   /**
    * 32-byte SPAKE2 session key (`Ke`).  Both parties hold the same value after
    * a successful handshake.  Callers that need application-layer encryption
-   * (e.g. `sftp` and `filedrop` channels) should pass this to
-   * {@link deriveAeadKey} to obtain a full-strength AES-GCM key; callers
-   * that rely on transport-layer security (e.g. WebRTC with DTLS) may ignore
-   * it.
+   * (the `sftp` and `filedrop` channels) pass this to {@link deriveAeadKey} to
+   * derive the AES-256-GCM keys; those keys are per direction, not per channel,
+   * so the channels share one AEAD mechanism rather than each having its own
+   * key.  Callers that rely on transport-layer security (e.g. WebRTC with DTLS)
+   * may ignore it.
    */
   sessionKey: Uint8Array<ArrayBuffer>;
   /**
@@ -34,6 +36,41 @@ export interface AuthResult {
 }
 
 /**
+ * The fixed set of AEAD direction-context labels accepted by
+ * {@link deriveAeadKey}.  The application-layer AEAD channel derives one
+ * AES-256-GCM key per direction, so each label is an ASCII-only
+ * domain-separation string for one direction of the encrypted stream; both
+ * endpoints must pass the same label for a direction to derive the same key.
+ *
+ * The set is per-direction, not per-channel: the encrypted-connection decorator
+ * wraps any channel (`sftp`, `filedrop`, or `webrtc`) and keys only by
+ * direction, so there is no per-channel label.  The per-direction split is
+ * load-bearing: both directions number their messages from zero and build the
+ * AEAD nonce from that sequence, so a single shared key would reuse a key-nonce
+ * pair - catastrophic for AES-GCM - whereas one key per sender keeps every pair
+ * unique.
+ *
+ * Adding a label is a deliberate, reviewed change: append it here so a new
+ * caller cannot introduce a variable, non-ASCII, or non-NFC context that would
+ * make the two parties derive different keys and fail AEAD with an opaque
+ * auth-tag/decrypt error.
+ *
+ * Frozen so the readonly compile-time type also holds at runtime: a plain-JS
+ * caller cannot `push` a label and widen the set the runtime guard checks.
+ */
+export const AEAD_CONTEXTS = Object.freeze([
+  "initiator-to-responder",
+  "responder-to-initiator",
+] as const);
+
+/**
+ * An AEAD direction-context label.  One of the fixed {@link AEAD_CONTEXTS}; the
+ * open `string` is deliberately not accepted so a variable label cannot reach
+ * {@link deriveAeadKey} without a reviewed change to that tuple.
+ */
+export type AeadContext = (typeof AEAD_CONTEXTS)[number];
+
+/**
  * Derive a 32-byte AES-256-GCM key from the SPAKE2 session key using HKDF.
  *
  * Use this when the connection channel requires application-layer encryption.
@@ -41,13 +78,26 @@ export interface AuthResult {
  * channel's encryption layer.
  *
  * @param sessionKey  The `sessionKey` field from {@link AuthResult}.
- * @param context     An application-specific context string that binds the
- *                    derived key to its intended use (e.g. `"sftp-aead"`).
+ * @param context     A fixed AEAD direction-context label from
+ *                    {@link AEAD_CONTEXTS} (e.g. `"initiator-to-responder"`)
+ *                    that binds the derived key to one direction of the
+ *                    encrypted stream.  The {@link AeadContext} type rejects a
+ *                    free-form label at compile time; the runtime check below
+ *                    catches an untyped (plain-JS or `as`-cast) caller, failing
+ *                    fast rather than silently deriving a key the two parties
+ *                    may not agree on.
+ * @throws {Error} if `context` is not one of {@link AEAD_CONTEXTS}.
  */
 export async function deriveAeadKey(
   sessionKey: Uint8Array<ArrayBuffer>,
-  context: string,
+  context: AeadContext,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  if (!(AEAD_CONTEXTS as readonly string[]).includes(context)) {
+    throw new Error(
+      `deriveAeadKey: unknown AEAD context ${JSON.stringify(context)}; ` +
+        `expected one of ${AEAD_CONTEXTS.map((l) => JSON.stringify(l)).join(", ")}`,
+    );
+  }
   return hkdfDerive(sessionKey, `psilink-aead-v1:${context}`, 32);
 }
 
@@ -101,7 +151,7 @@ export async function deriveAeadKey(
  *                 messages).
  */
 export async function authenticateConnection(
-  conn: Connection,
+  conn: MessageConnection,
   authentication: Authentication,
   handshakeRole: HandshakeRole,
 ): Promise<AuthResult> {

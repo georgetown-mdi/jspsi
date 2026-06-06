@@ -83,7 +83,11 @@ export class LocalFSClient implements FileTransportClient {
       fileEntries.map(async ({ name }) => {
         try {
           const stat = await fs.stat(path.join(dir, name));
-          return { name, modifyTime: Math.floor(stat.mtimeMs) } as FileInfo;
+          return {
+            name,
+            modifyTime: Math.floor(stat.mtimeMs),
+            size: stat.size,
+          } as FileInfo;
         } catch (err: unknown) {
           if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
           throw err;

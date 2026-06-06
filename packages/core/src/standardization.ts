@@ -78,7 +78,15 @@ function toLowerCase(s: string): string {
 }
 
 function removeAccents(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // Re-normalize to NFC after the NFD strip: a combining mark outside the
+  // stripped U+0300-U+036F range (e.g. the Arabic maddah U+0653) survives, so
+  // without this the step would leak a decomposed residue into the key. Every
+  // pipeline already receives NFC input (see runCompiledPipeline); this keeps
+  // the step's output NFC as well.
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC");
 }
 
 const suffixes = [
@@ -180,7 +188,11 @@ function parseDateFactory(params: Params): StandardizingFn {
   const re = new RegExp(`^${regexStr}$`);
 
   return (s) => {
-    const m = s.match(re);
+    // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract). Date
+    // separators are ASCII in practice, so this is a no-op on real input, but it
+    // keeps parse_date inside the same authored-pattern-matching family as the
+    // other regex steps rather than a silent exception.
+    const m = s.normalize("NFC").match(re);
     if (!m) return null;
 
     const parts: Partial<Record<Token, string>> = {};
@@ -277,7 +289,12 @@ function padLeftFactory(params: Params): StandardizingFn {
   const length = params.length as number | undefined;
   if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
-  const char = (params.char as string | undefined) ?? "0";
+  // Normalize before validating the length, not after: NFC can change the
+  // code-unit count -- a singleton like U+2126 -> U+03A9 stays one unit, but a
+  // combining mark like U+0344 -> U+0308 U+0301 expands to two -- and padStart
+  // treats a multi-unit fill as a cycling pattern, so the one-character contract
+  // must hold on the normalized value that actually pads.
+  const char = ((params.char as string | undefined) ?? "0").normalize("NFC");
   if (char.length !== 1)
     throw new Error(`pad_left: "char" must be exactly one character`);
   return (s) => s.padStart(length, char);
@@ -290,22 +307,45 @@ function nullIfFactory(params: Params): StandardizingFn {
       : params.value !== undefined
         ? [params.value as string]
         : [];
-  const set = new Set(values);
-  return (s) => (set.has(s) ? null : s);
+  // NFC-normalize the exclusion values so one authored in a different form
+  // (e.g. NFD from a YAML file written on macOS) still matches the runtime
+  // value.
+  const set = new Set(values.map((v) => v.normalize("NFC")));
+  // NFC-normalize the value before comparing (see the STANDARDIZING_FUNCTIONS
+  // contract): an upstream case-fold can leave non-NFC bytes against which an
+  // authored-NFC exclusion would otherwise silently miss. Return the original
+  // value on a non-match so emitted bytes for already-canonical inputs are
+  // untouched.
+  return (s) => (set.has(s.normalize("NFC")) ? null : s);
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
-  const replacement = (params.replacement as string | undefined) ?? "";
+  // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
+  // sequence into the key (the pattern itself is matched as authored; author it
+  // in NFC to match NFC runtime values).
+  const replacement = (
+    (params.replacement as string | undefined) ?? ""
+  ).normalize("NFC");
   const re = new RegExp(pattern, "g");
-  return (s) => s.replace(re, replacement);
+  // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract) so an
+  // authored-NFC pattern matches a value left non-NFC by an upstream case-fold;
+  // the result is derived from the normalized value, byte-identical for
+  // already-canonical inputs.
+  return (s) => s.normalize("NFC").replace(re, replacement);
 }
 
 function extractRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
   const re = new RegExp(pattern);
+  // Match AND slice on the NFC-normalized value (see the STANDARDIZING_FUNCTIONS
+  // contract): an authored-NFC pattern must match a value left non-NFC by an
+  // upstream case-fold, and the returned capture must come from the same
+  // normalized string -- NFC can change the code-unit count, so a capture taken
+  // from the original could misalign. `match` returns capture substrings of the
+  // string it ran against, so slicing follows the normalized value for free.
   return (s) => {
-    const m = s.match(re);
+    const m = s.normalize("NFC").match(re);
     if (!m) return null;
     return (m[1] ?? m[0]) || null;
   };
@@ -314,7 +354,11 @@ function extractRegexFactory(params: Params): StandardizingFn {
 function filterRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
   const re = new RegExp(pattern);
-  return (s) => (re.test(s) ? s : null);
+  // NFC-normalize before testing (see the STANDARDIZING_FUNCTIONS contract) so
+  // an authored-NFC pattern matches a value left non-NFC by an upstream
+  // case-fold; return the original value on a match so emitted bytes for
+  // already-canonical inputs are untouched.
+  return (s) => (re.test(s.normalize("NFC")) ? s : null);
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
@@ -323,14 +367,38 @@ function splitOnFactory(params: Params): StandardizingFn {
     (params.includeOriginal as boolean | undefined) ?? false;
   const re = new RegExp(delimiter);
   return (s) => {
-    const parts = s.split(re).filter((p) => p.length > 0);
-    if (parts.length <= 1) return new Set([s]);
-    return includeOriginal ? new Set([s, ...parts]) : new Set(parts);
+    // Normalize before splitting (see the STANDARDIZING_FUNCTIONS contract) so
+    // an authored-NFC delimiter matches a value left non-NFC by an upstream
+    // case-fold. Parts (and the unsplit value) come from the normalized form,
+    // like extract_regex, since the split offsets are computed on it; this is a
+    // no-op for already-canonical inputs.
+    const n = s.normalize("NFC");
+    const parts = n.split(re).filter((p) => p.length > 0);
+    if (parts.length <= 1) return new Set([n]);
+    return includeOriginal ? new Set([n, ...parts]) : new Set(parts);
   };
 }
 
 // Each entry here must also be documented in
 // docs/EXCHANGE_SPEC.md § "Available functions".
+//
+// NFC-comparison contract: any step that matches an authored value, pattern, or
+// delimiter against the intermediate value must NFC-normalize that value before
+// matching, because an upstream step such as to_upper_case can emit non-NFC
+// bytes (the six Greek code points U+0390, U+03B0, U+1FD2, U+1FD7, U+1FE2,
+// U+1FE7) even from NFC input -- to_lower_case does not today, but a future
+// case-fold could. The final key-string normalize in buildKeyStrings fixes the
+// EMITTED key, but it runs after these mid-pipeline reads, so each step must
+// normalize the value it inspects itself. The family today is null_if,
+// filter_regex, extract_regex, replace_regex, split_on, and parse_date -- define
+// membership by the property above, not this list, when adding a function. Two
+// return styles: a step that passes the value through on a match/non-match
+// (null_if, filter_regex) returns the ORIGINAL value so downstream bytes are
+// untouched; a step that derives a new value (extract_regex, replace_regex,
+// split_on, parse_date) derives it from the normalized value, since matching one
+// form and slicing the other can misalign offsets. Either way the output for
+// already-canonical (NFC or ASCII) inputs is byte-identical. This is an authoring
+// reminder for new functions, not enforcement.
 const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   remove_non_ascii: noParamFactory(removeNonAscii),
   replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
@@ -365,7 +433,14 @@ function compileStep(step: {
 }): CompiledStep {
   const params = step.params ?? {};
   if (step.function === "coalesce") {
-    return { kind: "coalesce", default: params.default as string | undefined };
+    // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
+    // value into the key (it replaces the whole value, often as the last step).
+    const rawDefault = params.default as string | undefined;
+    return {
+      kind: "coalesce",
+      default:
+        rawDefault === undefined ? undefined : rawDefault.normalize("NFC"),
+    };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];
   if (!factory)
@@ -413,7 +488,16 @@ function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
 // --- Pipeline ----------------------------------------------------------------
 
 function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
-  let current: FieldValue = input;
+  // Unicode NFC normalization is the unconditional first transform of every
+  // standardized field. The cleaned string becomes the PSI set element verbatim,
+  // so two parties holding the same logical value in different normalization
+  // forms (precomposed NFC vs decomposed NFD -- the common macOS-filesystem vs
+  // Windows/most-DB split) would otherwise emit different bytes and the same
+  // person would silently fail to match. It runs here, before any step and for
+  // every pipeline -- including the identity (no-steps) passthrough and custom
+  // pipelines that never strip to ASCII -- rather than being gated on a
+  // remove_accents step that is not guaranteed to run.
+  let current: FieldValue = input.normalize("NFC");
   for (const step of steps) {
     current = applyStep(current, step);
   }
@@ -425,6 +509,12 @@ function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
  *
  * Returns `null` if any step filters the value out, `Set<string>` if a fan-out
  * step (e.g. `split_on`) was applied, or a plain `string` otherwise.
+ *
+ * The input is normalized to NFC before the first step, but the returned value
+ * is not guaranteed NFC: a step such as `to_upper_case` can leave non-NFC bytes,
+ * and the canonical-key NFC guarantee is applied downstream by
+ * {@link buildKeyStrings}, not here. A direct caller that needs a canonical
+ * string must normalize the result itself.
  */
 export function runPipeline(
   input: string,
@@ -646,8 +736,15 @@ export function buildKeyStrings(
     elementValues.push(transformed);
   }
 
+  // Final NFC pass on the assembled key. Each part is already NFC, but this is
+  // the one chokepoint every PSI key string flows through, so it also covers the
+  // element-transform path (which assembles keys outside runCompiledPipeline) and
+  // the case where concatenating two NFC parts crosses a base + combining-mark
+  // boundary that itself composes (NFC is not closed under concatenation).
   const result = new Set(
-    cartesianProduct(elementValues).map((parts) => parts.join("")),
+    cartesianProduct(elementValues).map((parts) =>
+      parts.join("").normalize("NFC"),
+    ),
   );
 
   if (result.size > KEY_STRING_WARN_THRESHOLD) {

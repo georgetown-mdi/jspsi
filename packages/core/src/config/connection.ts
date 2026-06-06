@@ -328,12 +328,156 @@ export interface FileSyncOptions extends SharedOptions {
    * 100.
    */
   pollIntervalMs?: number;
+  /**
+   * When `true`, each outgoing message filename also encodes a UTC timestamp
+   * and a per-session sequence number, so filename-based logging can capture
+   * when a file was written even in sync-mediated environments where the sync
+   * tool stamps files with the transfer time rather than the original creation
+   * time; default: `false`. With it unset, message filenames carry only the
+   * declared byte count (`<id>-<byteCount>.json`).
+   */
+  timestampInFilename?: boolean;
+  /**
+   * When `true`, the rendezvous handshake uses an ack-handshake barrier
+   * instead of the atomic-exclusive-create lock-file race. Both parties must
+   * set this identically; the value is advertised in the hello payload and a
+   * mismatch fails fast at rendezvous, symmetrically on both parties, with a
+   * usage error naming each side's setting (rather than stalling until the
+   * peer timeout).
+   *
+   * Intended for sync-mediated transports (e.g. a cloud-sync service
+   * reconciling two local directories) where `createExclusive` lacks
+   * atomicity or deletion has high propagation latency. Delete still works
+   * on these transports — cleanup via `safeDelete` succeeds eventually —
+   * but arrival order cannot be determined by an atomic exclusive-create.
+   * This option is **not** intended for transports that genuinely cannot
+   * delete; handshake files must be removable at `close()` time or they
+   * accumulate and block future sessions.
+   *
+   * Default: `false`.
+   */
+  locklessRendezvous?: boolean;
+  /**
+   * A stable, human-readable identifier for this party on the file-sync
+   * transport. Appears in every filename this party writes (hello, message,
+   * ack) and in server-side logs and transcripts. When unset, a UUID is
+   * generated at construction time.
+   *
+   * Requires `timestampInFilename: true`. A reused stable id across sessions
+   * in the same directory (without a timestamp segment) could collide with a
+   * leftover file from a crashed prior session, causing phantom message
+   * detection via `hasOutstandingMessage`.
+   *
+   * The two parties must use distinct ids, and neither may be the other's id
+   * extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous
+   * because `"site-2".startsWith("site-")` breaks prefix routing). Spaces
+   * and `-` are permitted within an id. The value `"temp"` is reserved.
+   * Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`,
+   * `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may
+   * cause errors at the transport layer.
+   */
+  peerId?: string;
+  /**
+   * When `true`, the receiver writes a zero-length acknowledgment marker after
+   * consuming each message, and the sender gates its next `send()` on that
+   * marker rather than waiting for its own file to be deleted. No exchange file
+   * is deleted as a protocol step; the shared directory becomes a permanent
+   * transcript. Default: `false`.
+   *
+   * Intended for sync-mediated transports that do not propagate deletions
+   * (where the delete-as-signal protocol would stall indefinitely) and for
+   * audit/transcript retention use cases.
+   *
+   * Both parties must set this flag identically; the value is advertised in
+   * the hello payload and a mismatch fails fast at rendezvous, symmetrically
+   * on both parties, with a usage error naming each side's setting (rather
+   * than stalling until the peer timeout). Requires
+   * `timestampInFilename: true` -- without it, every message from the same
+   * party collides on filename and a retained transcript would overwrite
+   * itself. Also requires `locklessRendezvous: true` -- lock rendezvous is
+   * delete-based and cannot produce the whole-directory no-delete transcript
+   * retain mode guarantees.
+   *
+   * A fresh directory is required for each exchange and is enforced:
+   * `synchronize()` throws a `UsageError` if any message or ack-marker files
+   * from a prior session are present in the directory.
+   */
+  retainFiles?: boolean;
+  /**
+   * How to handle a file that appears in the shared directory *during* the
+   * message loop and is neither recognized as part of this exchange nor a
+   * known transient (an in-flight `temp-*.tmp` write). Directory exclusivity
+   * is a stated precondition (see EXCHANGE_SPEC.md "Directory exclusivity"),
+   * so such a file usually means the directory is being shared with another
+   * process or session, or a sync tool produced a conflict copy or partial
+   * download.
+   *
+   * - `error`: fail the exchange with a usage error (exit 64) naming the file
+   *   and the directory path.
+   * - `warn`: log the file once per distinct name and continue.
+   * - `ignore`: skip silently (the pre-existing behavior).
+   *
+   * **Local, not bilateral.** Detecting a foreign file is a local observation
+   * of one's own directory view; it needs no peer agreement and carries none
+   * of the mismatch-stall risk of `lockless_rendezvous`/`retain_files`. The
+   * two parties may run different values.
+   *
+   * When unset, the effective default is mode-coupled: `error` on plain
+   * delete-mode transports (ordinary `sftp`/`filedrop`), and `warn` when
+   * `retain_files` or `lockless_rendezvous` is set -- those flags signal a
+   * sync-mediated transport that legitimately produces transient conflict
+   * copies and partial downloads mid-session, where a hard fail would abort
+   * exactly the exchanges retain mode targets. An explicit value always
+   * overrides the mode-coupled default.
+   *
+   * This setting governs foreign-file detection only. A peer-prefixed file
+   * that is a malformed *protocol* file (a message-shaped name a correctly
+   * configured peer cannot produce) is always reported, regardless of this
+   * setting.
+   *
+   * Default: `error` (plain) / `warn` (sync-mediated), as above.
+   */
+  unexpectedFiles?: "error" | "warn" | "ignore";
 }
 
-const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z.object({
-  ...sharedOptionsFields,
-  pollIntervalMs: z.int().nonnegative().optional(),
-});
+const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
+  .object({
+    ...sharedOptionsFields,
+    pollIntervalMs: z.int().nonnegative().optional(),
+    timestampInFilename: z.boolean().optional(),
+    locklessRendezvous: z.boolean().optional(),
+    peerId: z.string().min(1).optional(),
+    retainFiles: z.boolean().optional(),
+    unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
+  })
+  .refine((opts) => !opts.peerId || opts.timestampInFilename === true, {
+    message:
+      "peer_id requires timestamp_in_filename: true; without it, a reused " +
+      "stable id can collide with a leftover file from a crashed prior " +
+      "session, causing phantom message detection",
+    path: ["peerId"],
+  })
+  .refine((opts) => opts.peerId !== "temp", {
+    message:
+      "peer_id 'temp' is reserved; the lockless rendezvous upload glob " +
+      "('<myId>-*') would capture in-flight 'temp-*.tmp' writes",
+    path: ["peerId"],
+  })
+  .refine((opts) => !opts.retainFiles || opts.timestampInFilename === true, {
+    message:
+      "retain_files requires timestamp_in_filename: true; without it, every " +
+      "message from the same party shares a filename and a retained transcript " +
+      "would overwrite itself",
+    path: ["retainFiles"],
+  })
+  .refine((opts) => !opts.retainFiles || opts.locklessRendezvous === true, {
+    message:
+      "retain_files requires lockless_rendezvous: true; lock rendezvous is " +
+      "delete-based (the joiner deletes the peer hello as a role-assignment " +
+      "signal) and cannot produce the whole-directory no-delete transcript " +
+      "retain mode guarantees",
+    path: ["retainFiles"],
+  });
 
 // --- Connection config -------------------------------------------------------
 
@@ -388,7 +532,7 @@ export interface SFTPConnectionConfig {
  * Connection configuration for an exchange over a locally-mounted folder.
  * Both parties must have read/write access to the same directory (e.g. a
  * network share mounted by IT that is backed by an SFTP server). The
- * `.hello`/`.wave`/`.json` rendezvous protocol is identical to the SFTP
+ * `-hello.json`/`-lock.json`/message-`.json` protocol is identical to the SFTP
  * channel; no SSH connection is made. Use `file://` URLs with the CLI.
  *
  * PAKE authentication applies in the same way as the `sftp` channel: the
@@ -471,6 +615,43 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.stun !== undefined || conn.turn !== undefined)
       ),
     { message: "iceProvision is mutually exclusive with stun and turn" },
+  )
+  // Defense-in-depth: locklessRendezvous is a FileSyncOptions field and
+  // cannot be expressed on a webrtc config through the discriminated union
+  // (webrtc uses SharedOptions, not FileSyncOptions). This refine guards the
+  // path anyway so a future schema change cannot silently accept it.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        (conn.options as FileSyncOptions | undefined)?.locklessRendezvous
+      ),
+    { message: "locklessRendezvous is not valid for the webrtc channel" },
+  )
+  // Defense-in-depth: peerId is a FileSyncOptions field and cannot be
+  // expressed on a webrtc config through the discriminated union (webrtc uses
+  // SharedOptions, not FileSyncOptions). This refine guards the path anyway
+  // so a future schema change cannot silently accept it.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        (conn.options as FileSyncOptions | undefined)?.peerId !== undefined
+      ),
+    { message: "peer_id is not valid for the webrtc channel" },
+  )
+  // Defense-in-depth: retainFiles is a FileSyncOptions field and cannot be
+  // expressed on a webrtc config through the discriminated union (webrtc uses
+  // SharedOptions, not FileSyncOptions). This refine guards the path anyway
+  // so a future schema change cannot silently accept it; the path is not
+  // reachable through the current union.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        (conn.options as FileSyncOptions | undefined)?.retainFiles
+      ),
+    { message: "retain_files is not valid for the webrtc channel" },
   );
 
 // --- Parse -------------------------------------------------------------------
@@ -493,4 +674,21 @@ export function parseConnectionConfig(raw: unknown): ConnectionConfig {
 /** Non-throwing version of {@link parseConnectionConfig}. */
 export function safeParseConnectionConfig(raw: unknown) {
   return ConnectionConfigSchema.safeParse(camelizeKeys(raw));
+}
+
+/**
+ * Parse and validate a raw value as {@link FileSyncOptions}.
+ * Snake_case keys are converted to camelCase before validation; already-
+ * camelCase objects (e.g. from {@link applyConnectionOverrides}) are accepted
+ * unchanged.
+ *
+ * @throws {ZodError} if validation fails.
+ */
+export function parseFileSyncOptions(raw: unknown): FileSyncOptions {
+  return FileSyncOptionsSchema.parse(camelizeKeys(raw));
+}
+
+/** Non-throwing version of {@link parseFileSyncOptions}. */
+export function safeParseFileSyncOptions(raw: unknown) {
+  return FileSyncOptionsSchema.safeParse(camelizeKeys(raw));
 }

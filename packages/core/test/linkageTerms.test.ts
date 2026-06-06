@@ -320,6 +320,44 @@ test("parses snake_case keys from disk", () => {
   expect(result.legalAgreement?.expirationDate).toBe("2027-01-01");
 });
 
+test("transform params keys are normalized (params are not opaque)", () => {
+  // Unlike connection.provider_options, a transform `params` block is psilink's
+  // own function vocabulary and follows the snake_case-YAML -> camelCase-TS
+  // convention: the standardizing-function library reads camelCase param keys.
+  const result = parseLinkageTerms({
+    version: "1.0.0",
+    identity: "Test Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expects_output: true, share_with_partner: false },
+    deduplicate: false,
+    linkage_fields: [{ name: "dob", type: "dateOfBirth" }],
+    linkage_keys: [
+      {
+        name: "DOB",
+        elements: [
+          {
+            field: "dob",
+            transform: [
+              {
+                function: "parse_date",
+                params: {
+                  input_format: "MM/DD/YYYY",
+                  output_format: "YYYYMMDD",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    inputFormat: "MM/DD/YYYY",
+    outputFormat: "YYYYMMDD",
+  });
+});
+
 // ─── validateCompatibility ───────────────────────────────────────────────────
 
 const sharedFields: LinkageTerms["linkageFields"] = [
@@ -422,7 +460,9 @@ test("linkage fields in different order are still compatible", () => {
         { name: "ssn", type: "ssn" },
         { name: "dob", type: "dateOfBirth" },
       ],
-      linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
+      linkageKeys: [
+        { name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] },
+      ],
     },
     {
       ...termsB,
@@ -430,7 +470,9 @@ test("linkage fields in different order are still compatible", () => {
         { name: "dob", type: "dateOfBirth" },
         { name: "ssn", type: "ssn" },
       ],
-      linkageKeys: [{ name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] }],
+      linkageKeys: [
+        { name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] },
+      ],
     },
   );
   expect(errors.filter((e) => e.includes("linkage fields"))).toHaveLength(0);
@@ -444,6 +486,44 @@ test("linkage keys mismatch is an error", () => {
   expect(errors.some((e) => e.includes("linkage keys do not match"))).toBe(
     true,
   );
+});
+
+test("a non-canonical linkage-key param is reported, not thrown", () => {
+  // transform.params is Record<string, unknown>, so an integer beyond 2^53
+  // survives schema parsing but cannot be canonically encoded. The canonical
+  // comparison must surface that as an error rather than letting the thrown
+  // CanonicalEncodingError escape validateCompatibility's {errors,warnings}
+  // contract (the callers in protocolSetup abort the exchange on a non-empty
+  // errors list; an uncaught throw would crash the process instead).
+  const badKeys: LinkageTerms["linkageKeys"] = [
+    {
+      name: "SSN",
+      elements: [
+        {
+          field: "ssn",
+          transform: [{ function: "noop", params: { big: 2 ** 53 } }],
+        },
+      ],
+    },
+  ];
+  const runLocalBad = () =>
+    validateCompatibility({ ...termsA, linkageKeys: badKeys }, termsB);
+  expect(runLocalBad).not.toThrow();
+  expect(
+    runLocalBad().errors.some((e) =>
+      e.includes("local linkage keys cannot be canonically encoded"),
+    ),
+  ).toBe(true);
+
+  // Symmetric: the partner's keys are the un-encodable ones.
+  const runPartnerBad = () =>
+    validateCompatibility(termsA, { ...termsB, linkageKeys: badKeys });
+  expect(runPartnerBad).not.toThrow();
+  expect(
+    runPartnerBad().errors.some((e) =>
+      e.includes("partner linkage keys cannot be canonically encoded"),
+    ),
+  ).toBe(true);
 });
 
 test("legal agreement present on one side only is an error", () => {
@@ -507,11 +587,17 @@ test("payload send/receive mismatch is an error", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      payload: { send: [{ name: "enrollment_date" }], receive: [{ name: "case_id" }] },
+      payload: {
+        send: [{ name: "enrollment_date" }],
+        receive: [{ name: "case_id" }],
+      },
     },
     {
       ...termsB,
-      payload: { send: [{ name: "case_id" }], receive: [{ name: "wrong_column" }] },
+      payload: {
+        send: [{ name: "case_id" }],
+        receive: [{ name: "wrong_column" }],
+      },
     },
   );
   expect(errors.some((e) => e.includes("payload mismatch"))).toBe(true);
@@ -521,11 +607,17 @@ test("matching payload send/receive columns are compatible", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      payload: { send: [{ name: "enrollment_date" }], receive: [{ name: "case_id" }] },
+      payload: {
+        send: [{ name: "enrollment_date" }],
+        receive: [{ name: "case_id" }],
+      },
     },
     {
       ...termsB,
-      payload: { send: [{ name: "case_id" }], receive: [{ name: "enrollment_date" }] },
+      payload: {
+        send: [{ name: "case_id" }],
+        receive: [{ name: "enrollment_date" }],
+      },
     },
   );
   expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
@@ -538,16 +630,32 @@ test("matching payload send/receive columns are compatible", () => {
 
 test("mismatched deduplicate values are not an error", () => {
   const { errors } = validateCompatibility(
-    { ...termsA, deduplicate: true,  output: { expectsOutput: true, shareWithPartner: true } },
-    { ...termsB, deduplicate: false, output: { expectsOutput: true, shareWithPartner: true } },
+    {
+      ...termsA,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
+    {
+      ...termsB,
+      deduplicate: false,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
   );
   expect(errors).toHaveLength(0);
 });
 
 test("both parties deduplicating is compatible when both expect output", () => {
   const { errors } = validateCompatibility(
-    { ...termsA, deduplicate: true, output: { expectsOutput: true, shareWithPartner: true } },
-    { ...termsB, deduplicate: true, output: { expectsOutput: true, shareWithPartner: true } },
+    {
+      ...termsA,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
+    {
+      ...termsB,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
   );
   expect(errors).toHaveLength(0);
 });

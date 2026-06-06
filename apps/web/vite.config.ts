@@ -19,7 +19,25 @@ const config = await configManager.load({ dotenv: true });
 
 logLibrary.setDefaultLevel(config.LOG_LEVEL);
 
+// Vite resolution for the `@`-prefixed imports the app uses, shared so the
+// inline vitest projects (which do not inherit the root `resolve`) resolve them
+// too. tsconfig provides these via explicit `paths` plus a `@*` -> `./src/*`
+// catch-all; `@psi` here stands in for that catch-all, which the unit project
+// needs because its `src/psi` sources pull in `@utils/*`.
+const srcAliases = {
+  "@components": path.resolve(__dirname, "src/components"),
+  "@utils": path.resolve(__dirname, "src/utils"),
+  "@util": path.resolve(__dirname, "src/util"),
+  "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
+  "@psi": path.resolve(__dirname, "src/psi"),
+  "@": path.resolve(__dirname, "src"),
+};
+
 export default defineConfig((_configEnv) => {
+  // Vitest evaluates this config but starts no dev/preview server, so the server
+  // snagger plugins below have no httpServer to capture (the hook would just warn
+  // "http server is undefined"). Skip them under test.
+  const underVitest = !!process.env.VITEST;
   return {
     server: {
       host: "127.0.0.1",
@@ -36,6 +54,7 @@ export default defineConfig((_configEnv) => {
             name: "unit",
             environment: "node",
           },
+          resolve: { alias: srcAliases },
         },
         {
           test: {
@@ -45,6 +64,7 @@ export default defineConfig((_configEnv) => {
             ],
             name: "integration",
             environment: "node",
+            globalSetup: ["./test/devServer/globalSetup.ts"],
           },
         },
         {
@@ -70,31 +90,30 @@ export default defineConfig((_configEnv) => {
       }),
       nitroV2Plugin({ preset: "node-server" }),
       viteReact(),
-      {
-        name: "dev-server-snagger",
-        configureServer(server: ViteDevServer) {
-          if (server.httpServer) {
-            registerServer(server.httpServer);
-          } else {
-            console.warn("http server is undefined");
-          }
-        },
-      },
-      {
-        name: "preview-server-snagger",
-        configurePreviewServer(server: PreviewServer) {
-          registerServer(server.httpServer);
-        },
-      },
+      ...(underVitest
+        ? []
+        : [
+            {
+              name: "dev-server-snagger",
+              configureServer(server: ViteDevServer) {
+                if (server.httpServer) {
+                  registerServer(server.httpServer);
+                } else {
+                  console.warn("http server is undefined");
+                }
+              },
+            },
+            {
+              name: "preview-server-snagger",
+              configurePreviewServer(server: PreviewServer) {
+                registerServer(server.httpServer);
+              },
+            },
+          ]),
     ],
     resolve: {
       tsconfigPaths: true,
-      alias: {
-        "@components": path.resolve(__dirname, "src/components"),
-        "@util": path.resolve(__dirname, "src/util"),
-        "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
-        "@": path.resolve(__dirname, "src"),
-      },
+      alias: srcAliases,
     },
   };
 });

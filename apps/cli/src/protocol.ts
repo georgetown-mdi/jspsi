@@ -6,7 +6,8 @@ import PSI from "@openmined/psi.js";
 
 import {
   FileSyncConnection,
-  EncryptedConnection,
+  fromEventConnection,
+  DEFAULT_PEER_TIMEOUT_MS,
   getLogger,
   describeExchangeStages,
   runExchange,
@@ -15,7 +16,6 @@ import {
 } from "@psilink/core";
 import type {
   Authentication,
-  Connection,
   ConnectionConfig,
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -295,6 +295,18 @@ export async function runProtocol(
       : new SSH2SFTPClientAdapter();
   const conn = new FileSyncConnection(client, { verbose: verbosity });
 
+  // The PSI protocol layer (authenticateConnection / runExchange) consumes the
+  // pull-based MessageConnection interface. Bridge the event-based
+  // FileSyncConnection through fromEventConnection so its data/error events are
+  // delivered to awaited receive() calls with no per-phase listener gap. The
+  // bridge bounds a parked receive() by the peer-inactivity budget: if the peer
+  // stays silent past this window the exchange fails as a transport error
+  // rather than hanging. peerTimeoutMs (when configured) overrides the default;
+  // the same value bounds the file-sync rendezvous TTL inside conn.open().
+  const peerBudgetMs =
+    connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+  const mc = fromEventConnection(conn, { inactivityTimeoutMs: peerBudgetMs });
+
   // SIGINT/SIGTERM handlers and the finally block share this closure so that
   // stop/cleanup/close run at most once regardless of which path gets there
   // first. The cleaned guard is the re-entry lock; signal handlers are
@@ -305,11 +317,11 @@ export async function runProtocol(
   // All three are function declarations so they can reference each other freely
   // without intermediate let-undefined variables.
   //
-  // No conn.on("error", ...) listener is installed here. Synchronous transport
-  // failures (send/synchronize) throw directly, and asynchronous poll() errors
-  // are observed by the on("error") listeners that the protocol-layer receive
-  // helpers (in pake.ts, protocolSetup.ts, payloadExchange.ts) register for the
-  // duration of each pending receive — see types.ts:Connection.
+  // No conn.on("error", ...) listener is installed at this layer. Synchronous
+  // transport failures (open/synchronize) throw directly; asynchronous poll()
+  // errors are observed by the permanent data/error listeners that the
+  // fromEventConnection bridge attaches for the connection's whole lifetime
+  // (mc, above), which surface on the protocol layer's awaited receive() calls.
   let cleaned = false;
   let opened = false;
   let started = false;
@@ -327,45 +339,35 @@ export async function runProtocol(
   // the exit code to the signal handler — preventing the CLI handler's
   // process.exit(69) from racing the signal handler's process.exit(130/143).
   let signalReceived: NodeJS.Signals | undefined;
-  // activeConn is the connection used for runExchange. When authentication
-  // succeeds, it is replaced with an EncryptedConnection that wraps conn so
-  // all subsequent messages are protected by AES-256-GCM. Without auth,
-  // activeConn stays as conn (no AEAD). Declared here so doCleanup can call
-  // activeConn.close(), which routes through the wrapper's teardown (listener
-  // detach + inner.close()) when it is an EncryptedConnection.
-  let activeConn: Connection = conn;
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
-    if (started) {
-      log.info("stopping polling");
-      try {
-        conn.stop();
-      } catch (err) {
-        log.debug("conn.stop() during cleanup:", err);
-      }
-    }
+    if (started) log.info("stopping polling");
     if (opened) log.info("closing connection");
-    // cleanup() and close() are intentionally called even when opened is false:
-    // cleanup() is a no-op on an unconnected instance; close() throws "not
-    // connected" which the catch below handles. This covers any partial state
-    // left by a failed open() call.
-    await conn.cleanup().catch((err: unknown) => {
-      log.debug("conn.cleanup() during cleanup:", err);
+    // mc.close() detaches the bridge's data/error listeners and then closes the
+    // underlying FileSyncConnection, which stops the poller, sweeps the
+    // responsible files, and ends the client (all idempotent, so this is safe
+    // even when open() never ran).
+    await mc.close().catch((err: unknown) => {
+      log.debug("mc.close() during cleanup:", err);
     });
-    // When the connection was open, a close failure is user-visible: the
-    // transport may not have terminated cleanly (e.g. SSH session timeout).
-    // When it was never opened, "not connected" is the expected throw and
-    // is logged at debug to avoid spurious noise.
-    try {
-      await activeConn.close();
-    } catch (err: unknown) {
+    // If an earlier transport failure already terminated mc, its close()
+    // returns immediately without re-closing conn (and the close it triggered
+    // on failure was fire-and-forget, hence unawaited). Close conn directly to
+    // guarantee the poller is stopped, the responsible files are swept, and the
+    // client is ended before doCleanup returns. close() is idempotent, so in
+    // the normal path this is a near no-op after mc.close() already closed it.
+    await conn.close().catch((err: unknown) => {
+      // When the connection was open, a close failure is user-visible: the
+      // transport may not have terminated cleanly (e.g. SSH session timeout).
+      // close() is idempotent and does not throw on an unopened instance, so
+      // the else branch is only a defensive fallback for an unexpected error.
       if (opened) {
         log.warn("failed to close connection during cleanup:", err);
       } else {
-        log.debug("connection close during cleanup:", err);
+        log.debug("conn.close() during cleanup:", err);
       }
-    }
+    });
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than
@@ -497,7 +499,7 @@ export async function runProtocol(
     await conn.synchronize();
 
     // If a signal fired during the synchronize() round-trip, doCleanup already
-    // ran (closing the connection and removing our hello/wave files). Bail
+    // ran (closing the connection and removing our hello/lock files). Bail
     // out before start() so the poller is not launched against a closed
     // transport. Without this, conn.start() would schedule polls that fail
     // when they hit the closed underlying client, producing spurious error
@@ -530,9 +532,14 @@ export async function runProtocol(
 
     if (auth) {
       log.info("authenticating");
-      // conn.start() must precede authenticateConnection: the SPAKE2 receive()
-      // helper registers conn.once("data", ...) listeners driven by the polling
-      // loop.
+      // conn.start() must precede authenticateConnection: the SPAKE2 handshake
+      // awaits mc.receive(), which is fed by the bridge's data listener; that
+      // listener only sees inbound frames once the polling loop is running.
+      // NOTE: there is an open ticket to extract sessionKey from the
+      // authentication result and use it set up AEAD encryption. It is
+      // currently blocked by integrating PAKE into the protocol and having the
+      // ability to generate invitation keys. For now, sessionKey is silently
+      // being dropped.
       // Discard the (possibly whitespace-padded) keyFilePath from auth;
       // saveKeyFile below uses trimmedKeyFilePath, which was captured and
       // trimmed during pre-flight without mutating the caller-supplied
@@ -546,11 +553,7 @@ export async function runProtocol(
       // "handshake may have completed on the partner side" case from the
       // "handshake never started" case.
       authStarted = true;
-      const { newToken, sessionKey } = await authenticateConnection(
-        conn,
-        pakeAuth,
-        role,
-      );
+      const { newToken } = await authenticateConnection(mc, pakeAuth, role);
       try {
         // saveKeyFile is synchronous; the assignment below runs in the same
         // microtask tick. A signal cannot interleave between them, so any
@@ -585,48 +588,13 @@ export async function runProtocol(
           { psilinkRecoveryHintEmitted: true },
         );
       }
-      try {
-        activeConn = await EncryptedConnection.create(conn, sessionKey, role);
-      } catch (err) {
-        // saveKeyFile already ran (tokenRotated=true), so the token state on
-        // disk must be communicated even when the subsequent key setup fails
-        // for an unrelated reason (e.g. a crypto environment issue). Tag the
-        // wrapped error so the generic token-rotation advisory in the outer
-        // catch is suppressed in favour of this more specific message.
-        if (tokenRotated) {
-          throw Object.assign(
-            new Error(
-              `the PAKE token was already rotated and saved, but encryption ` +
-                `key setup failed: ` +
-                (err instanceof Error ? err.message : String(err)) +
-                ` Retry the exchange without re-inviting; if this error ` +
-                `recurs, investigate whether your environment supports ` +
-                `AES-GCM (WebCrypto). If PAKE authentication fails on ` +
-                `retry, both parties must re-invite.`,
-            ),
-            { psilinkRecoveryHintEmitted: true },
-          );
-        }
-        throw err;
-      }
-      if (signalReceived !== undefined) {
-        // A signal fired during EncryptedConnection.create(): doCleanup
-        // already closed conn (activeConn at that time). Now that create()
-        // has resolved, detach the wrapper's listeners without closing the
-        // inner transport again, then bail so the signal handler owns the
-        // exit code.
-        (activeConn as EncryptedConnection).detachListeners();
-        throw new Error(
-          `interrupted by ${signalReceived} during key derivation`,
-        );
-      }
     }
 
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
     const { associationTable, partnerPayload } = await runExchange(
-      activeConn,
+      mc,
       role,
       prepared,
       {

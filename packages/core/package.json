@@ -14,6 +14,11 @@
       "import": "./dist/core.esm.js",
       "require": "./dist/core.cjs",
       "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.esm.js",
+      "require": "./dist/testing.cjs",
+      "types": "./dist/testing.d.ts"
     }
   },
   "scripts": {
@@ -29,6 +34,7 @@
   "dependencies": {
     "@noble/curves": "^2.2.0",
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",
+    "canonicalize": "^2.1.0",
     "eventemitter3": "^5.0.1",
     "loglevel": "^1.9.2",
     "luxon": "^3.7.2",

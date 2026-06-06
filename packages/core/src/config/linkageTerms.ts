@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 
 // --- Output ------------------------------------------------------------------
 
@@ -517,22 +518,6 @@ export function safeParseLinkageTerms(raw: unknown) {
 
 // --- Compatibility -----------------------------------------------------------
 
-// Serialize with sorted object keys so that property-insertion order (which
-// differs between plain objects and Zod-parsed ones) does not affect equality.
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return "[" + value.map(stableStringify).join(",") + "]";
-  }
-  if (value !== null && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const sorted = Object.keys(obj)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`);
-    return "{" + sorted.join(",") + "}";
-  }
-  return JSON.stringify(value);
-}
-
 export interface CompatibilityResult {
   errors: string[];
   warnings: string[];
@@ -596,18 +581,77 @@ export function validateCompatibility(
     );
   }
 
-  const localFields = [...local.linkageFields].sort((a, b) =>
-    a.name.localeCompare(b.name),
+  // Compare by canonical form (RFC 8785): two field/key sets are equal iff their
+  // canonical encodings match -- the same encoding that is hashed into the
+  // exchange-agreement receipt, so equality here means hash-equality there. The
+  // canonical encoder sorts keys, so property-insertion order (which differs
+  // between plain and Zod-parsed objects) does not affect the result; fields are
+  // pre-sorted by name because their array order is not significant, whereas
+  // linkage keys are ordered most-to-least precise and compared in place.
+  //
+  // canonicalString throws CanonicalEncodingError on a value outside the
+  // reproducible domain. A partner can reach this: transform `params` is
+  // `z.unknown()`, so a JSON integer beyond 2^53 survives schema parsing and
+  // then fails to canonicalize. validateCompatibility's contract is to report
+  // problems via `errors` (its callers abort the exchange on a non-empty list),
+  // not to throw, so surface such a value as an error instead of crashing.
+  //
+  // When canonicalOrError returns null the value could not be encoded, so the
+  // mismatch comparisons below are skipped for that side: an un-encodable value
+  // cannot be compared, and emitting "do not match" on top of the encoding
+  // error would be misleading. The encoding error already aborts the exchange.
+  // The cost is diagnostic only -- if one side is both un-encodable AND differs,
+  // the operator sees the encoding error first and the divergence on a re-run.
+  const canonicalOrError = (value: unknown, label: string): string | null => {
+    try {
+      return canonicalString(value);
+    } catch (err) {
+      if (err instanceof CanonicalEncodingError) {
+        errors.push(`${label} cannot be canonically encoded: ${err.message}`);
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  // Sort by UTF-16 code unit, not localeCompare: this comparator decides the
+  // element order and therefore the canonical bytes (canonical encoding
+  // preserves array order), and localeCompare is locale-dependent for non-ASCII
+  // names -- two parties under different locales could otherwise derive
+  // different bytes, and different receipt hashes, for the same terms. This is
+  // the same code-unit ordering the canonical encoder applies to object keys.
+  const byName = (a: LinkageField, b: LinkageField): number =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  const localFields = [...local.linkageFields].sort(byName);
+  const partnerFields = [...partner.linkageFields].sort(byName);
+  const localFieldsCanonical = canonicalOrError(
+    localFields,
+    "local linkage fields",
   );
-  const partnerFields = [...partner.linkageFields].sort((a, b) =>
-    a.name.localeCompare(b.name),
+  const partnerFieldsCanonical = canonicalOrError(
+    partnerFields,
+    "partner linkage fields",
   );
-  if (stableStringify(localFields) !== stableStringify(partnerFields)) {
+  if (
+    localFieldsCanonical !== null &&
+    partnerFieldsCanonical !== null &&
+    localFieldsCanonical !== partnerFieldsCanonical
+  ) {
     errors.push("linkage fields do not match");
   }
 
+  const localKeysCanonical = canonicalOrError(
+    local.linkageKeys,
+    "local linkage keys",
+  );
+  const partnerKeysCanonical = canonicalOrError(
+    partner.linkageKeys,
+    "partner linkage keys",
+  );
   if (
-    stableStringify(local.linkageKeys) !== stableStringify(partner.linkageKeys)
+    localKeysCanonical !== null &&
+    partnerKeysCanonical !== null &&
+    localKeysCanonical !== partnerKeysCanonical
   ) {
     errors.push("linkage keys do not match");
   }

@@ -49,7 +49,7 @@ A semver string identifying the schema of the linkage aggreement. Two versions a
 *Required:* yes  
 *Consistency:* none
 
-A free-text string identifying the party holding these terms. Included verbatim in the non-repudiation receipt (receipts are a planned 1.0 feature and are not yet implemented; see [ROADMAP.md](ROADMAP.md)). Parties may format this however they wish; common contents include name, organization, and contact information.
+A free-text string identifying the party holding these terms. It is self-asserted - a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is included verbatim in the non-repudiation receipt (receipts are a planned 1.0 feature and are not yet implemented; see [ROADMAP.md](ROADMAP.md)), where it carries evidentiary weight only under a certificate-backed signature that binds the asserted identity to a verified key; under a session-derived receipt it remains an unverified label (see [Non-repudiation](PROTOCOL.md#non-repudiation)). Parties may format this however they wish; common contents include name, organization, and contact information.
 
 ```yaml
 linkage_terms:
@@ -553,7 +553,7 @@ Channel-agnostic and channel-specific tuning parameters. A configuration warning
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `peer_timeout_ms` | integer | 3600000 | Total milliseconds to wait for the partner before giving up; the effective limit is the minimum of this and the remaining PAKE token lifetime |
+| `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining PAKE token lifetime. |
 | `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait during each connection attempt to the primary exchange server |
 | `max_reconnect_attempts` | integer | 3 | Maximum number of times to attempt reopening a dropped connection before giving up |
 
@@ -564,13 +564,72 @@ These options apply to both `sftp` and `filedrop` channels.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `poll_interval_ms` | integer | 100 | Milliseconds between checks for the partner's uploaded file. The default is tuned for local-network mounts and CI; raise it (for example, to 1000-5000 ms) for public SFTP servers to reduce request load. |
+| `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
+| `lockless_rendezvous` | boolean | false | When `true`, the rendezvous handshake uses an ack-handshake barrier (`<id>-hello.json` plus a zero-length acknowledgment marker `<myId>-<peerId>-hello-ack.json` named after the peer hello it acknowledges) instead of the default atomic lock-file race (`<id>-hello.json` + `<peer1>-<peer2>-lock.json`). Required on sync-mediated transports that lack atomic exclusive-create or deletion visibility during rendezvous (e.g. a cloud sync service reconciling two local mirrors where both sides "win" a local create). Both parties must set this identically. The setting is advertised in the hello payload, and each party compares the peer's advertised value against its own wherever it reads a peer hello: a mismatch fails fast **at rendezvous, symmetrically on both parties** (in either arrival order), with a clear error naming each side's setting, rather than stalling until the peer timeout. (The symmetric half is best-effort: it presumes the advertising hello write lands. If that write itself fails, the detecting party still fails locally with the clear error, but its peer degrades to the peer timeout -- never worse than the pre-advertisement behavior. See [FILE_SYNC.md](FILE_SYNC.md#bilateral-configuration-detect-and-fail-never-negotiate).) The operational sync glob in lockless mode is `<myId>-*` (upload) / `<partnerId>-*` (download), which covers hello, ack, and message files while excluding in-flight `temp-*.tmp` writes. |
+| `peer_id` | string | — | A stable, human-readable identifier for this party. Appears in every filename this party writes (hello, message, ack) and in server-side logs and transcripts. When unset, a UUID is generated at construction time. Requires `timestamp_in_filename: true`; a reused stable id without a timestamp segment can collide with a leftover file from a crashed prior session. The two parties must use distinct ids, and neither may be the other's id extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous; see [FILE_SYNC.md preconditions](FILE_SYNC.md#preconditions-for-a-correct-exchange)). Spaces and `-` are permitted within a `peer_id`. The value `"temp"` is reserved. Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may cause errors at the transport layer. |
+| `retain_files` | boolean | false | When `true`, the receiver writes a zero-length acknowledgment marker after consuming each message rather than deleting it; the sender gates its next write on observing that marker rather than on the message file disappearing. No exchange file is deleted as a protocol step; the shared directory becomes a permanent transcript. Requires `timestamp_in_filename: true` -- without it, every message from the same party would share a filename and a retained transcript would overwrite itself. Also requires `lockless_rendezvous: true` -- lock rendezvous is delete-based and cannot produce the whole-directory no-delete transcript retain mode guarantees. The CLI `--retain-files` flag implies both `--lockless-rendezvous` and `--timestamp-in-filename` when those are not already set. Both parties must set this flag identically. Like `lockless_rendezvous`, the setting is advertised in the hello payload and compared at rendezvous: a mismatch fails fast **symmetrically on both parties** (in either arrival order) with a clear error naming each side's setting, rather than stalling until the peer timeout; like `lockless_rendezvous`, the symmetric half is best-effort, contingent on the advertising write landing (see [FILE_SYNC.md](FILE_SYNC.md#bilateral-configuration-detect-and-fail-never-negotiate)). (When both flags differ at once -- only possible as `retain=true`/`lockless=true` versus both `false`, since `retain_files` implies `lockless_rendezvous` -- the error names the `retain_files` mismatch, which a single rerun realigns.) **A fresh directory is required for each exchange and is enforced**: `synchronize()` requires the directory to be empty except for at most one peer hello and throws a `UsageError` on any other pre-existing file (a leftover message, ack marker, lock file, self-hello, or temp file from a prior session); otherwise a stale message would be mis-consumed against the per-session sequence counter and a stale ack marker could prematurely release the sender. See [Acknowledgment markers](#acknowledgment-markers). |
+| `unexpected_files` | enum | mode-coupled (see description) | How to handle a file that appears in the shared directory *during* the message loop and is neither recognized as part of this exchange nor an in-flight `temp-*.tmp` write -- a sign the directory is being shared with another process or session, or that a sync tool produced a conflict copy or partial download (see [Directory exclusivity](#directory-exclusivity)). One of `error` (fail with a usage error, exit 64, naming the file and the directory path), `warn` (log once per distinct file name and continue), or `ignore` (skip silently -- the prior behavior). **Local, not bilateral**: detecting a foreign file is an observation of one's own directory view, needs no peer agreement, and carries none of the mismatch-stall risk of `lockless_rendezvous`/`retain_files`; the two parties may use different values. When unset the effective default is mode-coupled: `error` on plain delete-mode transports (ordinary `sftp`/`filedrop`) and `warn` when `retain_files` or `lockless_rendezvous` is set -- those flags signal a sync-mediated transport that legitimately produces transient conflict copies and partial downloads mid-session, where a hard fail would abort exactly the exchanges retain mode targets. An explicit value always overrides the mode-coupled default. This setting governs foreign-file detection only; a malformed *protocol* file (a peer-prefixed, message-shaped name a correctly configured peer cannot produce) is always reported regardless of this setting. |
+
+#### Message filenames
+
+On the `sftp` and `filedrop` channels each party writes its outgoing messages as files in the shared directory; the partner polls for them. Every message filename ends in `.json`, and the last `-`-delimited segment before the extension is a decimal byte count: the exact size of the serialized message. The receiver compares that declared count against the file's on-disk size and reads the file only once the two match, so a partially synced file is never read as a complete message. Because the byte count is always the final segment, parsing is right-anchored and a party id containing hyphens does not affect extraction.
+
+With `timestamp_in_filename` unset (the default), the format is:
+
+```
+<id>-<byteCount>.json
+```
+
+With `timestamp_in_filename: true`, the filename additionally carries a timestamp and counter:
+
+```
+<id>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>.json
+```
+
+`<YYYYMMDDTHHMMSS>` is the UTC write time in compact ISO 8601 form (no colons or hyphens, so it is Windows-safe and sorts lexicographically by time). `<NNN>` is a per-session counter that starts at `000`, is zero-padded to three digits, and increments with each message sent; it widens to four or more digits only after the 1000th message of a session.
+
+In-flight writes use a temporary `.tmp` file that is renamed to the final `.json` name only once the write completes, so a sync tool watching `*.json` never observes a partial file under its final name. Handshake files (`<id>-hello.json`, `<peer1>-<peer2>-lock.json`, the lockless acknowledgment marker `<myId>-<peerId>-hello-ack.json`) are separate from message files and are documented in [PROTOCOL.md](PROTOCOL.md).
+
+#### Acknowledgment markers
+
+When `retain_files: true`, the receiver writes a zero-length acknowledgment marker immediately after validating each message and before emitting it to the application layer. The marker is named after the message it acknowledges -- the writer's id, then the consumed message's name, then the `ack` type word -- so its terminal segment is `ack` (not a digit string) and it is never mistaken for a message even though the message's `<NNN>` and `<byteCount>` appear mid-name:
+
+```
+<receiverId>-<senderId>-<YYYYMMDDTHHMMSS>-<NNN>-<byteCount>-ack.json
+```
+
+This is the same construct as the lockless rendezvous ack (`<myId>-<peerId>-hello-ack.json`), applied to a message instead of a hello. The marker is **zero-length and matched by name existence**: it carries no body, so there is no byte-count gate and nothing to read. Because the name is a pure function of the acknowledged message's fixed name, the sender locates it by *constructing* the expected name from the message it sent -- it never parses the two ids back out of the marker -- and waits for that exact name to appear. Reprocessing the same message re-derives the identical name, so a transient retry creates no duplicate marker.
+
+The receiver never deletes the consumed message file. The message and its ack both persist, and the directory accumulates one of each per exchanged message on every transport -- including those, such as SFTP, that do support deletion. This is what makes the directory a durable transcript rather than only a workaround for transports that cannot propagate deletions.
+
+In `retain_files` mode `close()` does not delete exchange files; the directory is the transcript. This includes the rendezvous artifacts: each party's `-hello.json` and the lockless `-hello-ack.json` marker persist alongside the messages and their acks, so the transcript is not only message and ack files. The only file ever removed is an in-flight `temp-*.tmp` write, which is cleaned up inline on error.
+
+The transcript accumulates with no in-protocol cleanup; retention, rotation, and archival are out-of-band operator responsibilities.
+
+#### Directory exclusivity
+
+The shared directory (SFTP path or local filedrop path) must be **dedicated exclusively** to a single active exchange between exactly two parties. Both channels treat the directory as a private communication channel: each party reads and deletes files written by the other, and the rendezvous protocol uses filename presence as a synchronization signal.
+
+A third process writing `<id>-hello.json`, `<peer1>-<peer2>-lock.json`, a `<id>-...-ack.json` marker, or `<id>-*.json` files into the same path during an active session will cause the exchange to abort with a diagnostic error. Separate concurrent exchanges must use separate directories.
+
+#### Filename grammar
+
+Every protocol file on `sftp` and `filedrop` channels is named `<id>-...-<token>.json`, where `<token>` is the final `-`-delimited segment before `.json`:
+
+- If `<token>` is all digits, the file is a **message** and `<token>` is its declared byte count. Parsing is right-anchored so a party id containing hyphens does not affect extraction.
+- Otherwise `<token>` is a **type word** naming the file kind: `hello` (rendezvous hello), `ack` (a zero-length acknowledgment marker: the lockless rendezvous ack of a peer hello, and the retain-mode ack of a consumed message), `joining` (the lock-path joiner-arrival sentinel `<id>-joining.json`, briefly present while the joiner deletes the peer hello and renames the sentinel to its own hello), or `lock` (the rendezvous tiebreaker `<peer1>-<peer2>-lock.json`, created in lock mode -- the default `lockless_rendezvous: false` -- when both hellos coexist and one party wins the atomic exclusive-create race; both sides encode the two ids in hello-filename order so they reconstruct the same name). A typed file is never read as a message; the receiver's message scan ignores any file whose terminal segment is non-numeric, so a message ack's mid-name `<NNN>`/`<byteCount>` digits do not route it as a message.
+
+The receiver only reads files whose on-disk size matches the declared byte count, so a partially synced message file is never consumed prematurely.
 
 ### `connection.provider_options`
 
 *Type:* object  
-*Required:* no
+*Required:* no  
+*Applies to:* `webrtc`, `sftp`
 
 An opaque key-value map passed verbatim to the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
+
+Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`).
 
 ---
 
@@ -669,6 +728,14 @@ used unchanged |
 | `function` | string | yes | Name of the function to apply (see Available functions below) |
 | `params` | object | no | Function-specific parameters |
 
+### Unicode normalization
+
+Before the first step of any transformation runs, the input value is normalized to Unicode NFC (Normalization Form C). This is unconditional and applies to every field, including those given an identity (no-`steps`) transformation. Because the cleaned string becomes the PSI set element verbatim, two parties holding the same logical value in different normalization forms -- for example an accented name stored precomposed (NFC) on one side and decomposed (NFD) on the other, the common split between macOS filesystems and most databases -- would otherwise produce different bytes and silently fail to match. Author pipelines assuming their input is already NFC; `to_upper_case`, `to_lower_case`, and `remove_accents` therefore operate on a normalized input (though `to_upper_case` can itself re-emit non-NFC for a few code points, which the steps that match against an intermediate value compensate for; see the note below). NFC, not NFKC, is used: canonical equivalents are merged while visually-distinct compatibility characters (ligatures, full-width forms) are preserved.
+
+The same guarantee extends to the strings you supply in step `params` and to linkage key element transforms. Literal values a step injects into or compares against the data -- `null_if` values, a `coalesce` default, a `replace_regex` replacement, and a `pad_left` character -- are normalized to NFC, and the fully assembled key string is normalized once more after its elements are concatenated. Regex *patterns* (`replace_regex`, `extract_regex`, `filter_regex`, `split_on`) are applied exactly as written and are not normalized, because normalizing a pattern could change what it matches; author any non-ASCII in a pattern in NFC so it matches the NFC data.
+
+The `to_upper_case` step can emit a non-NFC sequence for six code points even from NFC input -- for example its result on the Greek `U+0390` is the decomposed `U+0399 U+0308 U+0301`. (`to_lower_case` does not exhibit this, but a future case-folding step could.) The steps that match your authored value, pattern, or delimiter against an intermediate value (`null_if`, `filter_regex`, `extract_regex`, `replace_regex`, `split_on`, and `parse_date`) therefore normalize the value they inspect to NFC before matching, so an exclusion, filter, extraction, replacement, split, or date parse authored in NFC behaves correctly even when it follows a case-fold. `null_if` and `filter_regex` pass the original value downstream unchanged; the steps that derive a new value do so from the normalized form.
+
 ### Null propagation
 
 A step may produce `null` to signal that the record has no valid value for this field. Once a step produces `null`, all subsequent steps are skipped and the field is absent from the record's PSI entry for any linkage key that references it. This is the intended mechanism for enforcing `exclude` constraints declared in a linkage field: a `null_if` step actively removes excluded values rather than merely warning.
@@ -691,6 +758,8 @@ When exactly one fan-out entry matches, the original row is accepted and all its
 
 ### Available functions
 
+Parameter names below are written in snake_case in YAML (e.g. `input_format`, `include_original`), following the same convention as the rest of the spec; they are normalized for the function library internally. Unlike `connection.provider_options`, a `params` block is not opaque and its keys are not passed verbatim.
+
 #### String transformation
 
 | Function | Description | Parameters |
@@ -703,7 +772,7 @@ When exactly one fan-out entry matches, the original row is accepted and all its
 | `trim_whitespace` | Remove leading and trailing whitespace | — |
 | `to_upper_case` | Convert to uppercase | — |
 | `to_lower_case` | Convert to lowercase | — |
-| `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text | — |
+| `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text; re-normalizes to NFC after the diacritic strip | — |
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
 | `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
 | `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`); tokens: `YYYY`, `MM`, `DD` |
@@ -733,7 +802,7 @@ When exactly one fan-out entry matches, the original row is accepted and all its
 |----------|-------------|------------|
 | `split_on` | Split the value on a regex delimiter, producing `Set<string>` | `delimiter` (regex pattern, required), `include_original` (boolean, default `false`) |
 
-When `split_on` finds no delimiter the value is returned unchanged as a single-element list. When `include_original` is `true` the unsplit value is prepended to the parts.
+When `split_on` finds no delimiter it returns the value as a single-element set; when `include_original` is `true` the unsplit value is prepended to the parts. In both cases the value is the NFC-normalized form, consistent with the other derive-type steps (see [Unicode normalization](#unicode-normalization) above); this differs from the original bytes only when an upstream step such as `to_upper_case` left a non-NFC intermediate.
 
 Steps following `split_on` are applied element-wise across all parts. Null-producing steps filter individual elements; if all elements are filtered the field becomes `null` and `coalesce` may recover it.
 

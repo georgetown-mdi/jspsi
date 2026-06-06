@@ -23,17 +23,16 @@ export type { IConfig, IClient, IMessage };
   instance: PeerServerInstance
 } */
 
-
 export function CreatePeerServerWSOnly(
   server: HttpServer | HttpsServer,
   options?: Partial<IConfig>,
 ): PeerServerInstance {
   const newOptions: IConfig = {
-	  ...defaultConfig,
-	  ...options,
+    ...defaultConfig,
+    ...options,
   };
 
-  return CreateInstanceWSOnly({server, options: newOptions})
+  return CreateInstanceWSOnly({ server, options: newOptions });
 }
 
 /* export default function CreatePeerServer(

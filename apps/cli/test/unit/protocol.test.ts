@@ -24,8 +24,8 @@ vi.mock("@openmined/psi.js", () => ({
 // is empty before resolving: the receiver's poller deletes each message file
 // after consuming it, so an empty directory is a deterministic signal that the
 // peer has consumed the final PAKE message - no fixed sleep required. .hello
-// and .wave files from synchronize() are ignored; after the wave race the
-// winner's wave file remains until cleanup() runs in the finally block (after
+// and -lock.json files from synchronize() are ignored; after the lock race the
+// winner's lock file remains until cleanup() runs in the finally block (after
 // runExchange returns), so it may still be present while this mock polls for
 // .json files. These files are harmless residue and will not be consumed by
 // the message poller.
@@ -55,12 +55,6 @@ vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
     ...actual,
-    // Keep the real EncryptedConnection so that protocol.ts can call
-    // EncryptedConnection.create after PAKE, and so vi.spyOn tests can
-    // replace create() on the real class object. Without this explicit
-    // entry Vitest's module proxy stubs the class's static methods and
-    // throws when create() is called.
-    EncryptedConnection: actual.EncryptedConnection,
     // Replace getLogger so that runProtocol's log.warn / log.error calls are
     // captured in mockState and can be asserted by individual tests. The
     // logger is only used for informational output; replacing it does not
@@ -82,7 +76,7 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
-import { runExchange, EncryptedConnection } from "@psilink/core";
+import { runExchange } from "@psilink/core";
 import { runProtocol } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 
@@ -303,8 +297,8 @@ test("rejects before opening a connection when keyFilePath parent is a dangling 
 test("rejects and cleans up when conn.open() itself throws (opened=false cleanup path)", async () => {
   // Uses a path that does not exist so that LocalFSClient.connect() ->
   // fs.access() throws ENOENT. open() rejects before opened=true, exercising
-  // the doCleanup branch where close() throws "not connected" and is swallowed
-  // at debug level.
+  // the doCleanup branch where close() runs idempotently on a connection that
+  // was never opened (no teardown to perform).
   await expect(
     runProtocol(
       {
@@ -476,14 +470,6 @@ test("both key files hold the same rotated token after a successful exchange", a
       "test-b",
     ),
   ]);
-
-  // Both runExchange calls must have received the EncryptedConnection wrapper,
-  // not the raw FileSyncConnection. A regression here would silently bypass
-  // AES-256-GCM and send plaintext over the filedrop transport.
-  expect(vi.mocked(runExchange).mock.calls).toHaveLength(2);
-  for (const [conn] of vi.mocked(runExchange).mock.calls) {
-    expect(conn).toBeInstanceOf(EncryptedConnection);
-  }
 
   const loadedA = loadKeyFile(keyFileA);
   const loadedB = loadKeyFile(keyFileB);
@@ -857,7 +843,7 @@ test("SIGINT handler exits with code 130", async () => {
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 
   // Two parties are required: a single party blocks forever in synchronize()
-  // (waiting for a peer's hello/wave file), so runExchange is never reached
+  // (waiting for a peer's hello/lock file), so runExchange is never reached
   // and the mockImplementationOnce entry is never consumed.
   // mockImplementationOnce is provided for both parties so both entries are
   // consumed after synchronize() completes.
@@ -905,7 +891,7 @@ test("SIGINT handler exits with code 130", async () => {
   try {
     // Wait for both parties to enter runExchange before emitting the signal.
     // Emitting SIGINT while a party is still in synchronize() could cause its
-    // cleanup to delete wave files the other party is still waiting for.
+    // cleanup to delete lock files the other party is still waiting for.
     await vi.waitFor(
       () =>
         expect(vi.mocked(runExchange).mock.calls.length).toBeGreaterThanOrEqual(
@@ -1031,7 +1017,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
       () => {
         const entries = fs
           .readdirSync(dropDir)
-          .filter((f) => f.endsWith(".hello"));
+          .filter((f) => f.endsWith("-hello.json"));
         expect(entries.length).toBeGreaterThanOrEqual(1);
       },
       { timeout: 5_000 },
@@ -1044,9 +1030,9 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
     });
 
     // After cleanup runs the hello file must be gone — otherwise a retry
-    // would trip the "preexisting hello or wave files" guard.
+    // would trip the "preexisting hello or lock files" guard.
     expect(
-      fs.readdirSync(dropDir).filter((f) => f.endsWith(".hello")),
+      fs.readdirSync(dropDir).filter((f) => f.endsWith("-hello.json")),
     ).toHaveLength(0);
   } finally {
     exitSpy.mockRestore();
@@ -1239,7 +1225,7 @@ test.skipIf(process.platform === "win32")(
     );
 
     // Poll for B's rendezvous file rather than sleeping a fixed amount. B
-    // writes its .hello file to dropDir during open()/synchronize(); its
+    // writes its -hello.json file to dropDir during open()/synchronize(); its
     // presence is the deterministic signal that B has reached synchronize() and
     // is waiting for a peer. A only starts after this loop exits, guaranteeing
     // B is already in the drop directory before A's open() runs.
@@ -1458,183 +1444,3 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
     exitSpy.mockRestore();
   }
 });
-
-// --- EncryptedConnection.create failure paths --------------------------------
-
-test("runProtocol throws a tagged recovery message when EncryptedConnection.create fails after tokenRotated=true", async () => {
-  // Path A: saveKeyFile succeeds (tokenRotated=true) but create() rejects with
-  // a synthetic error. The catch block wraps the error with the recovery message
-  // and tags it psilinkRecoveryHintEmitted=true to suppress the generic
-  // "already rotated and saved" advisory that would otherwise also fire.
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
-
-  // Wait for both key files to reflect the rotated token before rejecting: same
-  // synchronization pattern used by waitForRotationThenThrow. This ensures PAKE
-  // has completed on both sides before either party's create() throws; without
-  // it, the first party to throw would close its connection while the second is
-  // still exchanging PAKE messages, causing a PAKE failure with different
-  // diagnostics.
-  async function waitForBothRotationsThenReject(): Promise<never> {
-    const { readFileSync } = await import("node:fs");
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).pakeToken;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).pakeToken;
-        if (a !== TOKEN_A && b !== TOKEN_A) break;
-      } catch {
-        // key file may not exist yet; retry
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for both key files to rotate");
-      await new Promise((r) => setTimeout(r, 1));
-    }
-    throw new Error("simulated create() failure");
-  }
-
-  const createSpy = vi
-    .spyOn(EncryptedConnection, "create")
-    .mockImplementation(waitForBothRotationsThenReject as never);
-
-  try {
-    const pA = runProtocol(
-      {
-        channel: "filedrop",
-        path: dropDir,
-        options: { pollIntervalMs: 1 },
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
-      },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    );
-    const pB = runProtocol(
-      {
-        channel: "filedrop",
-        path: dropDir,
-        options: { pollIntervalMs: 1 },
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
-      },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    );
-
-    const [resultA, resultB] = await Promise.allSettled([pA, pB]);
-    expect(resultA.status).toBe("rejected");
-    expect(resultB.status).toBe("rejected");
-
-    // Both rejection messages must carry the Path A recovery hint.
-    expect((resultA as PromiseRejectedResult).reason.message).toContain(
-      "PAKE token was already rotated and saved, but encryption key setup failed",
-    );
-    expect((resultB as PromiseRejectedResult).reason.message).toContain(
-      "PAKE token was already rotated and saved, but encryption key setup failed",
-    );
-
-    // The psilinkRecoveryHintEmitted tag must suppress the generic advisory.
-    // If the tag is missing, the catch block logs "The PAKE token was already
-    // rotated and saved before this error." which would appear in mockState.errors.
-    expect(
-      mockState.errors.every((m) => !m.includes("already rotated and saved")),
-    ).toBe(true);
-  } finally {
-    createSpy.mockRestore();
-  }
-}, 15_000);
-
-test("runProtocol resolves (does not reject) when SIGINT fires during EncryptedConnection.create", async () => {
-  // Path B: a signal fires while create() is awaiting key derivation. doCleanup
-  // runs against the raw conn (activeConn before create resolves). After create
-  // resolves, the code closes the wrapper and throws "interrupted by SIGINT
-  // during key derivation". The catch block sees signalReceived !== undefined,
-  // logs the error, and returns — so runProtocol resolves rather than rejecting,
-  // leaving the signal handler's process.exit(130) as the sole exit path.
-  //
-  // Both parties must reach create() before the signal fires so neither is
-  // still in the PAKE round-trip when doCleanup closes the connection.
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
-
-  const exitSpy = vi
-    .spyOn(process, "exit")
-    .mockReturnValue(undefined as never);
-
-  const detachListeners = vi.fn();
-  const stubConn = { detachListeners } as unknown as EncryptedConnection;
-
-  let resolveA!: () => void;
-  let resolveB!: () => void;
-  let callCount = 0;
-  const createSpy = vi
-    .spyOn(EncryptedConnection, "create")
-    .mockImplementation(
-      () =>
-        new Promise<EncryptedConnection>((resolve) => {
-          if (callCount === 0) {
-            resolveA = () => resolve(stubConn);
-          } else {
-            resolveB = () => resolve(stubConn);
-          }
-          callCount++;
-        }),
-    );
-
-  try {
-    const pA = runProtocol(
-      {
-        channel: "filedrop",
-        path: dropDir,
-        options: { pollIntervalMs: 1 },
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
-      },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    );
-    const pB = runProtocol(
-      {
-        channel: "filedrop",
-        path: dropDir,
-        options: { pollIntervalMs: 1 },
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
-      },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    );
-
-    // Wait for both parties to enter create() before emitting the signal. Both
-    // PAKE handshakes must have completed at this point.
-    await vi.waitFor(() => expect(callCount).toBeGreaterThanOrEqual(2), {
-      timeout: 10_000,
-    });
-
-    process.emit("SIGINT");
-    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
-      timeout: 5_000,
-    });
-
-    // Resolve both held create() Promises so runProtocol can proceed to the
-    // signalReceived check at line 612, close the wrapper, and return.
-    resolveA();
-    resolveB();
-
-    const [resultA, resultB] = await Promise.allSettled([pA, pB]);
-    expect(resultA.status).toBe("fulfilled");
-    expect(resultB.status).toBe("fulfilled");
-    expect(detachListeners).toHaveBeenCalled();
-  } finally {
-    exitSpy.mockRestore();
-    createSpy.mockRestore();
-  }
-}, 20_000);

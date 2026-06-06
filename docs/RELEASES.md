@@ -71,8 +71,10 @@ npm run build
 npm test -w packages/core
 npm test -w apps/cli
 npm run test:unit -w apps/web
-docker compose -f apps/cli/test/container/compose.yaml up -d
-npm run test:integration -w apps/cli
+sh apps/cli/test/container/setup.sh      # once per checkout, if not already done
+npm run test:container:up   -w apps/cli
+npm run test:integration    -w apps/cli
+npm run test:container:down -w apps/cli
 ```
 
 All tests must pass. Lint must be clean (`npm run lint`).

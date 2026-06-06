@@ -1,12 +1,23 @@
+export * from "./errors";
 export * from "./participant";
 export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";
 export * from "./connection/fileSyncConnection";
-export { BufferedErrorEmitter } from "./connection/bufferedErrorEmitter";
-export { EncryptedConnection } from "./connection/encryptedConnection";
+export type { HelloEnvelope } from "./connection/controlEnvelope";
+export * from "./connection/messageConnection";
 export { getLogger, setLogPrefixer } from "./utils/logger";
 export { retryPromise, withTimeout } from "./utils/promise";
+// @internal: shared with the CLI config writer so read/write skip identical
+// subtrees; not a stable public API (see the declaration's JSDoc).
+export { OPAQUE_VALUE_KEYS } from "./utils/camelizeKeys";
+export {
+  canonicalString,
+  canonicalBytes,
+  safeIntegerSchema,
+  CanonicalEncodingError,
+} from "./utils/canonical";
+export type { CanonicalValue } from "./utils/canonical";
 
 export * from "./config/standardization";
 export * from "./config/connection";
@@ -22,7 +33,7 @@ export { loadCSVFile } from "./file";
 export { inferDateFormat } from "./utils/date.js";
 export * from "./exchange";
 export * from "./payloadExchange";
-export { authenticateConnection, deriveAeadKey } from "./auth";
-export type { AuthResult } from "./auth";
+export { authenticateConnection, deriveAeadKey, AEAD_CONTEXTS } from "./auth";
+export type { AuthResult, AeadContext } from "./auth";
 export { runSpake2 } from "./pake";
 export type { Spake2Result } from "./pake";
