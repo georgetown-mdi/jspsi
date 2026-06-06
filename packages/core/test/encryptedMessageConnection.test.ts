@@ -279,10 +279,28 @@ test("send succeeds at exactly sendSeq === MAX_SAFE_INTEGER", async () => {
   expect(await encB.receive()).toEqual({ boundary: true });
 });
 
-test("send refuses to advance the counter past MAX_SAFE_INTEGER", async () => {
+test("send refuses to advance past MAX_SAFE_INTEGER and latches the wrapper", async () => {
   const [encA] = await makeEncryptedPair();
   (encA as unknown as { sendSeq: number }).sendSeq = Number.MAX_SAFE_INTEGER + 1;
-  await expectSecurity(encA.send({ overflow: true }), /overflow/i);
+  const first = await expectSecurity(encA.send({ overflow: true }), /overflow/i);
+
+  // Overflow latches the wrapper dead like any other terminal failure: every
+  // later send and receive rejects with the very same error object.
+  const onSend = await encA.send({ again: true }).then(
+    () => {
+      throw new Error("expected rejection but send resolved");
+    },
+    (e: unknown) => e,
+  );
+  expect(onSend).toBe(first);
+
+  const onReceive = await encA.receive().then(
+    () => {
+      throw new Error("expected rejection but receive resolved");
+    },
+    (e: unknown) => e,
+  );
+  expect(onReceive).toBe(first);
 });
 
 // --- Sticky terminal state ----------------------------------------------------

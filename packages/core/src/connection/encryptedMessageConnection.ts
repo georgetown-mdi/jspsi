@@ -62,6 +62,17 @@ export const IV_SEQ_OFFSET = 4;
  * transport drop so a forged or replayed frame is never mistaken for an
  * ordinary disconnect.
  *
+ * This layer detects replay, reordering, and tampering (a non-increasing
+ * sequence number, or a failed GCM tag), but it does NOT detect dropped or
+ * withheld frames: an inbound sequence number that skips ahead (a gap) is
+ * accepted, and a truncated tail is indistinguishable from a clean end.
+ * Completeness is delegated to the inner transport and the lockstep protocol
+ * above, where a missing frame surfaces as a stalled or schema-invalid
+ * exchange. End-to-end gap and truncation detection is a deferred follow-up; it
+ * is blocked on the send path advancing its counter only on a fully successful
+ * send, so that a legitimate sender-side gap can never be mistaken for an
+ * attack (see docs/SECURITY_DESIGN.md, "Channel security").
+ *
  * Construct via the static {@link EncryptedMessageConnection.create} factory.
  */
 export class EncryptedMessageConnection implements MessageConnection {
@@ -133,15 +144,22 @@ export class EncryptedMessageConnection implements MessageConnection {
     if (this.failed !== undefined) throw this.failed;
 
     if (this.sendSeq > Number.MAX_SAFE_INTEGER) {
-      throw new ConnectionError(
-        "EncryptedConnection: sequence number overflow; refusing to reuse nonce",
-        "security",
+      // Route through fail() so overflow latches the wrapper like every other
+      // terminal failure: every later send/receive then rejects with this same
+      // error object. Kept kind "security" - refusing to reuse a nonce is a
+      // deliberate cryptographic safety guard that must never be silently
+      // retried, which is exactly the "security" contract.
+      throw this.fail(
+        new ConnectionError(
+          "EncryptedConnection: sequence number overflow; refusing to reuse nonce",
+          "security",
+        ),
       );
     }
 
-    const seq = this.sendSeq++;
-    const iv = this.seqToIv(seq);
-
+    // Build the plaintext before consuming a sequence number, so a serialization
+    // failure (e.g. a circular-reference payload throwing in JSON.stringify)
+    // does not burn a counter value on a frame that is never sent.
     let plaintext: Uint8Array<ArrayBuffer>;
     if (data instanceof Uint8Array) {
       plaintext = new Uint8Array(1 + data.length) as Uint8Array<ArrayBuffer>;
@@ -154,6 +172,9 @@ export class EncryptedMessageConnection implements MessageConnection {
       plaintext.set(json, 1);
     }
 
+    const seq = this.sendSeq++;
+    const iv = this.seqToIv(seq);
+
     let cipherBuffer: ArrayBuffer;
     try {
       cipherBuffer = await crypto.subtle.encrypt(
@@ -162,7 +183,21 @@ export class EncryptedMessageConnection implements MessageConnection {
         plaintext,
       );
     } catch (err) {
-      throw this.fail(asConnectionError(err, "security"));
+      // A failure to encrypt our OWN outbound data is not tampering: the
+      // realistic causes are local runtime faults (resource exhaustion, a
+      // crypto-subsystem error), out of anyone's control. Classify as
+      // "transport" - not the caller's fault, a retry is reasonable, and never
+      // "security" - keeping the underlying error as the cause. A dedicated
+      // "system" kind for non-attributable runtime faults was considered and
+      // deferred (see docs/COMMUNICATION.md, "Error handling").
+      throw this.fail(
+        new ConnectionError(
+          "EncryptedConnection: failed to encrypt outbound message " +
+            "(local crypto/runtime fault)",
+          "transport",
+          { cause: err },
+        ),
+      );
     }
 
     // Re-check after the await. Dead code in the pull model (no concurrent
@@ -177,13 +212,26 @@ export class EncryptedMessageConnection implements MessageConnection {
     envelope.set(iv);
     envelope.set(cipher, 12);
 
-    await this.inner.send({ enc: toBase64Url(envelope) });
+    try {
+      await this.inner.send({ enc: toBase64Url(envelope) });
+    } catch (err) {
+      // A transport-layer send failure makes this wrapper terminal too (the
+      // MessageConnection.send contract), so latch it rather than letting it
+      // escape with this.failed still undefined. asConnectionError passes an
+      // inner ConnectionError through unchanged, preserving its kind.
+      throw this.fail(asConnectionError(err, "transport"));
+    }
   }
 
   async receive(timeoutMs?: number): Promise<unknown> {
     if (this.failed !== undefined) throw this.failed;
     // Pull one envelope from the inner FIFO; timeoutMs passes straight through.
     const data = await this.inner.receive(timeoutMs);
+    // Re-check after the await, for symmetry with send()/handleInbound. Dead
+    // code in the pull model (no concurrent caller can latch a failure between
+    // the receive above and here), kept so a future concurrent caller observes
+    // the latch before any inbound processing begins.
+    if (this.failed !== undefined) throw this.failed;
     return this.handleInbound(data);
   }
 

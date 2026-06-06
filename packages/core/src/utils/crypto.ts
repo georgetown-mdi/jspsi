@@ -5,7 +5,13 @@
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();
 
-/** Shared `TextDecoder` instance for decoding UTF-8 bytes to strings. */
+/**
+ * Shared `TextDecoder` instance for decoding UTF-8 bytes to strings. Use only
+ * for one-shot, non-streaming decodes: never call `dec.decode(chunk, { stream:
+ * true })` on this shared instance. Streaming mode carries decoder state across
+ * calls, so a streaming caller would corrupt unrelated decodes elsewhere in the
+ * process. A caller that needs streaming must construct its own `TextDecoder`.
+ */
 export const dec = new TextDecoder();
 
 /**
