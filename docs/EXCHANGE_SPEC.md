@@ -728,6 +728,10 @@ used unchanged |
 | `function` | string | yes | Name of the function to apply (see Available functions below) |
 | `params` | object | no | Function-specific parameters |
 
+### Unicode normalization
+
+Before the first step of any transformation runs, the input value is normalized to Unicode NFC (Normalization Form C). This is unconditional and applies to every field, including those given an identity (no-`steps`) transformation. Because the cleaned string becomes the PSI set element verbatim, two parties holding the same logical value in different normalization forms -- for example an accented name stored precomposed (NFC) on one side and decomposed (NFD) on the other, the common split between macOS filesystems and most databases -- would otherwise produce different bytes and silently fail to match. Author pipelines assuming their input is already NFC; `to_upper_case`, `to_lower_case`, and `remove_accents` therefore operate on a normalized value. NFC, not NFKC, is used: canonical equivalents are merged while visually-distinct compatibility characters (ligatures, full-width forms) are preserved.
+
 ### Null propagation
 
 A step may produce `null` to signal that the record has no valid value for this field. Once a step produces `null`, all subsequent steps are skipped and the field is absent from the record's PSI entry for any linkage key that references it. This is the intended mechanism for enforcing `exclude` constraints declared in a linkage field: a `null_if` step actively removes excluded values rather than merely warning.
@@ -764,7 +768,7 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `trim_whitespace` | Remove leading and trailing whitespace | — |
 | `to_upper_case` | Convert to uppercase | — |
 | `to_lower_case` | Convert to lowercase | — |
-| `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text | — |
+| `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text; re-normalizes to NFC after the diacritic strip | — |
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
 | `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
 | `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`); tokens: `YYYY`, `MM`, `DD` |

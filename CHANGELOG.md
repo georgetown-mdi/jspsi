@@ -39,6 +39,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 
 ### Fixed
 
+- Standardized linkage-key strings are now normalized to Unicode NFC before they enter PSI. NFC normalization runs unconditionally as the first step of every field's standardization pipeline -- including identity (no-step) and custom pipelines that never strip to ASCII -- so two parties holding the same logical value in different normalization forms (precomposed NFC vs decomposed NFD, the common macOS-filesystem vs Windows/most-database split) produce identical key bytes instead of silently failing to match. Previously the only normalization happened inside `remove_accents`, which is not guaranteed to run. `remove_accents` additionally re-normalizes to NFC after its NFD diacritic strip so no decomposed residue leaks into the key.
 - `connection.provider_options` keys are now passed verbatim, as the spec now documents. Previously the config writer snakeized them to disk and the reader camelized them back, so a key authored in the casing the transport library expects -- e.g. ssh2's `readyTimeout` -- was rewritten (`ready_timeout`) rather than preserved. The map's contents are excluded from key-case transformation on both the write and read paths; all other schema fields, including function `params`, are normalized as before.
 - A malformed message from a peer is reported as a protocol error instead of crashing.
 - A failed exchange surfaces its original cause instead of a generic connection error.

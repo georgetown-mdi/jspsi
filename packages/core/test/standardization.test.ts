@@ -528,6 +528,76 @@ describe("runPipeline — split_on fan-out", () => {
   });
 });
 
+// --- runPipeline: NFC normalization ------------------------------------------
+
+describe("NFC normalization (unconditional first pipeline step)", () => {
+  // "Jose" with an accented e: precomposed NFC (U+00E9) vs decomposed NFD
+  // (plain e + combining acute U+0301). Written with \u escapes because the two
+  // forms are indistinguishable in a source editor.
+  const NFC_JOSE = "Jos\u00e9";
+  const NFD_JOSE = "Jose\u0301";
+
+  test("identity pipeline (no steps) collapses NFD to NFC bytes", () => {
+    expect(runPipeline(NFD_JOSE, [])).toBe(NFC_JOSE);
+    expect(runPipeline(NFC_JOSE, [])).toBe(NFC_JOSE);
+  });
+
+  test("custom pipeline that never strips to ASCII still normalizes", () => {
+    // to_lower_case only -- no remove_accents, no remove_non_ascii. The accent
+    // survives, but the output is NFC regardless of the input's form.
+    const steps = [{ function: "to_lower_case" }];
+    expect(runPipeline(NFD_JOSE, steps)).toBe("jos\u00e9");
+    expect(runPipeline(NFC_JOSE, steps)).toBe("jos\u00e9");
+    expect(runPipeline(NFD_JOSE, steps)).toBe(runPipeline(NFC_JOSE, steps));
+  });
+
+  test("NFC and NFD inputs collapse to one standardized field value", () => {
+    const steps = [{ function: "to_upper_case" }];
+    const nfc = new StandardizedField("first_name", "FN", steps, [
+      { FN: NFC_JOSE },
+    ]);
+    const nfd = new StandardizedField("first_name", "FN", steps, [
+      { FN: NFD_JOSE },
+    ]);
+    expect(nfd.get(0)).toEqual(["JOS\u00c9"]);
+    expect(nfd.get(0)).toEqual(nfc.get(0));
+  });
+
+  test("NFC and NFD inputs yield identical key strings end-to-end", () => {
+    const key = { name: "FN", elements: [{ field: "first_name" }] };
+    const make = (raw: string) =>
+      new StandardizedDataset([
+        new StandardizedField(
+          "first_name",
+          "FN",
+          [{ function: "to_upper_case" }],
+          [{ FN: raw }],
+        ),
+      ]);
+    expect(buildKeyStrings(key, make(NFD_JOSE), 0)).toEqual(
+      buildKeyStrings(key, make(NFC_JOSE), 0),
+    );
+  });
+
+  test("non-Latin multi-codepoint grapheme composes (Hangul jamo)", () => {
+    // The Hangul syllable U+D55C is the canonical composition of its three
+    // jamo U+1112 U+1161 U+11AB; the decomposed form must collapse to it.
+    const composed = "\ud55c";
+    const decomposed = "\u1112\u1161\u11ab";
+    expect(runPipeline(decomposed, [])).toBe(composed);
+  });
+
+  test("remove_accents re-normalizes to NFC (no decomposed residue)", () => {
+    // U+0622 (Arabic alef with madda above) decomposes to U+0627 + U+0653; the
+    // maddah (U+0653) is outside the stripped U+0300-U+036F range and survives.
+    // Without the re-NFC, remove_accents would emit the two-code-point
+    // decomposed sequence instead of the single precomposed character.
+    const out = runPipeline("\u0622", [{ function: "remove_accents" }]);
+    expect(out).toBe("\u0622");
+    expect((out as string).length).toBe(1);
+  });
+});
+
 // --- StandardizedField -------------------------------------------------------
 
 describe("StandardizedField", () => {

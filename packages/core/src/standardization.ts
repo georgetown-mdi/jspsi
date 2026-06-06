@@ -78,7 +78,15 @@ function toLowerCase(s: string): string {
 }
 
 function removeAccents(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // Re-normalize to NFC after the NFD strip: a combining mark outside the
+  // stripped U+0300-U+036F range (e.g. the Arabic maddah U+0653) survives, so
+  // without this the step would leak a decomposed residue into the key. Every
+  // pipeline already receives NFC input (see runCompiledPipeline); this keeps
+  // the step's output NFC as well.
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC");
 }
 
 const suffixes = [
@@ -413,7 +421,16 @@ function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
 // --- Pipeline ----------------------------------------------------------------
 
 function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
-  let current: FieldValue = input;
+  // Unicode NFC normalization is the unconditional first transform of every
+  // standardized field. The cleaned string becomes the PSI set element verbatim,
+  // so two parties holding the same logical value in different normalization
+  // forms (precomposed NFC vs decomposed NFD -- the common macOS-filesystem vs
+  // Windows/most-DB split) would otherwise emit different bytes and the same
+  // person would silently fail to match. It runs here, before any step and for
+  // every pipeline -- including the identity (no-steps) passthrough and custom
+  // pipelines that never strip to ASCII -- rather than being gated on a
+  // remove_accents step that is not guaranteed to run.
+  let current: FieldValue = input.normalize("NFC");
   for (const step of steps) {
     current = applyStep(current, step);
   }
