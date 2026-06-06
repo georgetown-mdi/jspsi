@@ -44,10 +44,17 @@ export interface AuthResult {
  * reviewed change (it already adds a `connection.channel` discriminant and its
  * config interface); append its label here so the new caller cannot introduce
  * a variable, non-ASCII, or non-NFC context that would make the two parties
- * derive different keys and fail AEAD silently.  `webrtc` is absent because it
- * relies on DTLS transport security and ignores the session key.
+ * derive different keys and fail AEAD with an opaque auth-tag error.  `webrtc`
+ * is absent because it relies on DTLS transport security and ignores the
+ * session key.
+ *
+ * Frozen so the readonly compile-time type also holds at runtime: a plain-JS
+ * caller cannot `push` a label and widen the set the runtime guard checks.
  */
-export const AEAD_CONTEXTS = ["sftp-aead", "filedrop-aead"] as const;
+export const AEAD_CONTEXTS = Object.freeze([
+  "sftp-aead",
+  "filedrop-aead",
+] as const);
 
 /**
  * An AEAD channel-context label.  One of the fixed {@link AEAD_CONTEXTS}; the
@@ -80,7 +87,7 @@ export async function deriveAeadKey(
   if (!(AEAD_CONTEXTS as readonly string[]).includes(context)) {
     throw new Error(
       `deriveAeadKey: unknown AEAD context ${JSON.stringify(context)}; ` +
-        `expected one of ${AEAD_CONTEXTS.join(", ")}`,
+        `expected one of ${AEAD_CONTEXTS.map((l) => JSON.stringify(l)).join(", ")}`,
     );
   }
   return hkdfDerive(sessionKey, `psilink-aead-v1:${context}`, 32);

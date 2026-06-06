@@ -8,8 +8,8 @@ import {
   authenticateConnection,
   deriveAeadKey,
   AEAD_CONTEXTS,
+  type AeadContext,
 } from "../src/auth";
-import type { AeadContext } from "../src/auth";
 import { PAKE_TOKEN_REGEX } from "../src/config/connection";
 import type { Authentication } from "../src/config/connection";
 import {
@@ -509,6 +509,16 @@ test("deriveAeadKey differs for different session keys", async () => {
   const k1 = await deriveAeadKey(new Uint8Array(32).fill(0x01), "sftp-aead");
   const k2 = await deriveAeadKey(new Uint8Array(32).fill(0x02), "sftp-aead");
   expect(k1).not.toEqual(k2);
+});
+
+test("every AEAD_CONTEXTS label is printable ASCII", () => {
+  // The runtime guard's soundness against a non-NFC context rests on every
+  // allowed label being ASCII (ASCII has a single NFC form). Enforce the
+  // documented "ASCII-only" invariant mechanically so a future non-ASCII label
+  // fails here at the point of addition rather than silently.
+  for (const context of AEAD_CONTEXTS) {
+    expect(context).toMatch(/^[\x21-\x7e]+$/);
+  }
 });
 
 test("deriveAeadKey rejects a context outside the fixed set", async () => {
