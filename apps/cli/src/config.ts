@@ -156,13 +156,6 @@ function camelToSnake(s: string): string {
   return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-// Mirrors core's private `snakeToCamel`. Used only to normalize a key to its
-// canonical camelCase form before consulting the camelCase-keyed
-// `OPAQUE_VALUE_KEYS`; it is a no-op on an already-camelCase key.
-function snakeToCamel(s: string): string {
-  return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
 /**
  * Recursively rewrites object keys from camelCase to snake_case. The inverse of
  * core's `camelizeKeys` for the keys the exchange schema uses: every config key
@@ -180,19 +173,31 @@ function snakeToCamel(s: string): string {
  * the write -> read round-trip invariant. Function-specific `params` blocks are
  * NOT opaque -- they are psilink's own vocabulary and stay normalized.
  *
- * The opaque check normalizes each key to its canonical camelCase form first
- * (`OPAQUE_VALUE_KEYS` is camelCase-keyed), so it matches regardless of the
- * input key's casing -- symmetric with `camelizeKeys`, which also normalizes
- * before consulting the set. In practice this writer only ever sees a camelCase
- * `ExchangeSpec`, but normalizing removes the silent precondition that the guard
- * would otherwise depend on.
+ * The opaque check consults the raw key directly (`OPAQUE_VALUE_KEYS.has(k)`),
+ * with no casing normalization. This is correct, and the asymmetry with
+ * `camelizeKeys` -- which normalizes via its own `snakeToCamel` before the same
+ * check -- is deliberate, because the two functions have different input
+ * domains. `camelizeKeys` reads user YAML whose key casing is unknown
+ * (conventionally snake_case), so it must normalize to the canonical camelCase
+ * form first. `snakeizeKeys` is only ever called by `saveConfig` on a typed
+ * `ExchangeSpec`, whose opaque key is always the camelCase `providerOptions`, so
+ * the raw key already matches the camelCase-keyed set and normalizing would be
+ * dead code. Re-introducing a `snakeToCamel` helper here to force symmetry would
+ * duplicate core's private copy across the package boundary -- the CLI builds
+ * against core's dist, so the two cannot share a private helper without widening
+ * core's export surface -- and a silent drift between the copies would break the
+ * very round-trip invariant the shared set exists to guarantee.
  */
 function snakeizeKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(snakeizeKeys);
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) =>
-        OPAQUE_VALUE_KEYS.has(snakeToCamel(k))
+        // Raw-key check: `k` is already canonical camelCase here (a typed
+        // ExchangeSpec from saveConfig), so the opaque key matches the
+        // camelCase-keyed set as-is -- see the note above on why this writer
+        // does not normalize.
+        OPAQUE_VALUE_KEYS.has(k)
           ? [camelToSnake(k), v]
           : [camelToSnake(k), snakeizeKeys(v)],
       ),

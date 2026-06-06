@@ -37,7 +37,7 @@ All notable changes to PSI-Link are documented here. The format follows [Keep a 
 
 ### Fixed
 
-- `connection.provider_options` keys are now passed verbatim, as the spec documents. Previously the config reader case-normalized them to camelCase (and the config writer back to snake_case), so a key authored in the casing the transport library expects -- e.g. ssh2's `readyTimeout` -- could be rewritten (`ready_timeout`) rather than preserved. The map's contents are excluded from key-case transformation on both the read and write paths; all other schema fields, including function `params`, are normalized as before.
+- `connection.provider_options` keys are now passed verbatim, as the spec documents. Previously the config writer snakeized them to disk and the reader camelized them back, so a key authored in the casing the transport library expects -- e.g. ssh2's `readyTimeout` -- could be rewritten (`ready_timeout`) rather than preserved. The map's contents are excluded from key-case transformation on both the write and read paths; all other schema fields, including function `params`, are normalized as before.
 - A malformed message from a peer is reported as a protocol error instead of crashing.
 - A failed exchange surfaces its original cause instead of a generic connection error.
 - Closing a file-sync connection now cancels any in-flight rendezvous or send wait promptly instead of letting the timer fire and resume against a connection that is tearing down. Internal hardening only: cancellation threads a single `AbortController` through every wait site, and a new internal `ConnectionClosedError` may appear in debug logs on a close-during-wait. Not a user-facing exit-code change (a deliberate close under a signal still exits 130/143).
