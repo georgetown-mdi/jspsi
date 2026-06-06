@@ -157,16 +157,39 @@ export class EncryptedMessageConnection implements MessageConnection {
       );
     }
 
-    // Build the plaintext before consuming a sequence number, so a serialization
-    // failure (e.g. a circular-reference payload throwing in JSON.stringify)
-    // does not burn a counter value on a frame that is never sent.
+    // Build the plaintext before consuming a sequence number, so a pre-counter
+    // failure (a circular-reference payload throwing in JSON.stringify, or the
+    // un-serializable guard below) does not burn a counter value. This covers
+    // only pre-counter failures: the counter still advances before the encrypt
+    // and inner.send awaits, so those failures DO leave a sender-side gap. That
+    // is safe today because any such failure latches the wrapper terminal (no
+    // later frame is sent), but it does not yet satisfy the "advance only on a
+    // fully successful send" prerequisite strict gap detection needs. The
+    // counter is advanced synchronously below so concurrent sends can never
+    // reuse a nonce; reconciling that with gap detection is part of the
+    // follow-up (see docs/SECURITY_DESIGN.md, "Channel security").
     let plaintext: Uint8Array<ArrayBuffer>;
     if (data instanceof Uint8Array) {
       plaintext = new Uint8Array(1 + data.length) as Uint8Array<ArrayBuffer>;
       plaintext[0] = TYPE_BINARY;
       plaintext.set(data, 1);
     } else {
-      const json = enc.encode(JSON.stringify(data));
+      const serialized = JSON.stringify(data);
+      // JSON.stringify returns undefined for a value with no JSON representation
+      // (undefined itself, a function, a symbol). Reject it at the sender with a
+      // "usage" error - caught at the right end, with the right kind, before any
+      // sequence number is consumed - rather than encoding the empty result and
+      // letting the receiver reject the frame as a misleading "not valid JSON"
+      // security failure. Not latched: one un-serializable argument is caller
+      // misuse, not a terminal fault, so the connection stays usable.
+      if (serialized === undefined) {
+        throw new ConnectionError(
+          "EncryptedConnection: cannot send a value with no JSON representation " +
+            "(undefined, a function, or a symbol)",
+          "usage",
+        );
+      }
+      const json = enc.encode(serialized);
       plaintext = new Uint8Array(1 + json.length) as Uint8Array<ArrayBuffer>;
       plaintext[0] = TYPE_JSON;
       plaintext.set(json, 1);
@@ -226,11 +249,25 @@ export class EncryptedMessageConnection implements MessageConnection {
   async receive(timeoutMs?: number): Promise<unknown> {
     if (this.failed !== undefined) throw this.failed;
     // Pull one envelope from the inner FIFO; timeoutMs passes straight through.
-    const data = await this.inner.receive(timeoutMs);
-    // Re-check after the await, for symmetry with send()/handleInbound. Dead
-    // code in the pull model (no concurrent caller can latch a failure between
-    // the receive above and here), kept so a future concurrent caller observes
-    // the latch before any inbound processing begins.
+    let data: unknown;
+    try {
+      data = await this.inner.receive(timeoutMs);
+    } catch (err) {
+      // Symmetric with send(): a fresh inner transport failure latches the
+      // wrapper so every later send/receive fast-fails with the same error. But
+      // if a concurrent path already latched - a deliberate close() sets
+      // this.failed and then tears the inner connection down - the rejection
+      // here is that teardown's cancellation. A receive parked at close() time
+      // carries the inner connection's "closed" kind, so surface it unchanged
+      // rather than overwriting it with a transport latch.
+      if (this.failed === undefined)
+        throw this.fail(asConnectionError(err, "transport"));
+      throw err;
+    }
+    // Re-check after a successful receive: dead code in the pull model (the only
+    // path that latches mid-await is a concurrent close(), which makes
+    // inner.receive reject - handled above - not resolve), kept so a future
+    // concurrent caller observes the latch before inbound processing begins.
     if (this.failed !== undefined) throw this.failed;
     return this.handleInbound(data);
   }

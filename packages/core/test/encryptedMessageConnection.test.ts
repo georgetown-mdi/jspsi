@@ -303,6 +303,20 @@ test("send refuses to advance past MAX_SAFE_INTEGER and latches the wrapper", as
   expect(onReceive).toBe(first);
 });
 
+// --- Send-side input validation -----------------------------------------------
+
+test("send(undefined) is rejected at the sender as usage, without latching", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  // A value with no JSON representation is caller misuse; it must be caught at
+  // the sender with kind "usage", not silently encoded and surfaced at the
+  // receiver as a misleading "not valid JSON" security failure.
+  await expectRejection(encA.send(undefined), "usage", /no JSON representation/i);
+
+  // Not latched: the connection stays usable for a subsequent valid send.
+  await encA.send({ ok: true });
+  expect(await encB.receive()).toEqual({ ok: true });
+});
+
 // --- Sticky terminal state ----------------------------------------------------
 
 test("after any failure, subsequent send and receive reject with the same sticky error", async () => {
@@ -314,6 +328,36 @@ test("after any failure, subsequent send and receive reject with the same sticky
   const first = await expectSecurity(recv.receive(), /authentication tag/i);
 
   // Every later receive and send rejects with the very same latched error.
+  const onReceive = await recv.receive().then(
+    () => {
+      throw new Error("expected rejection but receive resolved");
+    },
+    (e: unknown) => e,
+  );
+  expect(onReceive).toBe(first);
+
+  const onSend = await recv.send({ x: 1 }).then(
+    () => {
+      throw new Error("expected rejection but send resolved");
+    },
+    (e: unknown) => e,
+  );
+  expect(onSend).toBe(first);
+});
+
+test("a receive-path transport failure latches the wrapper", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // Close the peer's raw end: the pipe fails recv's inner connection with a
+  // transport error. receive() must latch it (symmetric with how send() latches
+  // an inner failure), so later calls fast-fail with the same error object.
+  await peer.close();
+
+  const first = await expectRejection(
+    recv.receive(),
+    "transport",
+    /peer closed/i,
+  );
+
   const onReceive = await recv.receive().then(
     () => {
       throw new Error("expected rejection but receive resolved");
