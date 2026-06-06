@@ -414,9 +414,13 @@ export async function buildExchangeRecord(
     partnerIdentity: inputs.partnerTerms.identity,
     // Omit the key entirely when absent rather than setting it to undefined: an
     // absent field and a null/undefined field are distinct in the canonical
-    // encoding the signing phase will hash over this record.
+    // encoding the signing phase will hash over this record. Validate on build
+    // with the same schema the parser uses, so the builder and parser agree on
+    // what a record may contain: a negative or non-safe-integer size throws here
+    // (caught by the non-fatal build guard in runExchange) rather than producing
+    // a record the parser would later reject or that cannot canonically encode.
     ...(inputs.resultSize !== undefined
-      ? { resultSize: inputs.resultSize }
+      ? { resultSize: resultSizeSchema.parse(inputs.resultSize) }
       : {}),
     bindingNonce: toBase64Url(bindingNonce),
     commitments: recordCommitments as ExchangeRecordCommitments,

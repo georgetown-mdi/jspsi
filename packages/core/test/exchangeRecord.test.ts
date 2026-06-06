@@ -219,6 +219,20 @@ describe("result size", () => {
     const { record } = await buildExchangeRecord(withoutSize, fixedRandomness);
     expect("resultSize" in record).toBe(false);
   });
+
+  test("is rejected on build when negative or not a safe integer", async () => {
+    // The builder validates with the same schema the parser uses, so it cannot
+    // emit a record the parser would reject or that cannot canonically encode.
+    await expect(
+      buildExchangeRecord({ ...baseInputs, resultSize: -1 }, fixedRandomness),
+    ).rejects.toThrow();
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, resultSize: Number.MAX_SAFE_INTEGER + 1 },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
 });
 
 // --- Association-table commitment presence -----------------------------------
