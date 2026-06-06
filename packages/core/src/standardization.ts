@@ -305,12 +305,14 @@ function nullIfFactory(params: Params): StandardizingFn {
         : [];
   // NFC-normalize the exclusion values so one authored in a different form
   // (e.g. NFD from a YAML file written on macOS) still matches the runtime
-  // value, which is NFC at the pipeline input. Known limitation: a preceding
-  // case-folding step (to_upper_case/to_lower_case) can emit non-NFC for some
-  // scripts, so a comparison here can still miss after such a step; making the
-  // value NFC at every step boundary is tracked as a separate follow-up.
+  // value.
   const set = new Set(values.map((v) => v.normalize("NFC")));
-  return (s) => (set.has(s) ? null : s);
+  // NFC-normalize the value before comparing (see the STANDARDIZING_FUNCTIONS
+  // contract): an upstream case-fold can leave non-NFC bytes against which an
+  // authored-NFC exclusion would otherwise silently miss. Return the original
+  // value on a non-match so emitted bytes for already-canonical inputs are
+  // untouched.
+  return (s) => (set.has(s.normalize("NFC")) ? null : s);
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
@@ -328,8 +330,14 @@ function replaceRegexFactory(params: Params): StandardizingFn {
 function extractRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
   const re = new RegExp(pattern);
+  // Match AND slice on the NFC-normalized value (see the STANDARDIZING_FUNCTIONS
+  // contract): an authored-NFC pattern must match a value left non-NFC by an
+  // upstream case-fold, and the returned capture must come from the same
+  // normalized string -- NFC can change the code-unit count, so a capture taken
+  // from the original could misalign. `match` returns capture substrings of the
+  // string it ran against, so slicing follows the normalized value for free.
   return (s) => {
-    const m = s.match(re);
+    const m = s.normalize("NFC").match(re);
     if (!m) return null;
     return (m[1] ?? m[0]) || null;
   };
@@ -338,7 +346,11 @@ function extractRegexFactory(params: Params): StandardizingFn {
 function filterRegexFactory(params: Params): StandardizingFn {
   const pattern = params.pattern as string;
   const re = new RegExp(pattern);
-  return (s) => (re.test(s) ? s : null);
+  // NFC-normalize before testing (see the STANDARDIZING_FUNCTIONS contract) so
+  // an authored-NFC pattern matches a value left non-NFC by an upstream
+  // case-fold; return the original value on a match so emitted bytes for
+  // already-canonical inputs are untouched.
+  return (s) => (re.test(s.normalize("NFC")) ? s : null);
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
@@ -355,6 +367,18 @@ function splitOnFactory(params: Params): StandardizingFn {
 
 // Each entry here must also be documented in
 // docs/EXCHANGE_SPEC.md § "Available functions".
+//
+// NFC-comparison contract: any step that compares or matches an intermediate
+// value against an authored list or pattern -- the null_if / filter_regex /
+// extract_regex family -- must NFC-normalize that value before comparing,
+// because an upstream step such as to_upper_case can emit non-NFC bytes (the six
+// Greek code points U+0390, U+03B0, U+1FD2, U+1FD7, U+1FE2, U+1FE7) even from
+// NFC input. The final key-string normalize in buildKeyStrings fixes the
+// EMITTED key, but it runs after these mid-pipeline reads, so each reading step
+// must normalize the value it inspects itself. A step that returns the value
+// unchanged should return the ORIGINAL (not the normalized) value, so emitted
+// bytes for already-canonical inputs are byte-identical. This is an authoring
+// reminder for future functions, not enforcement.
 const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   remove_non_ascii: noParamFactory(removeNonAscii),
   replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
