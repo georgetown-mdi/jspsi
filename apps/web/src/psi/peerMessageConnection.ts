@@ -59,7 +59,9 @@ export async function openPeerMessageConnection(
       // it uses finish(): receive() drains that frame before the close error
       // surfaces. A genuine error (onError) uses fail(), the abnormal
       // counterpart; receive() still drains an already-queued frame ahead of
-      // the error, but fail() carries no clean-close semantics.
+      // the error, but fail() carries no clean-close semantics. The kind stays
+      // `transport` (not a dedicated peer-closed kind) by decision; see
+      // docs/COMMUNICATION.md ("Error handling").
       const onClose = () =>
         controls.finish(
           new ConnectionError("peer connection closed", "transport"),
