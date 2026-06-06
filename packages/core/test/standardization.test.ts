@@ -785,6 +785,24 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
       ]),
     ).toBe("SMITH");
   });
+
+  test("length-sensitive step after a case-fold is cross-party-safe (NFC == NFD input)", () => {
+    // to_upper_case leaves a non-NFC intermediate (U+0399 U+0308 U+0301) that a
+    // length-sensitive step such as substring then operates on -- the Option-1
+    // residual. This is cross-party-safe: the intermediate is deterministic from
+    // the NFC-normalized input, so the same logical value authored as NFC
+    // (U+0390) vs NFD (U+03B9 U+0308 U+0301) converges before to_upper_case and
+    // yields an identical key. substring(1,1) returns the lone leading iota,
+    // confirming it sees the non-NFC intermediate.
+    const nfc = "\u0390";
+    const nfd = "\u03b9\u0308\u0301";
+    const steps = [
+      { function: "to_upper_case" },
+      { function: "substring", params: { start: 1, length: 1 } },
+    ];
+    expect(runPipeline(nfd, steps)).toBe(runPipeline(nfc, steps));
+    expect(runPipeline(nfc, steps)).toBe("\u0399");
+  });
 });
 
 // --- Key-string NFC normalization --------------------------------------------
