@@ -95,8 +95,8 @@ export function writeExchangeRecord(
     );
     log.info(
       `wrote private commitment opening data to ${output.openingFilePath}; ` +
-        "keep it private -- combined with the record it can reveal the " +
-        "matched data",
+        "keep it private -- it holds the matched data in plaintext (the " +
+        "commitment openings), so it is as sensitive as the matched data itself",
     );
   } catch (err) {
     log.warn(

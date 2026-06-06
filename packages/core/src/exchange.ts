@@ -31,7 +31,7 @@ import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
-import type { ExchangeRecord, OpeningData } from "./exchangeRecord.js";
+import type { BuiltExchangeRecord } from "./exchangeRecord.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -199,24 +199,20 @@ export interface ExchangeResult {
   /** Payload data received from the partner after linkage. */
   partnerPayload: PartnerPayload;
   /**
-   * Self-attested audit record of this exchange (Phase 1 of exchange receipts).
-   * Holds commitments to the data exchanged plus a non-secret summary; safe to
-   * retain or share. The caller (CLI or web) persists it. See
-   * {@link buildExchangeRecord}.
+   * The self-attested audit record of this exchange (Phase 1 of exchange
+   * receipts) together with its private opening data, produced as a pair. The
+   * `record` holds commitments to the data exchanged plus a non-secret summary
+   * and is safe to retain or share; the `opening` holds the per-commitment salts
+   * and a snapshot of the committed data and is as sensitive as the matched data
+   * itself. The caller (CLI or web) persists both. See {@link buildExchangeRecord}.
    *
-   * `undefined` only if building the record threw after the exchange already
-   * succeeded: the record is a secondary audit artifact, so its failure is
-   * non-fatal and never discards the exchange result. The caller skips
-   * persisting it (and {@link recordOpening}) in that case.
+   * A single optional field rather than two independent ones so the record and
+   * its opening can never be present apart. Absent only if building the record
+   * threw after the exchange already succeeded, in which case the caller skips
+   * persisting -- the record is a secondary audit artifact, so its failure is
+   * non-fatal and never discards the exchange result.
    */
-  record?: ExchangeRecord;
-  /**
-   * Private opening data for {@link record}: the per-commitment salts and a
-   * snapshot of the committed data, needed to reveal the commitments later. As
-   * sensitive as the matched data itself; the caller must store it privately.
-   * Present whenever {@link record} is.
-   */
-  recordOpening?: OpeningData;
+  audit?: BuiltExchangeRecord;
 }
 
 export interface RunExchangeOptions {
@@ -338,11 +334,10 @@ export async function runExchange(
   // Build the record after the exchange has fully succeeded. It is a secondary
   // audit artifact, so a failure to build it (e.g. an unexpected non-canonical
   // value) must not fail the exchange or discard its result: catch, warn, and
-  // return without a record. The caller treats record/recordOpening as optional.
-  let record: ExchangeRecord | undefined;
-  let recordOpening: OpeningData | undefined;
+  // return without a record. The caller treats the audit field as optional.
+  let audit: BuiltExchangeRecord | undefined;
   try {
-    const built = await buildExchangeRecord({
+    audit = await buildExchangeRecord({
       localTerms: linkageTerms,
       partnerTerms,
       resultSize: bothExpectOutput ? associationTable[0].length : undefined,
@@ -351,8 +346,6 @@ export async function runExchange(
       partnerPayloadReceived: toCommittedPayload(partnerPayload),
       createdAt: new Date().toISOString(),
     });
-    record = built.record;
-    recordOpening = built.opening;
   } catch (err) {
     getLogger("exchange").warn(
       "the exchange succeeded but the self-attested record could not be " +
@@ -366,7 +359,6 @@ export async function runExchange(
     partnerTerms,
     resolvedRole,
     partnerPayload,
-    record,
-    recordOpening,
+    audit,
   };
 }

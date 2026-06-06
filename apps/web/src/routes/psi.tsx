@@ -203,14 +203,28 @@ function Home() {
           new Blob([csv], { type: "text/csv" }),
         ),
       };
-      // The record (and its opening) are absent only if building the record
-      // failed after a successful exchange; the results above are still offered.
-      if (result.record !== undefined)
-        generated.recordUrl = jsonUrl(serializeExchangeRecord(result.record));
-      if (result.recordOpening !== undefined)
-        generated.openingUrl = jsonUrl(
-          serializeOpeningData(result.recordOpening),
+      // The audit record and its opening are produced as a pair (a single
+      // optional field), so one guard offers both or neither. They are absent
+      // only if building the record failed after a successful exchange; in that
+      // case the downloads are intentionally omitted without a blocking alert.
+      // The exchange and the results above already succeeded (the record is a
+      // secondary audit artifact and runExchange logs a warning when the build
+      // fails), and that failure is practically unreachable -- payload values are
+      // strings/null, row indices are safe integers, and crypto.subtle is already
+      // in use upstream -- so surfacing a UI error for it is not worth the noise.
+      // Filenames are timestamped per exchange (mirroring the CLI's timestamped
+      // path) so repeated downloads in one session accumulate rather than collide.
+      if (result.audit !== undefined) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        generated.recordUrl = jsonUrl(
+          serializeExchangeRecord(result.audit.record),
         );
+        generated.recordFileName = `psilink-record-${stamp}.json`;
+        generated.openingUrl = jsonUrl(
+          serializeOpeningData(result.audit.opening),
+        );
+        generated.openingFileName = `psilink-record-${stamp}.opening.json`;
+      }
       return generated;
     };
 
@@ -316,7 +330,9 @@ function Home() {
             stageId={stageId}
             resultsFileURL={outputs?.resultsUrl}
             recordFileURL={outputs?.recordUrl}
+            recordFileName={outputs?.recordFileName}
             openingFileURL={outputs?.openingUrl}
+            openingFileName={outputs?.openingFileName}
           />
         </Group>
         {errorAlert && (

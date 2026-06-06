@@ -599,8 +599,11 @@ export async function runProtocol(
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
-    const { associationTable, partnerPayload, record, recordOpening } =
-      await runExchange(mc, role, prepared, {
+    const { associationTable, partnerPayload, audit } = await runExchange(
+      mc,
+      role,
+      prepared,
+      {
         psiLibrary: await PSI(),
         verbosity,
         onStage: (id: string) => {
@@ -612,7 +615,8 @@ export async function runProtocol(
           log.info("terms agreed, partner identity:", partnerTerms.identity);
           log.info("role:", resolvedRole);
         },
-      });
+      },
+    );
 
     const { headers, rows } = buildOutputTable(
       associationTable,
@@ -625,14 +629,16 @@ export async function runProtocol(
     // Persist the self-attested record after the results: it is a secondary
     // audit artifact, so it is written last and its failure is non-fatal (see
     // writeExchangeRecord). Skipped when records are disabled, or when the
-    // record could not be built (runExchange returns it undefined and has
-    // already warned -- the exchange still succeeded).
-    if (
-      recordOutput !== undefined &&
-      record !== undefined &&
-      recordOpening !== undefined
-    )
-      writeExchangeRecord(recordOutput, record, recordOpening, loggerName);
+    // record could not be built (runExchange returns audit undefined and has
+    // already warned -- the exchange still succeeded). The record and its
+    // opening are a single optional field, so one check covers both.
+    if (recordOutput !== undefined && audit !== undefined)
+      writeExchangeRecord(
+        recordOutput,
+        audit.record,
+        audit.opening,
+        loggerName,
+      );
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
     // independently derived the same new token from the SPAKE2 session key, but

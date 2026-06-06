@@ -65,16 +65,24 @@ export type Acquire = (context: AcquireContext) => Promise<AcquiredExchange>;
 
 /** The downloadable artifacts produced after a successful exchange: the results
  * file plus the self-attested audit record and its private opening data. Each is
- * an object URL the UI exposes as a download. The record and opening URLs are
- * absent only when building the record failed (the exchange still succeeded and
- * the results remain available; see {@link ExchangeResult.record}). */
+ * an object URL the UI exposes as a download, paired with a timestamped download
+ * filename. The record and opening fields are absent only when building the
+ * record failed (the exchange still succeeded and the results remain available;
+ * see {@link ExchangeResult.audit}). */
 export interface ExchangeOutputs {
   /** The matched results (CSV). */
   resultsUrl: string;
   /** The self-attested exchange record (JSON); safe to retain or share. */
   recordUrl?: string;
+  /** Download filename for {@link recordUrl}, timestamped per exchange so
+   * repeated downloads in one session accumulate an audit trail rather than
+   * collide (mirrors the CLI's timestamped default path). */
+  recordFileName?: string;
   /** The private opening data (JSON); as sensitive as the matched data. */
   openingUrl?: string;
+  /** Download filename for {@link openingUrl}, timestamped to match
+   * {@link recordFileName}. */
+  openingFileName?: string;
 }
 
 /** Pure output-generation step: build the local results file plus the record

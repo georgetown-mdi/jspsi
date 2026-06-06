@@ -6,6 +6,7 @@ import { prepareForExchange, runExchange } from "../src/exchange";
 import { verifyRecordCommitments } from "../src/exchangeRecord";
 import { createMessagePipe } from "../src/connection/messageConnection";
 
+import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
 
@@ -73,14 +74,10 @@ async function runBoth(
 }
 
 /** A successful exchange always builds the record; narrow the now-optional
- * record/opening (or fail loudly) so the assertions below read cleanly. */
-function built(result: ExchangeResult): {
-  record: NonNullable<ExchangeResult["record"]>;
-  opening: NonNullable<ExchangeResult["recordOpening"]>;
-} {
-  expect(result.record).toBeDefined();
-  expect(result.recordOpening).toBeDefined();
-  return { record: result.record!, opening: result.recordOpening! };
+ * audit pair (or fail loudly) so the assertions below read cleanly. */
+function built(result: ExchangeResult): BuiltExchangeRecord {
+  expect(result.audit).toBeDefined();
+  return result.audit!;
 }
 
 test("both-output: both records agree on terms and carry the result size", async () => {

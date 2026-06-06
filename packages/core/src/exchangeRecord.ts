@@ -83,6 +83,16 @@ const COMMITMENT_DOMAINS: Record<CommitmentName, string> = {
 // commitment domains above.
 const AGREED_TERMS_DOMAIN = "psilink-agreed-terms/v1";
 
+// computeCommitment, verifyCommitmentOpening, and computeTermsHash are
+// intentionally part of the public API (re-exported via main.ts), not merely
+// internal helpers or test-only exports: reproducing or verifying a psilink
+// record in an independent implementation -- the cross-implementation
+// reproducibility this module is built around (see
+// test/vectors/exchange-record-vectors.json) -- means recomputing commitments
+// and the agreed-terms hash directly. They are supported alongside the
+// higher-level buildExchangeRecord / verifyRecordCommitments, so keep them
+// exported rather than narrowing the surface.
+
 /**
  * Compute the commitment to `data` of the given kind under `salt`.
  *

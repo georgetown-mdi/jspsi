@@ -25,8 +25,13 @@ export interface StatusProps extends PaperProps {
   resultsFileURL: string | undefined;
   /** Self-attested audit record (JSON); safe to retain or share. */
   recordFileURL?: string | undefined;
+  /** Download filename for the audit record (timestamped per exchange by the
+   * caller); falls back to a static name when not supplied. */
+  recordFileName?: string | undefined;
   /** Private opening data (JSON); as sensitive as the matched data. */
   openingFileURL?: string | undefined;
+  /** Download filename for the opening data; falls back to a static name. */
+  openingFileName?: string | undefined;
 }
 
 type ProtocolStageInfo = [
@@ -41,7 +46,9 @@ export function Status(props: StatusProps) {
     stageId,
     resultsFileURL,
     recordFileURL,
+    recordFileName,
     openingFileURL,
+    openingFileName,
     ...paperProps
   } = props;
 
@@ -118,6 +125,16 @@ export function Status(props: StatusProps) {
             animated={!isCompleted}
           />
 
+          {/*
+            Each download wraps a disabled-while-incomplete ActionIcon in an
+            anchor. The anchor itself stays clickable even while the icon is
+            disabled (the disabled attribute does not propagate to the parent
+            <a>), but the href is undefined until the exchange completes -- the
+            caller sets every *FileURL only at the "done" stage -- so a click
+            before completion navigates nowhere. The disabled state is thus a
+            visual affordance, not the click guard; the undefined href is. All
+            three buttons share this intentional pattern.
+          */}
           <Group justify="center" gap="xs" component="span">
             <Text>Download result:</Text>
             <a href={resultsFileURL} download="results.csv">
@@ -130,7 +147,10 @@ export function Status(props: StatusProps) {
           {recordFileURL !== undefined && (
             <Group justify="center" gap="xs" component="span">
               <Text>Download audit record:</Text>
-              <a href={recordFileURL} download="psilink-record.json">
+              <a
+                href={recordFileURL}
+                download={recordFileName ?? "psilink-record.json"}
+              >
                 <ActionIcon
                   variant="light"
                   color="blue"
@@ -145,7 +165,10 @@ export function Status(props: StatusProps) {
           {openingFileURL !== undefined && (
             <Group justify="center" gap="xs" component="span">
               <Text>Download opening data (keep private):</Text>
-              <a href={openingFileURL} download="psilink-record.opening.json">
+              <a
+                href={openingFileURL}
+                download={openingFileName ?? "psilink-record.opening.json"}
+              >
                 <ActionIcon
                   variant="light"
                   color="blue"
