@@ -23,6 +23,10 @@ export interface StatusProps extends PaperProps {
   stages: Array<{ id: string; label: string; state: ProcessState }>;
   stageId: string;
   resultsFileURL: string | undefined;
+  /** Self-attested audit record (JSON); safe to retain or share. */
+  recordFileURL?: string | undefined;
+  /** Private opening data (JSON); as sensitive as the matched data. */
+  openingFileURL?: string | undefined;
 }
 
 type ProtocolStageInfo = [
@@ -32,7 +36,14 @@ type ProtocolStageInfo = [
 ];
 
 export function Status(props: StatusProps) {
-  const { stages, stageId, resultsFileURL, ...paperProps } = props;
+  const {
+    stages,
+    stageId,
+    resultsFileURL,
+    recordFileURL,
+    openingFileURL,
+    ...paperProps
+  } = props;
 
   const { stageMap, numProgressBarStages } = useMemo(() => {
     let count = 0;
@@ -115,6 +126,36 @@ export function Status(props: StatusProps) {
               </ActionIcon>
             </a>
           </Group>
+
+          {recordFileURL !== undefined && (
+            <Group justify="center" gap="xs" component="span">
+              <Text>Download audit record:</Text>
+              <a href={recordFileURL} download="psilink-record.json">
+                <ActionIcon
+                  variant="light"
+                  color="blue"
+                  disabled={!isCompleted}
+                >
+                  <IconDownload size={18} />
+                </ActionIcon>
+              </a>
+            </Group>
+          )}
+
+          {openingFileURL !== undefined && (
+            <Group justify="center" gap="xs" component="span">
+              <Text>Download opening data (keep private):</Text>
+              <a href={openingFileURL} download="psilink-record.opening.json">
+                <ActionIcon
+                  variant="light"
+                  color="blue"
+                  disabled={!isCompleted}
+                >
+                  <IconDownload size={18} />
+                </ActionIcon>
+              </a>
+            </Group>
+          )}
         </Stack>
       )}
     </Paper>

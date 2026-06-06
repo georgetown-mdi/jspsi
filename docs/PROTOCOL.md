@@ -85,6 +85,26 @@ Because the receipt is collected after the result already exists on both sides, 
 
 Retention, access controls, and log integrity beyond the receipt remain each party's internal compliance obligation.
 
+## Self-attested record
+
+> **Implemented (Phase 1 of exchange receipts).** Unlike the signed receipt above, the self-attested record described here is produced today. It is deliberately unsigned: a session-derived MAC is not non-repudiation (see the two signing modes above), so Phase 1 produces an honest, local audit artifact rather than a receipt that overstates what it proves. The certificate-backed signing phase reuses this record's commitment scheme and on-disk format.
+
+At the conclusion of every successful exchange, each party produces a self-attested record of what it exchanged. It is a local audit artifact, explicitly **not** a signed or non-repudiable receipt and **not** evidence against the partner. It is built from data both sides already hold, so it needs no private key and adds no protocol round-trip.
+
+The record captures: a format `version` (a single recognized literal for v1, which a reader rejects rather than migrates if unrecognized); the local timestamp; a hash, over the canonical encoding, of the agreed exchange terms (both parties' linkage terms in a fixed, canonical-sorted order, so both parties and an independent third party derive the same hash); both parties' self-asserted `identity` strings; the result size, but only when both parties learn it (the both-output case -- a single-output sender never learns the intersection size); and a per-exchange binding nonce (CSPRNG-generated, at least 128 bits) so two runs with identical terms still produce distinct records. The binding nonce is the unsigned record's per-exchange binder and is distinct from the per-commitment salts below; do not conflate them. The signed receipt phase will add a stronger session-key-derived binder.
+
+The record commits to the data exchanged rather than embedding it: the payload columns this party sent, the payload columns it received, and -- when this party holds it (it received output) -- the association table. A bare `SHA-256` of a low-entropy result (for example an association table over identifiers; cf. the SSN brute-force warning in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#threat-model)) would be brute-forceable by anyone holding the record, leaking the intersection. Instead each commitment is
+
+```
+commitment = HMAC-SHA-256(key = salt, message = canonical({ domain, data }))
+```
+
+with a fresh per-commitment `salt` (CSPRNG-generated, at least 128 bits) and a per-kind `domain` label that separates the three commitment kinds. Keying HMAC with the secret salt gives computational hiding (the commitment reveals nothing about the data, and a low-entropy data set cannot be brute-forced from the commitment without the salt); binding follows from the collision resistance SHA-256 lends HMAC, so the committer cannot open one commitment to two different data sets. The committed `message` is the canonical encoding (RFC 8785) of `{ domain, data }`, so both parties commit over byte-identical serializations of the same logical data (row order, encoding, and null handling all fixed) and an independent implementation reproduces the bytes; that serialization is specified in [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md).
+
+The artifact is split across two files. The **record** holds the commitments and the non-secret summary above; it does not contain the matched data or the salts, so it does not reveal -- or allow brute-force recovery of -- the intersection, and it is the part safe to retain or hand to an auditor (and, in the signing phase, to sign and swap). The **opening data** holds, per commitment, the salt and a snapshot of the exact committed data -- the material needed to reveal (open) a commitment later. Because anyone holding the opening data can recompute the commitments, it is as sensitive as the matched data itself and must be kept private. The CLI writes both files atomically (temp file then rename, as the key file is written), owner-only, to a timestamped default path (overridable, or skipped with `--no-record`); the web app offers both as downloads.
+
+Privacy of the record itself: it stores the terms hash, both `identity` strings, and the result size in cleartext, so anyone who reads it learns that an exchange with that partner occurred and its size. As with the receipt, retention and access control of the record (and the strict protection of the opening data) are the holder's responsibility.
+
 ## Output
 
 The basic output is an association table between each party's element. As noted above, if parties supplied identifier columns with their inputs and flagged them in their metadata, the association table will be between each party's identifiers. Otherwise, the table references the row indices of each dataset.

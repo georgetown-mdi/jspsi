@@ -31,6 +31,8 @@ import {
   errorMessage,
   loadCSVFile,
   prepareForExchange,
+  serializeExchangeRecord,
+  serializeOpeningData,
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
@@ -43,7 +45,11 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { Acquire, StageDefinition } from "@psi/exchangeLifecycle";
+import type {
+  Acquire,
+  ExchangeOutputs,
+  StageDefinition,
+} from "@psi/exchangeLifecycle";
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
@@ -152,7 +158,7 @@ function Home() {
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
   const [stageId, setStageById] = useState<string>("before start");
-  const [resultURL, setResultURL] = useState<string>();
+  const [outputs, setOutputs] = useState<ExchangeOutputs>();
   const [errorAlert, setErrorAlert] = useState<{
     title: string;
     message: string;
@@ -172,13 +178,14 @@ function Home() {
     abortRef.current = controller;
 
     // Pure output-generation half of the former finishExchange: build the local
-    // results file and return its URL. No React state and no previous-URL revoke
-    // (a fresh session sets the URL at most once per component lifetime).
+    // results file plus the self-attested record and its private opening data,
+    // returning a download URL for each. No React state and no previous-URL
+    // revoke (a fresh session sets these at most once per component lifetime).
     const generateOutput = (
       result: ExchangeResult,
       prepared: PreparedExchange,
-    ): string => {
-      log.info("linkage complete, generating results file");
+    ): ExchangeOutputs => {
+      log.info("linkage complete, generating results and record files");
       const { headers, rows } = buildOutputTable(
         result.associationTable,
         prepared.rawRows,
@@ -187,8 +194,17 @@ function Home() {
       );
       const csv =
         headers.join(",") + "\n" + rows.map((r) => r.join(",") + "\n").join("");
-      const fileData = new Blob([csv], { type: "text/csv" });
-      return window.URL.createObjectURL(fileData);
+      const jsonUrl = (text: string): string =>
+        window.URL.createObjectURL(
+          new Blob([text], { type: "application/json" }),
+        );
+      return {
+        resultsUrl: window.URL.createObjectURL(
+          new Blob([csv], { type: "text/csv" }),
+        ),
+        recordUrl: jsonUrl(serializeExchangeRecord(result.record)),
+        openingUrl: jsonUrl(serializeOpeningData(result.recordOpening)),
+      };
     };
 
     // Server (PSI responder, PeerJS dialer): load/prepare, emit the stage tree,
@@ -250,8 +266,8 @@ function Home() {
       generateOutput,
       onStages: setStages,
       onStage: setStageById,
-      onResult: (url) => {
-        setResultURL(url);
+      onResult: (o) => {
+        setOutputs(o);
         setStageById("done");
       },
       onError: ({ category, error }) => {
@@ -291,7 +307,9 @@ function Home() {
           <Status
             stages={stages}
             stageId={stageId}
-            resultsFileURL={resultURL}
+            resultsFileURL={outputs?.resultsUrl}
+            recordFileURL={outputs?.recordUrl}
+            openingFileURL={outputs?.openingUrl}
           />
         </Group>
         {errorAlert && (

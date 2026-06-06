@@ -1,6 +1,9 @@
-// NOTE: `hexToBytes`, `bytesToHex`, and `hmacSha256` in `pake.ts`
-// are also candidates to move here once the AEAD layer provides a second
-// caller for them.
+// NOTE: `hexToBytes` and `bytesToHex` in `pake.ts` are also candidates to move
+// here once a second caller appears for them. `hmacSha256` has been moved here
+// (see below): the exchange-record commitment scheme is its second caller, so
+// per the CONTRIBUTING.md rule that shared cryptographic helpers are extracted
+// as soon as a second caller exists, it now lives in one place rather than being
+// re-implemented.
 
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();
@@ -98,4 +101,44 @@ export async function hkdfDerive(
     lengthBytes * 8,
   );
   return new Uint8Array(bits);
+}
+
+/**
+ * Compute HMAC-SHA-256 of `data` under `key`.
+ *
+ * Shared by the SPAKE2 confirmation MACs (`pake.ts`) and the exchange-record
+ * commitment scheme (`exchangeRecord.ts`), which keys it with a per-commitment
+ * salt. Uses `crypto.subtle`, so it is identical on Node and in the browser.
+ */
+export async function hmacSha256(
+  key: Uint8Array<ArrayBuffer>,
+  data: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, data));
+}
+
+/**
+ * Compute the SHA-256 digest of `data`. Uses `crypto.subtle`, so it is identical
+ * on Node and in the browser; the same bytes hash to the same digest on both.
+ */
+export async function sha256(
+  data: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+}
+
+/**
+ * Return `length` cryptographically random bytes from the platform CSPRNG
+ * (`crypto.getRandomValues`). Used for SPAKE2 scalars and for the exchange
+ * record's binding nonce and per-commitment salts.
+ */
+export function randomBytes(length: number): Uint8Array<ArrayBuffer> {
+  return crypto.getRandomValues(new Uint8Array(length));
 }

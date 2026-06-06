@@ -12,6 +12,7 @@ import { PSIParticipant } from "./participant.js";
 import { exchangeTerms, resolveRole } from "./protocolSetup.js";
 import { linkViaPSI } from "./link.js";
 import { preparePayload, exchangePayloads } from "./payloadExchange.js";
+import { buildExchangeRecord } from "./exchangeRecord.js";
 
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -26,6 +27,8 @@ import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
+import type { CanonicalValue } from "./utils/canonical.js";
+import type { ExchangeRecord, OpeningData } from "./exchangeRecord.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -192,6 +195,19 @@ export interface ExchangeResult {
   resolvedRole: PsiRole;
   /** Payload data received from the partner after linkage. */
   partnerPayload: PartnerPayload;
+  /**
+   * Self-attested audit record of this exchange (Phase 1 of exchange receipts).
+   * Holds commitments to the data exchanged plus a non-secret summary; safe to
+   * retain or share. The caller (CLI or web) persists it. See
+   * {@link buildExchangeRecord}.
+   */
+  record: ExchangeRecord;
+  /**
+   * Private opening data for {@link record}: the per-commitment salts and a
+   * snapshot of the committed data, needed to reveal the commitments later. As
+   * sensitive as the matched data itself; the caller must store it privately.
+   */
+  recordOpening: OpeningData;
 }
 
 export interface RunExchangeOptions {
@@ -296,5 +312,32 @@ export async function runExchange(
     localPayload,
   );
 
-  return { associationTable, partnerTerms, resolvedRole, partnerPayload };
+  // Self-attested record: produced from data both sides already hold, with no
+  // extra round-trip and no private key. The result size is recorded only when
+  // both parties learn it (the both-output case); a single-output sender never
+  // learns the intersection size, and resolveRole's exchanged record counts are
+  // total dataset sizes, not the intersection, so they are not used here. The
+  // association table is committed only when this party received output and so
+  // holds a meaningful table.
+  const bothExpectOutput =
+    linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
+  const heldAssociationTable = linkageTerms.output.expectsOutput;
+  const { record, opening: recordOpening } = await buildExchangeRecord({
+    localTerms: linkageTerms,
+    partnerTerms,
+    resultSize: bothExpectOutput ? associationTable[0].length : undefined,
+    associationTable: heldAssociationTable ? associationTable : undefined,
+    localPayloadSent: localPayload as unknown as CanonicalValue,
+    partnerPayloadReceived: partnerPayload as unknown as CanonicalValue,
+    createdAt: new Date().toISOString(),
+  });
+
+  return {
+    associationTable,
+    partnerTerms,
+    resolvedRole,
+    partnerPayload,
+    record,
+    recordOpening,
+  };
 }

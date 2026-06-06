@@ -4,6 +4,7 @@ import { p256 } from "@noble/curves/nist.js";
 import {
   enc,
   hkdfDerive,
+  hmacSha256,
   toBase64Url,
   fromBase64Url,
   bytesEqual,
@@ -109,20 +110,6 @@ function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
 
 function bytesToHex(bytes: Uint8Array<ArrayBuffer>): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function hmacSha256(
-  key: Uint8Array<ArrayBuffer>,
-  data: Uint8Array<ArrayBuffer>,
-): Promise<Uint8Array<ArrayBuffer>> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, data));
 }
 
 // 8-byte little-endian length prefix as required by the RFC 9382 transcript.

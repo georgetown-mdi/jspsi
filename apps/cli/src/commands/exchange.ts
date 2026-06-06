@@ -19,6 +19,7 @@ import {
   DEFAULT_CONFIG_PATH,
 } from "../config";
 import { loadKeyFile, DEFAULT_KEY_PATH, type KeyFile } from "../keyFile";
+import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import {
@@ -95,6 +96,21 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe: "silent | error | warn | info | debug | trace; default=info",
     })
+    .option("record", {
+      type: "boolean",
+      default: true,
+      describe:
+        "after a successful exchange, write a self-attested audit record (a " +
+        "local artifact, not a signed receipt) and its private opening file; " +
+        "use --no-record to skip",
+    })
+    .option("record-file", {
+      type: "string",
+      describe:
+        "path for the audit record (default: ./psilink-record-<timestamp>." +
+        "json); the private opening data is written alongside it as " +
+        "<name>.opening.json",
+    })
     .option("lockless-rendezvous", {
       type: "boolean",
       describe:
@@ -159,6 +175,8 @@ interface ExchangeArgs {
   peerId?: string;
   timestampInFilename?: boolean;
   retainFiles?: boolean;
+  record: boolean;
+  recordFile?: string;
   logLevel: logLibrary.LogLevelNumbers;
   verbosity: number;
 }
@@ -198,6 +216,9 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     peerId: argv["peer-id"] as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
+    // yargs sets `record` to false on --no-record; default true otherwise.
+    record: (argv["record"] as boolean | undefined) ?? true,
+    recordFile: argv["record-file"] as string | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -475,8 +496,20 @@ export async function handler(argv: Arguments): Promise<void> {
     process.exit((err as { exitCode?: number }).exitCode ?? 69);
   }
 
+  const recordOutput = resolveRecordOutput({
+    enabled: options.record,
+    recordFile: options.recordFile,
+  });
+
   try {
-    await runProtocol(connection, prepared, output, verbosity, "exchange");
+    await runProtocol(
+      connection,
+      prepared,
+      output,
+      verbosity,
+      "exchange",
+      recordOutput,
+    );
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(err instanceof UsageError ? 64 : 69);

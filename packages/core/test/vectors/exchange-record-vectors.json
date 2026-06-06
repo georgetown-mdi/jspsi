@@ -1,0 +1,132 @@
+{
+  "vectors": [
+    {
+      "name": "both-output-with-payloads",
+      "description": "Both parties learn the result size and hold the association table; each sends and receives one payload column. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "resultSize": 2,
+        "associationTable": [
+          [0, 2],
+          [1, 0]
+        ],
+        "localPayloadSent": {
+          "hasData": true,
+          "columns": ["dose"],
+          "rowIndices": [0, 2],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["status"],
+          "rowIndices": [1, 0],
+          "rows": [["active"], [null]]
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "salts": {
+          "localPayloadSent": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+          "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+          "associationTable": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "resultSize": 2,
+        "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "commitments": {
+          "localPayloadSent": "We5eIlrtkWBUe1uSGrla5rvLs0YhGFPPVDjk4EPX2k8",
+          "partnerPayloadReceived": "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+          "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "data": {
+              "hasData": true,
+              "columns": ["dose"],
+              "rowIndices": [0, 2],
+              "rows": [["10mg"], ["20mg"]]
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+            "data": {
+              "columns": ["status"],
+              "rowIndices": [1, 0],
+              "rows": [["active"], [null]]
+            }
+          },
+          "associationTable": {
+            "salt": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+            "data": [
+              [0, 2],
+              [1, 0]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

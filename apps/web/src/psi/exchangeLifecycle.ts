@@ -63,13 +63,26 @@ export interface AcquireContext {
  */
 export type Acquire = (context: AcquireContext) => Promise<AcquiredExchange>;
 
-/** Pure output-generation step: build the local results file from the exchange
- * result and return a URL for it. May throw (classified as `"output"`); runs
- * inside the owner after the exchange and before teardown. */
+/** The downloadable artifacts produced after a successful exchange: the results
+ * file plus the self-attested audit record and its private opening data. Each is
+ * an object URL the UI exposes as a download. */
+export interface ExchangeOutputs {
+  /** The matched results (CSV). */
+  resultsUrl: string;
+  /** The self-attested exchange record (JSON); safe to retain or share. */
+  recordUrl: string;
+  /** The private opening data (JSON); as sensitive as the matched data. */
+  openingUrl: string;
+}
+
+/** Pure output-generation step: build the local results file plus the record
+ * and opening artifacts from the exchange result and return their URLs. May
+ * throw (classified as `"output"`); runs inside the owner after the exchange and
+ * before teardown. */
 export type GenerateOutput = (
   result: ExchangeResult,
   prepared: PreparedExchange,
-) => string;
+) => ExchangeOutputs;
 
 /** Options for {@link runExchangeLifecycle}. */
 export interface RunExchangeLifecycleOptions {
@@ -81,7 +94,7 @@ export interface RunExchangeLifecycleOptions {
   generateOutput: GenerateOutput;
   onStages: (stages: Array<StageDefinition>) => void;
   onStage: (stageId: string) => void;
-  onResult: (url: string) => void;
+  onResult: (outputs: ExchangeOutputs) => void;
   onError: (failure: {
     category: ExchangeErrorCategory;
     error: unknown;
@@ -234,14 +247,14 @@ export async function runExchangeLifecycle(
     // The privacy-sensitive exchange has succeeded here. A failure building the
     // local results file is an "output" failure, never an "exchange" one, so the
     // user is not told to re-run a PSI exchange that in fact already completed.
-    let url: string;
+    let outputs: ExchangeOutputs;
     try {
-      url = generateOutput(result, prepared);
+      outputs = generateOutput(result, prepared);
     } catch (error) {
       emitError({ category: "output", error });
       return;
     }
-    emitResult(url);
+    emitResult(outputs);
   } catch (error) {
     emitError({ category: "exchange", error });
   } finally {
