@@ -19,6 +19,7 @@ import {
 import { fromBase64Url, randomBytes, toBase64Url } from "../src/utils/crypto";
 
 import type {
+  CommittedPayload,
   ExchangeRecordInputs,
   ExchangeRecordRandomness,
 } from "../src/exchangeRecord";
@@ -53,13 +54,15 @@ const fixedRandomness: ExchangeRecordRandomness = {
   },
 };
 
-const localPayloadSent: CanonicalValue = {
-  hasData: true,
+// Both payloads are in the record's canonical committed form (no transport
+// `hasData` tag); a sender and receiver commit over byte-identical data for the
+// same logical payload.
+const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
   rowIndices: [0, 2],
   rows: [["10mg"], ["20mg"]],
 };
-const partnerPayloadReceived: CanonicalValue = {
+const partnerPayloadReceived: CommittedPayload = {
   columns: ["status"],
   rowIndices: [1, 0],
   rows: [["active"], [null]],

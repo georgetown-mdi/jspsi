@@ -65,7 +65,14 @@ export type CommitmentName =
 
 // Domain-separation labels, one per commitment kind. Folded into the committed
 // message (not the salt) so the three kinds are cryptographically distinct even
-// under an identical (salt, data) pair.
+// under an identical (salt, data) pair. Keep them distinct -- in particular do
+// not collapse the sent/received payload labels: domain separation is what stops
+// a commitment of one kind from verifying as another. A consequence is that two
+// parties' commitments to the same logical payload (a sender's localPayloadSent
+// and the receiver's partnerPayloadReceived) are never equal as strings: the
+// label differs and each uses a fresh per-commitment salt. So a future
+// cross-verification compares the opened data snapshots -- byte-identical by
+// construction, see CommittedPayload -- not the commitment strings.
 const COMMITMENT_DOMAINS: Record<CommitmentName, string> = {
   associationTable: "psilink-commit-association-table/v1",
   localPayloadSent: "psilink-commit-payload-sent/v1",
@@ -299,6 +306,27 @@ const OpeningDataSchema: z.ZodType<OpeningData> = z.object({
 // --- Build -------------------------------------------------------------------
 
 /**
+ * The canonical representation a payload is committed in. Owned by the record
+ * format on purpose -- deliberately NOT the PSI wire message and NOT the
+ * consumed `PartnerPayload`, so a change to either of those (for transport or
+ * output reasons) cannot silently move this on-disk, version-frozen format.
+ *
+ * Both the payload a party sent and the payload it received are mapped into this
+ * one shape before committing (see `toCommittedPayload` in payloadExchange), so
+ * for the same logical payload a sender and receiver commit over byte-identical
+ * data. The transport-only `hasData` discriminant is not part of it; a no-data
+ * payload is the empty-arrays value `{ columns: [], rowIndices: [], rows: [] }`.
+ *
+ * Declared as a `type` (not an `interface`) so it carries an implicit index
+ * signature and is assignable to {@link CanonicalValue} without a cast.
+ */
+export type CommittedPayload = {
+  columns: string[];
+  rowIndices: number[];
+  rows: Array<Array<string | null>>;
+};
+
+/**
  * The inputs needed to build an {@link ExchangeRecord}, gathered at the end of a
  * successful exchange. `localTerms`/`partnerTerms` supply both the agreed-terms
  * hash and the two identities. `resultSize` is set only when both parties learn
@@ -312,10 +340,11 @@ export interface ExchangeRecordInputs {
   resultSize?: number;
   /** The association table; supply only when this party received output. */
   associationTable?: AssociationTable;
-  /** The payload message this party sent (the PSI `PayloadWireMessage`). */
-  localPayloadSent: CanonicalValue;
-  /** The payload this party received from the partner (`PartnerPayload`). */
-  partnerPayloadReceived: CanonicalValue;
+  /** The payload this party sent, in the record's canonical committed form. */
+  localPayloadSent: CommittedPayload;
+  /** The payload this party received, in the same canonical committed form, so
+   * both parties commit over byte-identical data for the same logical payload. */
+  partnerPayloadReceived: CommittedPayload;
   /** Local wall-clock timestamp (ISO 8601); supplied by the caller so the build
    * is otherwise deterministic and testable. */
   createdAt: string;
@@ -358,7 +387,7 @@ export async function buildExchangeRecord(
   if (inputs.associationTable !== undefined)
     datasets.push({
       name: "associationTable",
-      data: inputs.associationTable as unknown as CanonicalValue,
+      data: inputs.associationTable,
     });
 
   const recordCommitments: Partial<Record<CommitmentName, string>> = {};
@@ -465,12 +494,29 @@ export async function verifyRecordCommitments(
     "partnerPayloadReceived",
     "associationTable",
   ];
+  // localPayloadSent and partnerPayloadReceived are mandatory in a well-formed
+  // record (the schema requires them); the association table is optional. This
+  // function accepts any typed ExchangeRecord/OpeningData, so a value built
+  // without going through parseExchangeRecord could omit a mandatory commitment.
+  // Treat a missing mandatory commitment as invalid rather than vacuously
+  // skipping it -- otherwise a record with no commitments at all would report
+  // allValid=true with an empty verdicts object.
+  const mandatory: ReadonlySet<CommitmentName> = new Set([
+    "localPayloadSent",
+    "partnerPayloadReceived",
+  ]);
   const verdicts: RecordCommitmentVerdicts = {};
   let allValid = true;
   for (const name of names) {
     const value = record.commitments[name];
     const open = opening.commitments[name];
-    if (value === undefined && open === undefined) continue;
+    if (value === undefined && open === undefined) {
+      if (mandatory.has(name)) {
+        verdicts[name] = false;
+        allValid = false;
+      }
+      continue;
+    }
     if (value === undefined || open === undefined) {
       verdicts[name] = false;
       allValid = false;

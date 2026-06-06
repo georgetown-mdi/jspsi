@@ -72,35 +72,46 @@ async function runBoth(
   ]);
 }
 
+/** A successful exchange always builds the record; narrow the now-optional
+ * record/opening (or fail loudly) so the assertions below read cleanly. */
+function built(result: ExchangeResult): {
+  record: NonNullable<ExchangeResult["record"]>;
+  opening: NonNullable<ExchangeResult["recordOpening"]>;
+} {
+  expect(result.record).toBeDefined();
+  expect(result.recordOpening).toBeDefined();
+  return { record: result.record!, opening: result.recordOpening! };
+}
+
 test("both-output: both records agree on terms and carry the result size", async () => {
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const [initiator, responder] = await runBoth(both, both);
+  const init = built(initiator);
+  const resp = built(responder);
 
   // Carol and Elizabeth overlap -> two matches.
-  expect(initiator.record.resultSize).toBe(2);
-  expect(responder.record.resultSize).toBe(2);
+  expect(init.record.resultSize).toBe(2);
+  expect(resp.record.resultSize).toBe(2);
 
   // Both parties hash the same agreed terms to the same value.
-  expect(initiator.record.termsHash).toBe(responder.record.termsHash);
+  expect(init.record.termsHash).toBe(resp.record.termsHash);
 
   // Identities are recorded from each side's point of view.
-  expect(initiator.record.localIdentity).toBe("Initiator Co");
-  expect(initiator.record.partnerIdentity).toBe("Responder Co");
-  expect(responder.record.localIdentity).toBe("Responder Co");
-  expect(responder.record.partnerIdentity).toBe("Initiator Co");
+  expect(init.record.localIdentity).toBe("Initiator Co");
+  expect(init.record.partnerIdentity).toBe("Responder Co");
+  expect(resp.record.localIdentity).toBe("Responder Co");
+  expect(resp.record.partnerIdentity).toBe("Initiator Co");
 
   // Both hold the association table, so both commit to it.
-  expect(initiator.record.commitments.associationTable).toBeDefined();
-  expect(responder.record.commitments.associationTable).toBeDefined();
+  expect(init.record.commitments.associationTable).toBeDefined();
+  expect(resp.record.commitments.associationTable).toBeDefined();
 
   // Each record's commitments verify against its own opening data.
   expect(
-    (await verifyRecordCommitments(initiator.record, initiator.recordOpening))
-      .allValid,
+    (await verifyRecordCommitments(init.record, init.opening)).allValid,
   ).toBe(true);
   expect(
-    (await verifyRecordCommitments(responder.record, responder.recordOpening))
-      .allValid,
+    (await verifyRecordCommitments(resp.record, resp.opening)).allValid,
   ).toBe(true);
 });
 
@@ -110,28 +121,28 @@ test("single-output: result size omitted; only the receiver commits the table", 
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
   const senderOut: Output = { expectsOutput: false, shareWithPartner: true };
   const [initiator, responder] = await runBoth(receiverOut, senderOut);
+  const init = built(initiator);
+  const resp = built(responder);
 
   expect(initiator.resolvedRole).toBe("receiver");
   expect(responder.resolvedRole).toBe("sender");
 
   // Neither party records the result size: the sender never learns it, so it is
   // not "learned by both".
-  expect("resultSize" in initiator.record).toBe(false);
-  expect("resultSize" in responder.record).toBe(false);
+  expect("resultSize" in init.record).toBe(false);
+  expect("resultSize" in resp.record).toBe(false);
 
   // Only the receiver holds a meaningful association table, so only it commits.
-  expect(initiator.record.commitments.associationTable).toBeDefined();
-  expect(responder.record.commitments.associationTable).toBeUndefined();
+  expect(init.record.commitments.associationTable).toBeDefined();
+  expect(resp.record.commitments.associationTable).toBeUndefined();
 
   // Terms hash still matches across parties.
-  expect(initiator.record.termsHash).toBe(responder.record.termsHash);
+  expect(init.record.termsHash).toBe(resp.record.termsHash);
 
   expect(
-    (await verifyRecordCommitments(initiator.record, initiator.recordOpening))
-      .allValid,
+    (await verifyRecordCommitments(init.record, init.opening)).allValid,
   ).toBe(true);
   expect(
-    (await verifyRecordCommitments(responder.record, responder.recordOpening))
-      .allValid,
+    (await verifyRecordCommitments(resp.record, resp.opening)).allValid,
   ).toBe(true);
 });

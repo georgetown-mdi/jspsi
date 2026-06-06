@@ -48,7 +48,7 @@ const opening: OpeningData = {
   commitments: {
     localPayloadSent: {
       salt: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-      data: { hasData: false },
+      data: { columns: [], rowIndices: [], rows: [] },
     },
     partnerPayloadReceived: {
       salt: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
@@ -66,8 +66,9 @@ test("defaultRecordPath is a filesystem-safe timestamped path in the cwd", () =>
 
 test("openingPathFor swaps a .json suffix for .opening.json", () => {
   expect(openingPathFor("/tmp/rec.json")).toBe("/tmp/rec.opening.json");
+  // A leading ./ is preserved so the paired record and opening paths match.
   expect(openingPathFor("./psilink-record-X.json")).toBe(
-    "psilink-record-X.opening.json",
+    "./psilink-record-X.opening.json",
   );
   // No .json suffix: append rather than mangle.
   expect(openingPathFor("/tmp/rec")).toBe("/tmp/rec.opening.json");
@@ -98,7 +99,7 @@ test("resolveRecordOutput falls back to a timestamped default", () => {
     "./psilink-record-2026-06-06T01-02-03-456Z.json",
   );
   expect(out?.openingFilePath).toBe(
-    "psilink-record-2026-06-06T01-02-03-456Z.opening.json",
+    "./psilink-record-2026-06-06T01-02-03-456Z.opening.json",
   );
 });
 

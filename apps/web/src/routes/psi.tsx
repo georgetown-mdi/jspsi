@@ -198,13 +198,20 @@ function Home() {
         window.URL.createObjectURL(
           new Blob([text], { type: "application/json" }),
         );
-      return {
+      const generated: ExchangeOutputs = {
         resultsUrl: window.URL.createObjectURL(
           new Blob([csv], { type: "text/csv" }),
         ),
-        recordUrl: jsonUrl(serializeExchangeRecord(result.record)),
-        openingUrl: jsonUrl(serializeOpeningData(result.recordOpening)),
       };
+      // The record (and its opening) are absent only if building the record
+      // failed after a successful exchange; the results above are still offered.
+      if (result.record !== undefined)
+        generated.recordUrl = jsonUrl(serializeExchangeRecord(result.record));
+      if (result.recordOpening !== undefined)
+        generated.openingUrl = jsonUrl(
+          serializeOpeningData(result.recordOpening),
+        );
+      return generated;
     };
 
     // Server (PSI responder, PeerJS dialer): load/prepare, emit the stage tree,

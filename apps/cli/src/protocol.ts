@@ -624,8 +624,14 @@ export async function runProtocol(
 
     // Persist the self-attested record after the results: it is a secondary
     // audit artifact, so it is written last and its failure is non-fatal (see
-    // writeExchangeRecord). Skipped entirely when records are disabled.
-    if (recordOutput !== undefined)
+    // writeExchangeRecord). Skipped when records are disabled, or when the
+    // record could not be built (runExchange returns it undefined and has
+    // already warned -- the exchange still succeeded).
+    if (
+      recordOutput !== undefined &&
+      record !== undefined &&
+      recordOpening !== undefined
+    )
       writeExchangeRecord(recordOutput, record, recordOpening, loggerName);
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner

@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import {
   getLogger,
   serializeExchangeRecord,
@@ -28,12 +26,15 @@ export function defaultRecordPath(now: Date = new Date()): string {
  * Derive the private opening-data path from a record path: the record path with
  * a `.opening.json` suffix in place of a trailing `.json` (or appended when the
  * record path does not end in `.json`). Keeps the two files visibly paired.
+ *
+ * Operates on the suffix directly rather than via `path.join`, which would
+ * normalize away a leading `./` and leave the paired record and opening paths
+ * with inconsistent prefixes in log messages.
  */
 export function openingPathFor(recordPath: string): string {
-  const dir = path.dirname(recordPath);
-  const base = path.basename(recordPath);
-  const stem = base.endsWith(".json") ? base.slice(0, -".json".length) : base;
-  return path.join(dir, `${stem}.opening.json`);
+  return recordPath.endsWith(".json")
+    ? `${recordPath.slice(0, -".json".length)}.opening.json`
+    : `${recordPath}.opening.json`;
 }
 
 /** Resolved destinations for the record artifacts. */
