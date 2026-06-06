@@ -644,6 +644,17 @@ describe("NFC normalization of config literals", () => {
       ]),
     ).toBe("\u03a9\u03a9AB");
   });
+
+  test("pad_left rejects a pad character that NFC-expands to multiple units", () => {
+    // U+0344 is one code unit but NFC-decomposes to U+0308 U+0301; a multi-unit
+    // pad would corrupt the output via padStart's cycling, so it is rejected
+    // rather than silently padded.
+    expect(() =>
+      runPipeline("AB", [
+        { function: "pad_left", params: { length: 4, char: "\u0344" } },
+      ]),
+    ).toThrow('pad_left: "char" must be exactly one character');
+  });
 });
 
 // --- Key-string NFC normalization --------------------------------------------

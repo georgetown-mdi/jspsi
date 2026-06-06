@@ -285,13 +285,14 @@ function padLeftFactory(params: Params): StandardizingFn {
   const length = params.length as number | undefined;
   if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
-  const rawChar = (params.char as string | undefined) ?? "0";
-  if (rawChar.length !== 1)
+  // Normalize before validating the length, not after: NFC can change the
+  // code-unit count -- a singleton like U+2126 -> U+03A9 stays one unit, but a
+  // combining mark like U+0344 -> U+0308 U+0301 expands to two -- and padStart
+  // treats a multi-unit fill as a cycling pattern, so the one-character contract
+  // must hold on the normalized value that actually pads.
+  const char = ((params.char as string | undefined) ?? "0").normalize("NFC");
+  if (char.length !== 1)
     throw new Error(`pad_left: "char" must be exactly one character`);
-  // NFC-normalize the pad character so a precomposed-vs-compatibility singleton
-  // (e.g. U+2126 -> U+03A9) is not injected into the key in a non-NFC form. The
-  // length check runs on the raw value to preserve the one-code-unit contract.
-  const char = rawChar.normalize("NFC");
   return (s) => s.padStart(length, char);
 }
 
@@ -302,10 +303,12 @@ function nullIfFactory(params: Params): StandardizingFn {
       : params.value !== undefined
         ? [params.value as string]
         : [];
-  // NFC-normalize the exclusion values: the runtime string is guaranteed NFC
-  // (see runCompiledPipeline), so an exclusion authored in a different form
-  // (e.g. NFD in a YAML file written on macOS) would otherwise never match and
-  // the exclusion would silently not fire.
+  // NFC-normalize the exclusion values so one authored in a different form
+  // (e.g. NFD from a YAML file written on macOS) still matches the runtime
+  // value, which is NFC at the pipeline input. Known limitation: a preceding
+  // case-folding step (to_upper_case/to_lower_case) can emit non-NFC for some
+  // scripts, so a comparison here can still miss after such a step; making the
+  // value NFC at every step boundary is tracked as a separate follow-up.
   const set = new Set(values.map((v) => v.normalize("NFC")));
   return (s) => (set.has(s) ? null : s);
 }
