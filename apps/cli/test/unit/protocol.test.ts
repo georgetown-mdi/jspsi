@@ -416,7 +416,7 @@ test("writes the self-attested record and opening when runExchange returns an au
       undefined,
       -1,
       "test-a",
-      { recordFilePath: recordA, openingFilePath: openingA },
+      { recordFile: recordA },
     ),
     runProtocol(
       {
@@ -429,7 +429,7 @@ test("writes the self-attested record and opening when runExchange returns an au
       undefined,
       -1,
       "test-b",
-      { recordFilePath: recordB, openingFilePath: openingB },
+      { recordFile: recordB },
     ),
   ]);
 

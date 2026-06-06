@@ -214,8 +214,10 @@ function Home() {
       // in use upstream -- so surfacing a UI error for it is not worth the noise.
       // Filenames are timestamped per exchange (mirroring the CLI's timestamped
       // path) so repeated downloads in one session accumulate rather than collide.
+      // The stamp is the record's own createdAt (made filesystem-safe), not a
+      // fresh clock read, so the filename matches the timestamp inside the file.
       if (result.audit !== undefined) {
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
         generated.recordUrl = jsonUrl(
           serializeExchangeRecord(result.audit.record),
         );

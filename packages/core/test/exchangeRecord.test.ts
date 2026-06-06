@@ -235,6 +235,27 @@ describe("result size", () => {
   });
 });
 
+// --- Identity validation (at the record-build boundary) ----------------------
+
+describe("identities", () => {
+  test("an empty identity is rejected on build", async () => {
+    // The builder validates the identities with the same schema the parser uses
+    // (z.string().min(1)), so it cannot emit a record the parser would reject.
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, localTerms: { ...termsA, identity: "" } },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, partnerTerms: { ...termsB, identity: "" } },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 // --- Association-table commitment presence -----------------------------------
 
 describe("association-table commitment", () => {

@@ -144,8 +144,10 @@ export async function verifyCommitmentOpening(
 /**
  * Order the two parties' terms deterministically by their canonical encoding so
  * both parties derive the same agreed-terms object regardless of which one is
- * "local". Comparison is by UTF-16 code unit (the same ordering the canonical
- * encoder applies to object keys), which is platform- and locale-independent.
+ * "local". Comparison is JavaScript string order over the two RFC 8785 canonical
+ * encodings; because RFC 8785 escapes every non-ASCII character as \uXXXX, those
+ * strings are ASCII-only, so the comparison is stable and deterministic
+ * (platform- and locale-independent) with no UTF-16-vs-code-point ambiguity.
  */
 function agreedTermsValue(a: LinkageTerms, b: LinkageTerms): CanonicalValue {
   // LinkageTerms is within the canonical value domain (plain objects, arrays,
@@ -279,10 +281,18 @@ const resultSizeSchema = safeIntegerSchema.refine((n) => n >= 0, {
 });
 
 // Shared by the parser and the builder so both agree on what `createdAt` may be:
-// an ISO 8601 datetime string. Reused at build time (see buildExchangeRecord) so
-// a malformed timestamp throws there rather than producing a record the parser
-// would later reject.
+// an ISO 8601 datetime in UTC (ending in `Z`). `z.iso.datetime()` rejects
+// timezone offsets by default, which holds the timestamp to a single canonical
+// form -- the signing phase signs over createdAt's canonical bytes, so one UTC
+// form avoids two records for the same instant differing only by offset. The
+// UTC-only requirement is documented in PROTOCOL.md. Reused at build time (see
+// buildExchangeRecord) so a malformed timestamp throws there rather than
+// producing a record the parser would later reject.
 const createdAtSchema = z.iso.datetime();
+
+// Shared by the parser and the builder so both agree the identities are
+// non-empty strings; validated at build time alongside createdAt and resultSize.
+const identitySchema = z.string().min(1);
 
 const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
   z.object({
@@ -295,8 +305,8 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
   createdAt: createdAtSchema,
   termsHash: base64UrlSchema,
-  localIdentity: z.string().min(1),
-  partnerIdentity: z.string().min(1),
+  localIdentity: identitySchema,
+  partnerIdentity: identitySchema,
   resultSize: resultSizeSchema.optional(),
   bindingNonce: base64UrlSchema,
   commitments: ExchangeRecordCommitmentsSchema,
@@ -425,13 +435,14 @@ export async function buildExchangeRecord(
   const record: ExchangeRecord = {
     version: EXCHANGE_RECORD_VERSION,
     // Validate on build with the same schema the parser uses, so the builder and
-    // parser agree on what a record may contain: a non-ISO timestamp throws here
-    // (caught by the non-fatal build guard in runExchange) rather than producing
-    // a record the parser would later reject at round-trip.
+    // parser agree on what a record may contain: a non-ISO/non-UTC timestamp or
+    // an empty identity throws here (caught by the non-fatal build guard in
+    // runExchange) rather than producing a record the parser would later reject
+    // at round-trip.
     createdAt: createdAtSchema.parse(inputs.createdAt),
     termsHash,
-    localIdentity: inputs.localTerms.identity,
-    partnerIdentity: inputs.partnerTerms.identity,
+    localIdentity: identitySchema.parse(inputs.localTerms.identity),
+    partnerIdentity: identitySchema.parse(inputs.partnerTerms.identity),
     // Omit the key entirely when absent rather than setting it to undefined: an
     // absent field and a null/undefined field are distinct in the canonical
     // encoding the signing phase will hash over this record. Validate on build

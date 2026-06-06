@@ -11,14 +11,16 @@ import { writeFileOwnerOnly } from "./keyFile";
 export const DEFAULT_RECORD_BASENAME = "psilink-record";
 
 /**
- * Default path for the self-attested record: `./psilink-record-<UTC>.json` in
- * the working directory. The timestamp is filesystem-safe (colons and the
- * fractional-second dot replaced with hyphens) and makes each exchange write a
- * distinct file, so repeated exchanges accumulate an audit trail rather than
- * overwriting the previous record.
+ * Default path for the self-attested record: `./psilink-record-<stamp>.json` in
+ * the working directory, where `<stamp>` is the record's own `createdAt`
+ * timestamp made filesystem-safe (colons and the fractional-second dot replaced
+ * with hyphens). Deriving the stamp from `createdAt` -- rather than a fresh clock
+ * read taken before the exchange finished -- makes the filename match the
+ * timestamp recorded inside the file, and still gives each exchange a distinct
+ * file so repeated exchanges accumulate an audit trail rather than overwriting.
  */
-export function defaultRecordPath(now: Date = new Date()): string {
-  const stamp = now.toISOString().replace(/[:.]/g, "-");
+export function defaultRecordPath(createdAt: string): string {
+  const stamp = createdAt.replace(/[:.]/g, "-");
   return `./${DEFAULT_RECORD_BASENAME}-${stamp}.json`;
 }
 
@@ -37,8 +39,38 @@ export function openingPathFor(recordPath: string): string {
     : `${recordPath}.opening.json`;
 }
 
-/** Resolved destinations for the record artifacts. */
+/**
+ * Where the record artifacts should go, resolved from the CLI flags before the
+ * exchange runs. Holds only the user's choice -- an explicit `--record-file`
+ * path, or `undefined` for the default timestamped path -- because the default's
+ * timestamp is the record's `createdAt`, which is not known until the exchange
+ * completes. {@link recordPathsFor} turns this into concrete paths at write time.
+ */
 export interface RecordOutput {
+  /** Explicit `--record-file` path; `undefined` selects the default path. */
+  recordFile?: string;
+}
+
+/**
+ * Resolve the record-output choice from the CLI flags. Returns `undefined` when
+ * records are disabled (`--no-record`, which wins over an explicit
+ * `--record-file`); otherwise the trimmed explicit path, or a choice with
+ * `recordFile` undefined to mean "use the default timestamped path".
+ */
+export function resolveRecordOutput(opts: {
+  enabled: boolean;
+  recordFile?: string;
+}): RecordOutput | undefined {
+  if (!opts.enabled) return undefined;
+  const trimmed = opts.recordFile?.trim();
+  return {
+    recordFile:
+      trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined,
+  };
+}
+
+/** Concrete file destinations for the record and its opening data. */
+export interface RecordPaths {
   /** Shareable record (commitments + non-secret summary). */
   recordFilePath: string;
   /** Private opening data (per-commitment salts and committed data). */
@@ -46,22 +78,18 @@ export interface RecordOutput {
 }
 
 /**
- * Resolve where the record artifacts go from the CLI flags. Returns `undefined`
- * when records are disabled (`--no-record`); otherwise the (possibly default,
- * timestamped) record path and its derived opening path. `--no-record` wins over
- * an explicit `--record-file`.
+ * Resolve the concrete record and opening paths from the output choice and the
+ * record being written. An explicit `--record-file` is used verbatim; otherwise
+ * the default path's timestamp is the record's `createdAt`, so the filename
+ * reflects when the record was produced rather than a clock read from before the
+ * exchange completed. The opening path is always derived from the record path so
+ * the two stay visibly paired.
  */
-export function resolveRecordOutput(opts: {
-  enabled: boolean;
-  recordFile?: string;
-  now?: Date;
-}): RecordOutput | undefined {
-  if (!opts.enabled) return undefined;
-  const trimmed = opts.recordFile?.trim();
-  const recordFilePath =
-    trimmed !== undefined && trimmed.length > 0
-      ? trimmed
-      : defaultRecordPath(opts.now);
+export function recordPathsFor(
+  output: RecordOutput,
+  createdAt: string,
+): RecordPaths {
+  const recordFilePath = output.recordFile ?? defaultRecordPath(createdAt);
   return { recordFilePath, openingFilePath: openingPathFor(recordFilePath) };
 }
 
@@ -93,23 +121,29 @@ export function writeExchangeRecord(
   loggerName: string,
 ): void {
   const log = getLogger(loggerName);
+  // Resolve the concrete paths now: the default path's timestamp is the record's
+  // own createdAt, so the filename matches the timestamp inside the file.
+  const { recordFilePath, openingFilePath } = recordPathsFor(
+    output,
+    record.createdAt,
+  );
   // Track the opening write so a partial failure (opening written, record write
   // throws) can tell the user about the orphaned sensitive file below.
   let openingWritten = false;
   try {
-    writeFileOwnerOnly(output.openingFilePath, serializeOpeningData(opening));
+    writeFileOwnerOnly(openingFilePath, serializeOpeningData(opening));
     openingWritten = true;
-    writeFileOwnerOnly(output.recordFilePath, serializeExchangeRecord(record));
+    writeFileOwnerOnly(recordFilePath, serializeExchangeRecord(record));
     // Log in write order (opening first, then record), matching the sequence
     // above so the messages reflect what actually hit disk and when.
     log.info(
-      `wrote private commitment opening data to ${output.openingFilePath}; ` +
+      `wrote private commitment opening data to ${openingFilePath}; ` +
         "keep it private -- it holds the matched data in plaintext (the " +
         "commitment openings), so it is as sensitive as the matched data itself",
     );
     log.info(
       "wrote self-attested exchange record (a local audit artifact, NOT a " +
-        `signed or non-repudiable receipt) to ${output.recordFilePath}`,
+        `signed or non-repudiable receipt) to ${recordFilePath}`,
     );
   } catch (err) {
     log.warn(
@@ -122,7 +156,7 @@ export function writeExchangeRecord(
     // so the user must delete it or protect it -- do not silently orphan it.
     if (openingWritten) {
       log.warn(
-        `the private opening data was already written to ${output.openingFilePath} ` +
+        `the private opening data was already written to ${openingFilePath} ` +
           "before this failure and holds the matched data in plaintext; delete it " +
           "or keep it private",
       );
