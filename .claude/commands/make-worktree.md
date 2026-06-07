@@ -85,15 +85,12 @@ Output this block and nothing after it:
       cd <worktree>
       claude          # or continue this session: "work in the worktree above"
 
-    CLI integration tests (own container, safe alongside other checkouts):
-      npm run test:container:up   -w apps/cli
-      npm run test:integration    -w apps/cli
-      npm run test:container:down -w apps/cli   # stop it when done
-
-    Before deleting this worktree, run test:container:down first. The container
-    and network are named psilink-sftp-<branch>; removing the worktree without a
-    down orphans them (the bind-mount path is gone, so down is no longer easy).
-    Clean up strays with: docker compose -p psilink-sftp-<branch> down
+    If you continue THIS session: the Bash CWD does not reliably persist across
+    turns -- it resets to the repo root, checked out on a protected branch. So
+    target this worktree explicitly on every command: use
+    `git -C <worktree> ...`, absolute paths, or a leading `cd <worktree> &&`
+    within the same command. A bare git write (commit/amend/add/push) would
+    otherwise hit a protected branch (staging or main), not your feature branch.
 
 ## What you do NOT do
 
