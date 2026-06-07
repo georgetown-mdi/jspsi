@@ -233,6 +233,22 @@ export function detectFileConflicts(paths: string[]): string[] {
   });
 }
 
+/**
+ * Thrown by {@link writeFileOwnerOnly} in `exclusive` mode when the destination
+ * already exists (another process created it first). Distinct from a generic
+ * write failure so a caller can recover -- e.g. by loading the file the winning
+ * process wrote -- rather than treating the lost race as a hard error.
+ */
+export class FileExistsError extends Error {
+  constructor(public readonly path: string) {
+    super(
+      `refusing to overwrite ${path}: it already exists (another process may ` +
+        "have created it concurrently)",
+    );
+    this.name = "FileExistsError";
+  }
+}
+
 /** Options for {@link writeFileOwnerOnly}. */
 export interface WriteFileOwnerOnlyOptions {
   /**
@@ -325,22 +341,34 @@ export function writeFileOwnerOnly(
       fs.chmodSync(tmp, 0o600);
     }
     if (options.exclusive) {
-      // Atomic create-if-absent: linkSync fails with EEXIST if destPath already
-      // exists, closing the create-time race that renameSync (which silently
-      // overwrites) would leave open. The temp file already carries the
-      // owner-only permissions/ACL, and a hard link shares them, so the
-      // destination is owner-only the instant it appears.
+      // Atomic create-if-absent: linkSync fails if destPath already exists,
+      // closing the create-time race that renameSync (which silently overwrites)
+      // would leave open. The temp file already carries the owner-only
+      // permissions/ACL, and a hard link shares them, so the destination is
+      // owner-only the instant it appears.
       try {
         fs.linkSync(tmp, destPath);
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EEXIST")
-          throw new Error(
-            `refusing to overwrite ${destPath}: it already exists (another ` +
-              "process may have created it concurrently)",
-          );
+        const code = (e as NodeJS.ErrnoException).code;
+        // EEXIST is the normal "lost the race" signal. On Windows,
+        // CreateHardLink can report EPERM instead of EEXIST on some filesystems
+        // (FAT32, network shares) when the target exists; treat that as
+        // "exists" only when the destination is in fact present, otherwise
+        // rethrow the original error. The temp file is cleaned up by the outer
+        // catch.
+        if (code === "EEXIST" || (code === "EPERM" && fs.existsSync(destPath)))
+          throw new FileExistsError(destPath);
         throw e;
       }
-      fs.unlinkSync(tmp);
+      // The link succeeded; destPath is the authoritative copy. Removing the
+      // temp name is best-effort -- an orphaned temp is harmless and the next
+      // run's stale-temp sweep removes it -- so a failure here must NOT mask the
+      // successful creation by propagating to the outer catch.
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* best-effort: destination is already correctly created */
+      }
     } else {
       fs.renameSync(tmp, destPath);
     }

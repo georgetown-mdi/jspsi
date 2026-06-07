@@ -14,7 +14,7 @@ import {
 import type { SigningIdentity } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
-import { expandTilde } from "../fileUtils";
+import { expandTilde, FileExistsError } from "../fileUtils";
 import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
@@ -80,6 +80,11 @@ interface ConfigHints {
 // fully valid exchange spec: the fingerprint command may run before the rest of
 // the config exists. A missing default config is silently ignored; a missing
 // EXPLICIT --config-file, or malformed YAML, is a usage error.
+//
+// Tilde handling is split by design: the config-file path READ here is
+// tilde-expanded, but the returned `identityFile`/`identity` hints are NOT --
+// the handler expands the resolved identity path itself (it may instead come
+// from --identity-file or the default). Keep that contract if refactoring.
 /** @internal exported for testing */
 export function readConfigHints(
   configFile: string | undefined,
@@ -153,7 +158,24 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
   identity: SigningIdentity;
   action: SigningIdentityAction;
 } {
-  const existing = loadSigningIdentity(input.identityPath);
+  // A file that exists but is unreadable (malformed/inconsistent) normally
+  // surfaces as an error. With --force the user has explicitly asked to
+  // regenerate, so an unreadable existing file is treated as a file to replace
+  // rather than a blocker -- this makes --force a genuine recovery path.
+  let existing: SigningIdentity | undefined;
+  let replacingUnreadable = false;
+  try {
+    existing = loadSigningIdentity(input.identityPath);
+  } catch (err) {
+    if (!input.force) throw err;
+    input.log.warn(
+      `the existing signing identity at ${input.identityPath} could not be ` +
+        `read (${err instanceof Error ? err.message : String(err)}); --force ` +
+        "regenerates it.",
+    );
+    replacingUnreadable = true;
+  }
+
   if (existing !== undefined && !input.force) {
     if (
       input.identityArg !== undefined &&
@@ -181,17 +203,35 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
         "linkage_terms.identity in the config",
     );
   const identity = generateSigningIdentity(identityString);
-  // A first-time creation is exclusive (create-if-absent) so two concurrent
-  // invocations cannot both generate and silently overwrite each other, leaving
-  // one process holding a key whose fingerprint no longer matches disk. A
-  // --force regenerate of an existing identity deliberately overwrites it.
-  saveSigningIdentity(input.identityPath, identity, {
-    exclusive: existing === undefined,
-  });
-  return {
-    identity,
-    action: existing !== undefined ? "Regenerated" : "Created",
-  };
+
+  // A genuine first creation (no file on disk at all) is exclusive, so two
+  // concurrent invocations cannot both generate and silently overwrite each
+  // other. A --force regenerate (over a valid OR an unreadable file) is a
+  // deliberate overwrite.
+  if (existing === undefined && !replacingUnreadable) {
+    try {
+      saveSigningIdentity(input.identityPath, identity, { exclusive: true });
+    } catch (err) {
+      // Lost the create race: another process wrote the file between our
+      // existence check and our write. Adopt the winner's identity rather than
+      // failing -- both processes then agree on the same file and fingerprint.
+      if (err instanceof FileExistsError) {
+        const winner = loadSigningIdentity(input.identityPath);
+        if (winner !== undefined) {
+          input.log.warn(
+            "another process created the signing identity concurrently; " +
+              "using the existing file rather than overwriting it.",
+          );
+          return { identity: winner, action: "Loaded" };
+        }
+      }
+      throw err;
+    }
+    return { identity, action: "Created" };
+  }
+
+  saveSigningIdentity(input.identityPath, identity);
+  return { identity, action: "Regenerated" };
 }
 
 function report(

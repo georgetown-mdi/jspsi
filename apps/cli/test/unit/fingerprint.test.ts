@@ -2,12 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { UsageError, computeCertificateFingerprint } from "@psilink/core";
+import {
+  UsageError,
+  computeCertificateFingerprint,
+  generateSigningIdentity,
+} from "@psilink/core";
 import {
   readConfigHints,
   resolveSigningIdentity,
 } from "../../src/commands/fingerprint";
 import { loadSigningIdentity } from "../../src/signingIdentityFile";
+import * as idFile from "../../src/signingIdentityFile";
 
 let dir: string;
 const noopLog = { warn: () => {} };
@@ -126,6 +131,69 @@ test("errors when no identity is available to create one", () => {
     }),
   ).toThrow(UsageError);
   expect(fs.existsSync(idPath)).toBe(false);
+});
+
+test("a corrupt identity file is an error without --force", () => {
+  const idPath = path.join(dir, "id.json");
+  fs.writeFileSync(idPath, "{ not valid json");
+  expect(() =>
+    resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: "Recovered",
+      force: false,
+      log: noopLog,
+    }),
+  ).toThrow(UsageError);
+});
+
+test("--force regenerates over a corrupt identity file", () => {
+  const idPath = path.join(dir, "id.json");
+  fs.writeFileSync(idPath, "{ not valid json");
+  const warn = vi.fn();
+  const { identity, action } = resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Recovered",
+    force: true,
+    log: { warn },
+  });
+  expect(action).toBe("Regenerated");
+  expect(identity.certificate.identity).toBe("Recovered");
+  expect(warn).toHaveBeenCalledOnce(); // warned that the old file was unreadable
+  // the file is now a valid, loadable identity
+  expect(loadSigningIdentity(idPath)).toEqual(identity);
+});
+
+test("on a lost create race, adopts the winner's identity instead of failing", () => {
+  const idPath = path.join(dir, "id.json");
+  // A "winner" process has already written a valid identity to disk.
+  idFile.saveSigningIdentity(idPath, generateSigningIdentity("Winner Party"));
+  const realLoad = idFile.loadSigningIdentity;
+  let calls = 0;
+  const spy = vi
+    .spyOn(idFile, "loadSigningIdentity")
+    .mockImplementation((p: string) => {
+      calls += 1;
+      // First call is resolve's existence check: report absent so it attempts
+      // an exclusive create and then loses the race to the file on disk. The
+      // recovery re-load (second call) uses the real implementation.
+      return calls === 1 ? undefined : realLoad(p);
+    });
+  try {
+    const warn = vi.fn();
+    const { identity, action } = resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: "Loser Party",
+      force: false,
+      log: { warn },
+    });
+    expect(action).toBe("Loaded");
+    expect(identity.certificate.identity).toBe("Winner Party");
+    expect(warn).toHaveBeenCalledOnce();
+    // proves the race path ran: existence check + recovery re-load
+    expect(calls).toBeGreaterThanOrEqual(2);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("falls back to the config identity when --identity is absent", () => {

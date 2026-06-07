@@ -361,7 +361,13 @@ function assertCertificateSelfSignature(cert: SigningCertificate): void {
       `certificate signature must be ${ED25519_SIGNATURE_BYTES} bytes, got ` +
         `${sig.length}`,
     );
-  if (!ed25519.verify(sig, signatureInput(cert), pub))
+  // Strict RFC 8032 verification (zip215: false): reject the non-canonical R/A
+  // point encodings that noble's default (zip215: true) would accept, so any
+  // certificate we accept is one a strict cross-implementation verifier also
+  // accepts. Signing is deterministic and canonical, so our own certificates
+  // verify under either setting; this only tightens what a foreign certificate
+  // must satisfy.
+  if (!ed25519.verify(sig, signatureInput(cert), pub, { zip215: false }))
     throw new SigningError(
       "certificate self-signature does not verify; the certificate is " +
         "malformed or has been tampered with",

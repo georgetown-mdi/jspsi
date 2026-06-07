@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectFileConflicts,
   expandTilde,
+  FileExistsError,
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
 
@@ -70,7 +71,7 @@ describe("writeFileOwnerOnly", () => {
     const p = path.join(dir, "secret");
     writeFileOwnerOnly(p, "original", { exclusive: true });
     expect(() => writeFileOwnerOnly(p, "clobber", { exclusive: true })).toThrow(
-      /already exists/,
+      FileExistsError,
     );
     expect(fs.readFileSync(p, "utf8")).toBe("original");
     // no stray temp file left behind

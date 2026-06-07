@@ -54,6 +54,11 @@ export interface SigningConfig {
    * Path to this party's signing identity file (private key + self-signed
    * certificate). Owner-read-only; created and read by the CLI. Optional here:
    * the CLI falls back to a documented default path when it is omitted.
+   *
+   * Stored verbatim. A leading `~` is NOT resolved here -- the config layer does
+   * not resolve home directories (a host concern). Any CLI consumer that opens
+   * this path must tilde-expand it at use time, as `psilink fingerprint` does
+   * via `expandTilde`.
    */
   identityFile?: string;
   /**
