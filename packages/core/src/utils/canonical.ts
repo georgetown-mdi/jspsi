@@ -43,7 +43,11 @@ export type CanonicalValue =
  * Thrown when a value cannot be canonically encoded because it falls outside
  * the reproducible domain (see {@link assertCanonical}). The message names the
  * offending value's JSON path (e.g. `$.linkageKeys[0].elements[1]`) so the
- * caller can locate it.
+ * caller can locate it. One exception: an error the boundary guard in
+ * {@link canonicalString} converts -- a property getter that throws, or a
+ * circular reference that overflows the traversal -- is pathed at the root `$`,
+ * because the precise location is not recoverable there; the original error is
+ * preserved on `.cause`, whose stack still locates it.
  *
  * It extends {@link UsageError}: a value outside the canonical domain is a
  * configuration/data problem, so any call site that lets it propagate to the
@@ -52,15 +56,23 @@ export type CanonicalValue =
  * `canonicalString` in their own try/catch.
  */
 export class CanonicalEncodingError extends UsageError {
-  constructor(message: string) {
+  constructor(message: string, options?: { cause?: unknown }) {
     super(message);
     this.name = "CanonicalEncodingError";
+    // Preserve the underlying error (e.g. a throwing getter caught at the
+    // canonicalString boundary) as the cause, matching the error-conversion
+    // convention used elsewhere in the codebase. UsageError's constructor takes
+    // only a message, so set cause directly rather than forwarding super options.
+    if (options?.cause !== undefined) this.cause = options.cause;
   }
 }
 
-function fail(reason: string, path: string): never {
+function fail(reason: string, path: string, cause?: unknown): never {
   throw new CanonicalEncodingError(
     `canonical encoding failed at ${path}: ${reason}`,
+    // Only pass options when there is a cause, so the common origin rejections
+    // (which have none) do not allocate an options object per call.
+    cause === undefined ? undefined : { cause },
   );
 }
 
@@ -185,6 +197,12 @@ function assertCanonical(value: unknown, path: string): void {
         );
       // Object.entries includes a key explicitly set to `undefined`, so the
       // recursive call rejects it rather than letting canonicalize drop it.
+      // Hazard: Object.entries reads each enumerable property value, which
+      // invokes any getter -- a getter that throws escapes here as its own raw
+      // error, not a CanonicalEncodingError. That is tolerated rather than
+      // guarded per-property: the boundary try/catch in canonicalString converts
+      // any such error so the module's single-error-type contract holds even for
+      // non-schema-parsed input (the only kind that can carry a throwing getter).
       // Identifier-like keys extend the path with dot notation; any other key
       // (containing a dot, a digit-leading name, etc.) uses bracket notation so
       // the path stays unambiguous, e.g. `$["a.b"]` rather than `$.a.b`.
@@ -212,18 +230,54 @@ function assertCanonical(value: unknown, path: string): void {
  *   canonical domain.
  */
 export function canonicalString(value: unknown): string {
-  // assertCanonical MUST run first: the safety of the output rests entirely on
-  // it catching every value canonicalize would coerce. canonicalize 2.1.0 does
-  // not uniformly skip out-of-domain values -- e.g. a function-valued property
-  // is stringified to the literal `undefined`, producing invalid JSON -- so the
-  // pre-validator, not canonicalize, is what guarantees well-formed output.
-  assertCanonical(value, "$");
-  const encoded = canonicalize(value);
-  // canonicalize returns undefined for any top-level value that JSON.stringify
-  // drops entirely -- undefined, a function, or a symbol. assertCanonical has
-  // already rejected all of those, so this only guards the declared return type.
-  if (encoded === undefined) fail("value is not canonicalizable", "$");
-  return encoded;
+  try {
+    // assertCanonical MUST run first: the safety of the output rests entirely on
+    // it catching every value canonicalize would coerce. canonicalize 2.1.0 does
+    // not uniformly skip out-of-domain values -- e.g. a function-valued property
+    // is stringified to the literal `undefined`, producing invalid JSON -- so the
+    // pre-validator, not canonicalize, is what guarantees well-formed output.
+    assertCanonical(value, "$");
+    const encoded = canonicalize(value);
+    // canonicalize returns undefined for any top-level value that JSON.stringify
+    // drops entirely -- undefined, a function, or a symbol. assertCanonical has
+    // already rejected all of those, so this only guards the declared return type.
+    if (encoded === undefined) fail("value is not canonicalizable", "$");
+    return encoded;
+  } catch (err) {
+    // Boundary guard upholding the module's contract that every rejection is a
+    // CanonicalEncodingError. Both assertCanonical and canonicalize read property
+    // values as they traverse, invoking any enumerable getter on the input (see
+    // the Object.entries hazard note in assertCanonical). A getter that throws, a
+    // circular reference that overflows the recursion, or any other unexpected
+    // failure during traversal would otherwise escape as a raw error (a circular
+    // input is itself un-encodable, so converting it to a usage error is correct,
+    // not merely tolerated). The domain rejections fail() raises are CanonicalEncoding
+    // errors already, each carrying its precise JSON path; re-throw those
+    // unchanged so the path messages are preserved. Anything else is converted
+    // here. The converted error is still a CanonicalEncodingError (a UsageError,
+    // exit 64): a throwing getter on caller-supplied data is a data problem, not
+    // an internal failure. This blanket catch also reclassifies a genuine bug in
+    // assertCanonical/canonicalize as a CanonicalEncodingError; that is an
+    // accepted trade for the single-error-type contract, not accidental.
+    //
+    // Unlike the domain rejections, a converted error is pathed at the root `$`,
+    // not at the offending property (e.g. a getter at `$.outer.boom` still
+    // reports `$`). Pinpointing the property would require a per-property
+    // try/catch inside the traversal, reintroducing exactly the per-node overhead
+    // this single boundary wrap was chosen to avoid; a getter-bearing input is
+    // also exotic (only non-schema-parsed data can carry one). The original
+    // error is preserved as `.cause`, so its stack still locates the property
+    // even though the message says `$`. If a consumer ever feeds getter-bearing
+    // objects in routinely, revisit and thread the precise path.
+    if (err instanceof CanonicalEncodingError) throw err;
+    fail(
+      `unexpected error during traversal (${
+        err instanceof Error ? err.message : String(err)
+      })`,
+      "$",
+      err,
+    );
+  }
 }
 
 // Local TextEncoder so this module depends only on a platform API rather than

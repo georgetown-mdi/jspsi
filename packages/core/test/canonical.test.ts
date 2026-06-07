@@ -270,6 +270,83 @@ describe("values outside the canonical domain are rejected", () => {
   });
 });
 
+// --- boundary guard: every rejection is a CanonicalEncodingError --------------
+
+describe("the boundary guard keeps the single-error-type contract", () => {
+  test("a throwing enumerable getter surfaces as a CanonicalEncodingError, not the raw error", () => {
+    // Only a non-schema-parsed object can carry this; the traversal in
+    // assertCanonical (and canonicalize) reads the getter, which throws. The
+    // boundary try/catch in canonicalString converts the raw error so callers
+    // still see the module's one error type.
+    const value = {
+      get boom(): never {
+        throw new RangeError("getter blew up");
+      },
+    };
+    expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
+    expect(() => canonicalString(value)).toThrow(
+      /unexpected error during traversal/,
+    );
+  });
+
+  test("the converted error preserves the original as its cause", () => {
+    // The boundary message is pathed at the root `$`, so the original error --
+    // attached as `.cause` -- is what still locates the offending property (via
+    // its stack). Guard that the link is not dropped.
+    const original = new RangeError("getter blew up");
+    const value = {
+      get boom(): never {
+        throw original;
+      },
+    };
+    let caught: unknown;
+    try {
+      canonicalString(value);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(CanonicalEncodingError);
+    expect((caught as CanonicalEncodingError).cause).toBe(original);
+  });
+
+  test("a throwing getter nested below the root is still converted", () => {
+    const value = {
+      outer: {
+        get boom(): never {
+          throw new RangeError("deep getter blew up");
+        },
+      },
+    };
+    expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
+  });
+
+  test("a circular reference surfaces as a CanonicalEncodingError, not a raw stack overflow", () => {
+    // assertCanonical recurses into the cycle until the stack overflows; the
+    // boundary guard converts that RangeError. A cyclic object is itself
+    // un-encodable, so a CanonicalEncodingError (a usage error) is the correct
+    // type rather than a raw RangeError escaping. Only non-schema-parsed data can
+    // form a cycle, so this shares the throwing-getter reachability.
+    const value: Record<string, unknown> = {};
+    value.self = value;
+    expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
+  });
+
+  test("an ordinary domain rejection keeps its precise JSON-path message", () => {
+    // The guard re-throws a CanonicalEncodingError unchanged: it must not flatten
+    // the path messages fail() produces into the generic traversal message.
+    expect(() => canonicalString({ when: new Date(0) })).toThrow(
+      CanonicalEncodingError,
+    );
+    expect(() => canonicalString({ when: new Date(0) })).toThrow(/\$\.when/);
+    expect(() => canonicalString({ when: new Date(0) })).not.toThrow(
+      /unexpected error during traversal/,
+    );
+    expect(() => canonicalString({ items: [1, 10n] })).toThrow(
+      /\$\.items\[1\]/,
+    );
+  });
+});
+
 // --- safeIntegerSchema -------------------------------------------------------
 
 describe("safeIntegerSchema", () => {
