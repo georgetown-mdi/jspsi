@@ -2,7 +2,10 @@ import { ZodError } from "zod";
 import { expect, test } from "vitest";
 
 import { encodeInvitation, decodeInvitation } from "../src/config/invitation";
-import type { InvitationToken } from "../src/config/invitation";
+import type {
+  ConnectionEndpoint,
+  InvitationToken,
+} from "../src/config/invitation";
 
 const baseTerms = {
   version: "1.0.0",
@@ -185,4 +188,223 @@ test("decodeInvitation succeeds on a token with a past expires", async () => {
   });
   const decoded = await decodeInvitation(encoded);
   expect(decoded.expires).toBe("2020-01-01T00:00:00Z");
+});
+
+// --- Connection endpoint -----------------------------------------------------
+
+// The endpoint tests are matrix-driven so coverage is complete by construction:
+// adding a channel to CHANNEL_SHAPES or a name to FORBIDDEN_FIELDS auto-covers
+// every generated combination (a positive round-trip per shape; a credential
+// rejection per channel on both the encode and decode paths), instead of
+// relying on a reviewer to notice a missing cell.
+
+// Locator shapes per channel: a minimal form (only required fields) and a full
+// form (every optional locator field set). The filedrop full form uses a
+// RELATIVE path on purpose -- the endpoint schema intentionally accepts a
+// relative file-drop path (the acceptor remaps it to its own mount), unlike
+// FileDropConnectionConfigSchema in connection.ts which requires absolute; this
+// row guards that decision against a silent tightening. The type annotation
+// makes the compiler reject any shape that is not a valid, credential-free
+// ConnectionEndpoint.
+const CHANNEL_SHAPES: Record<
+  string,
+  { minimal: ConnectionEndpoint; full: ConnectionEndpoint }
+> = {
+  webrtc: {
+    minimal: { channel: "webrtc", host: "signal.example" },
+    full: {
+      channel: "webrtc",
+      host: "signal.example",
+      port: 9000,
+      path: "/psilink",
+    },
+  },
+  sftp: {
+    minimal: { channel: "sftp", host: "sftp.example" },
+    full: {
+      channel: "sftp",
+      host: "sftp.example",
+      port: 2222,
+      path: "/exchange",
+    },
+  },
+  filedrop: {
+    minimal: { channel: "filedrop", path: "/mnt/shared" },
+    full: { channel: "filedrop", path: "relative/drop" },
+  },
+};
+
+// Non-locator fields a real connection config carries that an endpoint must
+// reject -- both credentials and server-identity material -- using the actual
+// SFTP and PeerJS field identifiers from connection.ts. `certificate` is SSH
+// cert-based auth material; `hostKeyFingerprint`/`knownHosts` are the
+// server-identity fields SECURITY_DESIGN.md names as excluded (not secret, but
+// not locators either). Every name is rejected by the same strictObject
+// unrecognized-keys branch, so this matrix documents the invariant and guards
+// against the allowlist being loosened (e.g. strictObject -> looseObject); it
+// is not additional branch coverage. This list is a curated regression sample,
+// not an exhaustive denylist -- the binding rule is the locator allowlist.
+const FORBIDDEN_FIELDS = [
+  "password",
+  "privateKey",
+  "privateKeyPassphrase",
+  "certificate",
+  "hostKeyFingerprint",
+  "knownHosts",
+  "key",
+];
+
+const positiveCases = Object.entries(CHANNEL_SHAPES).flatMap(
+  ([channel, shapes]) =>
+    Object.entries(shapes).map(([shape, endpoint]) => ({
+      channel,
+      shape,
+      endpoint,
+    })),
+);
+
+const credentialCases = Object.entries(CHANNEL_SHAPES).flatMap(
+  ([channel, { minimal }]) =>
+    FORBIDDEN_FIELDS.map((field) => ({ channel, field, minimal })),
+);
+
+test("round-trips a token without a connection endpoint", async () => {
+  const decoded = await decodeInvitation(await encodeInvitation(baseToken));
+  expect(decoded.connectionEndpoint).toBeUndefined();
+});
+
+test.each(positiveCases)(
+  "round-trips a credential-free $channel endpoint ($shape)",
+  async ({ endpoint }) => {
+    const decoded = await decodeInvitation(
+      await encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
+    );
+    expect(decoded.connectionEndpoint).toEqual(endpoint);
+  },
+);
+
+test.each(credentialCases)(
+  "encodeInvitation rejects a $channel endpoint carrying $field",
+  async ({ field, minimal }) => {
+    const token = {
+      ...baseToken,
+      connectionEndpoint: { ...minimal, [field]: "secret" },
+    } as unknown as InvitationToken;
+    await expect(encodeInvitation(token)).rejects.toThrow(
+      /credential-free locator/,
+    );
+  },
+);
+
+test.each(credentialCases)(
+  "decodeInvitation rejects a $channel endpoint carrying $field",
+  async ({ field, minimal }) => {
+    const encoded = await encodeRaw({
+      ...baseToken,
+      connectionEndpoint: { ...minimal, [field]: "secret" },
+    });
+    await expect(decodeInvitation(encoded)).rejects.toThrow(
+      /credential-free locator/,
+    );
+  },
+);
+
+// username is not a credential but is still outside the locator allowlist. It
+// must be rejected on every channel and on both paths, and the message must
+// frame it as an unrecognized locator field (naming the field) rather than as
+// an attempted credential.
+const nonLocatorCases = Object.entries(CHANNEL_SHAPES).map(
+  ([channel, { minimal }]) => ({ channel, minimal }),
+);
+
+test.each(nonLocatorCases)(
+  "encodeInvitation rejects a $channel endpoint with a non-credential extra field",
+  async ({ minimal }) => {
+    const token = {
+      ...baseToken,
+      connectionEndpoint: { ...minimal, username: "alice" },
+    } as unknown as InvitationToken;
+    await expect(encodeInvitation(token)).rejects.toThrow(
+      /credential-free locator.*username/s,
+    );
+  },
+);
+
+test.each(nonLocatorCases)(
+  "decodeInvitation rejects a $channel endpoint with a non-credential extra field",
+  async ({ minimal }) => {
+    const encoded = await encodeRaw({
+      ...baseToken,
+      connectionEndpoint: { ...minimal, username: "alice" },
+    });
+    await expect(decodeInvitation(encoded)).rejects.toThrow(
+      /credential-free locator.*username/s,
+    );
+  },
+);
+
+// Structural rejections are an explicit table rather than a generated product:
+// each row's expectation is channel-specific (the required field differs, and
+// the discriminator and null cases are not per-channel).
+test.each([
+  { name: "a webrtc endpoint missing its host", bad: { channel: "webrtc" } },
+  {
+    name: "an sftp endpoint missing its host",
+    bad: { channel: "sftp", port: 2222 },
+  },
+  {
+    name: "a filedrop endpoint missing its path",
+    bad: { channel: "filedrop" },
+  },
+  { name: "an unknown channel", bad: { channel: "carrier-pigeon", host: "h" } },
+  { name: "an endpoint missing its channel discriminator", bad: { host: "h" } },
+  {
+    name: "a null endpoint (null is not the same as an omitted field)",
+    bad: null,
+  },
+])("rejects $name", async ({ bad }) => {
+  const encoded = await encodeRaw({ ...baseToken, connectionEndpoint: bad });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+// Boundary rejections for the constrained locator fields. These pin the
+// deliberate min(1) choices (port and path) so an accidental loosening to
+// min(0) or an empty string would fail a test.
+test.each([
+  {
+    name: "a webrtc endpoint with port 0",
+    bad: { channel: "webrtc", host: "h", port: 0 },
+  },
+  {
+    name: "an sftp endpoint with port 0",
+    bad: { channel: "sftp", host: "h", port: 0 },
+  },
+  {
+    name: "a webrtc endpoint with an empty path",
+    bad: { channel: "webrtc", host: "h", path: "" },
+  },
+  {
+    name: "an sftp endpoint with an empty path",
+    bad: { channel: "sftp", host: "h", path: "" },
+  },
+  {
+    name: "a filedrop endpoint with an empty path",
+    bad: { channel: "filedrop", path: "" },
+  },
+])("rejects $name", async ({ bad }) => {
+  const encoded = await encodeRaw({ ...baseToken, connectionEndpoint: bad });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test("strips an unknown top-level field rather than embedding it", async () => {
+  // encodeInvitation serializes the parse() result, so a field a caller adds by
+  // bypassing the types is not carried onto the wire. decode would re-strip, so
+  // this asserts on the encoded bytes: encoding with the extra field must
+  // produce the identical string as encoding the clean token.
+  const withExtra = await encodeInvitation({
+    ...baseToken,
+    smuggledSecret: "leak",
+  } as unknown as InvitationToken);
+  const clean = await encodeInvitation(baseToken);
+  expect(withExtra).toBe(clean);
 });

@@ -69,9 +69,12 @@ If `--save` was specified, the `--config-file` and `--key-file` arguments can be
 Subsequent commands involve agreeing to exchanges through the use of invitation strings. Invitation strings are base64url encoded, unpadded representations of the information necessary to agree on an exchange. In particular they contain:
 - Linkage terms
 - Invitation authentication token (short-lived; rotated to a persistent secret on acceptance)
+- Optionally, a credential-free connection endpoint (see below)
 - A 4-byte hash of the above, used to check for transcription errors
 
-Connection information is not included; each party configures their own `connection` block in their configuration file independently.
+An invitation MAY carry a connection endpoint: a public locator that tells the acceptor where to rendezvous (a PeerJS signaling URL, an SFTP host and port, or a file-drop directory) so the parties need not arrange that detail over a separate channel. The endpoint is the locator only and never carries credentials -- no password, private key, key file, or PeerJS API key. Each party still supplies the credential portion of its own `connection` block independently. When an invitation omits the endpoint, both parties configure their `connection` block entirely on their own.
+
+Because an invitation carries the shared authentication token -- and, in the web flow, the rendezvous derived from it -- treat it as confidential and forward it only over a trusted, out-of-band channel (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
 
 Invitation strings beginning with `-` may be misinterpreted as option flags by argument parsers. All positional arguments and unrecognized flags are validated against the invitation string schema, so the string is identified unambiguously regardless of its position or leading character.
 
