@@ -7,6 +7,8 @@ import {
   retryPromise,
 } from "@psilink/core";
 
+import { createCappedSink } from "./frameSizeGuard";
+
 // Typed interface for the internal ssh2 SFTPWrapper that ssh2-sftp-client
 // exposes as `this.sftp`. Defined at file scope so both connect() and
 // createExclusive() can share it without repeating the declaration.
@@ -67,9 +69,37 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
-    return this.client.get(path, undefined, {
-      readStreamOptions: options,
-    }) as Promise<Buffer<ArrayBufferLike>>;
+    const maxBytes = options?.maxBytes;
+    if (maxBytes === undefined) {
+      return this.client.get(path, undefined, {
+        readStreamOptions: options,
+      }) as Promise<Buffer<ArrayBufferLike>>;
+    }
+
+    // Capped read. Stream into the shared counting sink rather than letting
+    // ssh2-sftp-client buffer the whole transfer. The sink retains only the
+    // under-cap prefix and, the instant the running total crosses the cap,
+    // settles its own `result` with the typed terminal error AND fails the
+    // write callback so the library aborts and destroys the read stream at the
+    // server. So a server that under-reports the file's size in its directory
+    // listing (and thus slips past the poll loop's pre-get() check) still
+    // cannot drive an unbounded allocation here -- allocation stays bounded to
+    // roughly maxBytes however the transfer ends.
+    //
+    // The over-cap outcome is owned by the sink, decided at the point of
+    // detection; this get()'s own settle only feeds the non-over-cap cases via
+    // complete()/fail(). That removes the resolve-vs-reject race in
+    // ssh2-sftp-client's stream-destination handling (it resolves via the read
+    // stream's 'end' event but rejects via the sink's 'error' event) -- see
+    // createCappedSink. No encoding is forwarded (raw Buffer chunks) so the byte
+    // count is exact; the caller's own toString() decodes, matching the buffer
+    // that the uncapped path and LocalFSClient return.
+    const { sink, result, complete, fail } = createCappedSink(path, maxBytes);
+    // The over-cap path settles `result` from inside the sink, so this handler
+    // never rejects (complete/fail are no-ops once `result` has settled);
+    // `result` is the returned promise.
+    void this.client.get(path, sink).then(complete, fail);
+    return result;
   }
 
   put(

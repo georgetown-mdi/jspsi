@@ -1,4 +1,7 @@
+import { Writable } from "node:stream";
+
 import { describe, expect, test, vi, beforeEach } from "vitest";
+import { FrameSizeExceededError } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 
@@ -301,5 +304,66 @@ describe("createExclusive", () => {
       "SFTP session is not open",
     );
     expect(mockOpen).not.toHaveBeenCalled();
+  });
+});
+
+// --- capped get --------------------------------------------------------------
+
+describe("capped get", () => {
+  test("refuses an over-cap file even when get() resolves before the sink error settles", async () => {
+    // Regression: ssh2-sftp-client resolves a stream destination via the read
+    // stream's 'end' listener while the sink's cap-exceeded error rejects via a
+    // separate listener. For a file that finishes in one or two chunks the
+    // 'end' can win the race and resolve(wtr) with the under-cap prefix before
+    // the rejection settles. createCappedSink settles its own `result` at the
+    // point of detection (inside the sink's write handler), so the adapter
+    // surfaces a FrameSizeExceededError regardless of which listener fired or
+    // how get() ultimately settles.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      get: vi.fn().mockImplementation((_path: string, sink: Writable) => {
+        // No sink.on('error') here: createCappedSink attaches its own no-op
+        // listener, so the cap-fire error is handled without the caller's help.
+        sink.write(Buffer.alloc(20)); // under cap (maxBytes 32): retained
+        sink.write(Buffer.alloc(20)); // crosses cap: rejects result at detection
+        return Promise.resolve(sink); // mimic 'end' winning the race
+      }),
+    };
+    await expect(
+      adapter.get("/remote/oversize.bin", { maxBytes: 32 }),
+    ).rejects.toBeInstanceOf(FrameSizeExceededError);
+  });
+
+  test("rejects at the point of detection without waiting for get() to settle", async () => {
+    // The structural guarantee: the over-cap refusal is owned by the sink and
+    // does not depend on whether/how ssh2-sftp-client's get() promise settles.
+    // Here get() never settles at all; the adapter must still reject as soon as
+    // the running total crosses the cap.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      get: vi.fn().mockImplementation((_path: string, sink: Writable) => {
+        // No sink.on('error'): createCappedSink self-handles the cap-fire error.
+        sink.write(Buffer.alloc(40)); // crosses cap (maxBytes 32) immediately
+        return new Promise<void>(() => {}); // never settles
+      }),
+    };
+    await expect(
+      adapter.get("/remote/oversize.bin", { maxBytes: 32 }),
+    ).rejects.toBeInstanceOf(FrameSizeExceededError);
+  });
+
+  test("returns the buffer for an under-cap file", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      get: vi.fn().mockImplementation((_path: string, sink: Writable) => {
+        sink.write(Buffer.from("hello"));
+        return Promise.resolve(sink);
+      }),
+    };
+    const buf = await adapter.get("/remote/ok.bin", { maxBytes: 32 });
+    expect(buf.toString()).toBe("hello");
   });
 });

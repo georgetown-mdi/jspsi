@@ -7,9 +7,21 @@ import {
   asConnectionError,
   type MessageConnection,
 } from "./messageConnection";
+import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
 import type { HandshakeRole } from "../types";
 
-const Envelope = z.object({ enc: z.string() });
+// The `.max()` on the base64url ciphertext is defense-in-depth, NOT the primary
+// frame-size control. By the time handleInbound() runs, the inner transport has
+// already read the whole file and JSON-parsed it, so the dominant allocation
+// has happened -- this only rejects an over-cap envelope, it does not prevent
+// the read. The real bound is enforced at the transport read layer (see
+// MAX_FRAME_SIZE_BYTES and docs/SECURITY_DESIGN.md, "Channel security"). The
+// bound is the same single value: the `enc` string is a base64url substring of
+// the on-wire file, so it can never exceed the file-size cap. base64url is
+// ASCII, so the string length that z.string().max() measures (UTF-16 code
+// units) equals the byte count -- the byte-named cap applies cleanly -- and
+// reusing it here keeps one justified maximum across both layers.
+const Envelope = z.object({ enc: z.string().max(MAX_FRAME_SIZE_BYTES) });
 
 // First byte of the pre-encryption plaintext, preserving the original payload's
 // type across the wire. The transport underneath only ever sees the JSON

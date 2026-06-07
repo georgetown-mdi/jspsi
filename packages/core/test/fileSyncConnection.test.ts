@@ -17,7 +17,9 @@ import {
   UsageError,
   BilateralModeMismatchError,
   ConnectionClosedError,
+  FrameSizeExceededError,
 } from "../src/errors";
+import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { withCapturedLogs } from "../src/testing";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
@@ -940,6 +942,58 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
   expect(conn.peerId).toBe(peerId);
   // peerId arrived first → this connection is initiator (second to arrive).
   expect(conn.handshakeRole).toBe("initiator");
+});
+
+test("synchronize() surfaces an over-cap peer hello as a terminal FrameSizeExceededError", async () => {
+  // The rendezvous gate (readControlFileWithGate) must treat an over-cap hello
+  // control file as terminal rather than retrying it until the deadline: a
+  // hostile server could otherwise hold the gate open by serving an oversized
+  // hello every cycle, re-incurring on each pass the allocation the cap exists
+  // to prevent. Covers the FrameSizeExceededError rethrow in the gate's catch.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const peerHelloPath = `${conn.path}/${peerHelloName}`;
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial check: directory is clean
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  // The peer hello is present in the listing, but the adapter refuses to read it
+  // because it exceeds the cap (a server under-reporting its size in the listing
+  // and then serving an oversized body). Count reads to prove the gate does not
+  // retry at the polling cadence.
+  let peerHelloReads = 0;
+  const originalGet = client.get;
+  client.get = async (path: string) => {
+    if (path === peerHelloPath) {
+      peerHelloReads++;
+      throw new FrameSizeExceededError(
+        `inbound file ${path} exceeds the maximum inbound frame size`,
+      );
+    }
+    return originalGet(path);
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(
+    FrameSizeExceededError,
+  );
+  // Terminal: read once and propagated, not retried until the TTL.
+  expect(peerHelloReads).toBe(1);
 });
 
 test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {
@@ -6505,4 +6559,107 @@ test("close() during a parked rendezvous gate read completes teardown cleanly de
   // safeDeletes.
   expect(errors).toHaveLength(0);
   expect(conn.takeBufferedError()).toBeUndefined();
+});
+
+test("poll refuses an over-cap message before reading it into memory", async () => {
+  // A hostile server admin writes an oversized file. The poll loop must refuse
+  // it based on the size known from list() -- before get() loads the body into
+  // memory -- and stop terminally rather than allocating proportionally to the
+  // attacker-chosen size or looping on it.
+  const peerId = "peer-test";
+  const oversize = MAX_FRAME_SIZE_BYTES + 1;
+  let getCount = 0;
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+
+  await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    // The filename encodes the (attacker-declared) byte count and the listing
+    // reports the same on-disk size; no buffer is ever allocated for it.
+    client.list = async () => [
+      { name: `${peerId}-${oversize}.json`, modifyTime: 0, size: oversize },
+    ];
+    client.get = async () => {
+      getCount++;
+      throw new Error("get() must not be called for an over-cap file");
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    conn.on("error", (err) => {
+      errors.push(err);
+      notifyError();
+    });
+    conn.start();
+    await Promise.race([
+      errorArrived,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for error")),
+          2_000,
+        ),
+      ),
+    ]);
+    conn.stop();
+  });
+
+  expect(getCount).toBe(0);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(FrameSizeExceededError);
+  // FrameSizeExceededError is a UsageError, so the failure is the terminal,
+  // exit-64 family rather than a retryable transport error.
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("maximum inbound frame size");
+});
+
+test("poll surfaces an adapter frame-size cap as a terminal error", async () => {
+  // A server that under-reports a file's size in its directory listing slips
+  // past the pre-get() size check, so the adapter's hard read cap fires during
+  // get() instead. That FrameSizeExceededError must be terminal -- the poller
+  // must not re-read the same file every cycle (which would re-incur the very
+  // allocation the cap prevents).
+  const peerId = "peer-test";
+  let getCount = 0;
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+
+  await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    // Listing reports a small, under-cap size (the lie), so the pre-check passes
+    // and poll() proceeds to get().
+    client.list = async () => [
+      { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+    ];
+    client.get = async () => {
+      getCount++;
+      throw new FrameSizeExceededError(
+        "inbound file exceeds the maximum frame size of 5 bytes",
+      );
+    };
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.peerId = peerId;
+    conn.on("error", (err) => {
+      errors.push(err);
+      notifyError();
+    });
+    conn.start();
+    await Promise.race([
+      errorArrived,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("timed out waiting for error")),
+          2_000,
+        ),
+      ),
+    ]);
+    // Give the poller a chance to (wrongly) reschedule before asserting it did
+    // not: wait a few polling intervals and confirm get() ran exactly once.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    conn.stop();
+  });
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(FrameSizeExceededError);
+  expect(getCount).toBe(1);
 });

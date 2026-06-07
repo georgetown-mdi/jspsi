@@ -40,6 +40,37 @@ export class BilateralModeMismatchError extends UsageError {
 }
 
 /**
+ * Thrown when a transport read encounters an inbound file larger than the
+ * maximum frame size ({@link MAX_FRAME_SIZE_BYTES}). Raised at the transport
+ * read layer -- the poll loop and rendezvous gate's pre-`get()` size check, and
+ * the hard per-read byte cap inside each {@link FileTransportClient} adapter --
+ * so an oversized file is refused before it is ingested into memory rather than
+ * exhausting it (see docs/SECURITY_DESIGN.md, "Channel security").
+ *
+ * It is a {@link UsageError} subclass for two reasons. First, it must be a
+ * terminal failure in the poll loop: {@link FileSyncConnection}'s poller stops
+ * on a `UsageError` (re-reading an over-cap file cannot help and would re-incur
+ * the very allocation this guards against) and reschedules on any other error,
+ * so deriving from `UsageError` makes the refusal terminal without changing the
+ * poller's classification. Second, an over-cap file in the shared directory is
+ * the same family as the other directory-state conditions `UsageError` already
+ * covers (a stray, malformed, or foreign file), so it shares the exit-64
+ * (EX_USAGE) classification that tells the operator to inspect the directory or
+ * peer rather than retry as if the transport were merely flaky.
+ *
+ * Adapters in `apps/` throw this class (re-exported on the package surface) from
+ * their capped `get()` so a server that under-reports a file's size in its
+ * directory listing -- evading the pre-`get()` check -- still surfaces the same
+ * terminal, typed failure once the read itself crosses the cap.
+ */
+export class FrameSizeExceededError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "FrameSizeExceededError";
+  }
+}
+
+/**
  * Thrown into an in-flight {@link FileSyncConnection} wait when the connection
  * is closed mid-rendezvous or mid-send. `close()` aborts a shared
  * `AbortController` whose `reason` is an instance of this class, so any wait
