@@ -169,6 +169,11 @@ export async function validateInvite(params: {
       connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
     );
 
+    if (acceptTimeout <= 0)
+      throw new UsageError(
+        `--accept-timeout must be a positive number of seconds; got ` +
+          `${acceptTimeout}`,
+      );
     // The token's lifetime is fixed; an accept-timeout longer than it would keep
     // waiting at the rendezvous past the point the token can be honored.
     if (acceptTimeout > INVITATION_LIFETIME_SECONDS)
@@ -237,16 +242,19 @@ export async function validateInvite(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  const options = parseCommonBootstrapArgs(argv);
-  const acceptTimeout =
-    (argv["accept-timeout"] as number | undefined) ??
-    DEFAULT_ACCEPT_TIMEOUT_SECONDS;
-
-  logLibrary.setDefaultLevel(options.logLevel);
-  const log = getLogger("invite");
-  const positionals = (argv["args"] as Array<string> | undefined) ?? [];
-
-  await runOrExit(log, async () => {
+  await runOrExit("invite", async () => {
+    // Parse and apply the log level before creating the logger, so the
+    // configured level actually takes effect (loglevel binds a logger's level at
+    // creation). Doing this inside runOrExit also routes an invalid option (e.g.
+    // an unrecognized --log-level) through the same error->exit path as
+    // everything else, rather than yargs's noisier top-level catch.
+    const options = parseCommonBootstrapArgs(argv);
+    logLibrary.setDefaultLevel(options.logLevel);
+    const log = getLogger("invite");
+    const acceptTimeout =
+      (argv["accept-timeout"] as number | undefined) ??
+      DEFAULT_ACCEPT_TIMEOUT_SECONDS;
+    const positionals = (argv["args"] as Array<string> | undefined) ?? [];
     const resolved = resolveInvitePositionals(positionals);
     const ready = await validateInvite({
       resolved,

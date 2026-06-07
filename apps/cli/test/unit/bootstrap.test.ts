@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import type { Arguments } from "yargs";
 import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
 import type { ConnectionEndpoint } from "@psilink/core";
 
@@ -8,12 +9,14 @@ import {
   connectionFromURL,
   generatePakeToken,
   looksLikeUrl,
+  parseCommonBootstrapArgs,
   redactUrlCredentials,
   runOrExit,
 } from "../../src/commands/bootstrap";
 
-const silentLog = getLogger("bootstrap-test");
-silentLog.setLevel("silent");
+// runOrExit creates its error logger by name; silence that name so the
+// error-path tests below don't print to the console.
+getLogger("bootstrap-test").setLevel("silent");
 
 // --- looksLikeUrl ------------------------------------------------------------
 
@@ -107,7 +110,7 @@ test("runOrExit: a UsageError exits 64", async () => {
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
-  await runOrExit(silentLog, async () => {
+  await runOrExit("bootstrap-test", async () => {
     throw new UsageError("bad usage");
   });
   expect(exit).toHaveBeenCalledWith(64);
@@ -118,7 +121,7 @@ test("runOrExit: a non-UsageError preserves its own exitCode (not collapsed to 6
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
-  await runOrExit(silentLog, async () => {
+  await runOrExit("bootstrap-test", async () => {
     // A distinctive code (not 69) proves the `?? exitCode` rung is preserved,
     // so a missing input file keeps its own exit code instead of becoming 69.
     throw Object.assign(new Error("input file not found"), { exitCode: 66 });
@@ -131,7 +134,7 @@ test("runOrExit: an error without an exitCode defaults to 69", async () => {
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
-  await runOrExit(silentLog, async () => {
+  await runOrExit("bootstrap-test", async () => {
     throw new Error("transport failure");
   });
   expect(exit).toHaveBeenCalledWith(69);
@@ -145,7 +148,7 @@ test("runOrExit: a rejected body (e.g. a stdin/prompt error) exits cleanly, neve
   // A readline rejection mid-prompt is just a rejected promise inside the body;
   // runOrExit maps it to an exit rather than letting it crash unhandled.
   await expect(
-    runOrExit(silentLog, async () => {
+    runOrExit("bootstrap-test", async () => {
       await Promise.reject(new Error("stdin closed"));
     }),
   ).resolves.toBeUndefined();
@@ -153,12 +156,24 @@ test("runOrExit: a rejected body (e.g. a stdin/prompt error) exits cleanly, neve
   exit.mockRestore();
 });
 
+test("parseCommonBootstrapArgs: an unrecognized log-level is a usage error", () => {
+  // Routed through runOrExit by the handlers, so a UsageError exits 64 via the
+  // consistent error path rather than yargs's noisier top-level catch.
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "log-level": "bogus",
+    } as unknown as Arguments),
+  ).toThrow(UsageError);
+});
+
 test("runOrExit: a successful body does not exit", async () => {
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   let ran = false;
-  await runOrExit(silentLog, async () => {
+  await runOrExit("bootstrap-test", async () => {
     ran = true;
   });
   expect(ran).toBe(true);

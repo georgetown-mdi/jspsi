@@ -261,6 +261,9 @@ export async function validateAccept(params: {
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
+    // Validate the URL before reading the input file, mirroring validateInvite,
+    // so a bad scheme/host fails fast without first parsing the CSV.
+    const connection = connectionFromURL(url, connectionOverridesFrom(options));
     const rows = await loadInputRows(input);
     const { dataSpec, warnings } = buildDataSpec({
       terms: myTerms,
@@ -269,7 +272,6 @@ export async function validateAccept(params: {
     });
     for (const w of warnings) log.warn(w);
 
-    const connection = connectionFromURL(url, connectionOverridesFrom(options));
     const prepared = await prepareForOnlineExchange(dataSpec, myIdentity, rows);
     return {
       mode: "online",
@@ -303,13 +305,16 @@ export async function validateAccept(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  const options = parseCommonBootstrapArgs(argv);
-
-  logLibrary.setDefaultLevel(options.logLevel);
-  const log = getLogger("accept");
-  const positionals = (argv["args"] as Array<string> | undefined) ?? [];
-
-  await runOrExit(log, async () => {
+  await runOrExit("accept", async () => {
+    // Parse and apply the log level before creating the logger, so the
+    // configured level actually takes effect (loglevel binds a logger's level at
+    // creation). Doing this inside runOrExit also routes an invalid option (e.g.
+    // an unrecognized --log-level) through the same error->exit path as
+    // everything else, rather than yargs's noisier top-level catch.
+    const options = parseCommonBootstrapArgs(argv);
+    logLibrary.setDefaultLevel(options.logLevel);
+    const log = getLogger("accept");
+    const positionals = (argv["args"] as Array<string> | undefined) ?? [];
     const resolved = resolveAcceptPositionals(positionals);
     // All validation runs before the prompt: the user is never asked to confirm
     // an invitation, URL, or input file that has not validated, and the prompt

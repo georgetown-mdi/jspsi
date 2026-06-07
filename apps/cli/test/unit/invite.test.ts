@@ -109,3 +109,18 @@ test("validateInvite: offline requires an input file", async () => {
     }),
   ).rejects.toBeInstanceOf(UsageError);
 });
+
+test("validateInvite: a non-positive accept-timeout is rejected", async () => {
+  await expect(
+    validateInvite({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        input: "input.csv",
+      },
+      options: testOptions(),
+      acceptTimeout: 0,
+      log: silentLog,
+    }),
+  ).rejects.toBeInstanceOf(UsageError);
+});

@@ -125,7 +125,7 @@ export function connectionFromURL(
     if (url.hostname && url.hostname !== "localhost")
       throw new UsageError(
         `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
-          `or file://localhost/path; got: ${url.href}`,
+          `or file://localhost/path; got: ${redactUrlCredentials(url)}`,
       );
     const base: FileDropConnectionConfig = {
       channel: "filedrop",
@@ -143,10 +143,13 @@ export function connectionFromURL(
   // Reject a credential-only or schemeless URL with no host (e.g. sftp:///path)
   // here, with a clear message, rather than passing host: "" through to a
   // connection attempt that fails obscurely later. Mirrors the filedrop branch's
-  // host validation above.
+  // host validation above. (redactUrlCredentials is defensive consistency: a
+  // host-less URL cannot actually carry credentials -- the parser rejects
+  // userinfo without a host -- but URLs are always echoed through the redactor.)
   if (!url.hostname)
     throw new UsageError(
-      `sftp URL must include a host (e.g. sftp://host/path); got: ${url.href}`,
+      `sftp URL must include a host (e.g. sftp://host/path); got: ` +
+        redactUrlCredentials(url),
     );
 
   const base: SFTPConnectionConfig = {
@@ -412,10 +415,18 @@ export async function promptConfirm(question: string): Promise<boolean> {
     output: process.stderr,
   });
   try {
-    const answer = (await rl.question(`${question} [y/N] `))
-      .trim()
-      .toLowerCase();
-    return answer === "y" || answer === "yes";
+    // `rl.question()` never settles when stdin reaches EOF (a closed or
+    // piped-empty stdin) -- a long-standing readline/promises behavior
+    // (nodejs/node#53497). Race it against the interface's "close" event (which
+    // does fire on EOF) so a closed stdin deterministically resolves to "no"
+    // instead of leaving the promise pending -- which today exits silently via
+    // event-loop drain and would deadlock outright if any handle were open here.
+    const answer = await new Promise<string>((resolve) => {
+      rl.once("close", () => resolve(""));
+      void rl.question(`${question} [y/N] `).then(resolve, () => resolve(""));
+    });
+    const normalized = answer.trim().toLowerCase();
+    return normalized === "y" || normalized === "yes";
   } finally {
     rl.close();
   }
@@ -428,23 +439,29 @@ export async function promptConfirm(question: string): Promise<boolean> {
  * {@link UsageError} to EX_USAGE (64), otherwise the error's own numeric
  * `exitCode` or EX_UNAVAILABLE (69). This is the single error->exit boundary for
  * the bootstrap commands; routing the whole handler body through it -- including
- * the accept confirmation prompt -- means a thrown or rejected step exits
- * cleanly rather than crashing with an unhandled rejection. The `?? exitCode`
- * rung is load-bearing: `validateInputFile` and `buildDataSpec` throw plain
- * `Error`s carrying `exitCode`, so a missing input file keeps its own exit code
- * rather than collapsing to 69.
+ * option parsing and the accept confirmation prompt -- means a thrown or
+ * rejected step exits cleanly rather than crashing with an unhandled rejection.
+ * The `?? exitCode` rung is load-bearing: `validateInputFile` and `buildDataSpec`
+ * throw plain `Error`s carrying `exitCode`, so a missing input file keeps its own
+ * exit code rather than collapsing to 69.
  *
- * On error it calls `process.exit` (typed `never`), so values produced inside
- * `body` keep their definite-assignment narrowing at the call site.
+ * The error logger is created from `loggerName` lazily in the catch, so the body
+ * is free to apply the configured log level (via `setDefaultLevel`) before
+ * creating its own logger -- loglevel binds a logger's level at creation, so the
+ * body's logger must be made after the level is set. `process.exit` is typed
+ * `never`, so values produced inside `body` keep their definite-assignment
+ * narrowing.
  */
 export async function runOrExit(
-  log: ReturnType<typeof getLogger>,
+  loggerName: string,
   body: () => Promise<void>,
 ): Promise<void> {
   try {
     await body();
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    getLogger(loggerName).error(
+      err instanceof Error ? err.message : String(err),
+    );
     process.exit(
       err instanceof UsageError
         ? 64
@@ -594,7 +611,7 @@ export function parseCommonBootstrapArgs(
   ).toLowerCase();
   const logLevel = LOG_LEVELS[rawLogLevel];
   if (logLevel === undefined)
-    throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
+    throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
 
   return {
     configFile:

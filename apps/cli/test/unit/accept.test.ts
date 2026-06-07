@@ -175,3 +175,24 @@ test("validateAccept: online rejects a missing input file before the prompt, pre
     }),
   ).rejects.toMatchObject({ exitCode: 69 });
 });
+
+test("validateAccept: an unsupported URL is rejected before the input file is read", async () => {
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  // Both the URL is unsupported and the input file is missing; the URL is now
+  // checked first (mirroring validateInvite), so the UsageError wins over the
+  // file's exitCode-69 error -- proving the URL is validated before the read.
+  await expect(
+    validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("ws://host/path"),
+        invitation: encoded,
+        input: "/nonexistent/psilink-input.csv",
+      },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toBeInstanceOf(UsageError);
+});
