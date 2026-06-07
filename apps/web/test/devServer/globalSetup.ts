@@ -79,7 +79,9 @@ export default async function setup(): Promise<() => Promise<void>> {
   // Reuse a server already listening on the port (manual `npm run dev`, or a
   // warm one from a prior run): skip launch and leave it running on teardown.
   if (await httpAccepts(url, REUSE_PROBE_TIMEOUT_MS)) {
-    console.log(`[dev-server] reusing server already listening on port ${port}`);
+    console.log(
+      `[dev-server] reusing server already listening on port ${port}`,
+    );
     return () => Promise.resolve();
   }
 

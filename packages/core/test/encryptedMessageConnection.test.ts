@@ -69,7 +69,9 @@ async function sealRawBytes(
   const cipher = new Uint8Array(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext),
   );
-  const envelope = new Uint8Array(12 + cipher.length) as Uint8Array<ArrayBuffer>;
+  const envelope = new Uint8Array(
+    12 + cipher.length,
+  ) as Uint8Array<ArrayBuffer>;
   envelope.set(iv);
   envelope.set(cipher, 12);
   return envelope;
@@ -250,7 +252,11 @@ test("an empty decrypted payload is rejected as a security failure", async () =>
 test("an unknown type tag is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
   await peer.send(
-    await sealRaw("initiator", 0, new Uint8Array([99]) as Uint8Array<ArrayBuffer>),
+    await sealRaw(
+      "initiator",
+      0,
+      new Uint8Array([99]) as Uint8Array<ArrayBuffer>,
+    ),
   );
   await expectSecurity(recv.receive(), /unknown payload type tag 99/i);
 });
@@ -308,8 +314,12 @@ test("send succeeds at exactly sendSeq === MAX_SAFE_INTEGER", async () => {
 
 test("send refuses to advance past MAX_SAFE_INTEGER and latches the wrapper", async () => {
   const [encA] = await makeEncryptedPair();
-  (encA as unknown as { sendSeq: number }).sendSeq = Number.MAX_SAFE_INTEGER + 1;
-  const first = await expectSecurity(encA.send({ overflow: true }), /overflow/i);
+  (encA as unknown as { sendSeq: number }).sendSeq =
+    Number.MAX_SAFE_INTEGER + 1;
+  const first = await expectSecurity(
+    encA.send({ overflow: true }),
+    /overflow/i,
+  );
 
   // Overflow latches the wrapper dead like any other terminal failure: every
   // later send and receive rejects with the very same error object.
@@ -337,7 +347,11 @@ test("send(undefined) is rejected at the sender as usage, without latching", asy
   // A value with no JSON representation is caller misuse; it must be caught at
   // the sender with kind "usage", not silently encoded and surfaced at the
   // receiver as a misleading "not valid JSON" security failure.
-  await expectRejection(encA.send(undefined), "usage", /no JSON representation/i);
+  await expectRejection(
+    encA.send(undefined),
+    "usage",
+    /no JSON representation/i,
+  );
 
   // Not latched: the connection stays usable for a subsequent valid send.
   await encA.send({ ok: true });
