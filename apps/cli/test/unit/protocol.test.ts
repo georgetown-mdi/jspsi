@@ -76,7 +76,12 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
-import { runExchange } from "@psilink/core";
+import {
+  parseExchangeRecord,
+  parseOpeningData,
+  runExchange,
+} from "@psilink/core";
+import type { ExchangeRecord, OpeningData } from "@psilink/core";
 import { runProtocol } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 
@@ -348,6 +353,97 @@ test("authentication=null runs the exchange without PAKE and without error", asy
     ),
   ]);
   // No assertion on key files: no rotation occurs when auth is null.
+});
+
+// --- Self-attested record persistence via runProtocol ------------------------
+
+test("writes the self-attested record and opening when runExchange returns an audit", async () => {
+  // Covers the record-write wiring in runProtocol (the runExchange audit ->
+  // writeExchangeRecord call), which the default mock leaves unexercised by
+  // returning no audit. Each party's runExchange returns a built audit and is
+  // given its own record output paths; both the record and its opening must land
+  // on disk and round-trip the schema parsers.
+  const sampleRecord: ExchangeRecord = {
+    version: "psilink-exchange-record/v1",
+    createdAt: "2026-01-02T03:04:05.000Z",
+    termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
+    localIdentity: "Party A",
+    partnerIdentity: "Party B",
+    bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    commitments: {
+      localPayloadSent: "We5eIlrtkWBUe1uSGrla5rvLs0YhGFPPVDjk4EPX2k8",
+      partnerPayloadReceived: "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+    },
+  };
+  const sampleOpening: OpeningData = {
+    version: "psilink-exchange-opening/v1",
+    commitments: {
+      localPayloadSent: {
+        salt: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        data: { columns: [], rowIndices: [], rows: [] },
+      },
+      partnerPayloadReceived: {
+        salt: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+        data: { columns: [], rowIndices: [], rows: [] },
+      },
+    },
+  };
+  const audit = { record: sampleRecord, opening: sampleOpening };
+
+  // Drain the drop directory exactly as the default mock does (so neither
+  // party's cleanup races the other's poller), then return the audit alongside
+  // the usual fields.
+  async function runExchangeWithAudit(): Promise<unknown> {
+    const base = (await defaultRunExchange()) as Record<string, unknown>;
+    return { ...base, audit };
+  }
+  vi.mocked(runExchange).mockImplementation(runExchangeWithAudit as never);
+
+  const recordA = path.join(tmpDir, "rec-a.json");
+  const recordB = path.join(tmpDir, "rec-b.json");
+  const openingA = path.join(tmpDir, "rec-a.opening.json");
+  const openingB = path.join(tmpDir, "rec-b.opening.json");
+
+  await Promise.all([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: null,
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+      { recordFile: recordA },
+    ),
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: null,
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+      { recordFile: recordB },
+    ),
+  ]);
+
+  for (const [rec, open] of [
+    [recordA, openingA],
+    [recordB, openingB],
+  ] as const) {
+    expect(
+      parseExchangeRecord(JSON.parse(fs.readFileSync(rec, "utf8"))),
+    ).toEqual(sampleRecord);
+    expect(parseOpeningData(JSON.parse(fs.readFileSync(open, "utf8")))).toEqual(
+      sampleOpening,
+    );
+  }
 });
 
 // --- Expired token via runProtocol -------------------------------------------

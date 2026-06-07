@@ -25,6 +25,7 @@ import type {
 import { LocalFSClient } from "./connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { saveKeyFile } from "./keyFile";
+import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
 
 /**
@@ -91,6 +92,10 @@ export type ProtocolConnectionConfig = DistributedOmit<
  * this is the path taken by callers (e.g. zero-setup) that explicitly
  * acknowledge relying on transport-layer security only. The field is required
  * (no `undefined`) so the choice is always explicit.
+ *
+ * When `recordOutput` is provided, the self-attested exchange record and its
+ * private opening data are written after the results (non-fatal on failure; see
+ * {@link writeExchangeRecord}). Pass `undefined` to skip recording.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -98,6 +103,7 @@ export async function runProtocol(
   output: string | undefined,
   verbosity: number,
   loggerName: string,
+  recordOutput?: RecordOutput,
 ): Promise<void> {
   const log = getLogger(loggerName);
 
@@ -593,7 +599,7 @@ export async function runProtocol(
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
-    const { associationTable, partnerPayload } = await runExchange(
+    const { associationTable, partnerPayload, audit } = await runExchange(
       mc,
       role,
       prepared,
@@ -619,6 +625,20 @@ export async function runProtocol(
       partnerPayload,
     );
     writeOutput(output, headers, rows);
+
+    // Persist the self-attested record after the results: it is a secondary
+    // audit artifact, so it is written last and its failure is non-fatal (see
+    // writeExchangeRecord). Skipped when records are disabled, or when the
+    // record could not be built (runExchange returns audit undefined and has
+    // already warned -- the exchange still succeeded). The record and its
+    // opening are a single optional field, so one check covers both.
+    if (recordOutput !== undefined && audit !== undefined)
+      writeExchangeRecord(
+        recordOutput,
+        audit.record,
+        audit.opening,
+        loggerName,
+      );
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
     // independently derived the same new token from the SPAKE2 session key, but

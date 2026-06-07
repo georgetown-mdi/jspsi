@@ -11,7 +11,12 @@ import { inferDateFormat } from "./utils/date.js";
 import { PSIParticipant } from "./participant.js";
 import { exchangeTerms, resolveRole } from "./protocolSetup.js";
 import { linkViaPSI } from "./link.js";
-import { preparePayload, exchangePayloads } from "./payloadExchange.js";
+import {
+  preparePayload,
+  exchangePayloads,
+  toCommittedPayload,
+} from "./payloadExchange.js";
+import { buildExchangeRecord } from "./exchangeRecord.js";
 
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -26,6 +31,7 @@ import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
+import type { BuiltExchangeRecord } from "./exchangeRecord.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -192,6 +198,21 @@ export interface ExchangeResult {
   resolvedRole: PsiRole;
   /** Payload data received from the partner after linkage. */
   partnerPayload: PartnerPayload;
+  /**
+   * The self-attested audit record of this exchange (Phase 1 of exchange
+   * receipts) together with its private opening data, produced as a pair. The
+   * `record` holds commitments to the data exchanged plus a non-secret summary
+   * and is safe to retain or share; the `opening` holds the per-commitment salts
+   * and a snapshot of the committed data and is as sensitive as the matched data
+   * itself. The caller (CLI or web) persists both. See {@link buildExchangeRecord}.
+   *
+   * A single optional field rather than two independent ones so the record and
+   * its opening can never be present apart. Absent only if building the record
+   * threw after the exchange already succeeded, in which case the caller skips
+   * persisting -- the record is a secondary audit artifact, so its failure is
+   * non-fatal and never discards the exchange result.
+   */
+  audit?: BuiltExchangeRecord;
 }
 
 export interface RunExchangeOptions {
@@ -296,5 +317,48 @@ export async function runExchange(
     localPayload,
   );
 
-  return { associationTable, partnerTerms, resolvedRole, partnerPayload };
+  // Self-attested record: produced from data both sides already hold, with no
+  // extra round-trip and no private key. The result size is recorded only when
+  // both parties learn it (the both-output case); a single-output sender never
+  // learns the intersection size, and resolveRole's exchanged record counts are
+  // total dataset sizes, not the intersection, so they are not used here. The
+  // association table is committed only when this party expects output and so
+  // holds a meaningful table -- true for both parties in a both-output exchange,
+  // not only the PSI receiver. Both payloads are normalized to the record's
+  // canonical committed form (toCommittedPayload) so a sender and receiver commit
+  // over byte-identical data for the same logical payload.
+  const bothExpectOutput =
+    linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
+  const heldAssociationTable = linkageTerms.output.expectsOutput;
+
+  // Build the record after the exchange has fully succeeded. It is a secondary
+  // audit artifact, so a failure to build it (e.g. an unexpected non-canonical
+  // value) must not fail the exchange or discard its result: catch, warn, and
+  // return without a record. The caller treats the audit field as optional.
+  let audit: BuiltExchangeRecord | undefined;
+  try {
+    audit = await buildExchangeRecord({
+      localTerms: linkageTerms,
+      partnerTerms,
+      resultSize: bothExpectOutput ? associationTable[0].length : undefined,
+      associationTable: heldAssociationTable ? associationTable : undefined,
+      localPayloadSent: toCommittedPayload(localPayload),
+      partnerPayloadReceived: toCommittedPayload(partnerPayload),
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    getLogger("exchange").warn(
+      "the exchange succeeded but the self-attested record could not be " +
+        `built (${err instanceof Error ? err.message : String(err)}); the ` +
+        "result above is unaffected",
+    );
+  }
+
+  return {
+    associationTable,
+    partnerTerms,
+    resolvedRole,
+    partnerPayload,
+    audit,
+  };
 }

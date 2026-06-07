@@ -31,6 +31,8 @@ import {
   errorMessage,
   loadCSVFile,
   prepareForExchange,
+  serializeExchangeRecord,
+  serializeOpeningData,
 } from "@psilink/core";
 import { openPeerConnection, waitForPeerId } from "@psi/server";
 import { createAndSharePeerId } from "@psi/client";
@@ -43,7 +45,11 @@ import { Status } from "@components/Status";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import type { Acquire, StageDefinition } from "@psi/exchangeLifecycle";
+import type {
+  Acquire,
+  ExchangeOutputs,
+  StageDefinition,
+} from "@psi/exchangeLifecycle";
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { LinkSession } from "@utils/sessions";
 
@@ -152,7 +158,7 @@ function Home() {
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
   const [stageId, setStageById] = useState<string>("before start");
-  const [resultURL, setResultURL] = useState<string>();
+  const [outputs, setOutputs] = useState<ExchangeOutputs>();
   const [errorAlert, setErrorAlert] = useState<{
     title: string;
     message: string;
@@ -164,6 +170,22 @@ function Home() {
   const abortRef = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Revoke this session's object URLs when the component unmounts (or before a
+  // replacement set is stored): createObjectURL keeps each Blob alive until it
+  // is revoked, and the record and opening blobs hold the matched data, so they
+  // should not outlive the page that backs them. A fresh session normally sets
+  // `outputs` once, so this is bounded cleanup, not per-render churn.
+  useEffect(() => {
+    if (outputs === undefined) return;
+    return () => {
+      window.URL.revokeObjectURL(outputs.resultsUrl);
+      if (outputs.record !== undefined) {
+        window.URL.revokeObjectURL(outputs.record.recordUrl);
+        window.URL.revokeObjectURL(outputs.record.openingUrl);
+      }
+    };
+  }, [outputs]);
+
   const handleSubmit = () => {
     setSubmitted(true);
     setErrorAlert(undefined);
@@ -172,13 +194,16 @@ function Home() {
     abortRef.current = controller;
 
     // Pure output-generation half of the former finishExchange: build the local
-    // results file and return its URL. No React state and no previous-URL revoke
-    // (a fresh session sets the URL at most once per component lifetime).
+    // results file plus the self-attested record and its private opening data,
+    // returning a download URL for each. The object URLs are revoked when the
+    // component unmounts or the outputs are replaced (see the cleanup effect
+    // above), so the record and opening blobs -- which hold the matched data --
+    // do not outlive the page that backs them.
     const generateOutput = (
       result: ExchangeResult,
       prepared: PreparedExchange,
-    ): string => {
-      log.info("linkage complete, generating results file");
+    ): ExchangeOutputs => {
+      log.info("linkage complete, generating results and record files");
       const { headers, rows } = buildOutputTable(
         result.associationTable,
         prepared.rawRows,
@@ -187,8 +212,38 @@ function Home() {
       );
       const csv =
         headers.join(",") + "\n" + rows.map((r) => r.join(",") + "\n").join("");
-      const fileData = new Blob([csv], { type: "text/csv" });
-      return window.URL.createObjectURL(fileData);
+      const jsonUrl = (text: string): string =>
+        window.URL.createObjectURL(
+          new Blob([text], { type: "application/json" }),
+        );
+      const generated: ExchangeOutputs = {
+        resultsUrl: window.URL.createObjectURL(
+          new Blob([csv], { type: "text/csv" }),
+        ),
+      };
+      // The audit record and its opening are produced as a pair (a single
+      // optional field), so one guard offers both or neither. They are absent
+      // only if building the record failed after a successful exchange; in that
+      // case the downloads are intentionally omitted without a blocking alert.
+      // The exchange and the results above already succeeded (the record is a
+      // secondary audit artifact and runExchange logs a warning when the build
+      // fails), and that failure is practically unreachable -- payload values are
+      // strings/null, row indices are safe integers, and crypto.subtle is already
+      // in use upstream -- so surfacing a UI error for it is not worth the noise.
+      // Filenames are timestamped per exchange (mirroring the CLI's timestamped
+      // path) so repeated downloads in one session accumulate rather than collide.
+      // The stamp is the record's own createdAt (made filesystem-safe), not a
+      // fresh clock read, so the filename matches the timestamp inside the file.
+      if (result.audit !== undefined) {
+        const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
+        generated.record = {
+          recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
+          recordFileName: `psilink-record-${stamp}.json`,
+          openingUrl: jsonUrl(serializeOpeningData(result.audit.opening)),
+          openingFileName: `psilink-record-${stamp}.opening.json`,
+        };
+      }
+      return generated;
     };
 
     // Server (PSI responder, PeerJS dialer): load/prepare, emit the stage tree,
@@ -250,8 +305,8 @@ function Home() {
       generateOutput,
       onStages: setStages,
       onStage: setStageById,
-      onResult: (url) => {
-        setResultURL(url);
+      onResult: (o) => {
+        setOutputs(o);
         setStageById("done");
       },
       onError: ({ category, error }) => {
@@ -291,7 +346,11 @@ function Home() {
           <Status
             stages={stages}
             stageId={stageId}
-            resultsFileURL={resultURL}
+            resultsFileURL={outputs?.resultsUrl}
+            recordFileURL={outputs?.record?.recordUrl}
+            recordFileName={outputs?.record?.recordFileName}
+            openingFileURL={outputs?.record?.openingUrl}
+            openingFileName={outputs?.record?.openingFileName}
           />
         </Group>
         {errorAlert && (

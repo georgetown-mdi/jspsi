@@ -1,0 +1,485 @@
+{
+  "vectors": [
+    {
+      "name": "both-output-with-payloads",
+      "description": "Both parties learn the result size and hold the association table; each sends and receives one payload column. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "resultSize": 2,
+        "associationTable": [
+          [0, 2],
+          [1, 0]
+        ],
+        "localPayloadSent": {
+          "columns": ["dose"],
+          "rowIndices": [0, 2],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["status"],
+          "rowIndices": [1, 0],
+          "rows": [["active"], [null]]
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "salts": {
+          "localPayloadSent": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+          "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+          "associationTable": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "resultSize": 2,
+        "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "commitments": {
+          "localPayloadSent": "q0KQEdxUTLl82wK4N3MYGg8VeoitYa8C04KR8mqGZJA",
+          "partnerPayloadReceived": "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+          "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "data": {
+              "columns": ["dose"],
+              "rowIndices": [0, 2],
+              "rows": [["10mg"], ["20mg"]]
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+            "data": {
+              "columns": ["status"],
+              "rowIndices": [1, 0],
+              "rows": [["active"], [null]]
+            }
+          },
+          "associationTable": {
+            "salt": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+            "data": [
+              [0, 2],
+              [1, 0]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "no-data-payloads",
+      "description": "Both parties hold the association table but neither sends payload columns, so each commits an empty (no-data) payload as the canonical empty-arrays value. Confirms the sent and received no-data cases serialize identically across implementations.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "resultSize": 1,
+        "associationTable": [[0], [0]],
+        "localPayloadSent": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "partnerPayloadReceived": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA",
+        "salts": {
+          "localPayloadSent": "ERERERERERERERERERERERERERERERERERERERERERE",
+          "partnerPayloadReceived": "EhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhI",
+          "associationTable": "ExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExM"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "resultSize": 1,
+        "bindingNonce": "EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA",
+        "commitments": {
+          "localPayloadSent": "e-xzi-Xnd7SbVAPImfIfFza9RTRxcbHHhDuawJhsAXU",
+          "partnerPayloadReceived": "QwVMSBXXesHI1MlLhj2IkONqN3onexDaVYAOwkladgs",
+          "associationTable": "oirF72JpP_unXJXbGr5jphuX1OtwRssXXckjWt2oFnA"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "ERERERERERERERERERERERERERERERERERERERERERE",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "EhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhI",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          },
+          "associationTable": {
+            "salt": "ExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExM",
+            "data": [[0], [0]]
+          }
+        }
+      }
+    },
+    {
+      "name": "single-output-sender",
+      "description": "A single-output sender: the local party's terms set expectsOutput false and the partner's set it true, so this party receives no output. It holds no association table (no associationTable commitment) and the result size is omitted (recorded only when both parties' terms have them both receive output). It sent its payload and received an empty one. This is the sender's side of the same exchange as single-output-receiver below, so both reproduce the same termsHash, and this sent payload equals the receiver's received payload. Pins the canonical serialization of a record with both the association-table commitment and resultSize absent.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": false,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": false
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "localPayloadSent": {
+          "columns": ["dose"],
+          "rowIndices": [0, 2],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
+        "salts": {
+          "localPayloadSent": "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE",
+          "partnerPayloadReceived": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "tv6x7KXrbKkthjgsgGG37SJ9v_Swb_2eDj4Q2qrrYCs",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
+        "commitments": {
+          "localPayloadSent": "VvZx4jpnLTBMz5saojCMNCuxb1nRhefvMDstxr5T34Y",
+          "partnerPayloadReceived": "T66oHx7GDi-xn-ExGwCwglfMKlmrVRkVwGQWQfWucus"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE",
+            "data": {
+              "columns": ["dose"],
+              "rowIndices": [0, 2],
+              "rows": [["10mg"], ["20mg"]]
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "single-output-receiver",
+      "description": "A single-output receiver: the local party's terms set expectsOutput true and the partner's set it false. It receives output, so it holds the association table (associationTable commitment present), but the result size is still omitted because only one party receives output. It sent an empty payload and received the partner's. This is the receiver's side of the same exchange as single-output-sender above (same agreed terms, hence the same termsHash; the received payload equals that vector's sent payload). Pins the only real combination no other vector covers: an association-table commitment present while resultSize is absent.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": false
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": false,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ]
+        },
+        "associationTable": [
+          [0, 2],
+          [1, 0]
+        ],
+        "localPayloadSent": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "partnerPayloadReceived": {
+          "columns": ["dose"],
+          "rowIndices": [0, 2],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+        "salts": {
+          "localPayloadSent": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
+          "partnerPayloadReceived": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI",
+          "associationTable": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "tv6x7KXrbKkthjgsgGG37SJ9v_Swb_2eDj4Q2qrrYCs",
+        "localIdentity": "Party B",
+        "partnerIdentity": "Party A",
+        "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+        "commitments": {
+          "localPayloadSent": "xNLnO6uv5Pc5Im2d1iiDEo5rwKcr01KZavRuNe7f1eA",
+          "partnerPayloadReceived": "vbdVyB9JFv6_Z7Psyu5mnlN6PSGV1UBN1bfxPvY5eIg",
+          "associationTable": "6Y45KiWAHRT1kdgqHdPAmnhYRgUEq5jL2fYfP21yFMI"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI",
+            "data": {
+              "columns": ["dose"],
+              "rowIndices": [0, 2],
+              "rows": [["10mg"], ["20mg"]]
+            }
+          },
+          "associationTable": {
+            "salt": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM",
+            "data": [
+              [0, 2],
+              [1, 0]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

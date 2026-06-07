@@ -98,9 +98,19 @@ function seams() {
     onStage: vi.fn(),
     onResult: vi.fn(),
     onError: vi.fn(),
-    generateOutput: vi.fn(() => "blob:results"),
+    generateOutput: vi.fn(() => OUTPUTS),
   };
 }
+
+const OUTPUTS = {
+  resultsUrl: "blob:results",
+  record: {
+    recordUrl: "blob:record",
+    recordFileName: "psilink-record.json",
+    openingUrl: "blob:opening",
+    openingFileName: "psilink-record.opening.json",
+  },
+};
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -127,7 +137,7 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.generateOutput).toHaveBeenCalledTimes(1);
-    expect(s.onResult).toHaveBeenCalledWith("blob:results");
+    expect(s.onResult).toHaveBeenCalledWith(OUTPUTS);
     expect(s.onError).not.toHaveBeenCalled();
     // Teardown ran: the flushing close (teardown-exclusive) once, and the peer
     // was disconnected.
@@ -217,7 +227,7 @@ describe("runExchangeLifecycle", () => {
 
     // The exchange and output both succeeded; only teardown threw, so the
     // success state survives and neither alert is shown (F2).
-    expect(s.onResult).toHaveBeenCalledWith("blob:results");
+    expect(s.onResult).toHaveBeenCalledWith(OUTPUTS);
     expect(s.onError).not.toHaveBeenCalled();
   });
 

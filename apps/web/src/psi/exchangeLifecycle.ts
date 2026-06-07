@@ -63,13 +63,44 @@ export interface AcquireContext {
  */
 export type Acquire = (context: AcquireContext) => Promise<AcquiredExchange>;
 
-/** Pure output-generation step: build the local results file from the exchange
- * result and return a URL for it. May throw (classified as `"output"`); runs
- * inside the owner after the exchange and before teardown. */
+/** The self-attested record and its private opening data as paired downloads.
+ * A single object so the two can never be present apart (mirrors
+ * {@link ExchangeResult.audit}, where the record and opening are one field). */
+export interface RecordDownloads {
+  /** The self-attested exchange record (JSON); safe to retain or share. */
+  recordUrl: string;
+  /** Download filename for {@link recordUrl}, timestamped per exchange so
+   * repeated downloads in one session accumulate an audit trail rather than
+   * collide (mirrors the CLI's timestamped default path). */
+  recordFileName: string;
+  /** The private opening data (JSON); as sensitive as the matched data. */
+  openingUrl: string;
+  /** Download filename for {@link openingUrl}, timestamped to match
+   * {@link recordFileName}. */
+  openingFileName: string;
+}
+
+/** The downloadable artifacts produced after a successful exchange: the results
+ * file plus the self-attested audit record and its private opening data, each an
+ * object URL the UI exposes as a download with a timestamped filename. */
+export interface ExchangeOutputs {
+  /** The matched results (CSV). */
+  resultsUrl: string;
+  /** The record and opening downloads as a single optional group, present or
+   * absent together. Absent only when building the record failed (the exchange
+   * still succeeded and the results remain available; see
+   * {@link ExchangeResult.audit}). */
+  record?: RecordDownloads;
+}
+
+/** Pure output-generation step: build the local results file plus the record
+ * and opening artifacts from the exchange result and return their URLs. May
+ * throw (classified as `"output"`); runs inside the owner after the exchange and
+ * before teardown. */
 export type GenerateOutput = (
   result: ExchangeResult,
   prepared: PreparedExchange,
-) => string;
+) => ExchangeOutputs;
 
 /** Options for {@link runExchangeLifecycle}. */
 export interface RunExchangeLifecycleOptions {
@@ -81,7 +112,7 @@ export interface RunExchangeLifecycleOptions {
   generateOutput: GenerateOutput;
   onStages: (stages: Array<StageDefinition>) => void;
   onStage: (stageId: string) => void;
-  onResult: (url: string) => void;
+  onResult: (outputs: ExchangeOutputs) => void;
   onError: (failure: {
     category: ExchangeErrorCategory;
     error: unknown;
@@ -234,14 +265,14 @@ export async function runExchangeLifecycle(
     // The privacy-sensitive exchange has succeeded here. A failure building the
     // local results file is an "output" failure, never an "exchange" one, so the
     // user is not told to re-run a PSI exchange that in fact already completed.
-    let url: string;
+    let outputs: ExchangeOutputs;
     try {
-      url = generateOutput(result, prepared);
+      outputs = generateOutput(result, prepared);
     } catch (error) {
       emitError({ category: "output", error });
       return;
     }
-    emitResult(url);
+    emitResult(outputs);
   } catch (error) {
     emitError({ category: "exchange", error });
   } finally {

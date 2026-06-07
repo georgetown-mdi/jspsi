@@ -33,6 +33,7 @@ export { loadCSVFile } from "./file";
 
 export { inferDateFormat } from "./utils/date.js";
 export * from "./exchange";
+export * from "./exchangeRecord";
 export * from "./payloadExchange";
 export { authenticateConnection, deriveAeadKey, AEAD_CONTEXTS } from "./auth";
 export type { AuthResult, AeadContext } from "./auth";

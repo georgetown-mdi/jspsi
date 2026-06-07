@@ -2,6 +2,7 @@ import * as z from "zod";
 
 import type { HandshakeRole, AssociationTable } from "./types.js";
 import type { Metadata } from "./config/metadata.js";
+import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import { receiveParsed } from "./connection/messageConnection.js";
 
@@ -79,6 +80,32 @@ export function preparePayload(
 function toPartnerPayload(msg: PayloadWireMessage): PartnerPayload {
   if (!msg.hasData) return { columns: [], rowIndices: [], rows: [] };
   return { columns: msg.columns, rowIndices: msg.rowIndices, rows: msg.rows };
+}
+
+/**
+ * Map either payload representation -- the wire message this party sent, or the
+ * {@link PartnerPayload} it received -- into the record's canonical
+ * {@link CommittedPayload} form.
+ *
+ * Routing both sides through this one normalizer is what makes a sender's
+ * `localPayloadSent` commitment and the receiver's `partnerPayloadReceived`
+ * commitment cover byte-identical data for the same logical payload: the
+ * transport-only `hasData` discriminant is dropped, and the no-data case maps to
+ * empty arrays on both sides. The committed shape is owned by the record module
+ * (`CommittedPayload`), not by this wire/transport layer; the explicit
+ * field-by-field construction here means a future change to `PartnerPayload` or
+ * the wire schema cannot silently alter the on-disk record format.
+ */
+export function toCommittedPayload(
+  payload: PayloadWireMessage | PartnerPayload,
+): CommittedPayload {
+  if ("hasData" in payload && !payload.hasData)
+    return { columns: [], rowIndices: [], rows: [] };
+  return {
+    columns: payload.columns,
+    rowIndices: payload.rowIndices,
+    rows: payload.rows,
+  };
 }
 
 /**
