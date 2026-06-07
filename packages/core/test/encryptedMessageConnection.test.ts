@@ -317,6 +317,35 @@ test("send(undefined) is rejected at the sender as usage, without latching", asy
   expect(await encB.receive()).toEqual({ ok: true });
 });
 
+test("send rejects an un-serializable value (BigInt, circular) as usage", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  // JSON.stringify throws (not returns undefined) for these, so this also pins
+  // that the thrown TypeError is wrapped as a ConnectionError, not leaked raw.
+  await expectRejection(encA.send(10n), "usage", /not JSON-serializable/i);
+
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  await expectRejection(encA.send(circular), "usage", /not JSON-serializable/i);
+
+  // Not latched: a valid send still works afterward, on sequence number 0
+  // (the rejected sends consumed none).
+  await encA.send({ ok: true });
+  expect(await encB.receive()).toEqual({ ok: true });
+});
+
+test("create rejects a session key that is not 32 bytes", async () => {
+  const [raw] = createMessagePipe();
+  await expectRejection(
+    EncryptedMessageConnection.create(
+      raw,
+      new Uint8Array(16) as Uint8Array<ArrayBuffer>,
+      "initiator",
+    ),
+    "usage",
+    /32 bytes/i,
+  );
+});
+
 // --- Sticky terminal state ----------------------------------------------------
 
 test("after any failure, subsequent send and receive reject with the same sticky error", async () => {
@@ -390,6 +419,35 @@ test("close latches the wrapper dead and delegates to the inner connection", asy
   // Delegation reached the inner transport: the pipe propagated the close, so
   // the peer observes a transport drop rather than hanging.
   await expect(encB.receive()).rejects.toThrow(/peer closed/i);
+});
+
+test("close() is idempotent", async () => {
+  const [encA] = await makeEncryptedPair();
+  await encA.close();
+  // A second close() must resolve, not throw or double-tear-down the inner.
+  await expect(encA.close()).resolves.toBeUndefined();
+});
+
+test("a receive parked when close() runs is cancelled with kind closed", async () => {
+  const [encA] = await makeEncryptedPair();
+  const parked = encA.receive(); // nothing sent -> parks on inner.receive()
+  await encA.close();
+  // The inner connection cancels the parked receive with "closed"; the
+  // decorator surfaces it unchanged rather than overwriting it with the
+  // "usage" close latch.
+  await expectRejection(parked, "closed", /closed/i);
+});
+
+test("a security failure tears down the inner transport", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  const bytes = await sealRawBytes("initiator", 0, jsonPlaintext({ ok: true }));
+  bytes[bytes.length - 1] ^= 0xff; // corrupt the GCM tag
+  await peer.send({ enc: toBase64Url(bytes) });
+  await expectSecurity(recv.receive(), /authentication tag/i);
+
+  // The decorator latched terminal AND closed its inner connection, so the
+  // peer's raw end observes the close rather than a still-open channel.
+  await expect(peer.receive()).rejects.toThrow(/peer closed/i);
 });
 
 // --- deriveAeadKey known-answer vector ----------------------------------------

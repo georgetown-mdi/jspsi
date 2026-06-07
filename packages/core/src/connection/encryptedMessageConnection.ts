@@ -85,6 +85,10 @@ export class EncryptedMessageConnection implements MessageConnection {
   // ConnectionError once dead. Every subsequent send/receive rejects with this
   // same latched error, mirroring QueuedMessageConnection's terminal state.
   private failed: ConnectionError | undefined = undefined;
+  // Memoized inner-teardown promise: undefined until the first teardown, then
+  // the single in-flight/settled inner.close() promise. Makes inner teardown
+  // run exactly once whether triggered by a terminal failure or by close().
+  private innerClosed: Promise<void> | undefined = undefined;
 
   private constructor(
     inner: MessageConnection,
@@ -101,6 +105,19 @@ export class EncryptedMessageConnection implements MessageConnection {
     sessionKey: Uint8Array<ArrayBuffer>,
     role: HandshakeRole,
   ): Promise<EncryptedMessageConnection> {
+    // Validate the session-key length up front. HKDF accepts any-length input,
+    // so a wrong-length key would NOT throw - it would silently derive a
+    // different 32-byte AEAD key, and the mismatch would surface only later as
+    // opaque GCM tag failures. The PAKE session key is always 32 bytes, so a
+    // wrong length is an upstream bug; fail loudly here with a clear "usage"
+    // error rather than letting it degrade into a decryption mystery.
+    if (sessionKey.length !== 32) {
+      throw new ConnectionError(
+        `EncryptedConnection: session key must be 32 bytes, got ${sessionKey.length}`,
+        "usage",
+      );
+    }
+
     // No buffering dance is needed here: an encrypted frame that arrives during
     // this async key derivation sits in the inner connection's FIFO until the
     // first receive() pulls it, so nothing is dropped.
@@ -128,10 +145,25 @@ export class EncryptedMessageConnection implements MessageConnection {
 
   // Latch the first terminal error and return it for the caller to throw. The
   // latch is sticky: a later failure keeps the original error, so every
-  // subsequent send/receive rejects with the same value.
+  // subsequent send/receive rejects with the same value. On the first latch the
+  // inner transport is torn down (fire-and-forget), mirroring
+  // QueuedMessageConnection.fail(): a terminal failure - notably a detected
+  // forgery/replay - must not leave the underlying SFTP/filedrop connection live
+  // waiting on the caller to remember to close().
   private fail(error: ConnectionError): ConnectionError {
-    this.failed ??= error;
+    if (this.failed === undefined) {
+      this.failed = error;
+      void this.closeInner().catch(() => {});
+    }
     return this.failed;
+  }
+
+  // Tear the inner transport down exactly once. Memoizing the promise makes
+  // close() idempotent at this layer (rather than borrowing the inner
+  // connection's own idempotency guard) and lets close() await the same
+  // teardown a prior fail() may have already started.
+  private closeInner(): Promise<void> {
+    return (this.innerClosed ??= Promise.resolve(this.inner.close()));
   }
 
   private seqToIv(seq: number): Uint8Array<ArrayBuffer> {
@@ -174,14 +206,25 @@ export class EncryptedMessageConnection implements MessageConnection {
       plaintext[0] = TYPE_BINARY;
       plaintext.set(data, 1);
     } else {
-      const serialized = JSON.stringify(data);
-      // JSON.stringify returns undefined for a value with no JSON representation
-      // (undefined itself, a function, a symbol). Reject it at the sender with a
-      // "usage" error - caught at the right end, with the right kind, before any
-      // sequence number is consumed - rather than encoding the empty result and
-      // letting the receiver reject the frame as a misleading "not valid JSON"
-      // security failure. Not latched: one un-serializable argument is caller
-      // misuse, not a terminal fault, so the connection stays usable.
+      // JSON.stringify rejects an un-encodable value two ways, both caller
+      // misuse caught here at the sender with a "usage" error, before any
+      // sequence number is consumed, and without latching (one bad argument is
+      // not a terminal fault, so the connection stays usable): it THROWS a
+      // TypeError for a BigInt or a circular reference, and it RETURNS undefined
+      // for undefined / a function / a symbol. Either way, reject at the right
+      // end rather than encoding the result and letting the receiver reject the
+      // frame as a misleading "not valid JSON" security failure.
+      let serialized: string | undefined;
+      try {
+        serialized = JSON.stringify(data);
+      } catch (err) {
+        throw new ConnectionError(
+          "EncryptedConnection: cannot send a value that is not JSON-" +
+            "serializable (e.g. a BigInt or a circular reference)",
+          "usage",
+          { cause: err },
+        );
+      }
       if (serialized === undefined) {
         throw new ConnectionError(
           "EncryptedConnection: cannot send a value with no JSON representation " +
@@ -258,11 +301,13 @@ export class EncryptedMessageConnection implements MessageConnection {
       // if a concurrent path already latched - a deliberate close() sets
       // this.failed and then tears the inner connection down - the rejection
       // here is that teardown's cancellation. A receive parked at close() time
-      // carries the inner connection's "closed" kind, so surface it unchanged
-      // rather than overwriting it with a transport latch.
+      // carries the inner connection's "closed" kind, so surface it unchanged.
+      // asConnectionError passes an existing ConnectionError through untouched
+      // (preserving that "closed" kind) and wraps anything else, so receive()
+      // always rejects with a ConnectionError per the MessageConnection contract.
       if (this.failed === undefined)
         throw this.fail(asConnectionError(err, "transport"));
-      throw err;
+      throw asConnectionError(err, "transport");
     }
     // Re-check after a successful receive: dead code in the pull model (the only
     // path that latches mid-await is a concurrent close(), which makes
@@ -406,19 +451,21 @@ export class EncryptedMessageConnection implements MessageConnection {
   }
 
   async close(): Promise<void> {
-    // Latch the wrapper as deliberately closed, then tear down the inner
-    // transport. A fresh send/receive after close is caller misuse, so the
-    // latch is kind "usage" (mirroring QueuedMessageConnection's post-close
-    // throws); the kind is deliberately not "security", which is reserved for
-    // tamper/replay/ordering failures and must stay distinguishable from a
-    // clean shutdown. A receive that was already parked when close ran is
-    // cancelled by the inner connection with kind "closed", not by this latch.
+    // Latch the wrapper as deliberately closed, then await the inner teardown.
+    // A fresh send/receive after close is caller misuse, so the latch is kind
+    // "usage" (mirroring QueuedMessageConnection's post-close throws); the kind
+    // is deliberately not "security", which is reserved for tamper/replay/
+    // ordering failures and must stay distinguishable from a clean shutdown. A
+    // receive that was already parked when close ran is cancelled by the inner
+    // connection with kind "closed", not by this latch. Going through
+    // closeInner() makes this idempotent and reuses any teardown a prior fail()
+    // already started, so inner.close() runs once no matter how this is reached.
     this.fail(
       new ConnectionError(
         "EncryptedConnection: cannot use a closed connection",
         "usage",
       ),
     );
-    await this.inner.close();
+    await this.closeInner();
   }
 }
