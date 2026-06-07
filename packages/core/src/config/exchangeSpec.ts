@@ -4,6 +4,7 @@ import { LinkageTermsSchema } from "./linkageTerms.js";
 import { ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
 import { MetadataSchema } from "./metadata.js";
+import { SigningConfigSchema } from "./signing.js";
 
 // --- Exchange spec -----------------------------------------------------------
 
@@ -21,6 +22,11 @@ export const ExchangeSpecSchema = z.object({
   linkageTerms: LinkageTermsSchema,
   metadata: MetadataSchema.optional(),
   standardization: StandardizationSchema.optional(),
+  // Optional signing block (receipt signing mode, this party's signing identity
+  // file path, the pinned partner fingerprint, and the receipt output
+  // location). Absent in exchanges that do not sign receipts; see signing.ts and
+  // EXCHANGE_SPEC.md.
+  signing: SigningConfigSchema.optional(),
 });
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;

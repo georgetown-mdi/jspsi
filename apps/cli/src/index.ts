@@ -9,6 +9,10 @@ import {
   builder as exchangeBuilder,
   handler as exchangeHandler,
 } from "./commands/exchange";
+import {
+  builder as fingerprintBuilder,
+  handler as fingerprintHandler,
+} from "./commands/fingerprint";
 
 yargs(hideBin(process.argv))
   .scriptName("psilink")
@@ -50,6 +54,12 @@ yargs(hideBin(process.argv))
     "Execute a recurring exchange",
     exchangeBuilder,
     exchangeHandler,
+  )
+  .command(
+    "fingerprint",
+    "Show (and lazily create) this party's signing certificate fingerprint",
+    fingerprintBuilder,
+    fingerprintHandler,
   )
   .usage("$0 [command] [options]")
   .help("h")

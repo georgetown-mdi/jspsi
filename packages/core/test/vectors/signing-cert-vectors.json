@@ -1,0 +1,88 @@
+{
+  "vectors": [
+    {
+      "name": "ed25519-identity-a",
+      "description": "Deterministic Ed25519 signing identity (seed = bytes 0..31) bound to a multi-line free-text identity. Any implementation seeded identically must reproduce publicKeyX, signature, and fingerprint.",
+      "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+      "expected": {
+        "publicKeyX": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "signature": "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ",
+        "fingerprint": "iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg"
+      },
+      "identityFile": {
+        "version": "psilink-signing-identity/v1",
+        "privateKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "d": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        },
+        "certificate": {
+          "version": "psilink-signing-cert/v1",
+          "algorithm": "ed25519",
+          "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+          "publicKey": {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+          },
+          "signature": "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ"
+        }
+      },
+      "certificate": {
+        "version": "psilink-signing-cert/v1",
+        "algorithm": "ed25519",
+        "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+        "publicKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+        },
+        "signature": "8WKs03xb2bO9IsxziElnQeQ4v6--9DKTCRl5RyasydYD5THhQBBQwUD0nDHK7Lqm8NqgxczxhKX7JjJWlJiyAQ"
+      }
+    },
+    {
+      "name": "ed25519-identity-b",
+      "description": "A second deterministic identity (seed = bytes 255..224) with a different identity string, used as the mismatched-identity and non-matching-fingerprint counterpart to identity-a.",
+      "seed": "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA",
+      "identity": "Bureau of B, Office of Linkage",
+      "expected": {
+        "publicKeyX": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y",
+        "signature": "dtJyxCvW-SKwFMO0rzZ87JAOhBLqFE1DJneVOzWoKDsSlLTVsY8JAEbMaBd-Oem8mvfEUmoTchMgiOXDave6AQ",
+        "fingerprint": "tOURHnCEbF5GlKMSI-UpKSOS2jNvsZuJuo6HLWyQuz4"
+      },
+      "identityFile": {
+        "version": "psilink-signing-identity/v1",
+        "privateKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y",
+          "d": "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA"
+        },
+        "certificate": {
+          "version": "psilink-signing-cert/v1",
+          "algorithm": "ed25519",
+          "identity": "Bureau of B, Office of Linkage",
+          "publicKey": {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y"
+          },
+          "signature": "dtJyxCvW-SKwFMO0rzZ87JAOhBLqFE1DJneVOzWoKDsSlLTVsY8JAEbMaBd-Oem8mvfEUmoTchMgiOXDave6AQ"
+        }
+      },
+      "certificate": {
+        "version": "psilink-signing-cert/v1",
+        "algorithm": "ed25519",
+        "identity": "Bureau of B, Office of Linkage",
+        "publicKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "uvxxvq06xeS2PpyCFu5xo0quxlci7tvKcotOmzzM45Y"
+        },
+        "signature": "dtJyxCvW-SKwFMO0rzZ87JAOhBLqFE1DJneVOzWoKDsSlLTVsY8JAEbMaBd-Oem8mvfEUmoTchMgiOXDave6AQ"
+      }
+    }
+  ]
+}

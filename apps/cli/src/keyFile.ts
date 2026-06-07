@@ -54,7 +54,10 @@ const GENERIC_ALL = 0x10000000;
 //      SYSTEM and Administrators are not exempted by name because their
 //      display names are locale-dependent; skipping inherited ACEs (the (I)
 //      flag) covers their normal case -- see EXEMPT_SIDS above.
-function warnIfWindowsAclOverPermissive(keyFilePath: string): void {
+function warnIfWindowsAclOverPermissive(
+  keyFilePath: string,
+  secretLabel: string,
+): void {
   // path is caller-supplied; '' escaping suffices because the user controls the
   // key file path
   const escaped = keyFilePath.replace(/'/g, "''");
@@ -94,7 +97,7 @@ function warnIfWindowsAclOverPermissive(keyFilePath: string): void {
         log.warn(
           `${keyFilePath} has ACL entries granting read access to other ` +
             "users; restrict to owner-read-only via icacls or File " +
-            "Properties to prevent other users from reading the PAKE token",
+            `Properties to prevent other users from reading the ${secretLabel}`,
         );
       }
       return;
@@ -153,12 +156,49 @@ function warnIfWindowsAclOverPermissive(keyFilePath: string): void {
       log.warn(
         `${keyFilePath} has ACL entries granting read access to other users ` +
           "(inherited not checked); restrict to owner-read-only via icacls " +
-          "or File Properties to prevent other users from reading the PAKE " +
-          "token",
+          `or File Properties to prevent other users from reading the ` +
+          secretLabel,
       );
     }
   } catch {
     // icacls unavailable; warning is advisory
+  }
+}
+
+/**
+ * Warn if `filePath` is readable by users other than its owner. On Unix this is
+ * the POSIX-mode check (any group/other bit set); on Windows it is the ACL check
+ * (`warnIfWindowsAclOverPermissive`). `secretLabel` names the secret in the
+ * warning so the message fits the file (a "PAKE token" vs a "signing private
+ * key"). Advisory only: a removed file or unavailable tooling is swallowed.
+ *
+ * Shared by {@link loadKeyFile} and the signing-identity loader so both secret
+ * files get the same owner-only permission check from one implementation.
+ */
+export function warnIfFileOverPermissive(
+  filePath: string,
+  secretLabel: string,
+): void {
+  if (process.platform !== "win32") {
+    try {
+      const { mode } = fs.statSync(filePath);
+      if (mode & 0o077) {
+        log.warn(
+          `${filePath} has permissions ` +
+            `${(mode & 0o777).toString(8).padStart(4, "0")}; restrict to ` +
+            `0600 (owner-read-only) to prevent other users from reading the ` +
+            secretLabel,
+        );
+      }
+    } catch {
+      // file may have been removed between read and statSync; warning is
+      // advisory
+    }
+  } else {
+    // fs.statSync returns synthetic POSIX mode bits on Windows that do not
+    // reflect the actual ACL; warnIfWindowsAclOverPermissive handles its own
+    // error paths.
+    warnIfWindowsAclOverPermissive(filePath, secretLabel);
   }
 }
 
@@ -226,27 +266,7 @@ export function loadKeyFile(keyFilePath: string): KeyFile | undefined {
     throw err;
   }
   const result = KeyFileSchema.parse(raw);
-  if (process.platform !== "win32") {
-    try {
-      const { mode } = fs.statSync(keyFilePath);
-      if (mode & 0o077) {
-        log.warn(
-          `${keyFilePath} has permissions ` +
-            `${(mode & 0o777).toString(8).padStart(4, "0")}; restrict to ` +
-            "0600 (owner-read-only) to prevent other users from reading the " +
-            "PAKE token",
-        );
-      }
-    } catch {
-      // file may have been removed between readFileSync and statSync; warning
-      // is advisory
-    }
-  } else {
-    // fs.statSync returns synthetic POSIX mode bits on Windows that do not
-    // reflect the actual ACL; warnIfWindowsAclOverPermissive handles its own
-    // error paths.
-    warnIfWindowsAclOverPermissive(keyFilePath);
-  }
+  warnIfFileOverPermissive(keyFilePath, "PAKE token");
   return result;
 }
 

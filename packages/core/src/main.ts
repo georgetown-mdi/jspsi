@@ -28,6 +28,8 @@ export * from "./config/exchangeSpec";
 export * from "./config/linkageTerms";
 export * from "./config/invitation";
 export * from "./config/metadata";
+export * from "./config/signing";
+export * from "./signingIdentity";
 export * from "./standardization";
 export { loadCSVFile } from "./file";
 

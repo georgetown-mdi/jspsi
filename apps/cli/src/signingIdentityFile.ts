@@ -1,0 +1,79 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import {
+  parseSigningIdentity,
+  serializeSigningIdentity,
+  UsageError,
+} from "@psilink/core";
+import type { SigningIdentity } from "@psilink/core";
+
+import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./keyFile";
+
+// File custody for the long-lived signing identity (private key + self-signed
+// certificate). Kept in its OWN file, separate from the rotating PAKE key
+// (`.psilink.key`): the PAKE token rotates every exchange, whereas the signing
+// key must be stable for its whole life so a fingerprint a partner pinned once
+// keeps matching. The identity is reused across exchanges AND across partners,
+// so it defaults to a per-user location rather than the per-directory default
+// the PAKE key and config use; an exchange in any working directory loads the
+// same identity, and a partner's pin stays valid everywhere. The path is
+// overridable (config `signing.identity_file` or `--identity-file`).
+
+/** Directory holding the per-user signing identity by default. */
+export const DEFAULT_SIGNING_IDENTITY_DIR = path.join(os.homedir(), ".psilink");
+
+/**
+ * Default path for this party's signing identity file. Per-user (under the home
+ * directory), not per-working-directory, because one signing identity is reused
+ * across every exchange and partner; see the module note.
+ */
+export function defaultSigningIdentityPath(): string {
+  return path.join(DEFAULT_SIGNING_IDENTITY_DIR, "signing-identity.json");
+}
+
+/**
+ * Load and validate the signing identity at `identityPath`. Returns `undefined`
+ * if the file does not exist (so a caller can lazily create it). Throws a
+ * {@link UsageError} on a malformed, unreadable, or inconsistent file -- the
+ * same exit-64 classification a malformed PAKE key file gets. Warns (advisory)
+ * if the file is readable by other users.
+ */
+export function loadSigningIdentity(
+  identityPath: string,
+): SigningIdentity | undefined {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new UsageError(
+      `signing identity at ${identityPath} could not be read or parsed: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  let identity: SigningIdentity;
+  try {
+    identity = parseSigningIdentity(raw);
+  } catch (err: unknown) {
+    throw new UsageError(
+      `signing identity at ${identityPath} is malformed or unsupported: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  warnIfFileOverPermissive(identityPath, "signing private key");
+  return identity;
+}
+
+/**
+ * Write `identity` to `identityPath` owner-read-only, via the shared atomic
+ * owner-only write path (`0600` on Unix, a restricted ACL on Windows). Creates
+ * parent directories as needed.
+ */
+export function saveSigningIdentity(
+  identityPath: string,
+  identity: SigningIdentity,
+): void {
+  writeFileOwnerOnly(identityPath, serializeSigningIdentity(identity));
+}
