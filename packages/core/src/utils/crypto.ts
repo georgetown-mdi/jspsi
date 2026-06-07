@@ -6,10 +6,27 @@
 export const enc = new TextEncoder();
 
 /**
+ * Shared fatal `TextDecoder` for decoding UTF-8 bytes to strings. `fatal: true`
+ * makes `decode` THROW a `TypeError` on malformed UTF-8 rather than silently
+ * substituting U+FFFD - a caller decoding authenticated-but-possibly-malformed
+ * bytes (e.g. the AEAD layer) needs the rejection, not silent corruption. Use
+ * only for one-shot, non-streaming decodes: never call `decFatal.decode(chunk,
+ * { stream: true })` on this shared instance, since streaming mode carries
+ * decoder state across calls and would corrupt unrelated decodes elsewhere in
+ * the process. A caller that needs streaming must construct its own decoder.
+ */
+export const decFatal = new TextDecoder("utf-8", { fatal: true });
+
+/**
  * Encode a byte array as a base64url string (no padding).
  */
 export function toBase64Url(bytes: Uint8Array<ArrayBuffer>): string {
-  const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+  // Chunked call avoids the N-element intermediate array that `Array.from`
+  // would allocate; 0x8000 is below V8's spread-argument limit on all platforms.
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK)
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
