@@ -399,6 +399,13 @@ export interface BuiltExchangeRecord {
  * from the end-of-exchange inputs. Generates a fresh binding nonce and a fresh
  * salt per commitment (unless `randomness` injects them), commits to each data
  * set, and hashes the agreed terms. No private key and no network round-trip.
+ *
+ * The returned opening references each input `data` set directly rather than
+ * deep-copying it, so callers must not mutate the inputs after this resolves.
+ * The commitment bytes are computed before the opening is assembled, so a later
+ * mutation cannot change them: a divergent snapshot would fail commitment
+ * verification rather than corrupt the record silently. All current callers pass
+ * freshly built, non-mutated payloads.
  */
 export async function buildExchangeRecord(
   inputs: ExchangeRecordInputs,

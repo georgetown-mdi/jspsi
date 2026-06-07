@@ -134,8 +134,10 @@ export function writeExchangeRecord(
     writeFileOwnerOnly(openingFilePath, serializeOpeningData(opening));
     openingWritten = true;
     writeFileOwnerOnly(recordFilePath, serializeExchangeRecord(record));
-    // Log in write order (opening first, then record), matching the sequence
-    // above so the messages reflect what actually hit disk and when.
+    // Both writes have now succeeded; log them in write order (opening first,
+    // then record). The two messages are emitted together here, not interleaved
+    // between the writes -- a failed record write goes to the catch below, which
+    // names the orphaned opening file instead.
     log.info(
       `wrote private commitment opening data to ${openingFilePath}; ` +
         "keep it private -- it holds the matched data in plaintext (the " +

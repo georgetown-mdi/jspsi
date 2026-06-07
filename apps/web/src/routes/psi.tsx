@@ -170,6 +170,22 @@ function Home() {
   const abortRef = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Revoke this session's object URLs when the component unmounts (or before a
+  // replacement set is stored): createObjectURL keeps each Blob alive until it
+  // is revoked, and the record and opening blobs hold the matched data, so they
+  // should not outlive the page that backs them. A fresh session normally sets
+  // `outputs` once, so this is bounded cleanup, not per-render churn.
+  useEffect(() => {
+    if (outputs === undefined) return;
+    return () => {
+      window.URL.revokeObjectURL(outputs.resultsUrl);
+      if (outputs.record !== undefined) {
+        window.URL.revokeObjectURL(outputs.record.recordUrl);
+        window.URL.revokeObjectURL(outputs.record.openingUrl);
+      }
+    };
+  }, [outputs]);
+
   const handleSubmit = () => {
     setSubmitted(true);
     setErrorAlert(undefined);
@@ -179,8 +195,10 @@ function Home() {
 
     // Pure output-generation half of the former finishExchange: build the local
     // results file plus the self-attested record and its private opening data,
-    // returning a download URL for each. No React state and no previous-URL
-    // revoke (a fresh session sets these at most once per component lifetime).
+    // returning a download URL for each. The object URLs are revoked when the
+    // component unmounts or the outputs are replaced (see the cleanup effect
+    // above), so the record and opening blobs -- which hold the matched data --
+    // do not outlive the page that backs them.
     const generateOutput = (
       result: ExchangeResult,
       prepared: PreparedExchange,
@@ -218,14 +236,12 @@ function Home() {
       // fresh clock read, so the filename matches the timestamp inside the file.
       if (result.audit !== undefined) {
         const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
-        generated.recordUrl = jsonUrl(
-          serializeExchangeRecord(result.audit.record),
-        );
-        generated.recordFileName = `psilink-record-${stamp}.json`;
-        generated.openingUrl = jsonUrl(
-          serializeOpeningData(result.audit.opening),
-        );
-        generated.openingFileName = `psilink-record-${stamp}.opening.json`;
+        generated.record = {
+          recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
+          recordFileName: `psilink-record-${stamp}.json`,
+          openingUrl: jsonUrl(serializeOpeningData(result.audit.opening)),
+          openingFileName: `psilink-record-${stamp}.opening.json`,
+        };
       }
       return generated;
     };
@@ -331,10 +347,10 @@ function Home() {
             stages={stages}
             stageId={stageId}
             resultsFileURL={outputs?.resultsUrl}
-            recordFileURL={outputs?.recordUrl}
-            recordFileName={outputs?.recordFileName}
-            openingFileURL={outputs?.openingUrl}
-            openingFileName={outputs?.openingFileName}
+            recordFileURL={outputs?.record?.recordUrl}
+            recordFileName={outputs?.record?.recordFileName}
+            openingFileURL={outputs?.record?.openingUrl}
+            openingFileName={outputs?.record?.openingFileName}
           />
         </Group>
         {errorAlert && (

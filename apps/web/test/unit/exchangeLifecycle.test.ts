@@ -98,18 +98,18 @@ function seams() {
     onStage: vi.fn(),
     onResult: vi.fn(),
     onError: vi.fn(),
-    generateOutput: vi.fn(() => ({
-      resultsUrl: "blob:results",
-      recordUrl: "blob:record",
-      openingUrl: "blob:opening",
-    })),
+    generateOutput: vi.fn(() => OUTPUTS),
   };
 }
 
 const OUTPUTS = {
   resultsUrl: "blob:results",
-  recordUrl: "blob:record",
-  openingUrl: "blob:opening",
+  record: {
+    recordUrl: "blob:record",
+    recordFileName: "psilink-record.json",
+    openingUrl: "blob:opening",
+    openingFileName: "psilink-record.opening.json",
+  },
 };
 
 afterEach(() => {

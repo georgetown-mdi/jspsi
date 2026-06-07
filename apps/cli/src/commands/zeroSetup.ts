@@ -222,8 +222,9 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     peerId: argv["peer-id"] as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
-    // yargs sets `record` to false on --no-record; default true otherwise.
-    record: (argv["record"] as boolean | undefined) ?? true,
+    // yargs sets `record` to false on --no-record and true by the option's
+    // default otherwise, so it is always a boolean here.
+    record: argv["record"] as boolean,
     recordFile: argv["record-file"] as string | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
