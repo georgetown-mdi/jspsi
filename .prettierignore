@@ -5,6 +5,6 @@ dist
 .tanstack
 .output
 .rollup.cache
-
+*.gen.ts
 *.md
 docs
