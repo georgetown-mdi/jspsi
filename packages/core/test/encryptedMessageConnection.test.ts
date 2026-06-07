@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { expect, test } from "vitest";
 
 import {
@@ -11,7 +13,7 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import { deriveAeadKey } from "../src/auth";
-import { toBase64Url } from "../src/utils/crypto";
+import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
 import type { HandshakeRole } from "../src/types";
 
 // Fixed 32-byte session key for deterministic tests.
@@ -538,3 +540,149 @@ test("deriveAeadKey known-answer vector pins the HKDF info string", async () => 
   // for AES-GCM.
   expect(Array.from(i2r)).not.toEqual(Array.from(r2i));
 });
+
+// --- AEAD encrypt-path wire vector (end-to-end known-answer) -------------------
+// Distinct from the deriveAeadKey KAT above, which pins only the HKDF key
+// derivation: this pins the full serialized `{ enc }` envelope the encrypt path
+// emits - the 12-byte IV layout, the GCM ciphertext, and the 16-byte tag - for
+// both a JSON and a Uint8Array payload. The expected bytes were produced by an
+// independent oracle (Node's crypto.hkdfSync + createCipheriv, a different code
+// path than the decorator's WebCrypto crypto.subtle) and are checked in at
+// test/vectors/aead-envelope-vectors.json for cross-implementation reuse; the
+// wire format is specified in docs/SECURITY_DESIGN.md ("Channel security"). The
+// assertion compares against that recorded literal, never a decrypt/round-trip,
+// so a symmetric encode/decode bug a round-trip would mask is still caught.
+
+interface AeadEnvelopeVector {
+  name: string;
+  role: HandshakeRole;
+  sequence: number;
+  payloadType: "json" | "binary";
+  payloadJson?: unknown;
+  payloadHex?: string;
+  ivHex: string;
+  ciphertextHex: string;
+  tagHex: string;
+  envelopeHex: string;
+  enc: string;
+}
+
+const aeadVectors = JSON.parse(
+  readFileSync(
+    new URL("./vectors/aead-envelope-vectors.json", import.meta.url),
+    {
+      encoding: "utf8",
+    },
+  ),
+) as { sessionKeyHex: string; vectors: AeadEnvelopeVector[] };
+
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function fromHex(hex: string): Uint8Array<ArrayBuffer> {
+  // Guard an odd-length string: new Uint8Array(hex.length / 2) truncates a
+  // fractional length rather than throwing, so without this a malformed
+  // payloadHex would silently drop its last nibble instead of failing loudly.
+  if (hex.length % 2 !== 0)
+    throw new Error(`fromHex: odd-length hex string (length ${hex.length})`);
+  const out = new Uint8Array(hex.length / 2) as Uint8Array<ArrayBuffer>;
+  for (let i = 0; i < out.length; i++)
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+// Capture the `{ enc }` the decorator hands to its inner connection. The inner
+// connection only records the outbound envelope - nothing decrypts it back - so
+// the test asserts against the checked-in literal rather than a round-trip.
+async function captureEnc(
+  role: HandshakeRole,
+  sequence: number,
+  payload: unknown,
+): Promise<string> {
+  let captured: unknown;
+  const inner: MessageConnection = {
+    send: (d) => {
+      captured = d;
+      return Promise.resolve();
+    },
+    receive: () => new Promise<unknown>(() => {}),
+    close: () => Promise.resolve(),
+  };
+  const conn = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    role,
+  );
+  // Drive the encrypt path at the vector's fixed sequence (the same private-
+  // field cast the overflow tests use) so the IV - and therefore the ciphertext
+  // and tag - is deterministic.
+  (conn as unknown as { sendSeq: number }).sendSeq = sequence;
+  await conn.send(payload);
+  // A successful send always calls inner.send, so `captured` is set here; guard
+  // it anyway so a future regression fails with a clear message rather than an
+  // opaque "cannot read enc of undefined" TypeError.
+  if (captured === undefined)
+    throw new Error(
+      "captureEnc: conn.send resolved without calling inner.send",
+    );
+  return (captured as { enc: string }).enc;
+}
+
+test("the AEAD envelope vector file is present and keyed by SESSION_KEY", () => {
+  expect(aeadVectors.vectors.length).toBeGreaterThan(0);
+  // The checked-in vectors are derived from this session key; if the two drift
+  // apart the recorded bytes no longer describe what the test drives.
+  expect(toHex(SESSION_KEY)).toBe(aeadVectors.sessionKeyHex);
+});
+
+test.each(aeadVectors.vectors)(
+  "$name: the encrypt path emits the pinned { enc } envelope",
+  async (vector) => {
+    let payload: unknown;
+    if (vector.payloadType === "binary") {
+      if (vector.payloadHex === undefined)
+        throw new Error(
+          `vector ${vector.name}: binary vector lacks payloadHex`,
+        );
+      payload = fromHex(vector.payloadHex);
+    } else {
+      // Symmetric with the binary guard above: a json vector missing payloadJson
+      // would otherwise pass undefined to conn.send and fail as an opaque
+      // "usage" error rather than naming the malformed vector. `=== undefined`
+      // (not a truthiness check) so a legitimate falsy payload still passes.
+      if (vector.payloadJson === undefined)
+        throw new Error(`vector ${vector.name}: json vector lacks payloadJson`);
+      payload = vector.payloadJson;
+    }
+
+    const encStr = await captureEnc(vector.role, vector.sequence, payload);
+
+    // Primary assertion: the exact serialized envelope, as a fixed literal.
+    expect(encStr).toBe(vector.enc);
+
+    // Structural breakdown, so a failure names the field that diverged (IV,
+    // ciphertext, or tag) rather than only reporting that the blob differs.
+    const bytes = fromBase64Url(encStr);
+    const iv = bytes.slice(0, 12);
+    const tag = bytes.slice(bytes.length - 16);
+    const ciphertext = bytes.slice(12, bytes.length - 16);
+    expect(toHex(iv)).toBe(vector.ivHex);
+    expect(toHex(ciphertext)).toBe(vector.ciphertextHex);
+    expect(toHex(tag)).toBe(vector.tagHex);
+
+    // envelopeHex records the full IV || ciphertext || tag for an external
+    // reader; pin it to the actual decorator output AND to the concatenation of
+    // the component fields, so it cannot silently drift when a vector is edited.
+    expect(toHex(bytes)).toBe(vector.envelopeHex);
+    expect(vector.envelopeHex).toBe(
+      vector.ivHex + vector.ciphertextHex + vector.tagHex,
+    );
+
+    // IV layout: 4 reserved zero bytes, then the 8-byte big-endian sequence.
+    expect(toHex(iv.slice(0, IV_SEQ_OFFSET))).toBe("00000000");
+    expect(
+      new DataView(iv.buffer, iv.byteOffset).getBigUint64(IV_SEQ_OFFSET, false),
+    ).toBe(BigInt(vector.sequence));
+  },
+);
