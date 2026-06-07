@@ -4,12 +4,8 @@ import { UsageError } from "@psilink/core";
 import type { ExchangeSpec } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH, saveConfig } from "../config";
-import {
-  DEFAULT_KEY_PATH,
-  detectFileConflicts,
-  saveKeyFile,
-  type KeyFile,
-} from "../keyFile";
+import { detectFileConflicts } from "../fileUtils";
+import { DEFAULT_KEY_PATH, saveKeyFile, type KeyFile } from "../keyFile";
 
 /**
  * Target paths for {@link provisionConfigAndKey}. Each defaults to the path the

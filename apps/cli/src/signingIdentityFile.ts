@@ -9,7 +9,7 @@ import {
 } from "@psilink/core";
 import type { SigningIdentity } from "@psilink/core";
 
-import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./keyFile";
+import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
 
 // File custody for the long-lived signing identity (private key + self-signed
 // certificate). Kept in its OWN file, separate from the rotating PAKE key
@@ -69,11 +69,14 @@ export function loadSigningIdentity(
 /**
  * Write `identity` to `identityPath` owner-read-only, via the shared atomic
  * owner-only write path (`0600` on Unix, a restricted ACL on Windows). Creates
- * parent directories as needed.
+ * parent directories as needed. Pass `exclusive` when first creating the
+ * identity so a concurrent creator cannot silently overwrite it (a regenerate
+ * deliberately overwrites and omits it).
  */
 export function saveSigningIdentity(
   identityPath: string,
   identity: SigningIdentity,
+  options: { exclusive?: boolean } = {},
 ): void {
-  writeFileOwnerOnly(identityPath, serializeSigningIdentity(identity));
+  writeFileOwnerOnly(identityPath, serializeSigningIdentity(identity), options);
 }

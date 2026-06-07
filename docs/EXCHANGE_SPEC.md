@@ -649,7 +649,7 @@ The receipt signing mode. `none` signs no receipt (only the unsigned self-attest
 *Type:* string (path)  
 *Required:* no
 
-Path to this party's signing identity file (the Ed25519 private key plus its self-signed certificate). Defaults to `~/.psilink/signing-identity.json` -- a per-user location, because one identity is reused across every exchange and partner. The file is created lazily and owner-read-only by `psilink fingerprint` and is loaded thereafter; regenerate it deliberately with `psilink fingerprint --force` (which invalidates any fingerprint a partner has pinned).
+Path to this party's signing identity file (the Ed25519 private key plus its self-signed certificate). Defaults to `~/.psilink/signing-identity.json` -- a per-user location, because one identity is reused across every exchange and partner. A leading `~` (or `~/`) is expanded to the home directory, so the value below works verbatim. The file is created lazily and owner-read-only by `psilink fingerprint` and is loaded thereafter; regenerate it deliberately with `psilink fingerprint --force` (which invalidates any fingerprint a partner has pinned).
 
 ### `signing.partner_fingerprint`
 

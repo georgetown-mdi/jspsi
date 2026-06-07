@@ -16,6 +16,8 @@ Command line arguments take precedence over values in the configuration file, al
 
 The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
 
+A leading `~` (or `~/`) in any local filesystem path -- whether given on the command line or written into the configuration file -- is expanded to the current user's home directory. This applies to path arguments such as `--config-file`, `--key-file`, `--record-file`, the input/output paths, and `signing.identity_file`, as well as the path inside an `@`-file reference (for example, `@~/secrets/id_rsa`). Note that `~user` (another user's home) is not resolved.
+
 ## Initialization
 
 ```sh

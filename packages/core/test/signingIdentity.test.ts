@@ -174,6 +174,26 @@ describe("partner certificate pinning", () => {
       assertPartnerCertificateTrusted(tampered, pinnedTampered),
     ).rejects.toThrow(SigningError);
   });
+
+  // The self-signature check runs before the fingerprint match, so these reach
+  // it regardless of the (here irrelevant) pinned value.
+  const ANY_PIN = "A".repeat(43);
+
+  test("reports a degenerate partner key precisely, not as a bad signature", async () => {
+    const cert = clone(freshIdentity().certificate);
+    cert.publicKey.x = toBase64Url(new Uint8Array(32)); // all-zero: small order
+    await expect(
+      assertPartnerCertificateTrusted(cert, ANY_PIN),
+    ).rejects.toThrow(/small-order|degenerate/);
+  });
+
+  test("reports a failed partner self-signature distinctly from a bad key", async () => {
+    const cert = clone(freshIdentity().certificate);
+    cert.identity = "Tampered"; // body changed, key still valid -> signature fails
+    await expect(
+      assertPartnerCertificateTrusted(cert, ANY_PIN),
+    ).rejects.toThrow(/self-signature does not verify/);
+  });
 });
 
 // --- Identity binding --------------------------------------------------------

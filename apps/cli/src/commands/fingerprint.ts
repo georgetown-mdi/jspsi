@@ -1,5 +1,6 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
+import path from "node:path";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 
@@ -13,6 +14,7 @@ import {
 import type { SigningIdentity } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
+import { expandTilde } from "../fileUtils";
 import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
@@ -83,7 +85,7 @@ export function readConfigHints(
   configFile: string | undefined,
   explicit: boolean,
 ): ConfigHints {
-  const target = configFile ?? DEFAULT_CONFIG_PATH;
+  const target = expandTilde(configFile ?? DEFAULT_CONFIG_PATH);
   let text: string;
   try {
     text = fs.readFileSync(target, "utf8");
@@ -179,7 +181,13 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
         "linkage_terms.identity in the config",
     );
   const identity = generateSigningIdentity(identityString);
-  saveSigningIdentity(input.identityPath, identity);
+  // A first-time creation is exclusive (create-if-absent) so two concurrent
+  // invocations cannot both generate and silently overwrite each other, leaving
+  // one process holding a key whose fingerprint no longer matches disk. A
+  // --force regenerate of an existing identity deliberately overwrites it.
+  saveSigningIdentity(input.identityPath, identity, {
+    exclusive: existing === undefined,
+  });
   return {
     identity,
     action: existing !== undefined ? "Regenerated" : "Created",
@@ -234,8 +242,9 @@ export async function handler(argv: Arguments): Promise<void> {
 
   try {
     const hints = readConfigHints(configFileArg, configFileArg !== undefined);
-    const identityPath =
-      identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath();
+    const identityPath = expandTilde(
+      identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath(),
+    );
 
     const { identity, action } = resolveSigningIdentity({
       identityPath,
@@ -249,11 +258,21 @@ export async function handler(argv: Arguments): Promise<void> {
       identity.certificate,
     );
 
-    if (exportCertificate !== undefined)
-      fs.writeFileSync(
-        exportCertificate,
-        serializeCertificate(identity.certificate),
-      );
+    if (exportCertificate !== undefined) {
+      const exportPath = expandTilde(exportCertificate);
+      try {
+        fs.mkdirSync(path.dirname(exportPath), { recursive: true });
+        fs.writeFileSync(
+          exportPath,
+          serializeCertificate(identity.certificate),
+        );
+      } catch (err) {
+        throw new UsageError(
+          `could not write certificate to ${exportPath}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
 
     report(action, identityPath, identity, fingerprint);
   } catch (err) {

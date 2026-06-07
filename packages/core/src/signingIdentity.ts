@@ -302,6 +302,12 @@ export function generateSigningIdentity(
       "cannot generate a signing identity for an empty identity string",
     );
 
+  // noble/curves contract: keygen() returns the 32-byte Ed25519 *seed* as
+  // `secretKey` (NOT a 64-byte expanded key), and sign() takes that same seed.
+  // We store the seed as the JWK `d`. If a future noble version returned an
+  // expanded key here, decodePrivateSeed's 32-byte length check on load would
+  // reject it rather than letting an inconsistent `d` produce signatures that
+  // fail to verify.
   const { secretKey, publicKey } =
     options.seed !== undefined
       ? ed25519.keygen(options.seed)
@@ -332,25 +338,53 @@ export function generateSigningIdentity(
 // --- Self-signature verification ---------------------------------------------
 
 /**
- * Verify a certificate's self-signature: that `certificate.signature` is a valid
- * Ed25519 signature over the certificate body under the body's own public key.
- * Returns `false` for a malformed signature, a degenerate public key, or a
- * signature that does not verify. Pure check; does not consult any pin or
- * identity.
+ * Assert a certificate's self-signature, throwing a {@link SigningError} that
+ * names the specific failure: a malformed or degenerate public key, a malformed
+ * signature, or a signature that does not verify. This is the throwing form used
+ * on every load and trust path so a degenerate key is reported as such rather
+ * than masquerading as a failed signature; it decodes the public key exactly
+ * once. Pure check; does not consult any pin or identity.
+ *
+ * @throws {SigningError}
+ */
+function assertCertificateSelfSignature(cert: SigningCertificate): void {
+  // decodePublicKey throws a precise SigningError for a malformed/degenerate key.
+  const pub = decodePublicKey(cert.publicKey.x);
+  let sig: Uint8Array<ArrayBuffer>;
+  try {
+    sig = fromBase64Url(cert.signature);
+  } catch {
+    throw new SigningError("certificate signature is not valid base64url");
+  }
+  if (sig.length !== ED25519_SIGNATURE_BYTES)
+    throw new SigningError(
+      `certificate signature must be ${ED25519_SIGNATURE_BYTES} bytes, got ` +
+        `${sig.length}`,
+    );
+  if (!ed25519.verify(sig, signatureInput(cert), pub))
+    throw new SigningError(
+      "certificate self-signature does not verify; the certificate is " +
+        "malformed or has been tampered with",
+    );
+}
+
+/**
+ * Whether a certificate's self-signature is valid: that `certificate.signature`
+ * is a valid Ed25519 signature over the certificate body under the body's own
+ * public key. The boolean counterpart to {@link assertCertificateSelfSignature}
+ * for callers that only need a yes/no (the precise reason is available from the
+ * asserting form). Returns `false` for a malformed signature, a degenerate
+ * public key, or a signature that does not verify.
  */
 export function verifyCertificateSelfSignature(
   cert: SigningCertificate,
 ): boolean {
-  let pub: Uint8Array<ArrayBuffer>;
-  let sig: Uint8Array<ArrayBuffer>;
   try {
-    pub = decodePublicKey(cert.publicKey.x);
-    sig = fromBase64Url(cert.signature);
+    assertCertificateSelfSignature(cert);
+    return true;
   } catch {
     return false;
   }
-  if (sig.length !== ED25519_SIGNATURE_BYTES) return false;
-  return ed25519.verify(sig, signatureInput(cert), pub);
 }
 
 // --- Parse / serialize -------------------------------------------------------
@@ -368,13 +402,9 @@ export function verifyCertificateSelfSignature(
  */
 export function parseCertificate(raw: unknown): SigningCertificate {
   const cert = SigningCertificateSchema.parse(camelizeKeys(raw));
-  // decodePublicKey throws SigningError on a malformed/degenerate key.
-  decodePublicKey(cert.publicKey.x);
-  if (!verifyCertificateSelfSignature(cert))
-    throw new SigningError(
-      "certificate self-signature does not verify; the certificate is " +
-        "malformed or has been tampered with",
-    );
+  // Decodes the public key (rejecting a malformed/degenerate one) and verifies
+  // the self-signature in one pass, each failure with its own precise message.
+  assertCertificateSelfSignature(cert);
   return cert;
 }
 
@@ -492,6 +522,14 @@ export async function matchesPinnedFingerprint(
     pinnedBytes = fromBase64Url(pinnedFingerprint);
   } catch {
     // A malformed pinned value cannot match anything.
+    //
+    // TODO(receipt-verification): a malformed pin is currently indistinguishable
+    // from a genuine mismatch -- both end as "fingerprint does not match". The
+    // CLI guards this today (SigningConfigSchema validates partner_fingerprint
+    // against FINGERPRINT_REGEX before it reaches here), so it is unreachable via
+    // config. The first caller that accepts a fingerprint from a NON-config
+    // source must distinguish "your configured pin is malformed" from "the
+    // partner's certificate does not match", or diagnosis will be confusing.
     return false;
   }
   return bytesEqual(actualBytes, pinnedBytes);
@@ -517,11 +555,16 @@ export async function assertPartnerCertificateTrusted(
         "certificate cannot be trusted; obtain the partner's fingerprint " +
         "out-of-band and set signing.partner_fingerprint",
     );
-  if (!verifyCertificateSelfSignature(certificate))
+  // Surface the precise reason (degenerate key vs. failed signature) with
+  // partner-facing context rather than a single generic message.
+  try {
+    assertCertificateSelfSignature(certificate);
+  } catch (err) {
     throw new SigningError(
-      "partner certificate self-signature does not verify; it is malformed or " +
-        "has been tampered with",
+      "partner certificate is not valid: " +
+        (err instanceof Error ? err.message : String(err)),
     );
+  }
   if (!(await matchesPinnedFingerprint(certificate, pinnedFingerprint)))
     throw new SigningError(
       "partner certificate fingerprint does not match the pinned value; the " +
@@ -546,6 +589,10 @@ export interface PresentedCertificateCheck {
  * authorizes the receipt's asserted identity. Throws on the first failure with a
  * clear, user-facing message. This is the single entry point a receipt-
  * verification phase calls.
+ *
+ * Note for that caller: if `pinnedFingerprint` can originate from a non-config
+ * source, see the TODO in {@link matchesPinnedFingerprint} -- a malformed pin is
+ * currently reported as a generic mismatch and should be distinguished.
  *
  * @throws {SigningError}
  */
