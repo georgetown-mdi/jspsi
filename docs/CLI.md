@@ -93,10 +93,16 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 >   proceed.
 > - Online invite does not yet revoke or expire the token early on timeout or
 >   cancellation; the token simply lapses at its 1-hour expiry.
+> - Online invite does not embed a `connectionEndpoint` in the invitation it
+>   prints; the server location is conveyed only by the printed `psilink accept
+>   URL ...` hint. An offline acceptor of an online-generated invitation
+>   therefore gets a placeholder connection block to fill in, not one seeded from
+>   the inviter's endpoint.
 > - Online invite and accept persist the configuration only after the whole
->   exchange succeeds. If the handshake succeeds but the data exchange then
->   fails, the rotated key is saved (by `psilink exchange`'s rotation path) but
->   the configuration is not written; re-invite to recover.
+>   exchange succeeds. If anything after the handshake fails -- the data
+>   exchange, or writing the configuration file itself -- the rotated key is
+>   saved (by `psilink exchange`'s rotation path) but the configuration is not
+>   written; re-invite to recover.
 
 ## Offline invitation
 

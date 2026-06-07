@@ -4,9 +4,11 @@ import { userInfo } from "node:os";
 
 import { getLogger, decodeInvitation, UsageError } from "@psilink/core";
 import type {
+  ConnectionConfig,
   ExchangeSpec,
   InvitationToken,
   LinkageTerms,
+  PreparedExchange,
 } from "@psilink/core";
 
 import { resolveAtSignRefs } from "../util/atSignRefs";
@@ -24,6 +26,10 @@ import {
   prepareForOnlineExchange,
   promptConfirm,
   runOnlineBootstrap,
+  runOrExit,
+  type CommonBootstrapOptions,
+  type ResolvedDataSpec,
+  type RunnableConnectionConfig,
 } from "./bootstrap";
 
 export function builder(cmd: Argv): Argv {
@@ -67,9 +73,7 @@ export function builder(cmd: Argv): Argv {
  *
  * @internal exported for testing
  */
-export function resolveAcceptPositionals(
-  positionals: Array<unknown>,
-):
+export function resolveAcceptPositionals(positionals: Array<unknown>):
   | { mode: "offline"; invitation: string; input?: string }
   | {
       mode: "online";
@@ -139,8 +143,7 @@ export async function decodeAndValidateInvitation(
     token = await decodeInvitation(encoded);
   } catch (err) {
     throw new UsageError(
-      "invalid invitation string: " +
-        (err instanceof Error ? err.message : String(err)),
+      "invalid invitation string: " + describeDecodeError(err),
     );
   }
 
@@ -151,6 +154,30 @@ export async function decodeAndValidateInvitation(
     );
 
   return token;
+}
+
+/**
+ * Render a decode failure concisely. `decodeInvitation` throws a `ZodError` on
+ * schema-validation failure, whose `.message` is a multi-line JSON dump; surface
+ * the first issue (with its path) instead. Other failures (checksum, JSON,
+ * base64) are plain `Error`s and pass through unchanged.
+ */
+function describeDecodeError(err: unknown): string {
+  if (err !== null && typeof err === "object" && "issues" in err) {
+    const { issues } = err as {
+      issues?: Array<{ path?: Array<PropertyKey>; message?: string }>;
+    };
+    if (Array.isArray(issues) && issues.length > 0) {
+      const first = issues[0];
+      const at =
+        Array.isArray(first.path) && first.path.length > 0
+          ? `${first.path.join(".")}: `
+          : "";
+      const more = issues.length > 1 ? ` (and ${issues.length - 1} more)` : "";
+      return `${at}${first.message ?? "schema validation failed"}${more}`;
+    }
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 // --- Display -----------------------------------------------------------------
@@ -174,6 +201,105 @@ function displayInvitation(
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
 }
 
+// --- Validation (the no-commit phase) ----------------------------------------
+
+/**
+ * Everything an acceptance needs that is fallible but free of the gating side
+ * effects (the confirmation prompt, writing files, opening a connection):
+ * decode + validate the invitation, detect conflicts, validate the URL and read
+ * the input (online), and resolve the data spec and connection. The caller's
+ * commit step performs the prompt and side effects from this bundle, so a
+ * missing file, bad URL, or invalid invitation aborts before the user is asked
+ * to confirm. Cleaning warnings are logged here so they precede the prompt.
+ */
+type AcceptReady =
+  | {
+      mode: "online";
+      url: URL;
+      output?: string;
+      token: InvitationToken;
+      connection: RunnableConnectionConfig;
+      dataSpec: ResolvedDataSpec;
+      prepared: PreparedExchange;
+    }
+  | {
+      mode: "offline";
+      token: InvitationToken;
+      connection: ConnectionConfig;
+      seeded: boolean;
+      dataSpec: ResolvedDataSpec;
+    };
+
+/**
+ * Validate and prepare an acceptance without committing any side effect. Throws
+ * (for the shared {@link runOrExit} mapper) on any failure; runs the invitation
+ * decode before the connection/input work so the `decode -> myTerms ->
+ * buildDataSpec` dependency stays ordered.
+ *
+ * @internal exported for testing
+ */
+export async function validateAccept(params: {
+  resolved: ReturnType<typeof resolveAcceptPositionals>;
+  options: CommonBootstrapOptions;
+  log: ReturnType<typeof getLogger>;
+}): Promise<AcceptReady> {
+  const { resolved, options, log } = params;
+
+  // Validate (checksum, schema, expiry) and detect file conflicts first, so the
+  // user is never prompted for an invalid invitation and a bootstrap never
+  // clobbers an existing configuration.
+  const token = await decodeAndValidateInvitation(resolved.invitation);
+  assertNoProvisionConflicts({
+    configPath: options.configFile,
+    keyPath: options.keyFile,
+  });
+
+  const myIdentity = options.identity ?? userInfo().username;
+  // Adopt the invitation's linkage keys, algorithm, and output policy, but record
+  // this party's own identity (the invitation's identity is the inviter's).
+  const myTerms: LinkageTerms = { ...token.linkageTerms, identity: myIdentity };
+
+  if (resolved.mode === "online") {
+    const { url, input, output } = resolved;
+    const rows = await loadInputRows(input);
+    const { dataSpec, warnings } = buildDataSpec({
+      terms: myTerms,
+      identity: myIdentity,
+      rows,
+    });
+    for (const w of warnings) log.warn(w);
+
+    const connection = connectionFromURL(url, connectionOverridesFrom(options));
+    const prepared = await prepareForOnlineExchange(dataSpec, myIdentity, rows);
+    return {
+      mode: "online",
+      url,
+      output,
+      token,
+      connection,
+      dataSpec,
+      prepared,
+    };
+  }
+
+  // Offline.
+  const rows =
+    resolved.input !== undefined
+      ? await loadInputRows(resolved.input)
+      : undefined;
+  const { dataSpec, warnings } = buildDataSpec({
+    terms: myTerms,
+    identity: myIdentity,
+    rows,
+  });
+  for (const w of warnings) log.warn(w);
+
+  const { connection, seeded } = connectionFromEndpoint(
+    token.connectionEndpoint,
+  );
+  return { mode: "offline", token, connection, seeded, dataSpec };
+}
+
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -181,82 +307,37 @@ export async function handler(argv: Arguments): Promise<void> {
 
   logLibrary.setDefaultLevel(options.logLevel);
   const log = getLogger("accept");
-
   const positionals = (argv["args"] as Array<string> | undefined) ?? [];
-  let resolved: ReturnType<typeof resolveAcceptPositionals>;
-  try {
-    resolved = resolveAcceptPositionals(positionals);
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(64);
-  }
 
-  let token: InvitationToken;
-  try {
-    // Validate (checksum, schema, expiry) and detect file conflicts before the
-    // prompt and before any network activity, so the user is never asked to
-    // accept an invalid invitation and a bootstrap never clobbers an existing
-    // configuration.
-    token = await decodeAndValidateInvitation(resolved.invitation);
-    assertNoProvisionConflicts({
-      configPath: options.configFile,
-      keyPath: options.keyFile,
-    });
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(
-      err instanceof UsageError
-        ? 64
-        : ((err as { exitCode?: number }).exitCode ?? 69),
+  await runOrExit(log, async () => {
+    const resolved = resolveAcceptPositionals(positionals);
+    // All validation runs before the prompt: the user is never asked to confirm
+    // an invitation, URL, or input file that has not validated, and the prompt
+    // itself runs inside runOrExit so a stdin error exits cleanly rather than
+    // crashing.
+    const ready = await validateAccept({ resolved, options, log });
+
+    displayInvitation(ready.token, log);
+    const confirmed = await promptConfirm(
+      "Accept this invitation and write configuration?",
     );
-  }
+    if (!confirmed) {
+      log.info("invitation declined; no files were written");
+      return;
+    }
 
-  displayInvitation(token, log);
-  const confirmed = await promptConfirm(
-    "Accept this invitation and write configuration?",
-  );
-  if (!confirmed) {
-    log.info("invitation declined; no files were written");
-    return;
-  }
-
-  const myIdentity = options.identity ?? userInfo().username;
-  // Adopt the invitation's linkage keys, algorithm, and output policy, but
-  // record this party's own identity (the invitation's identity is the inviter's).
-  const myTerms: LinkageTerms = { ...token.linkageTerms, identity: myIdentity };
-
-  try {
-    if (resolved.mode === "online") {
-      const { url, input, output } = resolved;
-      const rows = await loadInputRows(input);
-      const { dataSpec, warnings } = buildDataSpec({
-        terms: myTerms,
-        identity: myIdentity,
-        rows,
-      });
-      for (const w of warnings) log.warn(w);
-
-      const connection = connectionFromURL(
-        url,
-        connectionOverridesFrom(options),
-      );
-      const prepared = await prepareForOnlineExchange(
-        dataSpec,
-        myIdentity,
-        rows,
-      );
-
+    if (ready.mode === "online") {
       await runOnlineBootstrap({
-        connection,
-        dataSpec,
-        prepared,
-        pakeToken: token.pakeToken,
+        connection: ready.connection,
+        dataSpec: ready.dataSpec,
+        prepared: ready.prepared,
+        pakeToken: ready.token.pakeToken,
         // Pass the invitation's expiry through unchanged; authenticateConnection
         // re-checks it before and after the SPAKE2 handshake.
-        expires: token.expires,
+        expires: ready.token.expires,
         keyPath: options.keyFile,
         configPath: options.configFile,
-        output,
+        output: ready.output,
         verbosity: options.verbosity,
         loggerName: "accept",
         recordOutput: resolveRecordOutput({
@@ -271,32 +352,19 @@ export async function handler(argv: Arguments): Promise<void> {
       return;
     }
 
-    // Offline.
-    const rows =
-      resolved.input !== undefined
-        ? await loadInputRows(resolved.input)
-        : undefined;
-    const { dataSpec, warnings } = buildDataSpec({
-      terms: myTerms,
-      identity: myIdentity,
-      rows,
-    });
-    for (const w of warnings) log.warn(w);
-
-    const { connection, seeded } = connectionFromEndpoint(
-      token.connectionEndpoint,
-    );
-    const spec: ExchangeSpec = { connection, ...dataSpec };
+    const spec: ExchangeSpec = {
+      connection: ready.connection,
+      ...ready.dataSpec,
+    };
     const { configPath, keyPath } = provisionConfigAndKey(
       spec,
-      // The acceptor's key file holds the invitation token without an expiry;
-      // the inviter's copy carries the expiry. The token rotates on the first
-      // successful exchange.
-      { pakeToken: token.pakeToken },
+      // The acceptor's key file holds the invitation token without an expiry; the
+      // inviter's copy carries the expiry. The token rotates on first exchange.
+      { pakeToken: ready.token.pakeToken },
       { configPath: options.configFile, keyPath: options.keyFile },
     );
 
-    if (seeded)
+    if (ready.seeded)
       log.info(
         `wrote config to ${configPath}, seeding the connection block from the ` +
           "invitation's endpoint; review it and add your own credentials " +
@@ -308,12 +376,5 @@ export async function handler(argv: Arguments): Promise<void> {
           "running 'psilink exchange'.",
       );
     log.info(`wrote key file to ${keyPath}. Keep it private.`);
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(
-      err instanceof UsageError
-        ? 64
-        : ((err as { exitCode?: number }).exitCode ?? 69),
-    );
-  }
+  });
 }

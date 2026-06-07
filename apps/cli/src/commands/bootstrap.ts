@@ -51,7 +51,7 @@ export type ResolvedDataSpec = Omit<ExchangeSpec, "connection">;
 // supports sftp and filedrop, and a webrtc URL is rejected upstream. Narrowing
 // to this (rather than the full ConnectionConfig) keeps a webrtc config from
 // reaching runOnlineBootstrap, where it would otherwise only fail at runtime.
-type RunnableConnectionConfig = Extract<
+export type RunnableConnectionConfig = Extract<
   ConnectionConfig,
   { channel: "sftp" | "filedrop" }
 >;
@@ -418,6 +418,38 @@ export async function promptConfirm(question: string): Promise<boolean> {
     return answer === "y" || answer === "yes";
   } finally {
     rl.close();
+  }
+}
+
+// --- Command execution -------------------------------------------------------
+
+/**
+ * Run a command body, mapping any thrown error to a process exit: a
+ * {@link UsageError} to EX_USAGE (64), otherwise the error's own numeric
+ * `exitCode` or EX_UNAVAILABLE (69). This is the single error->exit boundary for
+ * the bootstrap commands; routing the whole handler body through it -- including
+ * the accept confirmation prompt -- means a thrown or rejected step exits
+ * cleanly rather than crashing with an unhandled rejection. The `?? exitCode`
+ * rung is load-bearing: `validateInputFile` and `buildDataSpec` throw plain
+ * `Error`s carrying `exitCode`, so a missing input file keeps its own exit code
+ * rather than collapsing to 69.
+ *
+ * On error it calls `process.exit` (typed `never`), so values produced inside
+ * `body` keep their definite-assignment narrowing at the call site.
+ */
+export async function runOrExit(
+  log: ReturnType<typeof getLogger>,
+  body: () => Promise<void>,
+): Promise<void> {
+  try {
+    await body();
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(
+      err instanceof UsageError
+        ? 64
+        : ((err as { exitCode?: number }).exitCode ?? 69),
+    );
   }
 }
 

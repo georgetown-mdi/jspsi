@@ -1,5 +1,5 @@
-import { expect, test } from "vitest";
-import { PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
+import { expect, test, vi } from "vitest";
+import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
 import type { ConnectionEndpoint } from "@psilink/core";
 
 import {
@@ -9,7 +9,11 @@ import {
   generatePakeToken,
   looksLikeUrl,
   redactUrlCredentials,
+  runOrExit,
 } from "../../src/commands/bootstrap";
+
+const silentLog = getLogger("bootstrap-test");
+silentLog.setLevel("silent");
 
 // --- looksLikeUrl ------------------------------------------------------------
 
@@ -95,6 +99,71 @@ test("redactUrlCredentials: strips an embedded password and username", () => {
 test("redactUrlCredentials: a credential-free URL is unchanged", () => {
   const redacted = redactUrlCredentials(new URL("sftp://host:2222/drop"));
   expect(redacted).toBe("sftp://host:2222/drop");
+});
+
+// --- runOrExit ---------------------------------------------------------------
+
+test("runOrExit: a UsageError exits 64", async () => {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  await runOrExit(silentLog, async () => {
+    throw new UsageError("bad usage");
+  });
+  expect(exit).toHaveBeenCalledWith(64);
+  exit.mockRestore();
+});
+
+test("runOrExit: a non-UsageError preserves its own exitCode (not collapsed to 69)", async () => {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  await runOrExit(silentLog, async () => {
+    // A distinctive code (not 69) proves the `?? exitCode` rung is preserved,
+    // so a missing input file keeps its own exit code instead of becoming 69.
+    throw Object.assign(new Error("input file not found"), { exitCode: 66 });
+  });
+  expect(exit).toHaveBeenCalledWith(66);
+  exit.mockRestore();
+});
+
+test("runOrExit: an error without an exitCode defaults to 69", async () => {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  await runOrExit(silentLog, async () => {
+    throw new Error("transport failure");
+  });
+  expect(exit).toHaveBeenCalledWith(69);
+  exit.mockRestore();
+});
+
+test("runOrExit: a rejected body (e.g. a stdin/prompt error) exits cleanly, never throwing", async () => {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  // A readline rejection mid-prompt is just a rejected promise inside the body;
+  // runOrExit maps it to an exit rather than letting it crash unhandled.
+  await expect(
+    runOrExit(silentLog, async () => {
+      await Promise.reject(new Error("stdin closed"));
+    }),
+  ).resolves.toBeUndefined();
+  expect(exit).toHaveBeenCalledWith(69);
+  exit.mockRestore();
+});
+
+test("runOrExit: a successful body does not exit", async () => {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  let ran = false;
+  await runOrExit(silentLog, async () => {
+    ran = true;
+  });
+  expect(ran).toBe(true);
+  expect(exit).not.toHaveBeenCalled();
+  exit.mockRestore();
 });
 
 // --- connectionFromEndpoint --------------------------------------------------

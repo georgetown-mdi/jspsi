@@ -3,7 +3,11 @@ import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
 import { getLogger, encodeInvitation, UsageError } from "@psilink/core";
-import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
+import type {
+  ConnectionConfig,
+  ExchangeSpec,
+  PreparedExchange,
+} from "@psilink/core";
 
 import { resolveRecordOutput } from "../recordFile";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
@@ -22,7 +26,10 @@ import {
   redactUrlCredentials,
   prepareForOnlineExchange,
   runOnlineBootstrap,
+  runOrExit,
+  type CommonBootstrapOptions,
   type ResolvedDataSpec,
+  type RunnableConnectionConfig,
 } from "./bootstrap";
 
 // Invitation tokens carry a 1-hour lifetime by default, per
@@ -98,6 +105,135 @@ export function resolveInvitePositionals(
   return { mode: "offline", input: arg0 };
 }
 
+// --- Validation (the no-commit phase) ----------------------------------------
+
+/**
+ * Everything an invitation needs that is fallible but free of the gating side
+ * effects (printing the token, writing files, opening a connection): conflict
+ * detection, URL validation (online), input reading, and minting+encoding the
+ * invitation. The caller's commit step performs the side effects from this
+ * bundle, so any failure here aborts before the live token reaches stdout or a
+ * config is written. Data-cleaning warnings are logged here (so they precede the
+ * token print), so this is not literally side-effect-free.
+ */
+type InviteReady =
+  | {
+      mode: "online";
+      url: URL;
+      output?: string;
+      connection: RunnableConnectionConfig;
+      dataSpec: ResolvedDataSpec;
+      prepared: PreparedExchange;
+      invitation: string;
+      expires: string;
+      pakeToken: string;
+    }
+  | {
+      mode: "offline";
+      dataSpec: ResolvedDataSpec;
+      invitation: string;
+      expires: string;
+      pakeToken: string;
+    };
+
+/**
+ * Validate and prepare an invitation without committing any side effect. Throws
+ * (for the shared {@link runOrExit} mapper) on any failure; mints `expires` and
+ * the PAKE token at encode time so the lifetime clock starts when the token
+ * exists, not at process entry.
+ *
+ * @internal exported for testing
+ */
+export async function validateInvite(params: {
+  resolved: ReturnType<typeof resolveInvitePositionals>;
+  options: CommonBootstrapOptions;
+  acceptTimeout: number;
+  log: ReturnType<typeof getLogger>;
+}): Promise<InviteReady> {
+  const { resolved, options, acceptTimeout, log } = params;
+  const identity = options.identity ?? userInfo().username;
+
+  if (resolved.mode === "online") {
+    const { url, input, output } = resolved;
+    // Detect a pre-existing config/key before anything else so a bootstrap never
+    // clobbers a configuration partway through an exchange.
+    assertNoProvisionConflicts({
+      configPath: options.configFile,
+      keyPath: options.keyFile,
+    });
+    // Validate the URL before the token is minted, so an unusable URL (e.g. a
+    // not-yet-supported webrtc scheme, or one with no host) fails before the
+    // caller can disclose the token.
+    const connection = connectionFromURL(
+      url,
+      connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
+    );
+
+    // The token's lifetime is fixed; an accept-timeout longer than it would keep
+    // waiting at the rendezvous past the point the token can be honored.
+    if (acceptTimeout > INVITATION_LIFETIME_SECONDS)
+      log.warn(
+        `--accept-timeout (${acceptTimeout}s) exceeds the invitation ` +
+          `lifetime (${INVITATION_LIFETIME_SECONDS}s); the token will expire ` +
+          "first and a later acceptance will be rejected.",
+      );
+
+    const rows = await loadInputRows(input);
+    const { dataSpec, warnings } = buildDataSpec({ identity, rows });
+    for (const w of warnings) log.warn(w);
+
+    const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
+    const pakeToken = generatePakeToken();
+    const invitation = await encodeInvitation({
+      version: "1",
+      linkageTerms: dataSpec.linkageTerms,
+      pakeToken,
+      expires,
+    });
+    // prepareForOnlineExchange can throw; run it here, before the token print in
+    // the caller's commit step, so a failure never follows disclosure.
+    const prepared = await prepareForOnlineExchange(dataSpec, identity, rows);
+
+    return {
+      mode: "online",
+      url,
+      output,
+      connection,
+      dataSpec,
+      prepared,
+      invitation,
+      expires,
+      pakeToken,
+    };
+  }
+
+  // Offline.
+  if (resolved.input === undefined)
+    throw new UsageError(
+      "an input file is required to generate an invitation; usage: " +
+        "psilink invite INPUT_FILE",
+    );
+  assertNoProvisionConflicts({
+    configPath: options.configFile,
+    keyPath: options.keyFile,
+  });
+
+  const rows = await loadInputRows(resolved.input);
+  const { dataSpec, warnings } = buildDataSpec({ identity, rows });
+  for (const w of warnings) log.warn(w);
+
+  const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
+  const pakeToken = generatePakeToken();
+  const invitation = await encodeInvitation({
+    version: "1",
+    linkageTerms: dataSpec.linkageTerms,
+    pakeToken,
+    expires,
+  });
+
+  return { mode: "offline", dataSpec, invitation, expires, pakeToken };
+}
+
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -108,72 +244,32 @@ export async function handler(argv: Arguments): Promise<void> {
 
   logLibrary.setDefaultLevel(options.logLevel);
   const log = getLogger("invite");
-
   const positionals = (argv["args"] as Array<string> | undefined) ?? [];
-  let resolved: ReturnType<typeof resolveInvitePositionals>;
-  try {
-    resolved = resolveInvitePositionals(positionals);
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(64);
-  }
 
-  const identity = options.identity ?? userInfo().username;
-  const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
-  const pakeToken = generatePakeToken();
+  await runOrExit(log, async () => {
+    const resolved = resolveInvitePositionals(positionals);
+    const ready = await validateInvite({
+      resolved,
+      options,
+      acceptTimeout,
+      log,
+    });
 
-  if (resolved.mode === "online") {
-    const { url, input, output } = resolved;
-    try {
-      // Detect a pre-existing config/key before opening any connection so a
-      // bootstrap never clobbers a configuration partway through an exchange.
-      assertNoProvisionConflicts({
-        configPath: options.configFile,
-        keyPath: options.keyFile,
-      });
-
-      // Validate the server URL before the invitation is printed: an unusable
-      // URL (e.g. a not-yet-supported webrtc scheme, or one with no host) must
-      // fail here, not after the live PAKE token has already been disclosed on
-      // stdout.
-      const connection = connectionFromURL(
-        url,
-        connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
-      );
-
-      // The token's lifetime is fixed; an accept-timeout longer than it would
-      // keep waiting at the rendezvous past the point the token can be honored.
-      if (acceptTimeout > INVITATION_LIFETIME_SECONDS)
-        log.warn(
-          `--accept-timeout (${acceptTimeout}s) exceeds the invitation ` +
-            `lifetime (${INVITATION_LIFETIME_SECONDS}s); the token will expire ` +
-            "first and a later acceptance will be rejected.",
-        );
-
-      const rows = await loadInputRows(input);
-      const { dataSpec, warnings } = buildDataSpec({ identity, rows });
-      for (const w of warnings) log.warn(w);
-
-      const invitation = await encodeInvitation({
-        version: "1",
-        linkageTerms: dataSpec.linkageTerms,
-        pakeToken,
-        expires,
-      });
-      printInvitation(invitation, { url });
-
-      const prepared = await prepareForOnlineExchange(dataSpec, identity, rows);
-
+    if (ready.mode === "online") {
+      // The token is disclosed only now -- after all validation and prep above
+      // succeeded. Nothing fallible runs after this print except the network
+      // wait it is meant to precede.
+      printInvitation(ready.invitation, { url: ready.url });
       log.info("waiting for the partner to accept...");
       await runOnlineBootstrap({
-        connection,
-        dataSpec,
-        prepared,
-        pakeToken,
-        expires,
+        connection: ready.connection,
+        dataSpec: ready.dataSpec,
+        prepared: ready.prepared,
+        pakeToken: ready.pakeToken,
+        expires: ready.expires,
         keyPath: options.keyFile,
         configPath: options.configFile,
-        output,
+        output: ready.output,
         verbosity: options.verbosity,
         loggerName: "invite",
         recordOutput: resolveRecordOutput({
@@ -185,64 +281,26 @@ export async function handler(argv: Arguments): Promise<void> {
         `exchange complete; saved config to ${options.configFile} and the ` +
           `rotated key to ${options.keyFile}. Keep the key file private.`,
       );
-    } catch (err) {
-      log.error(err instanceof Error ? err.message : String(err));
-      process.exit(
-        err instanceof UsageError
-          ? 64
-          : ((err as { exitCode?: number }).exitCode ?? 69),
-      );
+      return;
     }
-    return;
-  }
 
-  // Offline.
-  try {
-    if (resolved.input === undefined)
-      throw new UsageError(
-        "an input file is required to generate an invitation; usage: " +
-          "psilink invite INPUT_FILE",
-      );
-    assertNoProvisionConflicts({
-      configPath: options.configFile,
-      keyPath: options.keyFile,
-    });
-
-    const rows = await loadInputRows(resolved.input);
-    const { dataSpec, warnings } = buildDataSpec({ identity, rows });
-    for (const w of warnings) log.warn(w);
-
-    const invitation = await encodeInvitation({
-      version: "1",
-      linkageTerms: dataSpec.linkageTerms,
-      pakeToken,
-      expires,
-    });
-
-    const spec = specWithPlaceholderConnection(dataSpec);
+    const spec = specWithPlaceholderConnection(ready.dataSpec);
     const { configPath, keyPath } = provisionConfigAndKey(
       spec,
-      { pakeToken, expires },
+      { pakeToken: ready.pakeToken, expires: ready.expires },
       { configPath: options.configFile, keyPath: options.keyFile },
     );
 
-    printInvitation(invitation, undefined);
+    printInvitation(ready.invitation, undefined);
     log.info(
       `wrote config to ${configPath} and key file to ${keyPath} (the ` +
-        `invitation expires at ${expires}). Keep the key file private.`,
+        `invitation expires at ${ready.expires}). Keep the key file private.`,
     );
     log.info(
       `fill in the connection block in ${configPath} before running ` +
         "'psilink exchange'.",
     );
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(
-      err instanceof UsageError
-        ? 64
-        : ((err as { exitCode?: number }).exitCode ?? 69),
-    );
-  }
+  });
 }
 
 // --- Helpers -----------------------------------------------------------------

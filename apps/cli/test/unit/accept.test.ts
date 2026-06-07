@@ -1,7 +1,12 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { afterEach, expect, test, vi } from "vitest";
+import logLibrary from "loglevel";
 import {
   encodeInvitation,
   getDefaultLinkageTerms,
+  getLogger,
   UsageError,
 } from "@psilink/core";
 import type { InvitationToken } from "@psilink/core";
@@ -9,8 +14,30 @@ import type { InvitationToken } from "@psilink/core";
 import {
   decodeAndValidateInvitation,
   resolveAcceptPositionals,
+  validateAccept,
 } from "../../src/commands/accept";
 import { generatePakeToken } from "../../src/commands/bootstrap";
+import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
+
+const silentLog = getLogger("accept-test");
+silentLog.setLevel("silent");
+
+let optionsCounter = 0;
+// Minimal options pointing config/key at fresh, non-existent temp paths so the
+// conflict gate passes and validateAccept reaches the step under test.
+function testOptions(
+  overrides: Partial<CommonBootstrapOptions> = {},
+): CommonBootstrapOptions {
+  const id = `${process.pid}-${optionsCounter++}`;
+  return {
+    configFile: path.join(tmpdir(), `psilink-accept-test-${id}.yaml`),
+    keyFile: path.join(tmpdir(), `psilink-accept-test-${id}.key`),
+    record: false,
+    logLevel: logLibrary.levels.SILENT,
+    verbosity: 0,
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -117,4 +144,34 @@ test("an expired invitation is rejected, naming the expiry time", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(realNow + 120_000));
   await expect(decodeAndValidateInvitation(encoded)).rejects.toThrow(expires);
+});
+
+// --- validateAccept (the no-commit phase, before the prompt) -----------------
+
+test("validateAccept: an invalid invitation is rejected before the prompt", async () => {
+  await expect(
+    validateAccept({
+      resolved: { mode: "offline", invitation: "not-a-valid-invitation" },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toBeInstanceOf(UsageError);
+});
+
+test("validateAccept: online rejects a missing input file before the prompt, preserving its exit code", async () => {
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  await expect(
+    validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        invitation: encoded,
+        input: "/nonexistent/psilink-input.csv",
+      },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toMatchObject({ exitCode: 69 });
 });
