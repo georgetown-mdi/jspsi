@@ -7,6 +7,7 @@ import {
   detectFileConflicts,
   expandTilde,
   FileExistsError,
+  writeFileAtomic,
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
 
@@ -83,6 +84,38 @@ describe("writeFileOwnerOnly", () => {
     const p = path.join(dir, "secret");
     writeFileOwnerOnly(p, "x");
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+  });
+});
+
+// --- writeFileAtomic ---------------------------------------------------------
+
+describe("writeFileAtomic", () => {
+  test("writes content and creates missing parent directories", () => {
+    const p = path.join(dir, "nested", "deep", "cert.json");
+    writeFileAtomic(p, "x");
+    expect(fs.readFileSync(p, "utf8")).toBe("x");
+  });
+
+  test("overwrites an existing file", () => {
+    const p = path.join(dir, "cert.json");
+    writeFileAtomic(p, "first");
+    writeFileAtomic(p, "second");
+    expect(fs.readFileSync(p, "utf8")).toBe("second");
+  });
+
+  test("writes world-readable (0644) by default on POSIX", () => {
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "cert.json");
+    writeFileAtomic(p, "x");
+    expect(fs.statSync(p).mode & 0o777).toBe(0o644);
+  });
+
+  test("honors an explicit mode and leaves no temp file behind", () => {
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "cert.json");
+    writeFileAtomic(p, "x", 0o600);
+    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
   });
 });
 

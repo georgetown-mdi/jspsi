@@ -158,11 +158,16 @@ function warnIfWindowsAclOverPermissive(
       );
     });
     if (overPermissive) {
+      // The fallback does not inspect the rights an ACE grants (icacls' rights
+      // notation is complex and locale-adjacent), so it warns about any explicit
+      // non-owner ACE without claiming it specifically grants read -- a
+      // write-only grant on a secret file is a misconfiguration worth flagging
+      // too. The PowerShell tier above does mask for read and keeps that wording.
       log.warn(
-        `${keyFilePath} has ACL entries granting read access to other users ` +
-          "(inherited not checked); restrict to owner-read-only via icacls " +
-          `or File Properties to prevent other users from reading the ` +
-          secretLabel,
+        `${keyFilePath} has ACL entries granting access to other users ` +
+          "(inherited entries and specific rights not inspected); restrict to " +
+          "owner-only via icacls or File Properties to prevent other users " +
+          `from accessing the ${secretLabel}`,
       );
     }
   } catch {
@@ -377,6 +382,49 @@ export function writeFileOwnerOnly(
     // partial write never leaves a `.tmp.<pid>` orphan beside the destination.
     // A caller's own rollback cannot do this: it does not know the pid-qualified
     // temp name.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort cleanup before re-throwing */
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically write `content` to `destPath` with an explicit, world-readable mode
+ * (default `0644`), via a sibling temp file and rename. For NON-secret,
+ * shareable artifacts -- the exported public certificate -- where
+ * {@link writeFileOwnerOnly} would be wrong (it forces owner-only `0600`, which
+ * a partner could not read). The temp+rename gives crash-atomicity (a truncated
+ * file is never visible at `destPath`) and the explicit `chmod` makes the mode
+ * independent of the process umask. Kept deliberately separate from
+ * `writeFileOwnerOnly` so the owner-only, ACL-hardened path -- the
+ * security-sensitive one -- is not entangled with public-file semantics.
+ */
+export function writeFileAtomic(
+  destPath: string,
+  content: string,
+  mode = 0o644,
+): void {
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  // Same-directory temp guarantees a same-filesystem (atomic) rename; the
+  // PID-qualified suffix keeps concurrent writers from clobbering each other.
+  const tmp = `${destPath}.tmp.${process.pid}`;
+  try {
+    fs.unlinkSync(tmp);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  try {
+    fs.writeFileSync(tmp, content, { encoding: "utf8", mode });
+    // writeFileSync's mode is masked by the umask; chmod sets it exactly so a
+    // restrictive umask cannot leave the shared file unreadable to its audience.
+    // (On Windows chmod only toggles the read-only bit; the public default ACL
+    // already lets a partner read the exported certificate.)
+    fs.chmodSync(tmp, mode);
+    fs.renameSync(tmp, destPath);
+  } catch (err) {
     try {
       fs.unlinkSync(tmp);
     } catch {

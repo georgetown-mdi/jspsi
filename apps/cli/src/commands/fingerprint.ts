@@ -14,7 +14,7 @@ import {
 import type { SigningIdentity } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
-import { expandTilde, FileExistsError } from "../fileUtils";
+import { expandTilde, FileExistsError, writeFileAtomic } from "../fileUtils";
 import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
@@ -209,13 +209,22 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
   // other. A --force regenerate (over a valid OR an unreadable file) is a
   // deliberate overwrite.
   if (existing === undefined && !replacingUnreadable) {
-    try {
-      saveSigningIdentity(input.identityPath, identity, { exclusive: true });
-    } catch (err) {
-      // Lost the create race: another process wrote the file between our
-      // existence check and our write. Adopt the winner's identity rather than
-      // failing -- both processes then agree on the same file and fingerprint.
-      if (err instanceof FileExistsError) {
+    // First-time creation is an atomic create-if-absent so two concurrent
+    // first-time creators cannot both win. Under a race three things can happen:
+    // we win (Created); we lose and the winner's file is present (adopt it,
+    // Loaded); or we lose but the winner's file vanishes again before we can read
+    // it (a create/delete flap). In that last case the path is free once more, so
+    // retrying the exclusive create is exactly the right response -- bound the
+    // retries so a pathological flap cannot spin forever, and report it as a
+    // usage error rather than re-throwing a stale "already exists" for a file
+    // that no longer exists.
+    const MAX_CREATE_ATTEMPTS = 5;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        saveSigningIdentity(input.identityPath, identity, { exclusive: true });
+        return { identity, action: "Created" };
+      } catch (err) {
+        if (!(err instanceof FileExistsError)) throw err;
         const winner = loadSigningIdentity(input.identityPath);
         if (winner !== undefined) {
           input.log.warn(
@@ -224,10 +233,16 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
           );
           return { identity: winner, action: "Loaded" };
         }
+        // The winner's file disappeared between our failed create and our read,
+        // so the path is free again; retry unless the flap persists.
+        if (attempt >= MAX_CREATE_ATTEMPTS)
+          throw new UsageError(
+            `the signing identity file at ${input.identityPath} is being ` +
+              "created and removed concurrently; re-run the command once the " +
+              "conflicting process has finished.",
+          );
       }
-      throw err;
     }
-    return { identity, action: "Created" };
   }
 
   saveSigningIdentity(input.identityPath, identity);
@@ -300,12 +315,20 @@ export async function handler(argv: Arguments): Promise<void> {
 
     if (exportCertificate !== undefined) {
       const exportPath = expandTilde(exportCertificate);
-      try {
-        fs.mkdirSync(path.dirname(exportPath), { recursive: true });
-        fs.writeFileSync(
-          exportPath,
-          serializeCertificate(identity.certificate),
+      // Guard against the destructive fat-finger of pointing --export-certificate
+      // at the identity file itself: that would overwrite the private-key-bearing
+      // file with the public certificate alone, irrecoverably destroying the key
+      // (and every fingerprint a partner has pinned). Compare resolved paths so a
+      // relative or ~-form argument that names the same file is still caught.
+      if (path.resolve(exportPath) === path.resolve(identityPath))
+        throw new UsageError(
+          `--export-certificate path ${exportPath} is the signing identity ` +
+            "file itself; refusing to overwrite the private key with the " +
+            "public certificate. Choose a different path for the export.",
         );
+      try {
+        // Public, shareable artifact: world-readable and atomic, NOT owner-only.
+        writeFileAtomic(exportPath, serializeCertificate(identity.certificate));
       } catch (err) {
         throw new UsageError(
           `could not write certificate to ${exportPath}: ` +

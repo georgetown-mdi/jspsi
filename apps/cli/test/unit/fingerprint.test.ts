@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Arguments } from "yargs";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   UsageError,
@@ -8,11 +9,13 @@ import {
   generateSigningIdentity,
 } from "@psilink/core";
 import {
+  handler,
   readConfigHints,
   resolveSigningIdentity,
 } from "../../src/commands/fingerprint";
 import { loadSigningIdentity } from "../../src/signingIdentityFile";
 import * as idFile from "../../src/signingIdentityFile";
+import { FileExistsError } from "../../src/fileUtils";
 
 let dir: string;
 const noopLog = { warn: () => {} };
@@ -196,6 +199,68 @@ test("on a lost create race, adopts the winner's identity instead of failing", (
   }
 });
 
+test("retries the exclusive create after the winner vanishes, then creates", () => {
+  const idPath = path.join(dir, "id.json");
+  const realSave = idFile.saveSigningIdentity;
+  let saveCalls = 0;
+  const saveSpy = vi
+    .spyOn(idFile, "saveSigningIdentity")
+    .mockImplementation((p, id, opts) => {
+      saveCalls += 1;
+      // First attempt loses the race; on the second the path is free again.
+      if (saveCalls === 1) throw new FileExistsError(p);
+      realSave(p, id, opts);
+    });
+  // The existence check and the post-failure recovery read both report the file
+  // absent (the winner vanished), so the loop retries rather than adopting.
+  const loadSpy = vi
+    .spyOn(idFile, "loadSigningIdentity")
+    .mockReturnValue(undefined);
+  try {
+    const { identity, action } = resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: "Party A",
+      force: false,
+      log: noopLog,
+    });
+    expect(action).toBe("Created");
+    expect(identity.certificate.identity).toBe("Party A");
+    expect(saveCalls).toBe(2); // proves the create was retried, not abandoned
+  } finally {
+    saveSpy.mockRestore();
+    loadSpy.mockRestore();
+  }
+});
+
+test("fails with a usage error (not a stale exists error) when a create race flaps", () => {
+  const idPath = path.join(dir, "id.json");
+  // Every exclusive create loses the race and every recovery read finds the file
+  // gone -- a pathological create/delete flap. The bounded retry must give up
+  // with a UsageError, never re-throw the (non-UsageError) FileExistsError for a
+  // file that no longer exists.
+  const saveSpy = vi
+    .spyOn(idFile, "saveSigningIdentity")
+    .mockImplementation((p) => {
+      throw new FileExistsError(p);
+    });
+  const loadSpy = vi
+    .spyOn(idFile, "loadSigningIdentity")
+    .mockReturnValue(undefined);
+  try {
+    expect(() =>
+      resolveSigningIdentity({
+        identityPath: idPath,
+        identityArg: "Party A",
+        force: false,
+        log: noopLog,
+      }),
+    ).toThrow(UsageError);
+  } finally {
+    saveSpy.mockRestore();
+    loadSpy.mockRestore();
+  }
+});
+
 test("falls back to the config identity when --identity is absent", () => {
   const idPath = path.join(dir, "id.json");
   const { identity, action } = resolveSigningIdentity({
@@ -206,6 +271,41 @@ test("falls back to the config identity when --identity is absent", () => {
   });
   expect(action).toBe("Created");
   expect(identity.certificate.identity).toBe("Configured Party");
+});
+
+// --- handler: --export-certificate guard -------------------------------------
+
+test("handler refuses to export the certificate over the identity file itself", async () => {
+  const idPath = path.join(dir, "id.json");
+  // Seed a real identity file (it holds the private key).
+  idFile.saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+  const before = fs.readFileSync(idPath, "utf8");
+
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir); // hermetic: no ambient psilink.yaml is consulted
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        "identity-file": idPath,
+        "export-certificate": idPath, // the destructive fat-finger
+        "log-level": "silent",
+        force: false,
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64"); // UsageError -> exit 64, not a silent clobber
+  } finally {
+    process.chdir(cwd);
+    exitSpy.mockRestore();
+  }
+  // The identity file is byte-for-byte intact: the private key was not destroyed.
+  expect(fs.readFileSync(idPath, "utf8")).toBe(before);
+  expect(loadSigningIdentity(idPath).privateKey).toBeDefined();
 });
 
 // --- readConfigHints ---------------------------------------------------------

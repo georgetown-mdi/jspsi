@@ -60,6 +60,18 @@ const ED25519_SIGNATURE_BYTES = 64;
  * a value without changing the certificate shape. */
 export type SigningAlgorithm = "ed25519";
 
+// NOTE(receipt-verification): SigningError extends UsageError, so every signing
+// failure currently exits the CLI as 64 (EX_USAGE). That is correct for the only
+// failures a command surfaces today -- local-identity problems (a malformed or
+// inconsistent identity file), which are genuine usage/config errors. The
+// partner-trust failures (a mismatched pinned fingerprint, a partner certificate
+// whose self-signature does not verify) are arguably security events that
+// warrant a distinct exit code (e.g. a TrustError subclass mapped to EX_NOPERM),
+// not one indistinguishable from a missing flag. No CLI command raises those yet
+// -- assertPartnerCertificateTrusted/verifyPresentedCertificate have no caller
+// until the receipt-verification phase -- so the distinction is deferred to that
+// caller, which is where the difference becomes observable.
+
 // --- Errors ------------------------------------------------------------------
 
 /**
