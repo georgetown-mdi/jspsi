@@ -1,0 +1,68 @@
+{
+  "description": "Known-answer vectors for the EncryptedMessageConnection AEAD encrypt path. Each vector fixes (sessionKey, role, sequence, plaintext) and records the exact serialized { enc } envelope the decorator emits: base64url(IV || ciphertext || 16-byte GCM tag), no padding. An independent implementation reproduces `enc` from the inputs below. The wire format is specified in docs/SECURITY_DESIGN.md (\"Channel security\"); this file is distinct from the deriveAeadKey KAT in encryptedMessageConnection.test.ts, which pins only the key derivation.",
+  "cipher": "AES-256-GCM",
+  "sessionKeyHex": "4242424242424242424242424242424242424242424242424242424242424242",
+  "keyDerivation": {
+    "function": "HKDF-SHA-256",
+    "saltHex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "infoPrefix": "psilink-aead-v1:",
+    "note": "info = infoPrefix + context; the initiator sends under context 'initiator-to-responder'."
+  },
+  "ivLayout": "12 bytes: 4 leading zero bytes (authenticated, not separately validated) followed by an 8-byte big-endian sequence number.",
+  "typeTags": {
+    "json": 0,
+    "binary": 1
+  },
+  "vectors": [
+    {
+      "name": "json-initiator-seq0",
+      "description": "JSON object payload (type tag 0) sealed by the initiator at sequence 0, the first message of a connection: the 8-byte sequence field -- and therefore the whole 12-byte IV -- is all zeros.",
+      "role": "initiator",
+      "context": "initiator-to-responder",
+      "sequence": 0,
+      "payloadType": "json",
+      "payloadJson": {
+        "hello": "world",
+        "n": 42
+      },
+      "typeTag": 0,
+      "ivHex": "000000000000000000000000",
+      "ciphertextHex": "caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397",
+      "tagHex": "d7d410cdc4c4e0d9411c7f2c5ab289b6",
+      "envelopeHex": "000000000000000000000000caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397d7d410cdc4c4e0d9411c7f2c5ab289b6",
+      "enc": "AAAAAAAAAAAAAAAAyrozr7s6dihswPVBCViWlCJqR52bT1wTl9fUEM3ExODZQRx_LFqyibY"
+    },
+    {
+      "name": "binary-initiator-seq4328719365",
+      "description": "Uint8Array payload (type tag 1) sealed by the initiator at sequence 0x0102030405, chosen so the 8-byte big-endian sequence field is visible in ivHex.",
+      "role": "initiator",
+      "context": "initiator-to-responder",
+      "sequence": 4328719365,
+      "payloadType": "binary",
+      "payloadHex": "deadbeef",
+      "typeTag": 1,
+      "ivHex": "000000000000000102030405",
+      "ciphertextHex": "00c04fd8df",
+      "tagHex": "8efad81942f87df44ced7b82ff2d9ded",
+      "envelopeHex": "00000000000000010203040500c04fd8df8efad81942f87df44ced7b82ff2d9ded",
+      "enc": "AAAAAAAAAAECAwQFAMBP2N-O-tgZQvh99Ezte4L_LZ3t"
+    },
+    {
+      "name": "json-responder-seq1",
+      "description": "JSON object payload (type tag 0) sealed by the responder at sequence 1, exercising the responder-to-initiator send key end to end -- the other directional key, distinct from the initiator vectors above.",
+      "role": "responder",
+      "context": "responder-to-initiator",
+      "sequence": 1,
+      "payloadType": "json",
+      "payloadJson": {
+        "ack": true
+      },
+      "typeTag": 0,
+      "ivHex": "000000000000000000000001",
+      "ciphertextHex": "69ce4b20a11adae637696d7aec",
+      "tagHex": "9b0b2f484303041df450c2ea7edf8f64",
+      "envelopeHex": "00000000000000000000000169ce4b20a11adae637696d7aec9b0b2f484303041df450c2ea7edf8f64",
+      "enc": "AAAAAAAAAAAAAAABac5LIKEa2uY3aW167JsLL0hDAwQd9FDC6n7fj2Q"
+    }
+  ]
+}
