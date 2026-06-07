@@ -319,7 +319,12 @@ export async function handler(argv: Arguments): Promise<void> {
       // at the identity file itself: that would overwrite the private-key-bearing
       // file with the public certificate alone, irrecoverably destroying the key
       // (and every fingerprint a partner has pinned). Compare resolved paths so a
-      // relative or ~-form argument that names the same file is still caught.
+      // relative or ~-form argument that names the same file is still caught. This
+      // is a lexical compare, not a realpath one, so it does not catch a symlink
+      // whose name differs but resolves to the identity file -- which is fine:
+      // writeFileAtomic finishes with rename(), and renaming onto a symlink path
+      // replaces the link itself, leaving the real target intact, so that variant
+      // is non-destructive even when the lexical check misses it.
       if (path.resolve(exportPath) === path.resolve(identityPath))
         throw new UsageError(
           `--export-certificate path ${exportPath} is the signing identity ` +
