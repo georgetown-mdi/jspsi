@@ -155,6 +155,13 @@ export async function validateInvite(params: {
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
+    // A non-positive --accept-timeout is a pure usage error; reject it before any
+    // filesystem probe or connection construction (it feeds peerTimeout below).
+    if (acceptTimeout <= 0)
+      throw new UsageError(
+        `--accept-timeout must be a positive number of seconds; got ` +
+          `${acceptTimeout}`,
+      );
     // Detect a pre-existing config/key before anything else so a bootstrap never
     // clobbers a configuration partway through an exchange.
     assertNoProvisionConflicts({
@@ -169,11 +176,6 @@ export async function validateInvite(params: {
       connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
     );
 
-    if (acceptTimeout <= 0)
-      throw new UsageError(
-        `--accept-timeout must be a positive number of seconds; got ` +
-          `${acceptTimeout}`,
-      );
     // The token's lifetime is fixed; an accept-timeout longer than it would keep
     // waiting at the rendezvous past the point the token can be honored.
     if (acceptTimeout > INVITATION_LIFETIME_SECONDS)
