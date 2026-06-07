@@ -1,7 +1,7 @@
 import * as z from "zod";
 
 import { deriveAeadKey } from "../auth";
-import { toBase64Url, fromBase64Url, enc, dec } from "../utils/crypto";
+import { toBase64Url, fromBase64Url, enc, decFatal } from "../utils/crypto";
 import {
   ConnectionError,
   asConnectionError,
@@ -23,8 +23,9 @@ export const TYPE_JSON = 0;
 export const TYPE_BINARY = 1;
 
 // Byte offset within the 12-byte IV where the 8-byte big-endian sequence
-// number is written (preceded by 4 reserved zero bytes). Both the encode path
-// (seqToIv) and the decode path (handleInbound) must agree on this offset.
+// number is written (preceded by 4 zero bytes the sender writes and GCM
+// authenticates, but that the receiver does not separately validate). Both the
+// encode path (seqToIv) and the decode path (handleInbound) must agree on it.
 /** @internal */
 export const IV_SEQ_OFFSET = 4;
 
@@ -48,8 +49,11 @@ export const IV_SEQ_OFFSET = 4;
  * because each key is used by exactly one sender.
  *
  * Wire format: `{ enc: base64url(IV || ciphertext || 16-byte GCM tag) }` where
- * IV is 12 bytes: 4 zero bytes (reserved) followed by an 8-byte big-endian
- * sequence number. The encrypted plaintext is a 1-byte type tag (`0` = JSON
+ * IV is 12 bytes: 4 leading bytes (zeroed by the sender) followed by an 8-byte
+ * big-endian sequence number. Those leading bytes are part of the GCM IV, so
+ * they are authenticated - tampering with them fails the tag - but the receiver
+ * does not separately validate that they are zero. The encrypted plaintext is a
+ * 1-byte type tag (`0` = JSON
  * object, `1` = Uint8Array) followed by the payload (UTF-8 JSON or raw bytes
  * respectively); the tag preserves the distinction between protobuf binary
  * frames and JSON control messages that the underlying transport's own
@@ -72,6 +76,16 @@ export const IV_SEQ_OFFSET = 4;
  * is blocked on the send path advancing its counter only on a fully successful
  * send, so that a legitimate sender-side gap can never be mistaken for an
  * attack (see docs/SECURITY_DESIGN.md, "Channel security").
+ *
+ * This decorator is single-consumer: it assumes at most one send() and one
+ * receive() in flight at a time, matching MessageConnection's lockstep usage
+ * across this codebase. Concurrent send()s or concurrent receive()s are not
+ * supported - they would race the per-direction sequence counters - so no
+ * failure is ever latched between an await and its continuation, and the sticky
+ * `failed` latch only needs to be observed at the start of the next send()/
+ * receive(). A deliberate close() concurrent with a parked receive() IS
+ * supported: the inner connection cancels the parked receive with kind
+ * "closed", which is surfaced unchanged.
  *
  * Construct via the static {@link EncryptedMessageConnection.create} factory.
  */
@@ -100,6 +114,16 @@ export class EncryptedMessageConnection implements MessageConnection {
     this.recvKey = recvKey;
   }
 
+  /**
+   * Derive the per-direction AEAD keys from `sessionKey` and construct the
+   * decorator over `inner`. `role` must be this peer's handshake role; the two
+   * peers must pass complementary roles (one "initiator", one "responder") so
+   * each side's send key matches the other's receive key. A role mismatch is
+   * not detected here - it surfaces later as a "security" decrypt failure on the
+   * first received frame, not as a construction error. `sessionKey` must be 32
+   * bytes (the AES-256 key length); a wrong length throws a "usage"
+   * {@link ConnectionError}.
+   */
   static async create(
     inner: MessageConnection,
     sessionKey: Uint8Array<ArrayBuffer>,
@@ -113,7 +137,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     // error rather than letting it degrade into a decryption mystery.
     if (sessionKey.length !== 32) {
       throw new ConnectionError(
-        `EncryptedConnection: session key must be 32 bytes, got ${sessionKey.length}`,
+        `EncryptedMessageConnection: session key must be 32 bytes, got ${sessionKey.length}`,
         "usage",
       );
     }
@@ -153,7 +177,7 @@ export class EncryptedMessageConnection implements MessageConnection {
   private fail(error: ConnectionError): ConnectionError {
     if (this.failed === undefined) {
       this.failed = error;
-      void this.closeInner().catch(() => {});
+      void this.closeInner();
     }
     return this.failed;
   }
@@ -161,9 +185,13 @@ export class EncryptedMessageConnection implements MessageConnection {
   // Tear the inner transport down exactly once. Memoizing the promise makes
   // close() idempotent at this layer (rather than borrowing the inner
   // connection's own idempotency guard) and lets close() await the same
-  // teardown a prior fail() may have already started.
+  // teardown a prior fail() may have already started. Inner-teardown errors are
+  // swallowed: close() must always resolve per the MessageConnection contract,
+  // and teardown is best-effort whether it is reached via fail() or close().
   private closeInner(): Promise<void> {
-    return (this.innerClosed ??= Promise.resolve(this.inner.close()));
+    return (this.innerClosed ??= Promise.resolve(this.inner.close()).catch(
+      () => {},
+    ));
   }
 
   private seqToIv(seq: number): Uint8Array<ArrayBuffer> {
@@ -183,7 +211,7 @@ export class EncryptedMessageConnection implements MessageConnection {
       // retried, which is exactly the "security" contract.
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: sequence number overflow; refusing to reuse nonce",
+          "EncryptedMessageConnection: sequence number overflow; refusing to reuse nonce",
           "security",
         ),
       );
@@ -219,7 +247,7 @@ export class EncryptedMessageConnection implements MessageConnection {
         serialized = JSON.stringify(data);
       } catch (err) {
         throw new ConnectionError(
-          "EncryptedConnection: cannot send a value that is not JSON-" +
+          "EncryptedMessageConnection: cannot send a value that is not JSON-" +
             "serializable (e.g. a BigInt or a circular reference)",
           "usage",
           { cause: err },
@@ -227,7 +255,7 @@ export class EncryptedMessageConnection implements MessageConnection {
       }
       if (serialized === undefined) {
         throw new ConnectionError(
-          "EncryptedConnection: cannot send a value with no JSON representation " +
+          "EncryptedMessageConnection: cannot send a value with no JSON representation " +
             "(undefined, a function, or a symbol)",
           "usage",
         );
@@ -258,18 +286,13 @@ export class EncryptedMessageConnection implements MessageConnection {
       // deferred (see docs/COMMUNICATION.md, "Error handling").
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: failed to encrypt outbound message " +
+          "EncryptedMessageConnection: failed to encrypt outbound message " +
             "(local crypto/runtime fault)",
           "transport",
           { cause: err },
         ),
       );
     }
-
-    // Re-check after the await. Dead code in the pull model (no concurrent
-    // caller can latch a failure between the encrypt above and here), kept so a
-    // future concurrent caller still observes the latch.
-    if (this.failed !== undefined) throw this.failed;
 
     const cipher = new Uint8Array(cipherBuffer);
     const envelope = new Uint8Array(
@@ -309,11 +332,6 @@ export class EncryptedMessageConnection implements MessageConnection {
         throw this.fail(asConnectionError(err, "transport"));
       throw asConnectionError(err, "transport");
     }
-    // Re-check after a successful receive: dead code in the pull model (the only
-    // path that latches mid-await is a concurrent close(), which makes
-    // inner.receive reject - handled above - not resolve), kept so a future
-    // concurrent caller observes the latch before inbound processing begins.
-    if (this.failed !== undefined) throw this.failed;
     return this.handleInbound(data);
   }
 
@@ -326,7 +344,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     if (!parsed.success) {
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: received invalid envelope",
+          "EncryptedMessageConnection: received invalid envelope",
           "security",
         ),
       );
@@ -338,7 +356,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     } catch {
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: envelope contains invalid base64url",
+          "EncryptedMessageConnection: envelope contains invalid base64url",
           "security",
         ),
       );
@@ -348,7 +366,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     if (bytes.length < 28) {
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: envelope is too short",
+          "EncryptedMessageConnection: envelope is too short",
           "security",
         ),
       );
@@ -368,7 +386,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     if (seqBig > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: inbound sequence number exceeds safe integer range",
+          "EncryptedMessageConnection: inbound sequence number exceeds safe integer range",
           "security",
         ),
       );
@@ -378,7 +396,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     if (seq <= this.recvSeq) {
       throw this.fail(
         new ConnectionError(
-          `EncryptedConnection: replay or out-of-order message rejected ` +
+          `EncryptedMessageConnection: replay or out-of-order message rejected ` +
             `(seq=${seq}, last accepted=${this.recvSeq})`,
           "security",
         ),
@@ -405,22 +423,17 @@ export class EncryptedMessageConnection implements MessageConnection {
     } catch {
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: AES-GCM authentication tag verification failed",
+          "EncryptedMessageConnection: AES-GCM authentication tag verification failed",
           "security",
         ),
       );
     }
 
-    // Re-check after the await: dead code in the pull model (only one decrypt
-    // is in flight), kept so a future concurrent caller still observes a
-    // failure latched by another frame while this one was in decrypt.
-    if (this.failed !== undefined) throw this.failed;
-
     const plain = new Uint8Array(plainBuffer);
     if (plain.length < 1) {
       throw this.fail(
         new ConnectionError(
-          "EncryptedConnection: decrypted payload is empty",
+          "EncryptedMessageConnection: decrypted payload is empty",
           "security",
         ),
       );
@@ -431,11 +444,16 @@ export class EncryptedMessageConnection implements MessageConnection {
       return plain.slice(1);
     } else if (tag === TYPE_JSON) {
       try {
-        return JSON.parse(dec.decode(plain.subarray(1)));
+        // Fatal decode: invalid UTF-8 in the (authenticated) payload throws
+        // rather than silently substituting U+FFFD, so a malformed frame from a
+        // non-conforming peer is rejected here as a security failure instead of
+        // being delivered mangled. Both the decode and the parse fall under this
+        // catch.
+        return JSON.parse(decFatal.decode(plain.subarray(1)));
       } catch {
         throw this.fail(
           new ConnectionError(
-            "EncryptedConnection: decrypted payload is not valid JSON",
+            "EncryptedMessageConnection: decrypted payload is not valid JSON",
             "security",
           ),
         );
@@ -443,7 +461,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     } else {
       throw this.fail(
         new ConnectionError(
-          `EncryptedConnection: unknown payload type tag ${tag}`,
+          `EncryptedMessageConnection: unknown payload type tag ${tag}`,
           "security",
         ),
       );
@@ -462,7 +480,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     // already started, so inner.close() runs once no matter how this is reached.
     this.fail(
       new ConnectionError(
-        "EncryptedConnection: cannot use a closed connection",
+        "EncryptedMessageConnection: cannot use a closed connection",
         "usage",
       ),
     );

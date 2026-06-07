@@ -6,13 +6,16 @@
 export const enc = new TextEncoder();
 
 /**
- * Shared `TextDecoder` instance for decoding UTF-8 bytes to strings. Use only
- * for one-shot, non-streaming decodes: never call `dec.decode(chunk, { stream:
- * true })` on this shared instance. Streaming mode carries decoder state across
- * calls, so a streaming caller would corrupt unrelated decodes elsewhere in the
- * process. A caller that needs streaming must construct its own `TextDecoder`.
+ * Shared fatal `TextDecoder` for decoding UTF-8 bytes to strings. `fatal: true`
+ * makes `decode` THROW a `TypeError` on malformed UTF-8 rather than silently
+ * substituting U+FFFD - a caller decoding authenticated-but-possibly-malformed
+ * bytes (e.g. the AEAD layer) needs the rejection, not silent corruption. Use
+ * only for one-shot, non-streaming decodes: never call `decFatal.decode(chunk,
+ * { stream: true })` on this shared instance, since streaming mode carries
+ * decoder state across calls and would corrupt unrelated decodes elsewhere in
+ * the process. A caller that needs streaming must construct its own decoder.
  */
-export const dec = new TextDecoder();
+export const decFatal = new TextDecoder("utf-8", { fatal: true });
 
 /**
  * Encode a byte array as a base64url string (no padding).

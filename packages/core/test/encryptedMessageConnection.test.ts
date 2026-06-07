@@ -176,6 +176,18 @@ test("binary and JSON payloads interleave over one connection", async () => {
   expect(await encB.receive()).toEqual({ status: "completed" });
 });
 
+test("a payload larger than the base64 chunk size round-trips", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  // Exceeds the 0x8000-byte chunk boundary in toBase64Url; PSI protobuf frames
+  // are legitimately this large. Guards the chunk-stitching in the encoder.
+  const payload = new Uint8Array(100_000) as Uint8Array<ArrayBuffer>;
+  for (let i = 0; i < payload.length; i++) payload[i] = i & 0xff;
+  await encA.send(payload);
+  const got = await encB.receive();
+  expect(got).toBeInstanceOf(Uint8Array);
+  expect(Array.from(got as Uint8Array)).toEqual(Array.from(payload));
+});
+
 // --- Replay / out-of-order ----------------------------------------------------
 
 test("a replayed frame is rejected as a security failure", async () => {
@@ -241,6 +253,21 @@ test("an unknown type tag is rejected as a security failure", async () => {
     await sealRaw("initiator", 0, new Uint8Array([99]) as Uint8Array<ArrayBuffer>),
   );
   await expectSecurity(recv.receive(), /unknown payload type tag 99/i);
+});
+
+test("invalid UTF-8 under a JSON tag is rejected as a security failure", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // TYPE_JSON tag, then bytes for a JSON string literal whose content is an
+  // invalid UTF-8 byte. A non-fatal decoder would silently replace it with
+  // U+FFFD and resolve with a mangled string; the fatal decoder rejects.
+  await peer.send(
+    await sealRaw(
+      "initiator",
+      0,
+      new Uint8Array([TYPE_JSON, 0x22, 0xff, 0x22]) as Uint8Array<ArrayBuffer>,
+    ),
+  );
+  await expectSecurity(recv.receive(), /not valid JSON/i);
 });
 
 test("a non-JSON JSON-tagged payload is rejected as a security failure", async () => {
@@ -448,6 +475,28 @@ test("a security failure tears down the inner transport", async () => {
   // The decorator latched terminal AND closed its inner connection, so the
   // peer's raw end observes the close rather than a still-open channel.
   await expect(peer.receive()).rejects.toThrow(/peer closed/i);
+});
+
+test("close() resolves even when the inner connection's close rejects", async () => {
+  let closeCalls = 0;
+  const inner: MessageConnection = {
+    send: () => Promise.resolve(),
+    receive: () => new Promise<unknown>(() => {}), // never resolves
+    close: () => {
+      closeCalls++;
+      return Promise.reject(new Error("inner close boom"));
+    },
+  };
+  const enc = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "initiator",
+  );
+  // close() must resolve (the MessageConnection contract), and be idempotent: a
+  // second close() also resolves without tearing the inner down twice.
+  await expect(enc.close()).resolves.toBeUndefined();
+  await expect(enc.close()).resolves.toBeUndefined();
+  expect(closeCalls).toBe(1);
 });
 
 // --- deriveAeadKey known-answer vector ----------------------------------------
