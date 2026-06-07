@@ -19,6 +19,7 @@ import {
   loadInputRows,
   looksLikeUrl,
   parseCommonBootstrapArgs,
+  redactUrlCredentials,
   prepareForOnlineExchange,
   runOnlineBootstrap,
   type ResolvedDataSpec,
@@ -41,12 +42,15 @@ export function builder(cmd: Argv): Argv {
       .positional("args", {
         type: "string",
         array: true,
+        // INPUT_FILE is required in both modes today: linkage terms are inferred
+        // from it. It becomes optional once reusing a pre-existing config as the
+        // terms source lands (board item 196895356); update this then.
         describe:
-          "[INPUT_FILE] (offline), or URL INPUT_FILE [OUTPUT_FILE] (online)",
+          "INPUT_FILE (offline), or URL INPUT_FILE [OUTPUT_FILE] (online)",
       })
       .usage(
         "Usage:\n" +
-          "  $0 invite [options] [INPUT_FILE]                       (offline)\n" +
+          "  $0 invite [options] INPUT_FILE                         (offline)\n" +
           "  $0 invite [options] URL INPUT_FILE [OUTPUT_FILE]       (online)\n\n" +
           "Offline: generate an invitation string and key file to share with a\n" +
           "partner out-of-band. Online: also connect, wait for the partner to\n" +
@@ -128,6 +132,24 @@ export async function handler(argv: Arguments): Promise<void> {
         keyPath: options.keyFile,
       });
 
+      // Validate the server URL before the invitation is printed: an unusable
+      // URL (e.g. a not-yet-supported webrtc scheme, or one with no host) must
+      // fail here, not after the live PAKE token has already been disclosed on
+      // stdout.
+      const connection = connectionFromURL(
+        url,
+        connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
+      );
+
+      // The token's lifetime is fixed; an accept-timeout longer than it would
+      // keep waiting at the rendezvous past the point the token can be honored.
+      if (acceptTimeout > INVITATION_LIFETIME_SECONDS)
+        log.warn(
+          `--accept-timeout (${acceptTimeout}s) exceeds the invitation ` +
+            `lifetime (${INVITATION_LIFETIME_SECONDS}s); the token will expire ` +
+            "first and a later acceptance will be rejected.",
+        );
+
       const rows = await loadInputRows(input);
       const { dataSpec, warnings } = buildDataSpec({ identity, rows });
       for (const w of warnings) log.warn(w);
@@ -140,10 +162,6 @@ export async function handler(argv: Arguments): Promise<void> {
       });
       printInvitation(invitation, { url });
 
-      const connection = connectionFromURL(
-        url,
-        connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
-      );
       const prepared = await prepareForOnlineExchange(dataSpec, identity, rows);
 
       log.info("waiting for the partner to accept...");
@@ -255,9 +273,11 @@ function printInvitation(
   // level so it is reliably captured for copy/paste.
   console.log(invitation);
   if (online !== undefined) {
+    // Strip any credentials embedded in the URL before echoing it: the partner
+    // supplies their own, and a password must not reach the terminal or logs.
     log.info(
       `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-        `${online.url.href} ${invitation} <INPUT_FILE>`,
+        `${redactUrlCredentials(online.url)} ${invitation} <INPUT_FILE>`,
     );
   } else {
     log.info(

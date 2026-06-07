@@ -8,6 +8,7 @@ import {
   connectionFromURL,
   generatePakeToken,
   looksLikeUrl,
+  redactUrlCredentials,
 } from "../../src/commands/bootstrap";
 
 // --- looksLikeUrl ------------------------------------------------------------
@@ -56,6 +57,44 @@ test("connectionFromURL: a webrtc (ws) URL is a usage error", () => {
   expect(() => connectionFromURL(new URL("ws://host/path"), {})).toThrow(
     "not yet supported",
   );
+});
+
+test("connectionFromURL: a bare-host sftp URL leaves the path unset", () => {
+  for (const raw of ["sftp://host", "sftp://host/"]) {
+    const conn = connectionFromURL(new URL(raw), {});
+    expect(conn.channel).toBe("sftp");
+    if (conn.channel !== "sftp") return;
+    // A trailing "/" must not be pinned as the remote path; the server's default
+    // working directory is used instead.
+    expect(conn.server.path).toBeUndefined();
+  }
+});
+
+test("connectionFromURL: an sftp URL with no host is a usage error", () => {
+  expect(() => connectionFromURL(new URL("sftp:///drop"), {})).toThrow(
+    UsageError,
+  );
+  expect(() => connectionFromURL(new URL("sftp:///drop"), {})).toThrow(
+    /must include a host/,
+  );
+});
+
+// --- redactUrlCredentials ----------------------------------------------------
+
+test("redactUrlCredentials: strips an embedded password and username", () => {
+  const redacted = redactUrlCredentials(
+    new URL("sftp://alice:s3cr3t@host:2222/drop"),
+  );
+  expect(redacted).not.toContain("s3cr3t");
+  expect(redacted).not.toContain("alice");
+  expect(redacted).toContain("host");
+  expect(redacted).toContain("2222");
+  expect(redacted).toContain("/drop");
+});
+
+test("redactUrlCredentials: a credential-free URL is unchanged", () => {
+  const redacted = redactUrlCredentials(new URL("sftp://host:2222/drop"));
+  expect(redacted).toBe("sftp://host:2222/drop");
 });
 
 // --- connectionFromEndpoint --------------------------------------------------

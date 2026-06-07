@@ -47,6 +47,15 @@ import type { RecordOutput } from "../recordFile";
 // not-yet-resolved input to prepareForExchange; here resolution has happened.
 export type ResolvedDataSpec = Omit<ExchangeSpec, "connection">;
 
+// The connection channels the CLI can actually run an exchange over: runProtocol
+// supports sftp and filedrop, and a webrtc URL is rejected upstream. Narrowing
+// to this (rather than the full ConnectionConfig) keeps a webrtc config from
+// reaching runOnlineBootstrap, where it would otherwise only fail at runtime.
+type RunnableConnectionConfig = Extract<
+  ConnectionConfig,
+  { channel: "sftp" | "filedrop" }
+>;
+
 // The placeholder host/username written into a config when the inviter did not
 // supply a connection endpoint. Chosen to be obvious in a diff and to fail
 // loudly (rather than silently connect somewhere) if the user runs `exchange`
@@ -81,6 +90,22 @@ export function looksLikeUrl(value: string): boolean {
 }
 
 /**
+ * Render a URL as a string with any embedded credentials (the userinfo
+ * component) removed, for echoing in a user-facing hint. `URL.href` preserves an
+ * embedded password, which must never reach the terminal, logs, or shell
+ * history; the partner supplies their own credentials, so the username is
+ * dropped too and only the locator remains.
+ *
+ * @internal exported for testing
+ */
+export function redactUrlCredentials(url: URL): string {
+  const safe = new URL(url.href);
+  safe.username = "";
+  safe.password = "";
+  return safe.href;
+}
+
+/**
  * Build a connection config from a server URL, for the online invite/accept
  * paths. Mirrors the zero-setup mapping but is constrained to the channels the
  * CLI can actually run: a `webrtc` (ws/wss) URL or an unsupported scheme is a
@@ -93,7 +118,7 @@ export function looksLikeUrl(value: string): boolean {
 export function connectionFromURL(
   url: URL,
   overrides: ConnectionOverrides,
-): ConnectionConfig {
+): RunnableConnectionConfig {
   const channel = channelFromURL(url);
 
   if (channel === "filedrop") {
@@ -106,11 +131,23 @@ export function connectionFromURL(
       channel: "filedrop",
       path: fileURLToPath(url),
     };
-    return applyConnectionOverrides(base, overrides);
+    return applyConnectionOverrides(
+      base,
+      overrides,
+    ) as RunnableConnectionConfig;
   }
 
   if (channel !== "sftp")
     throw new UsageError(`${channel} channel not yet supported in the CLI`);
+
+  // Reject a credential-only or schemeless URL with no host (e.g. sftp:///path)
+  // here, with a clear message, rather than passing host: "" through to a
+  // connection attempt that fails obscurely later. Mirrors the filedrop branch's
+  // host validation above.
+  if (!url.hostname)
+    throw new UsageError(
+      `sftp URL must include a host (e.g. sftp://host/path); got: ${url.href}`,
+    );
 
   const base: SFTPConnectionConfig = {
     channel: "sftp",
@@ -119,10 +156,13 @@ export function connectionFromURL(
       port: url.port ? Number(url.port) : undefined,
       username: url.username || undefined,
       password: url.password || undefined,
-      path: url.pathname || undefined,
+      // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
+      // unset so the server's default working directory is used, rather than
+      // pinning it to the filesystem root.
+      path: url.pathname && url.pathname !== "/" ? url.pathname : undefined,
     },
   };
-  return applyConnectionOverrides(base, overrides);
+  return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;
 }
 
 /**
@@ -318,7 +358,7 @@ export async function prepareForOnlineExchange(
  * `saveConfig` strips any PAKE material regardless.
  */
 export async function runOnlineBootstrap(params: {
-  connection: ConnectionConfig;
+  connection: RunnableConnectionConfig;
   dataSpec: ResolvedDataSpec;
   prepared: PreparedExchange;
   pakeToken: string;
@@ -330,14 +370,18 @@ export async function runOnlineBootstrap(params: {
   loggerName: string;
   recordOutput?: RecordOutput;
 }): Promise<void> {
-  const connWithAuth = {
+  // `connection` is already narrowed to the channels runProtocol supports
+  // (RunnableConnectionConfig), so this cast only adds the `authentication`
+  // field; it bridges the spread of a discriminated union to the union target,
+  // not a channel-safety hole.
+  const connWithAuth: ProtocolConnectionConfig = {
     ...params.connection,
     authentication: {
       pakeToken: params.pakeToken,
       expires: params.expires,
       keyFilePath: params.keyPath,
     },
-  } as unknown as ProtocolConnectionConfig;
+  } as ProtocolConnectionConfig;
 
   await runProtocol(
     connWithAuth,
