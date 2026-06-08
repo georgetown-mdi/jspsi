@@ -373,7 +373,7 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * - `version` — mandatory. Two versions are incompatible if no migration path
  *   exists.
  * - `identity` — none. Free-text identifying the holding party; recorded in
- *   the non-repudiation receipt.
+ *   the exchange record (the disclosure log).
  * - `date` — soft. A mismatch warns that one party may have a stale copy.
  * - `algorithm` — mandatory. `psi` reveals matched identifiers; `psi-c` reveals
  *   only the count.
@@ -406,8 +406,8 @@ export interface LinkageTerms {
   version: string;
   /**
    * Free-text string identifying the party holding these linkage terms (e.g.
-   * name organization, contact info). Included verbatim in the non-repudiation
-   * receipt.
+   * name organization, contact info). Included verbatim in the exchange
+   * record.
    * Consistency: none — parties may differ.
    */
   identity: string;

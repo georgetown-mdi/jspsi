@@ -396,6 +396,12 @@ test("writes the self-attested record and opening when runExchange returns an au
     termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
     localIdentity: "Party A",
     partnerIdentity: "Party B",
+    governance: {
+      algorithm: "psi",
+      matchingBasis: [{ name: "ssn", type: "ssn" }],
+      payloadSent: [],
+      payloadReceived: [],
+    },
     bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     commitments: {
       localPayloadSent: "We5eIlrtkWBUe1uSGrla5rvLs0YhGFPPVDjk4EPX2k8",
