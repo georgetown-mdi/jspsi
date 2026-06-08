@@ -21,6 +21,7 @@ import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
   PreparedExchange,
+  ExchangeBootstrapResult,
 } from "@psilink/core";
 
 import { LocalFSClient } from "./connection/localFSClient";
@@ -78,6 +79,17 @@ export type ProtocolConnectionConfig = DistributedOmit<
   authentication: AuthPersist | null;
 };
 
+/** The value {@link runProtocol} resolves with. */
+export interface RunProtocolResult {
+  /**
+   * Outcome of the zero-setup `--save` bootstrap, forwarded from
+   * {@link runExchange}. Present only when `saveIntent` was passed (the
+   * zero-setup path); `undefined` for every authenticated exchange and when the
+   * run is short-circuited by a signal.
+   */
+  bootstrap?: ExchangeBootstrapResult;
+}
+
 /**
  * Runs the PSI protocol over an SFTP or file-drop connection and writes
  * results to output.
@@ -97,6 +109,13 @@ export type ProtocolConnectionConfig = DistributedOmit<
  * When `recordOutput` is provided, the self-attested exchange record and its
  * private opening data are written after the results (non-fatal on failure; see
  * {@link writeExchangeRecord}). Pass `undefined` to skip recording.
+ *
+ * `saveIntent` carries this party's zero-setup `--save` intent into the
+ * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
+ * (the default) on every authenticated path; pass a boolean only from the
+ * zero-setup command, which then reads {@link RunProtocolResult.bootstrap} to
+ * provision the saved config/key. It is only meaningful with
+ * `authentication: null`.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -105,7 +124,8 @@ export async function runProtocol(
   verbosity: number,
   loggerName: string,
   recordOutput?: RecordOutput,
-): Promise<void> {
+  saveIntent?: boolean,
+): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
   if (connection.channel !== "filedrop" && connection.channel !== "sftp")
@@ -642,27 +662,30 @@ export async function runProtocol(
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
-    const { associationTable, partnerPayload, audit } = await runExchange(
-      // Authenticated path: `secure` is the AEAD decorator over mc, so PSI
-      // frames are encrypted on the wire. No-PAKE path: secure is undefined and
-      // the exchange runs over the unencrypted mc (transport security only).
-      secure ?? mc,
-      role,
-      prepared,
-      {
-        psiLibrary: await PSI(),
-        verbosity,
-        onStage: (id: string) => {
-          const label = stageLabels[id] ?? id;
-          log.info(label.charAt(0).toLowerCase() + label.slice(1));
+    const { associationTable, partnerPayload, audit, bootstrap } =
+      await runExchange(
+        // Authenticated path: `secure` is the AEAD decorator over mc, so PSI
+        // frames are encrypted on the wire. No-PAKE path: secure is undefined
+        // and the exchange runs over the unencrypted mc (transport security
+        // only) -- this is the zero-setup path that carries the --save bootstrap.
+        secure ?? mc,
+        role,
+        prepared,
+        {
+          psiLibrary: await PSI(),
+          verbosity,
+          saveIntent,
+          onStage: (id: string) => {
+            const label = stageLabels[id] ?? id;
+            log.info(label.charAt(0).toLowerCase() + label.slice(1));
+          },
+          onWarning: (msg: string) => log.warn("terms exchange:", msg),
+          onProtocolConfirmed: (partnerTerms, resolvedRole) => {
+            log.info("terms agreed, partner identity:", partnerTerms.identity);
+            log.info("role:", resolvedRole);
+          },
         },
-        onWarning: (msg: string) => log.warn("terms exchange:", msg),
-        onProtocolConfirmed: (partnerTerms, resolvedRole) => {
-          log.info("terms agreed, partner identity:", partnerTerms.identity);
-          log.info("role:", resolvedRole);
-        },
-      },
-    );
+      );
 
     const { headers, rows } = buildOutputTable(
       associationTable,
@@ -685,6 +708,10 @@ export async function runProtocol(
         audit.opening,
         loggerName,
       );
+
+    // bootstrap is undefined on every authenticated path (saveIntent unset) and
+    // populated on the zero-setup --save path; the caller branches on it.
+    return { bootstrap };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
     // independently derived the same new token from the SPAKE2 session key, but
@@ -776,7 +803,9 @@ export async function runProtocol(
         `error in flight when ${signalReceived} arrived: ` +
           (err instanceof Error ? err.message : String(err)),
       );
-      return;
+      // No bootstrap outcome: the run was cut short by a signal and the process
+      // is exiting. The caller guards against an absent bootstrap result.
+      return {};
     }
     throw err;
   } finally {

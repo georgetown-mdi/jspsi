@@ -89,6 +89,10 @@ Parties wishing to transition from a zero-setup exchange to a recurring exchange
 
 The party that did not signal an intent to save the exchange parameters is notified that their partner is trying to establish a recurring exchange, that nothing is being saved on their end, and that they can either wait for an invitation from their partner or coordinate to run the exchange again and save the parameters.
 
+The save intent rides the linkage-terms exchange -- the one round-trip both parties always perform -- so each side learns the other's intent even when it advertised nothing itself, and a one-sided save never stalls. When both parties save, the initiator generates a fresh base64url 32-byte secret (the same format and entropy as a rotation token; see [Token format and entropy](#token-format-and-entropy)) and transmits it to the responder on a dedicated in-band message.
+
+That secret is protected only by the transport layer (SSH for SFTP, DTLS for WebRTC, or operator access controls for a file-drop), because a zero-setup exchange carries no PAKE session key and so has no application-layer AEAD to wrap it. This is a deliberate, accepted trust model: bootstrapping with `--save` rests on the same transport trust -- and the same trust in the server administrator -- as the zero-setup exchange that carries it, for that one initial exchange only. The convenience is the point; a party who is not willing to trust the transport with the secret should use `psilink invite` instead, which never sends the secret through the exchange server (the invitation token travels out of band over a trusted channel such as secure email). After this first exchange the secret is rotated on every subsequent recurring exchange and is never reused.
+
 # Key file security
 
 `.psilink.key` contains the PAKE token that authenticates recurring exchanges. It must be treated as a credential with the same care as a private key or password.

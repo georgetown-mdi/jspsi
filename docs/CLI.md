@@ -56,7 +56,7 @@ Before running, users are warned about the limitations of the security model, na
 
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
-> **Not yet implemented:** `psilink init` and the `--save` flag are reserved for the configuration and bootstrapping workflow but are not yet wired up in the CLI; they are targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The `init` command currently prints a "not yet implemented" message and exits; the `--save` flag emits a warning and proceeds with a standard zero-setup exchange. `psilink invite` and `psilink accept` are implemented (offline and online); see the sections below.
+> **Not yet implemented:** `psilink init` is reserved for the configuration workflow but is not yet wired up in the CLI; it is targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The `init` command currently prints a "not yet implemented" message and exits. The `--save` flag, `psilink invite`, and `psilink accept` are implemented; see the sections below.
 
 If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret).
 
