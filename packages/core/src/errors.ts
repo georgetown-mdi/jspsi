@@ -71,6 +71,43 @@ export class FrameSizeExceededError extends UsageError {
 }
 
 /**
+ * Thrown when a transport directory listing violates a size bound: either the
+ * directory holds more entries than the configured maximum, or one entry's
+ * filename exceeds the configured maximum length. Raised at the transport
+ * `list()` layer in each {@link FileTransportClient} adapter -- while the
+ * directory is being enumerated, before the full listing is materialized -- so a
+ * hostile rendezvous directory cannot mount a memory-exhaustion denial of
+ * service through directory enumeration (entry count or name length),
+ * independent of file contents (see docs/SECURITY_DESIGN.md, "Channel
+ * security"). This is the directory-enumeration sibling of the per-frame
+ * {@link FrameSizeExceededError}: that bound guards the per-file body read; this
+ * one guards the listing that precedes it.
+ *
+ * Like {@link FrameSizeExceededError}, it is a {@link UsageError} subclass for
+ * two reasons. First, it must be terminal in the poll loop:
+ * {@link FileSyncConnection}'s poller stops on a `UsageError` (re-listing the
+ * same hostile directory cannot help and would re-incur the very enumeration
+ * this guards against) and reschedules on any other error, so deriving from
+ * `UsageError` makes the refusal terminal without changing the poller's
+ * classification. Second, an oversized or hostile shared directory is the same
+ * family as the other directory-state conditions `UsageError` already covers (a
+ * stray, malformed, or foreign file), so it shares the exit-64 (EX_USAGE)
+ * classification that tells the operator to inspect the directory rather than
+ * retry as if the transport were merely flaky.
+ *
+ * The concrete bound values and their derivation live with the enforcement
+ * sites in the CLI adapters (`apps/cli/src/connection/listingGuard.ts`), not
+ * here: unlike the frame-size cap, no `packages/core` code pre-checks a listing
+ * size, so the constants belong where they are enforced.
+ */
+export class DirectoryListingBoundsError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "DirectoryListingBoundsError";
+  }
+}
+
+/**
  * Thrown into an in-flight {@link FileSyncConnection} wait when the connection
  * is closed mid-rendezvous or mid-send. `close()` aborts a shared
  * `AbortController` whose `reason` is an instance of this class, so any wait

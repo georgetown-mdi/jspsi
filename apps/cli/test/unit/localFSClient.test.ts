@@ -4,9 +4,49 @@ import { Readable } from "node:stream";
 import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { FrameSizeExceededError } from "@psilink/core";
+import {
+  DirectoryListingBoundsError,
+  FrameSizeExceededError,
+} from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
+import {
+  MAX_DIRECTORY_ENTRIES,
+  MAX_FILENAME_LENGTH,
+} from "../../src/connection/listingGuard";
+
+// A lazily-generated stand-in for fs.opendir's Dir: yields `total` synthetic
+// entries one at a time and records how many were actually pulled. Generating
+// entries on demand (rather than building an array) lets a test drive list()
+// with a directory far larger than the cap while proving the walk stops at the
+// bound -- without the test itself allocating the very array the bound exists to
+// prevent.
+function countingDir(
+  total: number,
+  makeEntry: (i: number) => { name: string; isFile: () => boolean },
+) {
+  let yielded = 0;
+  return {
+    get yielded() {
+      return yielded;
+    },
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          if (yielded >= total)
+            return Promise.resolve({ value: undefined, done: true as const });
+          const value = makeEntry(yielded);
+          yielded += 1;
+          return Promise.resolve({ value, done: false as const });
+        },
+        // for-await calls return() when the body throws or breaks early.
+        return() {
+          return Promise.resolve({ value: undefined, done: true as const });
+        },
+      };
+    },
+  };
+}
 
 let dir: string;
 let client: LocalFSClient;
@@ -92,6 +132,71 @@ test("list omits a file that disappears between readdir and stat", async () => {
     expect(entries.map((e) => e.name)).toEqual(["keep.txt"]);
   } finally {
     spy.mockRestore();
+  }
+});
+
+test("list refuses a directory with more entries than the cap, stopping early", async () => {
+  // The directory is capable of yielding far more than the cap, but list() must
+  // refuse it without enumerating past the bound -- otherwise an attacker who
+  // floods the rendezvous directory drives an allocation proportional to the
+  // entry count. Proven by asserting the walk pulled exactly cap+1 entries (the
+  // one that tripped the bound) and stopped, not all 5000 extra.
+  const big = countingDir(MAX_DIRECTORY_ENTRIES + 5_000, (i) => ({
+    name: `f${i}.json`,
+    isFile: () => true,
+  }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spy = vi.spyOn(fs, "opendir").mockResolvedValue(big as any);
+  try {
+    await expect(client.list(dir)).rejects.toBeInstanceOf(
+      DirectoryListingBoundsError,
+    );
+    expect(big.yielded).toBe(MAX_DIRECTORY_ENTRIES + 1);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("list rejects an entry whose filename exceeds the maximum length", async () => {
+  // A name longer than NAME_MAX cannot exist on a real filesystem, so this is
+  // driven through a mocked directory: it is the SFTP-server case (a hostile
+  // server can synthesize an over-length name in a READDIR response) exercised
+  // against the shared bound.
+  const longName = `${"x".repeat(MAX_FILENAME_LENGTH + 1)}.json`;
+  const hostile = countingDir(1, () => ({
+    name: longName,
+    isFile: () => true,
+  }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spy = vi.spyOn(fs, "opendir").mockResolvedValue(hostile as any);
+  try {
+    await expect(client.list(dir)).rejects.toBeInstanceOf(
+      DirectoryListingBoundsError,
+    );
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("list accepts a directory at exactly the entry cap", async () => {
+  // Off-by-one guard: cap entries must list, only cap+1 trips. stat is mocked so
+  // the synthetic names need not exist on disk.
+  const atCap = countingDir(MAX_DIRECTORY_ENTRIES, (i) => ({
+    name: `f${i}.json`,
+    isFile: () => true,
+  }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const openSpy = vi.spyOn(fs, "opendir").mockResolvedValue(atCap as any);
+  const statSpy = vi
+    .spyOn(fs, "stat")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .mockResolvedValue({ mtimeMs: 1, size: 0 } as any);
+  try {
+    const result = await client.list(dir);
+    expect(result).toHaveLength(MAX_DIRECTORY_ENTRIES);
+  } finally {
+    openSpy.mockRestore();
+    statSpy.mockRestore();
   }
 });
 
