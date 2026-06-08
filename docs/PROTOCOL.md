@@ -166,6 +166,61 @@ If different identity strings are desired, update the DST and message inputs in 
 
 When renaming, also update every other domain-separation string in the codebase: the HKDF info strings in `pake.ts` (`"psilink-spake2-password-v1"`, `"psilink-spake2-ka-v1"`, `"psilink-spake2-ke-v1"`), `auth.ts` (`"psilink-aead-v1:..."`, `"psilink-token-rotation-v1"`), and the MAC label strings in `pake.ts` (`"psilink-spake2-confirm-A"`, `"psilink-spake2-confirm-B"`).
 
+# X25519 authenticated key exchange
+
+PSI-Link's X25519 authenticated key exchange is the key-agreement primitive that supersedes SPAKE2 as the source of the exchange session key (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#key-agreement-design) for the decision and its rationale). It performs an ephemeral X25519 Diffie-Hellman keyed together with the pre-shared secret, plus an explicit, role-asymmetric mutual key confirmation, and yields a 32-byte session key with forward secrecy and mutual authentication -- suitable to key the application-layer AEAD and the token rotation in exactly the same way the SPAKE2 session key Ke does. It is implemented as `runKex` in `packages/core/src/kex.ts` and exported from `@psilink/core`. This section specifies the primitive and its wire format; wiring it into the live authentication path (replacing SPAKE2 in `auth.ts`) is a separate, sequenced cutover and is not described here.
+
+**Library selection.** The governing rule is to prefer a well-respected, ideally audited, dual-platform library and to hand-roll only the minimal glue. As with SPAKE2, no production-ready, audited Noise Protocol Framework library with dual Node.js/browser support exists in the JavaScript ecosystem, so none qualifies. The construction therefore reuses [`@noble/curves`](https://github.com/paulmillr/noble-curves) -- already a dependency, independently audited, and used for the SPAKE2 group operations and the Ed25519 signing identity -- for the X25519 primitive (`x25519.getSharedSecret`) and the ephemeral key generation (`x25519.keygen`). No new dependency is added. The only hand-written layer is the minimal NNpsk0 glue: the Noise key-schedule mixing and the two confirmation tags. The full Noise framework is deliberately not implemented. The Diffie-Hellman is a library call, never hand-rolled curve math.
+
+**Construction.** The handshake is pinned to the Noise NNpsk0 pattern over X25519 -- no static keys, the pre-shared secret mixed in at position 0, and ephemeral-ephemeral Diffie-Hellman -- followed by an explicit key-confirmation round, following [NIST SP 800-56A Rev. 3](https://doi.org/10.6028/NIST.SP.800-56Ar3) (section 5.8.1 for the key-derivation step over the shared secret plus fixed info, sections 5.9 / 6.2.1.5 for key confirmation). All symmetric operations (SHA-256, HMAC-SHA-256, HKDF) use the platform `crypto.subtle` API, so they are identical on Node and in the browser.
+
+**Protocol-version tag.** The Noise "protocol name" is the version tag and is hashed into the initial handshake hash, binding every derived key and confirmation tag to it:
+
+```
+protocol_name = "psilink-kex-v1:NNpsk0_25519_SHA256"
+```
+
+A future authenticated mode (for example a certificate-chain variant) is an additive new version selected out of band; bumping this string makes a mismatched peer derive a different transcript and fail closed, so the door stays open without any pluggable-auth framework today.
+
+**Key schedule** (a minimal subset of the Noise `SymmetricState`: a chaining key `ck` and a handshake hash `h`). `protocol_name` is longer than the 32-byte hash output, so the Noise `InitializeSymmetric` reduces to `h0 = SHA-256(protocol_name)`, and `ck0 = h0`. The NNpsk0 tokens (`-> psk, e` then `<- e, ee`, with an empty prologue) are then processed in order:
+
+```
+MixHash("")                       # empty prologue
+MixKeyAndHash(psk)                # psk token at position 0
+MixHash(e_initiator_public)       # initiator's e: MixHash ...
+MixKey(e_initiator_public)        #                ... and MixKey (PSK mode)
+MixHash(e_responder_public)       # responder's e: MixHash ...
+MixKey(e_responder_public)        #                ... and MixKey (PSK mode)
+MixKey(dh)                        # ee: dh = X25519(e_self_private, e_peer_public)
+```
+
+In a PSK handshake, Noise (rev 34 section 9.2) processes each `e` token with `MixKey(e.public)` in addition to `MixHash(e.public)`, folding the ephemeral public keys into the chaining key as well as the hash; this implementation does both, so the mix chain is faithful NNpsk0. (`MixHash` touches only `h` and `MixKey` only `ck`, so their order within an `e` token does not affect the result; the chaining-key order `psk -> e_initiator -> e_responder -> ee` does, and is preserved.) Here `MixHash(x)` sets `h = SHA-256(h || x)`; `MixKey(ikm)` sets `ck = HKDF-Noise(ck, ikm, 2)[0]`; and `MixKeyAndHash(ikm)` sets `(ck, temp_h) = HKDF-Noise(ck, ikm, 3)[0..1]` then `MixHash(temp_h)`. `HKDF-Noise(ck, ikm, n)` is the Noise chaining HKDF (Noise rev 34 section 4.3): `temp_key = HMAC(ck, ikm)`, then `output_i = HMAC(temp_key, output_{i-1} || byte(i))` for `i` in `1..n` (with `output_0` empty). This equals RFC 5869 HKDF with `salt = ck` and an empty info string.
+
+After the tokens, the session key and a distinct confirmation key are derived, and the two confirmation tags computed, using the application HKDF (`hkdfDerive`: HKDF-SHA-256, 32-byte zero salt, named info):
+
+```
+session_key       = HKDF(ck || h, "psilink-kex-v1:session", 32)
+confirm_key        = HKDF(ck,      "psilink-kex-v1:confirm", 32)
+initiator_confirm  = HMAC(confirm_key, "psilink-kex-v1:initiator-confirm" || h)
+responder_confirm  = HMAC(confirm_key, "psilink-kex-v1:responder-confirm" || h)
+```
+
+Deriving `session_key` over both `ck` (which carries the pre-shared secret and the X25519 DH output) and `h` (which carries the protocol-version tag and both ephemeral public keys in role order) is the load-bearing invariant: the session key depends on the ephemeral DH output, so it is neither the pre-shared secret alone -- which would have no forward secrecy -- nor the raw X25519 output alone -- which would not be transcript-bound. The confirmation key is independent (distinct input keying material and a distinct label), and the two confirmation tags are role-asymmetric (distinct labels) and each binds the full transcript hash `h`. All labels are namespaced `psilink-kex-v1:` and are disjoint from every other domain-separation label in the system (`psilink-spake2-*`, `psilink-aead-v1:*`, `psilink-token-rotation-v1`, and the `psilink-signing-*` labels).
+
+**Message flow** (initiator sends first; all messages are JSON objects; `e` is a base64url-encoded 32-byte X25519 public key and `confirm` is a base64url-encoded 32-byte HMAC-SHA-256 tag):
+
+1. Initiator -> Responder: `{ kexMsg: "1", e: e_I }`
+2. Responder -> Initiator: `{ kexMsg: "2", e: e_R, confirm: responder_confirm }`
+3. Initiator -> Responder: `{ kexMsg: "3", confirm: initiator_confirm }` or `{ kexMsg: "abort" }`
+
+The responder confirms first (in msg2); the initiator verifies `responder_confirm` before sending its own confirmation in msg3, and the responder verifies `initiator_confirm` on msg3. A mismatched pre-shared secret therefore fails closed on both sides before any non-handshake frame is sent. Each side sends the tag for its own role and verifies the tag for the opposite role, so a reflected or echoed confirmation does not verify.
+
+**Contributory check.** The peer's X25519 share is rejected if the computed shared secret is all-zeros. `@noble/curves` enforces this in `getSharedSecret`, which rejects low-order and non-canonical peer shares by throwing (RFC 7748), so the check comes from the audited library; an explicit all-zeros guard is retained as defense in depth against a future primitive swap.
+
+**Failure handling** mirrors SPAKE2. All wire schemas use strict (`.strict()`) Zod parsing, so an unexpected field fails the parse. Tag comparison is constant-time. Every authentication failure throws a single generic, non-oracular error (`"key exchange authentication failed"`) that does not reveal which check failed; a silent peer surfaces the distinct `"key exchange handshake timed out"` after a 30 s per-message bound. Every receive-side failure before the final message sends a best-effort `{ kexMsg: "abort" }` so the peer stops waiting immediately rather than blocking until the timeout.
+
+**Test vectors and interoperability.** The key-schedule mix chain above is faithful Noise NNpsk0, but the overall handshake is pinned by psilink's own checked-in known-answer vector (`packages/core/test/vectors/kex-vectors.json`) rather than being wire-compatible with generic Noise. Two things diverge from a stock Noise NNpsk0 session: the protocol name differs (so the initial `h` differs), and instead of Noise `Split()` the session key uses a custom KDF over `ck || h` with an added explicit confirmation round. So no end-to-end Noise vector corresponds. What does correspond is the underlying machinery, cross-checked against its published references in `packages/core/test/kex.test.ts`: the X25519 Diffie-Hellman against [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748) section 6.1, and the Noise chaining HKDF against [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) test case 3. The vector fixes the pre-shared secret and both ephemeral private keys and records the session key and both confirmation tags; it is reproduced by the independent generator at `packages/core/test/vectors/generate-kex-vectors.mjs`.
+
 ## See also
 
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - exchange agreement format that parameterizes the protocol described here
