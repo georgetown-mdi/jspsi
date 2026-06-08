@@ -10,6 +10,10 @@ import {
   handler as exchangeHandler,
 } from "./commands/exchange";
 import {
+  builder as fingerprintBuilder,
+  handler as fingerprintHandler,
+} from "./commands/fingerprint";
+import {
   builder as inviteBuilder,
   handler as inviteHandler,
 } from "./commands/invite";
@@ -52,6 +56,12 @@ yargs(hideBin(process.argv))
     "Execute a recurring exchange",
     exchangeBuilder,
     exchangeHandler,
+  )
+  .command(
+    "fingerprint",
+    "Show (and lazily create) this party's signing certificate fingerprint",
+    fingerprintBuilder,
+    fingerprintHandler,
   )
   .usage("$0 [command] [options]")
   .help("h")

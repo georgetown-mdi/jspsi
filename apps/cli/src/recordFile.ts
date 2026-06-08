@@ -5,7 +5,7 @@ import {
 } from "@psilink/core";
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
 
-import { writeFileOwnerOnly } from "./keyFile";
+import { writeFileOwnerOnly } from "./fileUtils";
 
 /** Basename stem for the default record file. */
 export const DEFAULT_RECORD_BASENAME = "psilink-record";

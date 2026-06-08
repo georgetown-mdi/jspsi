@@ -25,7 +25,8 @@ import {
   saveConfig,
   DEFAULT_CONFIG_PATH,
 } from "../config";
-import { detectFileConflicts, DEFAULT_KEY_PATH } from "../keyFile";
+import { detectFileConflicts, expandTilde } from "../fileUtils";
+import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
@@ -207,9 +208,15 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   return {
     positionals: argv._,
     save: (argv["save"] as boolean | undefined) ?? false,
-    configFile:
+    // Local filesystem paths accept a leading `~`; server-private-key /
+    // -password are NOT paths here (resolveAtSignRefs already turned any @file
+    // ref into its contents), so they must not be tilde-expanded.
+    configFile: expandTilde(
       (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
-    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
+    ),
+    keyFile: expandTilde(
+      (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
+    ),
     identity: argv["identity"] as string | undefined,
     serverPort: argv["server-port"] as number | undefined,
     serverUsername: argv["server-username"] as string | undefined,
@@ -229,7 +236,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
-    recordFile: argv["record-file"] as string | undefined,
+    recordFile: expandTilde(argv["record-file"] as string | undefined),
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };

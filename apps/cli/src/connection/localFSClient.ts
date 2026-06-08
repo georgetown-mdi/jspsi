@@ -9,6 +9,8 @@ import type {
   PutOptions,
 } from "@psilink/core";
 
+import { frameSizeExceededError } from "./frameSizeGuard";
+
 /**
  * {@link FileTransportClient} backed by the local filesystem. Use this when
  * both parties share a network-mounted folder (e.g. an IT-provisioned share
@@ -100,12 +102,56 @@ export class LocalFSClient implements FileTransportClient {
   /**
    * `options.encoding` is not applied; always returns a raw Buffer. Callers
    * that need a decoded string should use `.toString(encoding)` on the result.
+   *
+   * When `options.maxBytes` is set, the read is bounded to that many bytes: the
+   * file is opened, the open handle is `fstat`ed, and a file larger than the cap
+   * is refused with a typed terminal error (see {@link frameSizeExceededError})
+   * before any content buffer is allocated. The stat and the read share one
+   * file handle, so that read pulls exactly the fstat'd size; a writer that
+   * appends after the stat (a TOCTOU race a plain `stat` + `readFile` would
+   * lose) cannot drive an allocation past the cap. Omitting `maxBytes` keeps the
+   * original unbounded
+   * `readFile` fast path.
    */
   async get(
     filePath: string,
-    _options?: GetOptions,
+    options?: GetOptions,
   ): Promise<Buffer<ArrayBufferLike>> {
-    return fs.readFile(filePath);
+    const maxBytes = options?.maxBytes;
+    if (maxBytes === undefined) return fs.readFile(filePath);
+
+    const handle = await fs.open(filePath, "r");
+    try {
+      const { size } = await handle.stat();
+      if (size > maxBytes)
+        throw frameSizeExceededError(filePath, maxBytes, size);
+      const buffer = Buffer.allocUnsafe(size) as Buffer<ArrayBufferLike>;
+      let offset = 0;
+      // Read exactly the fstat'd size from this handle. A single read() can
+      // return short, so loop until satisfied; bytesRead === 0 means the file
+      // was truncated under us (EOF before `size`), in which case the shorter
+      // prefix is returned rather than a buffer with an uninitialized tail.
+      while (offset < size) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          offset,
+          size - offset,
+          offset,
+        );
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      return offset === size
+        ? buffer
+        : (buffer.subarray(0, offset) as Buffer<ArrayBufferLike>);
+    } finally {
+      // Swallow a close() failure. This handle is read-only, so a failed close
+      // carries no data-integrity meaning; letting it reject here would replace
+      // the in-flight result -- masking a FrameSizeExceededError (whose
+      // UsageError type the poll loop relies on to stop re-reading the oversized
+      // file) or turning a successful read into a spurious transport error.
+      await handle.close().catch(() => {});
+    }
   }
 
   async put(
