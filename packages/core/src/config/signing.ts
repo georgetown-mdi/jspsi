@@ -16,8 +16,20 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
  * party shares with its partner out-of-band and the partner pins here. Sharing
  * the precise length lets a truncated or mistyped paste fail with a clear error
  * rather than silently never matching.
+ *
+ * The final character is constrained to the canonical set (those whose base64url
+ * value is a multiple of 4: A E I M Q U Y c g k o s w 0 4 8). A 43-character
+ * base64url string carries 258 bits but a SHA-256 digest is only 256, so the
+ * last character's low 2 bits are unused and are zero in the encoding `psilink
+ * fingerprint` emits. Without this constraint several distinct 43-character
+ * strings decode to the same 32 bytes; because pinning compares the decoded
+ * digest, a non-canonical variant would still match its certificate (so this is
+ * not a forgery vector), but the pin string would no longer be a 1:1 image of
+ * the digest. Requiring canonical form keeps that correspondence exact and
+ * rejects a near-miss paste outright rather than silently accepting a value
+ * `psilink` would never print.
  */
-export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{43}$/;
+export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /**
  * Receipt signing mode. Mirrors the two modes described in

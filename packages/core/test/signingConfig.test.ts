@@ -59,6 +59,29 @@ describe("parseSigningConfig", () => {
       }).success,
     ).toBe(false);
   });
+
+  test("rejects a non-canonical last character that decodes to the same digest", () => {
+    // The real fingerprint ends in "g"; "h", "i", "j" decode to the same 32
+    // bytes (the last char's low 2 bits are unused), so without a canonical
+    // constraint they would be accepted as equivalent pins. They must be
+    // rejected so the pin string is a 1:1 image of the digest psilink prints.
+    for (const lastChar of ["h", "i", "j"]) {
+      const nonCanonical = FINGERPRINT.slice(0, 42) + lastChar;
+      expect(
+        safeParseSigningConfig({
+          mode: "certificate",
+          partner_fingerprint: nonCanonical,
+        }).success,
+      ).toBe(false);
+    }
+    // The canonical form is still accepted.
+    expect(
+      safeParseSigningConfig({
+        mode: "certificate",
+        partner_fingerprint: FINGERPRINT,
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("ExchangeSpec signing block", () => {
