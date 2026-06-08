@@ -83,9 +83,16 @@ export type ProtocolConnectionConfig = DistributedOmit<
 export interface RunProtocolResult {
   /**
    * Outcome of the zero-setup `--save` bootstrap, forwarded from
-   * {@link runExchange}. Present only when `saveIntent` was passed (the
-   * zero-setup path); `undefined` for every authenticated exchange and when the
-   * run is short-circuited by a signal.
+   * {@link runExchange}. Defined whenever `saveIntent` is a boolean -- including
+   * `false`, where it carries `partnerSaveIntent` with `sharedSecret` undefined,
+   * which the caller needs to drive its no-save notice. `undefined` only when
+   * `saveIntent` was `undefined` (every authenticated exchange) or when the run
+   * is short-circuited by a signal (the interrupt path returns `{}`). The
+   * zero-setup caller relies on this: it passes the raw `--save` boolean so a
+   * non-saving party still receives a defined result, and reads `undefined` as
+   * "interrupted, do nothing" -- see the guard in the zeroSetup handler. Do not
+   * collapse a `false` saveIntent to `undefined`; that would silently suppress
+   * the no-save notices.
    */
   bootstrap?: ExchangeBootstrapResult;
 }
@@ -138,6 +145,19 @@ export async function runProtocol(
     );
 
   const auth = connection.authentication;
+  // saveIntent drives the zero-setup `--save` bootstrap, which exists only on
+  // the unauthenticated path: an authenticated exchange already has a persistent
+  // key and no provisioning step to consume a bootstrap result, so a stray
+  // saveIntent here would advertise a save field (and possibly transmit a secret
+  // frame) inside the PAKE-secured channel with nothing reading it back. Reject
+  // the combination rather than leave the footgun open to a future caller; the
+  // type docs already mark saveIntent as meaningful only with `authentication:
+  // null`, and both current callers honor that.
+  if (auth && saveIntent !== undefined)
+    throw new Error(
+      "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
+        "an authenticated exchange must not pass it",
+    );
   // Captured in the outer scope so the post-handshake saveKeyFile call below
   // can reuse the trimmed value without re-reading auth.keyFilePath.
   let trimmedKeyFilePath: string | undefined;

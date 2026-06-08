@@ -441,6 +441,16 @@ export function finalizeBootstrap(params: {
 }): void {
   const { save, bootstrap, spec, configFile, keyFile, log } = params;
 
+  // Invariant guard: a shared secret is established only when both parties pass
+  // --save, so a secret reaching here with save === false is an internal
+  // contradiction (the secret frame is gated on this party's own intent in
+  // runExchange). Fail loudly rather than silently discard a negotiated secret.
+  if (!save && bootstrap.sharedSecret !== undefined)
+    throw new Error(
+      "internal error: a shared secret was established but this party did not " +
+        "opt to save; refusing to silently discard it",
+    );
+
   if (save) {
     if (bootstrap.sharedSecret !== undefined) {
       // Both parties saved: the initiator generated the secret and the responder
@@ -460,6 +470,18 @@ export function finalizeBootstrap(params: {
     }
     // We saved but the partner did not: there is no secret, so persist the
     // config alone (no key file) and steer the user to the invitation flow.
+    // Re-check for a config conflict before writing: the both-saved branch gets
+    // this from provisionConfigAndKey, but this branch writes through saveConfig
+    // directly. The up-front gate ran before the network round-trip, so a file
+    // that appeared at the path in that window must abort here rather than
+    // clobber the user's configuration -- the same "never clobber a half-finished
+    // bootstrap" intent as the pre-flight check.
+    const conflicts = detectFileConflicts([configFile]);
+    if (conflicts.length > 0)
+      throw new UsageError(
+        `refusing to overwrite ${conflicts.join(", ")}, which appeared after ` +
+          "the pre-flight check; move or remove it and re-run with --save",
+      );
     saveConfig(configFile, spec);
     log.info(
       `your partner did not also choose to save, so no shared secret was ` +
@@ -618,7 +640,13 @@ export async function handler(argv: Arguments): Promise<void> {
       }),
       // Carry this party's --save intent into the in-band bootstrap. The
       // exchange advertises it to the partner and, when both saved, returns the
-      // established secret on runResult.bootstrap.
+      // established secret on runResult.bootstrap. Pass the raw boolean, never
+      // `options.save || undefined`: a non-saving party (options.save === false)
+      // must still receive a defined bootstrap so finalizeBootstrap can emit the
+      // "your partner wanted to save" notice. Collapsing false to undefined
+      // would route it through the interrupt guard below and silently swallow
+      // that notice. The wire is unaffected either way -- the save field only
+      // rides the terms frame when intent is true (see exchangeTerms).
       options.save,
     );
   } catch (err) {

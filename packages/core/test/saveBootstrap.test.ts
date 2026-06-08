@@ -1,9 +1,13 @@
 import { expect, test } from "vitest";
 
+import PSI from "@openmined/psi.js";
+
 import { exchangeBootstrapSecret, exchangeTerms } from "../src/protocolSetup";
+import { prepareForExchange, runExchange } from "../src/exchange";
 import { PAKE_TOKEN_REGEX } from "../src/config/connection";
 import type { HandshakeRole } from "../src/types";
 import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { ExchangeResult } from "../src/exchange";
 
 import {
   createMessagePipe,
@@ -185,4 +189,101 @@ test("no save field is put on the wire when save intent is omitted", async () =>
   ]);
   for (const frame of sent)
     expect(Object.prototype.hasOwnProperty.call(frame, "save")).toBe(false);
+});
+
+// --- runExchange bootstrap contract (end-to-end) -----------------------------
+//
+// The helpers above mirror runExchange's sequencing; these tests drive the real
+// runExchange over a pipe (real PSI) to pin the contract the CLI handler depends
+// on: a boolean saveIntent -- including `false` -- yields a DEFINED bootstrap, so
+// a non-saving party still carries partnerSaveIntent back to emit its notice;
+// `undefined` yields no bootstrap. This is the invariant a "clean up false to
+// undefined" change (see RunProtocolResult.bootstrap) would silently break.
+
+const psiLibrary = await PSI();
+
+// firstName-only terms: the default key templates all require SSN/DOB, so an
+// explicit firstName key gives both parties valid, matching terms over a tiny
+// dataset (same approach as exchangeRecordEndToEnd.test.ts).
+const firstNameTerms = {
+  version: "1.0.0",
+  date: "2026-01-01",
+  algorithm: "psi" as const,
+  deduplicate: false,
+  output: { expectsOutput: true, shareWithPartner: true },
+  linkageFields: [{ name: "firstName", type: "firstName" as const }],
+  linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
+};
+
+function preparedFor(identity: string) {
+  return prepareForExchange(
+    { linkageTerms: { ...firstNameTerms, identity } },
+    identity,
+    [{ first_name: "Alice" }, { first_name: "Bob" }, { first_name: "Carol" }],
+    ["first_name"],
+  );
+}
+
+/** Drive a full runExchange for both parties over a pipe with the given intents. */
+async function runExchangeBoth(
+  saveInitiator: boolean | undefined,
+  saveResponder: boolean | undefined,
+): Promise<[ExchangeResult, ExchangeResult]> {
+  const [ci, cr] = createMessagePipe();
+  return Promise.all([
+    runExchange(ci, "initiator", preparedFor("Init"), {
+      psiLibrary,
+      saveIntent: saveInitiator,
+    }),
+    runExchange(cr, "responder", preparedFor("Resp"), {
+      psiLibrary,
+      saveIntent: saveResponder,
+    }),
+  ]);
+}
+
+test("runExchange: saveIntent=false still returns a defined bootstrap (the notify driver)", async () => {
+  const [ri, rr] = await runExchangeBoth(false, false);
+  // Defined, not undefined: the handler reserves undefined for the interrupt
+  // path, and needs partnerSaveIntent here to choose the right no-save notice.
+  expect(ri.bootstrap).toEqual({
+    partnerSaveIntent: false,
+    sharedSecret: undefined,
+  });
+  expect(rr.bootstrap).toEqual({
+    partnerSaveIntent: false,
+    sharedSecret: undefined,
+  });
+});
+
+test("runExchange: saveIntent=undefined returns no bootstrap (authenticated/recurring contract)", async () => {
+  const [ri, rr] = await runExchangeBoth(undefined, undefined);
+  expect(ri.bootstrap).toBeUndefined();
+  expect(rr.bootstrap).toBeUndefined();
+});
+
+test("runExchange: a non-saving party still learns a saving partner's intent", async () => {
+  // Initiator did NOT pass --save; responder did. The non-saving initiator must
+  // come back with partnerSaveIntent true so the CLI emits the "your partner
+  // wanted to save" notice; no secret is established for either side.
+  const [ri, rr] = await runExchangeBoth(false, true);
+  expect(ri.bootstrap).toEqual({
+    partnerSaveIntent: true,
+    sharedSecret: undefined,
+  });
+  expect(rr.bootstrap).toEqual({
+    partnerSaveIntent: false,
+    sharedSecret: undefined,
+  });
+});
+
+test("runExchange: both saving establishes the same secret on both bootstrap results", async () => {
+  const [ri, rr] = await runExchangeBoth(true, true);
+  expect(ri.bootstrap?.partnerSaveIntent).toBe(true);
+  expect(rr.bootstrap?.partnerSaveIntent).toBe(true);
+  expect(ri.bootstrap?.sharedSecret).toMatch(PAKE_TOKEN_REGEX);
+  // The initiator minted it; the responder received the identical value, and
+  // the subsequent role/PSI exchange still completed -- the secret frame did
+  // not desync the lockstep that follows terms.
+  expect(rr.bootstrap?.sharedSecret).toBe(ri.bootstrap?.sharedSecret);
 });

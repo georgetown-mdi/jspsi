@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
 import type { ExchangeSpec, PreparedExchange } from "@psilink/core";
 
 import { buildSaveSpec, finalizeBootstrap } from "../../src/commands/zeroSetup";
@@ -134,4 +134,48 @@ test("neither-saved: saves nothing and emits the standard recurring hint", () =>
   expect(
     messages.some((m) => m.includes("psilink invite URL INPUT_FILE")),
   ).toBe(true);
+});
+
+// --- post-exchange conflict re-check (TOCTOU window) -------------------------
+
+test("we-saved-partner-did-not: aborts without clobbering a config that appeared after the pre-flight check", () => {
+  const { log } = capture();
+  // Simulate a file materializing at the config path in the window between the
+  // handler's up-front conflict gate and this post-exchange write. The
+  // both-saved branch gets this re-check from provisionConfigAndKey; the
+  // config-only branch must match it rather than silently overwrite.
+  fs.writeFileSync(configFile, "preexisting: true\n");
+  expect(() =>
+    finalizeBootstrap({
+      save: true,
+      bootstrap: { partnerSaveIntent: false },
+      spec: sampleSpec(),
+      configFile,
+      keyFile,
+      log,
+    }),
+  ).toThrow(UsageError);
+  // The pre-existing file is left untouched, not clobbered.
+  expect(fs.readFileSync(configFile, "utf8")).toContain("preexisting");
+});
+
+// --- invariant guard ---------------------------------------------------------
+
+test("refuses a shared secret when this party did not save, rather than dropping it silently", () => {
+  const { log } = capture();
+  // Unreachable from real exchange code (the secret frame is gated on this
+  // party's own intent), but the guard turns the contradiction into a loud
+  // failure instead of a silently discarded secret.
+  expect(() =>
+    finalizeBootstrap({
+      save: false,
+      bootstrap: { partnerSaveIntent: true, sharedSecret: SECRET },
+      spec: sampleSpec(),
+      configFile,
+      keyFile,
+      log,
+    }),
+  ).toThrow("internal error");
+  expect(fs.existsSync(configFile)).toBe(false);
+  expect(fs.existsSync(keyFile)).toBe(false);
 });

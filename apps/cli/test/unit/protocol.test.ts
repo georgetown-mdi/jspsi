@@ -135,6 +135,32 @@ test("rejects before opening a connection when keyFilePath is whitespace-only", 
   ).rejects.toThrow("non-empty keyFilePath");
 });
 
+test("rejects before opening a connection when saveIntent is passed on an authenticated exchange", async () => {
+  // saveIntent drives the zero-setup `--save` bootstrap, which is meaningful
+  // only on the unauthenticated path. Passing it alongside authentication is a
+  // misuse: the guard must reject it up front, before any connection is opened
+  // (and before the keyFilePath pre-flight), so a stray save field never rides
+  // the PAKE-secured channel.
+  await expect(
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        authentication: {
+          pakeToken: TOKEN_A,
+          keyFilePath: path.join(tmpDir, "k.key"),
+        },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test",
+      undefined,
+      true,
+    ),
+  ).rejects.toThrow("only valid on an unauthenticated");
+});
+
 test("rejects before opening a connection when keyFilePath parent is not writable", async () => {
   // 0o555 = r-x for all; the current user cannot write into the directory, so
   // saveKeyFile would fail after PAKE. The pre-flight should catch this. Skip

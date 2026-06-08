@@ -216,9 +216,14 @@ export interface ExchangeResult {
   /** Payload data received from the partner after linkage. */
   partnerPayload: PartnerPayload;
   /**
-   * Outcome of the zero-setup `--save` bootstrap. Present only when
-   * {@link RunExchangeOptions.saveIntent} was passed; `undefined` for every
-   * recurring/authenticated exchange and for callers that do not opt in.
+   * Outcome of the zero-setup `--save` bootstrap. The discriminant is whether
+   * {@link RunExchangeOptions.saveIntent} was a boolean, not whether this party
+   * passed `--save`: a `false` saveIntent still yields a defined result (with
+   * `partnerSaveIntent` set and `sharedSecret` undefined), because a non-saving
+   * party must still learn the partner's intent to emit the right notice.
+   * `undefined` only when `saveIntent` itself was `undefined` -- every
+   * recurring/authenticated exchange, where the bootstrap flow is not entered at
+   * all.
    */
   bootstrap?: ExchangeBootstrapResult;
   /**
