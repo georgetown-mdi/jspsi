@@ -400,11 +400,9 @@ export function loadConfig(
     // the missing-config case above.
     throw new UsageError(
       `key file ${options.keyFile} does not exist. ` +
-        "The CLI commands that create a key file (psilink invite, psilink " +
-        "accept, and psilink --save) are not yet implemented; until they " +
-        "land, the key file must be created out-of-band - a base64url-" +
-        'encoded 32-byte token under "pakeToken" - and copied to both ' +
-        "parties via a trusted channel. See " +
+        "Create one with 'psilink invite' (generate an invitation) or " +
+        "'psilink accept' (accept a partner's invitation); both write a " +
+        ".psilink.key. See docs/CLI.md#offline-invitation and " +
         "docs/SECURITY_DESIGN.md#recurring-exchange-authentication.",
     );
   const authPersist: AuthPersist = {
