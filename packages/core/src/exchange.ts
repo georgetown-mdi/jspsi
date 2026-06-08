@@ -9,7 +9,11 @@ import {
 } from "./standardization.js";
 import { inferDateFormat } from "./utils/date.js";
 import { PSIParticipant } from "./participant.js";
-import { exchangeTerms, resolveRole } from "./protocolSetup.js";
+import {
+  exchangeTerms,
+  exchangeBootstrapSecret,
+  resolveRole,
+} from "./protocolSetup.js";
 import { linkViaPSI } from "./link.js";
 import {
   preparePayload,
@@ -189,6 +193,19 @@ export function describeExchangeStages(
   ];
 }
 
+/**
+ * Outcome of the zero-setup `--save` shared-secret bootstrap, present on
+ * {@link ExchangeResult.bootstrap} only when {@link RunExchangeOptions.saveIntent}
+ * was provided (i.e. a zero-setup exchange). `partnerSaveIntent` reports whether
+ * the partner also advertised `--save`; `sharedSecret` is the persistent secret
+ * established in-band, present only when both parties saved -- the initiator
+ * generated it and the responder received it, so both hold the same value.
+ */
+export interface ExchangeBootstrapResult {
+  partnerSaveIntent: boolean;
+  sharedSecret?: string;
+}
+
 /** The result returned by {@link runExchange} on successful completion. */
 export interface ExchangeResult {
   associationTable: AssociationTable;
@@ -198,6 +215,17 @@ export interface ExchangeResult {
   resolvedRole: PsiRole;
   /** Payload data received from the partner after linkage. */
   partnerPayload: PartnerPayload;
+  /**
+   * Outcome of the zero-setup `--save` bootstrap. The discriminant is whether
+   * {@link RunExchangeOptions.saveIntent} was a boolean, not whether this party
+   * passed `--save`: a `false` saveIntent still yields a defined result (with
+   * `partnerSaveIntent` set and `sharedSecret` undefined), because a non-saving
+   * party must still learn the partner's intent to emit the right notice.
+   * `undefined` only when `saveIntent` itself was `undefined` -- every
+   * recurring/authenticated exchange, where the bootstrap flow is not entered at
+   * all.
+   */
+  bootstrap?: ExchangeBootstrapResult;
   /**
    * The self-attested audit record of this exchange (Phase 1 of exchange
    * receipts) together with its private opening data, produced as a pair. The
@@ -234,6 +262,16 @@ export interface RunExchangeOptions {
     partnerTerms: LinkageTerms,
     resolvedRole: PsiRole,
   ) => void;
+  /**
+   * Zero-setup `--save` intent for this party. `undefined` (the default) keeps
+   * this exchange out of the bootstrap flow entirely: no `save` field is put on
+   * the wire and {@link ExchangeResult.bootstrap} is `undefined`, so the
+   * recurring/authenticated path is byte-for-byte unchanged. A `boolean` opts
+   * in: the intent is advertised on the terms exchange, the partner's intent is
+   * read back, and -- only when both parties opt in -- the initiator transmits a
+   * fresh shared secret in-band (see {@link exchangeBootstrapSecret}).
+   */
+  saveIntent?: boolean;
   verbosity?: number;
 }
 
@@ -267,12 +305,28 @@ export async function runExchange(
   const verbosity = options.verbosity ?? 0;
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
-  const { partnerTerms, warnings } = await exchangeTerms(
+  const { partnerTerms, warnings, partnerSaveIntent } = await exchangeTerms(
     conn,
     handshakeRole,
     linkageTerms,
+    options.saveIntent,
   );
   for (const warning of warnings) onWarning(warning);
+
+  // Zero-setup `--save` bootstrap. Only build a result when the caller opted in
+  // (saveIntent defined), so every other exchange returns bootstrap: undefined.
+  // The shared secret is transmitted only when BOTH parties advertised intent;
+  // both learned that from the terms exchange just above, so they agree on
+  // whether this frame is sent. It rides directly after terms (before role
+  // resolution) so the message ordering is fixed on both sides.
+  let bootstrap: ExchangeBootstrapResult | undefined;
+  if (options.saveIntent !== undefined) {
+    const sharedSecret =
+      options.saveIntent && partnerSaveIntent
+        ? await exchangeBootstrapSecret(conn, handshakeRole)
+        : undefined;
+    bootstrap = { partnerSaveIntent, sharedSecret };
+  }
 
   const resolvedRole = await resolveRole(
     conn,
@@ -360,5 +414,6 @@ export async function runExchange(
     resolvedRole,
     partnerPayload,
     audit,
+    bootstrap,
   };
 }

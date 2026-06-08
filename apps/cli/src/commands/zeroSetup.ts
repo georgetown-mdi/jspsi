@@ -12,6 +12,8 @@ import {
 } from "@psilink/core";
 import type {
   ConnectionConfig,
+  ExchangeBootstrapResult,
+  ExchangeSpec,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
   PreparedExchange,
@@ -20,14 +22,16 @@ import type {
 import {
   applyConnectionOverrides,
   announceRetainMode,
+  saveConfig,
   DEFAULT_CONFIG_PATH,
 } from "../config";
-import { expandTilde } from "../fileUtils";
+import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
+import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -395,6 +399,129 @@ async function prepareDataset(
   return prepared;
 }
 
+// --- Save bootstrap ----------------------------------------------------------
+
+/**
+ * Build the {@link ExchangeSpec} a `--save` zero-setup exchange persists: the
+ * connection actually used plus the inferred linkage terms and metadata.
+ * Standardization is omitted -- `psilink exchange` re-infers it from the input
+ * file on load (the same inference that already succeeded here), so the saved
+ * config stays minimal. The connection carries whatever credentials the URL or
+ * --server-* flags supplied; `saveConfig` writes it owner-read-only.
+ *
+ * @internal exported for testing
+ */
+export function buildSaveSpec(
+  connection: ConnectionConfig,
+  prepared: PreparedExchange,
+): ExchangeSpec {
+  return {
+    connection,
+    linkageTerms: prepared.linkageTerms,
+    metadata: prepared.metadata,
+  };
+}
+
+/**
+ * Apply the `--save` bootstrap outcome after a successful zero-setup exchange:
+ * persist config/key as appropriate and emit the matching notice. It performs no
+ * network I/O -- only provisioning-layer writes and logging -- so it is unit
+ * tested directly. Conflict detection already ran up front in the handler (via
+ * {@link assertNoProvisionConflicts}); the both-saved path re-checks through
+ * {@link provisionConfigAndKey}, and the config-only path writes through
+ * {@link saveConfig}, the same writer that helper uses.
+ *
+ * The four cases mirror docs/SECURITY_DESIGN.md "Bootstrapping a shared secret":
+ * we-saved + both-saved (write config + key), we-saved + partner-did-not (write
+ * config only, instruct to invite), we-did-not-save + partner-did (save nothing,
+ * explain), and neither-saved (the standard recurring-exchange hint).
+ *
+ * @internal exported for testing
+ */
+export function finalizeBootstrap(params: {
+  save: boolean;
+  bootstrap: ExchangeBootstrapResult;
+  spec: ExchangeSpec;
+  configFile: string;
+  keyFile: string;
+  log: { info: (message: string) => void };
+}): void {
+  const { save, bootstrap, spec, configFile, keyFile, log } = params;
+
+  // Invariant guard: a shared secret is established only when both parties pass
+  // --save, so a secret reaching here with save === false is an internal
+  // contradiction (the secret frame is gated on this party's own intent in
+  // runExchange). Fail loudly rather than silently discard a negotiated secret.
+  if (!save && bootstrap.sharedSecret !== undefined)
+    throw new Error(
+      "internal error: a shared secret was established but this party did not " +
+        "opt to save; refusing to silently discard it",
+    );
+
+  if (save) {
+    if (bootstrap.sharedSecret !== undefined) {
+      // Both parties saved: the initiator generated the secret and the responder
+      // received it, so both persist the same config and key.
+      const { configPath, keyPath } = provisionConfigAndKey(
+        spec,
+        { pakeToken: bootstrap.sharedSecret },
+        { configPath: configFile, keyPath: keyFile },
+      );
+      log.info(
+        `established a shared secret with your partner; wrote config to ` +
+          `${configPath} and key file to ${keyPath}. Keep the key file ` +
+          `private. Run 'psilink exchange' for future exchanges with this ` +
+          `partner.`,
+      );
+      return;
+    }
+    // We saved but the partner did not: there is no secret, so persist the
+    // config alone (no key file) and steer the user to the invitation flow.
+    // Re-check for a config conflict before writing: the both-saved branch gets
+    // this from provisionConfigAndKey, but this branch writes through saveConfig
+    // directly. The up-front gate ran before the network round-trip, so a file
+    // that appeared at the path in that window must abort here rather than
+    // clobber the user's configuration -- the same "never clobber a half-finished
+    // bootstrap" intent as the pre-flight check. Only configFile is re-checked,
+    // not keyFile: this branch writes no key file, so gating on a path it will
+    // not touch would reject a write that is safe. The asymmetry with the
+    // pre-flight (which reserves both) is deliberate -- the pre-flight cannot yet
+    // know the partner declined to save, whereas here that is settled.
+    const conflicts = detectFileConflicts([configFile]);
+    if (conflicts.length > 0)
+      throw new UsageError(
+        `refusing to overwrite ${conflicts.join(", ")}, which appeared after ` +
+          "the pre-flight check; move or remove it and re-run with --save",
+      );
+    saveConfig(configFile, spec);
+    log.info(
+      `your partner did not also choose to save, so no shared secret was ` +
+        `established. Wrote config to ${configFile} (no key file). To set up ` +
+        `a recurring exchange, run 'psilink invite' and share the invitation ` +
+        `with your partner.`,
+    );
+    return;
+  }
+
+  if (bootstrap.partnerSaveIntent) {
+    // The partner wants a recurring exchange but we did not pass --save, so
+    // nothing was saved on our end.
+    log.info(
+      "your partner is trying to establish a recurring exchange, but you did " +
+        "not pass --save, so nothing was saved on your end. Wait for an " +
+        "invitation from your partner ('psilink accept'), or coordinate to " +
+        "re-run this exchange with --save on both sides.",
+    );
+    return;
+  }
+
+  log.info(
+    "To establish a recurring exchange with this partner, run 'psilink " +
+      "invite URL INPUT_FILE' and share the invitation string, or coordinate " +
+      "with your partner to re-run with --save.",
+  );
+}
+
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -450,11 +577,42 @@ export async function handler(argv: Arguments): Promise<void> {
     }
   }
 
+  // Detect a pre-existing config/key before any network activity. With --save,
+  // a target that already exists is an error -- a half-finished bootstrap must
+  // never clobber a user's configuration -- and the check runs up front so it
+  // aborts before a connection is opened. Without --save, no files are written,
+  // so an existing config/key is merely ignored; warn and point at the command
+  // that would use it (docs/CLI.md "Zero-setup exchange").
+  //
+  // Both paths are reserved here even though the partner-did-not-save branch
+  // ends up writing only the config: whether a key file is written depends on
+  // the partner's intent, which is not known until after the terms round-trip.
+  // Reserving both up front fails fast on an existing key file rather than
+  // discovering the conflict post-exchange, where the secret has already crossed
+  // the wire and the only recovery is a re-invite. The conservative gate trades a
+  // rare false block (a stale key file plus a partner who declines to save) for
+  // never stranding a half-saved bootstrap, and matches docs/CLI.md (an existing
+  // config OR key with --save is an error).
   if (options.save) {
-    log.warn(
-      "--save: bootstrapping a shared secret is not yet implemented; " +
-        "proceeding with a standard zero-setup exchange",
-    );
+    try {
+      assertNoProvisionConflicts({
+        configPath: options.configFile,
+        keyPath: options.keyFile,
+      });
+    } catch (err) {
+      log.error(err instanceof Error ? err.message : String(err));
+      process.exit(64);
+    }
+  } else {
+    const existing = detectFileConflicts([options.configFile, options.keyFile]);
+    if (existing.length > 0) {
+      const noun = existing.length === 1 ? "file" : "files";
+      log.warn(
+        `existing ${noun} ${existing.join(", ")} will be ignored by this ` +
+          "zero-setup exchange; to use saved configuration and key material, " +
+          "run 'psilink exchange' instead",
+      );
+    }
   }
 
   let connection: ConnectionConfig;
@@ -476,6 +634,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
   announceRetainMode(connection, log);
 
+  let runResult: Awaited<ReturnType<typeof runProtocol>>;
   try {
     // Spread + cast: `connection` is `ConnectionConfig` (which includes the
     // webrtc channel), so TypeScript cannot verify that the spread result fits
@@ -490,7 +649,7 @@ export async function handler(argv: Arguments): Promise<void> {
       ProtocolConnectionConfig,
       "authentication"
     >;
-    await runProtocol(
+    runResult = await runProtocol(
       { ...connection, ...authOverride } as unknown as ProtocolConnectionConfig,
       prepared,
       output,
@@ -500,17 +659,43 @@ export async function handler(argv: Arguments): Promise<void> {
         enabled: options.record,
         recordFile: options.recordFile,
       }),
+      // Carry this party's --save intent into the in-band bootstrap. The
+      // exchange advertises it to the partner and, when both saved, returns the
+      // established secret on runResult.bootstrap. Pass the raw boolean, never
+      // `options.save || undefined`: a non-saving party (options.save === false)
+      // must still receive a defined bootstrap so finalizeBootstrap can emit the
+      // "your partner wanted to save" notice. Collapsing false to undefined
+      // would route it through the interrupt guard below and silently swallow
+      // that notice. The wire is unaffected either way -- the save field only
+      // rides the terms frame when intent is true (see exchangeTerms).
+      options.save,
     );
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(err instanceof UsageError ? 64 : 69);
   }
 
-  if (!options.save) {
-    log.info(
-      "To establish a recurring exchange with this partner, run 'psilink " +
-        "invite URL INPUT_FILE' and share the invitation string, or " +
-        "coordinate with your partner to re-run with --save.",
-    );
+  const { bootstrap } = runResult;
+  // bootstrap is undefined only when a signal cut the run short and the process
+  // is already exiting; there is nothing to save or announce in that case.
+  if (bootstrap === undefined) return;
+
+  // The exchange has already succeeded and written its output by this point, so
+  // a provisioning failure here (a config/key conflict that appeared in the
+  // post-exchange window, or a disk error) cannot undo the linkage -- but it
+  // must still exit cleanly with a diagnostic rather than crash as an unhandled
+  // rejection. A conflict is a UsageError (exit 64); anything else exits 69.
+  try {
+    finalizeBootstrap({
+      save: options.save,
+      bootstrap,
+      spec: buildSaveSpec(connection, prepared),
+      configFile: options.configFile,
+      keyFile: options.keyFile,
+      log,
+    });
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(err instanceof UsageError ? 64 : 69);
   }
 }
