@@ -21,7 +21,12 @@ describe("connect retry", () => {
     let calls = 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
-      sftp: { open: vi.fn(), close: vi.fn() },
+      sftp: {
+        open: vi.fn(),
+        close: vi.fn(),
+        opendir: vi.fn(),
+        readdir: vi.fn(),
+      },
       connect: vi.fn().mockImplementation(async () => {
         if (++calls < 3) throw new Error("connection refused");
       }),
@@ -74,7 +79,12 @@ describe("connect retry", () => {
     let capturedOptions: Record<string, unknown> | undefined;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
-      sftp: { open: vi.fn(), close: vi.fn() },
+      sftp: {
+        open: vi.fn(),
+        close: vi.fn(),
+        opendir: vi.fn(),
+        readdir: vi.fn(),
+      },
       connect: vi
         .fn()
         .mockImplementation(async (opts: Record<string, unknown>) => {
@@ -89,6 +99,24 @@ describe("connect retry", () => {
     });
     expect(capturedOptions).toHaveProperty("host", "sftp.example.org");
     expect(capturedOptions).not.toHaveProperty("maxReconnectAttempts");
+  });
+
+  test("rejects at connect time when the internal SFTP API drops a method it drives", async () => {
+    // createExclusive()/list() call open/close/opendir/readdir on the internal
+    // SFTPWrapper directly. The connect-time guard must catch an upstream
+    // rename or removal of any of them and surface one actionable error here,
+    // rather than letting a TypeError surface at the first send()/poll.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      // `readdir` is absent, as if a future ssh2 version renamed it; the
+      // session property itself is present, so the bare null check would pass.
+      sftp: { open: vi.fn(), close: vi.fn(), opendir: vi.fn() },
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    await expect(
+      adapter.connect({ host: "sftp.example.org", maxReconnectAttempts: 0 }),
+    ).rejects.toThrow("readdir");
   });
 });
 

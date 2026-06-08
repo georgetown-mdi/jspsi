@@ -45,10 +45,12 @@ interface Ssh2SftpClientInternals {
     ): void;
     // Called with a directory handle, readdir returns ONE server batch per call
     // and reports end-of-directory as an error whose `code` is SSH_FX_EOF (not
-    // as an empty list), the contract the batch loop in list() relies on.
+    // as an empty list), the contract the batch loop in list() relies on. `list`
+    // is supplied only on success: ssh2 omits it (passes undefined) whenever
+    // `err` is set, including the EOF signal, hence the optional parameter.
     readdir(
       handle: Buffer,
-      callback: (err: Ssh2SftpError | null, list: Ssh2DirEntry[]) => void,
+      callback: (err: Ssh2SftpError | null, list?: Ssh2DirEntry[]) => void,
     ): void;
   } | null;
 }
@@ -87,6 +89,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           "it - check for breaking changes in the ssh2-sftp-client " +
           "changelog",
       );
+    // createExclusive() and list() reach past the public API to drive the
+    // SFTPWrapper directly (exclusive create, and bounded streamed directory
+    // reads, have no public-API equivalent). Verify every method those paths
+    // call is present and callable now, so an upstream rename surfaces as one
+    // actionable error here at connect time rather than as a TypeError at the
+    // first send()/poll -- this is the connect-time guard those methods'
+    // comments promise. A bare `!sftp` check would let a renamed method slip
+    // through to first use.
+    for (const method of ["open", "close", "opendir", "readdir"] as const) {
+      if (typeof sftp[method] !== "function")
+        throw new Error(
+          `ssh2-sftp-client internal SFTP session no longer exposes a ` +
+            `callable '${method}()' after connect(); the installed version ` +
+            `may have renamed or removed it - check for breaking changes in ` +
+            `the ssh2-sftp-client changelog`,
+        );
+    }
   }
 
   end(): Promise<void> {
@@ -155,7 +174,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
               else settle(() => reject(readErr));
               return;
             }
-            for (const entry of list) {
+            // `list` is defined whenever readErr is null (the branch above has
+            // already returned otherwise); `?? []` keeps the type honest and
+            // treats a defensively-missing batch as empty. Apply the two bounds
+            // in the SAME order as LocalFSClient.list(): the entry-count bound
+            // first -- it governs every entry whatever its name -- then the
+            // per-name length bound, so both adapters surface the same error
+            // variant for a directory that breaches both at once. results.length
+            // counts every entry seen (none are filtered out here), matching
+            // LocalFSClient's `scanned`.
+            for (const entry of list ?? []) {
+              if (results.length >= MAX_DIRECTORY_ENTRIES) {
+                settle(() =>
+                  reject(directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES)),
+                );
+                return;
+              }
               if (entry.filename.length > MAX_FILENAME_LENGTH) {
                 settle(() =>
                   reject(
@@ -165,12 +199,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
                       MAX_FILENAME_LENGTH,
                     ),
                   ),
-                );
-                return;
-              }
-              if (results.length >= MAX_DIRECTORY_ENTRIES) {
-                settle(() =>
-                  reject(directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES)),
                 );
                 return;
               }
