@@ -24,7 +24,7 @@ When adopting the software, program officers are likely to first conduct exchang
 
 ## Core library
 
-The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. Receipt generation and signing are part of the intended design but are not yet implemented; they are targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a self-attested exchange record at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is part of the intended design but is deferred to a later release (see [ROADMAP.md](ROADMAP.md)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
 
 ## Command line application
 
