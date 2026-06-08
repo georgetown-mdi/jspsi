@@ -1,9 +1,16 @@
 import { Writable } from "node:stream";
 
 import { describe, expect, test, vi, beforeEach } from "vitest";
-import { FrameSizeExceededError } from "@psilink/core";
+import {
+  DirectoryListingBoundsError,
+  FrameSizeExceededError,
+} from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import {
+  MAX_DIRECTORY_ENTRIES,
+  MAX_FILENAME_LENGTH,
+} from "../../src/connection/listingGuard";
 
 // --- connect retry -----------------------------------------------------------
 
@@ -365,5 +372,185 @@ describe("capped get", () => {
     };
     const buf = await adapter.get("/remote/ok.bin", { maxBytes: 32 });
     expect(buf.toString()).toBe("hello");
+  });
+});
+
+// --- bounded list ------------------------------------------------------------
+
+interface MockDirEntry {
+  filename: string;
+  attrs: { mtime: number; size: number };
+}
+
+// A stand-in for the internal ssh2 SFTPWrapper that serves a directory through
+// the handle-based opendir/readdir/close protocol the adapter's list() drives.
+// readdir hands back one batch of `batchSize` entries per call and reports
+// end-of-directory as an error whose `code` is SSH_FX_EOF (1) -- ssh2's actual
+// contract -- and the mock generates entries lazily so a test can model a flood
+// far larger than the cap while recording how many entries were actually
+// produced (proving the walk stops early) and that the handle is closed exactly
+// once.
+function makeBatchedSftp(opts: {
+  totalEntries: number;
+  batchSize: number;
+  makeName?: (i: number) => string;
+}) {
+  const makeName = opts.makeName ?? ((i: number) => `f${i}.json`);
+  let produced = 0;
+  let readdirCalls = 0;
+  let closeCalls = 0;
+  const sftp = {
+    opendir: (_path: string, cb: (err: Error | null, handle: Buffer) => void) =>
+      cb(null, Buffer.from("handle")),
+    readdir: (
+      _handle: Buffer,
+      cb: (
+        err: (Error & { code?: number }) | null,
+        list?: MockDirEntry[],
+      ) => void,
+    ) => {
+      readdirCalls += 1;
+      if (produced >= opts.totalEntries) {
+        cb(Object.assign(new Error("EOF"), { code: 1 }));
+        return;
+      }
+      const batch: MockDirEntry[] = [];
+      for (
+        let i = 0;
+        i < opts.batchSize && produced < opts.totalEntries;
+        i += 1
+      ) {
+        batch.push({
+          filename: makeName(produced),
+          attrs: { mtime: 7, size: produced },
+        });
+        produced += 1;
+      }
+      cb(null, batch);
+    },
+    close: (_handle: Buffer, cb: (err: Error | null) => void) => {
+      closeCalls += 1;
+      cb(null);
+    },
+  };
+  return {
+    sftp,
+    get produced() {
+      return produced;
+    },
+    get readdirCalls() {
+      return readdirCalls;
+    },
+    get closeCalls() {
+      return closeCalls;
+    },
+  };
+}
+
+describe("bounded list", () => {
+  test("maps a normal directory's entries and closes the handle", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const mock = makeBatchedSftp({ totalEntries: 3, batchSize: 2 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { sftp: mock.sftp };
+
+    const result = await adapter.list("/remote/dir");
+    expect(result.map((e) => e.name)).toEqual([
+      "f0.json",
+      "f1.json",
+      "f2.json",
+    ]);
+    // ssh2 reports mtime in seconds; FileInfo.modifyTime is ms.
+    expect(result[0].modifyTime).toBe(7000);
+    expect(result[2].size).toBe(2);
+    expect(mock.closeCalls).toBe(1);
+  });
+
+  test("refuses a directory with more entries than the cap without enumerating it all", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const batchSize = 4096;
+    // A flood far larger than the cap: list() must refuse it after at most the
+    // cap plus one batch, never producing the whole set -- otherwise the SFTP
+    // adapter (the path with the in-scope adversary) allocates proportional to
+    // the attacker-chosen entry count.
+    const mock = makeBatchedSftp({
+      totalEntries: MAX_DIRECTORY_ENTRIES + 100_000,
+      batchSize,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { sftp: mock.sftp };
+
+    await expect(adapter.list("/remote/hostile")).rejects.toBeInstanceOf(
+      DirectoryListingBoundsError,
+    );
+    expect(mock.produced).toBeLessThanOrEqual(
+      MAX_DIRECTORY_ENTRIES + batchSize,
+    );
+    expect(mock.produced).toBeLessThan(MAX_DIRECTORY_ENTRIES + 100_000);
+    // The handle is closed despite the refusal, and not double-closed.
+    expect(mock.closeCalls).toBe(1);
+  });
+
+  test("rejects an entry whose filename exceeds the maximum length", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const longName = `${"x".repeat(MAX_FILENAME_LENGTH + 1)}.json`;
+    const mock = makeBatchedSftp({
+      totalEntries: 1,
+      batchSize: 1,
+      makeName: () => longName,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { sftp: mock.sftp };
+
+    await expect(adapter.list("/remote/hostile")).rejects.toBeInstanceOf(
+      DirectoryListingBoundsError,
+    );
+    expect(mock.closeCalls).toBe(1);
+  });
+
+  test("accepts a directory at exactly the entry cap", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const mock = makeBatchedSftp({
+      totalEntries: MAX_DIRECTORY_ENTRIES,
+      batchSize: 4096,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { sftp: mock.sftp };
+
+    const result = await adapter.list("/remote/dir");
+    expect(result).toHaveLength(MAX_DIRECTORY_ENTRIES);
+    expect(mock.closeCalls).toBe(1);
+  });
+
+  test("propagates a non-EOF readdir error and closes the handle", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const ioErr = Object.assign(new Error("permission denied"), { code: 3 });
+    let closeCalls = 0;
+    const sftp = {
+      opendir: (_path: string, cb: (err: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("handle")),
+      readdir: (
+        _handle: Buffer,
+        cb: (err: (Error & { code?: number }) | null) => void,
+      ) => cb(ioErr),
+      close: (_handle: Buffer, cb: (err: Error | null) => void) => {
+        closeCalls += 1;
+        cb(null);
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { sftp };
+
+    await expect(adapter.list("/remote/dir")).rejects.toBe(ioErr);
+    expect(closeCalls).toBe(1);
+  });
+
+  test("rejects with a diagnostic error when the SFTP session is not open", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = { sftp: null };
+    await expect(adapter.list("/remote/dir")).rejects.toThrow(
+      "SFTP session is not open",
+    );
   });
 });

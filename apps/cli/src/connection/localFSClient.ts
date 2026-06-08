@@ -10,6 +10,12 @@ import type {
 } from "@psilink/core";
 
 import { frameSizeExceededError } from "./frameSizeGuard";
+import {
+  MAX_DIRECTORY_ENTRIES,
+  MAX_FILENAME_LENGTH,
+  directoryTooLargeError,
+  filenameTooLongError,
+} from "./listingGuard";
 
 /**
  * {@link FileTransportClient} backed by the local filesystem. Use this when
@@ -74,15 +80,38 @@ export class LocalFSClient implements FileTransportClient {
   /** No-op: there is no remote connection to tear down. */
   async end(): Promise<void> {}
 
+  /**
+   * Enforces the directory-listing bounds (see {@link ./listingGuard}) at the
+   * transport read layer. The enumeration streams entries through `fs.opendir`
+   * rather than `fs.readdir`: `readdir` materializes the whole directory into one
+   * array (and this method then fans out a stat per file), so both allocations
+   * would scale with the attacker-controlled entry count before any check could
+   * run. `opendir` yields entries in bounded batches, so the count check below
+   * stops the walk -- and caps the retained `fileNames` array and the downstream
+   * stat fan-out -- at {@link MAX_DIRECTORY_ENTRIES} regardless of how many
+   * entries the directory actually holds. The count check covers every entry
+   * (the adversary controls the count whatever the entry type); the returned set
+   * is still files only, preserving the prior behavior.
+   */
   async list(dir: string): Promise<FileInfo[]> {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    const fileEntries = entries.filter((e) => e.isFile());
-    // readdir withFileTypes provides the file type but not mtimeMs; a stat per
-    // file is unavoidable. Promise.all keeps the calls parallel.
-    // ENOENT means a file was deleted between readdir and stat (e.g. by the
-    // peer's cleanup); omit it rather than failing the whole listing.
+    const fileNames: string[] = [];
+    let scanned = 0;
+    // The for-await loop closes the directory handle automatically on normal
+    // completion, on break, and on throw (the async iterator's return() runs),
+    // so an over-bound directory does not leak the handle.
+    for await (const entry of await fs.opendir(dir)) {
+      if (++scanned > MAX_DIRECTORY_ENTRIES)
+        throw directoryTooLargeError(dir, MAX_DIRECTORY_ENTRIES);
+      if (entry.name.length > MAX_FILENAME_LENGTH)
+        throw filenameTooLongError(dir, entry.name, MAX_FILENAME_LENGTH);
+      if (entry.isFile()) fileNames.push(entry.name);
+    }
+    // opendir provides the file type but not mtimeMs; a stat per file is
+    // unavoidable. Promise.all keeps the calls parallel. ENOENT means a file was
+    // deleted between the walk and stat (e.g. by the peer's cleanup); omit it
+    // rather than failing the whole listing.
     const results = await Promise.all(
-      fileEntries.map(async ({ name }) => {
+      fileNames.map(async (name) => {
         try {
           const stat = await fs.stat(path.join(dir, name));
           return {

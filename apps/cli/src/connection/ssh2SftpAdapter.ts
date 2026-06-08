@@ -8,10 +8,28 @@ import {
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
+import {
+  MAX_DIRECTORY_ENTRIES,
+  MAX_FILENAME_LENGTH,
+  directoryTooLargeError,
+  filenameTooLongError,
+} from "./listingGuard";
+
+// A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
+// transport consumes are typed; ssh2 supplies more (longname, the rest of
+// attrs).
+interface Ssh2DirEntry {
+  filename: string;
+  attrs: { mtime: number; size: number };
+}
+
+// ssh2 reports SFTP failures (including end-of-directory from readdir) as an
+// Error carrying the numeric SFTP status code on `code`.
+type Ssh2SftpError = Error & { code?: number };
 
 // Typed interface for the internal ssh2 SFTPWrapper that ssh2-sftp-client
-// exposes as `this.sftp`. Defined at file scope so both connect() and
-// createExclusive() can share it without repeating the declaration.
+// exposes as `this.sftp`. Defined at file scope so connect(), createExclusive(),
+// and list() can share it without repeating the declaration.
 interface Ssh2SftpClientInternals {
   sftp: {
     open(
@@ -21,6 +39,17 @@ interface Ssh2SftpClientInternals {
       callback: (err: Error | null, handle: Buffer) => void,
     ): void;
     close(handle: Buffer, callback: (err: Error | null) => void): void;
+    opendir(
+      path: string,
+      callback: (err: Error | null, handle: Buffer) => void,
+    ): void;
+    // Called with a directory handle, readdir returns ONE server batch per call
+    // and reports end-of-directory as an error whose `code` is SSH_FX_EOF (not
+    // as an empty list), the contract the batch loop in list() relies on.
+    readdir(
+      handle: Buffer,
+      callback: (err: Ssh2SftpError | null, list: Ssh2DirEntry[]) => void,
+    ): void;
   } | null;
 }
 
@@ -64,8 +93,101 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.client.end().then(() => {});
   }
 
+  /**
+   * Lists a remote directory under the directory-listing bounds (see
+   * {@link ./listingGuard}), enforced at the transport read layer.
+   *
+   * It does NOT delegate to ssh2-sftp-client's `list()`: that passes the
+   * directory PATH to `sftp.readdir`, which internally loops readdir until EOF
+   * and accumulates the entire listing into one array before returning, so a
+   * hostile directory's full (attacker-controlled) entry set is already resident
+   * by the time any check could run. Instead this opens a directory handle and
+   * reads one server batch at a time, applying the count and filename-length
+   * checks as entries arrive, so an oversized or hostile directory is refused
+   * before the full listing is materialized -- the SFTP path carries the
+   * in-scope adversary (the server admin), so it must be bounded as firmly as
+   * the local one. A single READDIR response is itself bounded by the SSH
+   * transport's maximum packet size, so the bounded allocation is at most the
+   * cap plus one batch.
+   *
+   * The session is reached via the same internal `sftp` property
+   * createExclusive() uses; see its comment for the access-via-internals
+   * rationale and the connect-time guard against an upstream API rename.
+   */
   list(path: string): Promise<FileInfo[]> {
-    return this.client.list(path);
+    const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
+    if (!sftp)
+      return Promise.reject(
+        new Error(
+          "SFTP session is not open; if this occurs after a successful " +
+            "connect(), the ssh2-sftp-client internal API may have changed - " +
+            "verify that the installed version still exposes the 'sftp' " +
+            "session property",
+        ),
+      );
+    // SSH_FX_EOF: the SFTP status code ssh2 reports (as err.code) from readdir
+    // once the directory is fully read. Used directly rather than via a named
+    // import because ssh2 does not expose its status-code table on its public
+    // surface (the same reason createExclusive() uses numeric SFTP flags).
+    const SSH_FX_EOF = 1;
+    return new Promise<FileInfo[]>((resolve, reject) => {
+      sftp.opendir(path, (openErr, handle) => {
+        if (openErr) {
+          reject(openErr);
+          return;
+        }
+        const results: FileInfo[] = [];
+        let settled = false;
+        // Always close the handle, then settle once. A close() failure on a
+        // read-only directory handle carries no data meaning, so it is swallowed
+        // rather than allowed to mask the result or the refusal (matching get()'s
+        // close handling). The `settled` guard makes a late readdir callback a
+        // no-op and prevents a double close.
+        const settle = (action: () => void): void => {
+          if (settled) return;
+          settled = true;
+          sftp.close(handle, () => action());
+        };
+        const readNextBatch = (): void => {
+          sftp.readdir(handle, (readErr, list) => {
+            if (readErr) {
+              if (readErr.code === SSH_FX_EOF) settle(() => resolve(results));
+              else settle(() => reject(readErr));
+              return;
+            }
+            for (const entry of list) {
+              if (entry.filename.length > MAX_FILENAME_LENGTH) {
+                settle(() =>
+                  reject(
+                    filenameTooLongError(
+                      path,
+                      entry.filename,
+                      MAX_FILENAME_LENGTH,
+                    ),
+                  ),
+                );
+                return;
+              }
+              if (results.length >= MAX_DIRECTORY_ENTRIES) {
+                settle(() =>
+                  reject(directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES)),
+                );
+                return;
+              }
+              results.push({
+                name: entry.filename,
+                // ssh2 reports mtime in seconds; FileInfo.modifyTime is ms -- the
+                // same conversion ssh2-sftp-client's list() applies.
+                modifyTime: entry.attrs.mtime * 1000,
+                size: entry.attrs.size,
+              });
+            }
+            readNextBatch();
+          });
+        };
+        readNextBatch();
+      });
+    });
   }
 
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
