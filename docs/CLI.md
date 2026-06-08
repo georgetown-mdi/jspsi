@@ -58,7 +58,7 @@ Before running, users are warned about the limitations of the security model, na
 
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
-> **Not yet implemented:** `psilink init`, `psilink invite`, `psilink accept`, and the `--save` flag are reserved for the configuration and bootstrapping workflow but are not yet wired up in the CLI; they are targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The `init`, `invite`, and `accept` commands currently print a "not yet implemented" message and exit; the `--save` flag emits a warning and proceeds with a standard zero-setup exchange. Until these commands land, recurring exchanges require a key file (`.psilink.key`) provisioned out-of-band - see [Required permissions](SECURITY_DESIGN.md#required-permissions) for the file format.
+> **Not yet implemented:** `psilink init` and the `--save` flag are reserved for the configuration and bootstrapping workflow but are not yet wired up in the CLI; they are targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The `init` command currently prints a "not yet implemented" message and exits; the `--save` flag emits a warning and proceeds with a standard zero-setup exchange. `psilink invite` and `psilink accept` are implemented (offline and online); see the sections below.
 
 If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret).
 
@@ -79,6 +79,32 @@ An invitation MAY carry a connection endpoint: a public locator that tells the a
 Because an invitation carries the shared authentication token -- and, in the web flow, the rendezvous derived from it -- treat it as confidential and forward it only over a trusted, out-of-band channel (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
 
 Invitation strings beginning with `-` may be misinterpreted as option flags by argument parsers. All positional arguments and unrecognized flags are validated against the invitation string schema, so the string is identified unambiguously regardless of its position or leading character.
+
+> **Current CLI limitations.** The invite and accept sections below describe the
+> intended design. The current implementation has the following gaps, each
+> tracked for a follow-up:
+>
+> - Generating an invitation requires an `INPUT_FILE`; reusing a pre-existing
+>   configuration file as the source of linkage terms is not yet supported.
+> - A pre-existing configuration or key file at a target path is always reported
+>   as a conflict and the command aborts. Reconciling an existing config by
+>   comparing its linkage terms (and, online, its connection block) against the
+>   invitation or URL -- and the warn-rather-than-error handling described for a
+>   pre-existing key file in the online-invitation case -- is not yet
+>   implemented; remove the file or pass `--config-file` / `--key-file` to
+>   proceed.
+> - Online invite does not yet revoke or expire the token early on timeout or
+>   cancellation; the token simply lapses at its 1-hour expiry.
+> - Online invite does not embed a `connectionEndpoint` in the invitation it
+>   prints; the server location is conveyed only by the printed `psilink accept
+>   URL ...` hint. An offline acceptor of an online-generated invitation
+>   therefore gets a placeholder connection block to fill in, not one seeded from
+>   the inviter's endpoint.
+> - Online invite and accept persist the configuration only after the whole
+>   exchange succeeds. If anything after the handshake fails -- the data
+>   exchange, or writing the configuration file itself -- the rotated key is
+>   saved (by `psilink exchange`'s rotation path) but the configuration is not
+>   written; re-invite to recover.
 
 ## Offline invitation
 

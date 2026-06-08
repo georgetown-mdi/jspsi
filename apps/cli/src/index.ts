@@ -13,6 +13,14 @@ import {
   builder as fingerprintBuilder,
   handler as fingerprintHandler,
 } from "./commands/fingerprint";
+import {
+  builder as inviteBuilder,
+  handler as inviteHandler,
+} from "./commands/invite";
+import {
+  builder as acceptBuilder,
+  handler as acceptHandler,
+} from "./commands/accept";
 
 yargs(hideBin(process.argv))
   .scriptName("psilink")
@@ -32,22 +40,16 @@ yargs(hideBin(process.argv))
     },
   )
   .command(
-    "invite",
-    "Generate an invitation",
-    () => {},
-    () => {
-      console.error("psilink invite: not yet implemented");
-      process.exit(1);
-    },
+    "invite [args..]",
+    "Generate an invitation (offline), or invite and run an exchange (online)",
+    inviteBuilder,
+    inviteHandler,
   )
   .command(
-    "accept",
-    "Accept a partner invitation",
-    () => {},
-    () => {
-      console.error("psilink accept: not yet implemented");
-      process.exit(1);
-    },
+    "accept [args..]",
+    "Accept a partner invitation (offline), or accept and run (online)",
+    acceptBuilder,
+    acceptHandler,
   )
   .command(
     "exchange <input> [output]",

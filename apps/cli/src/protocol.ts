@@ -7,6 +7,7 @@ import PSI from "@openmined/psi.js";
 import {
   FileSyncConnection,
   fromEventConnection,
+  EncryptedMessageConnection,
   DEFAULT_PEER_TIMEOUT_MS,
   getLogger,
   describeExchangeStages,
@@ -331,6 +332,12 @@ export async function runProtocol(
   let cleaned = false;
   let opened = false;
   let started = false;
+  // The AEAD decorator that wraps `mc` once a PAKE session key is available
+  // (authenticated path only). Declared in the outer scope so doCleanup can
+  // close it; left undefined on the no-PAKE path, where the exchange runs over
+  // the unencrypted `mc`. secure.close() delegates to mc.close(), so closing it
+  // closes the underlying FileSyncConnection and sweeps its responsible files.
+  let secure: EncryptedMessageConnection | undefined;
   // Set synchronously immediately before `await authenticateConnection`.
   // The partner can complete its own handshake and persist the rotated token
   // before our await resolves, so any failure that arrives after this flag is
@@ -350,10 +357,23 @@ export async function runProtocol(
     cleaned = true;
     if (started) log.info("stopping polling");
     if (opened) log.info("closing connection");
+    // When the AEAD decorator was built (authenticated path), close it: its
+    // close() delegates to mc.close(), which detaches the bridge's data/error
+    // listeners and closes the underlying FileSyncConnection. Closing secure is
+    // a no-op for the no-PAKE path (secure is undefined there) and for the
+    // window where a signal arrived between authenticateConnection returning and
+    // create resolving (secure still undefined) -- the mc.close() below then
+    // closes the transport directly. All of these are idempotent.
+    if (secure !== undefined) {
+      await secure.close().catch((err: unknown) => {
+        log.debug("secure.close() during cleanup:", err);
+      });
+    }
     // mc.close() detaches the bridge's data/error listeners and then closes the
     // underlying FileSyncConnection, which stops the poller, sweeps the
     // responsible files, and ends the client (all idempotent, so this is safe
-    // even when open() never ran).
+    // even when open() never ran, and a near no-op after secure.close() already
+    // closed it via the same delegation).
     await mc.close().catch((err: unknown) => {
       log.debug("mc.close() during cleanup:", err);
     });
@@ -541,11 +561,6 @@ export async function runProtocol(
       // conn.start() must precede authenticateConnection: the SPAKE2 handshake
       // awaits mc.receive(), which is fed by the bridge's data listener; that
       // listener only sees inbound frames once the polling loop is running.
-      // NOTE: there is an open ticket to extract sessionKey from the
-      // authentication result and use it set up AEAD encryption. It is
-      // currently blocked by integrating PAKE into the protocol and having the
-      // ability to generate invitation keys. For now, sessionKey is silently
-      // being dropped.
       // Discard the (possibly whitespace-padded) keyFilePath from auth;
       // saveKeyFile below uses trimmedKeyFilePath, which was captured and
       // trimmed during pre-flight without mutating the caller-supplied
@@ -559,7 +574,15 @@ export async function runProtocol(
       // "handshake may have completed on the partner side" case from the
       // "handshake never started" case.
       authStarted = true;
-      const { newToken } = await authenticateConnection(mc, pakeAuth, role);
+      // sessionKey is the 32-byte SPAKE2 session key; both parties derive the
+      // same value. It keys the per-direction AEAD encryption set up below, so
+      // every PSI frame after this point is opaque on the wire to an SFTP/
+      // file-drop admin. newToken is the rotated PAKE secret persisted to disk.
+      const { newToken, sessionKey } = await authenticateConnection(
+        mc,
+        pakeAuth,
+        role,
+      );
       try {
         // saveKeyFile is synchronous; the assignment below runs in the same
         // microtask tick. A signal cannot interleave between them, so any
@@ -594,13 +617,36 @@ export async function runProtocol(
           { psilinkRecoveryHintEmitted: true },
         );
       }
+
+      // Wrap mc in the AEAD decorator now that the PAKE session key is in hand,
+      // and run the PSI exchange through `secure` so every frame is encrypted on
+      // the wire. create() derives the two per-direction keys via HKDF and
+      // registers no listeners on mc, so a signal arriving between
+      // authenticateConnection returning and this resolving needs no listener
+      // juggling: the handler's doCleanup closes mc/conn directly. If the signal
+      // lands before create() resolves, doCleanup runs while secure is still
+      // undefined and latches cleaned, so the decorator that create() then
+      // assigns to secure is never close()d -- harmless, because mc is already
+      // closed and the decorator holds only CryptoKey objects, reclaimed when
+      // runProtocol returns. The signalReceived check below mirrors the
+      // post-open and post-synchronize guards, bailing before runExchange so the
+      // encrypted stream is never started against an already-closed mc.
+      secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
+      if (signalReceived !== undefined) {
+        throw new Error(
+          `interrupted by ${signalReceived} during channel encryption setup`,
+        );
+      }
     }
 
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
     const { associationTable, partnerPayload, audit } = await runExchange(
-      mc,
+      // Authenticated path: `secure` is the AEAD decorator over mc, so PSI
+      // frames are encrypted on the wire. No-PAKE path: secure is undefined and
+      // the exchange runs over the unencrypted mc (transport security only).
+      secure ?? mc,
       role,
       prepared,
       {

@@ -84,6 +84,7 @@ import {
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
 import { runProtocol } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import { LocalFSClient } from "../../src/connection/localFSClient";
 
 // 32 zero bytes in base64url (43 chars, no padding).
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -1540,3 +1541,141 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
     exitSpy.mockRestore();
   }
 });
+
+// --- Application-layer AEAD encryption ----------------------------------------
+
+test("authenticated exchange runs through EncryptedMessageConnection: wire bytes are { enc } envelopes, not cleartext", async () => {
+  // After PAKE, runProtocol must wrap mc in EncryptedMessageConnection and run
+  // the PSI exchange through it. This is asserted at the wire level: every PSI
+  // frame written to the drop directory is an { enc } AEAD envelope, the
+  // cleartext probe never appears on the wire, and the peer decrypts the frame
+  // back to its original form (proving a real AES-GCM round-trip through the
+  // decorator, not a no-op pass-through). FileSyncConnection and
+  // authenticateConnection are the real implementations here, so the session
+  // key, the per-direction keys, and the envelopes are all genuine.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  // The probe carries a canary containing '!' (outside the base64url alphabet),
+  // so it can never appear inside an { enc } base64url string; if it ever
+  // crossed the wire in cleartext the substring check below would catch it.
+  const CANARY = "PSILINK_CLEARTEXT_CANARY_!do-not-leak!";
+
+  // Capture every byte the transport writes, at write time, before the peer's
+  // poller can consume and delete the file (reading the directory afterwards
+  // would race that deletion). vi.spyOn calls through to the real put().
+  const putSpy = vi.spyOn(LocalFSClient.prototype, "put");
+
+  // Coordinate the two mocked runExchange invocations: the initiator sends one
+  // PSI frame through the encrypted connection it was handed, the responder
+  // receives and decrypts it. The initiator waits for the responder to consume
+  // before returning, so neither party's doCleanup sweeps the frame mid-flight.
+  // The decorator pairs the initiator's send key with the responder's receive
+  // key, so this direction also exercises the role-keyed HKDF derivation.
+  let received: unknown;
+  let signalConsumed!: () => void;
+  const consumed = new Promise<void>((resolve) => {
+    signalConsumed = resolve;
+  });
+
+  async function encryptingExchange(
+    conn: {
+      send: (d: unknown) => Promise<void>;
+      receive: () => Promise<unknown>;
+    },
+    role: "initiator" | "responder",
+  ): Promise<unknown> {
+    if (role === "initiator") {
+      await conn.send({ probe: CANARY });
+      await consumed;
+    } else {
+      received = await conn.receive();
+      signalConsumed();
+    }
+    return { associationTable: [[], []], partnerPayload: {} };
+  }
+
+  vi.mocked(runExchange).mockImplementation(encryptingExchange as never);
+
+  try {
+    await Promise.all([
+      runProtocol(
+        {
+          channel: "filedrop",
+          path: dropDir,
+          options: { pollIntervalMs: 1 },
+          authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+        },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+      ),
+      runProtocol(
+        {
+          channel: "filedrop",
+          path: dropDir,
+          options: { pollIntervalMs: 1 },
+          authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+        },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+
+    // 1. The peer decrypted the frame back to the exact object that was sent:
+    //    the decorator performed a real AES-GCM round-trip, not a pass-through.
+    expect(received).toEqual({ probe: CANARY });
+
+    // Decode every non-empty buffer the transport wrote, keeping the raw text
+    // for the cleartext check and the parsed message envelopes for the shape
+    // check. send() serializes each message as { ts, seq, type, payload }.
+    // Every protocol frame is written as a Buffer (FileSyncConnection.send
+    // JSON.stringifies the message and calls put(Buffer, ...)). Assert that
+    // invariant rather than silently filtering: a future stream-based write
+    // must fail this test loudly instead of slipping a cleartext frame past
+    // the canary check below by being dropped from wireTexts.
+    const writtenSrcs = putSpy.mock.calls.map((call) => call[0]);
+    for (const src of writtenSrcs) {
+      expect(Buffer.isBuffer(src)).toBe(true);
+    }
+    const wireTexts = writtenSrcs
+      .filter((src): src is Buffer => Buffer.isBuffer(src) && src.length > 0)
+      .map((src) => src.toString("utf8"));
+
+    // 2. The cleartext probe never crossed the wire in any frame (PSI or PAKE).
+    for (const text of wireTexts) {
+      expect(text).not.toContain(CANARY);
+    }
+
+    // 3. At least one message frame's payload is an { enc } envelope -- the PSI
+    //    frame went out encrypted, not as a cleartext protocol frame. PAKE
+    //    frames also carry a payload, but their SPAKE2 fields are never { enc }.
+    const encEnvelopes = wireTexts
+      .map((text) => {
+        try {
+          return JSON.parse(text) as { payload?: unknown };
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(
+        (msg): msg is { payload: unknown } =>
+          msg !== undefined && msg !== null && "payload" in msg,
+      )
+      .map((msg) => msg.payload)
+      .filter(
+        (p): p is { enc: string } =>
+          typeof p === "object" &&
+          p !== null &&
+          typeof (p as { enc?: unknown }).enc === "string",
+      );
+    expect(encEnvelopes.length).toBeGreaterThanOrEqual(1);
+  } finally {
+    putSpy.mockRestore();
+  }
+}, 15_000);
