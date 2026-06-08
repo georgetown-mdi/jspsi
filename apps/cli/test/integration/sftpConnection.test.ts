@@ -2,7 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { FileSyncConnection, UsageError } from "@psilink/core";
+import {
+  FileSyncConnection,
+  FrameSizeExceededError,
+  UsageError,
+} from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { sftpPort } from "../container/env";
@@ -280,5 +284,39 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
     await serverSFTP.safeDelete(`${SFTP_PATH}/${sentinelName}`);
     await abortConn.close();
     await cleanServer();
+  }
+});
+
+test("get aborts and rejects a file larger than maxBytes", async () => {
+  // Write an over-cap file directly to the server's storage (the host srv/ dir
+  // is mounted into the container) and read it back through the adapter with a
+  // small cap. The streaming read must reject with the typed frame-size error
+  // after buffering at most a chunk past the cap, rather than downloading the
+  // whole file. Exercises the real SFTP read-stream abort path against the
+  // server, with several chunks flowing before the cap fires (cap > one chunk).
+  const name = "oversize-frame.bin";
+  const localPath = path.join(SFTP_LOCAL_DIRECTORY, name);
+  await fs.writeFile(localPath, Buffer.alloc(1024 * 1024)); // 1 MiB
+  try {
+    await expect(
+      serverSFTP.get(`${SFTP_PATH}/${name}`, { maxBytes: 256 * 1024 }),
+    ).rejects.toBeInstanceOf(FrameSizeExceededError);
+  } finally {
+    await fs.unlink(localPath).catch(() => {});
+  }
+});
+
+test("get returns a file at or under maxBytes unchanged", async () => {
+  const name = "under-cap-frame.bin";
+  const localPath = path.join(SFTP_LOCAL_DIRECTORY, name);
+  const contents = Buffer.from("a small but real frame body");
+  await fs.writeFile(localPath, contents);
+  try {
+    const buf = await serverSFTP.get(`${SFTP_PATH}/${name}`, {
+      maxBytes: contents.length,
+    });
+    expect(Buffer.from(buf)).toEqual(contents);
+  } finally {
+    await fs.unlink(localPath).catch(() => {});
   }
 });

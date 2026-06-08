@@ -12,6 +12,7 @@ import {
   UsageError,
   BilateralModeMismatchError,
   ConnectionClosedError,
+  FrameSizeExceededError,
 } from "../errors";
 import {
   HelloEnvelopeSchema,
@@ -22,6 +23,7 @@ import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
   cancellableDelay,
 } from "./fileSyncConstants";
+import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -157,8 +159,17 @@ async function readControlFileWithGate(
   do {
     let raw: Buffer<ArrayBufferLike>;
     try {
-      raw = await client.get(filePath, { encoding: "utf-8" });
-    } catch {
+      raw = await client.get(filePath, {
+        encoding: "utf-8",
+        maxBytes: MAX_FRAME_SIZE_BYTES,
+      });
+    } catch (err) {
+      // An over-cap control file is terminal, not a partial-sync retry: a
+      // hostile server could otherwise hold the gate open by serving an
+      // oversized hello every cycle until the deadline. Rethrow so it
+      // propagates out of synchronize() as the typed, exit-64 failure rather
+      // than being swallowed and retried.
+      if (err instanceof FrameSizeExceededError) throw err;
       // File may not be readable yet (TOCTOU or partial sync); retry.
       await cancellableDelay(pollingFrequency, signal);
       continue;
@@ -254,6 +265,22 @@ export interface GetOptions {
   flags?: "r";
   encoding?: null | string;
   handle?: null | string;
+  /**
+   * Maximum number of bytes the read may pull into memory. A file larger than
+   * this is refused with a {@link FrameSizeExceededError} -- before any read for
+   * a stat-capable adapter, or after at most one stream chunk past the cap for a
+   * streaming one -- so allocation stays bounded to roughly `maxBytes` rather
+   * than the (possibly attacker-chosen) file size. This is the hard backstop
+   * behind the poll loop's pre-`get()` size check; it is what still bounds the
+   * read when a server under-reports a file's size in its directory listing.
+   * Omit for an uncapped read.
+   *
+   * A capped read always resolves to a raw Buffer; `encoding` is not applied
+   * (the streaming adapter drops it so the running byte count stays exact).
+   * Callers that need a string decode the result with `.toString()`, as they
+   * already do for the always-raw-Buffer {@link LocalFSClient}.
+   */
+  maxBytes?: number;
 }
 
 /**
@@ -2322,6 +2349,30 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (messages.length === 1) {
         const { file: messageFile, declaredSize } = messages[0];
 
+        // Frame-size bound (the primary enforcement point; see
+        // docs/SECURITY_DESIGN.md, "Channel security"). Refuse before the
+        // sync-gate and before get() loads the body into memory: a hostile
+        // server admin could otherwise write an arbitrarily large file and
+        // exhaust memory. Checked against both the filename-declared count and
+        // the listed on-disk size (either one over the cap is enough, and the
+        // declared check fires even while the file is still syncing, so we never
+        // wait for an over-cap file to finish). This pre-check trusts the listed
+        // size the same way the sync-gate below already does; the maxBytes cap
+        // passed to get() is the hard backstop for a server that under-reports
+        // the size here. Terminal: a FrameSizeExceededError is a UsageError, so
+        // poll()'s catch stops the poller rather than re-reading the file.
+        if (
+          declaredSize > MAX_FRAME_SIZE_BYTES ||
+          messageFile.size > MAX_FRAME_SIZE_BYTES
+        ) {
+          throw new FrameSizeExceededError(
+            `message file ${messageFile.name} from ${peerId} in ${path} ` +
+              `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
+              `exceeding the maximum inbound frame size of ` +
+              `${MAX_FRAME_SIZE_BYTES} bytes; refusing to read it into memory`,
+          );
+        }
+
         if (messageFile.size < declaredSize) {
           // The file has appeared but the sync tool has not finished
           // transferring it. Leave it untouched and re-check next cycle rather
@@ -2336,7 +2387,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.log.debug(`[${this.role}] getting message ${messageFile.name}`);
 
           reachedGet = true;
-          const message = await this.client.get(inPath, { encoding: "utf-8" });
+          const message = await this.client.get(inPath, {
+            encoding: "utf-8",
+            maxBytes: MAX_FRAME_SIZE_BYTES,
+          });
           reachedGet = false;
 
           // The file has already passed the byte-count gate above, so it is

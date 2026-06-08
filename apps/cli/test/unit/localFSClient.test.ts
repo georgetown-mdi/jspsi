@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { FrameSizeExceededError } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
@@ -105,6 +106,63 @@ test("get reads an existing file as a Buffer", async () => {
 
 test("get rejects when file does not exist", async () => {
   await expect(client.get(path.join(dir, "missing.txt"))).rejects.toThrow();
+});
+
+test("get refuses a file larger than maxBytes without allocating it", async () => {
+  const filePath = path.join(dir, "oversize.bin");
+  await fs.writeFile(filePath, Buffer.alloc(64));
+  // Spy on the FileHandle read so we can prove the over-cap file is refused
+  // after the fstat but before any content read/allocation.
+  const handle = await fs.open(filePath, "r");
+  const readSpy = vi.spyOn(handle, "read");
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    await expect(client.get(filePath, { maxBytes: 32 })).rejects.toThrow(
+      FrameSizeExceededError,
+    );
+    expect(readSpy).not.toHaveBeenCalled();
+  } finally {
+    openSpy.mockRestore();
+    readSpy.mockRestore();
+    await handle.close();
+  }
+});
+
+test("get surfaces FrameSizeExceededError even when handle.close rejects", async () => {
+  const filePath = path.join(dir, "oversize-closefail.bin");
+  await fs.writeFile(filePath, Buffer.alloc(64));
+  // A failing close() in the finally block must not mask the typed terminal
+  // error: the poll loop classifies FrameSizeExceededError (a UsageError) as
+  // terminal and would otherwise reschedule and re-read the oversized file.
+  const handle = await fs.open(filePath, "r");
+  const closeSpy = vi
+    .spyOn(handle, "close")
+    .mockRejectedValue(new Error("EIO: simulated close failure"));
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    await expect(client.get(filePath, { maxBytes: 32 })).rejects.toThrow(
+      FrameSizeExceededError,
+    );
+  } finally {
+    openSpy.mockRestore();
+    closeSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+});
+
+test("get reads a file at exactly maxBytes", async () => {
+  const filePath = path.join(dir, "atlimit.bin");
+  const contents = Buffer.from("0123456789");
+  await fs.writeFile(filePath, contents);
+  const buf = await client.get(filePath, { maxBytes: contents.length });
+  expect(buf).toEqual(contents);
+});
+
+test("get reads a file under maxBytes", async () => {
+  const filePath = path.join(dir, "under.txt");
+  await fs.writeFile(filePath, "small");
+  const buf = await client.get(filePath, { maxBytes: 1024 });
+  expect(buf.toString()).toBe("small");
 });
 
 // --- put ---------------------------------------------------------------------
