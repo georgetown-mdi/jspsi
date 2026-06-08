@@ -409,6 +409,15 @@ const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
 
 const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
   z.object({
+    // algorithm stays pinned to the closed enum even though the sibling
+    // RecordLinkageField.type is an open string -- a deliberate asymmetry, not an
+    // oversight. type is open descriptive taxonomy: a newer PII category does not
+    // change what the record means, so a frozen-log reader passes it through.
+    // algorithm is meaning-bearing protocol structure that gates the disclosure
+    // semantics (psi revealed identifiers, psi-c only a count); a record carrying
+    // an algorithm this version does not define is not a v1 record. The version
+    // literal already rejects a future format, so reject an unknown algorithm here
+    // rather than admit semantics a v1 reader cannot interpret.
     algorithm: AlgorithmSchema,
     legalAgreement: RecordLegalAgreementSchema.optional(),
     matchingBasis: z.array(RecordLinkageFieldSchema),
@@ -545,11 +554,14 @@ function governanceFromTerms(terms: LinkageTerms): ExchangeRecordGovernance {
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
       if (seen.has(element.field)) continue;
+      // Mark the reference processed before resolving it, so a repeated dangling
+      // reference is deduplicated on lookup like any other. Output is unchanged --
+      // an unresolved reference emits nothing either way.
+      seen.add(element.field);
       const field = fieldByName.get(element.field);
       // A key element should always reference a declared field; skip an
       // unresolved reference rather than emitting a field with no semantic type.
       if (field === undefined) continue;
-      seen.add(element.field);
       matchingBasis.push({ name: field.name, type: field.type });
     }
   }
