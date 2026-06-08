@@ -123,6 +123,19 @@ export interface RunProtocolResult {
  * zero-setup command, which then reads {@link RunProtocolResult.bootstrap} to
  * provision the saved config/key. It is only meaningful with
  * `authentication: null`.
+ *
+ * `onAuthenticated` is an optional post-handshake hook invoked exactly once, on
+ * the authenticated path only, after the rotated token is saved to the key file
+ * and before the data exchange begins -- i.e. at the moment of acceptance. The
+ * online invite/accept callers persist their configuration here, so a handshake
+ * that succeeds but whose exchange then fails leaves both the rotated key and
+ * the config on disk. A handshake that never succeeds (declined, expired, or
+ * unreachable partner) never reaches the hook. A throw from the hook is
+ * non-fatal: it is logged at error level (so it survives `--log-level=error`)
+ * and the exchange still runs, because the data exchange is the irreplaceable
+ * two-party operation and must not be aborted by a failure to persist the
+ * recoverable config. Pass `undefined` (the default) on the no-auth path and
+ * from callers that need no post-handshake step (zero-setup, exchange).
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -132,6 +145,7 @@ export async function runProtocol(
   loggerName: string,
   recordOutput?: RecordOutput,
   saveIntent?: boolean,
+  onAuthenticated?: () => void,
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
@@ -656,6 +670,37 @@ export async function runProtocol(
           ),
           { psilinkRecoveryHintEmitted: true },
         );
+      }
+
+      // The handshake has succeeded and the rotated token is now persisted to
+      // the key file. Fire the optional post-handshake hook here -- exactly at
+      // acceptance, after the key save and before the data exchange (and before
+      // encryption setup, so the hook's persistence survives even a failure in
+      // that setup or an interrupt) -- so a caller (online invite/accept) can
+      // persist its configuration at this point. The hook runs only on the
+      // authenticated path (the only path with an acceptance) and exactly once.
+      // It is invoked synchronously, after the saveKeyFile/tokenRotated
+      // assignment above, so it does not violate that pair's no-await invariant.
+      //
+      // A throw from the hook is non-fatal: it is logged at error level (so it
+      // survives --log-level=error and is never silently lost) and the exchange
+      // proceeds. The data exchange is the irreplaceable two-party operation; a
+      // failure to persist the recoverable config must not abort it. In the
+      // worst case -- the hook write fails and the exchange then also fails --
+      // the outcome is no worse than before this hook existed (rotated key on
+      // disk, no config); the common case persists the config as intended.
+      if (onAuthenticated !== undefined) {
+        try {
+          onAuthenticated();
+        } catch (hookErr) {
+          log.error(
+            "the post-authentication hook failed after the handshake " +
+              "succeeded and the rotated key was saved; the exchange will " +
+              "continue, but any persistence the hook performs (e.g. writing " +
+              "the configuration) did not complete: " +
+              (hookErr instanceof Error ? hookErr.message : String(hookErr)),
+          );
+        }
       }
 
       // Wrap mc in the AEAD decorator now that the PAKE session key is in hand,

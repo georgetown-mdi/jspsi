@@ -351,14 +351,23 @@ export async function prepareForOnlineExchange(
 
 /**
  * Run the connect -> SPAKE2 handshake -> exchange path shared by online invite
- * and online accept, then persist the config. `runProtocol` opens the
- * connection, completes the handshake with `pakeToken`/`expires`, writes the
- * rotated (persistent, no-expiry) token to `keyPath`, and runs the exchange.
- * The config is written only after that all succeeds, so a declined or
- * unreachable partner leaves no config behind.
+ * and online accept, persisting the config at the moment the handshake
+ * succeeds. `runProtocol` opens the connection, completes the handshake with
+ * `pakeToken`/`expires`, writes the rotated (persistent, no-expiry) token to
+ * `keyPath`, then -- via the `onAuthenticated` post-handshake hook passed below
+ * -- writes the config, and finally runs the exchange.
+ *
+ * Persisting from the hook (rather than after `runProtocol` returns) means a
+ * handshake that succeeds but whose data exchange then fails leaves both the
+ * rotated key and the config on disk, so the recurring-exchange setup is
+ * recoverable without re-inviting. A handshake that never succeeds (declined,
+ * expired, or unreachable partner) never reaches the hook, so it still leaves
+ * no config behind. A failure of the config write itself is non-fatal and
+ * logged by `runProtocol`; the exchange still runs (see `onAuthenticated`).
  *
  * The persisted config carries the plain `connection` (no `authentication`);
- * `saveConfig` strips any PAKE material regardless.
+ * `saveConfig` strips any PAKE material regardless, so moving the write into the
+ * hook changes only when the config is persisted, not what is persisted.
  */
 export async function runOnlineBootstrap(params: {
   connection: RunnableConnectionConfig;
@@ -393,12 +402,21 @@ export async function runOnlineBootstrap(params: {
     params.verbosity,
     params.loggerName,
     params.recordOutput,
+    // saveIntent: the zero-setup `--save` bootstrap is meaningful only on the
+    // unauthenticated path; this is an authenticated exchange, so leave it unset.
+    undefined,
+    // Persist the configuration exactly at acceptance: runProtocol invokes this
+    // once, after the rotated token is saved to the key file and before the data
+    // exchange begins. Writing here (rather than after runProtocol returns) means
+    // a handshake success followed by a data-exchange failure leaves both the
+    // rotated key and the config on disk -- no re-invite needed to recover.
+    () => {
+      saveConfig(params.configPath, {
+        connection: params.connection,
+        ...params.dataSpec,
+      });
+    },
   );
-
-  saveConfig(params.configPath, {
-    connection: params.connection,
-    ...params.dataSpec,
-  });
 }
 
 // --- Confirmation prompt -----------------------------------------------------

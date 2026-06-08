@@ -1,7 +1,11 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
-import type { ConnectionEndpoint } from "@psilink/core";
+import type { ConnectionEndpoint, PreparedExchange } from "@psilink/core";
 
 import {
   buildDataSpec,
@@ -11,8 +15,19 @@ import {
   looksLikeUrl,
   parseCommonBootstrapArgs,
   redactUrlCredentials,
+  runOnlineBootstrap,
   runOrExit,
+  type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
+import { runProtocol } from "../../src/protocol";
+
+// runOnlineBootstrap's config-persistence tests below drive its wiring without
+// opening a connection: runProtocol is mocked so each test chooses whether the
+// handshake "succeeds" (the mock invokes onAuthenticated) before it resolves or
+// rejects. saveConfig is left real, so the assertions check the actual file.
+vi.mock("../../src/protocol", () => ({
+  runProtocol: vi.fn(),
+}));
 
 // runOrExit creates its error logger by name; silence that name so the
 // error-path tests below don't print to the console.
@@ -303,4 +318,74 @@ test("buildDataSpec: supplied terms plus input infer metadata and standardizatio
   expect(dataSpec.linkageTerms).toEqual(inferred.linkageTerms);
   expect(dataSpec.metadata).toBeDefined();
   expect(dataSpec.standardization).toBeDefined();
+});
+
+// --- runOnlineBootstrap: config persisted at handshake success ---------------
+
+/** Minimal valid params for runOnlineBootstrap; runProtocol is mocked, so the
+ *  connection/prepared/key fields are never exercised against a real transport.
+ */
+function onlineBootstrapParams(
+  configPath: string,
+): Parameters<typeof runOnlineBootstrap>[0] {
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const connection: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/tmp/psilink-drop",
+  };
+  return {
+    connection,
+    dataSpec,
+    prepared: {} as unknown as PreparedExchange,
+    pakeToken: generatePakeToken(),
+    expires: undefined,
+    keyPath: path.join(path.dirname(configPath), ".psilink.key"),
+    configPath,
+    output: undefined,
+    verbosity: -1,
+    loggerName: "bootstrap-test",
+    recordOutput: undefined,
+  };
+}
+
+test("runOnlineBootstrap writes the config from the hook even when the exchange then fails", async () => {
+  // Handshake succeeds (runProtocol invokes onAuthenticated -> saveConfig), then
+  // the data exchange fails. The config must already be on disk so the
+  // recurring-exchange setup is recoverable without re-inviting.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = callArgs[7] as (() => void) | undefined;
+    onAuthenticated?.();
+    throw new Error("data exchange failed");
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await expect(
+      runOnlineBootstrap(onlineBootstrapParams(configPath)),
+    ).rejects.toThrow("data exchange failed");
+    expect(fs.existsSync(configPath)).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap does not write the config when the handshake fails", async () => {
+  // The handshake fails before acceptance, so runProtocol never invokes the
+  // hook. No config must be written -- preserving the "declined or unreachable
+  // partner leaves no config behind" guarantee.
+  vi.mocked(runProtocol).mockImplementation((async () => {
+    throw new Error("partner declined the invitation");
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await expect(
+      runOnlineBootstrap(onlineBootstrapParams(configPath)),
+    ).rejects.toThrow("partner declined");
+    expect(fs.existsSync(configPath)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -100,11 +100,6 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 >   URL ...` hint. An offline acceptor of an online-generated invitation
 >   therefore gets a placeholder connection block to fill in, not one seeded from
 >   the inviter's endpoint.
-> - Online invite and accept persist the configuration only after the whole
->   exchange succeeds. If anything after the handshake fails -- the data
->   exchange, or writing the configuration file itself -- the rotated key is
->   saved (by `psilink exchange`'s rotation path) but the configuration is not
->   written; re-invite to recover.
 
 ## Offline invitation
 

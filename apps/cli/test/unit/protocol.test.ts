@@ -1711,3 +1711,318 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
     putSpy.mockRestore();
   }
 }, 15_000);
+
+// --- Post-handshake hook (onAuthenticated) -----------------------------------
+
+test("runProtocol invokes onAuthenticated after the rotated key is saved and before the exchange begins", async () => {
+  // The hook must fire at the moment of acceptance: after saveKeyFile has
+  // rotated the on-disk token, but before runExchange runs. Party A carries the
+  // hook; party B does not (exercising the no-hook path alongside). The hook
+  // reads the key file (which must already show the rotated token) and inspects
+  // the recorded exchange events (A's exchange must not have started yet).
+  // Moving the hook after runExchange would flip the second assertion; moving it
+  // before saveKeyFile would flip the first.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  // Record per-party exchange entry, keyed off a sentinel id on `prepared`, then
+  // fall through to the default polling drain so the peer consumes the last PAKE
+  // message before runExchange resolves (avoids a cleanup/receive race).
+  const events: string[] = [];
+  vi.mocked(runExchange).mockImplementation((async (...callArgs: unknown[]) => {
+    const prepared = callArgs[2] as { id?: string };
+    events.push(`exchange:${prepared.id ?? "?"}`);
+    return defaultRunExchange();
+  }) as never);
+
+  const preparedA = { id: "A" } as unknown as PreparedExchange;
+  const preparedB = { id: "B" } as unknown as PreparedExchange;
+
+  let hookSawToken: string | undefined;
+  let aExchangeRunAtHookTime: boolean | undefined;
+  const onAuthenticatedA = () => {
+    hookSawToken = loadKeyFile(keyFileA)?.pakeToken;
+    aExchangeRunAtHookTime = events.includes("exchange:A");
+  };
+
+  await Promise.all([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      preparedA,
+      undefined,
+      -1,
+      "test-a",
+      undefined,
+      undefined,
+      onAuthenticatedA,
+    ),
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      preparedB,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  // Fired after the key save: the hook saw a rotated (non-original) token.
+  expect(hookSawToken).toBeDefined();
+  expect(hookSawToken).not.toBe(TOKEN_A);
+  // Fired before the exchange: A's runExchange had not run when the hook fired.
+  expect(aExchangeRunAtHookTime).toBe(false);
+});
+
+test("runProtocol persists the onAuthenticated side effect even when the data exchange then fails", async () => {
+  // The recurring-exchange guarantee: a handshake success followed by an
+  // exchange failure must still leave the hook's persistence on disk (the
+  // bootstrap callers write the config here). A marker file stands in for the
+  // config write. Both parties wait until both key files have rotated before
+  // throwing, so PAKE has completed on both sides before either cleanup runs.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  const markerA = path.join(tmpDir, "config-a.marker");
+  const markerB = path.join(tmpDir, "config-b.marker");
+
+  async function waitForRotationThenThrow(): Promise<never> {
+    const { readFileSync } = await import("node:fs");
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      try {
+        const a = JSON.parse(readFileSync(keyFileA, "utf8")).pakeToken;
+        const b = JSON.parse(readFileSync(keyFileB, "utf8")).pakeToken;
+        if (a !== TOKEN_A && b !== TOKEN_A) break;
+      } catch {
+        // file may not exist yet; retry
+      }
+      if (Date.now() > deadline)
+        throw new Error("timed out waiting for both key files to rotate");
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    throw new Error("simulated data-exchange failure after rotation");
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrow)
+    .mockImplementationOnce(waitForRotationThenThrow);
+
+  const pA = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1 },
+      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+    undefined,
+    undefined,
+    () => fs.writeFileSync(markerA, "config-a"),
+  );
+  const pB = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1 },
+      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+    undefined,
+    undefined,
+    () => fs.writeFileSync(markerB, "config-b"),
+  );
+
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  // The exchange failed, but the hook's persistence survived on both sides.
+  expect(fs.existsSync(markerA)).toBe(true);
+  expect(fs.existsSync(markerB)).toBe(true);
+  // The handshake had succeeded: the token was rotated before the failure.
+  expect(loadKeyFile(keyFileA)?.pakeToken).not.toBe(TOKEN_A);
+  expect(loadKeyFile(keyFileB)?.pakeToken).not.toBe(TOKEN_A);
+}, 15_000);
+
+test("runProtocol does not invoke onAuthenticated when the handshake fails", async () => {
+  // An expired token fails the pre-handshake expiry check in
+  // authenticateConnection, before any token rotation. The hook must not fire
+  // -- preserving the "declined or unreachable partner leaves no config behind"
+  // guarantee -- so neither marker is written and neither token rotates.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  const expired = "2000-01-01T00:00:00.000Z";
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A, expires: expired });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A, expires: expired });
+  const markerA = path.join(tmpDir, "config-a.marker");
+  const markerB = path.join(tmpDir, "config-b.marker");
+
+  const pA = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1 },
+      authentication: {
+        pakeToken: TOKEN_A,
+        expires: expired,
+        keyFilePath: keyFileA,
+      },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+    undefined,
+    undefined,
+    () => fs.writeFileSync(markerA, "config-a"),
+  );
+  const pB = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1 },
+      authentication: {
+        pakeToken: TOKEN_A,
+        expires: expired,
+        keyFilePath: keyFileB,
+      },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+    undefined,
+    undefined,
+    () => fs.writeFileSync(markerB, "config-b"),
+  );
+
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  // Hook never fired: no marker on either side.
+  expect(fs.existsSync(markerA)).toBe(false);
+  expect(fs.existsSync(markerB)).toBe(false);
+  // No rotation occurred: the original token is unchanged on both sides.
+  expect(loadKeyFile(keyFileA)?.pakeToken).toBe(TOKEN_A);
+  expect(loadKeyFile(keyFileB)?.pakeToken).toBe(TOKEN_A);
+});
+
+test("a throw from onAuthenticated is non-fatal: the exchange still runs and the failure is logged", async () => {
+  // The data exchange is the irreplaceable operation; a config-write failure at
+  // acceptance must not abort it. A's hook throws, but A's exchange still
+  // completes and the failure is reported at error level (captured in
+  // mockState.errors), not silently swallowed. Party B carries no hook.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  const throwingHook = () => {
+    throw new Error("simulated config write failure");
+  };
+
+  const [resultA, resultB] = await Promise.allSettled([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+      undefined,
+      undefined,
+      throwingHook,
+    ),
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  // The exchange completed on both sides despite A's hook throwing.
+  expect(resultA.status).toBe("fulfilled");
+  expect(resultB.status).toBe("fulfilled");
+  // The token still rotated (handshake + exchange succeeded).
+  expect(loadKeyFile(keyFileA)?.pakeToken).not.toBe(TOKEN_A);
+  // The hook failure was reported at error level, not silently lost.
+  expect(
+    mockState.errors.some((m) => m.includes("post-authentication hook failed")),
+  ).toBe(true);
+  expect(
+    mockState.errors.some((m) => m.includes("simulated config write failure")),
+  ).toBe(true);
+});
+
+test("runProtocol without onAuthenticated runs a normal authenticated exchange (existing callers unaffected)", async () => {
+  // zeroSetup and exchange pass no post-handshake hook; the new optional
+  // parameter must leave that path unchanged -- the token rotates, both sides
+  // agree, and no hook-related error is logged.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  await Promise.all([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  const a = loadKeyFile(keyFileA)?.pakeToken;
+  const b = loadKeyFile(keyFileB)?.pakeToken;
+  expect(a).toBeDefined();
+  expect(a).not.toBe(TOKEN_A);
+  expect(a).toBe(b);
+  expect(
+    mockState.errors.some((m) => m.includes("post-authentication hook")),
+  ).toBe(false);
+});
