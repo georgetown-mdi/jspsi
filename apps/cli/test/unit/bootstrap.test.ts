@@ -353,8 +353,13 @@ test("runOnlineBootstrap writes the config from the hook even when the exchange 
   // the data exchange fails. The config must already be on disk so the
   // recurring-exchange setup is recoverable without re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = callArgs[7] as (() => void) | undefined;
-    onAuthenticated?.();
+    // runOnlineBootstrap passes exactly one function argument (the
+    // onAuthenticated hook); select it by type rather than a positional index
+    // so a future signature change cannot silently break the mock.
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      | (() => void | Promise<void>)
+      | undefined;
+    await onAuthenticated?.();
     throw new Error("data exchange failed");
   }) as never);
 

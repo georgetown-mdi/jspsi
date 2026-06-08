@@ -130,12 +130,14 @@ export interface RunProtocolResult {
  * online invite/accept callers persist their configuration here, so a handshake
  * that succeeds but whose exchange then fails leaves both the rotated key and
  * the config on disk. A handshake that never succeeds (declined, expired, or
- * unreachable partner) never reaches the hook. A throw from the hook is
- * non-fatal: it is logged at error level (so it survives `--log-level=error`)
- * and the exchange still runs, because the data exchange is the irreplaceable
- * two-party operation and must not be aborted by a failure to persist the
- * recoverable config. Pass `undefined` (the default) on the no-auth path and
- * from callers that need no post-handshake step (zero-setup, exchange).
+ * unreachable partner) never reaches the hook. The hook may be synchronous or
+ * async; it is awaited, so a returned promise is settled before the exchange
+ * begins. A failure from the hook -- a synchronous throw or a rejected promise
+ * -- is non-fatal: it is logged at error level (so it survives
+ * `--log-level=error`) and the exchange still runs, because the data exchange is
+ * the irreplaceable two-party operation and must not be aborted by a failure to
+ * persist the recoverable config. Pass `undefined` (the default) on the no-auth
+ * path and from callers that need no post-handshake step (zero-setup, exchange).
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -145,7 +147,7 @@ export async function runProtocol(
   loggerName: string,
   recordOutput?: RecordOutput,
   saveIntent?: boolean,
-  onAuthenticated?: () => void,
+  onAuthenticated?: () => void | Promise<void>,
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
@@ -679,10 +681,12 @@ export async function runProtocol(
       // that setup or an interrupt) -- so a caller (online invite/accept) can
       // persist its configuration at this point. The hook runs only on the
       // authenticated path (the only path with an acceptance) and exactly once.
-      // It is invoked synchronously, after the saveKeyFile/tokenRotated
-      // assignment above, so it does not violate that pair's no-await invariant.
+      // It is awaited (so a sync or async hook both work, and a synchronous
+      // throw or a rejected promise are both caught below); the await comes
+      // after the saveKeyFile/tokenRotated assignment above, so that pair's
+      // no-await invariant is untouched.
       //
-      // A throw from the hook is non-fatal: it is logged at error level (so it
+      // A failure from the hook is non-fatal: it is logged at error level (so it
       // survives --log-level=error and is never silently lost) and the exchange
       // proceeds. The data exchange is the irreplaceable two-party operation; a
       // failure to persist the recoverable config must not abort it. In the
@@ -691,7 +695,7 @@ export async function runProtocol(
       // disk, no config); the common case persists the config as intended.
       if (onAuthenticated !== undefined) {
         try {
-          onAuthenticated();
+          await onAuthenticated();
         } catch (hookErr) {
           log.error(
             "the post-authentication hook failed after the handshake " +

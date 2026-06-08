@@ -1981,6 +1981,65 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   ).toBe(true);
 });
 
+test("an async onAuthenticated that rejects is non-fatal: the exchange still runs and the rejection is logged", async () => {
+  // The hook is awaited, so an async hook works and its rejected promise is
+  // caught (not a detached unhandled rejection). Same non-fatal contract as the
+  // synchronous-throw case: the exchange completes and the failure is logged.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  const rejectingHook = async () => {
+    await Promise.resolve();
+    throw new Error("simulated async config write failure");
+  };
+
+  const [resultA, resultB] = await Promise.allSettled([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+      undefined,
+      undefined,
+      rejectingHook,
+    ),
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  // The exchange completed despite A's async hook rejecting.
+  expect(resultA.status).toBe("fulfilled");
+  expect(resultB.status).toBe("fulfilled");
+  expect(loadKeyFile(keyFileA)?.pakeToken).not.toBe(TOKEN_A);
+  // The rejection was caught and reported at error level, not detached.
+  expect(
+    mockState.errors.some((m) => m.includes("post-authentication hook failed")),
+  ).toBe(true);
+  expect(
+    mockState.errors.some((m) =>
+      m.includes("simulated async config write failure"),
+    ),
+  ).toBe(true);
+});
+
 test("runProtocol without onAuthenticated runs a normal authenticated exchange (existing callers unaffected)", async () => {
   // zeroSetup and exchange pass no post-handshake hook; the new optional
   // parameter must leave that path unchanged -- the token rotates, both sides
