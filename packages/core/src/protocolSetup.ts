@@ -74,6 +74,12 @@ export interface TermsExchangeResult {
  * throw - which carries the real diagnostic - is always what surfaces. Pass
  * `localTerms` when aborting from the responder's message-2 slot, which must
  * still carry `linkageTerms`; omit it for the initiator's decision-only frame.
+ *
+ * The optional `save` intent field is intentionally not spread onto an abort
+ * frame. An abort ends the exchange before the bootstrap step, so the partner
+ * never reads intent carried here (it throws on the abort first), and advertising
+ * a desire to save while refusing the terms would be self-contradictory. Omitting
+ * it is the correct signal, not an oversight.
  */
 async function sendAbort(
   conn: MessageConnection,

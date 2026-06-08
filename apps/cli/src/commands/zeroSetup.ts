@@ -475,7 +475,11 @@ export function finalizeBootstrap(params: {
     // directly. The up-front gate ran before the network round-trip, so a file
     // that appeared at the path in that window must abort here rather than
     // clobber the user's configuration -- the same "never clobber a half-finished
-    // bootstrap" intent as the pre-flight check.
+    // bootstrap" intent as the pre-flight check. Only configFile is re-checked,
+    // not keyFile: this branch writes no key file, so gating on a path it will
+    // not touch would reject a write that is safe. The asymmetry with the
+    // pre-flight (which reserves both) is deliberate -- the pre-flight cannot yet
+    // know the partner declined to save, whereas here that is settled.
     const conflicts = detectFileConflicts([configFile]);
     if (conflicts.length > 0)
       throw new UsageError(
@@ -572,6 +576,16 @@ export async function handler(argv: Arguments): Promise<void> {
   // aborts before a connection is opened. Without --save, no files are written,
   // so an existing config/key is merely ignored; warn and point at the command
   // that would use it (docs/CLI.md "Zero-setup exchange").
+  //
+  // Both paths are reserved here even though the partner-did-not-save branch
+  // ends up writing only the config: whether a key file is written depends on
+  // the partner's intent, which is not known until after the terms round-trip.
+  // Reserving both up front fails fast on an existing key file rather than
+  // discovering the conflict post-exchange, where the secret has already crossed
+  // the wire and the only recovery is a re-invite. The conservative gate trades a
+  // rare false block (a stale key file plus a partner who declines to save) for
+  // never stranding a half-saved bootstrap, and matches docs/CLI.md (an existing
+  // config OR key with --save is an error).
   if (options.save) {
     try {
       assertNoProvisionConflicts({
