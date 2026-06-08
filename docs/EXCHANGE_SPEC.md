@@ -49,7 +49,7 @@ A semver string identifying the schema of the linkage aggreement. Two versions a
 *Required:* yes  
 *Consistency:* none
 
-A free-text string identifying the party holding these terms. It is self-asserted - a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the self-attested exchange record produced after every successful exchange (see [Self-attested record](PROTOCOL.md#self-attested-record)), where -- because that record is unsigned -- it is an unverified label. It is also included verbatim in the non-repudiation receipt (receipts are a planned 1.0 feature and are not yet implemented; see [ROADMAP.md](ROADMAP.md)), where it carries evidentiary weight only under a certificate-backed signature that binds the asserted identity to a verified key; under a session-derived receipt it remains an unverified label (see [Non-repudiation](PROTOCOL.md#non-repudiation)). Parties may format this however they wish; common contents include name, organization, and contact information.
+A free-text string identifying the party holding these terms. It is self-asserted - a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the self-attested exchange record produced after every successful exchange (see [Self-attested record](PROTOCOL.md#self-attested-record)), where -- because that record is unsigned -- it is an unverified label. It is also included verbatim in the non-repudiation receipt (receipt assembly is a planned 1.0 feature and is not yet wired up; see [ROADMAP.md](ROADMAP.md)), where it carries evidentiary weight only under a certificate-backed signature; there it must exactly match the identity bound into the presenting party's certificate, so under that mode this otherwise-free-text field is effectively pinned to what the party's signing certificate carries (see [Signing](#signing) and [Signing identity and certificate pinning](PROTOCOL.md#signing-identity-and-certificate-pinning)). Under a session-derived receipt it remains an unverified label. Parties may format this however they wish; common contents include name, organization, and contact information.
 
 ```yaml
 linkage_terms:
@@ -630,6 +630,50 @@ The receiver only reads files whose on-disk size matches the declared byte count
 An opaque key-value map passed verbatim to the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
 
 Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`).
+
+---
+
+## Signing
+
+Optional. Configures signing of exchange receipts and the trust in the partner's signing identity. Absent in exchanges that do not sign receipts. The block carries only non-secret references: the signing **private key is never in the config** -- it lives in a separate owner-read-only identity file (see `signing.identity_file`). The only field that crosses the trust boundary, `signing.partner_fingerprint`, is a public value (a hash of a public certificate). The trust model and certificate format are specified in [PROTOCOL.md](PROTOCOL.md#signing-identity-and-certificate-pinning) and [SECURITY_DESIGN.md](SECURITY_DESIGN.md#receipt-signing-identities).
+
+### `signing.mode`
+
+*Type:* string (`none` | `session-derived` | `certificate`)  
+*Required:* yes, when a `signing` block is present
+
+The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared PAKE session key -- tamper-evident but not non-repudiation and not third-party verifiable. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation. (Receipt assembly and the receipt swap are not yet wired up; this field, the signing identity, and the trust checks below are in place today.)
+
+### `signing.identity_file`
+
+*Type:* string (path)  
+*Required:* no
+
+Path to this party's signing identity file (the Ed25519 private key plus its self-signed certificate). Defaults to `~/.psilink/signing-identity.json` -- a per-user location, because one identity is reused across every exchange and partner. A leading `~` (or `~/`) is expanded to the home directory, so the value below works verbatim. The file is created lazily and owner-read-only by `psilink fingerprint` and is loaded thereafter; regenerate it deliberately with `psilink fingerprint --force` (which invalidates any fingerprint a partner has pinned).
+
+### `signing.partner_fingerprint`
+
+*Type:* string (43-character unpadded base64url SHA-256)  
+*Required:* no (but required, in practice, to verify a partner under `certificate` mode)
+
+The partner's pinned certificate fingerprint, obtained from the partner via `psilink fingerprint` and a trusted out-of-band channel. A presented partner certificate is trusted only if its self-signature verifies and its fingerprint matches this value; an absent or mismatched value rejects the partner's certificate (and therefore any receipt it carries) with a clear error. The fingerprint is not secret, but the channel that carries it must be authentic. It stays valid until the partner deliberately regenerates its identity.
+
+```yaml
+signing:
+  mode: certificate
+  identity_file: ~/.psilink/signing-identity.json
+  partner_fingerprint: iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg
+  receipt_output: ./receipts
+```
+
+### `signing.receipt_output`
+
+*Type:* string (path)  
+*Required:* no
+
+Where signed receipts / evidence are written. Optional; the CLI falls back to a documented default when omitted.
+
+Under `certificate` mode a receipt is accepted only if its asserted [`linkage_terms.identity`](#linkage_termsidentity) is the one the presenting certificate authorizes -- an exact match of the full identity over the same canonical bytes the record commits to and the receipt signs. A party that uses a different identity string than the one bound into its certificate needs a new certificate (a deliberate regeneration); see [PROTOCOL.md](PROTOCOL.md#signing-identity-and-certificate-pinning).
 
 ---
 

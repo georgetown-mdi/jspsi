@@ -6,7 +6,7 @@ import {
   UsageError,
 } from "@psilink/core";
 
-import { writeFileOwnerOnly } from "./keyFile";
+import { writeFileOwnerOnly } from "./fileUtils";
 
 /**
  * Default path for the exchange config file written by the provisioning

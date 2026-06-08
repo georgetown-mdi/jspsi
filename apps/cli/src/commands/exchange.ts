@@ -18,6 +18,7 @@ import {
   announceRetainMode,
   DEFAULT_CONFIG_PATH,
 } from "../config";
+import { expandTilde } from "../fileUtils";
 import { loadKeyFile, DEFAULT_KEY_PATH, type KeyFile } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
@@ -195,11 +196,17 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
 
   return {
-    input: argv["input"] as string,
-    output: argv["output"] as string | undefined,
-    configFile:
+    // Local filesystem paths accept a leading `~`; server-private-key /
+    // -password are NOT paths here (resolveAtSignRefs already turned any @file
+    // ref into its contents), so they must not be tilde-expanded.
+    input: expandTilde(argv["input"] as string),
+    output: expandTilde(argv["output"] as string | undefined),
+    configFile: expandTilde(
       (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
-    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
+    ),
+    keyFile: expandTilde(
+      (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
+    ),
     identity: argv["identity"] as string | undefined,
     serverPort: argv["server-port"] as number | undefined,
     serverUsername: argv["server-username"] as string | undefined,
@@ -219,7 +226,7 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
-    recordFile: argv["record-file"] as string | undefined,
+    recordFile: expandTilde(argv["record-file"] as string | undefined),
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };

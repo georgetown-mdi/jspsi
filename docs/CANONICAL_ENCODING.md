@@ -38,10 +38,14 @@ platform-independent.
 
 This encoding is the single canonicalization primitive for everything that is
 hashed, committed, or signed: the agreed-terms object embedded in a receipt, the
-self-attested record, and the receipt itself. It supersedes ad hoc
-`JSON.stringify` and key-sorting for those artifacts. Equality checks that must
-match a hashed form -- for example the cross-party linkage-terms comparison in
-`validateCompatibility` -- use it too, so that "equal" means "hashes equal".
+self-attested record, the receipt itself, and the signing certificate -- whose
+self-signature is computed over, and whose pinned fingerprint is a SHA-256 of,
+the canonical bytes of its body (see
+[PROTOCOL.md](PROTOCOL.md#signing-identity-and-certificate-pinning)). It
+supersedes ad hoc `JSON.stringify` and key-sorting for those artifacts. Equality
+checks that must match a hashed form -- for example the cross-party
+linkage-terms comparison in `validateCompatibility` -- use it too, so that
+"equal" means "hashes equal".
 
 It is **not** the wire format for exchange messages or configuration files;
 those remain ordinary JSON/YAML.
