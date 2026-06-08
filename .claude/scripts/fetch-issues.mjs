@@ -14,21 +14,43 @@
 // the node ID lets us address each item directly -- one round-trip for any
 // number of IDs, returning only those items, with no scan-and-filter.
 //
-// Usage:
-//   node fetch-issues.mjs <project-number> <itemId> [itemId...]
-//   node fetch-issues.mjs --json <project-number> <itemId> [itemId...]
-//   node fetch-issues.mjs --out-dir DIR <project-number> <itemId> [itemId...]
+// Each item argument may be EITHER a numeric ID (the `?itemId=N` value) OR a
+// `PVTI_...` global node ID as printed by `gh project item-list` -- the latter
+// is decoded back to its numeric ID, so a listed item can be looked up without
+// hand-decoding the node ID. The two forms mix freely in one invocation.
 //
-// Default output is human-readable (title, url, body per item). --json emits a
-// compact array of { id, type, title, body, url } for programmatic consumers. --out-dir
+// Usage:
+//   node fetch-issues.mjs <project-number> <itemId|PVTI_...> [more...]
+//   node fetch-issues.mjs --json <project-number> <itemId|PVTI_...> [more...]
+//   node fetch-issues.mjs --out-dir DIR <project-number> <itemId|PVTI_...> [more...]
+//
+// Default output is human-readable (title, url, populated field values, and body
+// per item). --json emits a compact array of
+// { id, type, title, body, url, fields } for programmatic consumers. --out-dir
 // writes each body to DIR/<id>.md (creating DIR) and prints one summary line per
 // file, which composes with edit-issue.mjs --body-file for a fetch-edit-push loop.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // fetchItems lives in lib/projectItems.mjs so lint-issues.mjs can reuse the same
-// aliased multi-fetch for resolving cross-references.
-import { fetchItems } from "./lib/projectItems.mjs";
+// aliased multi-fetch for resolving cross-references. numericIdFromNodeId lets a
+// PVTI_ node ID argument be accepted alongside the numeric form.
+import { fetchItems, numericIdFromNodeId } from "./lib/projectItems.mjs";
+
+// Fields surfaced first, in this order, in human-readable output; any other
+// populated field is printed afterward in encounter order. These three are the
+// board's primary triage axes, so they lead.
+const LEAD_FIELDS = ["Status", "Epic", "Implementation Order"];
+
+/**
+ * Resolve one item argument to its numeric ID. A `PVTI_...` value is decoded via
+ * numericIdFromNodeId; anything else is parsed as a base-10 integer. Returns NaN
+ * for an unparseable numeric argument so the caller's Number.isInteger check
+ * still rejects it. A malformed PVTI_ id throws (a clearer signal than NaN).
+ */
+function toNumericId(arg) {
+  return arg.startsWith("PVTI_") ? numericIdFromNodeId(arg) : Number(arg);
+}
 
 function main() {
   const argv = process.argv.slice(2);
@@ -54,14 +76,15 @@ function main() {
   const rest = argv.slice(i);
 
   const projectNumber = Number(rest[0]);
-  const numericIds = rest.slice(1).map(Number);
+  // Each argument is a numeric ID or a PVTI_ node ID; resolve both to numeric.
+  const numericIds = rest.slice(1).map(toNumericId);
   if (
     !Number.isInteger(projectNumber) ||
     numericIds.length === 0 ||
     numericIds.some((n) => !Number.isInteger(n))
   ) {
     process.stderr.write(
-      "Usage: node fetch-issues.mjs [--json] [--out-dir DIR] <project-number> <itemId> [itemId...]\n",
+      "Usage: node fetch-issues.mjs [--json] [--out-dir DIR] <project-number> <itemId|PVTI_...> [more...]\n",
     );
     process.exit(2);
   }
@@ -99,6 +122,21 @@ function main() {
     process.stdout.write(
       `TYPE:  ${item.type}${item.url ? ` (${item.url})` : ""}\n`,
     );
+    // Print populated project-field values: the lead fields first in a fixed
+    // order, then any other populated field in encounter order. Title is a field
+    // too but already shown above, so drop it here to avoid the duplicate.
+    const fields = item.fields ?? {};
+    const printed = new Set(["Title"]);
+    for (const name of LEAD_FIELDS) {
+      if (name in fields) {
+        process.stdout.write(`${name}: ${fields[name]}\n`);
+        printed.add(name);
+      }
+    }
+    for (const [name, value] of Object.entries(fields)) {
+      if (printed.has(name)) continue;
+      process.stdout.write(`${name}: ${value}\n`);
+    }
     process.stdout.write(`---\n${item.body}\n\n`);
   }
 }

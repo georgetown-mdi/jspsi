@@ -47,15 +47,79 @@ export function pvtiNodeId(projectNumber, numericId) {
 }
 
 /**
+ * Inverse of pvtiNodeId: recover the numeric item ID from a PVTI_ global node
+ * ID. Strips the "PVTI_" tag, base64url-decodes, and reads the trailing 4 bytes
+ * as a big-endian uint32. The decoded byte prefix (everything before those 4
+ * bytes) must match a known PROJECT_PREFIXES entry, which both validates the ID
+ * shape and guards against a node ID from some other project sneaking through.
+ * numericIdFromNodeId(pvtiNodeId(p, n)) === n holds for every known p.
+ */
+export function numericIdFromNodeId(nodeId) {
+  if (typeof nodeId !== "string" || !nodeId.startsWith("PVTI_")) {
+    throw new Error(`not a PVTI_ node id: ${nodeId}`);
+  }
+  const buf = Buffer.from(nodeId.slice(5), "base64url");
+  if (buf.length < 5) {
+    throw new Error(`PVTI_ node id too short to decode: ${nodeId}`);
+  }
+  const prefixHex = buf.subarray(0, -4).toString("hex");
+  const known = Object.values(PROJECT_PREFIXES).includes(prefixHex);
+  if (!known) {
+    throw new Error(
+      `PVTI_ node id "${nodeId}" has prefix ${prefixHex}, not a known project; known: ${Object.values(PROJECT_PREFIXES).join(", ")}`,
+    );
+  }
+  return buf.readUInt32BE(buf.length - 4);
+}
+
+/**
+ * GraphQL selection for an item's project-field values. Covers the value types
+ * the boards use -- text, number, and single-select -- each carrying its field
+ * name via the ProjectV2FieldCommon interface. Shared so fetchItems (read by
+ * numeric ID) and the all-items listing in list-epic.mjs extract fields the same
+ * way. Other value types (date, iteration, ...) are simply not selected here and
+ * fall out of the resulting map; extend this and extractFields together if a new
+ * type needs surfacing.
+ */
+export const FIELD_VALUES_FRAGMENT =
+  "fieldValues(first: 20) { nodes { __typename " +
+  "... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } } " +
+  "... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { name } } } " +
+  "... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } } } }";
+
+/**
+ * Turn a fieldValues node list (as selected by FIELD_VALUES_FRAGMENT) into a
+ * plain { fieldName -> value } map. Text and single-select values map to their
+ * string; number values map to their number. Nodes with no field name (or an
+ * unselected value type, which has neither text/number/name) are skipped.
+ */
+export function extractFields(fieldValues) {
+  const out = {};
+  for (const node of fieldValues?.nodes ?? []) {
+    const name = node?.field?.name;
+    if (!name) continue;
+    if (typeof node.text === "string") out[name] = node.text;
+    else if (typeof node.number === "number") out[name] = node.number;
+    else if (typeof node.name === "string") out[name] = node.name;
+  }
+  return out;
+}
+
+/**
  * Fetch the given numeric item IDs from one project in a single GraphQL call.
  * Returns one entry per requested ID, in order, as
- * { id, type, title, body, url }. Unresolved IDs come back with type "missing"
- * and null fields. Shared by fetch-issues.mjs (read) and lint-issues.mjs
- * (cross-reference resolution) so the aliased multi-fetch has one implementation.
+ * { id, type, title, body, url, fields }, where fields is the { name -> value }
+ * map of populated project-field values (see extractFields). Unresolved IDs come
+ * back with type "missing", null content fields, and an empty fields map. Shared
+ * by fetch-issues.mjs (read) and lint-issues.mjs (cross-reference resolution) so
+ * the aliased multi-fetch has one implementation. The id/type/title/body/url
+ * properties are stable; fields was added later and is purely additive.
  */
 export function fetchItems(projectNumber, numericIds) {
   const fields =
-    "... on ProjectV2Item { databaseId content { __typename " +
+    "... on ProjectV2Item { databaseId " +
+    FIELD_VALUES_FRAGMENT +
+    " content { __typename " +
     "... on DraftIssue { title body } " +
     "... on Issue { title body number url } } }";
   const aliases = numericIds
@@ -81,7 +145,14 @@ export function fetchItems(projectNumber, numericIds) {
   return numericIds.map((id, i) => {
     const node = data[`i${i}`];
     if (!node || !node.content) {
-      return { id, type: "missing", title: null, body: null, url: null };
+      return {
+        id,
+        type: "missing",
+        title: null,
+        body: null,
+        url: null,
+        fields: {},
+      };
     }
     const c = node.content;
     return {
@@ -90,6 +161,7 @@ export function fetchItems(projectNumber, numericIds) {
       title: c.title ?? null,
       body: c.body ?? null,
       url: c.url ?? null,
+      fields: extractFields(node.fieldValues),
     };
   });
 }

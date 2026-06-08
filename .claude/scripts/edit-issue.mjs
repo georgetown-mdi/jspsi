@@ -10,8 +10,13 @@
 // the numeric ID plus human-readable field/option names, so callers never juggle
 // node IDs or look up option IDs by hand.
 //
+// The <itemId> may be EITHER a numeric ID (the `?itemId=N` value) OR a
+// `PVTI_...` global node ID as printed by `gh project item-list`; the node ID is
+// decoded back to its numeric ID, so a listed item can be edited without
+// hand-decoding it.
+//
 // Usage:
-//   node edit-issue.mjs <project-number> <itemId> [edits...]
+//   node edit-issue.mjs <project-number> <itemId|PVTI_...> [edits...]
 //
 // Edits (any combination, applied in one run):
 //   --title "..."                 set the draft title
@@ -35,12 +40,23 @@
 // and other field types are reported as unsupported rather than guessed at.
 
 import { readFileSync } from "node:fs";
-import { fetchItems, gh, OWNER, pvtiNodeId } from "./lib/projectItems.mjs";
+import {
+  fetchItems,
+  gh,
+  numericIdFromNodeId,
+  OWNER,
+  pvtiNodeId,
+} from "./lib/projectItems.mjs";
 
 /** Parse argv into { projectNumber, numericId, title?, body?, fields: [{name, value}] }. */
 function parseArgs(argv) {
   const projectNumber = Number(argv[0]);
-  const numericId = Number(argv[1]);
+  // The item argument is a numeric ID or a PVTI_ node ID; resolve both to
+  // numeric. A malformed PVTI_ id throws (a clearer signal than the NaN below).
+  const itemArg = argv[1] ?? "";
+  const numericId = itemArg.startsWith("PVTI_")
+    ? numericIdFromNodeId(itemArg)
+    : Number(itemArg);
   if (!Number.isInteger(projectNumber) || !Number.isInteger(numericId)) {
     usage();
   }
@@ -102,7 +118,7 @@ function parseArgs(argv) {
 function usage(msg) {
   if (msg) process.stderr.write(`error: ${msg}\n`);
   process.stderr.write(
-    "Usage: node edit-issue.mjs <project-number> <itemId> " +
+    "Usage: node edit-issue.mjs <project-number> <itemId|PVTI_...> " +
       "[--title T] [--body B | --body-file PATH] [--status S] [--field NAME --value VAL]... [--diff] [--dry-run|-n]\n",
   );
   process.exit(2);
