@@ -102,8 +102,9 @@ export function recordPathsFor(
  * means the record holds no secret material (no salts, no matched data), so it is
  * the file you may hand to an auditor -- not that it is world-readable on disk.
  * It still discloses, in cleartext, that an exchange occurred, with whom (both
- * identities), and its size, so the conservative default keeps it private to the
- * owner; share it by copying the file, not by loosening its permissions.
+ * identities), under which agreement, over what categories of data, and its size,
+ * so the conservative default keeps it private to the owner; share it by copying
+ * the file, not by loosening its permissions.
  *
  * Non-fatal by design: the privacy-sensitive exchange and the results file have
  * already succeeded by the time this runs, so a record-write failure is logged

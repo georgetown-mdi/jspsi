@@ -36,6 +36,12 @@ const record: ExchangeRecord = {
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
   localIdentity: "Party A",
   partnerIdentity: "Party B",
+  governance: {
+    algorithm: "psi",
+    matchingBasis: [{ name: "ssn", type: "ssn" }],
+    payloadSent: [],
+    payloadReceived: [],
+  },
   resultSize: 2,
   bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   commitments: {

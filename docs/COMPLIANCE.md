@@ -87,6 +87,7 @@ For HIPAA-regulated deployments:
 - The PSI-Link software itself is not a Business Associate. The two covered entities (or business associates) running the exchange remain responsible for any business associate agreement (BAA) between themselves under their data sharing agreement.
 - Any third-party service used to support the exchange (a peer-coordination server, STUN/TURN relay, or shared SFTP server) is operated either by one of the parties or by a third party. If a third party operates such a service, the deploying agency is responsible for assessing whether a BAA is required. Because the PSI protocol does not transmit PHI to those supporting services, most deployments treat them as conduits, but this is a determination the deploying agency must make for itself.
 - The Security Rule's technical safeguards (access control, audit controls, integrity, transmission security) are addressed by the cryptographic design documented in [SECURITY_DESIGN.md](SECURITY_DESIGN.md). The administrative and physical safeguards remain the deploying agency's responsibility.
+- The self-attested exchange record each party writes after a successful exchange is a local, unsigned log of what it disclosed -- the partner, the governing data sharing agreement, the algorithm, the categories of data exchanged, and (when both parties learn it) the result size -- and carries no protected values. Where an accounting of disclosures applies (45 CFR 164.528), an agency can retain these records as the per-exchange source for that accounting; whether a given disclosure is accountable, and the retention and production of the accounting, remain the agency's responsibility. See [PROTOCOL.md](PROTOCOL.md#self-attested-record).
 
 <!-- TODO: provide a sample HIPAA-conduit determination memo template that agencies can adapt. -->
 
@@ -95,6 +96,8 @@ For HIPAA-regulated deployments:
 PSI-Link can be used to link educational records across agencies under a data sharing agreement consistent with FERPA's "studies" or "audit and evaluation" exceptions (34 CFR Part 99). The same protocol-level guarantees apply: no individual records are disclosed beyond the intersection, and supporting services see only ciphertext or connection metadata.
 
 The decision to disclose education records under FERPA, and to whom, is the educational agency's responsibility. PSI-Link does not enforce FERPA-specific controls beyond the cryptographic protections described in [SECURITY_DESIGN.md](SECURITY_DESIGN.md).
+
+The self-attested exchange record (see the [HIPAA considerations](#hipaa-considerations) above and [PROTOCOL.md](PROTOCOL.md#self-attested-record)) likewise gives the educational agency a per-exchange log -- the partner, the governing agreement, and the categories of data exchanged, with no protected values -- that it can retain toward FERPA's requirement to record disclosures of education records (34 CFR 99.32, subject to that section's exceptions). Maintaining the record of disclosures remains the agency's responsibility.
 
 ### CJIS considerations
 

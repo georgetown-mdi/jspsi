@@ -103,6 +103,27 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(init.record.commitments.associationTable).toBeDefined();
   expect(resp.record.commitments.associationTable).toBeDefined();
 
+  // Governance metadata is derived from the agreed terms on both sides and agrees
+  // on the cross-party-consistent fields. firstNameTerms configure no payload and
+  // no legal agreement, so the payload categories are explicitly empty.
+  expect(init.record.governance.algorithm).toBe("psi");
+  expect(resp.record.governance.algorithm).toBe("psi");
+  expect(init.record.governance.matchingBasis).toEqual([
+    { name: "firstName", type: "firstName" },
+  ]);
+  expect(resp.record.governance.matchingBasis).toEqual([
+    { name: "firstName", type: "firstName" },
+  ]);
+  expect("legalAgreement" in init.record.governance).toBe(false);
+  expect(init.record.governance.payloadSent).toEqual([]);
+  expect(init.record.governance.payloadReceived).toEqual([]);
+  // The payload categories are each party's own-direction view (send/receive),
+  // not a cross-party-validated field, so assert the responder's independently
+  // rather than inferring it from the initiator's.
+  expect("legalAgreement" in resp.record.governance).toBe(false);
+  expect(resp.record.governance.payloadSent).toEqual([]);
+  expect(resp.record.governance.payloadReceived).toEqual([]);
+
   // Each record's commitments verify against its own opening data.
   expect(
     (await verifyRecordCommitments(init.record, init.opening)).allValid,

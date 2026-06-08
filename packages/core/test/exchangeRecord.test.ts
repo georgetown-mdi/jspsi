@@ -81,6 +81,30 @@ const baseInputs: ExchangeRecordInputs = {
   createdAt: "2026-01-02T03:04:05.000Z",
 };
 
+// Terms carrying the optional governance inputs: a legal agreement, several
+// linkage fields (out of name order, to exercise the matchingBasis sort) all
+// referenced by one key, and payload columns with and without a description.
+const termsWithGovernance: LinkageTerms = {
+  ...termsA,
+  algorithm: "psi",
+  linkageFields: [
+    { name: "ln", type: "lastName" },
+    { name: "dob", type: "dateOfBirth" },
+    { name: "ssn4", type: "ssn4" },
+  ],
+  linkageKeys: [
+    {
+      name: "NAME_DOB_SSN4",
+      elements: [{ field: "ln" }, { field: "dob" }, { field: "ssn4" }],
+    },
+  ],
+  legalAgreement: { reference: "MOU-2025-0042", expirationDate: "2030-06-30" },
+  payload: {
+    send: [{ name: "dose", description: "Administered dose in milligrams." }],
+    receive: [{ name: "status" }],
+  },
+};
+
 // --- Agreed-terms hash -------------------------------------------------------
 
 describe("computeTermsHash", () => {
@@ -282,6 +306,115 @@ describe("association-table commitment", () => {
     // Payload commitments are still produced.
     expect(record.commitments.localPayloadSent).toBeDefined();
     expect(record.commitments.partnerPayloadReceived).toBeDefined();
+  });
+});
+
+// --- Governance metadata -----------------------------------------------------
+
+describe("governance metadata", () => {
+  test("is populated from terms that carry a legal agreement", async () => {
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, localTerms: termsWithGovernance },
+      fixedRandomness,
+    );
+    expect(record.governance).toEqual({
+      algorithm: "psi",
+      legalAgreement: {
+        reference: "MOU-2025-0042",
+        expirationDate: "2030-06-30",
+      },
+      // Standardized name + semantic type per field, sorted by name (dob < ln <
+      // ssn4), regardless of the order they were declared in.
+      matchingBasis: [
+        { name: "dob", type: "dateOfBirth" },
+        { name: "ln", type: "lastName" },
+        { name: "ssn4", type: "ssn4" },
+      ],
+      payloadSent: [
+        { name: "dose", description: "Administered dose in milligrams." },
+      ],
+      payloadReceived: [{ name: "status" }],
+    });
+  });
+
+  test("omits the legal agreement when the terms have none", async () => {
+    // baseInputs.localTerms (termsA) has no legalAgreement and no payload.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect("legalAgreement" in record.governance).toBe(false);
+    expect(record.governance.algorithm).toBe("psi");
+    expect(record.governance.matchingBasis).toEqual([
+      { name: "ssn", type: "ssn" },
+    ]);
+    expect(record.governance.payloadSent).toEqual([]);
+    expect(record.governance.payloadReceived).toEqual([]);
+  });
+
+  test("matching basis covers only the fields the linkage keys reference", async () => {
+    // 'email' is a declared linkage field that no linkage key references, so it
+    // was not matched on; it must not appear in the matching basis (recording it
+    // would overstate the disclosure basis).
+    const withUnusedField: LinkageTerms = {
+      ...termsA,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "email", type: "emailAddress" },
+      ],
+      linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+    };
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, localTerms: withUnusedField },
+      fixedRandomness,
+    );
+    expect(record.governance.matchingBasis).toEqual([
+      { name: "ssn", type: "ssn" },
+    ]);
+  });
+
+  test("represents the no-payload count-only (psi-c) case explicitly", async () => {
+    const countOnly: LinkageTerms = { ...termsA, algorithm: "psi-c" };
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, localTerms: countOnly },
+      fixedRandomness,
+    );
+    expect(record.governance.algorithm).toBe("psi-c");
+    // Empty arrays, not omission: the no-payload case is recorded explicitly.
+    expect(record.governance.payloadSent).toEqual([]);
+    expect(record.governance.payloadReceived).toEqual([]);
+  });
+
+  test("carries data-dictionary descriptions when present and bare names otherwise", async () => {
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, localTerms: termsWithGovernance },
+      fixedRandomness,
+    );
+    expect(record.governance.payloadSent).toEqual([
+      { name: "dose", description: "Administered dose in milligrams." },
+    ]);
+    // 'status' has no description -> the key is omitted, not set to undefined.
+    expect(record.governance.payloadReceived).toEqual([{ name: "status" }]);
+    expect("description" in record.governance.payloadReceived[0]).toBe(false);
+  });
+
+  test("contains no value-level data -- only names, categories, descriptions, references", async () => {
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: termsWithGovernance,
+        partnerTerms: { ...termsWithGovernance, identity: "Party B" },
+      },
+      fixedRandomness,
+    );
+    const serialized = serializeExchangeRecord(record);
+    // The payload row values and the matched-identifier table are committed, not
+    // embedded; they live only in the opening data, never in the record.
+    for (const value of ["10mg", "20mg", "active"]) {
+      expect(serialized).not.toContain(value);
+    }
+    // None of the value-bearing keys (committed rows, indices, salts, opened
+    // data) appear in the record at all.
+    for (const key of ['"rows"', '"rowIndices"', '"salt"', '"data"']) {
+      expect(serialized).not.toContain(key);
+    }
   });
 });
 

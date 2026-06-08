@@ -13,25 +13,33 @@ import {
   sha256,
   toBase64Url,
 } from "./utils/crypto.js";
+import { AlgorithmSchema } from "./types.js";
 
 import type { CanonicalValue } from "./utils/canonical.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
-import type { AssociationTable } from "./types.js";
+import type { Algorithm, AssociationTable } from "./types.js";
 
-// The self-attested exchange record (Phase 1 of exchange receipts). At the end
-// of a successful exchange each party writes a LOCAL audit artifact recording
-// that the exchange happened: the agreed terms (as a hash), both self-asserted
-// identities, the timestamp, the result size when both parties learn it, and
-// privacy-preserving commitments to the data exchanged.
+// The exchange record: a self-attested, unsigned disclosure-log entry each party
+// writes at the end of a successful exchange. It stands on its own as a record of
+// what was disclosed -- the governing data-sharing agreement, the algorithm, the
+// categories of data exchanged (payload column names/descriptions and the linkage
+// fields the match keyed on), both self-asserted identities, the timestamp, and the
+// result size when both parties learn it -- so an operator can populate a HIPAA
+// accounting of disclosures or a FERPA disclosure record without re-matching the
+// original linkage-terms config. It carries readable governance metadata but NO
+// protected data: no payload values, no linkage-field values, no matched
+// identifiers. The data exchanged is bound by privacy-preserving commitments, not
+// embedded.
 //
 // It is explicitly NOT a signed or non-repudiable receipt and NOT evidence
-// against the partner. No private key is involved and no extra protocol round
-// is added. A bare hash of a low-entropy result (e.g. an association table over
-// identifiers) would be brute-forceable by anyone holding the record, leaking
-// the intersection; commitments with fresh per-commitment randomness bind to the
-// data without revealing it. See docs/PROTOCOL.md ("Self-attested record") and
-// docs/CANONICAL_ENCODING.md. The certificate-backed signing phase reuses this
-// module's commitment scheme and on-disk format.
+// against the partner. No private key is involved and no extra protocol round is
+// added; signing this record is the separate, deferred Signed Exchange Receipts
+// work. A bare hash of a low-entropy result (e.g. an association table over
+// identifiers) would be brute-forceable by anyone holding the record, leaking the
+// intersection; commitments with fresh per-commitment randomness bind to the data
+// without revealing it. See docs/PROTOCOL.md ("Self-attested record") and
+// docs/CANONICAL_ENCODING.md. The deferred signing work reuses this module's
+// commitment scheme and on-disk format.
 
 // --- Versions ----------------------------------------------------------------
 
@@ -191,14 +199,91 @@ export interface ExchangeRecordCommitments {
   associationTable?: string;
 }
 
+/** One payload column as a disclosure category: its name and any data-dictionary
+ * description. Names and descriptions only, never values. Structurally this
+ * mirrors a linkage-terms payload column but is owned by the record format (like
+ * {@link CommittedPayload}), so a change to the config type cannot silently move
+ * this version-frozen on-disk format. */
+export interface RecordPayloadColumn {
+  /** Column name. */
+  name: string;
+  /** Optional data-dictionary description. Unlike the name, a description is NOT
+   * cross-party validated at exchange time, so the two parties' records may
+   * legitimately carry different description text for the same column. */
+  description?: string;
+}
+
+/** Reference to the governing data-sharing agreement, copied from the agreed
+ * terms. A single shared reference: the two parties' agreement reference and
+ * expiration are required to match at exchange time, so the record stores one
+ * authority for the disclosure rather than two. */
+export interface RecordLegalAgreement {
+  /** Human-readable agreement identifier (e.g. "MOU-2025-0042"). */
+  reference: string;
+  /** Date after which the agreement no longer authorizes an exchange (ISO 8601,
+   * YYYY-MM-DD). */
+  expirationDate: string;
+}
+
+/** One linkage field in the matching basis: the standardized field name the match
+ * keyed on and its semantic type. Names and types only, never values. The
+ * standardized `name` (not the raw source column) is the identifier the linkage
+ * keys, the standardization config, and the cross-party agreement all reference,
+ * so it is the stable anchor for tracing the basis back through standardization to
+ * the data; the `type` is the human-legible PII category. Both are mutually
+ * validated identical across parties at exchange time. */
+export interface RecordLinkageField {
+  /** Standardized linkage-field name (not the raw source column). */
+  name: string;
+  /** Semantic PII type (e.g. "lastName", "dateOfBirth", "ssn4"). */
+  type: string;
+}
+
 /**
- * A self-attested local audit record of one successful exchange. Holds the
- * commitments and non-secret summary only; it does not contain the matched data
- * or the salts, so it does not reveal (or allow brute-force recovery of) the
- * intersection. It does record, in cleartext, that an exchange with the named
- * partner occurred and its size, so retention and access control are the
- * holder's responsibility. This is a local audit artifact, not a signed or
- * non-repudiable receipt.
+ * Readable, non-sensitive governance metadata that lets the record stand on its
+ * own as a disclosure-log entry: the authority for the disclosure and the
+ * categories of data involved, identifying what was disclosed without consulting
+ * the original config. Every field is a name, category, description, or reference
+ * -- never a payload value, linkage-field value, or matched identifier. The
+ * fields are drawn from terms both parties validated at exchange time, so both
+ * parties' records carry consistent governance metadata for the same exchange;
+ * the lone exception is a column's free-text {@link RecordPayloadColumn.description},
+ * which is not cross-party validated.
+ */
+export interface ExchangeRecordGovernance {
+  /** The matching algorithm: `psi` revealed matched identifiers, `psi-c` revealed
+   * only a count -- i.e. whether identifiers or only a count were disclosed. */
+  algorithm: Algorithm;
+  /** The governing data-sharing agreement, when the terms named one; omitted when
+   * no legal agreement was configured (its absence is explicit, not ambiguous). */
+  legalAgreement?: RecordLegalAgreement;
+  /** The linkage fields the match keyed on -- the standardized name and semantic
+   * type of each field the linkage keys reference, documenting the basis on which
+   * shared membership was determined. Scoped to the fields the keys ACTUALLY
+   * reference, not every declared linkage field: a declared-but-unused field was
+   * not matched on, so recording it would overstate the basis. Names and types
+   * only -- never values. Sorted by `name` (UTF-16 code unit) so both parties and
+   * both implementations derive the same order. */
+  matchingBasis: RecordLinkageField[];
+  /** The payload columns this party sent for matched records (names and any
+   * descriptions). Empty when this party sent no payload (count-only `psi-c`, or
+   * no payload configured) -- represented explicitly, not by omission. */
+  payloadSent: RecordPayloadColumn[];
+  /** The payload columns this party received for matched records. Empty when this
+   * party received no payload. */
+  payloadReceived: RecordPayloadColumn[];
+}
+
+/**
+ * A self-attested local disclosure-log entry for one successful exchange. It
+ * records, in cleartext, that an exchange with the named partner occurred, under
+ * which agreement, over what categories of data, and its size -- enough to stand
+ * on its own as an audit artifact. It holds readable governance metadata and the
+ * data commitments only; it does not contain the matched data or the salts, so it
+ * does not reveal (or allow brute-force recovery of) the intersection. Because it
+ * names both parties and the disclosure in cleartext, retention and access
+ * control are the holder's responsibility. This is a local audit artifact, not a
+ * signed or non-repudiable receipt.
  */
 export interface ExchangeRecord {
   /** Single recognized format version for v1; readers reject anything else. */
@@ -211,6 +296,9 @@ export interface ExchangeRecord {
   localIdentity: string;
   /** The partner's self-asserted identity (from the terms it sent). */
   partnerIdentity: string;
+  /** Readable governance metadata (the authority for, and the categories of, the
+   * disclosure) that makes this record a standalone disclosure-log entry. */
+  governance: ExchangeRecordGovernance;
   /** Intersection size, present only when both parties learn it (both-output
    * case); omitted otherwise. */
   resultSize?: number;
@@ -301,12 +389,49 @@ const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
     associationTable: base64UrlSchema.optional(),
   });
 
+const RecordPayloadColumnSchema: z.ZodType<RecordPayloadColumn> = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+});
+
+const RecordLegalAgreementSchema: z.ZodType<RecordLegalAgreement> = z.object({
+  reference: z.string().min(1),
+  expirationDate: z.iso.date(),
+});
+
+const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
+  name: z.string().min(1),
+  // `type` is not pinned to the current LinkageField type enum: the record is a
+  // frozen log, so a reader accepts whatever category a (possibly newer) writer
+  // recorded rather than rejecting an unrecognized type.
+  type: z.string().min(1),
+});
+
+const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
+  z.object({
+    // algorithm stays pinned to the closed enum even though the sibling
+    // RecordLinkageField.type is an open string -- a deliberate asymmetry, not an
+    // oversight. type is open descriptive taxonomy: a newer PII category does not
+    // change what the record means, so a frozen-log reader passes it through.
+    // algorithm is meaning-bearing protocol structure that gates the disclosure
+    // semantics (psi revealed identifiers, psi-c only a count); a record carrying
+    // an algorithm this version does not define is not a v1 record. The version
+    // literal already rejects a future format, so reject an unknown algorithm here
+    // rather than admit semantics a v1 reader cannot interpret.
+    algorithm: AlgorithmSchema,
+    legalAgreement: RecordLegalAgreementSchema.optional(),
+    matchingBasis: z.array(RecordLinkageFieldSchema),
+    payloadSent: z.array(RecordPayloadColumnSchema),
+    payloadReceived: z.array(RecordPayloadColumnSchema),
+  });
+
 const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
   createdAt: createdAtSchema,
   termsHash: base64UrlSchema,
   localIdentity: identitySchema,
   partnerIdentity: identitySchema,
+  governance: ExchangeRecordGovernanceSchema,
   resultSize: resultSizeSchema.optional(),
   bindingNonce: base64UrlSchema,
   commitments: ExchangeRecordCommitmentsSchema,
@@ -354,10 +479,12 @@ export type CommittedPayload = {
 
 /**
  * The inputs needed to build an {@link ExchangeRecord}, gathered at the end of a
- * successful exchange. `localTerms`/`partnerTerms` supply both the agreed-terms
- * hash and the two identities. `resultSize` is set only when both parties learn
- * it; `associationTable` only when this party holds it. The two payload data
- * sets are always committed (a no-data payload is committed as such).
+ * successful exchange. `localTerms`/`partnerTerms` supply the agreed-terms hash,
+ * the two identities, and the readable governance metadata (algorithm, legal
+ * agreement, matching basis, and payload categories -- all read from
+ * `localTerms`). `resultSize` is set only when both parties learn it;
+ * `associationTable` only when this party holds it. The two payload data sets are
+ * always committed (a no-data payload is committed as such).
  */
 export interface ExchangeRecordInputs {
   localTerms: LinkageTerms;
@@ -392,6 +519,70 @@ export interface ExchangeRecordRandomness {
 export interface BuiltExchangeRecord {
   record: ExchangeRecord;
   opening: OpeningData;
+}
+
+/**
+ * Derive the record's readable governance metadata from this party's agreed
+ * terms. The source is the local terms throughout: `algorithm`, `legalAgreement`,
+ * and the linkage fields/keys are cross-party validated (so they equal the
+ * partner's), while `payload.send`/`payload.receive` are this party's own view of
+ * what it sent and received. Reads names, types, descriptions, and the agreement
+ * reference only -- never a value.
+ */
+function governanceFromTerms(terms: LinkageTerms): ExchangeRecordGovernance {
+  const toColumn = (c: {
+    name: string;
+    description?: string;
+  }): RecordPayloadColumn =>
+    // Omit `description` entirely when absent rather than emitting `undefined`:
+    // an absent key and a null/undefined key are distinct in the canonical
+    // encoding the deferred signing work will hash over this record.
+    c.description !== undefined
+      ? { name: c.name, description: c.description }
+      : { name: c.name };
+
+  // The matching basis is the linkage fields the keys ACTUALLY reference, not
+  // every declared field: a declared-but-unused field was not matched on, so
+  // recording it would overstate the basis. Walk the keys, resolve each element's
+  // field reference to its declared field (for the semantic type), dedupe by name
+  // (a field used in several keys appears once), and sort by name -- the same
+  // code-unit ordering validateCompatibility and the canonical encoder use, so the
+  // order is deterministic and identical across parties and platforms.
+  const fieldByName = new Map(terms.linkageFields.map((f) => [f.name, f]));
+  const seen = new Set<string>();
+  const matchingBasis: RecordLinkageField[] = [];
+  for (const key of terms.linkageKeys) {
+    for (const element of key.elements) {
+      if (seen.has(element.field)) continue;
+      // Mark the reference processed before resolving it, so a repeated dangling
+      // reference is deduplicated on lookup like any other. Output is unchanged --
+      // an unresolved reference emits nothing either way.
+      seen.add(element.field);
+      const field = fieldByName.get(element.field);
+      // A key element should always reference a declared field; skip an
+      // unresolved reference rather than emitting a field with no semantic type.
+      if (field === undefined) continue;
+      matchingBasis.push({ name: field.name, type: field.type });
+    }
+  }
+  matchingBasis.sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+
+  return {
+    algorithm: terms.algorithm,
+    ...(terms.legalAgreement !== undefined
+      ? {
+          legalAgreement: {
+            reference: terms.legalAgreement.reference,
+            expirationDate: terms.legalAgreement.expirationDate,
+          },
+        }
+      : {}),
+    matchingBasis,
+    payloadSent: (terms.payload?.send ?? []).map(toColumn),
+    payloadReceived: (terms.payload?.receive ?? []).map(toColumn),
+  };
 }
 
 /**
@@ -450,6 +641,11 @@ export async function buildExchangeRecord(
     termsHash,
     localIdentity: identitySchema.parse(inputs.localTerms.identity),
     partnerIdentity: identitySchema.parse(inputs.partnerTerms.identity),
+    // Readable governance metadata, derived from this party's agreed terms (which
+    // are already schema-validated, so the governance fields are well-formed by
+    // construction). Carries no values -- only names, categories, descriptions,
+    // and the agreement reference.
+    governance: governanceFromTerms(inputs.localTerms),
     // Omit the key entirely when absent rather than setting it to undefined: an
     // absent field and a null/undefined field are distinct in the canonical
     // encoding the signing phase will hash over this record. Validate on build
