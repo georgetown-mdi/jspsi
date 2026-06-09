@@ -33,15 +33,15 @@ The table below maps PSI-Link's design to relevant NIST SP 800-53 Rev 5 control 
 
 | Control | Title | PSI-Link implementation |
 |---------|-------|------------------------|
-| IA-3 | Device Identification and Authentication | Mutual MAC confirmation in the SPAKE2 handshake authenticates both parties before any data is exchanged. |
-| IA-5 | Authenticator Management | The PAKE token is a 256-bit cryptographically random credential stored in a key file with owner-only permissions; it rotates automatically after every successful exchange. |
-| IA-5(1) | Authenticator Management: Password-Based Authentication | Tokens are generated from `crypto.getRandomValues` (256 bits of entropy). The password scalar is derived via HKDF-SHA-256 expanded to 48 bytes before reduction modulo the P-256 order, holding bias below 2^-128. |
+| IA-3 | Device Identification and Authentication | The explicit, role-asymmetric mutual key confirmation in the X25519 authenticated key exchange authenticates both parties before any data is exchanged. |
+| IA-5 | Authenticator Management | The shared secret is a 256-bit cryptographically random credential stored in a key file with owner-only permissions; it rotates automatically after every successful exchange. |
+| IA-5(1) | Authenticator Management: Password-Based Authentication | The shared secret is a 256-bit value from `crypto.getRandomValues`, not a human-memorable password; it is mixed into the X25519 key schedule as the Noise NNpsk0 pre-shared key rather than stretched as a password, so its full 256-bit entropy authenticates the exchange. |
 | RA-3 | Risk Assessment | Threat model, adversary capabilities, privacy guarantees, and known limitations are documented in [SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model). |
 | SA-22 | Unsupported System Components | The supported-version and end-of-life policy is defined in [SECURITY.md](../SECURITY.md). |
-| SC-8 | Transmission Confidentiality and Integrity | Recurring (PAKE-authenticated) exchanges on the SFTP and filedrop channels are protected in transit by AES-GCM AEAD keyed from the SPAKE2 session key; zero-setup exchanges on those channels are not AEAD-wrapped at the application layer and rely on the channel's transport encryption (for SFTP, the SSH session). WebRTC channels use DTLS end-to-end. |
-| SC-12 | Cryptographic Key Establishment and Management | Session keys are established via SPAKE2 (RFC 9382). Key-file permissions, rotation, backup, and compromise-response procedures are documented in [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security). |
-| SC-13 | Cryptographic Protection | All cryptographic operations use NIST-approved algorithms: P-256 (FIPS 186-4), SHA-256, HMAC-SHA-256, HKDF (SP 800-56C), and AES-GCM. |
-| SC-28 | Protection of Information at Rest | The PAKE token is the only persistent credential. It is stored with mode `0600` on Unix and a restricted ACL on Windows; see [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security). |
+| SC-8 | Transmission Confidentiality and Integrity | Recurring (authenticated) exchanges on the SFTP and filedrop channels are protected in transit by AES-GCM AEAD keyed from the X25519 key-exchange session key; zero-setup exchanges on those channels are not AEAD-wrapped at the application layer and rely on the channel's transport encryption (for SFTP, the SSH session). WebRTC channels use DTLS end-to-end. |
+| SC-12 | Cryptographic Key Establishment and Management | Session keys are established via an X25519 authenticated key exchange -- an ephemeral X25519 Diffie-Hellman (RFC 7748) keyed with the pre-shared secret under the Noise NNpsk0 pattern, with explicit key confirmation, following NIST SP 800-56A Rev. 3. Key-file permissions, rotation, backup, and compromise-response procedures are documented in [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security). |
+| SC-13 | Cryptographic Protection | All cryptographic operations use NIST-approved algorithms: X25519 (FIPS 186-5, SP 800-186), Ed25519 (FIPS 186-5) for receipt signing identities, SHA-256, HMAC-SHA-256, HKDF (SP 800-56C), and AES-GCM. |
+| SC-28 | Protection of Information at Rest | The shared secret is the only persistent credential. It is stored with mode `0600` on Unix and a restricted ACL on Windows; see [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security). |
 | AU-12 | Audit Record Generation | PSI-Link does not capture PII in log output; see [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling). |
 | SI-2 | Flaw Remediation | Coordinated vulnerability disclosure with a 90-day fix target; CVE assignment for confirmed vulnerabilities; patch releases follow the process in [RELEASES.md](RELEASES.md). |
 | SI-7 | Software, Firmware, and Information Integrity | Release tags are signed with the maintainer's SSH key; container images are signed with Cosign; a CycloneDX SBOM is attached to each GitHub Release. |
@@ -87,7 +87,7 @@ For HIPAA-regulated deployments:
 - The PSI-Link software itself is not a Business Associate. The two covered entities (or business associates) running the exchange remain responsible for any business associate agreement (BAA) between themselves under their data sharing agreement.
 - Any third-party service used to support the exchange (a peer-coordination server, STUN/TURN relay, or shared SFTP server) is operated either by one of the parties or by a third party. If a third party operates such a service, the deploying agency is responsible for assessing whether a BAA is required. Because the PSI protocol does not transmit PHI to those supporting services, most deployments treat them as conduits, but this is a determination the deploying agency must make for itself.
 - The Security Rule's technical safeguards (access control, audit controls, integrity, transmission security) are addressed by the cryptographic design documented in [SECURITY_DESIGN.md](SECURITY_DESIGN.md). The administrative and physical safeguards remain the deploying agency's responsibility.
-- The self-attested exchange record each party writes after a successful exchange is a local, unsigned log of what it disclosed -- the partner, the governing data sharing agreement, the algorithm, the categories of data exchanged, and (when both parties learn it) the result size -- and carries no protected values. Where an accounting of disclosures applies (45 CFR 164.528), an agency can retain these records as the per-exchange source for that accounting; whether a given disclosure is accountable, and the retention and production of the accounting, remain the agency's responsibility. See [PROTOCOL.md](PROTOCOL.md#self-attested-record).
+- The self-attested exchange record each party writes after a successful exchange is a local, unsigned log of what it disclosed -- the partner, the governing data sharing agreement and the purpose of the disclosure under it, the algorithm, the categories of data exchanged, and (when both parties learn it) the result size -- and carries no protected values. Where an accounting of disclosures applies (45 CFR 164.528), an agency can retain these records as the per-exchange source for that accounting; the record carries the brief purpose statement 164.528 requires for each disclosure, so it can populate the accounting without reopening the agreement. Whether a given disclosure is accountable, and the retention and production of the accounting, remain the agency's responsibility. See [PROTOCOL.md](PROTOCOL.md#self-attested-record).
 
 <!-- TODO: provide a sample HIPAA-conduit determination memo template that agencies can adapt. -->
 
@@ -97,7 +97,7 @@ PSI-Link can be used to link educational records across agencies under a data sh
 
 The decision to disclose education records under FERPA, and to whom, is the educational agency's responsibility. PSI-Link does not enforce FERPA-specific controls beyond the cryptographic protections described in [SECURITY_DESIGN.md](SECURITY_DESIGN.md).
 
-The self-attested exchange record (see the [HIPAA considerations](#hipaa-considerations) above and [PROTOCOL.md](PROTOCOL.md#self-attested-record)) likewise gives the educational agency a per-exchange log -- the partner, the governing agreement, and the categories of data exchanged, with no protected values -- that it can retain toward FERPA's requirement to record disclosures of education records (34 CFR 99.32, subject to that section's exceptions). Maintaining the record of disclosures remains the agency's responsibility.
+The self-attested exchange record (see the [HIPAA considerations](#hipaa-considerations) above and [PROTOCOL.md](PROTOCOL.md#self-attested-record)) likewise gives the educational agency a per-exchange log -- the partner, the governing agreement and the purpose of the disclosure under it, and the categories of data exchanged, with no protected values -- that it can retain toward FERPA's requirement to record disclosures of education records (34 CFR 99.32, subject to that section's exceptions). FERPA's studies and audit/evaluation exceptions turn on the purpose of the disclosure, which the record now states explicitly. Maintaining the record of disclosures remains the agency's responsibility.
 
 ### CJIS considerations
 
@@ -146,7 +146,7 @@ PSI-Link does not hold an ATO of its own; an ATO is granted to a specific deploy
 A privacy review of PSI-Link should consider:
 
 - **What data flows.** Across the network during an exchange, only cryptographic protocol messages between the two parties (see [PROTOCOL.md](PROTOCOL.md)). To third-party supporting services, only connection metadata or opaque ciphertext (see [SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)).
-- **What is retained.** The PAKE token in `.psilink.key` is the only persistent credential. The exchange output is an association table of row indices, not raw PII. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling) and [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security).
+- **What is retained.** The shared secret in `.psilink.key` is the only persistent credential. The exchange output is an association table of row indices, not raw PII. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling) and [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security).
 - **What is logged.** PSI-Link does not write PII to log output; see [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling).
 - **What third parties see.** Peer-coordination, STUN/TURN, and SFTP operators see metadata only; data-channel content is encrypted. See [SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security).
 - **Who can attack what.** Documented in [SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model).
@@ -163,7 +163,7 @@ If a reviewer identifies a compliance-relevant gap that is not addressed here, p
 ## See also
 
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, channel security, NIST 800-53 mapping
-- [PROTOCOL.md](PROTOCOL.md) - PSI and SPAKE2 protocol specification
+- [PROTOCOL.md](PROTOCOL.md) - PSI and key-exchange protocol specification
 - [RELEASES.md](RELEASES.md) - release artifacts, signing, and SBOM
 - [SECURITY.md](../SECURITY.md) - vulnerability reporting and response
 - [NOTICE](../NOTICE) - third-party component attributions

@@ -4,7 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import { exchangeBootstrapSecret, exchangeTerms } from "../src/protocolSetup";
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { PAKE_TOKEN_REGEX } from "../src/config/connection";
+import { SHARED_SECRET_REGEX } from "../src/config/connection";
 import type { HandshakeRole } from "../src/types";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
@@ -140,7 +140,7 @@ test("the bootstrapped secret is a base64url 32-byte token (key-file format)", a
     runSide(a, "initiator", termsA, true),
     runSide(b, "responder", termsB, true),
   ]);
-  expect(resA.secret).toMatch(PAKE_TOKEN_REGEX);
+  expect(resA.secret).toMatch(SHARED_SECRET_REGEX);
 });
 
 test("each call mints a fresh secret", async () => {
@@ -281,7 +281,7 @@ test("runExchange: both saving establishes the same secret on both bootstrap res
   const [ri, rr] = await runExchangeBoth(true, true);
   expect(ri.bootstrap?.partnerSaveIntent).toBe(true);
   expect(rr.bootstrap?.partnerSaveIntent).toBe(true);
-  expect(ri.bootstrap?.sharedSecret).toMatch(PAKE_TOKEN_REGEX);
+  expect(ri.bootstrap?.sharedSecret).toMatch(SHARED_SECRET_REGEX);
   // The initiator minted it; the responder received the identical value, and
   // the subsequent role/PSI exchange still completed -- the secret frame did
   // not desync the lockstep that follows terms.

@@ -43,8 +43,8 @@ const PSK_LEN = 32;
 const PROTOCOL_NAME = "psilink-kex-v1:NNpsk0_25519_SHA256";
 
 // Domain-separation labels, all namespaced under psilink-kex-v1: and disjoint
-// from every other label in the system (psilink-spake2-*, psilink-aead-v1:*,
-// psilink-token-rotation-v1, the psilink-signing-* labels). The two confirm
+// from every other label in the system (psilink-aead-v1:*,
+// psilink-shared-secret-rotation-v1, the psilink-signing-* labels). The two confirm
 // labels are role-asymmetric: each side sends the tag for its own role and
 // verifies the tag for the opposite role, so a reflected/echoed confirmation
 // does not verify.
@@ -56,7 +56,7 @@ const RESPONDER_CONFIRM_LABEL = "psilink-kex-v1:responder-confirm";
 // Single generic failure message for every authentication failure. Kept
 // non-oracular on purpose: it must not hint at which check failed (a malformed
 // share, a contributory-check rejection, or a confirmation mismatch all look
-// identical to the peer). Mirrors SPAKE2's "PAKE authentication failed".
+// identical to the peer).
 //
 // "Non-oracular" refers to the error and to the absence of any secret-dependent
 // branch: the only comparison against secret-derived material is the
@@ -69,8 +69,7 @@ const GENERIC_FAILURE = "key exchange authentication failed";
 const TIMEOUT_FAILURE = "key exchange handshake timed out";
 
 // 30 s is a generous ceiling for a single handshake round-trip on any realistic
-// network; exceeding it almost certainly means the peer is gone. Matches the
-// SPAKE2 handshake timeout.
+// network; exceeding it almost certainly means the peer is gone.
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
 const EMPTY = new Uint8Array(0);
@@ -328,7 +327,7 @@ export async function computeKexKeys(
 // defensive copy of secret key material; it only feeds getSharedSecret. The
 // ephemeral secret is not zeroized after use: JS offers no reliable
 // zeroization (GC, copies), and the key is single-use per handshake, so the
-// residual-memory exposure is an accepted limitation (as in pake.ts).
+// residual-memory exposure is an accepted limitation.
 function deriveSharedSecret(
   mySecret: Uint8Array,
   peerPublic: Uint8Array<ArrayBuffer>,
@@ -420,7 +419,7 @@ export interface KexResult {
  * decode it to bytes first (a wrong length is a caller error, thrown
  * synchronously before any network activity).
  *
- * `handshakeRole` is assigned out of band by the caller (as in `runSpake2`); it
+ * `handshakeRole` is assigned out of band by the caller; it
  * is not negotiated in-band. Two peers that both pass `"initiator"` reject each
  * other (the second message fails the opposite schema) and two `"responder"`s
  * deadlock on receive -- neither yields a false session.
@@ -436,7 +435,7 @@ export interface KexResult {
  * @throws {ConnectionError} unchanged if the connection terminates for a
  *   non-transport reason (e.g. a deliberate local {@link MessageConnection.close}
  *   during the handshake). Such a close is deliberately not masked as an
- *   authentication failure, matching `runSpake2`.
+ *   authentication failure.
  */
 export async function runKex(
   conn: MessageConnection,
@@ -538,7 +537,7 @@ export async function runKex(
     // malformed or wrong msg3: from the responder's side it is an
     // authentication failure either way, and the initiator has already moved
     // on. This intentionally trades operator diagnosability for a single
-    // non-oracular outcome, matching runSpake2.
+    // non-oracular outcome.
     if (!msg3.success || msg3.data.kexMsg !== "3") {
       throw new Error(GENERIC_FAILURE);
     }

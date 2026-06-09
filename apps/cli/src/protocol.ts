@@ -32,14 +32,14 @@ import { writeOutput } from "./util/cli";
 
 /**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
- * the rotated PAKE token is persisted after each successful SPAKE2 handshake.
+ * the rotated shared secret is persisted after each successful key exchange.
  *
- * `pakeToken` is narrowed from optional in {@link Authentication} to required
+ * `sharedSecret` is narrowed from optional in {@link Authentication} to required
  * here: every authenticated exchange must supply a valid token before the
  * connection is opened.
  */
 export interface AuthPersist extends Authentication {
-  pakeToken: string;
+  sharedSecret: string;
   keyFilePath: string;
 }
 
@@ -54,10 +54,10 @@ type DistributedOmit<T, K extends PropertyKey> = T extends unknown
  * explicit states (no `undefined` third state):
  *
  * - `AuthPersist` — authenticated exchange; the token is persisted to
- *   `keyFilePath` after each successful SPAKE2 handshake.
+ *   `keyFilePath` after each successful key exchange.
  * - `null` — intentionally unauthenticated exchange (e.g. zero-setup); the
  *   caller has acknowledged the security tradeoff and `runProtocol` proceeds
- *   without PAKE.
+ *   without authentication.
  *
  * The required (non-optional) field forces every CLI caller to make the
  * authentication choice explicit at construction time. There is no library
@@ -119,11 +119,11 @@ export interface RunProtocolResult {
  * When `connection.authentication` is set, `keyFilePath` must be a non-empty,
  * non-whitespace string; this is checked before any connection is opened so
  * that a whitespace-only path does not silently create a file named " " in
- * the current directory. `pakeToken` is validated by {@link authenticateConnection}
+ * the current directory. `sharedSecret` is validated by {@link authenticateConnection}
  * after the connection opens. `keyFilePath` is checked for non-emptiness only
  * — invalid paths are caught with a clear OS error at the key-file write step.
  *
- * When `connection.authentication` is `null` the exchange runs without PAKE;
+ * When `connection.authentication` is `null` the exchange runs without authentication;
  * this is the path taken by callers (e.g. zero-setup) that explicitly
  * acknowledge relying on transport-layer security only. The field is required
  * (no `undefined`) so the choice is always explicit.
@@ -184,7 +184,7 @@ export async function runProtocol(
   // the unauthenticated path: an authenticated exchange already has a persistent
   // key and no provisioning step to consume a bootstrap result, so a stray
   // saveIntent here would advertise a save field (and possibly transmit a secret
-  // frame) inside the PAKE-secured channel with nothing reading it back. Reject
+  // frame) inside the authenticated channel with nothing reading it back. Reject
   // the combination rather than leave the footgun open to a future caller; the
   // type docs already mark saveIntent as meaningful only with `authentication:
   // null`, and both current callers honor that.
@@ -238,7 +238,7 @@ export async function runProtocol(
               targetStat.isDirectory()
                 ? "directory"
                 : "non-regular filesystem entry"
-            }); saveKeyFile would fail after a successful PAKE handshake. ` +
+            }); saveKeyFile would fail after a successful key exchange. ` +
             "Remove or rename it before running the exchange.",
         );
     } catch (err) {
@@ -254,7 +254,7 @@ export async function runProtocol(
     // Pre-validate that the parent directory exists (creating it if missing,
     // mirroring saveKeyFile's `mkdirSync({ recursive: true })`) and that it
     // is a directory, so saveKeyFile failure cannot occur after a successful
-    // PAKE handshake, where the partner may already hold the rotated token
+    // key exchange, where the partner may already hold the rotated token
     // and recovery requires re-invitation.
     const parent = path.dirname(kfp);
     let parentStat: fs.Stats | undefined;
@@ -302,10 +302,10 @@ export async function runProtocol(
     if (!parentStat.isDirectory())
       throw new Error(
         `keyFilePath parent ${parent} exists but is not a directory; ` +
-          "saveKeyFile would fail after a successful PAKE handshake",
+          "saveKeyFile would fail after a successful key exchange",
       );
     // Best-effort writability check: catches the common case of a read-only
-    // parent before PAKE rotates the token. fs.accessSync(W_OK) is
+    // parent before the key exchange rotates the secret. fs.accessSync(W_OK) is
     // unreliable on Windows (it consults only the read-only attribute, not
     // the ACL) and can be inconsistent on Linux with capabilities such as
     // CAP_DAC_OVERRIDE. A create-and-unlink probe on a sentinel file
@@ -363,8 +363,8 @@ export async function runProtocol(
         `keyFilePath parent directory ${parent} is not writable: ` +
           (err instanceof Error ? err.message : String(err)) +
           ". Restore write permission before running the exchange, " +
-          "otherwise saveKeyFile would fail after a successful PAKE " +
-          "handshake and both parties would need to re-invite.",
+          "otherwise saveKeyFile would fail after a successful key " +
+          "exchange and both parties would need to re-invite.",
       );
     } finally {
       if (probeFd !== undefined) {
@@ -418,9 +418,9 @@ export async function runProtocol(
   let cleaned = false;
   let opened = false;
   let started = false;
-  // The AEAD decorator that wraps `mc` once a PAKE session key is available
+  // The AEAD decorator that wraps `mc` once a session key is available
   // (authenticated path only). Declared in the outer scope so doCleanup can
-  // close it; left undefined on the no-PAKE path, where the exchange runs over
+  // close it; left undefined on the no-auth path, where the exchange runs over
   // the unencrypted `mc`. secure.close() delegates to mc.close(), so closing it
   // closes the underlying FileSyncConnection and sweeps its responsible files.
   let secure: EncryptedMessageConnection | undefined;
@@ -446,7 +446,7 @@ export async function runProtocol(
     // When the AEAD decorator was built (authenticated path), close it: its
     // close() delegates to mc.close(), which detaches the bridge's data/error
     // listeners and closes the underlying FileSyncConnection. Closing secure is
-    // a no-op for the no-PAKE path (secure is undefined there) and for the
+    // a no-op for the no-auth path (secure is undefined there) and for the
     // window where a signal arrived between authenticateConnection returning and
     // create resolving (secure still undefined) -- the mc.close() below then
     // closes the transport directly. All of these are idempotent.
@@ -498,23 +498,23 @@ export async function runProtocol(
   // block stay consistent:
   // - tokenRotated: our saveKeyFile completed; the partner also derived the
   //   same new token but their save status is unknown.
-  // - authStarted && !tokenRotated: SPAKE2 may have completed on either side;
+  // - authStarted && !tokenRotated: the key exchange may have completed on either side;
   //   the partner may have persisted a rotated token even though we did not.
   // - !authStarted: handshake never began; the existing token is still valid.
   function logRotationStateOnInterrupt(reason: string): void {
     if (tokenRotated) {
       log.warn(
-        `The PAKE token was already rotated and saved before ${reason}. ` +
-          "Retry without re-inviting; if PAKE authentication fails on retry, " +
+        `The shared secret was already rotated and saved before ${reason}. ` +
+          "Retry without re-inviting; if authentication fails on retry, " +
           "both parties must re-invite.",
       );
     } else if (authStarted) {
       log.warn(
-        `The PAKE handshake was in progress when ${reason}. Depending on ` +
+        `The key exchange was in progress when ${reason}. Depending on ` +
           "how far the handshake had progressed, the partner may have " +
           "already completed it and saved the rotated token even though " +
           "this side did not. Retry the exchange with the existing key " +
-          "file; if PAKE authentication fails on retry, both parties must " +
+          "file; if authentication fails on retry, both parties must " +
           "re-invite.",
       );
     }
@@ -650,29 +650,29 @@ export async function runProtocol(
 
     if (auth) {
       log.info("authenticating");
-      // conn.start() must precede authenticateConnection: the SPAKE2 handshake
+      // conn.start() must precede authenticateConnection: the key exchange
       // awaits mc.receive(), which is fed by the bridge's data listener; that
       // listener only sees inbound frames once the polling loop is running.
       // Discard the (possibly whitespace-padded) keyFilePath from auth;
       // saveKeyFile below uses trimmedKeyFilePath, which was captured and
       // trimmed during pre-flight without mutating the caller-supplied
       // auth object.
-      const { keyFilePath: _ignored, ...pakeAuth } = auth;
+      const { keyFilePath: _ignored, ...authParams } = auth;
       // trimmedKeyFilePath is set whenever auth is set; they are populated
       // together in the pre-flight branch above.
       const keyFilePath = trimmedKeyFilePath!;
       // Set synchronously before the await so a signal arriving during the
-      // SPAKE2 round-trip or before saveKeyFile runs can distinguish the
+      // key-exchange round-trip or before saveKeyFile runs can distinguish the
       // "handshake may have completed on the partner side" case from the
       // "handshake never started" case.
       authStarted = true;
-      // sessionKey is the 32-byte SPAKE2 session key; both parties derive the
+      // sessionKey is the 32-byte session key; both parties derive the
       // same value. It keys the per-direction AEAD encryption set up below, so
       // every PSI frame after this point is opaque on the wire to an SFTP/
-      // file-drop admin. newToken is the rotated PAKE secret persisted to disk.
-      const { newToken, sessionKey } = await authenticateConnection(
+      // file-drop admin. rotatedSecret is the new shared secret persisted to disk.
+      const { rotatedSecret, sessionKey } = await authenticateConnection(
         mc,
-        pakeAuth,
+        authParams,
         role,
       );
       try {
@@ -682,11 +682,11 @@ export async function runProtocol(
         // state (tokenRotated=false) or both post-save state (tokenRotated
         // =true). Maintain this invariant: do not insert awaits between
         // saveKeyFile and the assignment.
-        saveKeyFile(keyFilePath, { pakeToken: newToken });
+        saveKeyFile(keyFilePath, { sharedSecret: rotatedSecret });
         tokenRotated = true;
       } catch (err) {
-        // "may already hold": both parties independently derive newToken from
-        // the SPAKE2 session key, but either party's disk write can fail. We
+        // "may already hold": both parties independently derive rotatedSecret from
+        // the session key, but either party's disk write can fail. We
         // cannot know whether the partner's save succeeded, so "may" is
         // intentionally conservative.
         //
@@ -765,7 +765,7 @@ export async function runProtocol(
         }
       }
 
-      // Wrap mc in the AEAD decorator now that the PAKE session key is in hand,
+      // Wrap mc in the AEAD decorator now that the session key is in hand,
       // and run the PSI exchange through `secure` so every frame is encrypted on
       // the wire. create() derives the two per-direction keys via HKDF and
       // registers no listeners on mc, so a signal arriving between
@@ -792,7 +792,7 @@ export async function runProtocol(
     const { associationTable, partnerPayload, audit, bootstrap } =
       await runExchange(
         // Authenticated path: `secure` is the AEAD decorator over mc, so PSI
-        // frames are encrypted on the wire. No-PAKE path: secure is undefined
+        // frames are encrypted on the wire. No-auth path: secure is undefined
         // and the exchange runs over the unencrypted mc (transport security
         // only) -- this is the zero-setup path that carries the --save bootstrap.
         secure ?? mc,
@@ -844,15 +844,15 @@ export async function runProtocol(
     return { bootstrap, onAuthenticatedError };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
-    // independently derived the same new token from the SPAKE2 session key, but
+    // independently derived the same new token from the session key, but
     // their disk write cannot be verified from here. "Retry without
     // re-inviting" is the correct first step: if the partner also saved, retry
     // succeeds; if their save failed, they received a separate error and the
-    // retry will surface a PAKE mismatch, at which point both parties
+    // retry will surface a shared-secret mismatch, at which point both parties
     // re-invite. We do not say "both parties hold" (overstates certainty) or
     // "may already hold" (understates - this party definitely saved).
     //
-    // authStarted && !tokenRotated handles the looser window: SPAKE2 may have
+    // authStarted && !tokenRotated handles the looser window: the key exchange may have
     // completed on the partner side even though our own save did not run.
     // Surfaced at error level (rather than warn) because the user's exchange
     // is failing and they need the recovery hint surfaced prominently.
@@ -864,10 +864,10 @@ export async function runProtocol(
     //     messages already include specific recovery hints ("must
     //     re-invite" / "obtain a new invitation").
     // Skip the generic advisory in both cases so the user does not see two
-    // messages that contradict each other. SPAKE2 protocol failures from
-    // runSpake2 (generic "PAKE authentication failed" / "PAKE handshake
-    // timed out") are NOT tagged and DO get the generic advisory, which
-    // adds useful "retry first; if it fails, re-invite" context.
+    // messages that contradict each other. Key-exchange protocol failures from
+    // runKex (generic "key exchange authentication failed" / "key exchange
+    // handshake timed out") are NOT tagged and DO get the generic advisory,
+    // which adds useful "retry first; if it fails, re-invite" context.
     //
     // The walker follows `cause` so a future wrap (e.g. `new Error('outer: '
     // + inner.message, { cause: inner })`) still suppresses the generic
@@ -895,17 +895,17 @@ export async function runProtocol(
     if (!hintAlreadyEmitted) {
       if (tokenRotated) {
         log.error(
-          "The PAKE token was already rotated and saved before this error. " +
-            "Retry the exchange without re-inviting; if PAKE authentication " +
+          "The shared secret was already rotated and saved before this error. " +
+            "Retry the exchange without re-inviting; if authentication " +
             "fails on retry, both parties must re-invite.",
         );
       } else if (authStarted) {
         log.error(
-          "The PAKE handshake was in progress when this error occurred. " +
+          "The key exchange was in progress when this error occurred. " +
             "Depending on how far the handshake had progressed, the " +
             "partner may have already completed it and saved the rotated " +
             "token even though this side did not. Retry the exchange " +
-            "with the existing key file; if PAKE authentication fails on " +
+            "with the existing key file; if authentication fails on " +
             "retry, both parties must re-invite.",
         );
       }

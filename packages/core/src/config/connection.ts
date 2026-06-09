@@ -144,45 +144,45 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
 // --- Authentication ----------------------------------------------------------
 
 /**
- * Regex that a PAKE token must match: 43 base64url characters encoding exactly
+ * Regex that a shared secret must match: 43 base64url characters encoding exactly
  * 32 bytes. The final character encodes 4 data bits and 2 zero padding bits
  * (256 bits ÷ 6 = 42 full characters + 4 remaining data bits), constraining it
  * to the 16-character set `[AEIMQUYcgkosw048]`.
  */
-export const PAKE_TOKEN_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
-// Shared Zod schema for the `pakeToken` field; reused by both Authentication
+// Shared Zod schema for the `sharedSecret` field; reused by both Authentication
 // and WebRTCAuthentication so the regex and error message stay in sync.
-const pakeTokenSchema = z
+const sharedSecretSchema = z
   .string()
   .regex(
-    PAKE_TOKEN_REGEX,
-    "pakeToken must be a base64url-encoded 32-byte value (43 base64url " +
+    SHARED_SECRET_REGEX,
+    "sharedSecret must be a base64url-encoded 32-byte value (43 base64url " +
       "characters; final character must be in [AEIMQUYcgkosw048])",
   )
   .optional();
 
 /**
- * Shared PAKE token for SPAKE2 mutual authentication. The token and its
- * expiration are stored in `.psilink.key` and injected at runtime; they never
- * appear in `psilink.yaml`.
+ * Shared secret for mutual authentication via the X25519 key exchange. The
+ * secret and its expiration are stored in `.psilink.key` and injected at
+ * runtime; they never appear in `psilink.yaml`.
  *
- * IMPORTANT: This type is the parse-time representation. `pakeToken` is
+ * IMPORTANT: This type is the parse-time representation. `sharedSecret` is
  * optional because a configuration file parsed in isolation may not yet
- * include a token. Before calling {@link authenticateConnection}, the caller
- * MUST populate `pakeToken` with a value matching {@link PAKE_TOKEN_REGEX};
- * the runtime check there rejects missing or malformed tokens with a tagged
+ * include a secret. Before calling {@link authenticateConnection}, the caller
+ * MUST populate `sharedSecret` with a value matching {@link SHARED_SECRET_REGEX};
+ * the runtime check there rejects missing or malformed secrets with a tagged
  * recovery error, but the compile-time type does not enforce this.
  */
 export interface Authentication {
   /**
-   * Shared SPAKE2 token; loaded from `.psilink.key` at runtime and injected
+   * Shared secret; loaded from `.psilink.key` at runtime and injected
    * into the connection config. Never written to `psilink.yaml`.
    *
    * Must be a base64url-encoded 32-byte value (exactly 43 characters from
    * `[A-Za-z0-9_-]`, with the final character constrained to
-   * `[AEIMQUYcgkosw048]`).  Both invitation tokens and persistent (rotation)
-   * tokens use this format; they differ only in whether `expires` is set.
+   * `[AEIMQUYcgkosw048]`).  Both invitation secrets and persistent (rotation)
+   * secrets use this format; they differ only in whether `expires` is set.
    *
    * REQUIRED at the moment {@link authenticateConnection} is invoked, even
    * though the type marks it optional. The optionality exists only so that
@@ -191,17 +191,17 @@ export interface Authentication {
    * populate this field before calling the runtime API; otherwise
    * {@link authenticateConnection} throws a tagged validation error.
    */
-  pakeToken?: string;
+  sharedSecret?: string;
   /**
    * Expiration for this token (ISO 8601 datetime). The exchange is aborted
-   * before the PAKE handshake if the current time is past this value.
+   * before the key exchange if the current time is past this value.
    * Invitation tokens default to 1 hour; rotation-generated tokens carry none.
    */
   expires?: string;
 }
 
 const AuthenticationSchema: z.ZodType<Authentication> = z.object({
-  pakeToken: pakeTokenSchema,
+  sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
 });
 
@@ -217,7 +217,7 @@ export interface WebRTCAuthentication extends Authentication {
 }
 
 const WebRTCAuthenticationSchema: z.ZodType<WebRTCAuthentication> = z.object({
-  pakeToken: pakeTokenSchema,
+  sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
   role: z.enum(["inviter", "acceptor"]).optional(),
 });
@@ -296,8 +296,8 @@ const SFTPProxySchema: z.ZodType<SFTPProxy> = z.object({
 export interface SharedOptions {
   /**
    * Total milliseconds to wait for the partner before giving up; default:
-   * 3600000. The effective limit is the minimum of this and the remaining PAKE
-   * token lifetime.
+   * 3600000. The effective limit is the minimum of this and the remaining
+   * shared-secret lifetime.
    */
   peerTimeoutMs?: number;
   /**
@@ -535,8 +535,8 @@ export interface SFTPConnectionConfig {
  * `-hello.json`/`-lock.json`/message-`.json` protocol is identical to the SFTP
  * channel; no SSH connection is made. Use `file://` URLs with the CLI.
  *
- * PAKE authentication applies in the same way as the `sftp` channel: the
- * shared token in `.psilink.key` authenticates the exchange partner. This
+ * Shared-secret authentication applies in the same way as the `sftp` channel:
+ * the shared secret in `.psilink.key` authenticates the exchange partner. This
  * matters because the remote end may be accessing the same storage over SFTP
  * rather than a local mount, so filesystem permissions alone do not guarantee
  * the partner's identity.
@@ -661,7 +661,7 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
  * Snake_case keys are converted to camelCase before validation, so JSON/YAML
  * from disk can be passed directly.
  *
- * Note: @-file references in credential fields (e.g. `pakeToken`, `password`,
+ * Note: @-file references in credential fields (e.g. `sharedSecret`, `password`,
  * `privateKey`) are not resolved here. Apply `readAtSignFile` (or equivalent)
  * to those fields before calling this function.
  *

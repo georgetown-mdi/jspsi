@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
+import { SHARED_SECRET_REGEX } from "./connection.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -152,14 +153,14 @@ const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> =
 
 /**
  * The invitation token passed from inviter to acceptor out-of-band.
- * Carries linkage terms and a short-lived PAKE credential, and MAY carry a
+ * Carries linkage terms and a short-lived shared-secret credential, and MAY carry a
  * credential-free connection endpoint (see {@link ConnectionEndpoint}) so the
  * acceptor can reach the rendezvous point without separate out-of-band setup.
  *
  * The endpoint is a public locator only: the token MUST NEVER carry connection
  * credentials (password, private key, key file, PeerJS API key). Each party
  * still configures the credential portion of its own `connection` block
- * independently. Because the token carries the established PAKE secret -- and,
+ * independently. Because the token carries the established shared secret -- and,
  * for the web flow, the rendezvous derived from it -- the encoded invitation is
  * confidential and must be forwarded only over a trusted out-of-band channel;
  * see docs/SECURITY_DESIGN.md.
@@ -179,10 +180,10 @@ export interface InvitationToken {
   version: "1";
   linkageTerms: LinkageTerms;
   /**
-   * Short-lived PAKE setup credential, rotated to a persistent token on first
+   * Short-lived setup secret, rotated to a persistent shared secret on first
    * successful exchange.
    */
-  pakeToken: string;
+  sharedSecret: string;
   /** ISO 8601 datetime after which this token is rejected at accept time. */
   expires?: string;
   /**
@@ -195,7 +196,14 @@ export interface InvitationToken {
 const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   version: z.literal("1"),
   linkageTerms: LinkageTermsSchema,
-  pakeToken: z.string().min(1),
+  sharedSecret: z
+    .string()
+    .regex(
+      SHARED_SECRET_REGEX,
+      "invitation sharedSecret must be a base64url-encoded 32-byte value " +
+        "(43 base64url characters; final character must be in " +
+        "[AEIMQUYcgkosw048])",
+    ),
   expires: z.iso.datetime().optional(),
   connectionEndpoint: ConnectionEndpointSchema.optional(),
 });
@@ -231,7 +239,7 @@ const CHECKSUM_CHARS = 6;
 /**
  * Serializes an {@link InvitationToken} as a base64url string with a
  * 4-byte truncated-SHA-256 checksum appended for transcription-error
- * detection. The checksum provides no security guarantee; PAKE handles
+ * detection. The checksum provides no security guarantee; the key exchange handles
  * authentication.
  *
  * Uses `btoa`/`atob` and `globalThis.crypto.subtle.digest`

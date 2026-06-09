@@ -21,7 +21,7 @@ import {
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
-import { generatePakeToken } from "../../src/commands/bootstrap";
+import { generateSharedSecret } from "../../src/commands/bootstrap";
 import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
 import { saveConfig } from "../../src/config";
 
@@ -53,7 +53,7 @@ function sampleToken(expires?: string): InvitationToken {
   return {
     version: "1",
     linkageTerms: getDefaultLinkageTerms("Inviter Org"),
-    pakeToken: generatePakeToken(),
+    sharedSecret: generateSharedSecret(),
     expires,
   };
 }
@@ -113,7 +113,7 @@ test("encode/decode round-trips an invitation at the command level", async () =>
   const token = sampleToken(new Date(Date.now() + 3_600_000).toISOString());
   const encoded = await encodeInvitation(token);
   const decoded = await decodeAndValidateInvitation(encoded);
-  expect(decoded.pakeToken).toBe(token.pakeToken);
+  expect(decoded.sharedSecret).toBe(token.sharedSecret);
   expect(decoded.linkageTerms.identity).toBe("Inviter Org");
   expect(decoded.linkageTerms.linkageKeys.map((k) => k.name)).toEqual(
     token.linkageTerms.linkageKeys.map((k) => k.name),

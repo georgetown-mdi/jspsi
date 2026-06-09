@@ -114,7 +114,7 @@ export function redactUrlCredentials(url: URL): string {
  * paths. Mirrors the zero-setup mapping but is constrained to the channels the
  * CLI can actually run: a `webrtc` (ws/wss) URL or an unsupported scheme is a
  * usage error. The returned config carries no `authentication`; the caller adds
- * the PAKE token separately for the handshake and never persists it to the
+ * the shared secret separately for the handshake and never persists it to the
  * config.
  *
  * @internal exported for testing
@@ -368,7 +368,7 @@ export function connectionFromEndpoint(
       // The CLI cannot yet run a webrtc exchange, but the config is written
       // faithfully so the locator is preserved for when it can (and for the
       // web app). webrtc needs no credential placeholder: it authenticates
-      // from the PAKE token, not a username/password.
+      // from the shared secret, not a username/password.
       const connection: WebRTCConnectionConfig = {
         channel: "webrtc",
         server: {
@@ -382,14 +382,14 @@ export function connectionFromEndpoint(
   }
 }
 
-// --- PAKE token --------------------------------------------------------------
+// --- shared secret --------------------------------------------------------------
 
 /**
- * Generate a fresh invitation PAKE token: a base64url-encoded 32 random bytes,
- * matching `PAKE_TOKEN_REGEX`. The rotation token derived after the first
+ * Generate a fresh invitation shared secret: a base64url-encoded 32 random bytes,
+ * matching `SHARED_SECRET_REGEX`. The rotation token derived after the first
  * successful handshake replaces it; this is only the short-lived setup credential.
  */
-export function generatePakeToken(): string {
+export function generateSharedSecret(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
@@ -489,10 +489,10 @@ export async function prepareForOnlineExchange(
 // --- Online exchange ---------------------------------------------------------
 
 /**
- * Run the connect -> SPAKE2 handshake -> exchange path shared by online invite
+ * Run the connect -> key exchange -> exchange path shared by online invite
  * and online accept, persisting the config at the moment the handshake
  * succeeds. `runProtocol` opens the connection, completes the handshake with
- * `pakeToken`/`expires`, writes the rotated (persistent, no-expiry) token to
+ * `sharedSecret`/`expires`, writes the rotated (persistent, no-expiry) token to
  * `keyPath`, then -- via the `onAuthenticated` post-handshake hook passed below
  * -- writes the config, and finally runs the exchange.
  *
@@ -514,8 +514,8 @@ export async function prepareForOnlineExchange(
  * followed by an exchange failure never claims a config that is not there.
  *
  * The persisted config carries the plain `connection` (no `authentication`);
- * `saveConfig` strips any PAKE material regardless, so moving the write into the
- * hook changes only when the config is persisted, not what is persisted.
+ * `saveConfig` strips any shared-secret material regardless, so moving the write
+ * into the hook changes only when the config is persisted, not what is persisted.
  *
  * With `reuseExistingConfig`, the config write is skipped entirely: the accept
  * path has already reconciled a pre-existing config against the invitation and
@@ -530,7 +530,7 @@ export async function runOnlineBootstrap(params: {
   connection: RunnableConnectionConfig;
   dataSpec: ResolvedDataSpec;
   prepared: PreparedExchange;
-  pakeToken: string;
+  sharedSecret: string;
   expires: string | undefined;
   keyPath: string;
   configPath: string;
@@ -548,7 +548,7 @@ export async function runOnlineBootstrap(params: {
   const connWithAuth: ProtocolConnectionConfig = {
     ...params.connection,
     authentication: {
-      pakeToken: params.pakeToken,
+      sharedSecret: params.sharedSecret,
       expires: params.expires,
       keyFilePath: params.keyPath,
     },

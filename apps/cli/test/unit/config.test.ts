@@ -244,7 +244,7 @@ test("saveConfig writes the config owner-read-only (0600)", () => {
   }
 });
 
-test("saveConfig strips pakeToken/expires and does not mutate the caller's spec", () => {
+test("saveConfig strips sharedSecret/expires and does not mutate the caller's spec", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {
     const configPath = path.join(dir, "psilink.yaml");
@@ -254,7 +254,7 @@ test("saveConfig strips pakeToken/expires and does not mutate the caller's spec"
         channel: "sftp",
         server: { host: "h" },
         authentication: {
-          pakeToken: token,
+          sharedSecret: token,
           expires: "2028-01-01T00:00:00.000Z",
         },
       },
@@ -263,13 +263,13 @@ test("saveConfig strips pakeToken/expires and does not mutate the caller's spec"
     saveConfig(configPath, spec);
     const raw = fs.readFileSync(configPath, "utf8");
     // Key material never lands in the config, even when the caller leaves it set.
-    expect(raw).not.toContain("pake_token");
+    expect(raw).not.toContain("shared_secret");
     expect(raw).not.toContain(token);
     expect(raw).not.toContain("expires");
     // The now-empty authentication container is pruned, not left as `{}`.
     expect(raw).not.toContain("authentication");
     // The strip runs on a clone; the caller's spec is untouched.
-    expect(spec.connection.authentication?.pakeToken).toBe(token);
+    expect(spec.connection.authentication?.sharedSecret).toBe(token);
     expect(spec.connection.authentication?.expires).toBe(
       "2028-01-01T00:00:00.000Z",
     );
@@ -376,7 +376,7 @@ test("saveConfig keeps authentication when role remains after stripping (WebRTC)
         server: { host: "api.peerjs.com" },
         authentication: {
           role: "inviter",
-          pakeToken: token,
+          sharedSecret: token,
           expires: "2028-01-01T00:00:00.000Z",
         },
       },
@@ -388,7 +388,7 @@ test("saveConfig keeps authentication when role remains after stripping (WebRTC)
     expect(raw).toContain("authentication:");
     expect(raw).toContain("role: inviter");
     // ... while the key material is still stripped.
-    expect(raw).not.toContain("pake_token");
+    expect(raw).not.toContain("shared_secret");
     expect(raw).not.toContain(token);
     expect(raw).not.toContain("expires");
   } finally {

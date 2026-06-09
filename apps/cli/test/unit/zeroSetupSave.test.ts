@@ -8,7 +8,7 @@ import type { ExchangeSpec, PreparedExchange } from "@psilink/core";
 import { buildSaveSpec, finalizeBootstrap } from "../../src/commands/zeroSetup";
 import { loadKeyFile } from "../../src/keyFile";
 
-// A 43-char base64url token satisfying the pakeToken format constraint, as a
+// A 43-char base64url token satisfying the sharedSecret format constraint, as a
 // stand-in for a secret the initiator would have generated in-band.
 const SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -71,7 +71,7 @@ test("both-saved: writes config and key, and reports the shared secret", () => {
   });
 
   expect(fs.existsSync(configFile)).toBe(true);
-  expect(loadKeyFile(keyFile)?.pakeToken).toBe(SECRET);
+  expect(loadKeyFile(keyFile)?.sharedSecret).toBe(SECRET);
   expect(messages.some((m) => m.includes("established a shared secret"))).toBe(
     true,
   );

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
-import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
+import { getLogger, SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
@@ -16,7 +16,7 @@ import {
   connectionFromEndpoint,
   connectionFromURL,
   diffConnectionAgainstTarget,
-  generatePakeToken,
+  generateSharedSecret,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
@@ -258,13 +258,13 @@ test("connectionFromEndpoint: a webrtc endpoint seeds the signaling locator", ()
   expect(connection.server.path).toBe("/psi");
 });
 
-// --- generatePakeToken -------------------------------------------------------
+// --- generateSharedSecret -------------------------------------------------------
 
-test("generatePakeToken: matches the PAKE token format and is non-deterministic", () => {
-  const a = generatePakeToken();
-  const b = generatePakeToken();
-  expect(a).toMatch(PAKE_TOKEN_REGEX);
-  expect(b).toMatch(PAKE_TOKEN_REGEX);
+test("generateSharedSecret: matches the shared secret format and is non-deterministic", () => {
+  const a = generateSharedSecret();
+  const b = generateSharedSecret();
+  expect(a).toMatch(SHARED_SECRET_REGEX);
+  expect(b).toMatch(SHARED_SECRET_REGEX);
   expect(a).not.toBe(b);
 });
 
@@ -343,7 +343,7 @@ function onlineBootstrapParams(
     connection,
     dataSpec,
     prepared: {} as unknown as PreparedExchange,
-    pakeToken: generatePakeToken(),
+    sharedSecret: generateSharedSecret(),
     expires: undefined,
     keyPath: path.join(path.dirname(configPath), ".psilink.key"),
     configPath,

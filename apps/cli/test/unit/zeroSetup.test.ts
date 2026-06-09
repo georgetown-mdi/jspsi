@@ -167,7 +167,7 @@ test("createConnection filedrop: connectionTimeout is converted to ms", () => {
 
 // --- authentication invariant ------------------------------------------------
 // The handler passes authentication: null to runProtocol to explicitly opt out
-// of PAKE. These tests guard against createConnection inadvertently setting
+// of authentication. These tests guard against createConnection inadvertently setting
 // authentication, which would require the handler to override it.
 
 test("createConnection filedrop never produces a config with authentication set", () => {

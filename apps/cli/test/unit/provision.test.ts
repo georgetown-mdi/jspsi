@@ -10,7 +10,7 @@ import {
 } from "../../src/commands/provision";
 import { loadKeyFile } from "../../src/keyFile";
 
-// 43-char base64url token satisfying the pakeToken format constraint.
+// 43-char base64url token satisfying the sharedSecret format constraint.
 const TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 function sampleSpec(): ExchangeSpec {
@@ -41,7 +41,7 @@ test("provisionConfigAndKey reports a pre-existing config file and writes nothin
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: TOKEN },
+      { sharedSecret: TOKEN },
       { configPath, keyPath },
     ),
   ).toThrow(configPath);
@@ -51,11 +51,11 @@ test("provisionConfigAndKey reports a pre-existing config file and writes nothin
 });
 
 test("provisionConfigAndKey reports a pre-existing key file and writes nothing", () => {
-  fs.writeFileSync(keyPath, JSON.stringify({ pakeToken: TOKEN }));
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: TOKEN },
+      { sharedSecret: TOKEN },
       { configPath, keyPath },
     ),
   ).toThrow(keyPath);
@@ -63,7 +63,7 @@ test("provisionConfigAndKey reports a pre-existing key file and writes nothing",
 });
 
 test("assertNoProvisionConflicts reports the conflicting path before any write", () => {
-  fs.writeFileSync(keyPath, JSON.stringify({ pakeToken: TOKEN }));
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
   expect(() => assertNoProvisionConflicts({ configPath, keyPath })).toThrow(
     keyPath,
   );
@@ -80,7 +80,7 @@ test("provisionConfigAndKey rejects the same path for config and key", () => {
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: TOKEN },
+      { sharedSecret: TOKEN },
       { configPath: both, keyPath: both },
     ),
   ).toThrow(UsageError);
@@ -105,18 +105,18 @@ test("assertNoProvisionConflicts rejects the same path for config and key", () =
 test("provisionConfigAndKey writes a key file with expires when set", () => {
   provisionConfigAndKey(
     sampleSpec(),
-    { pakeToken: TOKEN, expires: "2028-06-01T12:00:00.000Z" },
+    { sharedSecret: TOKEN, expires: "2028-06-01T12:00:00.000Z" },
     { configPath, keyPath },
   );
   const key = loadKeyFile(keyPath);
-  expect(key?.pakeToken).toBe(TOKEN);
+  expect(key?.sharedSecret).toBe(TOKEN);
   expect(key?.expires).toBe("2028-06-01T12:00:00.000Z");
 });
 
 test("provisionConfigAndKey omits expires when absent", () => {
   provisionConfigAndKey(
     sampleSpec(),
-    { pakeToken: TOKEN },
+    { sharedSecret: TOKEN },
     { configPath, keyPath },
   );
   expect(fs.readFileSync(keyPath, "utf8")).not.toContain("expires");
@@ -129,7 +129,7 @@ test("provisionConfigAndKey writes the key file with mode 0600", () => {
   if (process.platform === "win32") return;
   provisionConfigAndKey(
     sampleSpec(),
-    { pakeToken: TOKEN },
+    { sharedSecret: TOKEN },
     { configPath, keyPath },
   );
   expect(fs.statSync(keyPath).mode & 0o777).toBe(0o600);
@@ -140,12 +140,12 @@ test("provisionConfigAndKey writes the key file with mode 0600", () => {
 test("provisionConfigAndKey writes both files and returns the resolved paths", () => {
   const result = provisionConfigAndKey(
     sampleSpec(),
-    { pakeToken: TOKEN },
+    { sharedSecret: TOKEN },
     { configPath, keyPath },
   );
   expect(result).toEqual({ configPath, keyPath });
   expect(fs.existsSync(configPath)).toBe(true);
-  expect(loadKeyFile(keyPath)?.pakeToken).toBe(TOKEN);
+  expect(loadKeyFile(keyPath)?.sharedSecret).toBe(TOKEN);
 });
 
 // --- rollback ----------------------------------------------------------------
@@ -157,7 +157,7 @@ test("provisionConfigAndKey rolls back the written config when the key write fai
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: "too-short" },
+      { sharedSecret: "too-short" },
       { configPath, keyPath },
     ),
   ).toThrow("base64url-encoded 32-byte value");
@@ -180,7 +180,7 @@ test("provisionConfigAndKey writes no key file when the config write fails", () 
     expect(() =>
       provisionConfigAndKey(
         sampleSpec(),
-        { pakeToken: TOKEN },
+        { sharedSecret: TOKEN },
         { configPath: badConfig, keyPath },
       ),
     ).toThrow();
@@ -198,7 +198,7 @@ test("provisionConfigAndKey with reuseExistingConfig writes only the key, keepin
   fs.writeFileSync(configPath, original);
   const result = provisionConfigAndKey(
     sampleSpec(),
-    { pakeToken: TOKEN },
+    { sharedSecret: TOKEN },
     { configPath, keyPath },
     { reuseExistingConfig: true },
   );
@@ -206,16 +206,16 @@ test("provisionConfigAndKey with reuseExistingConfig writes only the key, keepin
   // The user's config is left byte-for-byte untouched ...
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
   // ... and the key file is written.
-  expect(loadKeyFile(keyPath)?.pakeToken).toBe(TOKEN);
+  expect(loadKeyFile(keyPath)?.sharedSecret).toBe(TOKEN);
 });
 
 test("provisionConfigAndKey with reuseExistingConfig still rejects a pre-existing key file", () => {
   fs.writeFileSync(configPath, "channel: filedrop\npath: /mnt/share\n");
-  fs.writeFileSync(keyPath, JSON.stringify({ pakeToken: TOKEN }));
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: TOKEN },
+      { sharedSecret: TOKEN },
       { configPath, keyPath },
       { reuseExistingConfig: true },
     ),
@@ -234,7 +234,7 @@ test("provisionConfigAndKey with reuseExistingConfig does not delete the config 
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: "too-short" },
+      { sharedSecret: "too-short" },
       { configPath, keyPath },
       { reuseExistingConfig: true },
     ),
@@ -251,7 +251,7 @@ test("provisionConfigAndKey with reuseExistingConfig aborts when the config was 
   expect(() =>
     provisionConfigAndKey(
       sampleSpec(),
-      { pakeToken: TOKEN },
+      { sharedSecret: TOKEN },
       { configPath, keyPath },
       { reuseExistingConfig: true },
     ),
@@ -268,14 +268,14 @@ test("assertNoProvisionConflicts can check only the key path (accept reconciles 
     assertNoProvisionConflicts({ configPath, keyPath }, ["key"]),
   ).not.toThrow();
   // ... but a pre-existing key still does.
-  fs.writeFileSync(keyPath, JSON.stringify({ pakeToken: TOKEN }));
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
   expect(() =>
     assertNoProvisionConflicts({ configPath, keyPath }, ["key"]),
   ).toThrow(keyPath);
 });
 
 test("assertNoProvisionConflicts can check only the config path (online invite warns on the key)", () => {
-  fs.writeFileSync(keyPath, JSON.stringify({ pakeToken: TOKEN }));
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
   // A pre-existing key does not trip the gate when only the config is checked.
   expect(() =>
     assertNoProvisionConflicts({ configPath, keyPath }, ["config"]),

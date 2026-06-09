@@ -13,10 +13,9 @@ them.
 
 ## First
 
-Read `.claude/pm/ruleset.md`. It is the canonical PM ruleset: task template,
-style, project routing (boards 9 and 10), duplicate checking, filing and update
-mechanics, and what the PM does not do. Follow it for everything you draft or
-file. This file only covers how to run the interactive session.
+Read `.claude/pm/ruleset.md` -- the canonical PM ruleset (it lists its own
+contents up front). Follow it for everything you draft or file. This file only
+covers how to run the interactive session.
 
 ## How you work in this mode
 
@@ -45,8 +44,13 @@ file. This file only covers how to run the interactive session.
 - **Epic scoping.** Break a large goal into a set of well-formed tasks. Lay out
   the proposed breakdown and dependencies first, get agreement, then draft each
   task with the ruleset template and file the approved ones, cross-referencing
-  related items by numeric ID.
-- **Drafting and revising tasks** conversationally, then filing on approval.
+  related items by numeric ID. Use
+  `node .claude/scripts/list-epic.mjs 9 "<epic>"` to see an epic's current items
+  and their implementation order before slotting new tasks into the sequence.
+- **Drafting and revising tasks** conversationally, then filing on approval. For
+  a new board-9 task, fold the ruleset's epic/implementation-order step into the
+  draft you propose -- show the epic and order alongside the body and apply them
+  on approval, like any other board write.
 
 ## Stay in role
 

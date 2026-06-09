@@ -269,21 +269,21 @@ export function loadConfig(
   // canonical name or one would slip through silently.
   //
   // The named keys get specific guidance; any other field under
-  // `authentication` (e.g. typos like `expires_at` or `pakeTok`) gets a
+  // `authentication` (e.g. typos like `expires_at` or `shared_secre`) gets a
   // generic warning so the user sees the silent drop rather than wondering
   // why their setting did nothing.
   //
   // CANONICAL_TO_USER_FORMS centralizes the dual-form mapping so a future
   // field cannot be added to only one of the two lookups.
   const CANONICAL_TO_USER_FORMS: Record<string, string[]> = {
-    pakeToken: ["pake_token", "pakeToken"],
+    sharedSecret: ["shared_secret", "sharedSecret"],
     expires: ["expires"],
     role: ["role"],
   };
   const CANONICAL_TO_HINT: Record<string, string> = {
-    pakeToken:
-      "the token is always loaded from the key file (any @-file reference " +
-      "in this field was also not resolved)",
+    sharedSecret:
+      "the shared secret is always loaded from the key file (any @-file " +
+      "reference in this field was also not resolved)",
     expires:
       "expiration is always loaded from the key file (any @-file reference " +
       "in this field was also not resolved)",
@@ -302,8 +302,8 @@ export function loadConfig(
     const isWebRTC =
       (rawConn as Record<string, unknown>)["channel"] === "webrtc";
     const canonicalIgnored = isWebRTC
-      ? ["pakeToken", "expires"]
-      : ["pakeToken", "expires", "role"];
+      ? ["sharedSecret", "expires"]
+      : ["sharedSecret", "expires", "role"];
     const ignoredKeys = canonicalIgnored.flatMap(
       (canonical) => CANONICAL_TO_USER_FORMS[canonical],
     );
@@ -413,7 +413,7 @@ export function loadConfig(
         "docs/SECURITY_DESIGN.md#recurring-exchange-authentication.",
     );
   const authPersist: AuthPersist = {
-    pakeToken: keyData.pakeToken,
+    sharedSecret: keyData.sharedSecret,
     expires: keyData.expires,
     keyFilePath: options.keyFile,
   };

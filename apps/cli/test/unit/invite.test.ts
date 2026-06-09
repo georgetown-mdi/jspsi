@@ -158,7 +158,10 @@ function onlineFixture(): { input: string; options: CommonBootstrapOptions } {
 
 test("validateInvite: online warns (does not error) on a pre-existing key file", async () => {
   const { input, options } = onlineFixture();
-  fs.writeFileSync(options.keyFile, JSON.stringify({ pakeToken: KEY_TOKEN }));
+  fs.writeFileSync(
+    options.keyFile,
+    JSON.stringify({ sharedSecret: KEY_TOKEN }),
+  );
   const log = getLogger("invite-key-warn-test");
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");

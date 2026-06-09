@@ -7,7 +7,7 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 // (the private key lives there, NOT here), the receipt signing mode, the pinned
 // partner certificate fingerprint (a public value exchanged out-of-band), and
 // where signed receipts are written. The signing private key is deliberately
-// kept out of the config and out of the rotating PAKE key file; see
+// kept out of the config and out of the rotating key file; see
 // docs/SECURITY_DESIGN.md.
 
 /**
@@ -35,7 +35,7 @@ export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
  * Receipt signing mode. Mirrors the two modes described in
  * docs/PROTOCOL.md#non-repudiation, plus an explicit `none`:
  * - `none` -- no receipt is signed (only the unsigned self-attested record).
- * - `session-derived` -- a MAC under the shared PAKE session key; tamper-evident
+ * - `session-derived` -- a MAC under the shared session key; tamper-evident
  *   but not non-repudiation and not third-party verifiable.
  * - `certificate` -- a signature under this party's long-lived signing identity,
  *   the only mode that yields third-party-verifiable non-repudiation. This is the

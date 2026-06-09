@@ -24,7 +24,7 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
-// 43-char base64url tokens satisfying the pakeToken format constraint.
+// 43-char base64url tokens satisfying the sharedSecret format constraint.
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const TOKEN_B = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM";
 
@@ -70,19 +70,19 @@ function baseOptions() {
 
 // --- happy path --------------------------------------------------------------
 
-test("returns connection and injects pakeToken from key file", () => {
+test("returns connection and injects sharedSecret from key file", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig(baseOptions());
   expect(result.connection.channel).toBe("sftp");
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_A);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_A);
   expect(result.connection.authentication.keyFilePath).toBe(keyFile);
 });
 
 test("injects expires from key file when present", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   saveKeyFile(keyFile, {
-    pakeToken: TOKEN_A,
+    sharedSecret: TOKEN_A,
     expires: "2030-01-01T00:00:00.000Z",
   });
   const result = loadConfig(baseOptions());
@@ -91,7 +91,7 @@ test("injects expires from key file when present", () => {
   );
 });
 
-test("injects pakeToken from key file even when an authentication block is present in config", () => {
+test("injects sharedSecret from key file even when an authentication block is present in config", () => {
   // An authentication block in psilink.yaml for sftp/filedrop has no
   // user-settable fields; the key file always provides the token.
   const configWithAuth = {
@@ -102,15 +102,15 @@ test("injects pakeToken from key file even when an authentication block is prese
     },
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithAuth));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig(baseOptions());
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_A);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_A);
 });
 
 // --- config file errors ------------------------------------------------------
 
 test("throws with ENOENT code when config file is absent", () => {
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   let caught: unknown;
   try {
     loadConfig(baseOptions());
@@ -124,7 +124,7 @@ test("throws with ENOENT code when config file is absent", () => {
 
 test("throws a UsageError on malformed YAML in config file", () => {
   fs.writeFileSync(configFile, ": {invalid yaml{{");
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   // Malformed local config is a usage error (CLI exit 64), not exit 69.
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
@@ -134,7 +134,7 @@ test("throws a UsageError when config file fails schema validation", () => {
     configFile,
     YAML.stringify({ connection: { channel: "ftp", server: {} } }),
   );
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
@@ -156,14 +156,14 @@ test("throws a UsageError with 'malformed' when key file contains invalid JSON",
 
 test("throws a UsageError with 'malformed' when key file fails schema validation", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
-  fs.writeFileSync(keyFile, JSON.stringify({ pakeToken: "" }));
+  fs.writeFileSync(keyFile, JSON.stringify({ sharedSecret: "" }));
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("malformed");
 });
 
 test("throws a UsageError with 'malformed' when key file token is wrong length", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
-  fs.writeFileSync(keyFile, JSON.stringify({ pakeToken: "tooshort" }));
+  fs.writeFileSync(keyFile, JSON.stringify({ sharedSecret: "tooshort" }));
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("malformed");
 });
@@ -172,7 +172,7 @@ test("throws a UsageError with 'malformed' when key file token is wrong length",
 
 test("applies serverPort override to the connection", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig({ ...baseOptions(), serverPort: 2222 });
   if (result.connection.channel !== "sftp") return;
   expect(result.connection.server.port).toBe(2222);
@@ -180,19 +180,19 @@ test("applies serverPort override to the connection", () => {
 
 test("applies peerTimeout override and converts to milliseconds", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig({ ...baseOptions(), peerTimeout: 60 });
   expect(result.connection.options?.peerTimeoutMs).toBe(60_000);
 });
 
 // --- filedrop channel --------------------------------------------------------
 
-test("filedrop config injects pakeToken from key file", () => {
+test("filedrop config injects sharedSecret from key file", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig(baseOptions());
   expect(result.connection.channel).toBe("filedrop");
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_A);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_A);
   expect(result.connection.authentication.keyFilePath).toBe(keyFile);
 });
 
@@ -203,52 +203,52 @@ test("filedrop config throws a UsageError when key file is absent", () => {
 });
 
 // --- config warnings ---------------------------------------------------------
-// These tests exercise the branches that emit a warning when pake_token,
-// pakeToken, expires, or role appear in psilink.yaml. The tests verify both
+// These tests exercise the branches that emit a warning when shared_secret,
+// sharedSecret, expires, or role appear in psilink.yaml. The tests verify both
 // the warning text (via the mocked logger) and the observable invariant that
 // key-file values always win. The check runs before schema parsing so any
 // token format (valid or not) triggers the warning rather than a ZodError.
 
-test("pakeToken set in YAML config does not override the key file token", () => {
+test("sharedSecret set in YAML config does not override the key file token", () => {
   const configWithToken = {
     ...minimalSFTPConfig,
     connection: {
       ...minimalSFTPConfig.connection,
       authentication: {
-        pake_token: TOKEN_A,
+        shared_secret: TOKEN_A,
       },
     },
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithToken));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_B });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_B });
   const result = loadConfig(baseOptions());
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_B);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_B);
   expect(
     mockState.warnings.some((m) =>
-      m.includes("connection.authentication.pake_token is set"),
+      m.includes("connection.authentication.shared_secret is set"),
     ),
   ).toBe(true);
 });
 
-test("camelCase pakeToken in YAML config does not override the key file token", () => {
-  // Exercises the a["pakeToken"] branch (camelCase, as opposed to a["pake_token"]).
-  // A user who writes `pakeToken: foo` directly in psilink.yaml hits this path.
+test("camelCase sharedSecret in YAML config does not override the key file token", () => {
+  // Exercises the a["sharedSecret"] branch (camelCase, as opposed to a["shared_secret"]).
+  // A user who writes `sharedSecret: foo` directly in psilink.yaml hits this path.
   const configWithCamelToken = {
     ...minimalSFTPConfig,
     connection: {
       ...minimalSFTPConfig.connection,
       authentication: {
-        pakeToken: TOKEN_A,
+        sharedSecret: TOKEN_A,
       },
     },
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithCamelToken));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_B });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_B });
   const result = loadConfig(baseOptions());
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_B);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_B);
   expect(
     mockState.warnings.some((m) =>
-      m.includes("connection.authentication.pakeToken is set"),
+      m.includes("connection.authentication.sharedSecret is set"),
     ),
   ).toBe(true);
 });
@@ -263,7 +263,7 @@ test("expires set in YAML config does not override the key file expiry", () => {
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithExpires));
   saveKeyFile(keyFile, {
-    pakeToken: TOKEN_A,
+    sharedSecret: TOKEN_A,
     expires: "2030-01-01T00:00:00.000Z",
   });
   const result = loadConfig(baseOptions());
@@ -279,7 +279,7 @@ test("expires set in YAML config does not override the key file expiry", () => {
 
 test("an unknown authentication field in YAML config is dropped with a generic warning", () => {
   // Covers the strip-and-warn branch for fields not in the specific-hint list
-  // (typos like `expires_at`, unknown keys like `pakeTok`). The user must see
+  // (typos like `expires_at`, unknown keys like `shared_secre`). The user must see
   // a warning rather than the field being silently dropped by Zod.
   const configWithUnknown = {
     ...minimalSFTPConfig,
@@ -289,9 +289,9 @@ test("an unknown authentication field in YAML config is dropped with a generic w
     },
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithUnknown));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig(baseOptions());
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_A);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_A);
   expect(
     mockState.warnings.some((m) =>
       m.includes("connection.authentication.expires_at is not"),
@@ -312,9 +312,9 @@ test("authentication.role in YAML config is ignored and does not cause a ZodErro
     },
   };
   fs.writeFileSync(configFile, YAML.stringify(configWithRole));
-  saveKeyFile(keyFile, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const result = loadConfig(baseOptions());
-  expect(result.connection.authentication.pakeToken).toBe(TOKEN_A);
+  expect(result.connection.authentication.sharedSecret).toBe(TOKEN_A);
   expect(
     (result.connection.authentication as unknown as Record<string, unknown>)[
       "role"

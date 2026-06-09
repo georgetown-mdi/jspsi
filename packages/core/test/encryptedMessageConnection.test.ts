@@ -12,7 +12,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
-import { deriveAeadKey } from "../src/auth";
+import { deriveAeadKey, AEAD_CONTEXTS, type AeadContext } from "../src/auth";
 import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
 import type { HandshakeRole } from "../src/types";
 
@@ -192,7 +192,7 @@ test("a payload larger than the base64 chunk size round-trips", async () => {
   expect(Array.from(got as Uint8Array)).toEqual(Array.from(payload));
 });
 
-// --- Replay / out-of-order ----------------------------------------------------
+// --- Sequence: replay / reorder / gap -----------------------------------------
 
 test("a replayed frame is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
@@ -211,6 +211,56 @@ test("an out-of-order frame (seq <= last accepted) is rejected as a security fai
   await recv.receive();
   await recv.receive();
   await expectSecurity(recv.receive(), /replay|out-of-order/i);
+});
+
+test("a forward-gap frame (seq skips ahead) is rejected as a security failure", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // The acceptance-criteria example: 0 then 5. Frame 0 is accepted, then a frame
+  // whose seq jumps past the expected next value (1) is proof that frames 1..4
+  // were dropped or withheld in transit.
+  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({ n: 0 })));
+  await peer.send(await sealRaw("initiator", 5, jsonPlaintext({ n: 5 })));
+  expect(await recv.receive()).toEqual({ n: 0 });
+  await expectSecurity(recv.receive(), /skipped ahead|dropped or withheld/i);
+});
+
+test("a withheld first frame (stream starts past seq 0) is rejected as a gap", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // recvSeq starts at -1, so the expected first seq is 0. A stream that opens at
+  // seq 1 means the very first frame was withheld; this is the gap case at the
+  // head of the stream, not a replay (seq 1 is not <= -1).
+  await peer.send(await sealRaw("initiator", 1, jsonPlaintext({ n: 1 })));
+  await expectSecurity(recv.receive(), /skipped ahead|dropped or withheld/i);
+});
+
+test("a strictly incrementing stream is accepted", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  // The real send path advances the counter by one per send; a contiguous
+  // 0,1,2,3 sequence must pass the strict gap check unchanged and deliver in
+  // order.
+  for (let i = 0; i < 4; ++i) await encA.send({ i });
+  for (let i = 0; i < 4; ++i) expect(await encB.receive()).toEqual({ i });
+});
+
+test("a detected gap latches the wrapper", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({ n: 0 })));
+  await peer.send(await sealRaw("initiator", 2, jsonPlaintext({ n: 2 })));
+  expect(await recv.receive()).toEqual({ n: 0 });
+  const first = await expectSecurity(
+    recv.receive(),
+    /skipped ahead|dropped or withheld/i,
+  );
+
+  // The gap is terminal like every other security failure: a later receive
+  // rejects with the very same latched error object, never a fresh one.
+  const onReceive = await recv.receive().then(
+    () => {
+      throw new Error("expected rejection but receive resolved");
+    },
+    (e: unknown) => e,
+  );
+  expect(onReceive).toBe(first);
 });
 
 // --- Integrity / format failures (all rejected as "security") -----------------
@@ -310,6 +360,12 @@ test("send succeeds at exactly sendSeq === MAX_SAFE_INTEGER", async () => {
   // The last sequence number usable without ambiguity; sending here must
   // succeed, guarding against a `>` -> `>=` off-by-one regression.
   (encA as unknown as { sendSeq: number }).sendSeq = Number.MAX_SAFE_INTEGER;
+  // Align the receiver's expected-next counter so the boundary frame stays
+  // contiguous: strict gap detection rejects any seq that is not exactly
+  // recvSeq + 1, so a fresh receiver (expecting 0) would otherwise reject a lone
+  // frame sealed at MAX_SAFE_INTEGER as a forward gap rather than round-trip it.
+  (encB as unknown as { recvSeq: number }).recvSeq =
+    Number.MAX_SAFE_INTEGER - 1;
   await expect(encA.send({ boundary: true })).resolves.toBeUndefined();
   expect(await encB.receive()).toEqual({ boundary: true });
 });
@@ -340,6 +396,26 @@ test("send refuses to advance past MAX_SAFE_INTEGER and latches the wrapper", as
     (e: unknown) => e,
   );
   expect(onReceive).toBe(first);
+});
+
+test("an inbound frame after recvSeq reaches MAX_SAFE_INTEGER is rejected", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // At a saturated counter the gap guard is degenerate: recvSeq + 1 loses IEEE
+  // 754 precision and equals recvSeq, so `seq > recvSeq + 1` can never fire and
+  // no representable seq is a forward gap. The neighboring guards must hold the
+  // line instead -- the replay guard for any seq <= MAX_SAFE_INTEGER (asserted
+  // here), and the BigInt range guard for any seq above it (rejected before the
+  // counter comparison, independent of recvSeq; see the test above). The stream
+  // is terminal at the top of the counter; saturation opens no hole.
+  (recv as unknown as { recvSeq: number }).recvSeq = Number.MAX_SAFE_INTEGER;
+  await peer.send(
+    await sealRaw(
+      "initiator",
+      Number.MAX_SAFE_INTEGER,
+      jsonPlaintext({ n: 1 }),
+    ),
+  );
+  await expectSecurity(recv.receive(), /replay|out-of-order/i);
 });
 
 // --- Send-side input validation -----------------------------------------------
@@ -539,6 +615,75 @@ test("deriveAeadKey known-answer vector pins the HKDF info string", async () => 
   // nonce across directions (both counters start at 0), which is catastrophic
   // for AES-GCM.
   expect(Array.from(i2r)).not.toEqual(Array.from(r2i));
+});
+
+// --- deriveAeadKey / AEAD_CONTEXTS guards -------------------------------------
+// deriveAeadKey and the frozen AEAD_CONTEXTS tuple are exported from auth.ts and
+// lost their unit coverage when pake.test.ts was deleted in the X25519 cutover.
+// The KAT above pins the exact bytes (and the per-label difference); these
+// restore the runtime guards and the remaining derivation properties. (Ported
+// from the deleted pake.test.ts.)
+
+test("deriveAeadKey derives a stable 32-byte key for each allowed label", async () => {
+  const sessionKey = new Uint8Array(32).fill(0x42);
+  for (const context of AEAD_CONTEXTS) {
+    const k1 = await deriveAeadKey(sessionKey, context);
+    const k2 = await deriveAeadKey(sessionKey, context);
+    expect(k1).toHaveLength(32);
+    expect(k1).toEqual(k2);
+  }
+});
+
+test("deriveAeadKey differs for different session keys", async () => {
+  const k1 = await deriveAeadKey(
+    new Uint8Array(32).fill(0x01),
+    "initiator-to-responder",
+  );
+  const k2 = await deriveAeadKey(
+    new Uint8Array(32).fill(0x02),
+    "initiator-to-responder",
+  );
+  expect(k1).not.toEqual(k2);
+});
+
+test("every AEAD_CONTEXTS label is printable ASCII", () => {
+  // The runtime guard's soundness against a non-NFC context rests on every
+  // allowed label being ASCII (ASCII has a single NFC form). Enforce it
+  // mechanically so a future non-ASCII label fails here at the point of
+  // addition. The class is printable, non-space ASCII (U+0021..U+007E) --
+  // stricter than "ASCII": it also rejects a stray leading/trailing space or
+  // control char that would survive NFC unchanged.
+  for (const context of AEAD_CONTEXTS) {
+    expect(context).toMatch(/^[\x21-\x7e]+$/);
+  }
+});
+
+test("AEAD_CONTEXTS is frozen against runtime mutation", () => {
+  expect(Object.isFrozen(AEAD_CONTEXTS)).toBe(true);
+  // The readonly tuple type has no `push`; cast past it to model an untyped
+  // plain-JS caller trying to widen the guard's allowlist at runtime. A frozen
+  // array throws on mutation under the strict mode ES modules always run in.
+  expect(() =>
+    (AEAD_CONTEXTS as unknown as string[]).push("evil-aead"),
+  ).toThrow(TypeError);
+});
+
+test("deriveAeadKey rejects a context outside the fixed set", async () => {
+  const sessionKey = new Uint8Array(32).fill(0x01);
+  // An untyped (plain-JS or `as`-cast) caller can bypass the compile-time
+  // AeadContext constraint with a free-form, empty, or non-ASCII label; the
+  // runtime guard must fail fast rather than silently derive a key the two
+  // parties may not agree on.
+  for (const bad of [
+    "initiator",
+    "",
+    "responder-to-initiatoŕ",
+    "é-to-responder",
+  ]) {
+    await expect(
+      deriveAeadKey(sessionKey, bad as unknown as AeadContext),
+    ).rejects.toThrow(/unknown AEAD context/);
+  }
 });
 
 // --- AEAD encrypt-path wire vector (end-to-end known-answer) -------------------
