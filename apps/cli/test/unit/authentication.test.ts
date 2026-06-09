@@ -7,6 +7,7 @@ import {
   FileSyncConnection,
   fromEventConnection,
   authenticateConnection,
+  createMessagePipe,
   SHARED_SECRET_REGEX,
 } from "@psilink/core";
 import type { HandshakeRole, MessageConnection } from "@psilink/core";
@@ -189,4 +190,40 @@ test("authentication throws when tokens differ", async () => {
   expect((resultB as PromiseRejectedResult).reason.message).toContain(
     "key exchange authentication failed",
   );
+});
+
+// --- Legacy proof-of-concept client interop ----------------------------------
+//
+// SPAKE2 has been removed; the X25519 key exchange is wire-incompatible with it.
+// An old proof-of-concept client speaks the SPAKE2 frame shape (`pakeMsg` /
+// `point` / `mac`), which fails the new strict `.strict()` message schemas. Both
+// directions must fail closed with the single generic, non-oracular error and
+// without hanging -- not crash opaquely or stall until the handshake timeout.
+
+test("a legacy SPAKE2-shaped first message fails a new responder with a clean error", async () => {
+  const [a, b] = createMessagePipe();
+  // `a` is the new responder running the X25519 handshake via authenticateConnection.
+  const newSide = authenticateConnection(
+    a,
+    { sharedSecret: TOKEN_A },
+    "responder",
+  );
+  // `b` is the legacy client: it opens with a SPAKE2 message-1 shape.
+  await b.send({ pakeMsg: "1", point: TOKEN_A });
+  await expect(newSide).rejects.toThrow("key exchange authentication failed");
+});
+
+test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", async () => {
+  const [a, b] = createMessagePipe();
+  // `a` is the new initiator; it sends X25519 message 1 first.
+  const newSide = authenticateConnection(
+    a,
+    { sharedSecret: TOKEN_A },
+    "initiator",
+  );
+  // `b` is the legacy responder: it consumes the initiator's frame and replies
+  // with a SPAKE2 message-2 shape, which the new initiator cannot parse.
+  await b.receive();
+  await b.send({ pakeMsg: "2", point: TOKEN_A, mac: TOKEN_A });
+  await expect(newSide).rejects.toThrow("key exchange authentication failed");
 });
