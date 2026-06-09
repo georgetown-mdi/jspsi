@@ -540,6 +540,14 @@ export async function runOnlineBootstrap(params: {
   // "config is on disk, retry without re-inviting" recovery from a run where the
   // config write never succeeded (hook threw, or handshake never reached it).
   let configWritten = false;
+  // Set at the very top of the hook, before the reuse early-return. runProtocol
+  // saves the rotated key immediately before invoking onAuthenticated, so
+  // reaching the hook is proof the key is on disk. The reuse branch keeps a
+  // pre-existing config and writes no fresh one (configWritten stays false), so
+  // without this flag the catch below could not tell a reuse run whose handshake
+  // succeeded (key saved) from one that failed pre-handshake (no key) -- and
+  // would falsely promise `psilink exchange` recovery in the latter.
+  let keyPersisted = false;
   try {
     const { onAuthenticatedError } = await runProtocol(
       connWithAuth,
@@ -568,6 +576,11 @@ export async function runOnlineBootstrap(params: {
       // write settles, so a rejected write would resolve cleanly and masquerade
       // as a success.
       () => {
+        // Reaching the hook means runProtocol already saved the rotated key
+        // (it does so immediately before this call). Record that before the
+        // reuse early-return so the recovery message below is gated on the key
+        // actually being on disk.
+        keyPersisted = true;
         if (params.reuseExistingConfig) {
           // The reconcile check already confirmed the pre-existing config agrees
           // with the invitation and URL; keep it untouched. The rotated key is
@@ -601,15 +614,19 @@ export async function runOnlineBootstrap(params: {
     // the saveConfig call above, so surface it under a name the caller speaks.
     return { configWriteError: onAuthenticatedError };
   } catch (err) {
-    // The exchange failed after a successful handshake. When the config is on
-    // disk -- freshly written by the hook, or a reused pre-existing one -- tell
-    // the user it (and the rotated key) are there so they retry with `psilink
+    // The exchange failed after a successful handshake. When BOTH the config and
+    // the rotated key are on disk, tell the user so they retry with `psilink
     // exchange` instead of re-inviting, the exact recovery this bootstrap exists
     // to make possible. Logged at error level (matching runProtocol's rotation
     // advisory) so it stays visible alongside the error the handler then reports.
-    // Only when the config is actually on disk: a hook failure (config not
-    // written) must not claim otherwise.
-    if (configWritten || params.reuseExistingConfig)
+    // Both files must actually be present: a fresh run needs `configWritten` (the
+    // hook persisted the config, which implies the key was already saved); a
+    // reuse run keeps the pre-existing config but still needs `keyPersisted`,
+    // since a pre-handshake failure (declined, expired, unreachable) never saves
+    // the rotated key -- promising `psilink exchange` there would point at a key
+    // that does not exist. A hook failure (config not written) likewise leaves
+    // `configWritten` false, so it never claims a config that is not there.
+    if (configWritten || (params.reuseExistingConfig && keyPersisted))
       getLogger(params.loggerName).error(
         `the configuration at ${params.configPath} and the rotated key at ` +
           `${params.keyPath} are on disk; retry with 'psilink exchange' to ` +

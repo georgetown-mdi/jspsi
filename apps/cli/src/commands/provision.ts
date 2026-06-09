@@ -110,7 +110,10 @@ export interface ProvisionOptions {
  * With `options.reuseExistingConfig`, the config write is skipped and only the
  * key file is written and gated: for the accept path, where a pre-existing
  * config has already been reconciled against the invitation and is kept as-is.
- * The user's config is never written or deleted in that case.
+ * The user's config is never written or deleted in that case. Before writing the
+ * key, the config's continued presence is re-gated -- if it was removed since the
+ * caller reconciled it, this throws rather than orphaning a key with no matching
+ * config.
  *
  * Both writers are atomic (temp file + rename) and clean up their own temp on
  * failure, so a failed write leaves nothing at its destination. The config is
@@ -142,7 +145,24 @@ export function provisionConfigAndKey(
   );
   // Outside the try: a saveConfig failure is atomic, so nothing was written and
   // there is nothing to roll back -- let it propagate before the key is touched.
-  if (!options.reuseExistingConfig) saveConfig(resolved.configPath, spec);
+  if (options.reuseExistingConfig) {
+    // Re-gate the config's presence right before writing the key. Reuse means
+    // "keep the existing config and add only the key", so if that config was
+    // removed after the caller reconciled it (a delete in the TOCTOU window
+    // between reconcile and here), writing the key would orphan it -- a key with
+    // no matching config. Abort cleanly instead: nothing has been written yet,
+    // so there is no residue. This mirrors the online hook's pre-write re-gate
+    // and keeps this function's "never leave inconsistent on-disk state"
+    // guarantee. The same-path guard already ran in throwIfConflicts above.
+    if (detectFileConflicts([resolved.configPath]).length === 0)
+      throw new UsageError(
+        `the configuration file at ${resolved.configPath} no longer exists; ` +
+          "it was reconciled for reuse but has since been removed. Re-run the " +
+          "command so a fresh configuration is written, or restore the file.",
+      );
+  } else {
+    saveConfig(resolved.configPath, spec);
+  }
   try {
     saveKeyFile(resolved.keyPath, keyData);
   } catch (err) {

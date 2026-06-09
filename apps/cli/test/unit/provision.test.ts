@@ -243,6 +243,24 @@ test("provisionConfigAndKey with reuseExistingConfig does not delete the config 
   expect(fs.existsSync(keyPath)).toBe(false);
 });
 
+test("provisionConfigAndKey with reuseExistingConfig aborts when the config was removed, writing no key", () => {
+  // The caller reconciled a config for reuse, but it was deleted in the window
+  // before this call. Writing the key would orphan it (a key with no matching
+  // config), so the re-gate must abort -- nothing written -- rather than leave
+  // inconsistent on-disk state. (configPath does not exist in this test.)
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { pakeToken: TOKEN },
+      { configPath, keyPath },
+      { reuseExistingConfig: true },
+    ),
+  ).toThrow(UsageError);
+  expect(fs.existsSync(configPath)).toBe(false);
+  // No orphaned key landed.
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
 test("assertNoProvisionConflicts can check only the key path (accept reconciles the config)", () => {
   fs.writeFileSync(configPath, "channel: filedrop\n");
   // A pre-existing config does not trip the gate when only the key is checked.

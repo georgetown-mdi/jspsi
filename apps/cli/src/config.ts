@@ -294,6 +294,13 @@ export function diffLinkageTerms(
     conflicts.push({ field, existing: a, incoming: b });
   };
 
+  // version and algorithm are compared by raw equality rather than the
+  // nfcCanonical fold used for the user-authored name fields below. Both are
+  // schema-constrained to ASCII -- version to a semver string (/^\d+\.\d+\.\d+$/)
+  // and algorithm to a fixed enum ("psi" | "psi-c") -- so neither can ever differ
+  // by Unicode normalization form, and the NFC fold would be a no-op. (Semver
+  // range matching, as opposed to exact equality, is a cross-cutting concern that
+  // belongs in core's validateCompatibility, which also compares version exactly.)
   if (existing.version !== incoming.version)
     add("version", existing.version, incoming.version);
   if (existing.algorithm !== incoming.algorithm)
