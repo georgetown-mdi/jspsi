@@ -345,8 +345,9 @@ const PayloadSchema: z.ZodType<Payload> = z.object({
 
 /**
  * Reference to the legal data-sharing agreement authorizing this exchange.
- * If `expirationDate` has passed, the exchange fails before any data is
- * transmitted.
+ * The two parties' `reference`, `purpose`, and `expirationDate` are all
+ * cross-checked: any mismatch, or an `expirationDate` that has passed, fails
+ * the exchange before any data is transmitted.
  */
 export interface LegalAgreement {
   /** Identifier of the legal agreement (e.g. "MOU-2025-0042"). */
@@ -393,8 +394,9 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  *   matched to the same output.
  * - `linkageFields` — mandatory.
  * - `linkageKeys` — mandatory.
- * - `legalAgreement` — mandatory if present. Exchange fails if `expirationDate`
- *   has passed.
+ * - `legalAgreement` — mandatory if present. The `reference`, `purpose`, and
+ *   `expirationDate` are cross-checked; any mismatch, or an `expirationDate`
+ *   that has passed, cancels the exchange.
  * - `payload` — mandatory if present.
  *
  * Constraints:

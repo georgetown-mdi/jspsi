@@ -133,6 +133,62 @@ test("both-output: both records agree on terms and carry the result size", async
   ).toBe(true);
 });
 
+test("both-output: a legal-agreement purpose flows end-to-end into both records", async () => {
+  // The isolated unit tests cover governanceFromTerms and the purpose-mismatch
+  // check separately; this exercises the integrated live path -- prepareForExchange
+  // -> runExchange (validateCompatibility passes on matching purposes, then
+  // buildExchangeRecord) -- so the mandatory purpose reaches both audit records.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const legalAgreement = {
+    reference: "DUA-2026-0007",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-06-30",
+  };
+  const withAgreement = (identity: string, rows: typeof serverRows) =>
+    prepareForExchange(
+      {
+        linkageTerms: {
+          ...firstNameTerms,
+          identity,
+          output: both,
+          legalAgreement,
+        },
+      },
+      identity,
+      rows,
+      ["first_name", "note"],
+    );
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator, responder] = await Promise.all([
+    runExchange(
+      connInitiator,
+      "initiator",
+      withAgreement("Initiator Co", clientRows),
+      {
+        psiLibrary,
+      },
+    ),
+    runExchange(
+      connResponder,
+      "responder",
+      withAgreement("Responder Co", serverRows),
+      {
+        psiLibrary,
+      },
+    ),
+  ]);
+  const init = built(initiator);
+  const resp = built(responder);
+
+  // Both parties' agreed terms carry the same legal agreement, so both records
+  // carry the cross-validated reference, purpose, and expiration verbatim.
+  expect(init.record.governance.legalAgreement).toEqual(legalAgreement);
+  expect(resp.record.governance.legalAgreement).toEqual(legalAgreement);
+  // The agreement is part of the agreed terms, so both parties still hash to one
+  // value.
+  expect(init.record.termsHash).toBe(resp.record.termsHash);
+});
+
 test("single-output: result size omitted; only the receiver commits the table", async () => {
   // Initiator receives output; responder only sends. resolveRole makes the
   // initiator the receiver (it expects output and the partner does not).

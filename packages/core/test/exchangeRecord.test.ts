@@ -459,6 +459,25 @@ describe("serialize / parse", () => {
     expect(parsed.version).toBe(EXCHANGE_RECORD_VERSION);
   });
 
+  test("a record carrying a legal-agreement purpose round-trips intact", async () => {
+    // baseInputs.localTerms (termsA) has no legalAgreement, so the round-trip
+    // above never exercises the parser against a record with a purpose. Build
+    // from the governance-bearing terms so parseExchangeRecord validates the
+    // mandatory purpose -- a regression dropping it from RecordLegalAgreementSchema
+    // would surface here.
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, localTerms: termsWithGovernance },
+      fixedRandomness,
+    );
+    const parsed = parseExchangeRecord(
+      JSON.parse(serializeExchangeRecord(record)),
+    );
+    expect(parsed).toEqual(record);
+    expect(parsed.governance.legalAgreement?.purpose).toBe(
+      "Care coordination for co-enrolled patients",
+    );
+  });
+
   test("the opening data round-trips through serialize -> parse", async () => {
     const { opening } = await buildExchangeRecord(baseInputs, fixedRandomness);
     const parsed = parseOpeningData(JSON.parse(serializeOpeningData(opening)));
