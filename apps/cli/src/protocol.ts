@@ -707,6 +707,15 @@ export async function runProtocol(
       // after the saveKeyFile/tokenRotated assignment above, so that pair's
       // no-await invariant is untouched.
       //
+      // Unlike the other interruptible awaits, this one has no preceding
+      // `signalReceived` guard, by design: the gap since the last guarded await
+      // (authenticateConnection) is synchronous -- saveKeyFile plus the
+      // tokenRotated assignment -- so no signal can have arrived before we reach
+      // the hook. If a signal fires *during* an async hook, letting that write
+      // finish is the intended behavior (persist the config at acceptance); the
+      // existing signalReceived check after EncryptedMessageConnection.create
+      // then bails before the exchange.
+      //
       // A failure from the hook is non-fatal: it is logged at error level (so it
       // survives --log-level=error and is never silently lost) and the exchange
       // proceeds. The data exchange is the irreplaceable two-party operation; a
@@ -718,7 +727,14 @@ export async function runProtocol(
         try {
           await onAuthenticated();
         } catch (hookErr) {
-          onAuthenticatedError = hookErr;
+          // The caller distinguishes a hook failure from success by the presence
+          // of this value, so it must be defined even when the hook threw a
+          // falsy value (e.g. `throw undefined`); coerce that pathological case
+          // to an Error so a failure can never masquerade as a clean write.
+          onAuthenticatedError =
+            hookErr === undefined
+              ? new Error("the post-authentication hook threw undefined")
+              : hookErr;
           log.error(
             "the post-authentication hook failed after the handshake " +
               "succeeded and the rotated key was saved; the exchange will " +
@@ -897,9 +913,12 @@ export async function runProtocol(
         `error in flight when ${signalReceived} arrived: ` +
           (err instanceof Error ? err.message : String(err)),
       );
-      // No bootstrap outcome: the run was cut short by a signal and the process
-      // is exiting. The caller guards against an absent bootstrap result.
-      return {};
+      // The run was cut short by a signal and the process is exiting; the
+      // caller guards against an absent bootstrap result. Preserve
+      // onAuthenticatedError so a hook failure recorded before the signal is not
+      // silently dropped here -- otherwise the caller would treat the run as a
+      // clean config write.
+      return { onAuthenticatedError };
     }
     throw err;
   } finally {

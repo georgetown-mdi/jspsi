@@ -432,7 +432,9 @@ export async function runOnlineBootstrap(params: {
  * (`configWriteError` set), the rotated key was still saved but the config was
  * not, so the message must not claim otherwise -- the underlying error was
  * already logged at error level by `runProtocol`, so this only corrects the
- * summary and points back to it.
+ * summary and points back to it. The failure summary is logged at `error`
+ * level, not `warn`, so it (and its actionable recovery instruction) stays
+ * visible at `--log-level=error`, where the error it references is also shown.
  */
 export function logOnlineBootstrapOutcome(
   log: ReturnType<typeof getLogger>,
@@ -445,7 +447,7 @@ export function logOnlineBootstrapOutcome(
     );
     return;
   }
-  log.warn(
+  log.error(
     `exchange complete and the rotated key was saved to ${params.keyFile}, ` +
       `but the configuration could not be written to ${params.configFile} ` +
       `(see the error above). Recreate it before running a recurring ` +

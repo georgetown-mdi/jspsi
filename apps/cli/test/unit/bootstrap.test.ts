@@ -354,12 +354,12 @@ test("runOnlineBootstrap writes the config from the hook even when the exchange 
   // the data exchange fails. The config must already be on disk so the
   // recurring-exchange setup is recoverable without re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    // runOnlineBootstrap passes exactly one function argument (the
-    // onAuthenticated hook); select it by type rather than a positional index
-    // so a future signature change cannot silently break the mock.
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      | (() => void | Promise<void>)
-      | undefined;
+    // The onAuthenticated hook is the last argument runOnlineBootstrap passes;
+    // select the last function argument so the mock is stable against both
+    // positional drift and any future function-typed parameter before it.
+    const onAuthenticated = callArgs.findLast(
+      (a) => typeof a === "function",
+    ) as (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     throw new Error("data exchange failed");
   }) as never);
@@ -438,32 +438,40 @@ test("runOnlineBootstrap reports no config-write error on a clean run", async ()
 // --- logOnlineBootstrapOutcome ----------------------------------------------
 
 test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
-  const log = { info: vi.fn(), warn: vi.fn() } as unknown as ReturnType<
-    typeof getLogger
-  >;
+  const log = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as unknown as ReturnType<typeof getLogger>;
   logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
   });
   expect(log.warn).not.toHaveBeenCalled();
+  expect(log.error).not.toHaveBeenCalled();
   expect(log.info).toHaveBeenCalledTimes(1);
   expect(vi.mocked(log.info).mock.calls[0][0]).toContain(
     "saved config to psilink.yaml",
   );
 });
 
-test("logOnlineBootstrapOutcome: a config-write failure warns and does not claim the config was saved", () => {
-  const log = { info: vi.fn(), warn: vi.fn() } as unknown as ReturnType<
-    typeof getLogger
-  >;
+test("logOnlineBootstrapOutcome: a config-write failure logs at error level and does not claim the config was saved", () => {
+  const log = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as unknown as ReturnType<typeof getLogger>;
   logOnlineBootstrapOutcome(log, {
     configFile: "psilink.yaml",
     keyFile: ".psilink.key",
     configWriteError: new Error("permission denied"),
   });
   expect(log.info).not.toHaveBeenCalled();
-  expect(log.warn).toHaveBeenCalledTimes(1);
-  const msg = vi.mocked(log.warn).mock.calls[0][0] as string;
+  // Logged at error level (not warn) so it stays visible at --log-level=error,
+  // where the underlying hook error it references is also shown.
+  expect(log.warn).not.toHaveBeenCalled();
+  expect(log.error).toHaveBeenCalledTimes(1);
+  const msg = vi.mocked(log.error).mock.calls[0][0] as string;
   // The rotated key is still reported saved; the config is reported NOT written.
   expect(msg).toContain("rotated key was saved to .psilink.key");
   expect(msg).toContain("could not be written to psilink.yaml");

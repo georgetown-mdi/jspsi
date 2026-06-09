@@ -2054,6 +2054,61 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
   );
 });
 
+test("a hook that throws a falsy value still reports a defined onAuthenticatedError (failure never masquerades as success)", async () => {
+  // The caller distinguishes failure from success by the presence of
+  // onAuthenticatedError; a pathological `throw undefined` must not collapse to
+  // the undefined "no error" value, so runProtocol coerces it to an Error.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+
+  // `throw undefined` via a variable so the intent is explicit (and not read as
+  // a thrown literal). This is the worst case the coercion guards against.
+  const nothing: unknown = undefined;
+  const throwFalsyHook = () => {
+    throw nothing;
+  };
+
+  const [resultA, resultB] = await Promise.allSettled([
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+      undefined,
+      undefined,
+      throwFalsyHook,
+    ),
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1 },
+        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  expect(resultA.status).toBe("fulfilled");
+  expect(resultB.status).toBe("fulfilled");
+  const valueA = (resultA as PromiseFulfilledResult<RunProtocolResult>).value;
+  // Defined despite the falsy throw, so the caller's `=== undefined` success
+  // guard correctly treats this as a failure rather than a clean write.
+  expect(valueA.onAuthenticatedError).toBeDefined();
+  expect(valueA.onAuthenticatedError).toBeInstanceOf(Error);
+});
+
 test("runProtocol without onAuthenticated runs a normal authenticated exchange (existing callers unaffected)", async () => {
   // zeroSetup and exchange pass no post-handshake hook; the new optional
   // parameter must leave that path unchanged -- the token rotates, both sides
