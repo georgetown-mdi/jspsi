@@ -152,10 +152,12 @@ export async function verifyCommitmentOpening(
 /**
  * Order the two parties' terms deterministically by their canonical encoding so
  * both parties derive the same agreed-terms object regardless of which one is
- * "local". Comparison is JavaScript string order over the two RFC 8785 canonical
- * encodings; because RFC 8785 escapes every non-ASCII character as \uXXXX, those
- * strings are ASCII-only, so the comparison is stable and deterministic
- * (platform- and locale-independent) with no UTF-16-vs-code-point ambiguity.
+ * "local". Comparison is JavaScript's `<=` over the two RFC 8785 canonical
+ * encodings, which orders by UTF-16 code unit -- deterministic and
+ * locale-independent (it is not `localeCompare`). RFC 8785 emits non-ASCII as
+ * raw UTF-8 rather than `\u` escapes, so the encodings are not ASCII-only; but
+ * both parties compare byte-identical strings under the same code-unit ordering,
+ * so the derived order is stable and platform- and locale-independent.
  */
 function agreedTermsValue(a: LinkageTerms, b: LinkageTerms): CanonicalValue {
   // LinkageTerms is within the canonical value domain (plain objects, arrays,
