@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   FileSyncConnection,
   fromEventConnection,
@@ -29,6 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -226,4 +227,71 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
   await b.receive();
   await b.send({ pakeMsg: "2", point: TOKEN_A, mac: TOKEN_A });
   await expect(newSide).rejects.toThrow("key exchange authentication failed");
+});
+
+// --- Post-handshake expiry ---------------------------------------------------
+//
+// authenticateConnection checks `expires` twice: once synchronously before the
+// key exchange starts, and once after runKex returns, to catch a secret that
+// expires *during* the round-trip. Only the pre-handshake check is covered
+// above ("authentication throws for an expired token..."); these two tests
+// drive the post-handshake branch (auth.ts) by faking only Date: start the
+// clock just before `expires`, kick off both sides over an in-memory pipe (no
+// real-timer coupling, so the handshake still completes), then advance the
+// clock past `expires` in a microtask while the round-trip is in flight. The
+// post-handshake checks -- which run only after both runKex calls resolve --
+// then see the secret as expired. (Ported from the deleted pake.test.ts, which
+// covered the equivalent SPAKE2 branch before the X25519 cutover.)
+
+test("authentication throws when the shared secret expires during the key-exchange round-trip", async () => {
+  const expires = "2030-01-01T00:00:00.000Z";
+  vi.useFakeTimers({
+    toFake: ["Date"],
+    now: new Date("2029-12-31T23:59:59.000Z"),
+  });
+  const [a, b] = createMessagePipe();
+  const authPromise = Promise.allSettled([
+    authenticateConnection(a, { sharedSecret: TOKEN_A, expires }, "initiator"),
+    authenticateConnection(b, { sharedSecret: TOKEN_A, expires }, "responder"),
+  ]);
+  // Advance past expires while the round-trip is still in flight.
+  await Promise.resolve().then(() =>
+    vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
+  );
+  const [resultA, resultB] = await authPromise;
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  expect((resultA as PromiseRejectedResult).reason.message).toContain(
+    "during the key-exchange round-trip",
+  );
+  expect((resultB as PromiseRejectedResult).reason.message).toContain(
+    "during the key-exchange round-trip",
+  );
+});
+
+test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintEmitted", async () => {
+  const expires = "2030-01-01T00:00:00.000Z";
+  vi.useFakeTimers({
+    toFake: ["Date"],
+    now: new Date("2029-12-31T23:59:59.000Z"),
+  });
+  const [a, b] = createMessagePipe();
+  const authPromise = Promise.allSettled([
+    authenticateConnection(a, { sharedSecret: TOKEN_A, expires }, "initiator"),
+    authenticateConnection(b, { sharedSecret: TOKEN_A, expires }, "responder"),
+  ]);
+  await Promise.resolve().then(() =>
+    vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
+  );
+  const [resultA, resultB] = await authPromise;
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  // Tagged so the CLI surfaces a re-invite hint instead of the generic
+  // transport-failure advisory.
+  for (const result of [resultA, resultB] as PromiseRejectedResult[]) {
+    expect(result.reason.message).toContain(
+      "during the key-exchange round-trip",
+    );
+    expect(result.reason.psilinkRecoveryHintEmitted).toBe(true);
+  }
 });
