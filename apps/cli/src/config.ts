@@ -302,10 +302,16 @@ export function diffLinkageTerms(
   // so they are intentionally not compared here.
 
   // Sort linkage fields by name (their order is not significant) before the
-  // canonical compare; compare linkage keys in place (their order is). The
-  // comparator is code-unit order, matching the canonical encoder's key sort.
-  const byName = (a: { name: string }, b: { name: string }): number =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  // canonical compare; compare linkage keys in place (their order is). Sort on
+  // the NFC-normalized name so the order agrees with the NFC fold the canonical
+  // compare applies -- otherwise two field sets equal up to normalization could
+  // sort differently (e.g. one party authored a name in NFD, the other in NFC)
+  // and register as a false conflict.
+  const byName = (a: { name: string }, b: { name: string }): number => {
+    const x = a.name.normalize("NFC");
+    const y = b.name.normalize("NFC");
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
   const existingFields = [...existing.linkageFields].sort(byName);
   const incomingFields = [...incoming.linkageFields].sort(byName);
   if (nfcCanonical(existingFields) !== nfcCanonical(incomingFields)) {

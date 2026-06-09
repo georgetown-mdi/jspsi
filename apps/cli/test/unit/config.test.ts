@@ -509,6 +509,29 @@ test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing"
   expect(conflicts).toEqual([]);
 });
 
+test("diffLinkageTerms: NFC-vs-NFD field names that reorder the sort are not a false conflict", () => {
+  // Two fields whose normalization form changes their sort order: NFC "\u00c5"
+  // (U+00C5) sorts after "B", but its NFD form "A\u030a" begins with "A" and
+  // sorts before "B". If the comparator sorted on the raw name the two sides
+  // would order differently and falsely conflict; the NFC-normalized comparator
+  // must keep them equal.
+  const base = getDefaultLinkageTerms("Org");
+  const field = base.linkageFields[0];
+  const existing = cloneTerms(base);
+  const incoming = cloneTerms(base);
+  existing.linkageFields = [
+    { ...structuredClone(field), name: "B" },
+    { ...structuredClone(field), name: "\u00c5" },
+  ];
+  incoming.linkageFields = [
+    { ...structuredClone(field), name: "B" },
+    { ...structuredClone(field), name: "A\u030a" },
+  ];
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((c) => c.field)).not.toContain("linkage_fields");
+  expect(conflicts).toEqual([]);
+});
+
 test("diffLinkageTerms: an explicitly-undefined optional is treated as absent", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));

@@ -15,7 +15,7 @@ import {
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
-  diffConnectionAgainstUrl,
+  diffConnectionAgainstTarget,
   generatePakeToken,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
@@ -643,9 +643,14 @@ test("runOnlineBootstrap re-gates the config write: a config appearing after the
   }
 });
 
-// --- diffConnectionAgainstUrl ------------------------------------------------
+// --- diffConnectionAgainstTarget ---------------------------------------------
+// These compare a saved config against the connection the live exchange will
+// actually use (a built RunnableConnectionConfig, as connectionFromURL would
+// produce), so the diff's verdict matches the live connection field for field.
+// URL-specific parsing (port truthiness, path "/", percent-encoding) lives in
+// connectionFromURL and is tested above.
 
-test("diffConnectionAgainstUrl: an agreeing sftp config has no conflicts or warnings", () => {
+test("diffConnectionAgainstTarget: an agreeing sftp config has no conflicts or warnings", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: {
@@ -656,121 +661,172 @@ test("diffConnectionAgainstUrl: an agreeing sftp config has no conflicts or warn
       password: "s3cr3t",
     },
   };
-  const r = diffConnectionAgainstUrl(
-    existing,
-    new URL("sftp://host:2222/drop"),
-  );
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "host",
+      port: 2222,
+      path: "/drop",
+      username: "alice",
+      password: "s3cr3t",
+    },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
   expect(r.warnings).toEqual([]);
 });
 
-test("diffConnectionAgainstUrl: a host mismatch is a conflict (which drop)", () => {
+test("diffConnectionAgainstTarget: a host mismatch is a conflict (which drop)", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "other-host" },
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts.map((d) => d.field)).toContain("connection.server.host");
 });
 
-test("diffConnectionAgainstUrl: an sftp path mismatch is a conflict (which drop)", () => {
+test("diffConnectionAgainstTarget: host comparison is case-insensitive (same endpoint)", () => {
+  // DNS is case-insensitive, and the live connection uses the host as-is, so a
+  // case-only difference must not abort.
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host.example.com" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "Host.Example.COM" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: an sftp path mismatch is a conflict (which drop)", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", path: "/old" },
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host/new"));
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/new" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts.map((d) => d.field)).toContain("connection.server.path");
 });
 
-test("diffConnectionAgainstUrl: credentials the target omits are not flagged", () => {
+test("diffConnectionAgainstTarget: a trailing-slash-only path difference is not a conflict", () => {
+  // FileSyncConnection strips a single trailing slash, so /drop and /drop/ are
+  // the same directory at runtime.
   const existing: ConnectionConfig = {
     channel: "sftp",
-    server: { host: "host", username: "alice", password: "s3cr3t" },
+    server: { host: "host", path: "/drop" },
   };
-  // Neither the URL nor an override carries userinfo; the acceptor's own stored
-  // credentials must not be treated as a disagreement.
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"));
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop/" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a path the target omits is not flagged", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
   expect(r.warnings).toEqual([]);
 });
 
-test("diffConnectionAgainstUrl: a port/path the target omits is not flagged", () => {
-  const existing: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "host", port: 2222, path: "/drop" },
-  };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"));
-  expect(r.conflicts).toEqual([]);
-  expect(r.warnings).toEqual([]);
-});
-
-test("diffConnectionAgainstUrl: a port the URL states warns (how you reach), not conflicts", () => {
+test("diffConnectionAgainstTarget: a differing port warns (how you reach), not conflicts", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", port: 22 },
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host:2222"));
-  expect(r.conflicts).toEqual([]);
-  expect(r.warnings.some((w) => w.includes("port"))).toBe(true);
-});
-
-test("diffConnectionAgainstUrl: a --server-port override that differs from the config warns", () => {
-  // The URL states no port; the override does. The override is part of what the
-  // user is asking for, so a divergence from the saved config must surface.
-  const existing: ConnectionConfig = {
+  const target: RunnableConnectionConfig = {
     channel: "sftp",
-    server: { host: "host", port: 22 },
+    server: { host: "host", port: 2222 },
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"), {
-    serverPort: 2222,
-  });
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
   expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
 });
 
-test("diffConnectionAgainstUrl: the URL stating the default port 22 against an unset config is silent", () => {
-  // An unset config port means the SFTP default (22), so a URL restating 22 is
-  // not a divergence and must not warn.
-  const existing: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "host" },
-  };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host:22"));
-  expect(r.conflicts).toEqual([]);
-  expect(r.warnings).toEqual([]);
-});
-
-test("diffConnectionAgainstUrl: a non-default port against an unset config warns", () => {
-  const existing: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "host" },
-  };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host:2222"));
-  expect(r.conflicts).toEqual([]);
-  expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
-});
-
-test("diffConnectionAgainstUrl: a --server-port override equal to the config is silent", () => {
+test("diffConnectionAgainstTarget: a target port equal to the config is silent", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", port: 2222 },
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"), {
-    serverPort: 2222,
-  });
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: the default port 22 against an unset config is silent", () => {
+  // An unset config port means the SFTP default (22), so a target restating 22
+  // is not a divergence and must not warn.
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 22 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
   expect(r.warnings).toEqual([]);
 });
 
-test("diffConnectionAgainstUrl: credentials that differ warn without echoing the value", () => {
+test("diffConnectionAgainstTarget: a non-default port against an unset config warns", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
+});
+
+test("diffConnectionAgainstTarget: credentials the target omits are not flagged", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "alice", password: "s3cr3t" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: differing credentials warn without echoing the value", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", username: "bob", password: "saved-secret" },
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"), {
-    serverUsername: "alice",
-    serverPassword: "new-secret",
-  });
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "alice", password: "new-secret" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
   const joined = r.warnings.join(" | ");
   expect(joined).toContain("username");
@@ -781,56 +837,62 @@ test("diffConnectionAgainstUrl: credentials that differ warn without echoing the
   expect(joined).not.toContain("alice");
 });
 
-test("diffConnectionAgainstUrl: a channel mismatch warns and does not compare further (file-sync)", () => {
+test("diffConnectionAgainstTarget: a differing private key warns without echoing it", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", privateKey: "saved-key" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", privateKey: "new-key" },
+  };
+  const joined = diffConnectionAgainstTarget(existing, target).warnings.join(
+    " | ",
+  );
+  expect(joined).toContain("private key");
+  expect(joined).not.toContain("saved-key");
+  expect(joined).not.toContain("new-key");
+});
+
+test("diffConnectionAgainstTarget: a channel mismatch warns and compares nothing else (file-sync)", () => {
   // file:// vs sftp:// is a legitimate different way of reaching the same drop;
   // it warns and short-circuits the per-channel fields rather than aborting.
   const existing: ConnectionConfig = {
     channel: "filedrop",
     path: "/mnt/share",
   };
-  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
   expect(r.warnings).toHaveLength(1);
   expect(r.warnings[0]).toContain("channel");
 });
 
-test("diffConnectionAgainstUrl: a filedrop path mismatch is a conflict", () => {
+test("diffConnectionAgainstTarget: a filedrop path mismatch is a conflict", () => {
   const existing: ConnectionConfig = {
     channel: "filedrop",
     path: "/mnt/other",
   };
-  const r = diffConnectionAgainstUrl(
-    existing,
-    new URL("file:///mnt/share/drop"),
-  );
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts.map((d) => d.field)).toContain("connection.path");
 });
 
-test("diffConnectionAgainstUrl: a percent-encoded URL path matches the decoded config path", () => {
+test("diffConnectionAgainstTarget: a filedrop trailing-slash-only difference is not a conflict", () => {
   const existing: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "host", path: "/my drop" },
+    channel: "filedrop",
+    path: "/mnt/share",
   };
-  // The URL parser keeps the path percent-encoded (/my%20drop); decoding it
-  // before the compare keeps an encodable character from being a false conflict.
-  const r = diffConnectionAgainstUrl(
-    existing,
-    new URL("sftp://host/my%20drop"),
-  );
-  expect(r.conflicts).toEqual([]);
-  expect(r.warnings).toEqual([]);
-});
-
-test("diffConnectionAgainstUrl: a percent-encoded URL credential matches the decoded config value", () => {
-  const existing: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "host", username: "bob", password: "p w" },
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share/",
   };
-  // url.password is stored encoded (p%20w); the same decode applies to userinfo.
-  const r = diffConnectionAgainstUrl(
-    existing,
-    new URL("sftp://bob:p%20w@host"),
-  );
+  const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
-  expect(r.warnings).toEqual([]);
 });

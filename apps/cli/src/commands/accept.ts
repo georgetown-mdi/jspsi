@@ -22,7 +22,6 @@ import type {
 import {
   diffLinkageTerms,
   formatReconcileDiffs,
-  type ConnectionOverrides,
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -35,7 +34,7 @@ import {
   connectionFromEndpoint,
   connectionFromURL,
   connectionOverridesFrom,
-  diffConnectionAgainstUrl,
+  diffConnectionAgainstTarget,
   loadInputRows,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
@@ -290,17 +289,15 @@ export async function validateAccept(params: {
     const { url, input, output } = resolved;
     // Validate the URL before reading the input file, mirroring validateInvite,
     // so a bad scheme/host fails fast without first parsing the CSV.
-    const overrides = connectionOverridesFrom(options);
-    const connection = connectionFromURL(url, overrides);
+    const connection = connectionFromURL(url, connectionOverridesFrom(options));
     // Reconcile a pre-existing config against the invitation AND the connection
-    // target (URL plus --server-* overrides) before the input is read and before
-    // any network activity, so a location disagreement aborts with a diff and no
-    // acceptance is ever sent to the inviter.
+    // the exchange will actually use (the built `connection`) before the input is
+    // read and before any network activity, so a location disagreement aborts
+    // with a diff and no acceptance is ever sent to the inviter.
     const reuseExistingConfig = reconcileAcceptConfig({
       configPath: options.configFile,
       myTerms,
-      url,
-      overrides,
+      target: connection,
       log,
     });
     const rows = await loadInputRows(input);
@@ -328,7 +325,6 @@ export async function validateAccept(params: {
   const reuseExistingConfig = reconcileAcceptConfig({
     configPath: options.configFile,
     myTerms,
-    url: undefined,
     log,
   });
   const rows =
@@ -367,21 +363,23 @@ export async function validateAccept(params: {
 function reconcileAcceptConfig(params: {
   configPath: string;
   myTerms: LinkageTerms;
-  url: URL | undefined;
-  overrides?: ConnectionOverrides;
+  target?: RunnableConnectionConfig;
   log: ReturnType<typeof getLogger>;
 }): boolean {
-  const { configPath, myTerms, url, overrides, log } = params;
+  const { configPath, myTerms, target, log } = params;
   if (detectFileConflicts([configPath]).length === 0) return false;
 
   // Reference to the source(s) compared against, woven into the messages so the
   // online ("invitation and URL") and offline ("invitation") cases read right.
+  // A `target` connection is present only online.
   const against =
-    url !== undefined
+    target !== undefined
       ? "the invitation and the connection URL"
       : "the invitation";
   const retryWith =
-    url !== undefined ? "the same URL and invitation" : "the same invitation";
+    target !== undefined
+      ? "the same URL and invitation"
+      : "the same invitation";
 
   let existing: ExchangeSpec;
   try {
@@ -405,8 +403,8 @@ function reconcileAcceptConfig(params: {
   for (const w of warnings) log.warn(w);
 
   const conn: { conflicts: ReconcileDiff[]; warnings: string[] } =
-    url !== undefined
-      ? diffConnectionAgainstUrl(existing.connection, url, overrides)
+    target !== undefined
+      ? diffConnectionAgainstTarget(existing.connection, target)
       : { conflicts: [], warnings: [] };
 
   const all: ReconcileDiff[] = [...conflicts, ...conn.conflicts];
