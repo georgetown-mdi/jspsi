@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, expect, test } from "vitest";
 import {
@@ -19,8 +20,12 @@ log.setLevel(log.levels.DEBUG);
 // inside the container, so subdirectories of srv/ are served as subdirectories
 // of /psi via SFTP. beforeAll creates SFTP_LOCAL_DIRECTORY with { recursive:
 // true } before opening connections, so the host directory exists when the
-// server needs it.
-const SFTP_LOCAL_DIRECTORY = "test/container/sftp/srv/sftp";
+// server needs it. The directory is resolved relative to this test file (via
+// import.meta.url) so it is independent of vitest's cwd, matching the pattern in
+// authenticatedExchange.test.ts.
+const SFTP_LOCAL_DIRECTORY = fileURLToPath(
+  new URL("../container/sftp/srv/sftp", import.meta.url),
+);
 const SFTP_PATH = "/psi/sftp";
 const SFTP_PORT = sftpPort();
 
