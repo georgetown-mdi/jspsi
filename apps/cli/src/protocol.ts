@@ -670,11 +670,13 @@ export async function runProtocol(
       // same value. It keys the per-direction AEAD encryption set up below, so
       // every PSI frame after this point is opaque on the wire to an SFTP/
       // file-drop admin. rotatedSecret is the new shared secret persisted to disk.
-      const { rotatedSecret, sessionKey } = await authenticateConnection(
-        mc,
-        authParams,
-        role,
-      );
+      // requestEncryption is true unconditionally here: this code path serves
+      // only the file-sync channels (sftp, filedrop), whose server admin can
+      // snoop the transport, so the application-encryption layer always applies.
+      // applyEncryption is the negotiated OR decision both parties agree on; it
+      // gates the EncryptedMessageConnection wrap below.
+      const { rotatedSecret, sessionKey, applyEncryption } =
+        await authenticateConnection(mc, authParams, role, true);
       try {
         // saveKeyFile is synchronous; the assignment below runs in the same
         // microtask tick. A signal cannot interleave between them, so any
@@ -765,10 +767,16 @@ export async function runProtocol(
         }
       }
 
-      // Wrap mc in the AEAD decorator now that the session key is in hand,
-      // and run the PSI exchange through `secure` so every frame is encrypted on
-      // the wire. create() derives the two per-direction keys via HKDF and
-      // registers no listeners on mc, so a signal arriving between
+      // Wrap mc in the AEAD decorator when the handshake negotiated it, and run
+      // the PSI exchange through `secure` so every frame is encrypted on the
+      // wire. The wrap is gated on applyEncryption -- the transcript-bound OR of
+      // both parties' requests -- rather than on the bare authentication state:
+      // file-sync requests it unconditionally (true is passed above), so the
+      // observable behavior is unchanged here (an authenticated file-sync
+      // exchange always encrypts), while the gate readies the path for a future
+      // caller that authenticates over an already-confidential transport and
+      // declines the extra layer. create() derives the two per-direction keys via
+      // HKDF and registers no listeners on mc, so a signal arriving between
       // authenticateConnection returning and this resolving needs no listener
       // juggling: the handler's doCleanup closes mc/conn directly. If the signal
       // lands before create() resolves, doCleanup runs while secure is still
@@ -777,8 +785,12 @@ export async function runProtocol(
       // closed and the decorator holds only CryptoKey objects, reclaimed when
       // runProtocol returns. The signalReceived check below mirrors the
       // post-open and post-synchronize guards, bailing before runExchange so the
-      // encrypted stream is never started against an already-closed mc.
-      secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
+      // encrypted stream is never started against an already-closed mc; it runs
+      // whether or not the wrap was applied, since a signal may also have arrived
+      // during the awaited onAuthenticated hook above.
+      if (applyEncryption) {
+        secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
+      }
       if (signalReceived !== undefined) {
         throw new Error(
           `interrupted by ${signalReceived} during channel encryption setup`,
