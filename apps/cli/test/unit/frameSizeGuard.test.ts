@@ -1,5 +1,9 @@
-import { describe, expect, test } from "vitest";
-import { FrameSizeExceededError, UsageError } from "@psilink/core";
+import { describe, expect, test, vi } from "vitest";
+import {
+  FrameSizeExceededError,
+  TransportOperationStalledError,
+  UsageError,
+} from "@psilink/core";
 
 import {
   createCappedSink,
@@ -72,5 +76,41 @@ describe("createCappedSink", () => {
     sink.write(Buffer.alloc(40)); // crosses cap: `result` rejects now
     fail(new Error("generic transport error")); // no-op after settle
     await expect(result).rejects.toBeInstanceOf(FrameSizeExceededError);
+  });
+
+  test("rejects with a terminal TransportOperationStalledError when the transfer goes idle", async () => {
+    // The liveness bound: a server that opens the stream but withholds data (no
+    // write ever arrives) is failed by the idle deadline, since the size cap
+    // never fires when no bytes accumulate. The error is terminal (a UsageError)
+    // so the poll loop fails the exchange rather than retrying into the hang.
+    vi.useFakeTimers();
+    try {
+      const { result } = createCappedSink("/p/silent.bin", 32, 1_000);
+      const assertion = expect(result).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(1_001);
+      await assertion;
+      await expect(result).rejects.toBeInstanceOf(UsageError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a chunk resets the idle window, so a still-progressing transfer is not stalled", async () => {
+    // The idle timer resets on each write: a transfer that delivers a chunk
+    // before the window elapses and then completes is not failed, even though
+    // the wall-clock span from creation to completion exceeds the window.
+    vi.useFakeTimers();
+    try {
+      const { sink, result, complete } = createCappedSink("/p/slow.bin", 32, 1_000);
+      await vi.advanceTimersByTimeAsync(800); // under the window
+      sink.write(Buffer.from("hi")); // progress: resets the idle window
+      await vi.advanceTimersByTimeAsync(800); // under the window again (1600 total)
+      complete();
+      expect((await result).toString()).toBe("hi");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

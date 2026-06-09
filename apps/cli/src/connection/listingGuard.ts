@@ -1,7 +1,6 @@
-import {
-  DirectoryListingBoundsError,
-  DirectoryListingStalledError,
-} from "@psilink/core";
+import { DirectoryListingBoundsError } from "@psilink/core";
+
+import { transportOperationStalledError } from "./sftpLivenessGuard";
 
 /**
  * Directory-listing enforcement primitives shared by the file-transport adapters
@@ -139,56 +138,34 @@ export function filenameTooLongError(
 export const MAX_LISTING_READDIR_BATCHES = 2 * MAX_DIRECTORY_ENTRIES;
 
 /**
- * Maximum wall-clock time, in milliseconds, a single transport `list()` may run
- * before it is refused. Enforced in the SFTP adapter as a whole-operation
- * deadline armed before the directory is opened. This is the bound for the case
- * {@link MAX_LISTING_READDIR_BATCHES} cannot catch: a server that withholds an
- * `opendir`/`readdir`/`close` callback entirely produces no batch to count, so
- * only elapsed time can fail it. It also backstops an empty-batch flood on a link
- * fast enough to issue the round-trip cap's worth of batches quickly.
- *
- * Value: 60,000 ms (60 s). Derived as a coarse "the server has gone silent"
- * backstop, not a tight latency budget (the round-trip cap is the precise bound
- * for the demonstrated empty-batch attack). It sits well above any legitimate
- * listing -- a normally-rotated rendezvous directory lists in one or a few
- * sub-second round-trips -- at roughly three times the SSH stack's 20 s
- * connection-establishment unresponsiveness threshold (ssh2's default
- * `readyTimeout`, also this project's `serverConnectTimeoutMs`), so a transiently
- * slow but live server is not cut off mid-listing, yet two orders of magnitude
- * below the one-hour peer-inactivity budget, so a withheld-callback stall fails
- * the exchange in a minute rather than after an hour. Fixed, not configurable,
- * for the same reason as the other bounds.
+ * Construct the typed, terminal liveness error for a listing that exceeded the
+ * round-trip cap ({@link MAX_LISTING_READDIR_BATCHES}) without completing -- the
+ * empty-batch / no-progress flood. Builds the shared
+ * {@link ./sftpLivenessGuard.transportOperationStalledError} so this listing-
+ * specific stall and the `get()` / `createExclusive()` stalls are one error type.
  */
-export const LISTING_DEADLINE_MS = 60_000;
-
-/**
- * Construct the typed, terminal error for a listing that exceeded the round-trip
- * cap ({@link MAX_LISTING_READDIR_BATCHES}) without completing -- the
- * empty-batch / no-progress flood.
- */
-export function listingStalledByBatchCountError(
-  dirPath: string,
-  max: number,
-): DirectoryListingStalledError {
-  return new DirectoryListingStalledError(
-    `directory ${dirPath} listing made no progress over ${max} readdir ` +
-      `round-trips without reaching end-of-directory; refusing to continue ` +
-      `enumerating it`,
+export function listingStalledByBatchCountError(dirPath: string, max: number) {
+  return transportOperationStalledError(
+    "directory listing",
+    dirPath,
+    `made no progress over ${max} readdir round-trips without reaching ` +
+      `end-of-directory`,
   );
 }
 
 /**
- * Construct the typed, terminal error for a listing that exceeded the wall-clock
- * deadline ({@link LISTING_DEADLINE_MS}) without completing -- the server
- * withheld a readdir/close callback.
+ * Construct the typed, terminal liveness error for a listing that exceeded the
+ * wall-clock deadline ({@link ./sftpLivenessGuard.SFTP_STALL_DEADLINE_MS})
+ * without completing -- the server withheld a readdir/close callback.
  */
 export function listingStalledByTimeoutError(
   dirPath: string,
   deadlineMs: number,
-): DirectoryListingStalledError {
-  return new DirectoryListingStalledError(
-    `directory ${dirPath} listing did not complete within ${deadlineMs} ms; ` +
-      `the server withheld a directory-read response, so refusing to wait on ` +
-      `it further`,
+) {
+  return transportOperationStalledError(
+    "directory listing",
+    dirPath,
+    `did not complete within ${deadlineMs} ms (the server withheld a ` +
+      `directory-read response)`,
   );
 }

@@ -9,7 +9,6 @@ import {
 
 import { createCappedSink } from "./frameSizeGuard";
 import {
-  LISTING_DEADLINE_MS,
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
   MAX_LISTING_READDIR_BATCHES,
@@ -18,6 +17,11 @@ import {
   listingStalledByBatchCountError,
   listingStalledByTimeoutError,
 } from "./listingGuard";
+import {
+  SFTP_STALL_DEADLINE_MS,
+  transportOperationStalledError,
+  withSftpOperationDeadline,
+} from "./sftpLivenessGuard";
 
 // A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
 // transport consumes are typed; ssh2 supplies more (longname, the rest of
@@ -144,11 +148,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * signal EOF, or by withholding a readdir/close callback entirely so the call
    * never settles. Both are bounded here: a total readdir round-trip cap
    * ({@link MAX_LISTING_READDIR_BATCHES}) fails the progress-free flood, and a
-   * whole-operation wall-clock deadline ({@link LISTING_DEADLINE_MS}) fails the
+   * whole-operation wall-clock deadline ({@link SFTP_STALL_DEADLINE_MS}) fails the
    * withheld-callback case (the only one no batch count can catch). Each surfaces
-   * a typed terminal {@link DirectoryListingStalledError} (a `UsageError`, so the
-   * poll loop treats it as terminal) and closes the open directory handle on the
-   * way out rather than leaking it.
+   * a typed terminal {@link TransportOperationStalledError} (a `UsageError`, so
+   * the poll loop treats it as terminal) and closes the open directory handle on
+   * the way out rather than leaking it. The same liveness class on {@link get}
+   * and {@link createExclusive} is bounded by {@link withSftpOperationDeadline}.
    */
   list(path: string): Promise<FileInfo[]> {
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
@@ -206,9 +211,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       const deadline = setTimeout(
         () =>
           settle(() =>
-            reject(listingStalledByTimeoutError(path, LISTING_DEADLINE_MS)),
+            reject(listingStalledByTimeoutError(path, SFTP_STALL_DEADLINE_MS)),
           ),
-        LISTING_DEADLINE_MS,
+        SFTP_STALL_DEADLINE_MS,
       );
       sftp.opendir(path, (openErr, openedHandle) => {
         // The deadline may have already fired (the server withheld the opendir
@@ -290,9 +295,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
     const maxBytes = options?.maxBytes;
     if (maxBytes === undefined) {
-      return this.client.get(path, undefined, {
-        readStreamOptions: options,
-      }) as Promise<Buffer<ArrayBufferLike>>;
+      // Uncapped reads carry no counting sink, so they have no per-chunk
+      // progress signal to drive the idle bound the capped path below uses. The
+      // transport always passes maxBytes, so this branch is effectively unused;
+      // bound it with a coarse whole-operation deadline anyway so a withheld or
+      // never-ending transfer fails rather than hanging. (A whole-operation
+      // deadline would be too tight for a legitimately large capped transfer,
+      // which is why the live path bounds the idle gap instead.)
+      return withSftpOperationDeadline(
+        this.client.get(path, undefined, {
+          readStreamOptions: options,
+        }) as Promise<Buffer<ArrayBufferLike>>,
+        SFTP_STALL_DEADLINE_MS,
+        () =>
+          transportOperationStalledError(
+            "file read",
+            path,
+            `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
+              `withheld the transfer)`,
+          ),
+      );
     }
 
     // Capped read. Stream into the shared counting sink rather than letting
@@ -397,7 +419,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
     // SSH_FXF_WRITE (0x02) | SSH_FXF_CREAT (0x08) | SSH_FXF_EXCL (0x20)
     const EXCL_WRITE_CREATE = 0x2a;
-    return new Promise<void>((resolve, reject) => {
+    const attempt = new Promise<void>((resolve, reject) => {
       sftp.open(path, EXCL_WRITE_CREATE, {}, (openErr, handle) => {
         if (openErr) {
           // Normalize SFTPv4+ FILE_ALREADY_EXISTS (11) directly to EEXIST.
@@ -463,6 +485,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         });
       });
     });
+    // Bound the whole operation -- open, the SFTPv3 code-4 exists() fallback, and
+    // close -- against a server that withholds any of those callbacks, so an
+    // exclusive create cannot hang the rendezvous lock path forever. The wrapper
+    // only races: a handle opened just before a withheld close is not reclaimed
+    // (that close cannot itself complete), but the exchange fails terminally
+    // rather than stalling, and the session teardown releases the session.
+    return withSftpOperationDeadline(
+      attempt,
+      SFTP_STALL_DEADLINE_MS,
+      () =>
+        transportOperationStalledError(
+          "exclusive create",
+          path,
+          `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
+            `withheld the open or close response)`,
+        ),
+    );
   }
 
   exists(remotePath: string): Promise<boolean> {

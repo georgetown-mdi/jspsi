@@ -108,45 +108,48 @@ export class DirectoryListingBoundsError extends UsageError {
 }
 
 /**
- * Thrown when a transport directory listing fails to make progress within its
- * liveness bound: the streamed `list()` read either exceeded the configured
- * round-trip cap (a server that keeps returning empty, non-EOF readdir batches
- * forever, advancing no entry and never signalling end-of-directory) or exceeded
- * the configured wall-clock deadline (a server that withholds a readdir/close
- * callback entirely, so the call would otherwise never settle). Raised at the
- * transport `list()` layer in the SFTP {@link FileTransportClient} adapter, where
- * the read is driven one server batch at a time. The directory handle opened for
- * the listing is closed before this is thrown, so the bounded failure does not
- * leak it (see docs/SECURITY_DESIGN.md, "Channel security").
+ * Thrown when a server-driven transport operation fails to make progress within
+ * its liveness bound -- the withheld-response / never-terminating class on the
+ * SFTP {@link FileTransportClient} adapter, where every read awaits a callback
+ * the server controls. A hostile (or dead) server admin can hang an operation
+ * indefinitely: a `list()` that keeps returning empty, non-EOF readdir batches
+ * (advancing no entry, never signalling end-of-directory) or whose
+ * readdir/close callback never fires; a `get()` whose transfer withholds data or
+ * never ends; an exclusive `createExclusive()` whose open/close callback never
+ * fires. Each is bounded -- by a round-trip cap, a per-chunk idle window, or a
+ * whole-operation wall-clock deadline as the operation allows -- and surfaces
+ * this error rather than awaiting forever (and, for a directory or file handle
+ * opened before the stall, leaking it). See docs/SECURITY_DESIGN.md, "Channel
+ * security".
  *
- * This is the liveness sibling of the memory-bound {@link DirectoryListingBoundsError}
- * and per-frame {@link FrameSizeExceededError}: those bound the allocation a
- * hostile directory or file can drive; this one bounds the time and round-trips a
- * hostile server can make the listing consume. The size bounds do not cover this
- * vector -- a server returning progress-free empty batches never accumulates an
- * entry, so it never reaches the entry-count cap, and a callback that never fires
- * accumulates nothing at all.
+ * This is the liveness sibling of the memory bounds
+ * {@link DirectoryListingBoundsError} and {@link FrameSizeExceededError}: those
+ * cap what a hostile directory or file can allocate; this caps the time and
+ * round-trips a hostile server can make an operation consume. The memory bounds
+ * do not cover this vector -- a progress-free stream never grows an allocation,
+ * and a withheld callback accumulates nothing at all.
  *
  * Like its siblings, it is a {@link UsageError} subclass for two reasons. First,
  * it must be terminal in the poll loop: {@link FileSyncConnection}'s poller stops
- * on a `UsageError` (re-listing the same hung directory cannot help and would
- * re-incur the very stall this guards against) and reschedules on any other
- * error, so deriving from `UsageError` makes the refusal terminal without
- * changing the poller's classification. Second, a hung or progress-free
- * rendezvous directory is the same family as the other directory-state
- * conditions `UsageError` already covers, so it shares the exit-64 (EX_USAGE)
- * classification that tells the operator to inspect the directory or peer rather
- * than retry as if the transport were merely flaky.
+ * on a `UsageError` (retrying the same hung operation cannot help and would
+ * re-incur the stall) and reschedules on any other error, so deriving from
+ * `UsageError` makes the refusal terminal -- it fails the exchange rather than
+ * spinning retries into the same hang -- without changing the poller's
+ * classification. Second, a hung or progress-free server is the same family as
+ * the other directory-state conditions `UsageError` already covers, so it shares
+ * the exit-64 (EX_USAGE) classification that tells the operator to inspect the
+ * directory or peer rather than retry as if the transport were merely flaky.
  *
- * The concrete bound values and their derivation live with the enforcement site
- * in the CLI adapter (`apps/cli/src/connection/listingGuard.ts`), alongside the
- * size bounds, for the same reason: no `packages/core` code pre-checks a listing,
- * so the constants belong where they are enforced.
+ * The concrete bound values and their derivation live with the enforcement sites
+ * in the CLI adapter (`apps/cli/src/connection/sftpLivenessGuard.ts` and
+ * `listingGuard.ts`), alongside the size bounds, for the same reason: no
+ * `packages/core` code drives these reads, so the constants belong where they
+ * are enforced.
  */
-export class DirectoryListingStalledError extends UsageError {
+export class TransportOperationStalledError extends UsageError {
   constructor(message: string) {
     super(message);
-    this.name = "DirectoryListingStalledError";
+    this.name = "TransportOperationStalledError";
   }
 }
 

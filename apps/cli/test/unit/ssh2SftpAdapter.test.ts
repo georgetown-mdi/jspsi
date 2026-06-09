@@ -3,17 +3,17 @@ import { Writable } from "node:stream";
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import {
   DirectoryListingBoundsError,
-  DirectoryListingStalledError,
   FrameSizeExceededError,
+  TransportOperationStalledError,
 } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {
-  LISTING_DEADLINE_MS,
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
   MAX_LISTING_READDIR_BATCHES,
 } from "../../src/connection/listingGuard";
+import { SFTP_STALL_DEADLINE_MS } from "../../src/connection/sftpLivenessGuard";
 
 // --- connect retry -----------------------------------------------------------
 
@@ -343,6 +343,49 @@ describe("createExclusive", () => {
     );
     expect(mockOpen).not.toHaveBeenCalled();
   });
+
+  test("bounds an open() whose callback is never invoked via the operation deadline", async () => {
+    // The withheld-response liveness class: the server accepts the request but
+    // never invokes the open callback, so the exclusive create would await
+    // forever. The whole-operation deadline must fail it with the typed error.
+    vi.useFakeTimers();
+    try {
+      mockOpen.mockImplementation(() => {
+        // Deliberately never invokes the callback.
+      });
+      const creating = adapter.createExclusive("/remote/lock.json");
+      // Attach before advancing so the mid-advance rejection is not unhandled.
+      const assertion = expect(creating).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+      expect(mockClose).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("bounds a close() whose callback is never invoked via the operation deadline", async () => {
+    // open succeeds (default mock) but the server withholds the close callback;
+    // the deadline still fails the operation rather than hanging after the file
+    // was created.
+    vi.useFakeTimers();
+    try {
+      mockClose.mockImplementation(() => {
+        // Deliberately never invokes the callback.
+      });
+      const creating = adapter.createExclusive("/remote/lock.json");
+      const assertion = expect(creating).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+      expect(mockClose).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // --- capped get --------------------------------------------------------------
@@ -403,6 +446,84 @@ describe("capped get", () => {
     };
     const buf = await adapter.get("/remote/ok.bin", { maxBytes: 32 });
     expect(buf.toString()).toBe("hello");
+  });
+
+  test("bounds a capped read whose transfer never delivers data via the idle deadline", async () => {
+    // The withheld-transfer liveness class: the server opens the read stream but
+    // writes nothing and never ends it, so `result` would never settle. The size
+    // cap cannot catch this (no bytes accumulate); the idle deadline must.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        get: vi.fn().mockImplementation(() => new Promise<Writable>(() => {})),
+      };
+      const reading = adapter.get("/remote/silent.bin", { maxBytes: 32 });
+      const assertion = expect(reading).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not stall a slow but progressing transfer (idle window resets on each chunk)", async () => {
+    // The idle bound must not penalize a legitimately large, slow transfer: it
+    // resets on every chunk, so a transfer whose chunk gaps stay under the
+    // window completes even though its TOTAL time exceeds the window -- which a
+    // whole-operation deadline would have wrongly failed.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let resolveGet!: (s: Writable) => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        get: vi.fn().mockImplementation((_path: string, sink: Writable) => {
+          sink.write(Buffer.from("a"));
+          // Next chunk and completion each land under one idle window after the
+          // previous event, but the total span (1.2x the window) exceeds it.
+          setTimeout(
+            () => sink.write(Buffer.from("b")),
+            SFTP_STALL_DEADLINE_MS * 0.6,
+          );
+          setTimeout(() => resolveGet(sink), SFTP_STALL_DEADLINE_MS * 1.2);
+          return new Promise<Writable>((res) => {
+            resolveGet = res;
+          });
+        }),
+      };
+      const reading = adapter.get("/remote/slow.bin", { maxBytes: 32 });
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS * 1.2 + 1);
+      expect((await reading).toString()).toBe("ab");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("bounds an uncapped read whose transfer never settles via the operation deadline", async () => {
+    // The uncapped path returns the library's get() promise directly and has no
+    // counting sink (hence no per-chunk progress signal), so it is bounded by a
+    // coarse whole-operation deadline. The transport always passes maxBytes, so
+    // this path is the defensive backstop.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        get: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+      const reading = adapter.get("/remote/silent.bin"); // no maxBytes: uncapped
+      const assertion = expect(reading).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -620,7 +741,7 @@ describe("bounded list", () => {
     (adapter as any).client = { sftp };
 
     await expect(adapter.list("/remote/hang")).rejects.toBeInstanceOf(
-      DirectoryListingStalledError,
+      TransportOperationStalledError,
     );
     // Stopped at the round-trip cap rather than looping forever.
     expect(readdirCalls).toBe(MAX_LISTING_READDIR_BATCHES);
@@ -656,9 +777,9 @@ describe("bounded list", () => {
       const listing = adapter.list("/remote/silent");
       // Attach before advancing so the mid-advance rejection is not unhandled.
       const assertion = expect(listing).rejects.toBeInstanceOf(
-        DirectoryListingStalledError,
+        TransportOperationStalledError,
       );
-      await vi.advanceTimersByTimeAsync(LISTING_DEADLINE_MS + 1);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
       await assertion;
       // Tried readdir once, then hung; the deadline, not the round-trip cap,
       // bounded it.
