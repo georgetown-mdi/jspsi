@@ -38,7 +38,7 @@ function makeConn(): FileSyncConnection {
 // Opens and synchronizes both connections, then bridges each event-based
 // FileSyncConnection into the pull-based MessageConnection that
 // authenticateConnection consumes - mirroring how runProtocol wires the
-// transport. The bridge attaches before any PAKE frame is in flight (the
+// transport. The bridge attaches before any key-exchange frame is in flight (the
 // initiator's first message is sent inside authenticateConnection), so no
 // inbound data can slip past between start() and the bridge.
 async function openAndSync(
@@ -55,7 +55,7 @@ async function openAndSync(
 
 // Call teardown only after both parties have completed authentication
 // (i.e., as a .finally() on the Promise.all that awaits both auth calls).
-// Each party's last outgoing PAKE message is consumed by the peer's poller
+// Each party's last outgoing key-exchange message is consumed by the peer's poller
 // before authenticateConnection() returns, so cleanup() can safely delete
 // the responsible files with no TOCTOU race.
 async function teardown(
@@ -125,7 +125,7 @@ test("authentication throws for an expired token without opening a connection", 
       { sharedSecret: TOKEN_A, expires: "2000-01-01T00:00:00.000Z" },
       "initiator",
     ),
-  ).rejects.toThrow("PAKE token expired");
+  ).rejects.toThrow("shared secret expired");
 });
 
 test("authentication throws for a token that is not 43 base64url characters", async () => {
@@ -183,10 +183,10 @@ test("authentication throws when tokens differ", async () => {
   expect(resultB.status).toBe("rejected");
   expect((resultA as PromiseRejectedResult).reason).toBeInstanceOf(Error);
   expect((resultA as PromiseRejectedResult).reason.message).toContain(
-    "PAKE authentication failed",
+    "key exchange authentication failed",
   );
   expect((resultB as PromiseRejectedResult).reason).toBeInstanceOf(Error);
   expect((resultB as PromiseRejectedResult).reason.message).toContain(
-    "PAKE authentication failed",
+    "key exchange authentication failed",
   );
 });

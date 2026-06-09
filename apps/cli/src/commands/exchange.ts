@@ -269,7 +269,7 @@ export function loadConfig(
   // canonical name or one would slip through silently.
   //
   // The named keys get specific guidance; any other field under
-  // `authentication` (e.g. typos like `expires_at` or `pakeTok`) gets a
+  // `authentication` (e.g. typos like `expires_at` or `shared_secre`) gets a
   // generic warning so the user sees the silent drop rather than wondering
   // why their setting did nothing.
   //

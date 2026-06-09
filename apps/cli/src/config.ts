@@ -211,7 +211,7 @@ function snakeizeKeys(value: unknown): unknown {
  * (`server.password`, `server.privateKey`), so it gets the same `0600` / ACL
  * protection as the key file via {@link writeFileOwnerOnly}.
  *
- * The PAKE token and its expiration live only in the key file and never belong
+ * The shared secret and its expiration live only in the key file and never belong
  * in the config; they are stripped from `connection.authentication` here even
  * if a caller leaves them populated, so the secret cannot be duplicated onto
  * disk (and cannot go stale after token rotation). The caller's spec is not

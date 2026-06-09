@@ -279,7 +279,7 @@ test("expires set in YAML config does not override the key file expiry", () => {
 
 test("an unknown authentication field in YAML config is dropped with a generic warning", () => {
   // Covers the strip-and-warn branch for fields not in the specific-hint list
-  // (typos like `expires_at`, unknown keys like `pakeTok`). The user must see
+  // (typos like `expires_at`, unknown keys like `shared_secre`). The user must see
   // a warning rather than the field being silently dropped by Zod.
   const configWithUnknown = {
     ...minimalSFTPConfig,

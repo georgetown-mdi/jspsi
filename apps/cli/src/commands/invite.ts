@@ -139,7 +139,7 @@ type InviteReady =
 /**
  * Validate and prepare an invitation without committing any side effect. Throws
  * (for the shared {@link runOrExit} mapper) on any failure; mints `expires` and
- * the PAKE token at encode time so the lifetime clock starts when the token
+ * the shared secret at encode time so the lifetime clock starts when the token
  * exists, not at process entry.
  *
  * @internal exported for testing

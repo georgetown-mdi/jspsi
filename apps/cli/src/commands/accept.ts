@@ -338,7 +338,7 @@ export async function handler(argv: Arguments): Promise<void> {
         prepared: ready.prepared,
         sharedSecret: ready.token.sharedSecret,
         // Pass the invitation's expiry through unchanged; authenticateConnection
-        // re-checks it before and after the SPAKE2 handshake.
+        // re-checks it before and after the key exchange.
         expires: ready.token.expires,
         keyPath: options.keyFile,
         configPath: options.configFile,

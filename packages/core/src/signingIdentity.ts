@@ -23,7 +23,7 @@ import type { CanonicalValue } from "./utils/canonical.js";
 //
 // Trust model: pinned self-signed. There is no CA chain and no revocation -- the
 // fingerprint pin, exchanged over a trusted out-of-band channel, IS the trust
-// anchor (the same channel the parties already use for the PAKE invitation). The
+// anchor (the same channel the parties already use for the invitation). The
 // certificate format is a small canonical-JSON document signed over its RFC 8785
 // canonical bytes, reusing the project's single canonicalization primitive
 // rather than introducing an X.509/ASN.1 surface; see docs/SECURITY_DESIGN.md

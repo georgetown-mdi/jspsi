@@ -13,7 +13,7 @@ export const DEFAULT_KEY_PATH = "./.psilink.key";
 
 /** Contents of a `.psilink.key` file. */
 export interface KeyFile {
-  /** Shared SPAKE2 token; injected into the connection config at runtime. */
+  /** Shared secret; injected into the connection config at runtime. */
   sharedSecret: string;
   /** ISO 8601 datetime after which the token should be considered expired. */
   expires?: string;
@@ -42,7 +42,7 @@ export function loadKeyFile(keyFilePath: string): KeyFile | undefined {
     throw err;
   }
   const result = KeyFileSchema.parse(raw);
-  warnIfFileOverPermissive(keyFilePath, "PAKE token");
+  warnIfFileOverPermissive(keyFilePath, "shared secret");
   return result;
 }
 

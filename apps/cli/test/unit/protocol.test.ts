@@ -13,7 +13,7 @@ const mockState = vi.hoisted(() => ({
   errors: [] as string[],
 }));
 
-// Keep FileSyncConnection and authenticateConnection real so PAKE runs over a
+// Keep FileSyncConnection and authenticateConnection real so the key exchange runs over a
 // real file-drop connection. Mock only the PSI exchange layer, which would
 // otherwise require the full WASM stack and a prepared dataset.
 vi.mock("@openmined/psi.js", () => ({
@@ -23,7 +23,7 @@ vi.mock("@openmined/psi.js", () => ({
 // Default runExchange mock implementation. Polls the drop directory until it
 // is empty before resolving: the receiver's poller deletes each message file
 // after consuming it, so an empty directory is a deterministic signal that the
-// peer has consumed the final PAKE message - no fixed sleep required. .hello
+// peer has consumed the final key-exchange message - no fixed sleep required. .hello
 // and -lock.json files from synchronize() are ignored; after the lock race the
 // winner's lock file remains until cleanup() runs in the finally block (after
 // runExchange returns), so it may still be present while this mock polls for
@@ -58,7 +58,7 @@ vi.mock("@psilink/core", async (importActual) => {
     // Replace getLogger so that runProtocol's log.warn / log.error calls are
     // captured in mockState and can be asserted by individual tests. The
     // logger is only used for informational output; replacing it does not
-    // affect PAKE or PSI correctness.
+    // affect key-exchange or PSI correctness.
     getLogger: (_name: string) => ({
       info: () => {},
       warn: (msg: string, ...args: unknown[]) => {
@@ -140,7 +140,7 @@ test("rejects before opening a connection when saveIntent is passed on an authen
   // only on the unauthenticated path. Passing it alongside authentication is a
   // misuse: the guard must reject it up front, before any connection is opened
   // (and before the keyFilePath pre-flight), so a stray save field never rides
-  // the PAKE-secured channel.
+  // the authenticated channel.
   await expect(
     runProtocol(
       {
@@ -163,7 +163,7 @@ test("rejects before opening a connection when saveIntent is passed on an authen
 
 test("rejects before opening a connection when keyFilePath parent is not writable", async () => {
   // 0o555 = r-x for all; the current user cannot write into the directory, so
-  // saveKeyFile would fail after PAKE. The pre-flight should catch this. Skip
+  // saveKeyFile would fail after the key exchange. The pre-flight should catch this. Skip
   // if running as root (CI sometimes does), since root bypasses mode bits.
   if (process.getuid?.() === 0) return;
   const readOnlyDir = path.join(tmpDir, "readonly");
@@ -222,7 +222,7 @@ test("creates the keyFilePath parent directory when it does not yet exist", asyn
   // accept. The pre-flight mirrors that behavior by creating the directory.
   const createdParent = path.join(tmpDir, "newly-created", "nested");
   expect(fs.existsSync(createdParent)).toBe(false);
-  // authentication: null skips runProtocol's PAKE branch, but the keyFilePath
+  // authentication: null skips runProtocol's authentication branch, but the keyFilePath
   // probe runs only when authentication is set. To exercise the probe and
   // still abort before the full exchange, point dropDir at a path that
   // localFSClient cannot open so runProtocol throws after the probe runs.
@@ -348,8 +348,8 @@ test("rejects and cleans up when conn.open() itself throws (opened=false cleanup
 
 // --- Unauthenticated exchange paths ------------------------------------------
 
-test("authentication=null runs the exchange without PAKE and without error", async () => {
-  // Zero-setup path: authentication: null tells runProtocol to skip PAKE and
+test("authentication=null runs the exchange without authentication and without error", async () => {
+  // Zero-setup path: authentication: null tells runProtocol to skip authentication and
   // emit no warning. Output is left undefined so writeOutput writes to stdout
   // rather than a temp file whose parent may be deleted before the stream
   // flushes.
@@ -483,7 +483,7 @@ test("writes the self-attested record and opening when runExchange returns an au
 
 test("runProtocol rejects an expired token without rotating, and the tagged recovery hint suppresses the generic catch advisory", async () => {
   // Pre-handshake expiry check in authenticateConnection fires before any
-  // SPAKE2 message is exchanged. Both parties supply the same expired token
+  // key-exchange message is exchanged. Both parties supply the same expired token
   // so each side trips the same check independently. The resulting error
   // carries `psilinkRecoveryHintEmitted: true` (set in auth.ts), so the
   // runProtocol catch must NOT log either of its generic advisory lines -
@@ -548,7 +548,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   // would contradict the tagged "obtain a new invitation" recovery hint.
   expect(
     mockState.errors.every(
-      (m) => !m.includes("PAKE handshake was in progress"),
+      (m) => !m.includes("key exchange was in progress"),
     ),
   ).toBe(true);
   expect(
@@ -571,7 +571,7 @@ test("both key files hold the same rotated token after a successful exchange", a
   const outputA = path.join(tmpDir, "out-a.csv");
   const outputB = path.join(tmpDir, "out-b.csv");
 
-  // pollIntervalMs: 1 keeps PAKE latency low so each party's poller
+  // pollIntervalMs: 1 keeps key-exchange latency low so each party's poller
   // consumes the peer's last message well before the mock's 5 s deadline.
   await Promise.all([
     runProtocol(
@@ -603,7 +603,7 @@ test("both key files hold the same rotated token after a successful exchange", a
   const loadedA = loadKeyFile(keyFileA);
   const loadedB = loadKeyFile(keyFileB);
 
-  // Both parties derive the same new token from the shared SPAKE2 session key.
+  // Both parties derive the same new token from the shared session key.
   expect(loadedA?.sharedSecret).toBeDefined();
   expect(loadedA?.sharedSecret).toBe(loadedB?.sharedSecret);
   // The token must differ from the original (it was rotated).
@@ -624,7 +624,7 @@ test("both key files hold the same rotated token after a successful exchange", a
 // errors and the test asserts on the rejected promise plus the captured log
 // output. The runExchange mock is replaced so the first call (for whichever
 // party becomes the first to reach runExchange) rejects with a synthetic
-// transport error after PAKE has rotated the token, exercising the catch block
+// transport error after the key exchange has rotated the secret, exercising the catch block
 // in runProtocol that logs the recovery hint.
 
 test("runProtocol suppresses the generic advisory when a tagged error is wrapped via `cause`", async () => {
@@ -636,8 +636,8 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   //
   // Both parties must wait for both key files to reach the rotated state
   // before throwing. Without that synchronization the first party to throw
-  // would close its connection while the second is still completing PAKE,
-  // causing a PAKE failure that would log the generic authStarted advisory
+  // would close its connection while the second is still completing the key exchange,
+  // causing a key-exchange failure that would log the generic authStarted advisory
   // (the very thing this test asserts is suppressed). See the
   // "logs recovery message when an error occurs after tokenRotated=true"
   // test below for the same pattern.
@@ -703,7 +703,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // not the outer wrap, but the cause walker finds it anyway.
   expect(
     mockState.errors.every(
-      (m) => !m.includes("PAKE handshake was in progress"),
+      (m) => !m.includes("key exchange was in progress"),
     ),
   ).toBe(true);
   expect(
@@ -718,10 +718,10 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   // Both runExchange calls wait until both key files reflect the rotated
-  // token, then throw. Waiting for both rotations guarantees that PAKE has
-  // completed on both sides (and the last PAKE message file has been consumed
+  // token, then throw. Waiting for both rotations guarantees that the key exchange has
+  // completed on both sides (and the last key-exchange message file has been consumed
   // off disk) before either party's doCleanup runs, so neither cleanup can
-  // race with the other party's still-pending pake.receive(). Throwing from
+  // race with the other party's still-pending key-exchange receive(). Throwing from
   // both sides keeps the test deterministic: every protocol call exercises
   // the recovery-log catch branch in runProtocol.
   async function waitForRotationThenThrow(): Promise<never> {
@@ -783,7 +783,7 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
 
   expect(
     mockState.errors.some((m) =>
-      m.includes("PAKE token was already rotated and saved"),
+      m.includes("shared secret was already rotated and saved"),
     ),
   ).toBe(true);
 });
@@ -799,7 +799,7 @@ test.skipIf(process.platform === "win32")(
     // The wrapped error sets `psilinkRecoveryHintEmitted: true` to suppress the
     // generic advisory; this test verifies neither generic hint is logged.
     //
-    // To force saveKeyFile to fail AFTER PAKE rotates (and not at the
+    // To force saveKeyFile to fail AFTER the key exchange rotates (and not at the
     // pre-flight in runProtocol), we use a keyFilePath that pre-flight
     // accepts (a non-existent regular file path) but pre-create a directory
     // at saveKeyFile's tmp-file path (`${keyFilePath}.tmp.${pid}`) so the
@@ -824,7 +824,7 @@ test.skipIf(process.platform === "win32")(
     };
 
     // B starts first (becomes responder) so that B's saveKeyFile failure
-    // happens after PAKE completes but before B's runExchange is reached.
+    // happens after the key exchange completes but before B's runExchange is reached.
     const bPromise = runProtocol(
       {
         ...dropConfig,
@@ -879,7 +879,7 @@ test.skipIf(process.platform === "win32")(
     // wrapped error message.
     expect(
       mockState.errors.every(
-        (m) => !m.includes("PAKE handshake was in progress"),
+        (m) => !m.includes("key exchange was in progress"),
       ),
     ).toBe(true);
     expect(
@@ -1106,7 +1106,7 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
 
     expect(
       mockState.warnings.some((m) =>
-        m.includes("PAKE token was already rotated and saved"),
+        m.includes("shared secret was already rotated and saved"),
       ),
     ).toBe(true);
   } finally {
@@ -1300,7 +1300,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
 
     expect(
       mockState.warnings.some((m) =>
-        m.includes("PAKE token was already rotated and saved"),
+        m.includes("shared secret was already rotated and saved"),
       ),
     ).toBe(true);
   } finally {
@@ -1316,7 +1316,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
 test.skipIf(process.platform === "win32")(
   "key file write failure surfaces a recovery message without hiding the cause",
   async () => {
-    // To force a saveKeyFile failure AFTER PAKE rotates, point B's key file
+    // To force a saveKeyFile failure AFTER the key exchange rotates, point B's key file
     // at a non-existent regular file path (so pre-flight accepts it) and
     // pre-create a directory at saveKeyFile's tmp-file path
     // (`${keyFilePath}.tmp.${pid}`). The unlinkSync inside saveKeyFile then
@@ -1339,7 +1339,7 @@ test.skipIf(process.platform === "win32")(
     };
 
     // Start B first so it becomes the responder. As the responder, B's only
-    // outgoing PAKE message (msg2) is consumed by A before B returns from
+    // outgoing key-exchange message (msg2) is consumed by A before B returns from
     // authenticateConnection; by the time B fails at saveKeyFile and doCleanup
     // runs, all of B's responsible files are already gone — no cleanup race.
     const bPromise = runProtocol(
@@ -1397,7 +1397,7 @@ test.skipIf(process.platform === "win32")(
     }
 
     // A uses runProtocol so its cleanup runs through the full exchange path.
-    // send() in the exchange phase waits for A's last PAKE message (msg3) to
+    // send() in the exchange phase waits for A's last key-exchange message (msg3) to
     // be consumed before writing, which guarantees B has consumed msg3 before
     // A's cleanup could touch it.
     const aPromise = runProtocol(
@@ -1577,7 +1577,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
 // --- Application-layer AEAD encryption ----------------------------------------
 
 test("authenticated exchange runs through EncryptedMessageConnection: wire bytes are { enc } envelopes, not cleartext", async () => {
-  // After PAKE, runProtocol must wrap mc in EncryptedMessageConnection and run
+  // After the key exchange, runProtocol must wrap mc in EncryptedMessageConnection and run
   // the PSI exchange through it. This is asserted at the wire level: every PSI
   // frame written to the drop directory is an { enc } AEAD envelope, the
   // cleartext probe never appears on the wire, and the peer decrypts the frame
@@ -1679,14 +1679,14 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
       .filter((src): src is Buffer => Buffer.isBuffer(src) && src.length > 0)
       .map((src) => src.toString("utf8"));
 
-    // 2. The cleartext probe never crossed the wire in any frame (PSI or PAKE).
+    // 2. The cleartext probe never crossed the wire in any frame (PSI or key-exchange).
     for (const text of wireTexts) {
       expect(text).not.toContain(CANARY);
     }
 
     // 3. At least one message frame's payload is an { enc } envelope -- the PSI
-    //    frame went out encrypted, not as a cleartext protocol frame. PAKE
-    //    frames also carry a payload, but their SPAKE2 fields are never { enc }.
+    //    frame went out encrypted, not as a cleartext protocol frame. Key-exchange
+    //    frames also carry a payload, but their key-exchange fields are never { enc }.
     const encEnvelopes = wireTexts
       .map((text) => {
         try {

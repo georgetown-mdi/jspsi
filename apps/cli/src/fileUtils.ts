@@ -7,7 +7,7 @@ import { getLogger } from "@psilink/core";
 const log = getLogger("file-utils");
 
 // Generic filesystem helpers shared across the CLI's file-custody modules
-// (the PAKE key file, the config writer, exchange records, and the signing
+// (the key file, the config writer, exchange records, and the signing
 // identity). Kept here -- rather than in any one feature module -- so those
 // modules depend on a neutral utility instead of on each other.
 
@@ -179,10 +179,10 @@ function warnIfWindowsAclOverPermissive(
  * Warn if `filePath` is readable by users other than its owner. On Unix this is
  * the POSIX-mode check (any group/other bit set); on Windows it is the ACL check
  * (`warnIfWindowsAclOverPermissive`). `secretLabel` names the secret in the
- * warning so the message fits the file (a "PAKE token" vs a "signing private
+ * warning so the message fits the file (a "shared secret" vs a "signing private
  * key"). Advisory only: a removed file or unavailable tooling is swallowed.
  *
- * Shared by every loader of an owner-only secret file (the PAKE key file and the
+ * Shared by every loader of an owner-only secret file (the key file and the
  * signing-identity loader) so they get the same permission check from one
  * implementation.
  */
@@ -276,7 +276,7 @@ export interface WriteFileOwnerOnlyOptions {
  * write leaves no `.tmp.<pid>` orphan. With `exclusive`, the final step is an
  * atomic create-if-absent that throws rather than overwriting an existing file.
  *
- * Shared by every owner-only writer (the PAKE key file, the config writer,
+ * Shared by every owner-only writer (the key file, the config writer,
  * exchange records, and the signing identity) so they all get the same
  * protection from one implementation rather than diverging.
  */

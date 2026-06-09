@@ -12,12 +12,12 @@ import type { SigningIdentity } from "@psilink/core";
 import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
 
 // File custody for the long-lived signing identity (private key + self-signed
-// certificate). Kept in its OWN file, separate from the rotating PAKE key
-// (`.psilink.key`): the PAKE token rotates every exchange, whereas the signing
+// certificate). Kept in its OWN file, separate from the rotating key file
+// (`.psilink.key`): the shared secret rotates every exchange, whereas the signing
 // key must be stable for its whole life so a fingerprint a partner pinned once
 // keeps matching. The identity is reused across exchanges AND across partners,
 // so it defaults to a per-user location rather than the per-directory default
-// the PAKE key and config use; an exchange in any working directory loads the
+// the key file and config use; an exchange in any working directory loads the
 // same identity, and a partner's pin stays valid everywhere. The path is
 // overridable (config `signing.identity_file` or `--identity-file`).
 
@@ -37,7 +37,7 @@ export function defaultSigningIdentityPath(): string {
  * Load and validate the signing identity at `identityPath`. Returns `undefined`
  * if the file does not exist (so a caller can lazily create it). Throws a
  * {@link UsageError} on a malformed, unreadable, or inconsistent file -- the
- * same exit-64 classification a malformed PAKE key file gets. Warns (advisory)
+ * same exit-64 classification a malformed key file gets. Warns (advisory)
  * if the file is readable by other users.
  */
 export function loadSigningIdentity(

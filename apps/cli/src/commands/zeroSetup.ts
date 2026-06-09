@@ -644,7 +644,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // check verifies that the authentication override is structurally valid for
     // ProtocolConnectionConfig.
     // authentication: null is the explicit opt-out that tells runProtocol to
-    // proceed without PAKE and without a warning.
+    // proceed without authentication and without a warning.
     const authOverride = { authentication: null } satisfies Pick<
       ProtocolConnectionConfig,
       "authentication"

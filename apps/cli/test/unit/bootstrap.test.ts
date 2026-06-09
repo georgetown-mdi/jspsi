@@ -239,7 +239,7 @@ test("connectionFromEndpoint: a webrtc endpoint seeds the signaling locator", ()
 
 // --- generateSharedSecret -------------------------------------------------------
 
-test("generateSharedSecret: matches the PAKE token format and is non-deterministic", () => {
+test("generateSharedSecret: matches the shared secret format and is non-deterministic", () => {
   const a = generateSharedSecret();
   const b = generateSharedSecret();
   expect(a).toMatch(SHARED_SECRET_REGEX);

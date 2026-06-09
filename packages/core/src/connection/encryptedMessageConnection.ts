@@ -48,7 +48,7 @@ export const IV_SEQ_OFFSET = 4;
  * actual transport to the inner connection, so the SFTP/filedrop admin sees
  * only opaque ciphertext envelopes.
  *
- * Two direction-specific keys are derived from the SPAKE2 session key via
+ * Two direction-specific keys are derived from the session key via
  * {@link deriveAeadKey}:
  * - initiator -> responder: `deriveAeadKey(sessionKey, "initiator-to-responder")`
  * - responder -> initiator: `deriveAeadKey(sessionKey, "responder-to-initiator")`
@@ -144,7 +144,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     // Validate the session-key length up front. HKDF accepts any-length input,
     // so a wrong-length key would NOT throw - it would silently derive a
     // different 32-byte AEAD key, and the mismatch would surface only later as
-    // opaque GCM tag failures. The PAKE session key is always 32 bytes, so a
+    // opaque GCM tag failures. The session key is always 32 bytes, so a
     // wrong length is an upstream bug; fail loudly here with a clear "usage"
     // error rather than letting it degrade into a decryption mystery.
     if (sessionKey.length !== 32) {

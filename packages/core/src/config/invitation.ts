@@ -152,14 +152,14 @@ const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> =
 
 /**
  * The invitation token passed from inviter to acceptor out-of-band.
- * Carries linkage terms and a short-lived PAKE credential, and MAY carry a
+ * Carries linkage terms and a short-lived shared-secret credential, and MAY carry a
  * credential-free connection endpoint (see {@link ConnectionEndpoint}) so the
  * acceptor can reach the rendezvous point without separate out-of-band setup.
  *
  * The endpoint is a public locator only: the token MUST NEVER carry connection
  * credentials (password, private key, key file, PeerJS API key). Each party
  * still configures the credential portion of its own `connection` block
- * independently. Because the token carries the established PAKE secret -- and,
+ * independently. Because the token carries the established shared secret -- and,
  * for the web flow, the rendezvous derived from it -- the encoded invitation is
  * confidential and must be forwarded only over a trusted out-of-band channel;
  * see docs/SECURITY_DESIGN.md.
@@ -179,7 +179,7 @@ export interface InvitationToken {
   version: "1";
   linkageTerms: LinkageTerms;
   /**
-   * Short-lived PAKE setup credential, rotated to a persistent token on first
+   * Short-lived setup secret, rotated to a persistent shared secret on first
    * successful exchange.
    */
   sharedSecret: string;
@@ -231,7 +231,7 @@ const CHECKSUM_CHARS = 6;
 /**
  * Serializes an {@link InvitationToken} as a base64url string with a
  * 4-byte truncated-SHA-256 checksum appended for transcription-error
- * detection. The checksum provides no security guarantee; PAKE handles
+ * detection. The checksum provides no security guarantee; the key exchange handles
  * authentication.
  *
  * Uses `btoa`/`atob` and `globalThis.crypto.subtle.digest`
