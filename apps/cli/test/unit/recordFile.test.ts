@@ -42,6 +42,7 @@ const record: ExchangeRecord = {
     payloadSent: [],
     payloadReceived: [],
   },
+  recordsExposed: 5,
   resultSize: 2,
   bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   commitments: {

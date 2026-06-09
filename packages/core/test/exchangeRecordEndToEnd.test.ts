@@ -90,6 +90,11 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(init.record.resultSize).toBe(2);
   expect(resp.record.resultSize).toBe(2);
 
+  // Each party records its own participating record count -- the size of its own
+  // input, independent of the partner and of the result.
+  expect(init.record.recordsExposed).toBe(clientRows.length);
+  expect(resp.record.recordsExposed).toBe(serverRows.length);
+
   // Both parties hash the same agreed terms to the same value.
   expect(init.record.termsHash).toBe(resp.record.termsHash);
 
@@ -189,7 +194,7 @@ test("both-output: a legal-agreement purpose flows end-to-end into both records"
   expect(init.record.termsHash).toBe(resp.record.termsHash);
 });
 
-test("single-output: result size omitted; only the receiver commits the table", async () => {
+test("single-output: result size omitted, but each party records its own exposure", async () => {
   // Initiator receives output; responder only sends. resolveRole makes the
   // initiator the receiver (it expects output and the partner does not).
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
@@ -203,12 +208,21 @@ test("single-output: result size omitted; only the receiver commits the table", 
 
   // Neither party records the result size: it is recorded only when both
   // parties' terms have them both receive output, and here only the receiver
-  // does. The gate is the terms agreement, not whether a party can observe the
-  // size during the protocol.
+  // does. The gate is the terms agreement (entitlement), not whether a party can
+  // observe the size during the protocol -- the single-output sender does observe
+  // its match count during the clean cascade, but the record deliberately does not
+  // surface it.
   expect("resultSize" in init.record).toBe(false);
   expect("resultSize" in resp.record).toBe(false);
 
-  // Only the receiver holds a meaningful association table, so only it commits.
+  // Each party still records its own participating record count: a per-direction
+  // figure known from its own input, independent of entitlement to the result.
+  expect(init.record.recordsExposed).toBe(clientRows.length);
+  expect(resp.record.recordsExposed).toBe(serverRows.length);
+
+  // Only the party entitled to the result commits the association table. The
+  // sender holds a table from the clean cascade too, but -- like the match count --
+  // the record does not bind it.
   expect(init.record.commitments.associationTable).toBeDefined();
   expect(resp.record.commitments.associationTable).toBeUndefined();
 

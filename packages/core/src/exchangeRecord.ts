@@ -23,10 +23,11 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // writes at the end of a successful exchange. It stands on its own as a record of
 // what was disclosed -- the governing data-sharing agreement, the algorithm, the
 // categories of data exchanged (payload column names/descriptions and the linkage
-// fields the match keyed on), both self-asserted identities, the timestamp, and the
-// result size when both parties learn it -- so an operator can populate a HIPAA
-// accounting of disclosures or a FERPA disclosure record without re-matching the
-// original linkage-terms config. It carries readable governance metadata but NO
+// fields the match keyed on), both self-asserted identities, the timestamp, the
+// count of records this party exposed to the exchange, and the result size when
+// both parties are entitled to it -- so an operator can populate a HIPAA accounting
+// of disclosures or a FERPA disclosure record without re-matching the original
+// linkage-terms config. It carries readable governance metadata but NO
 // protected data: no payload values, no linkage-field values, no matched
 // identifiers. The data exchanged is bound by privacy-preserving commitments, not
 // embedded.
@@ -306,8 +307,24 @@ export interface ExchangeRecord {
   /** Readable governance metadata (the authority for, and the categories of, the
    * disclosure) that makes this record a standalone disclosure-log entry. */
   governance: ExchangeRecordGovernance;
-  /** Intersection size, present only when both parties learn it (both-output
-   * case); omitted otherwise. */
+  /** The number of records this party contributed to the exchange -- its own
+   * participating record count, recorded for every party as a per-direction
+   * statement of what this party exposed. Distinct from {@link resultSize}: it is
+   * the size of THIS party's input, not the intersection, so it is known from the
+   * party's own data alone and stays meaningful even under a future algorithm that
+   * discloses neither the result size nor the partner's set size. Always present
+   * (a party always knows its own input size); carries no protected value -- an
+   * aggregate count of the holder's own records. */
+  recordsExposed: number;
+  /** Intersection size, present only in the both-output case -- recorded only when
+   * both parties' agreed terms have them both receive output, so it is stored only
+   * when both sides are entitled to the result. Omitted when only one party
+   * receives output: the gate is the terms agreement (entitlement), NOT what a
+   * party happens to observe during the protocol. A single-output helper can
+   * observe its match count during the clean cascade, but the record deliberately
+   * does not surface it -- privacy here is enforced by what the tool writes down,
+   * not by what is theoretically discoverable. Each party's own outbound exposure
+   * is carried by {@link recordsExposed} instead. */
   resultSize?: number;
   /** Per-exchange CSPRNG binder (base64url, >= 128 bits) so two runs with
    * identical terms still produce distinct records. Distinct from the
@@ -371,9 +388,14 @@ const canonicalValueSchema: z.ZodType<CanonicalValue> =
     { message: "must be a value within the canonical encoding domain" },
   );
 
-const resultSizeSchema = safeIntegerSchema.refine((n) => n >= 0, {
-  message: "result size must be non-negative",
-});
+// Both the intersection size and the records-exposed count are non-negative safe
+// integers; share one constraint so the two count fields validate identically.
+const nonNegativeCountSchema = (label: string) =>
+  safeIntegerSchema.refine((n) => n >= 0, {
+    message: `${label} must be non-negative`,
+  });
+const resultSizeSchema = nonNegativeCountSchema("result size");
+const recordsExposedSchema = nonNegativeCountSchema("records exposed");
 
 // Shared by the parser and the builder so both agree on what `createdAt` may be:
 // an ISO 8601 datetime in UTC (ending in `Z`). `z.iso.datetime()` rejects
@@ -440,6 +462,7 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   localIdentity: identitySchema,
   partnerIdentity: identitySchema,
   governance: ExchangeRecordGovernanceSchema,
+  recordsExposed: recordsExposedSchema,
   resultSize: resultSizeSchema.optional(),
   bindingNonce: base64UrlSchema,
   commitments: ExchangeRecordCommitmentsSchema,
@@ -490,13 +513,17 @@ export type CommittedPayload = {
  * successful exchange. `localTerms`/`partnerTerms` supply the agreed-terms hash,
  * the two identities, and the readable governance metadata (algorithm, legal
  * agreement, matching basis, and payload categories -- all read from
- * `localTerms`). `resultSize` is set only when both parties learn it;
- * `associationTable` only when this party holds it. The two payload data sets are
- * always committed (a no-data payload is committed as such).
+ * `localTerms`). `recordsExposed` is this party's own participating record count
+ * (always supplied); `resultSize` is set only when both parties are entitled to it
+ * (the both-output case); `associationTable` only when this party holds it. The two
+ * payload data sets are always committed (a no-data payload is committed as such).
  */
 export interface ExchangeRecordInputs {
   localTerms: LinkageTerms;
   partnerTerms: LinkageTerms;
+  /** This party's own participating record count (the size of its input to the
+   * exchange). Always supplied -- a party always knows its own input size. */
+  recordsExposed: number;
   /** Intersection size; supply only in the both-output case. */
   resultSize?: number;
   /** The association table; supply only when this party received output. */
@@ -655,6 +682,11 @@ export async function buildExchangeRecord(
     // construction). Carries no values -- only names, categories, descriptions,
     // and the agreement reference.
     governance: governanceFromTerms(inputs.localTerms),
+    // This party's own participating record count, validated on build with the
+    // same schema the parser uses (as createdAt/resultSize below): a negative or
+    // non-safe-integer count throws here rather than producing a record the parser
+    // would later reject.
+    recordsExposed: recordsExposedSchema.parse(inputs.recordsExposed),
     // Omit the key entirely when absent rather than setting it to undefined: an
     // absent field and a null/undefined field are distinct in the canonical
     // encoding the signing phase will hash over this record. Validate on build

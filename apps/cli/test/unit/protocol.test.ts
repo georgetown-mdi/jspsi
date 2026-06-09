@@ -427,6 +427,7 @@ test("writes the self-attested record and opening when runExchange returns an au
       payloadSent: [],
       payloadReceived: [],
     },
+    recordsExposed: 5,
     bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     commitments: {
       localPayloadSent: "We5eIlrtkWBUe1uSGrla5rvLs0YhGFPPVDjk4EPX2k8",

@@ -372,15 +372,30 @@ export async function runExchange(
   );
 
   // Self-attested record: produced from data both sides already hold, with no
-  // extra round-trip and no private key. The result size is recorded only when
-  // both parties learn it (the both-output case); a single-output sender never
-  // learns the intersection size, and resolveRole's exchanged record counts are
-  // total dataset sizes, not the intersection, so they are not used here. The
-  // association table is committed only when this party expects output and so
-  // holds a meaningful table -- true for both parties in a both-output exchange,
-  // not only the PSI receiver. Both payloads are normalized to the record's
-  // canonical committed form (toCommittedPayload) so a sender and receiver commit
-  // over byte-identical data for the same logical payload.
+  // extra round-trip and no private key. Two disclosure figures, gated
+  // differently and deliberately:
+  //
+  // - recordsExposed is each party's own participating record count (rowCount).
+  //   It is a per-direction statement of what this party put into the exchange,
+  //   known from its own input alone, so it is recorded for every party
+  //   regardless of role and stays meaningful even under a future algorithm that
+  //   discloses neither the result size nor the partner's set size.
+  // - resultSize (the intersection size) is recorded only in the both-output
+  //   case, when both parties' agreed terms have them both receive output -- so it
+  //   is stored only when both sides are entitled to the result. A single-output
+  //   helper can observe its match count during the clean cascade, but the record
+  //   deliberately does not surface it: privacy here is enforced by what the tool
+  //   writes down, not by what is theoretically discoverable. (resolveRole's
+  //   exchanged record counts are total dataset sizes, not the intersection, and
+  //   are not used here.)
+  //
+  // The association table is committed only when this party is entitled to the
+  // result (expectsOutput) -- both parties in a both-output exchange, only the
+  // receiver in a single-output one. A single-output helper holds a table from the
+  // clean cascade too, but, like the match count, the record does not bind it.
+  // Both payloads are normalized to the record's canonical committed form
+  // (toCommittedPayload) so a sender and receiver commit over byte-identical data
+  // for the same logical payload.
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;
@@ -394,6 +409,7 @@ export async function runExchange(
     audit = await buildExchangeRecord({
       localTerms: linkageTerms,
       partnerTerms,
+      recordsExposed: rowCount,
       resultSize: bothExpectOutput ? associationTable[0].length : undefined,
       associationTable: heldAssociationTable ? associationTable : undefined,
       localPayloadSent: toCommittedPayload(localPayload),
