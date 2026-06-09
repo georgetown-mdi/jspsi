@@ -418,11 +418,13 @@ export async function runProtocol(
   let cleaned = false;
   let opened = false;
   let started = false;
-  // The AEAD decorator that wraps `mc` once a session key is available
-  // (authenticated path only). Declared in the outer scope so doCleanup can
-  // close it; left undefined on the no-auth path, where the exchange runs over
-  // the unencrypted `mc`. secure.close() delegates to mc.close(), so closing it
-  // closes the underlying FileSyncConnection and sweeps its responsible files.
+  // The AEAD decorator that wraps `mc` when the handshake negotiates encryption.
+  // Declared in the outer scope so doCleanup can close it; left undefined
+  // whenever no wrap is applied -- the no-auth path (no session key) and the
+  // authenticated path where the negotiated applyEncryption is false -- in which
+  // case the exchange runs over the unencrypted `mc`. secure.close() delegates to
+  // mc.close(), so closing it closes the underlying FileSyncConnection and sweeps
+  // its responsible files.
   let secure: EncryptedMessageConnection | undefined;
   // Set synchronously immediately before `await authenticateConnection`.
   // The partner can complete its own handshake and persist the rotated token
@@ -443,13 +445,14 @@ export async function runProtocol(
     cleaned = true;
     if (started) log.info("stopping polling");
     if (opened) log.info("closing connection");
-    // When the AEAD decorator was built (authenticated path), close it: its
+    // When the AEAD decorator was built (encryption negotiated), close it: its
     // close() delegates to mc.close(), which detaches the bridge's data/error
-    // listeners and closes the underlying FileSyncConnection. Closing secure is
-    // a no-op for the no-auth path (secure is undefined there) and for the
-    // window where a signal arrived between authenticateConnection returning and
-    // create resolving (secure still undefined) -- the mc.close() below then
-    // closes the transport directly. All of these are idempotent.
+    // listeners and closes the underlying FileSyncConnection. secure is undefined
+    // whenever no wrap was applied -- the no-auth path, the authenticated path
+    // where applyEncryption is false, and the window where a signal arrived
+    // between authenticateConnection returning and create resolving -- and the
+    // mc.close() below then closes the transport directly. All of these are
+    // idempotent.
     if (secure !== undefined) {
       await secure.close().catch((err: unknown) => {
         log.debug("secure.close() during cleanup:", err);

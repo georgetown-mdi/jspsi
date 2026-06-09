@@ -96,6 +96,32 @@ test("both parties derive the same rotated token over a real connection", async 
   expect(b.applyEncryption).toBe(true);
 });
 
+test("applyEncryption surfaces own-OR-peer through authenticateConnection across flag combinations", async () => {
+  // The OR semantics are pinned at the runKex layer; this asserts they survive
+  // through authenticateConnection, whose AuthResult now carries applyEncryption.
+  // The (false, false) -> false combination exercises the unencrypted decision
+  // at the auth layer (the success path above only covers (true, true) -> true),
+  // and the asymmetric combinations confirm one party's request is enough. Run
+  // over an in-memory pipe -- the handshake completes the same as over a real
+  // transport, without the file-drop setup the rotation tests need.
+  const combos: Array<[boolean, boolean, boolean]> = [
+    [false, false, false],
+    [true, false, true],
+    [false, true, true],
+  ];
+  for (const [reqInit, reqResp, expected] of combos) {
+    const [a, b] = createMessagePipe();
+    const [resA, resB] = await Promise.all([
+      authenticateConnection(a, { sharedSecret: TOKEN_A }, "initiator", reqInit),
+      authenticateConnection(b, { sharedSecret: TOKEN_A }, "responder", reqResp),
+    ]);
+    expect(resA.applyEncryption).toBe(expected);
+    expect(resB.applyEncryption).toBe(expected);
+    // The rotated secret still agrees regardless of the flag values.
+    expect(resA.rotatedSecret).toBe(resB.rotatedSecret);
+  }
+});
+
 test("rotated token written to the key file carries no expiry", async () => {
   const connA = makeConn();
   const connB = makeConn();

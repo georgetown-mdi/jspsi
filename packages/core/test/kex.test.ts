@@ -456,6 +456,30 @@ test("flipping a party's request-encryption flag on the wire fails the handshake
   await expect(responder).rejects.toThrow(GENERIC_FAILURE);
 });
 
+test("flipping the responder's request-encryption flag on the wire fails the handshake closed (initiator side)", async () => {
+  // Symmetric to the msg1 case above, on the msg2 downgrade path. The honest
+  // responder requests encryption (true) and computes its confirmation tag over
+  // a transcript binding that true flag, but the wire copy the initiator sees is
+  // flipped to false. The initiator binds the false flag into its transcript, so
+  // the responder's confirmation tag (msg2) does not verify and the initiator
+  // fails closed -- a msg2 downgrade cannot proceed with a split decision.
+  const [connA, connB] = createMessagePipe();
+  const initiator = runKex(connA, "initiator", PSK_A, false);
+  initiator.catch(() => {});
+  // The hand-rolled responder honestly requests encryption (responderReqEnc:
+  // true), so keys.responderConfirm binds reqEnc: true into the transcript.
+  const { eRespPub, keys } = await fakeResponderUpToMsg2(connB, PSK_A, true);
+  // Only the wire copy is flipped to false: the initiator's transcript binds the
+  // false flag, diverging from the responder's, so the tag mismatches.
+  await connB.send({
+    kexMsg: "2",
+    e: toBase64Url(eRespPub),
+    confirm: toBase64Url(keys.responderConfirm),
+    reqEnc: false,
+  });
+  await expect(initiator).rejects.toThrow(GENERIC_FAILURE);
+});
+
 // The cross-version fail-closed mechanism that stands in for a protocol-version
 // bump: a flag-unaware peer omits reqEnc entirely, and the flag-aware peer's
 // strict (.strict()) schema rejects the message before any transcript is

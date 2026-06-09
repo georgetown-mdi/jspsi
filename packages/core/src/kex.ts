@@ -41,9 +41,11 @@ const PSK_LEN = 32;
 // bumping this string makes a mismatched peer derive a different transcript and
 // fail closed. The version is reserved for a genuine cryptographic-suite change
 // and is not bumped for an additive payload such as the request-encryption flag
-// below: a flag-aware and a flag-unaware peer already fail closed at parse,
-// because the flag is a required field on the strict wire schemas (a missing or
-// unexpected key is rejected before any transcript is computed). See
+// below: a flag-aware and a flag-unaware peer already fail closed at parse. The
+// flag-aware side rejects a message that omits reqEnc by the schema's
+// required-field check; an old flag-unaware side rejects a message that carries
+// the (to it unknown) reqEnc key by its strict (.strict()) schema. Either way
+// the message is rejected before any transcript is computed. See
 // docs/SECURITY_DESIGN.md ("Key-agreement design").
 const PROTOCOL_NAME = "psilink-kex-v1:NNpsk0_25519_SHA256";
 
