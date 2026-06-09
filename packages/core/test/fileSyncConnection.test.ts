@@ -1,6 +1,9 @@
 import { expect, test, vi } from "vitest";
 
-import { FileSyncConnection } from "../src/connection/fileSyncConnection";
+import {
+  FileSyncConnection,
+  normalizeFiledropPath,
+} from "../src/connection/fileSyncConnection";
 import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
   cancellableDelay,
@@ -6662,4 +6665,27 @@ test("poll surfaces an adapter frame-size cap as a terminal error", async () => 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(FrameSizeExceededError);
   expect(getCount).toBe(1);
+});
+
+// --- normalizeFiledropPath ---------------------------------------------------
+
+test("normalizeFiledropPath: strips all trailing slashes", () => {
+  expect(normalizeFiledropPath("/mnt/share/")).toBe("/mnt/share");
+  expect(normalizeFiledropPath("/mnt/share//")).toBe("/mnt/share");
+  expect(normalizeFiledropPath("/mnt/share")).toBe("/mnt/share");
+});
+
+test("normalizeFiledropPath: folds backslashes to forward slashes", () => {
+  expect(normalizeFiledropPath("C:\\share\\drop")).toBe("C:/share/drop");
+  expect(normalizeFiledropPath("C:\\share\\drop\\")).toBe("C:/share/drop");
+});
+
+test("normalizeFiledropPath: preserves root-like paths", () => {
+  // A Unix root or a fully-stripped path stays "/", and a Windows drive root
+  // keeps its trailing slash ("C:" is not a valid path argument on Windows).
+  expect(normalizeFiledropPath("/")).toBe("/");
+  expect(normalizeFiledropPath("//")).toBe("/");
+  expect(normalizeFiledropPath("")).toBe("/");
+  expect(normalizeFiledropPath("C:/")).toBe("C:/");
+  expect(normalizeFiledropPath("C:\\")).toBe("C:/");
 });

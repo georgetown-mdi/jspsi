@@ -14,6 +14,7 @@ import {
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
+  normalizeFiledropPath,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -195,15 +196,12 @@ function filedropPathsEqual(
   a: string | undefined,
   b: string | undefined,
 ): boolean {
-  // Mirror FileSyncConnection.open's filedrop normalization: fold backslashes to
-  // forward slashes (so a Windows "C:\drop" matches "C:/drop"), then strip every
-  // trailing slash (so "/drop//" matches "/drop"). The live connection then
-  // restores a root-like path (a drive root, or "/" for an emptied path), but
-  // that is a deterministic function of the stripped form, so equal stripped
-  // forms always map to equal live paths -- the equality predicate needs only
-  // the strip.
+  // Normalize both sides through the connection's own normalizer, so the diff's
+  // verdict is exactly what the live filedrop connection would open (backslashes
+  // folded to forward slashes, all trailing slashes stripped, root-like paths
+  // preserved) -- no separate equality rule to drift from it.
   const norm = (p: string | undefined): string | undefined =>
-    p === undefined ? undefined : p.replace(/\\/g, "/").replace(/\/+$/, "");
+    p === undefined ? undefined : normalizeFiledropPath(p);
   return norm(a) === norm(b);
 }
 
