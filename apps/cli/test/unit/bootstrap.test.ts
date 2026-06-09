@@ -734,3 +734,26 @@ test("diffConnectionAgainstUrl: a filedrop path mismatch is reported", () => {
   );
   expect(diffs.map((d) => d.field)).toContain("connection.path");
 });
+
+test("diffConnectionAgainstUrl: a percent-encoded URL path matches the decoded config path", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/my drop" },
+  };
+  // The URL parser keeps the path percent-encoded (/my%20drop); decoding it
+  // before the compare keeps an encodable character from being a false conflict.
+  expect(
+    diffConnectionAgainstUrl(existing, new URL("sftp://host/my%20drop")),
+  ).toEqual([]);
+});
+
+test("diffConnectionAgainstUrl: a percent-encoded URL credential matches the decoded config value", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "bob", password: "p w" },
+  };
+  // url.password is stored encoded (p%20w); the same decode applies to userinfo.
+  expect(
+    diffConnectionAgainstUrl(existing, new URL("sftp://bob:p%20w@host")),
+  ).toEqual([]);
+});

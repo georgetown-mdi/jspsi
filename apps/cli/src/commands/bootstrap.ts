@@ -33,6 +33,7 @@ import {
   saveConfig,
   type ConnectionOverrides,
   type ReconcileDiff,
+  RECONCILE_UNSET,
   DEFAULT_CONFIG_PATH,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -177,8 +178,10 @@ export function connectionFromURL(
  * "Online acceptance"): the channel (from the scheme) and, for sftp, the host
  * always; the port, path, and username/password only when the URL carries them.
  * A credential the URL omits is never a conflict -- the acceptor supplies their
- * own. A channel mismatch short-circuits the rest, since the per-channel fields
- * are not comparable across channels.
+ * own. The URL's percent-encoded path and userinfo are decoded before the
+ * compare so an encodable character (a space, an `@`) is not flagged against a
+ * config that stores the decoded value. A channel mismatch short-circuits the
+ * rest, since the per-channel fields are not comparable across channels.
  *
  * Compares against the URL directly (not a {@link connectionFromURL} result):
  * that builder leaves an unspecified port/path `undefined`, which a naive
@@ -205,7 +208,7 @@ export function diffConnectionAgainstUrl(
 
   const cmp = (field: string, have: string | undefined, want: string): void => {
     if (have !== want)
-      diffs.push({ field, existing: have ?? "(unset)", incoming: want });
+      diffs.push({ field, existing: have ?? RECONCILE_UNSET, incoming: want });
   };
 
   if (channel === "sftp") {
@@ -215,14 +218,28 @@ export function diffConnectionAgainstUrl(
     // omitted field is not a disagreement with whatever the config holds.
     if (url.port)
       cmp("connection.server.port", server.port?.toString(), url.port);
+    // The URL parser percent-encodes the path and userinfo (a space becomes
+    // %20, an '@' becomes %40), whereas a hand-authored config stores the
+    // decoded value; decode the URL side so an encodable character is not a
+    // false conflict. (host/port carry no percent-encoding.)
     const urlPath =
-      url.pathname && url.pathname !== "/" ? url.pathname : undefined;
+      url.pathname && url.pathname !== "/"
+        ? decodeURIComponent(url.pathname)
+        : undefined;
     if (urlPath !== undefined)
       cmp("connection.server.path", server.path, urlPath);
     if (url.username)
-      cmp("connection.server.username", server.username, url.username);
+      cmp(
+        "connection.server.username",
+        server.username,
+        decodeURIComponent(url.username),
+      );
     if (url.password)
-      cmp("connection.server.password", server.password, url.password);
+      cmp(
+        "connection.server.password",
+        server.password,
+        decodeURIComponent(url.password),
+      );
   } else if (channel === "filedrop") {
     cmp(
       "connection.path",

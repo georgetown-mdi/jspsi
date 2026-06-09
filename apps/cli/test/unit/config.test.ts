@@ -444,13 +444,32 @@ test("diffLinkageTerms: an algorithm mismatch is a conflict naming the field", (
   expect(conflicts[0].incoming).toBe("psi");
 });
 
-test("diffLinkageTerms: an output-policy mismatch is a conflict", () => {
+test("diffLinkageTerms: a differing output policy is NOT a conflict (per-party)", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.output = { expectsOutput: true, shareWithPartner: false };
+  // output is a per-party preference the protocol checks as a complementary
+  // mirror at exchange time, so two valid parties differ here; reconciliation
+  // must not equality-compare it.
+  existing.output = { expectsOutput: false, shareWithPartner: true };
+  incoming.output = { expectsOutput: true, shareWithPartner: false };
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("diffLinkageTerms: a differing deduplicate flag is NOT a conflict (per-party)", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // deduplicate is per-party with no cross-party check; the acceptor's own value
+  // is legitimate. (Keep expectsOutput true to satisfy the intra-party rule that
+  // deduplicate requires it.)
+  existing.output = { expectsOutput: true, shareWithPartner: true };
   incoming.output = { expectsOutput: true, shareWithPartner: true };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts.map((c) => c.field)).toContain("output");
+  existing.deduplicate = true;
+  incoming.deduplicate = false;
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 test("diffLinkageTerms: a linkage-keys mismatch is a conflict naming the field", () => {
@@ -460,6 +479,21 @@ test("diffLinkageTerms: a linkage-keys mismatch is a conflict naming the field",
   incoming.linkageKeys = incoming.linkageKeys.slice(0, -1);
   const { conflicts } = diffLinkageTerms(existing, incoming);
   expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
+});
+
+test("diffLinkageTerms: a sub-field difference under matching key names renders the detail", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // Same key names on both sides, but one key's element is derived from a
+  // different field. A names-only render would print two identical lists; the
+  // detail fallback must instead show what actually differs.
+  incoming.linkageKeys[0].elements[0].field =
+    existing.linkageKeys[0].elements[0].field + "_x";
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
+  expect(keyConflict).toBeDefined();
+  expect(keyConflict?.existing).not.toBe(keyConflict?.incoming);
+  expect(keyConflict?.incoming).toContain("_x");
 });
 
 test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {

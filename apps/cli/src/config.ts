@@ -215,6 +215,28 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
 }
 
 /**
+ * Render the existing/incoming sides of a structural-list (linkage fields/keys)
+ * conflict. Names alone are the readable choice when the lists differ *by name*.
+ * But two lists can share every name and still differ in a sub-field (type,
+ * constraints, `swap`, description) -- there the canonical compare flags a
+ * conflict yet `renderNames` would print two identical lists, leaving the user
+ * with nothing to act on. When the name renderings coincide, fall back to the
+ * full JSON of each list (raw, not NFC-folded, so the user sees the actual
+ * stored values to edit) so the differing sub-field is visible.
+ */
+function renderStructural(
+  existing: ReadonlyArray<{ name: string }>,
+  incoming: ReadonlyArray<{ name: string }>,
+): { existing: string; incoming: string } {
+  if (renderNames(existing) === renderNames(incoming))
+    return {
+      existing: JSON.stringify(existing),
+      incoming: JSON.stringify(incoming),
+    };
+  return { existing: renderNames(existing), incoming: renderNames(incoming) };
+}
+
+/**
  * Compare a pre-existing config's linkage terms against the terms an acceptance
  * would adopt from the invitation, returning the mandatory disagreements that
  * must abort the acceptance and the soft mismatches that only warn.
@@ -223,13 +245,22 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
  * NOT the cross-party {@link validateCompatibility} (which checks that two
  * different parties' terms work together). Reusing the existing config must not
  * silently change what was agreed, so the agreement-defining fields -- version,
- * algorithm, output policy, deduplicate, linkage fields and keys, legal
- * agreement, and payload -- must match. `identity` is excluded (party-specific:
- * the two copies legitimately differ, per the LinkageTerms consistency model)
- * and `date` is soft (a mismatch warns rather than aborts, matching
- * `validateCompatibility`). Structural fields are compared by NFC-normalized
- * canonical form: linkage fields order-insensitively (their array order is not
- * significant), linkage keys in place (their order is significant).
+ * algorithm, linkage fields and keys, legal agreement, and payload -- must
+ * match.
+ *
+ * The per-party fields are excluded, because each party legitimately holds its
+ * own value (per the LinkageTerms consistency model): `identity` (the holding
+ * party's name), `output` (an each-party preference the protocol checks as a
+ * complementary *mirror*, not an equality, in `validateCompatibility` -- so two
+ * compatible parties have unequal output blocks), and `deduplicate` (a per-party
+ * flag with no cross-party check at all). Comparing any of these by equality
+ * against the invitation's copy -- which carries the *inviter's* per-party
+ * choices -- would falsely reject a valid existing config; genuine output
+ * incompatibility is caught against the live partner at exchange time. `date` is
+ * soft (a mismatch warns rather than aborts, matching `validateCompatibility`).
+ * Structural fields are compared by NFC-normalized canonical form: linkage
+ * fields order-insensitively (their array order is not significant), linkage
+ * keys in place (their order is significant).
  */
 export function diffLinkageTerms(
   existing: LinkageTerms,
@@ -245,20 +276,8 @@ export function diffLinkageTerms(
     add("version", existing.version, incoming.version);
   if (existing.algorithm !== incoming.algorithm)
     add("algorithm", existing.algorithm, incoming.algorithm);
-  if (existing.deduplicate !== incoming.deduplicate)
-    add(
-      "deduplicate",
-      String(existing.deduplicate),
-      String(incoming.deduplicate),
-    );
-
-  const renderOutput = (o: LinkageTerms["output"]): string =>
-    `expects_output=${o.expectsOutput}, share_with_partner=${o.shareWithPartner}`;
-  if (
-    existing.output.expectsOutput !== incoming.output.expectsOutput ||
-    existing.output.shareWithPartner !== incoming.output.shareWithPartner
-  )
-    add("output", renderOutput(existing.output), renderOutput(incoming.output));
+  // `output` and `deduplicate` are per-party (see this function's doc comment),
+  // so they are intentionally not compared here.
 
   // Sort linkage fields by name (their order is not significant) before the
   // canonical compare; compare linkage keys in place (their order is). The
@@ -267,19 +286,17 @@ export function diffLinkageTerms(
     a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   const existingFields = [...existing.linkageFields].sort(byName);
   const incomingFields = [...incoming.linkageFields].sort(byName);
-  if (nfcCanonical(existingFields) !== nfcCanonical(incomingFields))
-    add(
-      "linkage_fields",
-      renderNames(existingFields),
-      renderNames(incomingFields),
-    );
+  if (nfcCanonical(existingFields) !== nfcCanonical(incomingFields)) {
+    const r = renderStructural(existingFields, incomingFields);
+    add("linkage_fields", r.existing, r.incoming);
+  }
 
-  if (nfcCanonical(existing.linkageKeys) !== nfcCanonical(incoming.linkageKeys))
-    add(
-      "linkage_keys",
-      renderNames(existing.linkageKeys),
-      renderNames(incoming.linkageKeys),
-    );
+  if (
+    nfcCanonical(existing.linkageKeys) !== nfcCanonical(incoming.linkageKeys)
+  ) {
+    const r = renderStructural(existing.linkageKeys, incoming.linkageKeys);
+    add("linkage_keys", r.existing, r.incoming);
+  }
 
   const renderAgreement = (la: LinkageTerms["legalAgreement"]): string =>
     la === undefined
