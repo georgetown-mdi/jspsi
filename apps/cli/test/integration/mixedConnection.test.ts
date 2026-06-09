@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
@@ -16,11 +17,14 @@ log.setLevel(log.levels.DEBUG);
 // inside the container, so subdirectories of srv/ are served as subdirectories
 // of /psi via SFTP. beforeAll creates SFTP_LOCAL_DIRECTORY with { recursive:
 // true } before opening connections, so the host directory exists when the
-// server needs it. Relative path used for cleanup; LocalFSClient requires
-// absolute.
-const SFTP_LOCAL_DIRECTORY = "test/container/sftp/srv/mixed";
+// server needs it. The directory is resolved relative to this test file (via
+// import.meta.url) so it is independent of vitest's cwd, matching the pattern in
+// authenticatedExchange.test.ts; the resulting absolute path serves both the
+// cleanup helpers and LocalFSClient, which requires an absolute path.
+const SFTP_LOCAL_DIRECTORY = fileURLToPath(
+  new URL("../container/sftp/srv/mixed", import.meta.url),
+);
 const SFTP_PATH = "/psi/mixed";
-const LOCAL_DIRECTORY = path.resolve(SFTP_LOCAL_DIRECTORY);
 const SFTP_PORT = sftpPort();
 
 async function cleanServer() {
@@ -64,7 +68,7 @@ beforeAll(async () => {
         path: SFTP_PATH,
       },
     }),
-    localConn.open({ channel: "filedrop", path: LOCAL_DIRECTORY }),
+    localConn.open({ channel: "filedrop", path: SFTP_LOCAL_DIRECTORY }),
   ]);
 });
 
