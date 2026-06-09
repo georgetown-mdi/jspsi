@@ -13,6 +13,7 @@ import {
   BilateralModeMismatchError,
   ConnectionClosedError,
   FrameSizeExceededError,
+  TransportOperationStalledError,
 } from "../errors";
 import {
   HelloEnvelopeSchema,
@@ -95,6 +96,79 @@ export function normalizeFiledropPath(rawPath: string): string {
 // name is safe even when an id contains `-` or equals the word "ack".
 const ackMarkerName = (writerId: string, originalName: string): string =>
   `${writerId}-${originalName}-ack.json`;
+
+// Builds the terminal error for a transport await that outran the peer-inactivity
+// budget. `operation` names the call and its target (e.g. "file write to
+// .../temp-x.tmp"). It is a TransportOperationStalledError -- a UsageError, so the
+// poll loop treats it as terminal (stops rather than retrying into the same hang)
+// and the CLI classifies it exit-64 -- the same typed failure the CLI adapter's
+// per-operation read bounds raise, so a hang surfaces identically wherever it is
+// caught. See docs/SECURITY_DESIGN.md, "Channel security".
+const transportBudgetExceededError = (
+  operation: string,
+  budgetMs: number,
+): TransportOperationStalledError =>
+  new TransportOperationStalledError(
+    `transport ${operation} exceeded the ${budgetMs} ms peer-inactivity budget; ` +
+      `the peer or server has not responded within the budget, so the exchange ` +
+      `is failing rather than waiting on it further`,
+  );
+
+// Races a transport operation against the peer-inactivity budget so a server that
+// withholds its callback cannot hang the await past `budgetMs`: settles with the
+// operation's own result if it finishes first, otherwise rejects with
+// `makeError()` once the budget elapses. This is the consumer-layer, op-agnostic
+// backstop beneath the CLI adapter's per-operation READ bounds (see
+// boundTransport): those fast-fail a stalled read in 60 s, this bounds EVERY await
+// -- writes, stat, delete, the filedrop/local-FS path, and any future op -- so a
+// withheld callback fails the exchange within the budget instead of hanging
+// forever (the silent-poller-stop S1 finding).
+//
+// It is the core-side analogue of the CLI adapter's `withSftpOperationDeadline`,
+// re-implemented here because `apps/` depends on `packages/core`, not the reverse,
+// so the adapter helper cannot be imported up into core. Both share the same two
+// load-bearing properties: the timer is `unref`'d so the safety bound never holds
+// the process open on its own, and a `promise` that loses the race and later
+// rejects is absorbed by a no-op `catch` (it has no other consumer) rather than
+// surfacing as an unhandled rejection -- without changing the race outcome, since
+// `settled` is what `Promise.race` observes either way. When the budget wins, the
+// underlying operation keeps running and is abandoned; the session tears down on
+// the terminal error.
+function withTransportBudget<T>(
+  op: Promise<T>,
+  budgetMs: number,
+  makeError: () => TransportOperationStalledError,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(makeError()), budgetMs);
+    timer.unref();
+  });
+  const settled = op.finally(() => clearTimeout(timer));
+  void settled.catch(() => {});
+  return Promise.race([settled, deadline]);
+}
+
+// safeDelete variant of withTransportBudget: bounds the wait the same way but
+// RESOLVES (void) when the budget wins rather than rejecting, preserving
+// safeDelete's "never rejects" contract so callers may keep using it in `catch`
+// blocks. A hung safeDelete on a cleanup path is thus bounded for liveness without
+// turning best-effort cleanup into a thrown error. The underlying op should never
+// reject (safeDelete swallows its own errors), but a stray rejection is absorbed
+// for the same reason as above.
+function withTransportBudgetVoid(
+  op: Promise<void>,
+  budgetMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, budgetMs);
+    timer.unref();
+  });
+  const settled = op.finally(() => clearTimeout(timer));
+  void settled.catch(() => {});
+  return Promise.race([settled, deadline]);
+}
 
 /**
  * Default peer-inactivity budget (1 hour) used when `peerTimeoutMs` is not
@@ -408,7 +482,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
-    this.client = client;
+    // Wrap the injected transport so every data-plane await is backstopped by the
+    // peer-inactivity budget (see boundTransport). The wrap reads the budget
+    // lazily per call, so wrapping here -- before open() populates this.config --
+    // is safe: no budget is read until a transport call is actually made.
+    this.client = this.boundTransport(client);
     // No peerId validation here: Options is an internal type, not the public
     // FileSyncOptions. The validation boundary is FileSyncOptionsSchema
     // (enforced by parseFileSyncOptions / applyConnectionOverrides). All
@@ -484,6 +562,78 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // above a loop would observe a stale controller and become uncancellable.
   private wait(ms: number): Promise<void> {
     return cancellableDelay(ms, this.abortController.signal);
+  }
+
+  // The whole-exchange liveness backstop (THE security control for the
+  // withheld-callback DoS; see docs/SECURITY_DESIGN.md "Channel security"). Wraps
+  // the transport so every data-plane await is raced against the peer-inactivity
+  // budget and cannot hang past it. It is the universal layer beneath the CLI
+  // adapter's per-operation READ bounds: those fast-fail a stalled list()/get()/
+  // createExclusive() in 60 s, but the always-executed write/stat/delete ops
+  // (put/rename/delete/exists) have no per-op bound, so without this a hostile or
+  // dead server that withholds the callback on the first put/delete hangs the
+  // exchange forever -- in synchronize()/send() the awaited call never settles,
+  // and in poll() the reschedule sits in a `finally` the hung await never reaches,
+  // so the poller stops silently. Bounding here, at the single consumer seam every
+  // transport call already flows through, is op-agnostic (covers ops not
+  // enumerated here and any added later) and adapter-agnostic (covers the SFTP
+  // adapter, and the filedrop/local-FS LocalFSClient whose post-connect ops are
+  // otherwise unbounded).
+  //
+  // Budget granularity: each await is raced against a FRESH peerTimeoutMs (the
+  // peer-inactivity budget), not the remaining time until the rendezvous
+  // timeToLive. The budget bounds a single unresponsive await (silence FROM the
+  // peer), not total exchange duration: poll() runs unbounded by timeToLive today
+  // (it reschedules indefinitely), so racing it against an absolute open()+budget
+  // deadline would newly kill a healthy long-running exchange at the budget mark.
+  // A fresh per-await budget defeats the hang identically -- the first withheld
+  // callback fails after peerTimeoutMs and propagates -- without imposing a
+  // duration cap. It is the same single coarse knob the operator already tunes
+  // (peerTimeoutMs / DEFAULT_PEER_TIMEOUT_MS), deliberately coarse rather than a
+  // tight per-op timeout that would risk false-failing a legitimately large/slow
+  // transfer. close() needs no special handling: its ops get the same fresh
+  // budget, matching the fresh peerTimeoutMs deadline its drain already uses.
+  //
+  // The bound reads the budget lazily per call (config is populated by open()), so
+  // the wrap is installed once in the constructor. On a SFTP read the adapter's
+  // 60 s bound settles the op first and this race's timer is cleared, so the same
+  // hang is never failed twice; this budget is the sole bound only where no per-op
+  // bound exists (every write/stat/delete, and all LocalFSClient ops).
+  private boundTransport(raw: FileTransportClient): FileTransportClient {
+    const budgetMs = (): number =>
+      this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+    const bound = <T>(op: Promise<T>, operation: string): Promise<T> => {
+      const ms = budgetMs();
+      return withTransportBudget(op, ms, () =>
+        transportBudgetExceededError(operation, ms),
+      );
+    };
+    return {
+      // connect() runs before open() sets the budget and is already bounded by
+      // its own per-attempt deadline (ssh2 readyTimeout; LocalFSClient's
+      // withTimeout), so it passes through unwrapped.
+      connect: (options) => raw.connect(options),
+      end: () => bound(raw.end(), "connection close"),
+      list: (path) => bound(raw.list(path), `directory listing of ${path}`),
+      get: (path, options) =>
+        bound(raw.get(path, options), `file read of ${path}`),
+      put: (src, dest, options) =>
+        bound(raw.put(src, dest, options), `file write to ${dest}`),
+      delete: (path) => bound(raw.delete(path), `delete of ${path}`),
+      rename: (fromPath, toPath) =>
+        bound(
+          raw.rename(fromPath, toPath),
+          `rename of ${fromPath} to ${toPath}`,
+        ),
+      createExclusive: (path) =>
+        bound(raw.createExclusive(path), `exclusive create of ${path}`),
+      exists: (path) => bound(raw.exists(path), `existence check of ${path}`),
+      // safeDelete must never reject (callers use it in catch blocks), so it is
+      // bounded by the void variant: a hung cleanup delete stops waiting at the
+      // budget and resolves rather than throwing.
+      safeDelete: (path) =>
+        withTransportBudgetVoid(raw.safeDelete(path), budgetMs()),
+    };
   }
 
   /** Opens a connection from a typed config. Dispatches on `config.channel`. */

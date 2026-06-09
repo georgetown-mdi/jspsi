@@ -13,7 +13,10 @@ import {
   MAX_FILENAME_LENGTH,
   MAX_LISTING_READDIR_BATCHES,
 } from "../../src/connection/listingGuard";
-import { SFTP_STALL_DEADLINE_MS } from "../../src/connection/sftpLivenessGuard";
+import {
+  SFTP_SLOW_OPERATION_WARNING_MS,
+  SFTP_STALL_DEADLINE_MS,
+} from "../../src/connection/sftpLivenessGuard";
 
 // --- connect retry -----------------------------------------------------------
 
@@ -840,6 +843,170 @@ describe("bounded list", () => {
       // close was attempted as best-effort cleanup even though its callback
       // never arrived; the settlement did not wait on it.
       expect(closeCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// --- slow-operation warning (observability) ----------------------------------
+//
+// The non-fatal warning fires at SFTP_SLOW_OPERATION_WARNING_MS (below the 60 s
+// read fast-fail) and reports observed progress where a cheap signal exists:
+// bytes-so-far for a capped get, entries-so-far for a list, the payload size for a
+// put, and elapsed-only for the atomic ops. It never alters the result. The
+// adapter's log is replaced with a spy so the warning line can be asserted without
+// touching the console. (withSlowOperationWarning's own contract -- threshold,
+// non-fatal passthrough, no-warn-when-fast -- is covered in
+// sftpLivenessGuard.test.ts; these tests pin the per-operation wiring.)
+
+describe("slow-operation warning", () => {
+  test("reports bytes-so-far for a slow capped get and still resolves (non-fatal)", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn };
+      let resolveGet!: (s: Writable) => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        get: vi.fn().mockImplementation((_path: string, sink: Writable) => {
+          // 100 bytes arrive up front, then the transfer completes after the
+          // warning threshold but before the idle deadline.
+          sink.write(Buffer.alloc(100));
+          setTimeout(
+            () => resolveGet(sink),
+            SFTP_SLOW_OPERATION_WARNING_MS + 5_000,
+          );
+          return new Promise<Writable>((res) => {
+            resolveGet = res;
+          });
+        }),
+      };
+      const reading = adapter.get("/remote/big.bin", { maxBytes: 1_000 });
+      await vi.advanceTimersByTimeAsync(SFTP_SLOW_OPERATION_WARNING_MS + 1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0][0] as string;
+      expect(message).toContain("file read");
+      expect(message).toContain("/remote/big.bin");
+      expect(message).toContain("100 bytes received so far");
+      // Non-fatal: the read still completes with its bytes.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect((await reading).length).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("reports the payload size for a slow put and still resolves (non-fatal)", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      const warn = vi.fn();
+      let resolvePut!: () => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn };
+      // put reads this.options!.retries; an empty object falls back to the default.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation(
+          () =>
+            new Promise<void>((res) => {
+              resolvePut = res;
+            }),
+        ),
+      };
+      const writing = adapter.put(Buffer.alloc(2048), "/remote/out.tmp");
+      await vi.advanceTimersByTimeAsync(SFTP_SLOW_OPERATION_WARNING_MS + 1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0][0] as string;
+      expect(message).toContain("file write");
+      expect(message).toContain("/remote/out.tmp");
+      expect(message).toContain("2048 byte payload");
+      resolvePut();
+      await expect(writing).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("reports entries-so-far for a slow list while the read deadline still bounds it", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      const warn = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn };
+      let readdirCalls = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        sftp: {
+          opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+            cb(null, Buffer.from("handle")),
+          readdir: (
+            _h: Buffer,
+            cb: (
+              e: (Error & { code?: number }) | null,
+              list?: unknown[],
+            ) => void,
+          ) => {
+            // First batch delivers two entries; the next readdir callback is
+            // withheld, so the listing is bounded by the 60 s deadline -- but the
+            // 30 s warning fires first, reporting the two entries already read.
+            if (++readdirCalls === 1)
+              cb(null, [
+                { filename: "a.json", attrs: { mtime: 1, size: 1 } },
+                { filename: "b.json", attrs: { mtime: 1, size: 1 } },
+              ]);
+          },
+          close: (_h: Buffer, cb: () => void) => cb(),
+        },
+      };
+      const listing = adapter.list("/remote/dir");
+      const assertion = expect(listing).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_SLOW_OPERATION_WARNING_MS + 1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("2 entries read so far");
+      // The terminal deadline still fires; the warning did not displace it.
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("warns elapsed-only (no progress snippet) for a slow atomic exists and still resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      const warn = vi.fn();
+      let resolveExists!: (value: boolean) => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        exists: vi.fn().mockImplementation(
+          () =>
+            new Promise<boolean>((res) => {
+              resolveExists = res;
+            }),
+        ),
+      };
+      const checking = adapter.exists("/remote/lock");
+      await vi.advanceTimersByTimeAsync(SFTP_SLOW_OPERATION_WARNING_MS + 1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0][0] as string;
+      expect(message).toContain("existence check");
+      expect(message).toContain("/remote/lock");
+      // No payload, so elapsed-only: no parenthesized progress snippet.
+      expect(message).not.toContain("(");
+      resolveExists(true);
+      await expect(checking).resolves.toBe(true);
     } finally {
       vi.useRealTimers();
     }

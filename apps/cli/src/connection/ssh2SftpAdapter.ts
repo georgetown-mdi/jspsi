@@ -4,6 +4,7 @@ import {
   FileTransportClient,
   GetOptions,
   PutOptions,
+  getLoggerForVerbosity,
   retryPromise,
 } from "@psilink/core";
 
@@ -21,6 +22,7 @@ import {
   SFTP_STALL_DEADLINE_MS,
   transportOperationStalledError,
   withSftpOperationDeadline,
+  withSlowOperationWarning,
 } from "./sftpLivenessGuard";
 
 // A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
@@ -66,9 +68,30 @@ interface Ssh2SftpClientInternals {
 export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
+  private log: ReturnType<typeof getLoggerForVerbosity>;
 
-  constructor() {
+  constructor(verbosity = 1) {
     this.client = new Ssh2SftpClient();
+    this.log = getLoggerForVerbosity("sftp-adapter", verbosity);
+  }
+
+  // Layers the non-fatal slow-operation warning (observability) over an in-flight
+  // operation. Strictly above the terminal bounds: the per-operation read
+  // deadlines and the consumer-layer whole-exchange budget are what fail a stalled
+  // op; this only surfaces "still working" to a watching operator, with cheap
+  // observed progress where one exists. See withSlowOperationWarning.
+  private warnIfSlow<T>(
+    op: Promise<T>,
+    operation: string,
+    path: string,
+    progress?: (elapsedMs: number) => string,
+  ): Promise<T> {
+    return withSlowOperationWarning(op, {
+      operation,
+      path,
+      log: this.log,
+      progress,
+    });
   }
 
   async connect(options: Record<string, unknown>): Promise<void> {
@@ -171,146 +194,157 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // import because ssh2 does not expose its status-code table on its public
     // surface (the same reason createExclusive() uses numeric SFTP flags).
     const SSH_FX_EOF = 1;
-    return new Promise<FileInfo[]>((resolve, reject) => {
-      const results: FileInfo[] = [];
-      let settled = false;
-      // Undefined until opendir hands back a handle. settle() closes it only when
-      // it is set, so a deadline that fires before (or instead of) a successful
-      // opendir still settles -- with nothing to close.
-      let handle: Buffer | undefined;
-      // Round-trip counter for the liveness bound. A hostile server can return
-      // valid but empty (count = 0) non-EOF readdir batches forever: each one
-      // advances neither the entry-count nor the filename-length size bound and
-      // never carries the EOF status, so the batch loop would recurse without
-      // end. Capping the total readdir calls fails that progress-free flood with
-      // a typed terminal error. (Production is safe from deep synchronous
-      // recursion because ssh2 dispatches each readdir callback from a socket
-      // event, a fresh tick; the cap is the DoS bound, not a stack guard.)
-      let readdirCalls = 0;
-      // Settle the listing exactly once, then close the handle best-effort. The
-      // `settled` guard makes a late readdir callback or a late deadline fire a
-      // no-op and prevents a double close. `deadline` is declared just below but
-      // only read when settle() runs -- always after the timer is armed -- so the
-      // forward reference resolves before it is used.
-      const settle = (action: () => void): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(deadline);
-        // Settle BEFORE closing, and never gate the settlement on the close
-        // callback: a hostile server can withhold the close callback exactly as
-        // it withholds a readdir, so awaiting close() here would let the deadline
-        // fire, clear its own timer, then hang forever inside an un-returning
-        // close -- restoring the unbounded wait this guard exists to defeat.
-        // Close is best-effort cleanup that reclaims the handle on a well-behaved
-        // server; a withheld close callback leaks the handle until session
-        // teardown, with the listing already settled. A close() error on a
-        // read-only directory handle has no data meaning, so it is swallowed.
-        action();
-        if (handle !== undefined) sftp.close(handle, () => {});
-      };
-      // Whole-operation wall-clock deadline. The round-trip cap cannot catch a
-      // server that withholds an opendir/readdir/close callback entirely -- no
-      // batch ever arrives to count -- so only elapsed time can fail that case.
-      // Armed before opendir so it also bounds an opendir that never calls back;
-      // settle() clears it on every terminal path so a completed listing leaves
-      // no pending timer.
-      const deadline = setTimeout(
-        () =>
-          settle(() =>
-            reject(listingStalledByTimeoutError(path, SFTP_STALL_DEADLINE_MS)),
-          ),
-        SFTP_STALL_DEADLINE_MS,
-      );
-      // The deadline is the safety bound, not real work: cleared on every
-      // terminal path, so unref'ing it only matters if the process is winding
-      // down with a listing still in flight, where it must not block exit.
-      deadline.unref();
-      sftp.opendir(path, (openErr, openedHandle) => {
-        // The deadline may have already fired (the server withheld the opendir
-        // callback past the bound, then delivered it late); settle() already
-        // rejected the listing, so do not open a read against it. settle() ran
-        // before `handle` was assigned, though, so it could not close a handle
-        // opendir is only now handing back -- close it here best-effort so this
-        // late handle does not leak until session teardown.
-        if (settled) {
-          if (!openErr) sftp.close(openedHandle, () => {});
-          return;
-        }
-        if (openErr) {
-          settle(() => reject(openErr));
-          return;
-        }
-        handle = openedHandle;
-        const readNextBatch = (): void => {
-          // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
-          // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
-          // guard and rejects BEFORE issuing another readdir, so the server sees
-          // exactly MAX_LISTING_READDIR_BATCHES readdir calls (what the test
-          // asserts), even though `readdirCalls` itself reaches cap + 1 here.
-          if (++readdirCalls > MAX_LISTING_READDIR_BATCHES) {
+    // Hoisted out of the executor so the slow-operation warning can report
+    // entries-read-so-far as the listing's cheap observed-progress signal.
+    const results: FileInfo[] = [];
+    return this.warnIfSlow(
+      new Promise<FileInfo[]>((resolve, reject) => {
+        let settled = false;
+        // Undefined until opendir hands back a handle. settle() closes it only when
+        // it is set, so a deadline that fires before (or instead of) a successful
+        // opendir still settles -- with nothing to close.
+        let handle: Buffer | undefined;
+        // Round-trip counter for the liveness bound. A hostile server can return
+        // valid but empty (count = 0) non-EOF readdir batches forever: each one
+        // advances neither the entry-count nor the filename-length size bound and
+        // never carries the EOF status, so the batch loop would recurse without
+        // end. Capping the total readdir calls fails that progress-free flood with
+        // a typed terminal error. (Production is safe from deep synchronous
+        // recursion because ssh2 dispatches each readdir callback from a socket
+        // event, a fresh tick; the cap is the DoS bound, not a stack guard.)
+        let readdirCalls = 0;
+        // Settle the listing exactly once, then close the handle best-effort. The
+        // `settled` guard makes a late readdir callback or a late deadline fire a
+        // no-op and prevents a double close. `deadline` is declared just below but
+        // only read when settle() runs -- always after the timer is armed -- so the
+        // forward reference resolves before it is used.
+        const settle = (action: () => void): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(deadline);
+          // Settle BEFORE closing, and never gate the settlement on the close
+          // callback: a hostile server can withhold the close callback exactly as
+          // it withholds a readdir, so awaiting close() here would let the deadline
+          // fire, clear its own timer, then hang forever inside an un-returning
+          // close -- restoring the unbounded wait this guard exists to defeat.
+          // Close is best-effort cleanup that reclaims the handle on a well-behaved
+          // server; a withheld close callback leaks the handle until session
+          // teardown, with the listing already settled. A close() error on a
+          // read-only directory handle has no data meaning, so it is swallowed.
+          action();
+          if (handle !== undefined) sftp.close(handle, () => {});
+        };
+        // Whole-operation wall-clock deadline. The round-trip cap cannot catch a
+        // server that withholds an opendir/readdir/close callback entirely -- no
+        // batch ever arrives to count -- so only elapsed time can fail that case.
+        // Armed before opendir so it also bounds an opendir that never calls back;
+        // settle() clears it on every terminal path so a completed listing leaves
+        // no pending timer.
+        const deadline = setTimeout(
+          () =>
             settle(() =>
               reject(
-                listingStalledByBatchCountError(
-                  path,
-                  MAX_LISTING_READDIR_BATCHES,
-                ),
+                listingStalledByTimeoutError(path, SFTP_STALL_DEADLINE_MS),
               ),
-            );
+            ),
+          SFTP_STALL_DEADLINE_MS,
+        );
+        // The deadline is the safety bound, not real work: cleared on every
+        // terminal path, so unref'ing it only matters if the process is winding
+        // down with a listing still in flight, where it must not block exit.
+        deadline.unref();
+        sftp.opendir(path, (openErr, openedHandle) => {
+          // The deadline may have already fired (the server withheld the opendir
+          // callback past the bound, then delivered it late); settle() already
+          // rejected the listing, so do not open a read against it. settle() ran
+          // before `handle` was assigned, though, so it could not close a handle
+          // opendir is only now handing back -- close it here best-effort so this
+          // late handle does not leak until session teardown.
+          if (settled) {
+            if (!openErr) sftp.close(openedHandle, () => {});
             return;
           }
-          // openedHandle (not the outer `handle`) is the non-null Buffer here;
-          // the outer `handle` exists only to let settle() close it on any path.
-          sftp.readdir(openedHandle, (readErr, list) => {
-            // A readdir callback delivered after the deadline already settled
-            // must not process a batch against a rejected listing.
-            if (settled) return;
-            if (readErr) {
-              if (readErr.code === SSH_FX_EOF) settle(() => resolve(results));
-              else settle(() => reject(readErr));
+          if (openErr) {
+            settle(() => reject(openErr));
+            return;
+          }
+          handle = openedHandle;
+          const readNextBatch = (): void => {
+            // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
+            // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
+            // guard and rejects BEFORE issuing another readdir, so the server sees
+            // exactly MAX_LISTING_READDIR_BATCHES readdir calls (what the test
+            // asserts), even though `readdirCalls` itself reaches cap + 1 here.
+            if (++readdirCalls > MAX_LISTING_READDIR_BATCHES) {
+              settle(() =>
+                reject(
+                  listingStalledByBatchCountError(
+                    path,
+                    MAX_LISTING_READDIR_BATCHES,
+                  ),
+                ),
+              );
               return;
             }
-            // `list` is defined whenever readErr is null (the branch above has
-            // already returned otherwise); `?? []` keeps the type honest and
-            // treats a defensively-missing batch as empty. Apply the two bounds
-            // in the SAME order as LocalFSClient.list(): the entry-count bound
-            // first -- it governs every entry whatever its name -- then the
-            // per-name length bound, so both adapters surface the same error
-            // variant for a directory that breaches both at once. results.length
-            // counts every entry seen (none are filtered out here), matching
-            // LocalFSClient's `scanned`.
-            for (const entry of list ?? []) {
-              if (results.length >= MAX_DIRECTORY_ENTRIES) {
-                settle(() =>
-                  reject(directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES)),
-                );
+            // openedHandle (not the outer `handle`) is the non-null Buffer here;
+            // the outer `handle` exists only to let settle() close it on any path.
+            sftp.readdir(openedHandle, (readErr, list) => {
+              // A readdir callback delivered after the deadline already settled
+              // must not process a batch against a rejected listing.
+              if (settled) return;
+              if (readErr) {
+                if (readErr.code === SSH_FX_EOF) settle(() => resolve(results));
+                else settle(() => reject(readErr));
                 return;
               }
-              if (entry.filename.length > MAX_FILENAME_LENGTH) {
-                settle(() =>
-                  reject(
-                    filenameTooLongError(
-                      path,
-                      entry.filename,
-                      MAX_FILENAME_LENGTH,
+              // `list` is defined whenever readErr is null (the branch above has
+              // already returned otherwise); `?? []` keeps the type honest and
+              // treats a defensively-missing batch as empty. Apply the two bounds
+              // in the SAME order as LocalFSClient.list(): the entry-count bound
+              // first -- it governs every entry whatever its name -- then the
+              // per-name length bound, so both adapters surface the same error
+              // variant for a directory that breaches both at once. results.length
+              // counts every entry seen (none are filtered out here), matching
+              // LocalFSClient's `scanned`.
+              for (const entry of list ?? []) {
+                if (results.length >= MAX_DIRECTORY_ENTRIES) {
+                  settle(() =>
+                    reject(directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES)),
+                  );
+                  return;
+                }
+                if (entry.filename.length > MAX_FILENAME_LENGTH) {
+                  settle(() =>
+                    reject(
+                      filenameTooLongError(
+                        path,
+                        entry.filename,
+                        MAX_FILENAME_LENGTH,
+                      ),
                     ),
-                  ),
-                );
-                return;
+                  );
+                  return;
+                }
+                results.push({
+                  name: entry.filename,
+                  // ssh2 reports mtime in seconds; FileInfo.modifyTime is ms -- the
+                  // same conversion ssh2-sftp-client's list() applies.
+                  modifyTime: entry.attrs.mtime * 1000,
+                  size: entry.attrs.size,
+                });
               }
-              results.push({
-                name: entry.filename,
-                // ssh2 reports mtime in seconds; FileInfo.modifyTime is ms -- the
-                // same conversion ssh2-sftp-client's list() applies.
-                modifyTime: entry.attrs.mtime * 1000,
-                size: entry.attrs.size,
-              });
-            }
-            readNextBatch();
-          });
-        };
-        readNextBatch();
-      });
-    });
+              readNextBatch();
+            });
+          };
+          readNextBatch();
+        });
+      }),
+      "directory listing",
+      path,
+      () =>
+        `${results.length} ${results.length === 1 ? "entry" : "entries"} read ` +
+        "so far",
+    );
   }
 
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
@@ -323,18 +357,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // never-ending transfer fails rather than hanging. (A whole-operation
       // deadline would be too tight for a legitimately large capped transfer,
       // which is why the live path bounds the idle gap instead.)
-      return withSftpOperationDeadline(
-        this.client.get(path, undefined, {
-          readStreamOptions: options,
-        }) as Promise<Buffer<ArrayBufferLike>>,
-        SFTP_STALL_DEADLINE_MS,
-        () =>
-          transportOperationStalledError(
-            "file read",
-            path,
-            `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
-              `withheld the transfer)`,
-          ),
+      // Elapsed-only warning: an uncapped read has no counting sink, so there is
+      // no cheap bytes-so-far signal to report.
+      return this.warnIfSlow(
+        withSftpOperationDeadline(
+          this.client.get(path, undefined, {
+            readStreamOptions: options,
+          }) as Promise<Buffer<ArrayBufferLike>>,
+          SFTP_STALL_DEADLINE_MS,
+          () =>
+            transportOperationStalledError(
+              "file read",
+              path,
+              `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
+                `withheld the transfer)`,
+            ),
+        ),
+        "file read",
+        path,
       );
     }
 
@@ -356,12 +396,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // createCappedSink. No encoding is forwarded (raw Buffer chunks) so the byte
     // count is exact; the caller's own toString() decodes, matching the buffer
     // that the uncapped path and LocalFSClient return.
-    const { sink, result, complete, fail } = createCappedSink(path, maxBytes);
+    const { sink, result, complete, fail, bytesReceived } = createCappedSink(
+      path,
+      maxBytes,
+    );
     // The over-cap path settles `result` from inside the sink, so this handler
     // never rejects (complete/fail are no-ops once `result` has settled);
     // `result` is the returned promise.
     void this.client.get(path, sink).then(complete, fail);
-    return result;
+    // Warn with bytes-so-far and an average rate from the sink's running count.
+    return this.warnIfSlow(result, "file read", path, (elapsedMs) => {
+      const bytes = bytesReceived();
+      const rate = Math.round(bytes / (elapsedMs / 1000));
+      return `${bytes} bytes received so far (~${rate} bytes/s)`;
+    });
   }
 
   put(
@@ -369,15 +417,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     dest: string,
     options?: PutOptions,
   ): Promise<unknown> {
-    return retryPromise(
-      () => this.client.put(src, dest, { writeStreamOptions: options }),
-      this.options!.retries || 5,
-      100,
+    // Report the total payload size where it is known up front (a Buffer src,
+    // which is what send()/writeAck() always pass). This is observed signal taken
+    // for free from the source, NOT a bytes-acked counter: instrumenting the
+    // upload stream to count acked bytes would put observability machinery inside
+    // the always-on write path, which the warning must stay clear of. A stream src
+    // has no cheap size, so it falls back to elapsed-only.
+    const totalBytes = Buffer.isBuffer(src) ? src.length : undefined;
+    return this.warnIfSlow(
+      retryPromise(
+        () => this.client.put(src, dest, { writeStreamOptions: options }),
+        this.options!.retries || 5,
+        100,
+      ),
+      "file write",
+      dest,
+      totalBytes === undefined ? undefined : () => `${totalBytes} byte payload`,
     );
   }
 
   delete(path: string): Promise<void> {
-    return this.client.delete(path).then(() => {});
+    return this.warnIfSlow(
+      this.client.delete(path).then(() => {}),
+      "delete",
+      path,
+    );
   }
 
   safeDelete(path: string): Promise<void> {
@@ -393,7 +457,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   rename(fromPath: string, toPath: string): Promise<void> {
-    return this.client.rename(fromPath, toPath).then(() => {});
+    return this.warnIfSlow(
+      this.client.rename(fromPath, toPath).then(() => {}),
+      "rename",
+      `${fromPath} to ${toPath}`,
+    );
   }
 
   createExclusive(path: string): Promise<void> {
@@ -512,20 +580,25 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // only races: a handle opened just before a withheld close is not reclaimed
     // (that close cannot itself complete), but the exchange fails terminally
     // rather than stalling, and the session teardown releases the session.
-    return withSftpOperationDeadline(
-      attempt,
-      SFTP_STALL_DEADLINE_MS,
-      () =>
+    return this.warnIfSlow(
+      withSftpOperationDeadline(attempt, SFTP_STALL_DEADLINE_MS, () =>
         transportOperationStalledError(
           "exclusive create",
           path,
           `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
             `withheld the open or close response)`,
         ),
+      ),
+      "exclusive create",
+      path,
     );
   }
 
   exists(remotePath: string): Promise<boolean> {
-    return this.client.exists(remotePath).then(Boolean);
+    return this.warnIfSlow(
+      this.client.exists(remotePath).then(Boolean),
+      "existence check",
+      remotePath,
+    );
   }
 }

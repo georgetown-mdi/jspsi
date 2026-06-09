@@ -12,10 +12,25 @@ import { TransportOperationStalledError } from "@psilink/core";
  * {@link ./listingGuard}: those cap what a hostile file or directory can
  * allocate; this caps the time a hostile server can make an operation consume.
  *
- * The local-filesystem adapter needs no counterpart: its reads go to a trusted
- * kernel (`fs.opendir`/`fs.stat`), which does not withhold a callback the way a
- * remote SFTP server can. (The filedrop connect path does bound `fs.access` with
- * a timeout, but for a stalled network mount, not an adversary.)
+ * These are the per-operation fast-fail layer for the READ path only, not the
+ * universal backstop. They bound a stalled read tightly (60 s), but the always-
+ * executed write/stat/delete operations (`put`/`rename`/`delete`/`exists`) carry
+ * no per-operation bound here, and neither does the local-filesystem adapter.
+ * Those are covered instead by the whole-exchange budget in `FileSyncConnection`
+ * (`@psilink/core`), which races EVERY transport await --
+ * reads, writes, and the local-filesystem path alike -- against the coarse
+ * peer-inactivity budget. So the local-filesystem adapter does get a liveness
+ * bound after all (an earlier framing here held its reads to a trusted
+ * `fs.opendir`/`fs.stat` kernel that withholds nothing, but a stalled NFS/CIFS
+ * hard mount breaks that premise); it just gets the coarse whole-exchange bound
+ * rather than these tight per-operation ones, which stay SFTP-only because only
+ * the SFTP read path has the server-driven callback this tier exists to catch
+ * quickly. (The filedrop connect path separately bounds `fs.access` with a
+ * timeout.)
+ *
+ * This module also holds the estimate-free, non-fatal slow-operation WARNING
+ * ({@link withSlowOperationWarning}) -- observability, not a control, layered
+ * strictly above all of the above and never inside a terminal path.
  */
 
 /**
@@ -108,4 +123,68 @@ export function withSftpOperationDeadline<T>(
   const settled = promise.finally(() => clearTimeout(timer));
   void settled.catch(() => {});
   return Promise.race([settled, deadline]);
+}
+
+/**
+ * Elapsed time, in milliseconds, after which an in-flight SFTP operation that has
+ * not yet settled emits a non-fatal slow-operation warning. This is OBSERVABILITY,
+ * not a security control: it does nothing on a headless run with no human watching
+ * (the whole-exchange liveness budget in `FileSyncConnection` (`@psilink/core`)
+ * defends that run), and it stays entirely outside the terminal-error paths so it
+ * can never affect correctness or the liveness gate. See
+ * {@link withSlowOperationWarning}.
+ *
+ * Value: 30,000 ms (30 s). A fixed, deliberately generous threshold -- NOT a
+ * duration estimate. A false warning is cheap (the operator reads "still working"
+ * and ignores it), so it may be crude: it reports OBSERVED signal (the operation,
+ * elapsed time, and any cheap progress) and lets the human supply the intent the
+ * machine cannot, since a slow-but-honest transfer and a deliberately slow server
+ * are observationally identical. It sits well above any healthy operation (a normal
+ * listing, lock create, or small transfer completes in well under a second) yet
+ * below the 60 s per-operation read fast-fail ({@link SFTP_STALL_DEADLINE_MS}), so
+ * for a stalled read the operator sees one "slow" warning before the read fails;
+ * for an unbounded-at-the-adapter write it is the early signal beneath the coarse
+ * whole-exchange budget. Fixed rather than a fraction of the (operator-tunable)
+ * peer budget so the warning fires at a predictable wall-clock point regardless of
+ * how high the budget is raised.
+ */
+export const SFTP_SLOW_OPERATION_WARNING_MS = 30_000;
+
+/**
+ * Wraps an in-flight SFTP operation with a non-fatal slow-operation warning: if
+ * `promise` has not settled within `thresholdMs`, emits one `log.warn` line naming
+ * the operation, the elapsed time, and -- where a cheap progress signal exists --
+ * the observed progress (`progress(elapsedMs)`), then lets the operation continue
+ * unchanged. The returned promise settles exactly as `promise` does (same value,
+ * same rejection); the warning never alters the result, and the timer is cleared
+ * the moment `promise` settles.
+ *
+ * It is strictly observability and is layered ABOVE the terminal bounds, never
+ * inside them: the per-operation read deadline ({@link withSftpOperationDeadline} /
+ * the capped sink) and the consumer-layer whole-exchange budget are what actually
+ * fail a stalled operation; this only tells a watching operator that an operation
+ * is taking a while. The timer is `unref`'d so it never holds the process open on
+ * its own, and it fires at most once (a single `setTimeout`).
+ */
+export function withSlowOperationWarning<T>(
+  promise: Promise<T>,
+  options: {
+    operation: string;
+    path: string;
+    log: { warn: (message: string) => void };
+    thresholdMs?: number;
+    progress?: (elapsedMs: number) => string;
+  },
+): Promise<T> {
+  const thresholdMs = options.thresholdMs ?? SFTP_SLOW_OPERATION_WARNING_MS;
+  const timer = setTimeout(() => {
+    const observed = options.progress?.(thresholdMs);
+    options.log.warn(
+      `SFTP ${options.operation} of ${options.path} is still running after ` +
+        `${thresholdMs} ms${observed ? ` (${observed})` : ""}; this may be a ` +
+        "slow transfer or an unresponsive server",
+    );
+  }, thresholdMs);
+  timer.unref();
+  return promise.finally(() => clearTimeout(timer));
 }

@@ -69,6 +69,14 @@ export interface CappedSink {
    */
   result: Promise<Buffer<ArrayBufferLike>>;
   /**
+   * Total bytes received from the server so far (the running count the cap is
+   * checked against, including any counted-but-not-retained over-cap tail). Read
+   * by the slow-operation warning as the cheap observed-progress signal for a
+   * `get` that is taking a long time; it is observability only and never gates
+   * the size or liveness bounds.
+   */
+  bytesReceived: () => number;
+  /**
    * Mark the underlying transfer complete; resolves `result` with the buffered
    * bytes unless the cap already fired (in which case it is a no-op).
    */
@@ -195,6 +203,7 @@ export function createCappedSink(
   return {
     sink,
     result,
+    bytesReceived: () => total,
     complete: () => {
       if (settled) return;
       settled = true;
