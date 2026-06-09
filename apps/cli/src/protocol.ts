@@ -154,7 +154,9 @@ export interface RunProtocolResult {
  * persist the recoverable config. The failure is also reported in
  * {@link RunProtocolResult.onAuthenticatedError} so the caller can correct its
  * own messaging. Pass `undefined` (the default) on the no-auth path and from
- * callers that need no post-handshake step (zero-setup, exchange).
+ * callers that need no post-handshake step (zero-setup, exchange); passing a
+ * hook with `authentication: null` is rejected up front, since an
+ * unauthenticated exchange has no acceptance step to hook.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -190,6 +192,17 @@ export async function runProtocol(
     throw new Error(
       "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
         "an authenticated exchange must not pass it",
+    );
+  // The mirror constraint: onAuthenticated hooks the moment of acceptance, which
+  // exists only on the authenticated path -- its invocation below is nested in
+  // `if (auth)`. Reject a hook supplied with `authentication: null` up front
+  // rather than silently dropping it, so a future caller that wires a hook to a
+  // zero-setup exchange gets a clear error instead of a persistence step that
+  // never runs.
+  if (!auth && onAuthenticated !== undefined)
+    throw new Error(
+      "onAuthenticated is only valid on an authenticated exchange; an " +
+        "unauthenticated (zero-setup) exchange has no acceptance step to hook",
     );
   // Captured in the outer scope so the post-handshake saveKeyFile call below
   // can reuse the trimmed value without re-reading auth.keyFilePath.
@@ -730,13 +743,18 @@ export async function runProtocol(
           await onAuthenticated();
         } catch (hookErr) {
           // The caller distinguishes a hook failure from success by the presence
-          // of this value, so it must be defined even when the hook threw a
-          // falsy value (e.g. `throw undefined`); coerce that pathological case
-          // to an Error so a failure can never masquerade as a clean write.
-          onAuthenticatedError =
-            hookErr === undefined
-              ? new Error("the post-authentication hook threw undefined")
-              : hookErr;
+          // of this value, so it must be truthy even when the hook threw a falsy
+          // value (`undefined`, `null`, `0`, `""`, `false`, `NaN`). `undefined`
+          // is the success sentinel and the others would slip a downstream
+          // truthiness check, so coerce any falsy throw to an Error: a failure
+          // can then never masquerade as a clean write regardless of which check
+          // the caller uses.
+          onAuthenticatedError = hookErr
+            ? hookErr
+            : new Error(
+                "the post-authentication hook threw a falsy value: " +
+                  String(hookErr),
+              );
           log.error(
             "the post-authentication hook failed after the handshake " +
               "succeeded and the rotated key was saved; the exchange will " +

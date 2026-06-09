@@ -428,10 +428,13 @@ export async function runOnlineBootstrap(params: {
       //
       // saveConfig is synchronous, so `configWritten` is set only after the write
       // has completed and a failed write throws before it -- which is what
-      // runProtocol's onAuthenticatedError and the catch below depend on. If
-      // saveConfig is ever made async, make this hook `async` and `await` it:
-      // returning a bare promise here would be silently discarded by the awaited
-      // call, so a rejected write would masquerade as a clean one.
+      // runProtocol's onAuthenticatedError and the catch below depend on.
+      // runProtocol awaits this hook's return, so if saveConfig is ever made
+      // async the fix is to make this hook `async` and `await` the call: an
+      // awaited promise is handled correctly. The trap is an UNawaited async
+      // saveConfig -- the hook would return (and set `configWritten`) before the
+      // write settles, so a rejected write would resolve cleanly and masquerade
+      // as a success.
       () => {
         saveConfig(params.configPath, {
           connection: params.connection,
@@ -486,10 +489,10 @@ export function logOnlineBootstrapOutcome(
   log.error(
     `exchange complete and the rotated key was saved to ${params.keyFile}, ` +
       `but the configuration could not be written to ${params.configFile} ` +
-      `(see the error above). The rotated key is saved, so you do not need to ` +
-      `re-invite: recreate ${params.configFile} to match your connection and ` +
-      `linkage settings before running a recurring 'psilink exchange'. Keep ` +
-      `the key file private.`,
+      `(its cause was logged when the write failed). The rotated key is saved, ` +
+      `so you do not need to re-invite: recreate ${params.configFile} to match ` +
+      `your connection and linkage settings before running a recurring ` +
+      `'psilink exchange'. Keep the key file private.`,
   );
 }
 

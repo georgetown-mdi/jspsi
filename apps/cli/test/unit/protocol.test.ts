@@ -161,6 +161,31 @@ test("rejects before opening a connection when saveIntent is passed on an authen
   ).rejects.toThrow("only valid on an unauthenticated");
 });
 
+test("rejects before opening a connection when onAuthenticated is passed on an unauthenticated exchange", async () => {
+  // onAuthenticated hooks the moment of acceptance, which exists only on the
+  // authenticated path; its invocation is nested inside the `if (auth)` block.
+  // Passing it with `authentication: null` is a misuse: the guard must reject it
+  // up front rather than silently dropping the hook so the write never runs.
+  await expect(
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        authentication: null,
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test",
+      undefined,
+      undefined,
+      () => {
+        /* never invoked: the guard rejects before the hook would fire */
+      },
+    ),
+  ).rejects.toThrow("only valid on an authenticated exchange");
+});
+
 test("rejects before opening a connection when keyFilePath parent is not writable", async () => {
   // 0o555 = r-x for all; the current user cannot write into the directory, so
   // saveKeyFile would fail after PAKE. The pre-flight should catch this. Skip
