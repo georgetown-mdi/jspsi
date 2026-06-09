@@ -133,7 +133,17 @@ export function createCappedSink(
         ),
       );
       chunks.length = 0;
-      sink.destroy();
+      // Destroy WITH an error, not bare. ssh2-sftp-client keys its upstream
+      // read-stream teardown off the sink's 'error' event: get(path, dst) pipes
+      // the read stream into the sink, rejects its promise on the sink's 'error',
+      // and destroys the read stream only in that promise's `.finally`. A bare
+      // destroy() emits 'close', not 'error', so get() never settles, `.finally`
+      // never runs, and the server-side read keeps running -- the read stream
+      // leaks until session teardown. The typed terminal error is already on
+      // `result`; this plain Error exists only to abort the transfer at the
+      // server, exactly as the over-cap path's failed write callback does. The
+      // resulting get() rejection lands on the adapter's no-op `fail`.
+      sink.destroy(new Error("inbound transfer stalled"));
     }, stallDeadlineMs);
     // The idle timer is the safety bound, not real work: it must never keep the
     // process alive on its own. Every terminal path clears it, so this only

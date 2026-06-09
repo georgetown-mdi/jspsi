@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { describe, expect, test, vi } from "vitest";
 import {
   FrameSizeExceededError,
@@ -92,6 +94,40 @@ describe("createCappedSink", () => {
       await vi.advanceTimersByTimeAsync(1_001);
       await assertion;
       await expect(result).rejects.toBeInstanceOf(UsageError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("the idle stall tears down the upstream read stream, not just the sink", async () => {
+    // Regression: the idle path must destroy the sink WITH an error so the
+    // server-side transfer is aborted. ssh2-sftp-client's get(path, dst) pipes
+    // the read stream into the sink and destroys that read stream only when its
+    // own promise settles -- and the promise rejects via the sink's 'error'
+    // event. A bare sink.destroy() emits 'close', not 'error', so the read
+    // stream would keep running until session teardown. This models ssh2's
+    // wiring (pipe a real Readable in; tear it down on the sink's 'error') and
+    // asserts the source is destroyed once the idle deadline fires. With a bare
+    // destroy() the source would still be live here.
+    vi.useFakeTimers();
+    try {
+      const { sink, result } = createCappedSink("/p/stall.bin", 32, 1_000);
+      // A read stream that opens but never delivers data -- the withheld-transfer
+      // DoS the idle bound exists to catch.
+      const source = new Readable({ read() {} });
+      source.on("error", () => {});
+      sink.on("error", () => source.destroy());
+      source.pipe(sink);
+
+      const assertion = expect(result).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(1_001);
+      await assertion;
+      // The sink was destroyed with an error (the trigger for ssh2's upstream
+      // teardown), which here propagated to the modeled read stream.
+      expect(sink.errored).toBeInstanceOf(Error);
+      expect(source.destroyed).toBe(true);
     } finally {
       vi.useRealTimers();
     }
