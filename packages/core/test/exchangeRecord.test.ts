@@ -400,26 +400,82 @@ describe("governance metadata", () => {
     expect("description" in record.governance.payloadReceived[0]).toBe(false);
   });
 
-  test("contains no value-level data -- only names, categories, descriptions, references", async () => {
+  // The privacy invariant on the record body: it carries only readable governance
+  // metadata (names, types, descriptions, references) and never value-level data
+  // (payload row values, linkage-field values, the matched-identifier table),
+  // which are committed, never embedded. The next two tests guard that invariant
+  // from opposite directions over a fixture that populates every governance
+  // channel: a legal agreement, a multi-field matching basis, sent and received
+  // payload columns, and an association table.
+  const governanceInputs: ExchangeRecordInputs = {
+    ...baseInputs,
+    localTerms: termsWithGovernance,
+    partnerTerms: { ...termsWithGovernance, identity: "Party B" },
+  };
+
+  test("governance exposes only allow-listed metadata keys (a new value-bearing field would fail)", async () => {
+    // Positive, structural guard: assert governance is a CLOSED allow-list of keys
+    // at every level. The realistic regression -- governanceFromTerms (and its
+    // schema) growing a field that carries a value -- fails here because the new
+    // key is not permitted, without the test having to name a forbidden value. The
+    // allow-list is declared independently of the schema on purpose: adding a
+    // governance field forces a deliberate update here, and with it a fresh "is
+    // this value-level data?" judgement.
     const { record } = await buildExchangeRecord(
-      {
-        ...baseInputs,
-        localTerms: termsWithGovernance,
-        partnerTerms: { ...termsWithGovernance, identity: "Party B" },
-      },
+      governanceInputs,
+      fixedRandomness,
+    );
+    const onlyKeys = (obj: object, allowed: string[]): void => {
+      expect(Object.keys(obj).filter((k) => !allowed.includes(k))).toEqual([]);
+    };
+    const g = record.governance;
+    onlyKeys(g, [
+      "algorithm",
+      "legalAgreement",
+      "matchingBasis",
+      "payloadSent",
+      "payloadReceived",
+    ]);
+    onlyKeys(g.legalAgreement!, ["reference", "purpose", "expirationDate"]);
+    for (const field of g.matchingBasis) {
+      onlyKeys(field, ["name", "type"]);
+    }
+    for (const col of [...g.payloadSent, ...g.payloadReceived]) {
+      onlyKeys(col, ["name", "description"]);
+    }
+  });
+
+  test("no committed value-level data appears anywhere in the serialized record", async () => {
+    // Negative guard: the forbidden values are DERIVED from the committed inputs
+    // (every string cell of both payloads), not hardcoded, so the check keeps
+    // protecting the invariant as fixtures change. The matched-identifier table is
+    // integer indices -- not substring-searchable -- so it is guarded structurally
+    // by the absence of the committed-data keys below, not by value.
+    const { record } = await buildExchangeRecord(
+      governanceInputs,
       fixedRandomness,
     );
     const serialized = serializeExchangeRecord(record);
-    // The payload row values and the matched-identifier table are committed, not
-    // embedded; they live only in the opening data, never in the record.
-    for (const value of ["10mg", "20mg", "active"]) {
+    const committedValues = [
+      ...localPayloadSent.rows.flat(),
+      ...partnerPayloadReceived.rows.flat(),
+    ].filter((cell): cell is string => typeof cell === "string");
+    // Fail loudly if the fixture ever stops carrying committed values, which would
+    // turn the loop below into a silent no-op.
+    expect(committedValues.length).toBeGreaterThan(0);
+    for (const value of committedValues) {
       expect(serialized).not.toContain(value);
     }
-    // None of the value-bearing keys (committed rows, indices, salts, opened
-    // data) appear in the record at all.
+    // The committed payloads, their salts, and the opened data must never be
+    // embedded; these keys would appear only if a commitment's plaintext leaked
+    // into the record body.
     for (const key of ['"rows"', '"rowIndices"', '"salt"', '"data"']) {
       expect(serialized).not.toContain(key);
     }
+    // Out of reach by construction: legalAgreement.purpose is operator-supplied
+    // free text, copied verbatim and not cross-validated, so a value an operator
+    // smuggles into it cannot be detected here. Purpose-text hygiene is an operator
+    // responsibility, outside this automated invariant -- named, not papered over.
   });
 });
 
