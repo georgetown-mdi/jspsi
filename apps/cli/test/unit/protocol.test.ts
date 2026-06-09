@@ -572,9 +572,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   // Neither generic advisory line in runProtocol's catch must fire: both
   // would contradict the tagged "obtain a new invitation" recovery hint.
   expect(
-    mockState.errors.every(
-      (m) => !m.includes("key exchange was in progress"),
-    ),
+    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
   ).toBe(true);
   expect(
     mockState.errors.every((m) => !m.includes("already rotated and saved")),
@@ -727,9 +725,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // Neither generic advisory should fire: the tag is on the inner error,
   // not the outer wrap, but the cause walker finds it anyway.
   expect(
-    mockState.errors.every(
-      (m) => !m.includes("key exchange was in progress"),
-    ),
+    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
   ).toBe(true);
   expect(
     mockState.errors.every((m) => !m.includes("already rotated and saved")),
@@ -1753,8 +1749,9 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   // Record per-party exchange entry, keyed off a sentinel id on `prepared`, then
-  // fall through to the default polling drain so the peer consumes the last PAKE
-  // message before runExchange resolves (avoids a cleanup/receive race).
+  // fall through to the default polling drain so the peer consumes the last
+  // key-exchange message before runExchange resolves (avoids a cleanup/receive
+  // race).
   const events: string[] = [];
   vi.mocked(runExchange).mockImplementation((async (...callArgs: unknown[]) => {
     const prepared = callArgs[2] as { id?: string };
@@ -1816,7 +1813,8 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
   // exchange failure must still leave the hook's persistence on disk (the
   // bootstrap callers write the config here). A marker file stands in for the
   // config write. Both parties wait until both key files have rotated before
-  // throwing, so PAKE has completed on both sides before either cleanup runs.
+  // throwing, so the key exchange has completed on both sides before either
+  // cleanup runs.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });

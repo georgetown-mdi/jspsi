@@ -409,7 +409,11 @@ test("an inbound frame after recvSeq reaches MAX_SAFE_INTEGER is rejected", asyn
   // is terminal at the top of the counter; saturation opens no hole.
   (recv as unknown as { recvSeq: number }).recvSeq = Number.MAX_SAFE_INTEGER;
   await peer.send(
-    await sealRaw("initiator", Number.MAX_SAFE_INTEGER, jsonPlaintext({ n: 1 })),
+    await sealRaw(
+      "initiator",
+      Number.MAX_SAFE_INTEGER,
+      jsonPlaintext({ n: 1 }),
+    ),
   );
   await expectSecurity(recv.receive(), /replay|out-of-order/i);
 });
