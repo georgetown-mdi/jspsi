@@ -152,10 +152,12 @@ export async function verifyCommitmentOpening(
 /**
  * Order the two parties' terms deterministically by their canonical encoding so
  * both parties derive the same agreed-terms object regardless of which one is
- * "local". Comparison is JavaScript string order over the two RFC 8785 canonical
- * encodings; because RFC 8785 escapes every non-ASCII character as \uXXXX, those
- * strings are ASCII-only, so the comparison is stable and deterministic
- * (platform- and locale-independent) with no UTF-16-vs-code-point ambiguity.
+ * "local". Comparison is JavaScript's `<=` over the two RFC 8785 canonical
+ * encodings, which orders by UTF-16 code unit -- deterministic and
+ * locale-independent (it is not `localeCompare`). RFC 8785 emits non-ASCII as
+ * raw UTF-8 rather than `\u` escapes, so the encodings are not ASCII-only; but
+ * both parties compare byte-identical strings under the same code-unit ordering,
+ * so the derived order is stable and platform- and locale-independent.
  */
 function agreedTermsValue(a: LinkageTerms, b: LinkageTerms): CanonicalValue {
   // LinkageTerms is within the canonical value domain (plain objects, arrays,
@@ -214,12 +216,17 @@ export interface RecordPayloadColumn {
 }
 
 /** Reference to the governing data-sharing agreement, copied from the agreed
- * terms. A single shared reference: the two parties' agreement reference and
- * expiration are required to match at exchange time, so the record stores one
- * authority for the disclosure rather than two. */
+ * terms. A single shared reference: the two parties' agreement reference,
+ * purpose, and expiration are required to match at exchange time, so the record
+ * stores one authority for the disclosure rather than two. */
 export interface RecordLegalAgreement {
   /** Human-readable agreement identifier (e.g. "MOU-2025-0042"). */
   reference: string;
+  /** Readable statement of the purpose/authority for this disclosure under the
+   * agreement -- the HIPAA 164.528 / FERPA 99.32 purpose, carried so the record
+   * states why the disclosure happened without opening the agreement. Metadata
+   * only -- never a protected, linkage-field, or payload value. */
+  purpose: string;
   /** Date after which the agreement no longer authorizes an exchange (ISO 8601,
    * YYYY-MM-DD). */
   expirationDate: string;
@@ -396,6 +403,7 @@ const RecordPayloadColumnSchema: z.ZodType<RecordPayloadColumn> = z.object({
 
 const RecordLegalAgreementSchema: z.ZodType<RecordLegalAgreement> = z.object({
   reference: z.string().min(1),
+  purpose: z.string().min(1),
   expirationDate: z.iso.date(),
 });
 
@@ -527,7 +535,7 @@ export interface BuiltExchangeRecord {
  * and the linkage fields/keys are cross-party validated (so they equal the
  * partner's), while `payload.send`/`payload.receive` are this party's own view of
  * what it sent and received. Reads names, types, descriptions, and the agreement
- * reference only -- never a value.
+ * reference and purpose only -- never a value.
  */
 function governanceFromTerms(terms: LinkageTerms): ExchangeRecordGovernance {
   const toColumn = (c: {
@@ -575,6 +583,7 @@ function governanceFromTerms(terms: LinkageTerms): ExchangeRecordGovernance {
       ? {
           legalAgreement: {
             reference: terms.legalAgreement.reference,
+            purpose: terms.legalAgreement.purpose,
             expirationDate: terms.legalAgreement.expirationDate,
           },
         }

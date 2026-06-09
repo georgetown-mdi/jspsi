@@ -345,18 +345,30 @@ const PayloadSchema: z.ZodType<Payload> = z.object({
 
 /**
  * Reference to the legal data-sharing agreement authorizing this exchange.
- * If `expirationDate` has passed, the exchange fails before any data is
- * transmitted.
+ * The two parties' `reference`, `purpose`, and `expirationDate` are all
+ * cross-checked: any mismatch, or an `expirationDate` that has passed, fails
+ * the exchange before any data is transmitted.
  */
 export interface LegalAgreement {
   /** Identifier of the legal agreement (e.g. "MOU-2025-0042"). */
   reference: string;
+  /**
+   * Readable statement of the purpose or authority for the disclosure under
+   * this agreement (e.g. "Audit and evaluation of the State tutoring
+   * program"). A single agreement can authorize multiple purposes; this names
+   * the one this exchange happened for. Carried in cleartext in the exchange
+   * record so it stands alone as a HIPAA 164.528 accounting / FERPA 99.32
+   * disclosure-log entry without opening the agreement. Metadata only -- never
+   * a protected, linkage-field, or payload value.
+   */
+  purpose: string;
   /** Date after which the exchange will be refused (ISO 8601, YYYY-MM-DD). */
   expirationDate: string;
 }
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   reference: z.string().min(1),
+  purpose: z.string().min(1),
   expirationDate: z.iso.date(),
 });
 
@@ -382,8 +394,9 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  *   matched to the same output.
  * - `linkageFields` — mandatory.
  * - `linkageKeys` — mandatory.
- * - `legalAgreement` — mandatory if present. Exchange fails if `expirationDate`
- *   has passed.
+ * - `legalAgreement` — mandatory if present. The `reference`, `purpose`, and
+ *   `expirationDate` are cross-checked; any mismatch, or an `expirationDate`
+ *   that has passed, cancels the exchange.
  * - `payload` — mandatory if present.
  *
  * Constraints:
@@ -670,6 +683,13 @@ export function validateCompatibility(
           "legal agreement reference mismatch: local is " +
             `"${local.legalAgreement.reference}", partner is ` +
             `"${partner.legalAgreement.reference}"`,
+        );
+      }
+      if (local.legalAgreement.purpose !== partner.legalAgreement.purpose) {
+        errors.push(
+          "legal agreement purpose mismatch: local is " +
+            `"${local.legalAgreement.purpose}", partner is ` +
+            `"${partner.legalAgreement.purpose}"`,
         );
       }
       if (

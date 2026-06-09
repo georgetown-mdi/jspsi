@@ -2,7 +2,7 @@
   "vectors": [
     {
       "name": "both-output-with-payloads",
-      "description": "Both parties learn the result size and hold the association table; each sends and receives one payload column under a named data-sharing agreement. Exercises the full governance block -- a legal-agreement reference and expiration, payload columns with data-dictionary descriptions sent and received, the psi algorithm, and the matching basis (the ssn linkage field, recorded as name + type) -- alongside the commitments. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
+      "description": "Both parties learn the result size and hold the association table; each sends and receives one payload column under a named data-sharing agreement. Exercises the full governance block -- a legal-agreement reference, purpose, and expiration, payload columns with data-dictionary descriptions sent and received, the psi algorithm, and the matching basis (the ssn linkage field, recorded as name + type) -- alongside the commitments. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -46,6 +46,7 @@
           },
           "legalAgreement": {
             "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
             "expirationDate": "2030-06-30"
           }
         },
@@ -91,6 +92,7 @@
           },
           "legalAgreement": {
             "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
             "expirationDate": "2030-06-30"
           }
         },
@@ -122,13 +124,14 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "kyySmQiKi0C50YY3GtUs3NLmNJBWNYt8_2bYG2-t_a0",
+        "termsHash": "Mr4_C8Ph6lEic9fzLvBPbCDbDr8FZo2-9BtAA5my_DE",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
           "algorithm": "psi",
           "legalAgreement": {
             "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
             "expirationDate": "2030-06-30"
           },
           "matchingBasis": [
@@ -619,7 +622,7 @@
     },
     {
       "name": "count-only-psi-c",
-      "description": "A count-only psi-c exchange: both parties learn only the intersection size, so the result size is recorded but no association table is held or committed and no payload is exchanged. Exercises the psi-c algorithm (only a count was disclosed, not matched identifiers), a legal-agreement reference, empty sent/received payload lists, and a multi-field matching basis recorded as name + type and sorted by name. The terms also declare an unused linkage field (emailAddress) that no linkage key references; it is excluded from the matching basis, which therefore covers only the fields the keys actually matched on (dob, last, ssn4).",
+      "description": "A count-only psi-c exchange: both parties learn only the intersection size, so the result size is recorded but no association table is held or committed and no payload is exchanged. Exercises the psi-c algorithm (only a count was disclosed, not matched identifiers), a legal-agreement reference and purpose, empty sent/received payload lists, and a multi-field matching basis recorded as name + type and sorted by name. The terms also declare an unused linkage field (emailAddress) that no linkage key references; it is excluded from the matching basis, which therefore covers only the fields the keys actually matched on (dob, last, ssn4).",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -667,6 +670,7 @@
           ],
           "legalAgreement": {
             "reference": "DUA-2026-0007",
+            "purpose": "Audit and evaluation of the State tutoring program",
             "expirationDate": "2031-01-15"
           }
         },
@@ -716,6 +720,7 @@
           ],
           "legalAgreement": {
             "reference": "DUA-2026-0007",
+            "purpose": "Audit and evaluation of the State tutoring program",
             "expirationDate": "2031-01-15"
           }
         },
@@ -742,13 +747,197 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "wlDZBkvY09045WOKcS9dwjeg81ILzSqbhsumptWJUq8",
+        "termsHash": "Rt3EdyPsOqDtMWobk6yrB01Xj2-8BFPkj4YTp3erQJk",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
           "algorithm": "psi-c",
           "legalAgreement": {
             "reference": "DUA-2026-0007",
+            "purpose": "Audit and evaluation of the State tutoring program",
+            "expirationDate": "2031-01-15"
+          },
+          "matchingBasis": [
+            {
+              "name": "dob",
+              "type": "dateOfBirth"
+            },
+            {
+              "name": "last",
+              "type": "lastName"
+            },
+            {
+              "name": "ssn4",
+              "type": "ssn4"
+            }
+          ],
+          "payloadSent": [],
+          "payloadReceived": []
+        },
+        "resultSize": 3,
+        "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
+        "commitments": {
+          "localPayloadSent": "xmH11zKpm1R3YGUsm9InrUnigoDTx3kXj6kuzpwPzh8",
+          "partnerPayloadReceived": "z_kr5kL0Oi3c1JTwISsJTOKResSXshhimuZ2t_7rsxg"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "count-only-unicode-purpose",
+      "description": "psi-c with a non-ASCII legal-agreement purpose (accented Latin, em dash, Cyrillic); pins that a purpose carrying non-ASCII flows through the record and termsHash byte-identically across the Node and browser builds.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi-c",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "last",
+              "type": "lastName"
+            },
+            {
+              "name": "dob",
+              "type": "dateOfBirth"
+            },
+            {
+              "name": "ssn4",
+              "type": "ssn4"
+            },
+            {
+              "name": "email",
+              "type": "emailAddress"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB_SSN4",
+              "elements": [
+                {
+                  "field": "last"
+                },
+                {
+                  "field": "dob"
+                },
+                {
+                  "field": "ssn4"
+                }
+              ]
+            }
+          ],
+          "legalAgreement": {
+            "reference": "DUA-2026-0042",
+            "purpose": "Évaluation du programme — оценка",
+            "expirationDate": "2031-01-15"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi-c",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "last",
+              "type": "lastName"
+            },
+            {
+              "name": "dob",
+              "type": "dateOfBirth"
+            },
+            {
+              "name": "ssn4",
+              "type": "ssn4"
+            },
+            {
+              "name": "email",
+              "type": "emailAddress"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB_SSN4",
+              "elements": [
+                {
+                  "field": "last"
+                },
+                {
+                  "field": "dob"
+                },
+                {
+                  "field": "ssn4"
+                }
+              ]
+            }
+          ],
+          "legalAgreement": {
+            "reference": "DUA-2026-0042",
+            "purpose": "Évaluation du programme — оценка",
+            "expirationDate": "2031-01-15"
+          }
+        },
+        "resultSize": 3,
+        "localPayloadSent": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "partnerPayloadReceived": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
+        "salts": {
+          "localPayloadSent": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+          "partnerPayloadReceived": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "w-H2Ogdyts874nfndU6DT49Hrw0gnObMyZH5VfgHTyU",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi-c",
+          "legalAgreement": {
+            "reference": "DUA-2026-0042",
+            "purpose": "Évaluation du programme — оценка",
             "expirationDate": "2031-01-15"
           },
           "matchingBasis": [

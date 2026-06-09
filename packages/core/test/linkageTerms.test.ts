@@ -67,6 +67,7 @@ test("parses a complete valid set of terms", () => {
     },
     legalAgreement: {
       reference: "MOU-2025-0042",
+      purpose: "Audit and evaluation of the State tutoring program",
       expirationDate: "2027-12-31",
     },
   });
@@ -75,6 +76,9 @@ test("parses a complete valid set of terms", () => {
   expect(result.linkageFields).toHaveLength(4);
   expect(result.linkageKeys).toHaveLength(2);
   expect(result.legalAgreement?.reference).toBe("MOU-2025-0042");
+  expect(result.legalAgreement?.purpose).toBe(
+    "Audit and evaluation of the State tutoring program",
+  );
   expect(result.payload?.send).toHaveLength(1);
 });
 
@@ -306,6 +310,7 @@ test("parses snake_case keys from disk", () => {
     ],
     legal_agreement: {
       reference: "MOU-2025-0001",
+      purpose: "Care coordination for co-enrolled patients",
       expiration_date: "2027-01-01",
     },
   });
@@ -530,7 +535,11 @@ test("legal agreement present on one side only is an error", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      legalAgreement: { reference: "MOU-001", expirationDate: "2030-01-01" },
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2030-01-01",
+      },
     },
     termsB,
   );
@@ -541,11 +550,19 @@ test("mismatched legal agreement reference is an error", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      legalAgreement: { reference: "MOU-001", expirationDate: "2030-01-01" },
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2030-01-01",
+      },
     },
     {
       ...termsB,
-      legalAgreement: { reference: "MOU-002", expirationDate: "2030-01-01" },
+      legalAgreement: {
+        reference: "MOU-002",
+        purpose: "Care coordination",
+        expirationDate: "2030-01-01",
+      },
     },
   );
   expect(
@@ -553,15 +570,80 @@ test("mismatched legal agreement reference is an error", () => {
   ).toBe(true);
 });
 
+test("mismatched legal agreement purpose is an error", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2030-01-01",
+      },
+    },
+    {
+      ...termsB,
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Program audit and evaluation",
+        expirationDate: "2030-01-01",
+      },
+    },
+  );
+  expect(
+    errors.some((e) => e.includes("legal agreement purpose mismatch")),
+  ).toBe(true);
+});
+
+test("legal agreement purpose differing only by Unicode normalization is a mismatch", () => {
+  // purpose is compared byte-for-byte, so the same text in different Unicode
+  // normalization forms (NFC vs NFD) does not match. This pins the byte-exact
+  // semantics as a guardrail: a later .normalize() or localeCompare would
+  // silently weaken the cross-party check (and split termsHash between the
+  // parties, since purpose feeds the canonical encoding the hash covers).
+  const nfc = "Care coordination caf\u00e9"; // NFC: e-acute, one code point
+  const nfd = "Care coordination cafe\u0301"; // NFD: e + combining acute
+  expect(nfc).not.toBe(nfd); // distinct bytes...
+  expect(nfc.normalize("NFC")).toBe(nfd.normalize("NFC")); // ...but the same text
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: nfc,
+        expirationDate: "2030-01-01",
+      },
+    },
+    {
+      ...termsB,
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: nfd,
+        expirationDate: "2030-01-01",
+      },
+    },
+  );
+  expect(
+    errors.some((e) => e.includes("legal agreement purpose mismatch")),
+  ).toBe(true);
+});
+
 test("mismatched legal agreement expiration date is an error", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      legalAgreement: { reference: "MOU-001", expirationDate: "2030-01-01" },
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2030-01-01",
+      },
     },
     {
       ...termsB,
-      legalAgreement: { reference: "MOU-001", expirationDate: "2031-06-30" },
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2031-06-30",
+      },
     },
   );
   expect(
@@ -573,11 +655,19 @@ test("expired legal agreement is an error", () => {
   const { errors } = validateCompatibility(
     {
       ...termsA,
-      legalAgreement: { reference: "MOU-001", expirationDate: "2020-01-01" },
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2020-01-01",
+      },
     },
     {
       ...termsB,
-      legalAgreement: { reference: "MOU-001", expirationDate: "2020-01-01" },
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: "Care coordination",
+        expirationDate: "2020-01-01",
+      },
     },
   );
   expect(errors.some((e) => e.includes("expired"))).toBe(true);
