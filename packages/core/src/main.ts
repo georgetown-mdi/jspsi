@@ -41,3 +41,5 @@ export { authenticateConnection, deriveAeadKey, AEAD_CONTEXTS } from "./auth";
 export type { AuthResult, AeadContext } from "./auth";
 export { runSpake2 } from "./pake";
 export type { Spake2Result } from "./pake";
+export { runKex } from "./kex";
+export type { KexResult } from "./kex";

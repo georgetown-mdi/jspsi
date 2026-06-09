@@ -1,0 +1,68 @@
+{
+  "description": "Known-answer vector for the psilink-kex-v1 X25519 authenticated key exchange (Noise NNpsk0 over X25519 + explicit role-asymmetric key confirmation). Fixes the pre-shared secret and both ephemeral X25519 private keys, and records the derived session key and both confirmation tags. computeKexKeys in packages/core/src/kex.ts reproduces session_key, initiator_confirm, and responder_confirm from these inputs; kex.test.ts checks it. The key-schedule mix chain is faithful Noise NNpsk0 (PSK mode: each e token is MixHash + MixKey), but the overall handshake is pinned by this file and is NOT wire-compatible with generic Noise: the protocol name differs (so the initial h differs) and, instead of Noise Split(), the session key uses a custom KDF over ck||h with an added explicit confirmation round. So no end-to-end Noise vector corresponds. What does correspond is checked separately: the X25519 DH against RFC 7748 section 6.1 and the Noise-style chaining HKDF against RFC 5869 test case 3 (see external_anchors and kex.test.ts).",
+  "construction": {
+    "pattern": "Noise NNpsk0 over X25519",
+    "protocolName": "psilink-kex-v1:NNpsk0_25519_SHA256",
+    "hash": "SHA-256",
+    "dh": "X25519 (RFC 7748)",
+    "kdf": "HKDF-SHA-256",
+    "sessionLabel": "psilink-kex-v1:session",
+    "confirmKeyLabel": "psilink-kex-v1:confirm",
+    "initiatorConfirmLabel": "psilink-kex-v1:initiator-confirm",
+    "responderConfirmLabel": "psilink-kex-v1:responder-confirm",
+    "note": "h0 = SHA-256(protocolName); ck0 = h0. Tokens (PSK mode -- each e is MixHash then MixKey): MixHash(''), MixKeyAndHash(psk), MixHash(eInitiatorPub), MixKey(eInitiatorPub), MixHash(eResponderPub), MixKey(eResponderPub), MixKey(dh). sessionKey = HKDF(ck||h, sessionLabel, 32); confirmKey = HKDF(ck, confirmKeyLabel, 32); confirm tags = HMAC(confirmKey, label||h)."
+  },
+  "inputs": {
+    "pskHex": "4242424242424242424242424242424242424242424242424242424242424242",
+    "initiatorEphemeralPrivateHex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "responderEphemeralPrivateHex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0"
+  },
+  "derived": {
+    "initiatorEphemeralPublicHex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
+    "responderEphemeralPublicHex": "3ebcb692149344dc54e58160cf90bed9eea1dd14e81c8e91de557af7d7afd915",
+    "dhSharedSecretHex": "cef531834c2843a22541cc4a0f40492e7b0c34baea021fbf7d1caab2f35a4263",
+    "chainingKeyHex": "18911d60ccdf8733c0e5fe4a6782cb002fd19092d47785d333008e6f7ac1e2eb",
+    "handshakeHashHex": "5fc091775c63def2e4cc0b2b71398a702e6c90868d56b608fb743614f72e848f"
+  },
+  "outputs": {
+    "sessionKeyHex": "9af470783e66655dae235b704dfc58e3161f30b66e8e4c2217caac9fe934a1c5",
+    "confirmKeyHex": "bd067ed919a6037a66ffafdbd5db2a8ca49e82777064fbadc58cc96e6b4da7a6",
+    "initiatorConfirmHex": "c9d50a45c97c0647a956013e971f93da86fc3952e786e9529d4b9aec190c5a21",
+    "responderConfirmHex": "5c725e9d0fb5bb33eea341f6373bb4e878242e5c5ba7c847539187f68f63e89f"
+  },
+  "wire": {
+    "note": "Exactly the base64url fields runKex puts on the wire.",
+    "msg1": {
+      "kexMsg": "1",
+      "e": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw"
+    },
+    "msg2": {
+      "kexMsg": "2",
+      "e": "Pry2khSTRNxU5YFgz5C-2e6h3RToHI6R3lV699ev2RU",
+      "confirm": "XHJenQ-1uzPuo0H2Nzu06HgkLlxbp8hHU5GH9o9j6J8"
+    },
+    "msg3": {
+      "kexMsg": "3",
+      "confirm": "ydUKRcl8BkepVgE-lx-T2ob8OVLnhulSnUua7BkMWiE"
+    }
+  },
+  "externalAnchors": {
+    "note": "The externally-published references the handshake core corresponds to. Verified in this generator and re-verified in kex.test.ts.",
+    "rfc7748Section61": {
+      "aPriv": "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+      "aPub": "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
+      "bPriv": "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb",
+      "bPub": "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+      "shared": "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+    },
+    "rfc5869TestCase3": {
+      "hash": "SHA-256",
+      "ikmHex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "saltHex": "",
+      "infoHex": "",
+      "length": 42,
+      "okmHex": "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8",
+      "note": "noiseHkdf(ck = 32 zero bytes, ikm, 2) truncated to 42 bytes equals this OKM, anchoring the Noise chaining HKDF to standard HKDF."
+    }
+  }
+}
