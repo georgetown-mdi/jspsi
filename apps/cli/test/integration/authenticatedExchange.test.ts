@@ -3,7 +3,14 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "vitest";
 import { prepareForExchange, SHARED_SECRET_REGEX } from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
 
@@ -232,52 +239,73 @@ test("filedrop: authenticated recurring exchange matches the unauthenticated PSI
 // compose.yaml mounts apps/cli/test/container/sftp/srv/ as /home/{user}/psi, so
 // srv/authexchange is served at /psi/authexchange over SFTP. Both parties are
 // SFTP clients of the same path -- the realistic recurring-exchange topology.
-const SFTP_LOCAL_DIRECTORY = "test/container/sftp/srv/authexchange";
-const SFTP_PATH = "/psi/authexchange";
+//
+// Each phase (baseline -> run1 -> run2) runs in its own subdir under this root,
+// derived from its run tag, so the hello/lock rendezvous namespace is never
+// shared across phases: both parties within a phase share a subdir (so they
+// rendezvous), and distinct phases get distinct subdirs (so they cannot
+// cross-contaminate). Isolation is therefore structural and does not depend on
+// deleting files between phases. The root is resolved to an absolute path so the
+// test does not depend on vitest's cwd being apps/cli (mirrors
+// mixedConnection.test.ts), and stays distinct from the sibling integration
+// files' server subdirs (sftpConnection -> sftp, mixedConnection -> mixed).
+const SFTP_LOCAL_ROOT = path.resolve("test/container/sftp/srv/authexchange");
+const SFTP_PATH_ROOT = "/psi/authexchange";
 
-async function cleanSftpDir() {
-  await fsp.mkdir(SFTP_LOCAL_DIRECTORY, { recursive: true });
-  for (const file of await fsp.readdir(SFTP_LOCAL_DIRECTORY)) {
-    try {
-      await fsp.unlink(path.join(SFTP_LOCAL_DIRECTORY, file));
-    } catch {
-      // ignore
-    }
-  }
+// A config factory bound to a per-phase server subdir. Creates the host
+// directory the container serves so the SFTP path exists before either party
+// connects (the connection does not create remote directories).
+async function sftpForPhase(tag: string): Promise<ConfigFactory> {
+  await fsp.mkdir(path.join(SFTP_LOCAL_ROOT, tag), { recursive: true });
+  const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
+  return (auth) => ({
+    channel: "sftp",
+    server: {
+      host: "localhost",
+      port: SFTP_PORT,
+      username: "usera",
+      password: "usera",
+      path: serverPath,
+    },
+    options: { pollIntervalMs: 50 },
+    authentication: auth,
+  });
 }
 
-const sftp: ConfigFactory = (auth) => ({
-  channel: "sftp",
-  server: {
-    host: "localhost",
-    port: SFTP_PORT,
-    username: "usera",
-    password: "usera",
-    path: SFTP_PATH,
-  },
-  options: { pollIntervalMs: 50 },
-  authentication: auth,
+// Start each run from a clean root so stale files from a previously crashed run
+// cannot leak into a phase subdir; within a run, isolation is the per-phase
+// subdir, not this wipe. afterAll leaves the mounted dir tidy.
+beforeAll(async () => {
+  await fsp.rm(SFTP_LOCAL_ROOT, { recursive: true, force: true });
+  await fsp.mkdir(SFTP_LOCAL_ROOT, { recursive: true });
 });
 
-beforeAll(cleanSftpDir);
+afterAll(async () => {
+  await fsp.rm(SFTP_LOCAL_ROOT, { recursive: true, force: true });
+});
 
 test("sftp: authenticated recurring exchange over the real server matches the unauthenticated PSI result and rotates the secret", async () => {
-  const baseline = await runBaseline(work, sftp);
+  const baseline = await runBaseline(work, await sftpForPhase("baseline"));
   expect(baseline.trim().split("\n").length).toBe(1 + RECEIVER_ROWS.length);
 
-  await cleanSftpDir();
-
-  const run1 = await runAuthenticatedPair(work, "sftp1", sftp, INITIAL_SECRET);
+  const run1 = await runAuthenticatedPair(
+    work,
+    "sftp1",
+    await sftpForPhase("sftp1"),
+    INITIAL_SECRET,
+  );
   expect(run1.receiverOut).toBe(baseline);
 
-  await cleanSftpDir();
-
   // Recurring: the rotated secret from run 1 drives a second authenticated
-  // exchange over the real server, which must still authenticate and yield the
-  // same PSI result while rotating again to a fresh value.
-  const run2 = await runAuthenticatedPair(work, "sftp2", sftp, run1.rotated);
+  // exchange over the real server in its own subdir, which must still
+  // authenticate and yield the same PSI result while rotating again to a fresh
+  // value.
+  const run2 = await runAuthenticatedPair(
+    work,
+    "sftp2",
+    await sftpForPhase("sftp2"),
+    run1.rotated,
+  );
   expect(run2.receiverOut).toBe(baseline);
   expect(run2.rotated).not.toBe(run1.rotated);
-
-  await cleanSftpDir();
 }, 90_000);
