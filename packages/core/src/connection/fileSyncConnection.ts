@@ -153,12 +153,16 @@ const JOINING_SUFFIX = "-joining.json";
 // joiner fails mid-arrival, which a correct peer never causes.
 const DEFAULT_JOINER_RECOVERY_MS = 1000 * 30;
 
-// Reads the hello control file through the I5 partial-sync gate. Retries on any
-// get() failure or JSON parse failure (indicating the sync tool has not
-// finished writing the file) until timeToLive expires, then throws a transport
-// Error. A fully-synced body that parses but fails the envelope schema is a
-// terminal UsageError (protocol mismatch, not a transient sync gap). Peer-id
-// recovery is always filename-based; this function validates the body only.
+// Reads the hello control file through the I5 partial-sync gate. Retries on a
+// transient get() failure or a JSON parse failure (indicating the sync tool has
+// not finished writing the file) until timeToLive expires, then throws a
+// transport Error. A typed UsageError from get() -- an over-cap body
+// (FrameSizeExceededError) or a stalled read (TransportOperationStalledError) --
+// is terminal, as is a fully-synced body that parses but fails the envelope
+// schema (protocol mismatch, not a transient sync gap): re-reading cannot fix
+// any of these, and retrying would let a hostile server hold the gate open until
+// the deadline. Peer-id recovery is always filename-based; this function
+// validates the body only.
 //
 // The hello is the only control file with a body, so the gate now reads only it
 // (the schema is HelloEnvelopeSchema at every call site). The acknowledgment
@@ -184,12 +188,16 @@ async function readControlFileWithGate(
         maxBytes: MAX_FRAME_SIZE_BYTES,
       });
     } catch (err) {
-      // An over-cap control file is terminal, not a partial-sync retry: a
-      // hostile server could otherwise hold the gate open by serving an
-      // oversized hello every cycle until the deadline. Rethrow so it
-      // propagates out of synchronize() as the typed, exit-64 failure rather
-      // than being swallowed and retried.
-      if (err instanceof FrameSizeExceededError) throw err;
+      // A typed UsageError from get() is terminal, not a partial-sync retry: a
+      // hostile server could otherwise hold the gate open every cycle until the
+      // deadline -- by serving an oversized hello (FrameSizeExceededError) or by
+      // withholding the transfer so each read stalls
+      // (TransportOperationStalledError). Both re-incur their cost on every pass,
+      // so rethrow any UsageError to propagate out of synchronize() as the typed,
+      // exit-64 failure rather than being swallowed and retried. (The
+      // malformed-payload UsageError thrown below is terminal for the same
+      // reason.)
+      if (err instanceof UsageError) throw err;
       // File may not be readable yet (TOCTOU or partial sync); retry.
       await cancellableDelay(pollingFrequency, signal);
       continue;

@@ -21,6 +21,7 @@ import {
   BilateralModeMismatchError,
   ConnectionClosedError,
   FrameSizeExceededError,
+  TransportOperationStalledError,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { withCapturedLogs } from "../src/testing";
@@ -994,6 +995,62 @@ test("synchronize() surfaces an over-cap peer hello as a terminal FrameSizeExcee
 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(
     FrameSizeExceededError,
+  );
+  // Terminal: read once and propagated, not retried until the TTL.
+  expect(peerHelloReads).toBe(1);
+});
+
+test("synchronize() surfaces a stalled peer-hello read as a terminal TransportOperationStalledError", async () => {
+  // Liveness sibling of the over-cap case above. The rendezvous gate
+  // (readControlFileWithGate) must treat a stalled hello read as terminal
+  // rather than retrying it: a hostile server that withholds the transfer makes
+  // each get() reject with the typed liveness error, and retrying at the polling
+  // cadence would loop back into the stall every pass until the hour-long peer
+  // TTL instead of failing fast in seconds. TransportOperationStalledError is a
+  // UsageError, so the gate's catch rethrows it exactly as it does the over-cap
+  // FrameSizeExceededError.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const peerHelloPath = `${conn.path}/${peerHelloName}`;
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial check: directory is clean
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  // The peer hello is present in the listing, but the server withholds the
+  // transfer so the adapter's liveness bound rejects the read. Count reads to
+  // prove the gate does not retry at the polling cadence.
+  let peerHelloReads = 0;
+  const originalGet = client.get;
+  client.get = async (path: string) => {
+    if (path === peerHelloPath) {
+      peerHelloReads++;
+      throw new TransportOperationStalledError(
+        `SFTP file read of ${path} stalled: received no data for 60000 ms ` +
+          `(the server withheld the transfer); refusing to wait on the server ` +
+          `further`,
+      );
+    }
+    return originalGet(path);
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(
+    TransportOperationStalledError,
   );
   // Terminal: read once and propagated, not retried until the TTL.
   expect(peerHelloReads).toBe(1);
