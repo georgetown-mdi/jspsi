@@ -496,6 +496,29 @@ test("diffLinkageTerms: a sub-field difference under matching key names renders 
   expect(keyConflict?.incoming).toContain("_x");
 });
 
+test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // A transform param outside the JSON-safe integer range survives parsing
+  // (params is `z.unknown()`) but canonicalString rejects it. Both sides carry
+  // the SAME value, so the terms are identical and must reconcile cleanly: the
+  // canonical throw must not escape and abort two identical configs.
+  existing.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { big: 1e20 } },
+  ];
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { big: 1e20 } },
+  ];
+  let result!: ReturnType<typeof diffLinkageTerms>;
+  expect(() => {
+    result = diffLinkageTerms(existing, incoming);
+  }).not.toThrow();
+  // No hard conflict (so the config is reused), with a warning that the field
+  // could not be compared here -- the exchange re-checks compatibility later.
+  expect(result.conflicts).toEqual([]);
+  expect(result.warnings.some((w) => w.includes("JSON-safe range"))).toBe(true);
+});
+
 test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));

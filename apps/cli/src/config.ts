@@ -6,6 +6,7 @@ import type {
 } from "@psilink/core";
 import {
   canonicalString,
+  CanonicalEncodingError,
   OPAQUE_VALUE_KEYS,
   safeParseFileSyncOptions,
   UsageError,
@@ -294,6 +295,36 @@ export function diffLinkageTerms(
     conflicts.push({ field, existing: a, incoming: b });
   };
 
+  // canonicalString rejects values it cannot encode -- e.g. an integer outside
+  // the JSON-safe range in a transform param, which the `z.unknown()` params
+  // record lets through. Wrap the canonical comparison (mirroring core's
+  // validateCompatibility, which wraps the same primitive) so such a value does
+  // not abort the reconcile with a raw encoding error -- which would otherwise
+  // reject even two IDENTICAL configs. When a side cannot be encoded the equality
+  // cannot be decided here, so warn and do not treat it as a conflict: the
+  // cross-party validateCompatibility re-checks compatibility at exchange setup
+  // and surfaces an un-encodable value as a hard error there, so reuse stays
+  // backstopped.
+  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean => {
+    let ca: string;
+    let cb: string;
+    try {
+      ca = nfcCanonical(a);
+      cb = nfcCanonical(b);
+    } catch (err) {
+      if (err instanceof CanonicalEncodingError) {
+        warnings.push(
+          `the ${label} could not be compared against the configuration ` +
+            "because a value is outside the JSON-safe range; verify it manually " +
+            "(the exchange re-checks compatibility before running)",
+        );
+        return false;
+      }
+      throw err;
+    }
+    return ca !== cb;
+  };
+
   // version and algorithm are compared by raw equality rather than the
   // nfcCanonical fold used for the user-authored name fields below. Both are
   // schema-constrained to ASCII -- version to a semver string (/^\d+\.\d+\.\d+$/)
@@ -321,13 +352,13 @@ export function diffLinkageTerms(
   };
   const existingFields = [...existing.linkageFields].sort(byName);
   const incomingFields = [...incoming.linkageFields].sort(byName);
-  if (nfcCanonical(existingFields) !== nfcCanonical(incomingFields)) {
+  if (canonicalDiffers(existingFields, incomingFields, "linkage fields")) {
     const r = renderStructural(existingFields, incomingFields);
     add("linkage_fields", r.existing, r.incoming);
   }
 
   if (
-    nfcCanonical(existing.linkageKeys) !== nfcCanonical(incoming.linkageKeys)
+    canonicalDiffers(existing.linkageKeys, incoming.linkageKeys, "linkage keys")
   ) {
     const r = renderStructural(existing.linkageKeys, incoming.linkageKeys);
     add("linkage_keys", r.existing, r.incoming);
@@ -338,8 +369,11 @@ export function diffLinkageTerms(
       ? RECONCILE_UNSET
       : `${la.reference} (expires ${la.expirationDate})`;
   if (
-    nfcCanonical(existing.legalAgreement ?? null) !==
-    nfcCanonical(incoming.legalAgreement ?? null)
+    canonicalDiffers(
+      existing.legalAgreement ?? null,
+      incoming.legalAgreement ?? null,
+      "legal agreement",
+    )
   )
     add(
       "legal_agreement",
@@ -352,8 +386,11 @@ export function diffLinkageTerms(
       ? RECONCILE_UNSET
       : `send=${renderNames(p.send ?? [])} receive=${renderNames(p.receive ?? [])}`;
   if (
-    nfcCanonical(existing.payload ?? null) !==
-    nfcCanonical(incoming.payload ?? null)
+    canonicalDiffers(
+      existing.payload ?? null,
+      incoming.payload ?? null,
+      "payload",
+    )
   ) {
     const r = disambiguate(
       renderPayload(existing.payload),

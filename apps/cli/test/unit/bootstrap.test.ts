@@ -968,3 +968,33 @@ test("diffConnectionAgainstTarget: a filedrop trailing-slash-only difference is 
   const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
 });
+
+test("diffConnectionAgainstTarget: a filedrop path differing only by multiple trailing slashes is not a conflict", () => {
+  // FileSyncConnection.open strips ALL trailing slashes from a filedrop path, so
+  // "/drop//" and "/drop" are the same drop -- the diff must not over-abort.
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share//",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a filedrop path differing only by backslashes is not a conflict", () => {
+  // FileSyncConnection.open folds backslashes to forward slashes on a filedrop
+  // path, so "C:\\drop" and "C:/drop" are the same drop to the live connection.
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "C:\\share\\drop",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "C:/share/drop",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+});

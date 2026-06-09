@@ -177,16 +177,34 @@ export function connectionFromURL(
 const DEFAULT_SFTP_PORT = 22;
 
 // Two hosts are the same endpoint regardless of case (DNS is case-insensitive),
-// and FileSyncConnection strips a single trailing slash from the remote path
-// before use, so the reconcile compares hosts/paths the same way to avoid
-// aborting on a difference the live connection would not see.
+// so compare them case-folded. Paths are compared the way the live connection
+// will treat them, so the reconcile does not abort on a difference the
+// connection would not see -- but the two channels normalize differently, so
+// each has its own comparator. FileSyncConnection.open strips at most one
+// trailing slash from an sftp remote path, while a filedrop path additionally
+// has backslashes folded to forward slashes and ALL trailing slashes stripped.
 function hostsEqual(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
-function pathsEqual(a: string | undefined, b: string | undefined): boolean {
+function sftpPathsEqual(a: string | undefined, b: string | undefined): boolean {
   const strip = (p: string | undefined): string | undefined =>
     p !== undefined && p.endsWith("/") ? p.slice(0, -1) : p;
   return strip(a) === strip(b);
+}
+function filedropPathsEqual(
+  a: string | undefined,
+  b: string | undefined,
+): boolean {
+  // Mirror FileSyncConnection.open's filedrop normalization: fold backslashes to
+  // forward slashes (so a Windows "C:\drop" matches "C:/drop"), then strip every
+  // trailing slash (so "/drop//" matches "/drop"). The live connection then
+  // restores a root-like path (a drive root, or "/" for an emptied path), but
+  // that is a deterministic function of the stripped form, so equal stripped
+  // forms always map to equal live paths -- the equality predicate needs only
+  // the strip.
+  const norm = (p: string | undefined): string | undefined =>
+    p === undefined ? undefined : p.replace(/\\/g, "/").replace(/\/+$/, "");
+  return norm(a) === norm(b);
 }
 
 /**
@@ -248,7 +266,7 @@ export function diffConnectionAgainstTarget(
         existing: have.host,
         incoming: want.host,
       });
-    if (want.path !== undefined && !pathsEqual(have.path, want.path))
+    if (want.path !== undefined && !sftpPathsEqual(have.path, want.path))
       conflicts.push({
         field: "connection.server.path",
         existing: have.path ?? RECONCILE_UNSET,
@@ -275,7 +293,7 @@ export function diffConnectionAgainstTarget(
   } else if (target.channel === "filedrop") {
     // filedrop's only locator is the path -> conflict. No port/credentials apply.
     const havePath = (existing as FileDropConnectionConfig).path;
-    if (!pathsEqual(havePath, target.path))
+    if (!filedropPathsEqual(havePath, target.path))
       conflicts.push({
         field: "connection.path",
         existing: havePath ?? RECONCILE_UNSET,
@@ -586,6 +604,15 @@ export async function runOnlineBootstrap(params: {
           // with the invitation and URL; keep it untouched. The rotated key is
           // saved by runProtocol above; nothing is written here, so
           // `configWritten` stays false (no fresh config was persisted).
+          //
+          // Unlike the offline path (provisionConfigAndKey re-gates the config's
+          // presence before writing the key) and the non-reuse branch below
+          // (which re-gates before saveConfig), there is deliberately no config
+          // re-gate here: runProtocol already rotated and saved the key before
+          // invoking this hook, so a config deleted during the handshake window
+          // is unpreventable -- a check here could only re-report the orphan, not
+          // avoid it. That window is the documented immaterial single-user TOCTOU
+          // (see assertNoProvisionConflicts), so it is left as-is.
           return;
         }
         // Re-gate immediately before writing: a config that appeared between the
