@@ -275,6 +275,16 @@ describe("records exposed", () => {
     expect(record.recordsExposed).toBe(7);
   });
 
+  test("accepts zero (a party that contributed no records)", async () => {
+    // Zero is the lower bound of the valid range: an empty input still produces
+    // a record, and its outbound exposure is honestly zero rather than absent.
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, recordsExposed: 0 },
+      fixedRandomness,
+    );
+    expect(record.recordsExposed).toBe(0);
+  });
+
   test("is recorded even when the result size is omitted (single-output side)", async () => {
     // The records-exposed count is per-direction and known from this party's own
     // input, so it is present regardless of whether this party is entitled to the
