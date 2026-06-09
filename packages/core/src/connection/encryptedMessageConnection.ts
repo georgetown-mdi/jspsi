@@ -69,25 +69,33 @@ export const IV_SEQ_OFFSET = 4;
  * object, `1` = Uint8Array) followed by the payload (UTF-8 JSON or raw bytes
  * respectively); the tag preserves the distinction between protobuf binary
  * frames and JSON control messages that the underlying transport's own
- * serialization would otherwise collapse. The sequence number is monotonically
- * increasing per sender. Any inbound message whose sequence number is not
- * strictly greater than the last accepted sequence number, or whose GCM
- * authentication tag fails, is rejected: {@link receive} rejects with a
- * {@link ConnectionError} of kind `"security"` and the wrapper is permanently
- * dead. A `"security"` failure is deliberately distinguishable from a plain
- * transport drop so a forged or replayed frame is never mistaken for an
- * ordinary disconnect.
+ * serialization would otherwise collapse. The sequence number increments by
+ * exactly one per sender. Any inbound message whose sequence number is not
+ * exactly one greater than the last accepted sequence number - whether it
+ * repeats or precedes it (replay/reorder) or skips ahead (a dropped or withheld
+ * frame) - or whose GCM authentication tag fails, is rejected: {@link receive}
+ * rejects with a {@link ConnectionError} of kind `"security"` and the wrapper is
+ * permanently dead. A `"security"` failure is deliberately distinguishable from
+ * a plain transport drop so a forged, replayed, or omitted frame is never
+ * mistaken for an ordinary disconnect.
  *
- * This layer detects replay, reordering, and tampering (a non-increasing
- * sequence number, or a failed GCM tag), but it does NOT detect dropped or
- * withheld frames: an inbound sequence number that skips ahead (a gap) is
- * accepted, and a truncated tail is indistinguishable from a clean end.
- * Completeness is delegated to the inner transport and the lockstep protocol
- * above, where a missing frame surfaces as a stalled or schema-invalid
- * exchange. End-to-end gap and truncation detection is a deferred follow-up; it
- * is blocked on the send path advancing its counter only on a fully successful
- * send, so that a legitimate sender-side gap can never be mistaken for an
- * attack (see docs/SECURITY_DESIGN.md, "Channel security").
+ * This layer detects replay, reordering, tampering (a failed GCM tag), and now
+ * mid-stream omission: a strict gap check rejects any inbound sequence number
+ * that skips ahead of the expected next value, so a dropped or withheld frame
+ * between two delivered frames is caught here as a `"security"` failure. What it
+ * still does NOT detect is a truncated tail: a stream that simply stops is
+ * indistinguishable at this layer from a clean end, because no AEAD tag can
+ * authenticate the ABSENCE of a frame. That residual is deliberately not closed
+ * with an end-of-stream marker, because the PSI protocol above is self-driven
+ * lockstep - in the common case the receiver knows from its own message script
+ * whether another frame is due, so a missing tail surfaces as a stalled
+ * `receive()` (an inactivity timeout) and a marker could only reclassify that
+ * timeout, not detect the omission any sooner. That lockstep premise is
+ * conditional, not absolute: the per-party empty-linkage-round skip in the
+ * matching loop can legitimately stop the two scripts at different points (a
+ * pre-existing protocol-loop desync, tracked separately), but a marker would
+ * not fix that either - it is a protocol-layer fault, not an absent-frame one.
+ * See docs/SECURITY_DESIGN.md, "Channel security".
  *
  * This decorator is single-consumer: it assumes at most one send() and one
  * receive() in flight at a time, matching MessageConnection's lockstep usage
@@ -231,15 +239,16 @@ export class EncryptedMessageConnection implements MessageConnection {
 
     // Build the plaintext before consuming a sequence number, so a pre-counter
     // failure (a circular-reference payload throwing in JSON.stringify, or the
-    // un-serializable guard below) does not burn a counter value. This covers
-    // only pre-counter failures: the counter still advances before the encrypt
-    // and inner.send awaits, so those failures DO leave a sender-side gap. That
-    // is safe today because any such failure latches the wrapper terminal (no
-    // later frame is sent), but it does not yet satisfy the "advance only on a
-    // fully successful send" prerequisite strict gap detection needs. The
-    // counter is advanced synchronously below so concurrent sends can never
-    // reuse a nonce; reconciling that with gap detection is part of the
-    // follow-up (see docs/SECURITY_DESIGN.md, "Channel security").
+    // un-serializable guard below) does not burn a counter value and the
+    // connection stays usable. The counter still advances synchronously below,
+    // before the encrypt and inner.send awaits, so two concurrent sends can
+    // never peek the same value and reuse an AES-GCM nonce. That synchronous
+    // advance is fully compatible with the receiver's strict gap detection: if
+    // the encrypt or inner.send then fails, the wrapper latches terminal and no
+    // later frame is ever sent, so a consumed-but-unsent counter value can only
+    // truncate the tail - it never leaves a gap between two delivered frames for
+    // the receiver to mistake for an attack (see docs/SECURITY_DESIGN.md,
+    // "Channel security").
     let plaintext: Uint8Array<ArrayBuffer>;
     if (data instanceof Uint8Array) {
       plaintext = new Uint8Array(1 + data.length) as Uint8Array<ArrayBuffer>;
@@ -415,6 +424,34 @@ export class EncryptedMessageConnection implements MessageConnection {
       );
     }
 
+    // Strict gap detection: the only acceptable next sequence number is exactly
+    // one past the last accepted. A forward jump is proof that one or more
+    // frames the sender emitted never arrived - a transport-level attacker (for
+    // SFTP, the server admin) selectively dropping or withholding frames. The
+    // replay guard above rejects seq <= recvSeq; this rejects the complementary
+    // seq > recvSeq + 1, so together they pin the inbound stream to a
+    // contiguous, strictly increasing sequence with no omissions in the middle.
+    // This never false-alarms on a legitimate sender-side gap: a send that
+    // consumes a counter value but then fails to transmit (an encrypt fault or
+    // an inner.send failure) latches the wrapper terminal, so no later frame is
+    // ever sent - a skipped value can only truncate the tail, never leave a gap
+    // between two delivered frames. Tail truncation is a separate, deferred
+    // concern (see docs/SECURITY_DESIGN.md, "Channel security").
+    if (seq > this.recvSeq + 1) {
+      throw this.fail(
+        new ConnectionError(
+          `EncryptedMessageConnection: dropped or withheld frame detected; ` +
+            `inbound sequence number skipped ahead ` +
+            `(seq=${seq}, expected=${this.recvSeq + 1})`,
+          "security",
+        ),
+      );
+    }
+
+    // This assignment must stay below the replay and gap guards above, which
+    // both compare against the pre-reservation recvSeq. Hoisting it would
+    // silence the gap guard (seq > seq + 1 is never true) and make the replay
+    // guard reject every frame.
     // Reserve the sequence number synchronously, before the await below: two
     // inbound frames delivered before the first decrypt resolves would
     // otherwise both read the same stale recvSeq and both pass the guard

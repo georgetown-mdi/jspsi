@@ -192,7 +192,7 @@ test("a payload larger than the base64 chunk size round-trips", async () => {
   expect(Array.from(got as Uint8Array)).toEqual(Array.from(payload));
 });
 
-// --- Replay / out-of-order ----------------------------------------------------
+// --- Sequence: replay / reorder / gap -----------------------------------------
 
 test("a replayed frame is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
@@ -211,6 +211,56 @@ test("an out-of-order frame (seq <= last accepted) is rejected as a security fai
   await recv.receive();
   await recv.receive();
   await expectSecurity(recv.receive(), /replay|out-of-order/i);
+});
+
+test("a forward-gap frame (seq skips ahead) is rejected as a security failure", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // The acceptance-criteria example: 0 then 5. Frame 0 is accepted, then a frame
+  // whose seq jumps past the expected next value (1) is proof that frames 1..4
+  // were dropped or withheld in transit.
+  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({ n: 0 })));
+  await peer.send(await sealRaw("initiator", 5, jsonPlaintext({ n: 5 })));
+  expect(await recv.receive()).toEqual({ n: 0 });
+  await expectSecurity(recv.receive(), /skipped ahead|dropped or withheld/i);
+});
+
+test("a withheld first frame (stream starts past seq 0) is rejected as a gap", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // recvSeq starts at -1, so the expected first seq is 0. A stream that opens at
+  // seq 1 means the very first frame was withheld; this is the gap case at the
+  // head of the stream, not a replay (seq 1 is not <= -1).
+  await peer.send(await sealRaw("initiator", 1, jsonPlaintext({ n: 1 })));
+  await expectSecurity(recv.receive(), /skipped ahead|dropped or withheld/i);
+});
+
+test("a strictly incrementing stream is accepted", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  // The real send path advances the counter by one per send; a contiguous
+  // 0,1,2,3 sequence must pass the strict gap check unchanged and deliver in
+  // order.
+  for (let i = 0; i < 4; ++i) await encA.send({ i });
+  for (let i = 0; i < 4; ++i) expect(await encB.receive()).toEqual({ i });
+});
+
+test("a detected gap latches the wrapper", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({ n: 0 })));
+  await peer.send(await sealRaw("initiator", 2, jsonPlaintext({ n: 2 })));
+  expect(await recv.receive()).toEqual({ n: 0 });
+  const first = await expectSecurity(
+    recv.receive(),
+    /skipped ahead|dropped or withheld/i,
+  );
+
+  // The gap is terminal like every other security failure: a later receive
+  // rejects with the very same latched error object, never a fresh one.
+  const onReceive = await recv.receive().then(
+    () => {
+      throw new Error("expected rejection but receive resolved");
+    },
+    (e: unknown) => e,
+  );
+  expect(onReceive).toBe(first);
 });
 
 // --- Integrity / format failures (all rejected as "security") -----------------
@@ -310,6 +360,12 @@ test("send succeeds at exactly sendSeq === MAX_SAFE_INTEGER", async () => {
   // The last sequence number usable without ambiguity; sending here must
   // succeed, guarding against a `>` -> `>=` off-by-one regression.
   (encA as unknown as { sendSeq: number }).sendSeq = Number.MAX_SAFE_INTEGER;
+  // Align the receiver's expected-next counter so the boundary frame stays
+  // contiguous: strict gap detection rejects any seq that is not exactly
+  // recvSeq + 1, so a fresh receiver (expecting 0) would otherwise reject a lone
+  // frame sealed at MAX_SAFE_INTEGER as a forward gap rather than round-trip it.
+  (encB as unknown as { recvSeq: number }).recvSeq =
+    Number.MAX_SAFE_INTEGER - 1;
   await expect(encA.send({ boundary: true })).resolves.toBeUndefined();
   expect(await encB.receive()).toEqual({ boundary: true });
 });
