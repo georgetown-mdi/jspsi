@@ -22,6 +22,7 @@ import type {
 import {
   diffLinkageTerms,
   formatReconcileDiffs,
+  type ConnectionOverrides,
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -289,14 +290,17 @@ export async function validateAccept(params: {
     const { url, input, output } = resolved;
     // Validate the URL before reading the input file, mirroring validateInvite,
     // so a bad scheme/host fails fast without first parsing the CSV.
-    const connection = connectionFromURL(url, connectionOverridesFrom(options));
-    // Reconcile a pre-existing config against the invitation AND the URL before
-    // the input is read and before any network activity, so a disagreement
-    // aborts with a diff and no acceptance is ever sent to the inviter.
+    const overrides = connectionOverridesFrom(options);
+    const connection = connectionFromURL(url, overrides);
+    // Reconcile a pre-existing config against the invitation AND the connection
+    // target (URL plus --server-* overrides) before the input is read and before
+    // any network activity, so a location disagreement aborts with a diff and no
+    // acceptance is ever sent to the inviter.
     const reuseExistingConfig = reconcileAcceptConfig({
       configPath: options.configFile,
       myTerms,
       url,
+      overrides,
       log,
     });
     const rows = await loadInputRows(input);
@@ -364,9 +368,10 @@ function reconcileAcceptConfig(params: {
   configPath: string;
   myTerms: LinkageTerms;
   url: URL | undefined;
+  overrides?: ConnectionOverrides;
   log: ReturnType<typeof getLogger>;
 }): boolean {
-  const { configPath, myTerms, url, log } = params;
+  const { configPath, myTerms, url, overrides, log } = params;
   if (detectFileConflicts([configPath]).length === 0) return false;
 
   // Reference to the source(s) compared against, woven into the messages so the
@@ -398,16 +403,32 @@ function reconcileAcceptConfig(params: {
     myTerms,
   );
   for (const w of warnings) log.warn(w);
-  const connectionDiffs =
-    url !== undefined ? diffConnectionAgainstUrl(existing.connection, url) : [];
-  const all: ReconcileDiff[] = [...conflicts, ...connectionDiffs];
 
+  const conn: { conflicts: ReconcileDiff[]; warnings: string[] } =
+    url !== undefined
+      ? diffConnectionAgainstUrl(existing.connection, url, overrides)
+      : { conflicts: [], warnings: [] };
+
+  const all: ReconcileDiff[] = [...conflicts, ...conn.conflicts];
   if (all.length > 0)
     throw new UsageError(
       `the configuration file at ${configPath} disagrees with ${against}:\n` +
         formatReconcileDiffs(all) +
         `\nResolve the differences (or pass --config-file to write elsewhere), ` +
         `then retry with ${retryWith}.`,
+    );
+
+  // A connection field that is "how you reach the same drop" (protocol, port,
+  // credentials) may differ without aborting: it applies to this exchange only,
+  // and the saved config is deliberately left unchanged (we never clobber the
+  // user's stored connection block). Surface the divergence so the user can
+  // update the config themselves if they meant it to persist.
+  if (conn.warnings.length > 0)
+    log.warn(
+      `the connection details you specified differ from the saved ` +
+        `configuration at ${configPath}; they apply to this exchange only and ` +
+        `the saved config is left unchanged:\n` +
+        conn.warnings.map((w) => `  - ${w}`).join("\n"),
     );
 
   log.info(

@@ -173,85 +173,111 @@ export function connectionFromURL(
 
 /**
  * Compare a pre-existing config's connection block against an online accept's
- * URL, returning the explicit-field disagreements that must abort the
- * acceptance. Only fields the URL states explicitly are compared (docs/CLI.md
- * "Online acceptance"): the channel (from the scheme) and, for sftp, the host
- * always; the port, path, and username/password only when the URL carries them.
- * A credential the URL omits is never a conflict -- the acceptor supplies their
- * own. The URL's percent-encoded path and userinfo are decoded before the
- * compare so an encodable character (a space, an `@`) is not flagged against a
- * config that stores the decoded value. A channel mismatch short-circuits the
- * rest, since the per-channel fields are not comparable across channels.
+ * target -- the URL plus any `--server-*` overrides -- splitting the
+ * disagreements into those that must abort the acceptance (`conflicts`) and
+ * those that only warn (`warnings`).
  *
- * Compares against the URL directly (not a {@link connectionFromURL} result):
- * that builder leaves an unspecified port/path `undefined`, which a naive
- * field-by-field diff would read as "URL requires unset" and wrongly flag
- * against a config that does set them. The URL's own `port`/`pathname` tell us
- * which fields were explicit.
+ * The split follows where vs how you reach the rendezvous. `host` and `path`
+ * identify *which* drop you are meeting at; a mismatch there is almost always a
+ * wrong-invitation or wrong-config paste, so it is a conflict and aborts before
+ * any acceptance is sent. The channel (protocol), port, and credentials are
+ * *how* you reach the same drop and are legitimately variable -- e.g. a
+ * file-sync drop reached via `file://` by one party and `sftp://` by another, an
+ * alternate SSH port or tunnel, or a different account -- so a mismatch warns
+ * and the run proceeds: the live exchange uses what was specified, and the saved
+ * config is left unchanged.
+ *
+ * Only fields the target states are compared: a port/path/credential the URL
+ * omits (and that no override supplies) is not a disagreement with whatever the
+ * config holds. For port and credentials the effective value is the `--server-*`
+ * override when given, else the URL's (the same precedence {@link
+ * connectionFromURL} applies). The URL's percent-encoded path and userinfo are
+ * decoded before the compare so an encodable character (a space, an `@`) is not
+ * flagged against a config that stores the decoded value. Credential values are
+ * never echoed in a warning -- a password or key in a log is a leak -- so those
+ * warnings report only that the value differs. A channel mismatch short-circuits
+ * the per-channel fields, which are not comparable across channels.
  *
  * @internal exported for testing
  */
 export function diffConnectionAgainstUrl(
   existing: ConnectionConfig,
   url: URL,
-): ReconcileDiff[] {
-  const diffs: ReconcileDiff[] = [];
+  overrides: ConnectionOverrides = {},
+): { conflicts: ReconcileDiff[]; warnings: string[] } {
+  const conflicts: ReconcileDiff[] = [];
+  const warnings: string[] = [];
   const channel = channelFromURL(url);
+
   if (existing.channel !== channel) {
-    diffs.push({
-      field: "connection.channel",
-      existing: existing.channel,
-      incoming: channel,
-    });
-    return diffs;
+    warnings.push(`channel: specified ${channel}, saved ${existing.channel}`);
+    return { conflicts, warnings };
   }
 
-  const cmp = (field: string, have: string | undefined, want: string): void => {
+  const conflict = (
+    field: string,
+    have: string | undefined,
+    want: string,
+  ): void => {
     if (have !== want)
-      diffs.push({ field, existing: have ?? RECONCILE_UNSET, incoming: want });
+      conflicts.push({
+        field,
+        existing: have ?? RECONCILE_UNSET,
+        incoming: want,
+      });
   };
 
   if (channel === "sftp") {
     const { server } = existing as SFTPConnectionConfig;
-    cmp("connection.server.host", server.host, url.hostname);
-    // port/path/credentials are compared only when the URL states them; an
-    // omitted field is not a disagreement with whatever the config holds.
-    if (url.port)
-      cmp("connection.server.port", server.port?.toString(), url.port);
-    // The URL parser percent-encodes the path and userinfo (a space becomes
-    // %20, an '@' becomes %40), whereas a hand-authored config stores the
-    // decoded value; decode the URL side so an encodable character is not a
-    // false conflict. (host/port carry no percent-encoding.)
+
+    // host/path -> conflict (which drop you are meeting at).
+    conflict("connection.server.host", server.host, url.hostname);
     const urlPath =
       url.pathname && url.pathname !== "/"
         ? decodeURIComponent(url.pathname)
         : undefined;
     if (urlPath !== undefined)
-      cmp("connection.server.path", server.path, urlPath);
-    if (url.username)
-      cmp(
-        "connection.server.username",
-        server.username,
-        decodeURIComponent(url.username),
-      );
-    if (url.password)
-      cmp(
-        "connection.server.password",
-        server.password,
-        decodeURIComponent(url.password),
-      );
+      conflict("connection.server.path", server.path, urlPath);
+
+    // port -> warn (how you reach the same host). Effective value: the override
+    // wins over the URL, matching connectionFromURL.
+    const port =
+      overrides.serverPort !== undefined
+        ? String(overrides.serverPort)
+        : url.port || undefined;
+    if (port !== undefined && port !== server.port?.toString())
+      warnings.push(`port: specified ${port}, saved ${server.port ?? "unset"}`);
+
+    // credentials -> warn, value never echoed.
+    const username =
+      overrides.serverUsername ??
+      (url.username ? decodeURIComponent(url.username) : undefined);
+    if (username !== undefined && username !== server.username)
+      warnings.push("username: differs from the saved value");
+    const password =
+      overrides.serverPassword ??
+      (url.password ? decodeURIComponent(url.password) : undefined);
+    if (password !== undefined && password !== server.password)
+      warnings.push("password: differs from the saved value");
+    if (
+      overrides.serverPrivateKey !== undefined &&
+      overrides.serverPrivateKey !== server.privateKey
+    )
+      warnings.push("private key: differs from the saved value");
   } else if (channel === "filedrop") {
-    cmp(
+    // filedrop's only locator is the path -> conflict. No port/credentials apply.
+    conflict(
       "connection.path",
       (existing as FileDropConnectionConfig).path,
       fileURLToPath(url),
     );
   }
-  // webrtc never reaches here on an online accept: connectionFromURL rejects a
-  // ws/wss URL before the connection is built, and a webrtc existing config
-  // against an sftp/filedrop URL is caught by the channel mismatch above.
+  // webrtc never reaches the sftp/filedrop branches on an online accept:
+  // connectionFromURL rejects a ws/wss URL before the connection is built, and a
+  // webrtc existing config against an sftp/filedrop URL warns via the channel
+  // mismatch above.
 
-  return diffs;
+  return { conflicts, warnings };
 }
 
 /**

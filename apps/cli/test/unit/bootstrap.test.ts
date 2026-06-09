@@ -645,7 +645,7 @@ test("runOnlineBootstrap re-gates the config write: a config appearing after the
 
 // --- diffConnectionAgainstUrl ------------------------------------------------
 
-test("diffConnectionAgainstUrl: an agreeing sftp config has no diffs", () => {
+test("diffConnectionAgainstUrl: an agreeing sftp config has no conflicts or warnings", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: {
@@ -656,83 +656,132 @@ test("diffConnectionAgainstUrl: an agreeing sftp config has no diffs", () => {
       password: "s3cr3t",
     },
   };
-  expect(
-    diffConnectionAgainstUrl(existing, new URL("sftp://host:2222/drop")),
-  ).toEqual([]);
+  const r = diffConnectionAgainstUrl(
+    existing,
+    new URL("sftp://host:2222/drop"),
+  );
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
 });
 
-test("diffConnectionAgainstUrl: a host mismatch is reported", () => {
+test("diffConnectionAgainstUrl: a host mismatch is a conflict (which drop)", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "other-host" },
   };
-  const diffs = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
-  expect(diffs.map((d) => d.field)).toContain("connection.server.host");
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
+  expect(r.conflicts.map((d) => d.field)).toContain("connection.server.host");
 });
 
-test("diffConnectionAgainstUrl: credentials the URL omits are not flagged", () => {
+test("diffConnectionAgainstUrl: an sftp path mismatch is a conflict (which drop)", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/old" },
+  };
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host/new"));
+  expect(r.conflicts.map((d) => d.field)).toContain("connection.server.path");
+});
+
+test("diffConnectionAgainstUrl: credentials the target omits are not flagged", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", username: "alice", password: "s3cr3t" },
   };
-  // The URL carries no userinfo; the acceptor's own stored credentials must not
-  // be treated as a disagreement.
-  expect(diffConnectionAgainstUrl(existing, new URL("sftp://host"))).toEqual(
-    [],
-  );
+  // Neither the URL nor an override carries userinfo; the acceptor's own stored
+  // credentials must not be treated as a disagreement.
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"));
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
 });
 
-test("diffConnectionAgainstUrl: a port/path the URL omits is not flagged", () => {
+test("diffConnectionAgainstUrl: a port/path the target omits is not flagged", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", port: 2222, path: "/drop" },
   };
-  expect(diffConnectionAgainstUrl(existing, new URL("sftp://host"))).toEqual(
-    [],
-  );
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"));
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
 });
 
-test("diffConnectionAgainstUrl: a port the URL states is compared", () => {
+test("diffConnectionAgainstUrl: a port the URL states warns (how you reach), not conflicts", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",
     server: { host: "host", port: 22 },
   };
-  const diffs = diffConnectionAgainstUrl(existing, new URL("sftp://host:2222"));
-  expect(diffs.map((d) => d.field)).toContain("connection.server.port");
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host:2222"));
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings.some((w) => w.includes("port"))).toBe(true);
 });
 
-test("diffConnectionAgainstUrl: credentials the URL states are compared", () => {
+test("diffConnectionAgainstUrl: a --server-port override that differs from the config warns", () => {
+  // The URL states no port; the override does. The override is part of what the
+  // user is asking for, so a divergence from the saved config must surface.
   const existing: ConnectionConfig = {
     channel: "sftp",
-    server: { host: "host", username: "bob" },
+    server: { host: "host", port: 22 },
   };
-  const diffs = diffConnectionAgainstUrl(
-    existing,
-    new URL("sftp://alice@host"),
-  );
-  expect(diffs.map((d) => d.field)).toContain("connection.server.username");
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"), {
+    serverPort: 2222,
+  });
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
 });
 
-test("diffConnectionAgainstUrl: a channel mismatch short-circuits", () => {
+test("diffConnectionAgainstUrl: a --server-port override equal to the config is silent", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"), {
+    serverPort: 2222,
+  });
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstUrl: credentials that differ warn without echoing the value", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "bob", password: "saved-secret" },
+  };
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host"), {
+    serverUsername: "alice",
+    serverPassword: "new-secret",
+  });
+  expect(r.conflicts).toEqual([]);
+  const joined = r.warnings.join(" | ");
+  expect(joined).toContain("username");
+  expect(joined).toContain("password");
+  // No credential value -- saved or specified -- is ever echoed in a warning.
+  expect(joined).not.toContain("saved-secret");
+  expect(joined).not.toContain("new-secret");
+  expect(joined).not.toContain("alice");
+});
+
+test("diffConnectionAgainstUrl: a channel mismatch warns and does not compare further (file-sync)", () => {
+  // file:// vs sftp:// is a legitimate different way of reaching the same drop;
+  // it warns and short-circuits the per-channel fields rather than aborting.
   const existing: ConnectionConfig = {
     channel: "filedrop",
     path: "/mnt/share",
   };
-  const diffs = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
-  expect(diffs).toHaveLength(1);
-  expect(diffs[0].field).toBe("connection.channel");
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toHaveLength(1);
+  expect(r.warnings[0]).toContain("channel");
 });
 
-test("diffConnectionAgainstUrl: a filedrop path mismatch is reported", () => {
+test("diffConnectionAgainstUrl: a filedrop path mismatch is a conflict", () => {
   const existing: ConnectionConfig = {
     channel: "filedrop",
     path: "/mnt/other",
   };
-  const diffs = diffConnectionAgainstUrl(
+  const r = diffConnectionAgainstUrl(
     existing,
     new URL("file:///mnt/share/drop"),
   );
-  expect(diffs.map((d) => d.field)).toContain("connection.path");
+  expect(r.conflicts.map((d) => d.field)).toContain("connection.path");
 });
 
 test("diffConnectionAgainstUrl: a percent-encoded URL path matches the decoded config path", () => {
@@ -742,9 +791,12 @@ test("diffConnectionAgainstUrl: a percent-encoded URL path matches the decoded c
   };
   // The URL parser keeps the path percent-encoded (/my%20drop); decoding it
   // before the compare keeps an encodable character from being a false conflict.
-  expect(
-    diffConnectionAgainstUrl(existing, new URL("sftp://host/my%20drop")),
-  ).toEqual([]);
+  const r = diffConnectionAgainstUrl(
+    existing,
+    new URL("sftp://host/my%20drop"),
+  );
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
 });
 
 test("diffConnectionAgainstUrl: a percent-encoded URL credential matches the decoded config value", () => {
@@ -753,7 +805,10 @@ test("diffConnectionAgainstUrl: a percent-encoded URL credential matches the dec
     server: { host: "host", username: "bob", password: "p w" },
   };
   // url.password is stored encoded (p%20w); the same decode applies to userinfo.
-  expect(
-    diffConnectionAgainstUrl(existing, new URL("sftp://bob:p%20w@host")),
-  ).toEqual([]);
+  const r = diffConnectionAgainstUrl(
+    existing,
+    new URL("sftp://bob:p%20w@host"),
+  );
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
 });

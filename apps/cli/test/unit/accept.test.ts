@@ -314,3 +314,46 @@ test("validateAccept: online aborts (no acceptance sent) when the connection blo
     fs.rmSync(options.configFile, { force: true });
   }
 });
+
+test("validateAccept: online reuse warns (does not abort) on a differing --server-port override", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-online-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  // Terms and host (the abort fields) agree, so reconcile proceeds; only the
+  // overridden port differs from the saved 22 -- a "how you reach it" detail
+  // that must warn and apply, not abort.
+  saveConfig(configFile, {
+    connection: { channel: "sftp", server: { host: "host", port: 22 } },
+    linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
+  });
+  const log = getLogger("accept-port-warn-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({ configFile, keyFile, serverPort: 2222 }),
+      log,
+    });
+    expect(ready.reuseExistingConfig).toBe(true);
+    expect(
+      warnSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes("2222"),
+      ),
+    ).toBe(true);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
