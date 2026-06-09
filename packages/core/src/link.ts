@@ -142,8 +142,12 @@ export async function linkViaPSI(
           `${j > 0 ? ` (${unidentifiedIndices!.length} unmatched)` : ""}`,
       );
 
-      if (data_j.length === 0) continue;
-
+      // Run a PSI round for every agreed key, even when data_j is empty. The
+      // key set is fixed by the linkage terms so both parties loop the same
+      // keys, but data_j is derived from local data and can be empty on only
+      // one side; skipping that round drops a send/receive the partner still
+      // performs and desyncs the lockstep exchange. The PSI library returns an
+      // empty intersection for empty input, so the round is a correct no-op.
       log.debug(
         `${participant.id}: running psi on key ${j + 1} / ${data.length}:`,
       );
