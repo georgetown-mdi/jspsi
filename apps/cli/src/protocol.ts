@@ -806,10 +806,12 @@ export async function runProtocol(
     );
     const { associationTable, partnerPayload, audit, bootstrap } =
       await runExchange(
-        // Authenticated path: `secure` is the AEAD decorator over mc, so PSI
-        // frames are encrypted on the wire. No-auth path: secure is undefined
-        // and the exchange runs over the unencrypted mc (transport security
-        // only) -- this is the zero-setup path that carries the --save bootstrap.
+        // Encrypted path: `secure` is the AEAD decorator over mc (the handshake
+        // negotiated applyEncryption), so PSI frames are encrypted on the wire.
+        // Otherwise secure is undefined and the exchange runs over the unencrypted
+        // mc (transport security only): the no-auth zero-setup path that carries
+        // the --save bootstrap, and the authenticated path where the negotiated
+        // applyEncryption is false.
         secure ?? mc,
         role,
         prepared,

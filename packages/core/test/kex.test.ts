@@ -418,14 +418,15 @@ test("both parties derive applyEncryption = own OR peer across all flag combinat
   }
 });
 
-test("flipping a party's request-encryption flag on the wire fails the handshake closed", async () => {
-  // The honest initiator requests encryption (true), but the responder sees a
-  // flag flipped to false on the wire. The responder binds the false flag into
-  // its transcript; the initiator binds its true flag. Their handshake hashes
-  // diverge, so the initiator's confirmation tag (msg3) does not verify and the
-  // responder fails closed -- a downgrade cannot proceed with a split decision.
+test("flipping the initiator's request-encryption flag on the wire fails the handshake closed (responder side)", async () => {
+  // A session both parties want encrypted (initiator and responder each request
+  // true): an attacker flips the initiator's reqEnc from true to false in
+  // transit. The responder binds the downgraded false flag into its transcript;
+  // the honest initiator binds its true flag. Their handshake hashes diverge, so
+  // the initiator's confirmation tag (msg3) does not verify and the responder
+  // fails closed -- a downgrade cannot proceed with a split decision.
   const [connA, connB] = createMessagePipe();
-  const responder = runKex(connB, "responder", PSK_A, false);
+  const responder = runKex(connB, "responder", PSK_A, true);
   responder.catch(() => {});
   const eph = x25519.keygen();
   const eInitPub = toBytes(eph.publicKey);
@@ -457,14 +458,16 @@ test("flipping a party's request-encryption flag on the wire fails the handshake
 });
 
 test("flipping the responder's request-encryption flag on the wire fails the handshake closed (initiator side)", async () => {
-  // Symmetric to the msg1 case above, on the msg2 downgrade path. The honest
-  // responder requests encryption (true) and computes its confirmation tag over
-  // a transcript binding that true flag, but the wire copy the initiator sees is
-  // flipped to false. The initiator binds the false flag into its transcript, so
-  // the responder's confirmation tag (msg2) does not verify and the initiator
-  // fails closed -- a msg2 downgrade cannot proceed with a split decision.
+  // Symmetric to the msg1 case above, on the msg2 downgrade path. A session both
+  // parties want encrypted (initiator and responder each request true): an
+  // attacker flips the responder's reqEnc from true to false in transit. The
+  // honest responder computes its confirmation tag over a transcript binding
+  // true, but the wire copy the initiator sees is flipped to false. The initiator
+  // binds the downgraded false flag, so the responder's confirmation tag (msg2)
+  // does not verify and the initiator fails closed -- a downgrade cannot proceed
+  // with a split decision.
   const [connA, connB] = createMessagePipe();
-  const initiator = runKex(connA, "initiator", PSK_A, false);
+  const initiator = runKex(connA, "initiator", PSK_A, true);
   initiator.catch(() => {});
   // The hand-rolled responder honestly requests encryption (responderReqEnc:
   // true), so keys.responderConfirm binds reqEnc: true into the transcript.
