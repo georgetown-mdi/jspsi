@@ -790,4 +790,45 @@ describe("bounded list", () => {
       vi.useRealTimers();
     }
   });
+
+  test("settles on the deadline even when the close callback is also withheld", async () => {
+    // Regression: settle() must not gate the listing's settlement on the close
+    // callback. A server can withhold close exactly as it withholds a readdir,
+    // so if settle() awaited close() the deadline would fire, clear its own
+    // timer, then hang forever inside the un-returning close -- restoring the
+    // unbounded wait the deadline exists to defeat. The listing must reject on
+    // the deadline regardless of whether close ever calls back; the handle close
+    // is attempted best-effort but does not block the rejection.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let closeCalls = 0;
+      const sftp = {
+        opendir: (_path: string, cb: (err: Error | null, h: Buffer) => void) =>
+          cb(null, Buffer.from("handle")),
+        // Withholds the readdir callback, so the deadline -- not a batch -- ends
+        // the operation.
+        readdir: () => {},
+        // Attempted, but its own callback is never delivered.
+        close: (_handle: Buffer, _cb: (err: Error | null) => void) => {
+          closeCalls += 1;
+        },
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { sftp };
+
+      const listing = adapter.list("/remote/silent-close");
+      // Attach before advancing so the mid-advance rejection is not unhandled.
+      const assertion = expect(listing).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+      // close was attempted as best-effort cleanup even though its callback
+      // never arrived; the settlement did not wait on it.
+      expect(closeCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

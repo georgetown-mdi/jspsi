@@ -1,4 +1,7 @@
-import { DirectoryListingBoundsError } from "@psilink/core";
+import {
+  DirectoryListingBoundsError,
+  TransportOperationStalledError,
+} from "@psilink/core";
 
 import { transportOperationStalledError } from "./sftpLivenessGuard";
 
@@ -144,7 +147,10 @@ export const MAX_LISTING_READDIR_BATCHES = 2 * MAX_DIRECTORY_ENTRIES;
  * {@link ./sftpLivenessGuard.transportOperationStalledError} so this listing-
  * specific stall and the `get()` / `createExclusive()` stalls are one error type.
  */
-export function listingStalledByBatchCountError(dirPath: string, max: number) {
+export function listingStalledByBatchCountError(
+  dirPath: string,
+  max: number,
+): TransportOperationStalledError {
   return transportOperationStalledError(
     "directory listing",
     dirPath,
@@ -161,7 +167,7 @@ export function listingStalledByBatchCountError(dirPath: string, max: number) {
 export function listingStalledByTimeoutError(
   dirPath: string,
   deadlineMs: number,
-) {
+): TransportOperationStalledError {
   return transportOperationStalledError(
     "directory listing",
     dirPath,

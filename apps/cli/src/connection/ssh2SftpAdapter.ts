@@ -187,20 +187,26 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // recursion because ssh2 dispatches each readdir callback from a socket
       // event, a fresh tick; the cap is the DoS bound, not a stack guard.)
       let readdirCalls = 0;
-      // Always clear the deadline, close the handle if one was opened, then
-      // settle once. A close() failure on a read-only directory handle carries
-      // no data meaning, so it is swallowed rather than allowed to mask the
-      // result or the refusal (matching get()'s close handling). The `settled`
-      // guard makes a late readdir callback or a late deadline fire a no-op and
-      // prevents a double close. `deadline` is declared just below but only read
-      // when settle() runs -- always after the timer is armed -- so the forward
-      // reference resolves before it is used.
+      // Settle the listing exactly once, then close the handle best-effort. The
+      // `settled` guard makes a late readdir callback or a late deadline fire a
+      // no-op and prevents a double close. `deadline` is declared just below but
+      // only read when settle() runs -- always after the timer is armed -- so the
+      // forward reference resolves before it is used.
       const settle = (action: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(deadline);
-        if (handle === undefined) action();
-        else sftp.close(handle, () => action());
+        // Settle BEFORE closing, and never gate the settlement on the close
+        // callback: a hostile server can withhold the close callback exactly as
+        // it withholds a readdir, so awaiting close() here would let the deadline
+        // fire, clear its own timer, then hang forever inside an un-returning
+        // close -- restoring the unbounded wait this guard exists to defeat.
+        // Close is best-effort cleanup that reclaims the handle on a well-behaved
+        // server; a withheld close callback leaks the handle until session
+        // teardown, with the listing already settled. A close() error on a
+        // read-only directory handle has no data meaning, so it is swallowed.
+        action();
+        if (handle !== undefined) sftp.close(handle, () => {});
       };
       // Whole-operation wall-clock deadline. The round-trip cap cannot catch a
       // server that withholds an opendir/readdir/close callback entirely -- no
