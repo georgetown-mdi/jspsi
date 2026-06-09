@@ -87,9 +87,9 @@ test("both parties derive the same rotated token over a real connection", async 
     authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB),
   ]).finally(() => teardown(connA, connB));
 
-  expect(a.newToken).toBe(b.newToken);
-  expect(a.newToken).not.toBe(TOKEN_A);
-  expect(SHARED_SECRET_REGEX.test(a.newToken)).toBe(true);
+  expect(a.rotatedSecret).toBe(b.rotatedSecret);
+  expect(a.rotatedSecret).not.toBe(TOKEN_A);
+  expect(SHARED_SECRET_REGEX.test(a.rotatedSecret)).toBe(true);
 });
 
 test("rotated token written to the key file carries no expiry", async () => {
@@ -103,16 +103,16 @@ test("rotated token written to the key file carries no expiry", async () => {
   expect(connB.handshakeRole).toBeDefined();
   const roleB = connB.handshakeRole as HandshakeRole;
 
-  const [{ newToken }] = await Promise.all([
+  const [{ rotatedSecret }] = await Promise.all([
     authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
     authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB),
   ]).finally(() => teardown(connA, connB));
 
   const keyFilePath = path.join(tmpDir, "rotated.key");
-  saveKeyFile(keyFilePath, { sharedSecret: newToken });
+  saveKeyFile(keyFilePath, { sharedSecret: rotatedSecret });
 
   const loaded = loadKeyFile(keyFilePath);
-  expect(loaded?.sharedSecret).toBe(newToken);
+  expect(loaded?.sharedSecret).toBe(rotatedSecret);
   expect(loaded?.expires).toBeUndefined();
 });
 

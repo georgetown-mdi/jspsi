@@ -34,7 +34,7 @@ export interface AuthResult {
    * The value is a base64url-encoded 32-byte HKDF output.  It has no
    * expiration and is suitable for use as a persistent shared secret.
    */
-  newToken: string;
+  rotatedSecret: string;
 }
 
 /**
@@ -203,12 +203,12 @@ export async function authenticateConnection(
     );
   }
 
-  const newTokenBytes = await hkdfDerive(
+  const rotatedSecretBytes = await hkdfDerive(
     sessionKey,
     "psilink-shared-secret-rotation-v1",
     32,
   );
-  const newToken = toBase64Url(newTokenBytes);
+  const rotatedSecret = toBase64Url(rotatedSecretBytes);
 
-  return { sessionKey, newToken };
+  return { sessionKey, rotatedSecret };
 }

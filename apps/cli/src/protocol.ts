@@ -617,8 +617,8 @@ export async function runProtocol(
       // sessionKey is the 32-byte session key; both parties derive the
       // same value. It keys the per-direction AEAD encryption set up below, so
       // every PSI frame after this point is opaque on the wire to an SFTP/
-      // file-drop admin. newToken is the rotated shared secret persisted to disk.
-      const { newToken, sessionKey } = await authenticateConnection(
+      // file-drop admin. rotatedSecret is the new shared secret persisted to disk.
+      const { rotatedSecret, sessionKey } = await authenticateConnection(
         mc,
         authParams,
         role,
@@ -630,10 +630,10 @@ export async function runProtocol(
         // state (tokenRotated=false) or both post-save state (tokenRotated
         // =true). Maintain this invariant: do not insert awaits between
         // saveKeyFile and the assignment.
-        saveKeyFile(keyFilePath, { sharedSecret: newToken });
+        saveKeyFile(keyFilePath, { sharedSecret: rotatedSecret });
         tokenRotated = true;
       } catch (err) {
-        // "may already hold": both parties independently derive newToken from
+        // "may already hold": both parties independently derive rotatedSecret from
         // the session key, but either party's disk write can fail. We
         // cannot know whether the partner's save succeeded, so "may" is
         // intentionally conservative.
