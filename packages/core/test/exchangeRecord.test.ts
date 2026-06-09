@@ -98,7 +98,11 @@ const termsWithGovernance: LinkageTerms = {
       elements: [{ field: "ln" }, { field: "dob" }, { field: "ssn4" }],
     },
   ],
-  legalAgreement: { reference: "MOU-2025-0042", expirationDate: "2030-06-30" },
+  legalAgreement: {
+    reference: "MOU-2025-0042",
+    purpose: "Care coordination for co-enrolled patients",
+    expirationDate: "2030-06-30",
+  },
   payload: {
     send: [{ name: "dose", description: "Administered dose in milligrams." }],
     receive: [{ name: "status" }],
@@ -321,6 +325,7 @@ describe("governance metadata", () => {
       algorithm: "psi",
       legalAgreement: {
         reference: "MOU-2025-0042",
+        purpose: "Care coordination for co-enrolled patients",
         expirationDate: "2030-06-30",
       },
       // Standardized name + semantic type per field, sorted by name (dob < ln <
