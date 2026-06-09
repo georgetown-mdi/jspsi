@@ -135,6 +135,10 @@ export function createCappedSink(
       chunks.length = 0;
       sink.destroy();
     }, stallDeadlineMs);
+    // The idle timer is the safety bound, not real work: it must never keep the
+    // process alive on its own. Every terminal path clears it, so this only
+    // matters if the program is winding down with a transfer still in flight.
+    idleTimer.unref();
   };
 
   const sink = new Writable({
@@ -156,8 +160,12 @@ export function createCappedSink(
         return;
       }
       chunks.push(chunk);
-      // Progress: the transfer is alive, so reset the idle deadline.
-      armIdle();
+      // Progress: the transfer is alive, so reset the idle deadline -- but only
+      // while the read is still live. A chunk delivered after a terminal path
+      // (the idle timer fired, or complete()/fail() ran) already settled
+      // `result`; re-arming here would install a fresh timer that survives until
+      // it fires into the no-op `settled` guard, a small leak with no effect.
+      if (!settled) armIdle();
       callback();
     },
   });

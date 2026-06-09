@@ -79,21 +79,33 @@ export function transportOperationStalledError(
  * error factory rather than a message string. Like `withTimeout` it only races --
  * the underlying operation's callbacks may still fire after the deadline (a
  * harmless no-op: no busy-spin, and the session tears down on the terminal
- * error). A handle opened just before a withheld close is not reclaimed, since a
- * close whose own callback is withheld cannot itself complete; the operations
- * that hold a reusable handle past a stall ({@link ./ssh2SftpAdapter}'s `list()`)
- * close it on their own bounded-failure path instead of relying on this wrapper.
+ * error). When the deadline wins, `promise` keeps running and may reject later
+ * (the underlying operation eventually fails after the stall was already
+ * surfaced); that late rejection has no other consumer, so a no-op `catch`
+ * absorbs it rather than letting it surface as an unhandled rejection -- without
+ * changing the race outcome, since the same `promise` settlement still feeds
+ * `Promise.race`. The deadline timer is `unref`'d so it never holds the process
+ * open on its own. A handle opened just before a withheld close is not reclaimed,
+ * since a close whose own callback is withheld cannot itself complete; the
+ * operations that hold a reusable handle past a stall
+ * ({@link ./ssh2SftpAdapter}'s `list()`) close it on their own bounded-failure
+ * path instead of relying on this wrapper.
  */
 export function withSftpOperationDeadline<T>(
   promise: Promise<T>,
   ms: number,
-  makeError: () => Error,
+  makeError: () => TransportOperationStalledError,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(makeError()), ms);
-    }),
-  ]);
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(makeError()), ms);
+    timer.unref();
+  });
+  // Clear the timer whenever `promise` settles, whichever side won. A `promise`
+  // that loses the race and then rejects would otherwise be an unhandled
+  // rejection, so swallow it on a separate branch; this leaves the race result
+  // untouched because `settled` itself is what Promise.race observes.
+  const settled = promise.finally(() => clearTimeout(timer));
+  void settled.catch(() => {});
+  return Promise.race([settled, deadline]);
 }

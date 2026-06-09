@@ -221,17 +221,32 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           ),
         SFTP_STALL_DEADLINE_MS,
       );
+      // The deadline is the safety bound, not real work: cleared on every
+      // terminal path, so unref'ing it only matters if the process is winding
+      // down with a listing still in flight, where it must not block exit.
+      deadline.unref();
       sftp.opendir(path, (openErr, openedHandle) => {
         // The deadline may have already fired (the server withheld the opendir
-        // callback past the bound, then delivered it late); settle() is then a
-        // no-op, so do not open a read against an already-rejected listing.
-        if (settled) return;
+        // callback past the bound, then delivered it late); settle() already
+        // rejected the listing, so do not open a read against it. settle() ran
+        // before `handle` was assigned, though, so it could not close a handle
+        // opendir is only now handing back -- close it here best-effort so this
+        // late handle does not leak until session teardown.
+        if (settled) {
+          if (!openErr) sftp.close(openedHandle, () => {});
+          return;
+        }
         if (openErr) {
           settle(() => reject(openErr));
           return;
         }
         handle = openedHandle;
         const readNextBatch = (): void => {
+          // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
+          // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
+          // guard and rejects BEFORE issuing another readdir, so the server sees
+          // exactly MAX_LISTING_READDIR_BATCHES readdir calls (what the test
+          // asserts), even though `readdirCalls` itself reaches cap + 1 here.
           if (++readdirCalls > MAX_LISTING_READDIR_BATCHES) {
             settle(() =>
               reject(

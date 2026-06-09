@@ -715,38 +715,51 @@ describe("bounded list", () => {
     // non-EOF readdir batches without end. Each advances neither the entry-count
     // nor the filename-length size bound and never carries the EOF status, so
     // the batch loop would recurse forever. The round-trip cap must fail it with
-    // the typed terminal error and still close the open handle.
-    const adapter = new SSH2SFTPClientAdapter();
-    let readdirCalls = 0;
-    let closeCalls = 0;
-    const sftp = {
-      opendir: (_path: string, cb: (err: Error | null, h: Buffer) => void) =>
-        cb(null, Buffer.from("handle")),
-      readdir: (
-        _handle: Buffer,
-        cb: (err: (Error & { code?: number }) | null, list?: unknown[]) => void,
-      ) => {
-        readdirCalls += 1;
-        // Deliver the empty batch asynchronously so the bounded recursion
-        // unwinds the stack each round, mirroring ssh2's per-batch socket-event
-        // dispatch; a synchronous callback would recurse to the cap in one frame.
-        queueMicrotask(() => cb(null, []));
-      },
-      close: (_handle: Buffer, cb: (err: Error | null) => void) => {
-        closeCalls += 1;
-        cb(null);
-      },
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).client = { sftp };
+    // the typed terminal error and still close the open handle. Fake timers keep
+    // the test purely about the round-trip cap: list()'s wall-clock deadline is
+    // cleared by the cap's settle() before list() rejects, but faking setTimeout
+    // means it is never even registered with the real event loop.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let readdirCalls = 0;
+      let closeCalls = 0;
+      const sftp = {
+        opendir: (_path: string, cb: (err: Error | null, h: Buffer) => void) =>
+          cb(null, Buffer.from("handle")),
+        readdir: (
+          _handle: Buffer,
+          cb: (
+            err: (Error & { code?: number }) | null,
+            list?: unknown[],
+          ) => void,
+        ) => {
+          readdirCalls += 1;
+          // Deliver the empty batch asynchronously so the bounded recursion
+          // unwinds the stack each round, mirroring ssh2's per-batch
+          // socket-event dispatch; a synchronous callback would recurse to the
+          // cap in one frame. queueMicrotask is not faked, so the flood still
+          // drives to the cap without advancing timers.
+          queueMicrotask(() => cb(null, []));
+        },
+        close: (_handle: Buffer, cb: (err: Error | null) => void) => {
+          closeCalls += 1;
+          cb(null);
+        },
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { sftp };
 
-    await expect(adapter.list("/remote/hang")).rejects.toBeInstanceOf(
-      TransportOperationStalledError,
-    );
-    // Stopped at the round-trip cap rather than looping forever.
-    expect(readdirCalls).toBe(MAX_LISTING_READDIR_BATCHES);
-    // Handle closed on the bounded-failure path, exactly once.
-    expect(closeCalls).toBe(1);
+      await expect(adapter.list("/remote/hang")).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      // Stopped at the round-trip cap rather than looping forever.
+      expect(readdirCalls).toBe(MAX_LISTING_READDIR_BATCHES);
+      // Handle closed on the bounded-failure path, exactly once.
+      expect(closeCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("bounds a server that never invokes the readdir callback via the wall-clock deadline", async () => {

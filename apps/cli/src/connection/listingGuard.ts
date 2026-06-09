@@ -1,6 +1,6 @@
 import {
   DirectoryListingBoundsError,
-  TransportOperationStalledError,
+  type TransportOperationStalledError,
 } from "@psilink/core";
 
 import { transportOperationStalledError } from "./sftpLivenessGuard";
