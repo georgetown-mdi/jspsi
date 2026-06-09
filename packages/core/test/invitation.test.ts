@@ -7,6 +7,11 @@ import type {
   InvitationToken,
 } from "../src/config/invitation";
 
+// A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
+// InvitationTokenSchema now enforces that shape, so test tokens carry a real
+// one rather than a short literal.
+const VALID_SECRET = "A".repeat(43);
+
 const baseTerms = {
   version: "1.0.0",
   identity: "Test Party",
@@ -21,7 +26,7 @@ const baseTerms = {
 const baseToken: InvitationToken = {
   version: "1",
   linkageTerms: baseTerms,
-  sharedSecret: "abc123",
+  sharedSecret: VALID_SECRET,
 };
 
 // Reproduces the encoding step without schema validation so that tests can
@@ -45,7 +50,7 @@ async function encodeRaw(obj: unknown): Promise<string> {
 test("round-trips a token without expires", async () => {
   const encoded = await encodeInvitation(baseToken);
   const decoded = await decodeInvitation(encoded);
-  expect(decoded.sharedSecret).toBe("abc123");
+  expect(decoded.sharedSecret).toBe(VALID_SECRET);
   expect(decoded.expires).toBeUndefined();
   expect(decoded.linkageTerms.version).toBe("1.0.0");
   expect(decoded.linkageTerms.identity).toBe("Test Party");
@@ -59,7 +64,7 @@ test("round-trips a token with expires", async () => {
   const encoded = await encodeInvitation(token);
   const decoded = await decodeInvitation(encoded);
   expect(decoded.expires).toBe("2030-12-31T23:59:59Z");
-  expect(decoded.sharedSecret).toBe("abc123");
+  expect(decoded.sharedSecret).toBe(VALID_SECRET);
 });
 
 test("round-trips full linkage terms including all fields", async () => {
@@ -77,7 +82,7 @@ test("round-trips full linkage terms including all fields", async () => {
         },
       ],
     },
-    sharedSecret: "tok-xyz",
+    sharedSecret: VALID_SECRET,
     expires: "2030-01-01T00:00:00.000Z",
     version: "1",
   };
@@ -154,6 +159,14 @@ test("rejects a token with an empty sharedSecret", async () => {
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 
+test("rejects a token whose sharedSecret is not a base64url-encoded 32-byte value", async () => {
+  // A non-empty but wrong-shape secret is now caught at decode (matching the
+  // KeyFile and Authentication schemas) instead of slipping through to fail
+  // later at saveKeyFile / authenticateConnection.
+  const encoded = await encodeRaw({ ...baseToken, sharedSecret: "abc123" });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
 test("rejects a token with missing sharedSecret", async () => {
   const { sharedSecret: _, ...withoutToken } = baseToken;
   const encoded = await encodeRaw(withoutToken);
@@ -161,7 +174,7 @@ test("rejects a token with missing sharedSecret", async () => {
 });
 
 test("rejects a token with missing linkageTerms", async () => {
-  const encoded = await encodeRaw({ sharedSecret: "abc123" });
+  const encoded = await encodeRaw({ sharedSecret: VALID_SECRET });
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 

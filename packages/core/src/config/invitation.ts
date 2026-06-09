@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
+import { SHARED_SECRET_REGEX } from "./connection.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -195,7 +196,14 @@ export interface InvitationToken {
 const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   version: z.literal("1"),
   linkageTerms: LinkageTermsSchema,
-  sharedSecret: z.string().min(1),
+  sharedSecret: z
+    .string()
+    .regex(
+      SHARED_SECRET_REGEX,
+      "invitation sharedSecret must be a base64url-encoded 32-byte value " +
+        "(43 base64url characters; final character must be in " +
+        "[AEIMQUYcgkosw048])",
+    ),
   expires: z.iso.datetime().optional(),
   connectionEndpoint: ConnectionEndpointSchema.optional(),
 });
