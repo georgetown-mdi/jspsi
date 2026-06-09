@@ -476,6 +476,21 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
       path: ["output", "expectsOutput"],
     },
   )
+    // A party that receives no output cannot receive payload columns: payload is
+    // attached to matched records, which a non-receiving party never gets. Reject
+    // expectsOutput:false alongside a non-empty payload.receive as an incoherent
+    // configuration, so a one-sided exchange cannot produce a record that claims a
+    // party received payload it was never entitled to.
+    .refine(
+      (a) => a.output.expectsOutput || (a.payload?.receive?.length ?? 0) === 0,
+      {
+        message:
+          "payload.receive must be empty when expectsOutput is false: a party " +
+          "that receives no output cannot receive payload columns for matched " +
+          "records it never gets",
+        path: ["payload", "receive"],
+      },
+    )
     .refine(
       (a) => {
         const names = a.linkageFields.map((f) => f.name);
