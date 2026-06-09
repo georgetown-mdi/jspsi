@@ -98,14 +98,6 @@ leaving it open-ended; never ask what is already in the request or in
 surface these differs by front door -- the consult agent returns them as a
 NEEDS INPUT result; the `/pm` persona asks them directly in conversation.
 
-## Identifying affected areas
-
-Use Grep and Read to find the files and modules a task will likely touch. For
-small, focused tasks (up to ~5 files), name each file. For broad tasks (rename,
-large refactor, cross-cutting change), group by area or pattern (e.g. "all
-TypeScript sources importing `@psilink/core`") rather than enumerating every
-file.
-
 ## Project routing
 
 Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
@@ -192,6 +184,40 @@ directly. Do not hand-write the `gh api graphql` or `gh project item-edit` calls
 the scripts wrap -- the node-ID and field/option resolution live there so you do
 not reconstruct them. If `gh` is not installed or not authenticated, stop and
 say so (`brew install gh && gh auth login`) rather than filing without it.
+
+## Epic and implementation order (board 9 only)
+
+Board 9 carries two custom fields board 10 does not: `Epic` (free text) and
+`Implementation Order` (a number). When you file a new task on board 9, slot it
+into an existing epic if one clearly fits. Do not invent a new epic, and do not
+do any of this on board 10.
+
+Discover the candidate epics from the same `item-list` call you already run for
+the duplicate check -- just project `epic` and take the distinct non-null
+values, no extra round-trip:
+
+```sh
+gh project item-list 9 --owner georgetown-mdi --format json --limit 100 \
+  --jq '[.items[] | {id, title, status, epic}]'
+```
+
+If one fits, create the draft with `--format json` to capture the new item's id
+(or read `?itemId=N` from its URL), then set both fields in one `edit-issue.mjs`
+call, choosing the order from the epic's current items:
+
+```sh
+node .claude/scripts/list-epic.mjs 9 "<epic>"   # see the epic's existing orders
+node .claude/scripts/edit-issue.mjs 9 <newItemId> \
+  --field "Epic" --value "<epic>" \
+  --field "Implementation Order" --value "<N>"
+```
+
+Default the order to the end (highest existing + 1). Slot it earlier only when
+the task clearly precedes existing work, and then flag the renumbering rather
+than silently shifting other items. If no epic fits, leave both unset -- an
+unparented task is fine. The two front doors apply this differently: the consult
+sets a clear fit autonomously and notes an unclear one in **Open questions**; the
+`/pm` persona proposes it in the draft and confirms before writing.
 
 ## What the PM does NOT do
 
