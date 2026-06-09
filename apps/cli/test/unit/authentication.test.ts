@@ -7,7 +7,7 @@ import {
   FileSyncConnection,
   fromEventConnection,
   authenticateConnection,
-  PAKE_TOKEN_REGEX,
+  SHARED_SECRET_REGEX,
 } from "@psilink/core";
 import type { HandshakeRole, MessageConnection } from "@psilink/core";
 
@@ -82,13 +82,13 @@ test("both parties derive the same rotated token over a real connection", async 
   const roleB = connB.handshakeRole as HandshakeRole;
 
   const [a, b] = await Promise.all([
-    authenticateConnection(mcA, { pakeToken: TOKEN_A }, roleA),
-    authenticateConnection(mcB, { pakeToken: TOKEN_A }, roleB),
+    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
+    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB),
   ]).finally(() => teardown(connA, connB));
 
   expect(a.newToken).toBe(b.newToken);
   expect(a.newToken).not.toBe(TOKEN_A);
-  expect(PAKE_TOKEN_REGEX.test(a.newToken)).toBe(true);
+  expect(SHARED_SECRET_REGEX.test(a.newToken)).toBe(true);
 });
 
 test("rotated token written to the key file carries no expiry", async () => {
@@ -103,15 +103,15 @@ test("rotated token written to the key file carries no expiry", async () => {
   const roleB = connB.handshakeRole as HandshakeRole;
 
   const [{ newToken }] = await Promise.all([
-    authenticateConnection(mcA, { pakeToken: TOKEN_A }, roleA),
-    authenticateConnection(mcB, { pakeToken: TOKEN_A }, roleB),
+    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
+    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB),
   ]).finally(() => teardown(connA, connB));
 
   const keyFilePath = path.join(tmpDir, "rotated.key");
-  saveKeyFile(keyFilePath, { pakeToken: newToken });
+  saveKeyFile(keyFilePath, { sharedSecret: newToken });
 
   const loaded = loadKeyFile(keyFilePath);
-  expect(loaded?.pakeToken).toBe(newToken);
+  expect(loaded?.sharedSecret).toBe(newToken);
   expect(loaded?.expires).toBeUndefined();
 });
 
@@ -122,7 +122,7 @@ test("authentication throws for an expired token without opening a connection", 
   await expect(
     authenticateConnection(
       mc,
-      { pakeToken: TOKEN_A, expires: "2000-01-01T00:00:00.000Z" },
+      { sharedSecret: TOKEN_A, expires: "2000-01-01T00:00:00.000Z" },
       "initiator",
     ),
   ).rejects.toThrow("PAKE token expired");
@@ -131,9 +131,9 @@ test("authentication throws for an expired token without opening a connection", 
 test("authentication throws for a token that is not 43 base64url characters", async () => {
   const mc = fromEventConnection(makeConn());
   await expect(
-    authenticateConnection(mc, { pakeToken: "tooshort" }, "initiator"),
+    authenticateConnection(mc, { sharedSecret: "tooshort" }, "initiator"),
   ).rejects.toThrow(
-    "authentication.pakeToken must be a base64url-encoded 32-byte value",
+    "authentication.sharedSecret must be a base64url-encoded 32-byte value",
   );
 });
 
@@ -142,9 +142,9 @@ test("authentication throws for a token containing non-base64url characters", as
   // 43 chars but contains '=' (standard base64 padding, not valid base64url)
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   await expect(
-    authenticateConnection(mc, { pakeToken: badToken }, "initiator"),
+    authenticateConnection(mc, { sharedSecret: badToken }, "initiator"),
   ).rejects.toThrow(
-    "authentication.pakeToken must be a base64url-encoded 32-byte value",
+    "authentication.sharedSecret must be a base64url-encoded 32-byte value",
   );
 });
 
@@ -155,9 +155,9 @@ test("authentication throws for a token with valid base64url characters but wron
   // 2 zero padding bits for a 32-byte value.
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB";
   await expect(
-    authenticateConnection(mc, { pakeToken: badToken }, "initiator"),
+    authenticateConnection(mc, { sharedSecret: badToken }, "initiator"),
   ).rejects.toThrow(
-    "authentication.pakeToken must be a base64url-encoded 32-byte value",
+    "authentication.sharedSecret must be a base64url-encoded 32-byte value",
   );
 });
 
@@ -175,8 +175,8 @@ test("authentication throws when tokens differ", async () => {
   const roleB = connB.handshakeRole as HandshakeRole;
 
   const [resultA, resultB] = await Promise.allSettled([
-    authenticateConnection(mcA, { pakeToken: TOKEN_A }, roleA),
-    authenticateConnection(mcB, { pakeToken: TOKEN_B }, roleB),
+    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
+    authenticateConnection(mcB, { sharedSecret: TOKEN_B }, roleB),
   ]).finally(() => teardown(connA, connB));
 
   expect(resultA.status).toBe("rejected");

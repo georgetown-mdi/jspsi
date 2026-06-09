@@ -19,7 +19,7 @@ import {
   connectionOverridesFrom,
   DEFAULT_ACCEPT_TIMEOUT_SECONDS,
   expiresFromNow,
-  generatePakeToken,
+  generateSharedSecret,
   loadInputRows,
   looksLikeUrl,
   parseCommonBootstrapArgs,
@@ -126,14 +126,14 @@ type InviteReady =
       prepared: PreparedExchange;
       invitation: string;
       expires: string;
-      pakeToken: string;
+      sharedSecret: string;
     }
   | {
       mode: "offline";
       dataSpec: ResolvedDataSpec;
       invitation: string;
       expires: string;
-      pakeToken: string;
+      sharedSecret: string;
     };
 
 /**
@@ -190,11 +190,11 @@ export async function validateInvite(params: {
     for (const w of warnings) log.warn(w);
 
     const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
-    const pakeToken = generatePakeToken();
+    const sharedSecret = generateSharedSecret();
     const invitation = await encodeInvitation({
       version: "1",
       linkageTerms: dataSpec.linkageTerms,
-      pakeToken,
+      sharedSecret,
       expires,
     });
     // prepareForOnlineExchange can throw; run it here, before the token print in
@@ -210,7 +210,7 @@ export async function validateInvite(params: {
       prepared,
       invitation,
       expires,
-      pakeToken,
+      sharedSecret,
     };
   }
 
@@ -230,15 +230,15 @@ export async function validateInvite(params: {
   for (const w of warnings) log.warn(w);
 
   const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
-  const pakeToken = generatePakeToken();
+  const sharedSecret = generateSharedSecret();
   const invitation = await encodeInvitation({
     version: "1",
     linkageTerms: dataSpec.linkageTerms,
-    pakeToken,
+    sharedSecret,
     expires,
   });
 
-  return { mode: "offline", dataSpec, invitation, expires, pakeToken };
+  return { mode: "offline", dataSpec, invitation, expires, sharedSecret };
 }
 
 // --- Handler -----------------------------------------------------------------
@@ -275,7 +275,7 @@ export async function handler(argv: Arguments): Promise<void> {
         connection: ready.connection,
         dataSpec: ready.dataSpec,
         prepared: ready.prepared,
-        pakeToken: ready.pakeToken,
+        sharedSecret: ready.sharedSecret,
         expires: ready.expires,
         keyPath: options.keyFile,
         configPath: options.configFile,
@@ -297,7 +297,7 @@ export async function handler(argv: Arguments): Promise<void> {
     const spec = specWithPlaceholderConnection(ready.dataSpec);
     const { configPath, keyPath } = provisionConfigAndKey(
       spec,
-      { pakeToken: ready.pakeToken, expires: ready.expires },
+      { sharedSecret: ready.sharedSecret, expires: ready.expires },
       { configPath: options.configFile, keyPath: options.keyFile },
     );
 

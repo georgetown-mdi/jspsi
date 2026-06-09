@@ -10,7 +10,7 @@ import {
   AEAD_CONTEXTS,
   type AeadContext,
 } from "../src/auth";
-import { PAKE_TOKEN_REGEX } from "../src/config/connection";
+import { SHARED_SECRET_REGEX } from "../src/config/connection";
 import type { Authentication } from "../src/config/connection";
 import {
   createMessagePipe,
@@ -23,7 +23,7 @@ import { PassthroughConnection } from "./utils/passthroughConnection";
 // --- Token constants ---------------------------------------------------------
 
 // Base64url encoding of 32 bytes of 0x00 and 0x01.  Exactly 43 characters,
-// satisfying the pakeToken format constraint.
+// satisfying the sharedSecret format constraint.
 const TOKEN_ALPHA = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const TOKEN_BETA = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
 
@@ -193,7 +193,7 @@ test("responder rejects with PAKE authentication failed when initiator's msg3 is
 
 test("authenticateConnection succeeds with matching tokens", async () => {
   const [connA, connB] = makeConnections();
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [a, b] = await Promise.allSettled([
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
@@ -204,7 +204,7 @@ test("authenticateConnection succeeds with matching tokens", async () => {
 
 test("authenticateConnection: newToken is identical on both sides", async () => {
   const [connA, connB] = makeConnections();
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [a, b] = await Promise.all([
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
@@ -214,7 +214,7 @@ test("authenticateConnection: newToken is identical on both sides", async () => 
 
 test("authenticateConnection: newToken is a non-empty string", async () => {
   const [connA, connB] = makeConnections();
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [a] = await Promise.all([
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
@@ -223,33 +223,33 @@ test("authenticateConnection: newToken is a non-empty string", async () => {
   expect(a.newToken.length).toBeGreaterThan(0);
 });
 
-test("authenticateConnection: newToken satisfies the pakeToken format constraint", async () => {
+test("authenticateConnection: newToken satisfies the sharedSecret format constraint", async () => {
   const [connA, connB] = makeConnections();
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [a] = await Promise.all([
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
   ]);
-  expect(PAKE_TOKEN_REGEX.test(a.newToken)).toBe(true);
+  expect(SHARED_SECRET_REGEX.test(a.newToken)).toBe(true);
 });
 
-test("authenticateConnection: different pakeTokens produce different newTokens", async () => {
+test("authenticateConnection: different sharedSecrets produce different newTokens", async () => {
   const [connA1, connB1] = makeConnections();
   const [connA2, connB2] = makeConnections();
   const [r1] = await Promise.all([
-    authenticateConnection(connA1, { pakeToken: TOKEN_ALPHA }, "initiator"),
-    authenticateConnection(connB1, { pakeToken: TOKEN_ALPHA }, "responder"),
+    authenticateConnection(connA1, { sharedSecret: TOKEN_ALPHA }, "initiator"),
+    authenticateConnection(connB1, { sharedSecret: TOKEN_ALPHA }, "responder"),
   ]);
   const [r2] = await Promise.all([
-    authenticateConnection(connA2, { pakeToken: TOKEN_BETA }, "initiator"),
-    authenticateConnection(connB2, { pakeToken: TOKEN_BETA }, "responder"),
+    authenticateConnection(connA2, { sharedSecret: TOKEN_BETA }, "initiator"),
+    authenticateConnection(connB2, { sharedSecret: TOKEN_BETA }, "responder"),
   ]);
   expect(r1.newToken).not.toBe(r2.newToken);
 });
 
 test("authenticateConnection: sessionKey is identical on both sides", async () => {
   const [connA, connB] = makeConnections();
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [a, b] = await Promise.all([
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),
@@ -260,8 +260,8 @@ test("authenticateConnection: sessionKey is identical on both sides", async () =
 test("authenticateConnection fails when tokens differ", async () => {
   const [connA, connB] = makeConnections();
   const [a, b] = await Promise.allSettled([
-    authenticateConnection(connA, { pakeToken: TOKEN_ALPHA }, "initiator"),
-    authenticateConnection(connB, { pakeToken: TOKEN_BETA }, "responder"),
+    authenticateConnection(connA, { sharedSecret: TOKEN_ALPHA }, "initiator"),
+    authenticateConnection(connB, { sharedSecret: TOKEN_BETA }, "responder"),
   ]);
   expect(a.status).toBe("rejected");
   expect(b.status).toBe("rejected");
@@ -271,44 +271,44 @@ test("authenticateConnection fails when tokens differ", async () => {
   expect(msgs.every((m) => m === "PAKE authentication failed")).toBe(true);
 });
 
-test("authenticateConnection throws when pakeToken is absent", async () => {
+test("authenticateConnection throws when sharedSecret is absent", async () => {
   const [connA] = makeConnections();
   await expect(authenticateConnection(connA, {}, "initiator")).rejects.toThrow(
-    "pakeToken",
+    "sharedSecret",
   );
 });
 
-test("authenticateConnection throws when pakeToken is not a valid base64url-encoded 32-byte value", async () => {
+test("authenticateConnection throws when sharedSecret is not a valid base64url-encoded 32-byte value", async () => {
   const [connA] = makeConnections();
   await expect(
-    authenticateConnection(connA, { pakeToken: "too-short" }, "initiator"),
-  ).rejects.toThrow("pakeToken");
+    authenticateConnection(connA, { sharedSecret: "too-short" }, "initiator"),
+  ).rejects.toThrow("sharedSecret");
 });
 
-test("authenticateConnection throws when pakeToken is 43 characters but contains non-base64url characters", async () => {
+test("authenticateConnection throws when sharedSecret is 43 characters but contains non-base64url characters", async () => {
   const [connA] = makeConnections();
   // 42 'A's + '=' is 43 chars but '=' is not in the base64url alphabet.
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   await expect(
-    authenticateConnection(connA, { pakeToken: badToken }, "initiator"),
-  ).rejects.toThrow("pakeToken");
+    authenticateConnection(connA, { sharedSecret: badToken }, "initiator"),
+  ).rejects.toThrow("sharedSecret");
 });
 
-test("authenticateConnection throws when pakeToken is 43 valid base64url characters but the final character is not in [AEIMQUYcgkosw048]", async () => {
+test("authenticateConnection throws when sharedSecret is 43 valid base64url characters but the final character is not in [AEIMQUYcgkosw048]", async () => {
   const [connA] = makeConnections();
   // 42 'A's + 'B': 43 chars, all base64url, but 'B' (index 1) is not in the
   // 16-character set [AEIMQUYcgkosw048] that encodes 4 data bits + 2 zero
   // padding bits for a 32-byte value.
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB";
   await expect(
-    authenticateConnection(connA, { pakeToken: badToken }, "initiator"),
-  ).rejects.toThrow("pakeToken");
+    authenticateConnection(connA, { sharedSecret: badToken }, "initiator"),
+  ).rejects.toThrow("sharedSecret");
 });
 
 test("authenticateConnection throws when token is expired", async () => {
   const [connA] = makeConnections();
   const auth: Authentication = {
-    pakeToken: TOKEN_ALPHA,
+    sharedSecret: TOKEN_ALPHA,
     expires: "2020-01-01T00:00:00Z",
   };
   await expect(
@@ -326,11 +326,11 @@ test("authenticateConnection throws when token is expired", async () => {
 // failures from runSpake2 are intentionally not tagged because their messages
 // are generic and benefit from the caller's added advisory.
 
-test("authenticateConnection tags malformed-pakeToken errors with psilinkRecoveryHintEmitted", async () => {
+test("authenticateConnection tags malformed-sharedSecret errors with psilinkRecoveryHintEmitted", async () => {
   const [connA] = makeConnections();
   const err = await authenticateConnection(
     connA,
-    { pakeToken: "too-short" },
+    { sharedSecret: "too-short" },
     "initiator",
   ).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(Error);
@@ -344,7 +344,7 @@ test("authenticateConnection tags pre-handshake-expiry errors with psilinkRecove
   const [connA] = makeConnections();
   const err = await authenticateConnection(
     connA,
-    { pakeToken: TOKEN_ALPHA, expires: "2020-01-01T00:00:00Z" },
+    { sharedSecret: TOKEN_ALPHA, expires: "2020-01-01T00:00:00Z" },
     "initiator",
   ).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(Error);
@@ -368,12 +368,12 @@ test("authenticateConnection tags post-handshake-expiry errors with psilinkRecov
   const authPromise = Promise.allSettled([
     authenticateConnection(
       connA,
-      { pakeToken: TOKEN_ALPHA, expires },
+      { sharedSecret: TOKEN_ALPHA, expires },
       "initiator",
     ),
     authenticateConnection(
       connB,
-      { pakeToken: TOKEN_ALPHA, expires },
+      { sharedSecret: TOKEN_ALPHA, expires },
       "responder",
     ),
   ]);
@@ -396,8 +396,8 @@ test("authenticateConnection does NOT tag SPAKE2 'PAKE authentication failed' er
   // ("retry first; if it still fails, re-invite").
   const [connA, connB] = makeConnections();
   const [a] = await Promise.allSettled([
-    authenticateConnection(connA, { pakeToken: TOKEN_ALPHA }, "initiator"),
-    authenticateConnection(connB, { pakeToken: TOKEN_BETA }, "responder"),
+    authenticateConnection(connA, { sharedSecret: TOKEN_ALPHA }, "initiator"),
+    authenticateConnection(connB, { sharedSecret: TOKEN_BETA }, "responder"),
   ]);
   expect(a.status).toBe("rejected");
   const err = (a as PromiseRejectedResult).reason;
@@ -426,12 +426,12 @@ test("authenticateConnection throws when token expires during the SPAKE2 round-t
   const authPromise = Promise.allSettled([
     authenticateConnection(
       connA,
-      { pakeToken: TOKEN_ALPHA, expires },
+      { sharedSecret: TOKEN_ALPHA, expires },
       "initiator",
     ),
     authenticateConnection(
       connB,
-      { pakeToken: TOKEN_ALPHA, expires },
+      { sharedSecret: TOKEN_ALPHA, expires },
       "responder",
     ),
   ]);
@@ -453,7 +453,7 @@ test("authenticateConnection throws when token expires during the SPAKE2 round-t
 test("authenticateConnection accepts a token that has not yet expired", async () => {
   const [connA, connB] = makeConnections();
   const auth: Authentication = {
-    pakeToken: TOKEN_ALPHA,
+    sharedSecret: TOKEN_ALPHA,
     expires: "2099-01-01T00:00:00Z",
   };
   const [a, b] = await Promise.allSettled([
@@ -466,8 +466,8 @@ test("authenticateConnection accepts a token that has not yet expired", async ()
 
 test("authenticateConnection: newToken differs between successive handshake rounds", async () => {
   // Each runSpake2 call uses fresh random scalars, so sessionKey (and thus
-  // newToken) differs every round even with the same pakeToken.
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  // newToken) differs every round even with the same sharedSecret.
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [connA1, connB1] = makeConnections();
   const [connA2, connB2] = makeConnections();
   const [r1] = await Promise.all([
@@ -582,7 +582,7 @@ test("deriveAeadKey rejects a context outside the fixed set", async () => {
 
 test("both sides produce the same AEAD key after a successful handshake", async () => {
   const [connA, connB] = makeConnections();
-  const auth: Authentication = { pakeToken: TOKEN_ALPHA };
+  const auth: Authentication = { sharedSecret: TOKEN_ALPHA };
   const [a, b] = await Promise.all([
     authenticateConnection(connA, auth, "initiator"),
     authenticateConnection(connB, auth, "responder"),

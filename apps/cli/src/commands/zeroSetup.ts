@@ -464,7 +464,7 @@ export function finalizeBootstrap(params: {
       // received it, so both persist the same config and key.
       const { configPath, keyPath } = provisionConfigAndKey(
         spec,
-        { pakeToken: bootstrap.sharedSecret },
+        { sharedSecret: bootstrap.sharedSecret },
         { configPath: configFile, keyPath: keyFile },
       );
       log.info(

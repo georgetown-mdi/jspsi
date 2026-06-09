@@ -149,15 +149,15 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
  * (256 bits ÷ 6 = 42 full characters + 4 remaining data bits), constraining it
  * to the 16-character set `[AEIMQUYcgkosw048]`.
  */
-export const PAKE_TOKEN_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
-// Shared Zod schema for the `pakeToken` field; reused by both Authentication
+// Shared Zod schema for the `sharedSecret` field; reused by both Authentication
 // and WebRTCAuthentication so the regex and error message stay in sync.
-const pakeTokenSchema = z
+const sharedSecretSchema = z
   .string()
   .regex(
-    PAKE_TOKEN_REGEX,
-    "pakeToken must be a base64url-encoded 32-byte value (43 base64url " +
+    SHARED_SECRET_REGEX,
+    "sharedSecret must be a base64url-encoded 32-byte value (43 base64url " +
       "characters; final character must be in [AEIMQUYcgkosw048])",
   )
   .optional();
@@ -167,10 +167,10 @@ const pakeTokenSchema = z
  * expiration are stored in `.psilink.key` and injected at runtime; they never
  * appear in `psilink.yaml`.
  *
- * IMPORTANT: This type is the parse-time representation. `pakeToken` is
+ * IMPORTANT: This type is the parse-time representation. `sharedSecret` is
  * optional because a configuration file parsed in isolation may not yet
  * include a token. Before calling {@link authenticateConnection}, the caller
- * MUST populate `pakeToken` with a value matching {@link PAKE_TOKEN_REGEX};
+ * MUST populate `sharedSecret` with a value matching {@link SHARED_SECRET_REGEX};
  * the runtime check there rejects missing or malformed tokens with a tagged
  * recovery error, but the compile-time type does not enforce this.
  */
@@ -191,7 +191,7 @@ export interface Authentication {
    * populate this field before calling the runtime API; otherwise
    * {@link authenticateConnection} throws a tagged validation error.
    */
-  pakeToken?: string;
+  sharedSecret?: string;
   /**
    * Expiration for this token (ISO 8601 datetime). The exchange is aborted
    * before the PAKE handshake if the current time is past this value.
@@ -201,7 +201,7 @@ export interface Authentication {
 }
 
 const AuthenticationSchema: z.ZodType<Authentication> = z.object({
-  pakeToken: pakeTokenSchema,
+  sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
 });
 
@@ -217,7 +217,7 @@ export interface WebRTCAuthentication extends Authentication {
 }
 
 const WebRTCAuthenticationSchema: z.ZodType<WebRTCAuthentication> = z.object({
-  pakeToken: pakeTokenSchema,
+  sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
   role: z.enum(["inviter", "acceptor"]).optional(),
 });
@@ -661,7 +661,7 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
  * Snake_case keys are converted to camelCase before validation, so JSON/YAML
  * from disk can be passed directly.
  *
- * Note: @-file references in credential fields (e.g. `pakeToken`, `password`,
+ * Note: @-file references in credential fields (e.g. `sharedSecret`, `password`,
  * `privateKey`) are not resolved here. Apply `readAtSignFile` (or equivalent)
  * to those fields before calling this function.
  *

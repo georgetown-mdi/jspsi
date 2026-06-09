@@ -1,13 +1,13 @@
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
-import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
+import { getLogger, SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
 import type { ConnectionEndpoint } from "@psilink/core";
 
 import {
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
-  generatePakeToken,
+  generateSharedSecret,
   looksLikeUrl,
   parseCommonBootstrapArgs,
   redactUrlCredentials,
@@ -237,13 +237,13 @@ test("connectionFromEndpoint: a webrtc endpoint seeds the signaling locator", ()
   expect(connection.server.path).toBe("/psi");
 });
 
-// --- generatePakeToken -------------------------------------------------------
+// --- generateSharedSecret -------------------------------------------------------
 
-test("generatePakeToken: matches the PAKE token format and is non-deterministic", () => {
-  const a = generatePakeToken();
-  const b = generatePakeToken();
-  expect(a).toMatch(PAKE_TOKEN_REGEX);
-  expect(b).toMatch(PAKE_TOKEN_REGEX);
+test("generateSharedSecret: matches the PAKE token format and is non-deterministic", () => {
+  const a = generateSharedSecret();
+  const b = generateSharedSecret();
+  expect(a).toMatch(SHARED_SECRET_REGEX);
+  expect(b).toMatch(SHARED_SECRET_REGEX);
   expect(a).not.toBe(b);
 });
 

@@ -247,10 +247,10 @@ export function connectionFromEndpoint(
 
 /**
  * Generate a fresh invitation PAKE token: a base64url-encoded 32 random bytes,
- * matching `PAKE_TOKEN_REGEX`. The rotation token derived after the first
+ * matching `SHARED_SECRET_REGEX`. The rotation token derived after the first
  * successful handshake replaces it; this is only the short-lived setup credential.
  */
-export function generatePakeToken(): string {
+export function generateSharedSecret(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
@@ -352,7 +352,7 @@ export async function prepareForOnlineExchange(
 /**
  * Run the connect -> SPAKE2 handshake -> exchange path shared by online invite
  * and online accept, then persist the config. `runProtocol` opens the
- * connection, completes the handshake with `pakeToken`/`expires`, writes the
+ * connection, completes the handshake with `sharedSecret`/`expires`, writes the
  * rotated (persistent, no-expiry) token to `keyPath`, and runs the exchange.
  * The config is written only after that all succeeds, so a declined or
  * unreachable partner leaves no config behind.
@@ -364,7 +364,7 @@ export async function runOnlineBootstrap(params: {
   connection: RunnableConnectionConfig;
   dataSpec: ResolvedDataSpec;
   prepared: PreparedExchange;
-  pakeToken: string;
+  sharedSecret: string;
   expires: string | undefined;
   keyPath: string;
   configPath: string;
@@ -380,7 +380,7 @@ export async function runOnlineBootstrap(params: {
   const connWithAuth: ProtocolConnectionConfig = {
     ...params.connection,
     authentication: {
-      pakeToken: params.pakeToken,
+      sharedSecret: params.sharedSecret,
       expires: params.expires,
       keyFilePath: params.keyPath,
     },

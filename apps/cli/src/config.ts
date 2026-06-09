@@ -224,7 +224,7 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
   const sanitized = structuredClone(spec);
   const auth = sanitized.connection.authentication;
   if (auth) {
-    delete auth.pakeToken;
+    delete auth.sharedSecret;
     delete auth.expires;
     // Drop the container if those were its only keys, so the config carries no
     // noisy empty `authentication: {}` block. WebRTC's `role` (the only other

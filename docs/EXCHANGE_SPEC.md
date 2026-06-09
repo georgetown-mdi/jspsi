@@ -420,9 +420,9 @@ Authentication settings for the exchange. What belongs in `psilink.yaml` depends
 - **`webrtc`**: set `role` to identify the inviter and acceptor.
 - **`sftp` and `filedrop`**: no fields are user-settable here.
 
-The PAKE token and its expiration are loaded from a key file and added to the in-memory representation before the exchange runs; they never appear in `psilink.yaml` and should not be edited manually. If `pake_token`, `pakeToken`, or `expires` are present in the configuration file, the CLI will emit a warning and ignore them; values from the key file always take precedence.
+The PAKE token and its expiration are loaded from a key file and added to the in-memory representation before the exchange runs; they never appear in `psilink.yaml` and should not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI will emit a warning and ignore them; values from the key file always take precedence.
 
-`pakeToken` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
+`sharedSecret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
 
 Taken together, this implies that `connection.authentication` is never required in a configuration file. It is required for in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
 
@@ -430,8 +430,8 @@ The PAKE token is automatically rotated after each successful authentication han
 
 | Field | Type | In `psilink.yaml` | Description |
 |-------|------|-------------------|-------------|
-| `pake_token` | string | never; loaded from `.psilink.key` | PAKE shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
-| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `pake_token`; absent for persistent tokens. Do not set manually. |
+| `shared_secret` | string | never; loaded from `.psilink.key` | PAKE shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
+| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens. Do not set manually. |
 | `role` | enum | WebRTC only | `inviter` \| `acceptor`; used to derive deterministic PeerJS peer IDs from the shared token so both parties know each other's address without out-of-band communication. Orthogonal to the PSI protocol roles, which are determined by `linkage_terms.output`. For `sftp` and `filedrop` this field is not part of the schema; the CLI emits a warning and strips it before validation. |
 
 Any other key under `connection.authentication` is also stripped before validation. The CLI emits a warning naming the field. The Zod schema itself silently strips unknown keys (its default `strip` behavior), so a library consumer that bypasses the CLI's pre-validation pass will not see a warning for unknown fields - they are dropped without comment.

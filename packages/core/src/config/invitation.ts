@@ -182,7 +182,7 @@ export interface InvitationToken {
    * Short-lived PAKE setup credential, rotated to a persistent token on first
    * successful exchange.
    */
-  pakeToken: string;
+  sharedSecret: string;
   /** ISO 8601 datetime after which this token is rejected at accept time. */
   expires?: string;
   /**
@@ -195,7 +195,7 @@ export interface InvitationToken {
 const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   version: z.literal("1"),
   linkageTerms: LinkageTermsSchema,
-  pakeToken: z.string().min(1),
+  sharedSecret: z.string().min(1),
   expires: z.iso.datetime().optional(),
   connectionEndpoint: ConnectionEndpointSchema.optional(),
 });

@@ -44,7 +44,7 @@ const PROTOCOL_NAME = "psilink-kex-v1:NNpsk0_25519_SHA256";
 
 // Domain-separation labels, all namespaced under psilink-kex-v1: and disjoint
 // from every other label in the system (psilink-spake2-*, psilink-aead-v1:*,
-// psilink-token-rotation-v1, the psilink-signing-* labels). The two confirm
+// psilink-shared-secret-rotation-v1, the psilink-signing-* labels). The two confirm
 // labels are role-asymmetric: each side sends the tag for its own role and
 // verifies the tag for the opposite role, so a reflected/echoed confirmation
 // does not verify.

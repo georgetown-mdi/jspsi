@@ -34,12 +34,12 @@ import { writeOutput } from "./util/cli";
  * CLI-layer extension of {@link Authentication} that co-locates the path where
  * the rotated PAKE token is persisted after each successful SPAKE2 handshake.
  *
- * `pakeToken` is narrowed from optional in {@link Authentication} to required
+ * `sharedSecret` is narrowed from optional in {@link Authentication} to required
  * here: every authenticated exchange must supply a valid token before the
  * connection is opened.
  */
 export interface AuthPersist extends Authentication {
-  pakeToken: string;
+  sharedSecret: string;
   keyFilePath: string;
 }
 
@@ -104,7 +104,7 @@ export interface RunProtocolResult {
  * When `connection.authentication` is set, `keyFilePath` must be a non-empty,
  * non-whitespace string; this is checked before any connection is opened so
  * that a whitespace-only path does not silently create a file named " " in
- * the current directory. `pakeToken` is validated by {@link authenticateConnection}
+ * the current directory. `sharedSecret` is validated by {@link authenticateConnection}
  * after the connection opens. `keyFilePath` is checked for non-emptiness only
  * — invalid paths are caught with a clear OS error at the key-file write step.
  *
@@ -630,7 +630,7 @@ export async function runProtocol(
         // state (tokenRotated=false) or both post-save state (tokenRotated
         // =true). Maintain this invariant: do not insert awaits between
         // saveKeyFile and the assignment.
-        saveKeyFile(keyFilePath, { pakeToken: newToken });
+        saveKeyFile(keyFilePath, { sharedSecret: newToken });
         tokenRotated = true;
       } catch (err) {
         // "may already hold": both parties independently derive newToken from

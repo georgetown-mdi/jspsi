@@ -21,7 +21,7 @@ const baseTerms = {
 const baseToken: InvitationToken = {
   version: "1",
   linkageTerms: baseTerms,
-  pakeToken: "abc123",
+  sharedSecret: "abc123",
 };
 
 // Reproduces the encoding step without schema validation so that tests can
@@ -45,7 +45,7 @@ async function encodeRaw(obj: unknown): Promise<string> {
 test("round-trips a token without expires", async () => {
   const encoded = await encodeInvitation(baseToken);
   const decoded = await decodeInvitation(encoded);
-  expect(decoded.pakeToken).toBe("abc123");
+  expect(decoded.sharedSecret).toBe("abc123");
   expect(decoded.expires).toBeUndefined();
   expect(decoded.linkageTerms.version).toBe("1.0.0");
   expect(decoded.linkageTerms.identity).toBe("Test Party");
@@ -59,7 +59,7 @@ test("round-trips a token with expires", async () => {
   const encoded = await encodeInvitation(token);
   const decoded = await decodeInvitation(encoded);
   expect(decoded.expires).toBe("2030-12-31T23:59:59Z");
-  expect(decoded.pakeToken).toBe("abc123");
+  expect(decoded.sharedSecret).toBe("abc123");
 });
 
 test("round-trips full linkage terms including all fields", async () => {
@@ -77,7 +77,7 @@ test("round-trips full linkage terms including all fields", async () => {
         },
       ],
     },
-    pakeToken: "tok-xyz",
+    sharedSecret: "tok-xyz",
     expires: "2030-01-01T00:00:00.000Z",
     version: "1",
   };
@@ -143,25 +143,25 @@ test("rejects a date-only expires (not a datetime)", async () => {
 
 // --- Schema validation -------------------------------------------------------
 
-test("encodeInvitation rejects an empty pakeToken", async () => {
+test("encodeInvitation rejects an empty sharedSecret", async () => {
   await expect(
-    encodeInvitation({ ...baseToken, pakeToken: "" }),
+    encodeInvitation({ ...baseToken, sharedSecret: "" }),
   ).rejects.toThrow(ZodError);
 });
 
-test("rejects a token with an empty pakeToken", async () => {
-  const encoded = await encodeRaw({ ...baseToken, pakeToken: "" });
+test("rejects a token with an empty sharedSecret", async () => {
+  const encoded = await encodeRaw({ ...baseToken, sharedSecret: "" });
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 
-test("rejects a token with missing pakeToken", async () => {
-  const { pakeToken: _, ...withoutToken } = baseToken;
+test("rejects a token with missing sharedSecret", async () => {
+  const { sharedSecret: _, ...withoutToken } = baseToken;
   const encoded = await encodeRaw(withoutToken);
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 
 test("rejects a token with missing linkageTerms", async () => {
-  const encoded = await encodeRaw({ pakeToken: "abc123" });
+  const encoded = await encodeRaw({ sharedSecret: "abc123" });
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 

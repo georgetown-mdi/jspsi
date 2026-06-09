@@ -125,7 +125,7 @@ test("rejects before opening a connection when keyFilePath is whitespace-only", 
       {
         channel: "filedrop",
         path: dropDir,
-        authentication: { pakeToken: TOKEN_A, keyFilePath: "   " },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: "   " },
       },
       minimalPrepared,
       undefined,
@@ -147,7 +147,7 @@ test("rejects before opening a connection when saveIntent is passed on an authen
         channel: "filedrop",
         path: dropDir,
         authentication: {
-          pakeToken: TOKEN_A,
+          sharedSecret: TOKEN_A,
           keyFilePath: path.join(tmpDir, "k.key"),
         },
       },
@@ -176,7 +176,7 @@ test("rejects before opening a connection when keyFilePath parent is not writabl
           channel: "filedrop",
           path: dropDir,
           authentication: {
-            pakeToken: TOKEN_A,
+            sharedSecret: TOKEN_A,
             keyFilePath: path.join(readOnlyDir, "key.json"),
           },
         },
@@ -204,7 +204,7 @@ test("rejects before opening a connection when keyFilePath parent exists but is 
         channel: "filedrop",
         path: dropDir,
         authentication: {
-          pakeToken: TOKEN_A,
+          sharedSecret: TOKEN_A,
           keyFilePath: path.join(fileParent, "key.json"),
         },
       },
@@ -232,7 +232,7 @@ test("creates the keyFilePath parent directory when it does not yet exist", asyn
         channel: "filedrop",
         path: "/nonexistent-path-that-cannot-exist-psilink-test",
         authentication: {
-          pakeToken: TOKEN_A,
+          sharedSecret: TOKEN_A,
           keyFilePath: path.join(createdParent, "key.json"),
         },
       },
@@ -258,7 +258,7 @@ test("rejects before opening a connection when keyFilePath itself is a directory
         channel: "filedrop",
         path: dropDir,
         authentication: {
-          pakeToken: TOKEN_A,
+          sharedSecret: TOKEN_A,
           keyFilePath: keyDirAsFile,
         },
       },
@@ -278,7 +278,7 @@ test("does not mutate the caller-supplied auth object when trimming whitespace f
   const realKey = path.join(tmpDir, "real-key.json");
   const originalPath = `  ${realKey}  `;
   const auth = {
-    pakeToken: TOKEN_A,
+    sharedSecret: TOKEN_A,
     keyFilePath: originalPath,
   };
   // Force the run to fail after the pre-flight runs by pointing dropDir at
@@ -314,7 +314,7 @@ test("rejects before opening a connection when keyFilePath parent is a dangling 
         channel: "filedrop",
         path: dropDir,
         authentication: {
-          pakeToken: TOKEN_A,
+          sharedSecret: TOKEN_A,
           keyFilePath: path.join(link, "key.json"),
         },
       },
@@ -493,11 +493,11 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, {
-    pakeToken: TOKEN_A,
+    sharedSecret: TOKEN_A,
     expires: "2000-01-01T00:00:00.000Z",
   });
   saveKeyFile(keyFileB, {
-    pakeToken: TOKEN_A,
+    sharedSecret: TOKEN_A,
     expires: "2000-01-01T00:00:00.000Z",
   });
 
@@ -507,7 +507,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
       path: dropDir,
       options: { pollIntervalMs: 1 },
       authentication: {
-        pakeToken: TOKEN_A,
+        sharedSecret: TOKEN_A,
         expires: "2000-01-01T00:00:00.000Z",
         keyFilePath: keyFileA,
       },
@@ -523,7 +523,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
       path: dropDir,
       options: { pollIntervalMs: 1 },
       authentication: {
-        pakeToken: TOKEN_A,
+        sharedSecret: TOKEN_A,
         expires: "2000-01-01T00:00:00.000Z",
         keyFilePath: keyFileB,
       },
@@ -556,8 +556,8 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   ).toBe(true);
 
   // Token must remain unchanged on both sides.
-  expect(loadKeyFile(keyFileA)?.pakeToken).toBe(TOKEN_A);
-  expect(loadKeyFile(keyFileB)?.pakeToken).toBe(TOKEN_A);
+  expect(loadKeyFile(keyFileA)?.sharedSecret).toBe(TOKEN_A);
+  expect(loadKeyFile(keyFileB)?.sharedSecret).toBe(TOKEN_A);
 });
 
 // --- Token rotation via runProtocol ------------------------------------------
@@ -565,8 +565,8 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
 test("both key files hold the same rotated token after a successful exchange", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   const outputA = path.join(tmpDir, "out-a.csv");
   const outputB = path.join(tmpDir, "out-b.csv");
@@ -579,7 +579,7 @@ test("both key files hold the same rotated token after a successful exchange", a
         channel: "filedrop",
         path: dropDir,
         options: { pollIntervalMs: 1 },
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       },
       minimalPrepared,
       outputA,
@@ -591,7 +591,7 @@ test("both key files hold the same rotated token after a successful exchange", a
         channel: "filedrop",
         path: dropDir,
         options: { pollIntervalMs: 1 },
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       },
       minimalPrepared,
       outputB,
@@ -604,10 +604,10 @@ test("both key files hold the same rotated token after a successful exchange", a
   const loadedB = loadKeyFile(keyFileB);
 
   // Both parties derive the same new token from the shared SPAKE2 session key.
-  expect(loadedA?.pakeToken).toBeDefined();
-  expect(loadedA?.pakeToken).toBe(loadedB?.pakeToken);
+  expect(loadedA?.sharedSecret).toBeDefined();
+  expect(loadedA?.sharedSecret).toBe(loadedB?.sharedSecret);
   // The token must differ from the original (it was rotated).
-  expect(loadedA?.pakeToken).not.toBe(TOKEN_A);
+  expect(loadedA?.sharedSecret).not.toBe(TOKEN_A);
   // Rotation tokens carry no expiry.
   expect(loadedA?.expires).toBeUndefined();
   expect(loadedB?.expires).toBeUndefined();
@@ -643,16 +643,16 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // test below for the same pattern.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   async function waitForRotationThenThrowWrapped(): Promise<never> {
     const { readFileSync } = await import("node:fs");
     const deadline = Date.now() + 5_000;
     for (;;) {
       try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).pakeToken;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).pakeToken;
+        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
+        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
         if (a !== TOKEN_A && b !== TOKEN_A) break;
       } catch {
         // file may not exist yet; retry
@@ -675,7 +675,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     },
     minimalPrepared,
     undefined,
@@ -687,7 +687,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     },
     minimalPrepared,
     undefined,
@@ -714,8 +714,8 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
 test("runProtocol logs recovery message when an error occurs after tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   // Both runExchange calls wait until both key files reflect the rotated
   // token, then throw. Waiting for both rotations guarantees that PAKE has
@@ -729,8 +729,8 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
     const deadline = Date.now() + 5_000;
     for (;;) {
       try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).pakeToken;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).pakeToken;
+        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
+        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
         if (a !== TOKEN_A && b !== TOKEN_A) break;
       } catch {
         // file may not exist yet; retry
@@ -751,7 +751,7 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     },
     minimalPrepared,
     undefined,
@@ -763,7 +763,7 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     },
     minimalPrepared,
     undefined,
@@ -813,7 +813,7 @@ test.skipIf(process.platform === "win32")(
     // POSIX-style errno but not portable enough to assert against on Windows
     // without a separate fixture.
     const keyFileA = path.join(tmpDir, "a.key");
-    saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
     const bogusKeyFile = path.join(tmpDir, "b.key");
     fs.mkdirSync(`${bogusKeyFile}.tmp.${process.pid}`);
 
@@ -828,7 +828,7 @@ test.skipIf(process.platform === "win32")(
     const bPromise = runProtocol(
       {
         ...dropConfig,
-        authentication: { pakeToken: TOKEN_A, keyFilePath: bogusKeyFile },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: bogusKeyFile },
       },
       minimalPrepared,
       undefined,
@@ -859,7 +859,7 @@ test.skipIf(process.platform === "win32")(
     const aPromise = runProtocol(
       {
         ...dropConfig,
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       },
       minimalPrepared,
       undefined,
@@ -1043,8 +1043,8 @@ test("SIGINT handler exits with code 130", async () => {
 test("SIGINT logs recovery message when tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 
@@ -1070,7 +1070,7 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     },
     minimalPrepared,
     undefined,
@@ -1082,7 +1082,7 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     },
     minimalPrepared,
     undefined,
@@ -1093,8 +1093,8 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
   try {
     await vi.waitFor(
       () => {
-        expect(loadKeyFile(keyFileA)?.pakeToken).not.toBe(TOKEN_A);
-        expect(loadKeyFile(keyFileB)?.pakeToken).not.toBe(TOKEN_A);
+        expect(loadKeyFile(keyFileA)?.sharedSecret).not.toBe(TOKEN_A);
+        expect(loadKeyFile(keyFileB)?.sharedSecret).not.toBe(TOKEN_A);
       },
       { timeout: 10_000 },
     );
@@ -1237,8 +1237,8 @@ test("SIGTERM handler exits with code 143", async () => {
 test("SIGTERM logs recovery message when tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 
@@ -1264,7 +1264,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     },
     minimalPrepared,
     undefined,
@@ -1276,7 +1276,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     },
     minimalPrepared,
     undefined,
@@ -1287,8 +1287,8 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
   try {
     await vi.waitFor(
       () => {
-        expect(loadKeyFile(keyFileA)?.pakeToken).not.toBe(TOKEN_A);
-        expect(loadKeyFile(keyFileB)?.pakeToken).not.toBe(TOKEN_A);
+        expect(loadKeyFile(keyFileA)?.sharedSecret).not.toBe(TOKEN_A);
+        expect(loadKeyFile(keyFileB)?.sharedSecret).not.toBe(TOKEN_A);
       },
       { timeout: 10_000 },
     );
@@ -1330,7 +1330,7 @@ test.skipIf(process.platform === "win32")(
     fs.mkdirSync(`${bogusKeyFile}.tmp.${process.pid}`);
 
     const keyFileA = path.join(tmpDir, "a.key");
-    saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
 
     const dropConfig = {
       channel: "filedrop" as const,
@@ -1345,7 +1345,7 @@ test.skipIf(process.platform === "win32")(
     const bPromise = runProtocol(
       {
         ...dropConfig,
-        authentication: { pakeToken: TOKEN_A, keyFilePath: bogusKeyFile },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: bogusKeyFile },
       },
       minimalPrepared,
       undefined,
@@ -1403,7 +1403,7 @@ test.skipIf(process.platform === "win32")(
     const aPromise = runProtocol(
       {
         ...dropConfig,
-        authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       },
       minimalPrepared,
       undefined,
@@ -1587,8 +1587,8 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
   // key, the per-direction keys, and the envelopes are all genuine.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { pakeToken: TOKEN_A });
-  saveKeyFile(keyFileB, { pakeToken: TOKEN_A });
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   // The probe carries a canary containing '!' (outside the base64url alphabet),
   // so it can never appear inside an { enc } base64url string; if it ever
@@ -1638,7 +1638,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
           channel: "filedrop",
           path: dropDir,
           options: { pollIntervalMs: 1 },
-          authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileA },
+          authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
         },
         minimalPrepared,
         undefined,
@@ -1650,7 +1650,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
           channel: "filedrop",
           path: dropDir,
           options: { pollIntervalMs: 1 },
-          authentication: { pakeToken: TOKEN_A, keyFilePath: keyFileB },
+          authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
         },
         minimalPrepared,
         undefined,
