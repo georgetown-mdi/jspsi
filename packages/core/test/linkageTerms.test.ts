@@ -594,6 +594,39 @@ test("mismatched legal agreement purpose is an error", () => {
   ).toBe(true);
 });
 
+test("legal agreement purpose differing only by Unicode normalization is a mismatch", () => {
+  // purpose is compared byte-for-byte, so the same text in different Unicode
+  // normalization forms (NFC vs NFD) does not match. This pins the byte-exact
+  // semantics as a guardrail: a later .normalize() or localeCompare would
+  // silently weaken the cross-party check (and split termsHash between the
+  // parties, since purpose feeds the canonical encoding the hash covers).
+  const nfc = "Care coordination caf\u00e9"; // NFC: e-acute, one code point
+  const nfd = "Care coordination cafe\u0301"; // NFD: e + combining acute
+  expect(nfc).not.toBe(nfd); // distinct bytes...
+  expect(nfc.normalize("NFC")).toBe(nfd.normalize("NFC")); // ...but the same text
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: nfc,
+        expirationDate: "2030-01-01",
+      },
+    },
+    {
+      ...termsB,
+      legalAgreement: {
+        reference: "MOU-001",
+        purpose: nfd,
+        expirationDate: "2030-01-01",
+      },
+    },
+  );
+  expect(
+    errors.some((e) => e.includes("legal agreement purpose mismatch")),
+  ).toBe(true);
+});
+
 test("mismatched legal agreement expiration date is an error", () => {
   const { errors } = validateCompatibility(
     {

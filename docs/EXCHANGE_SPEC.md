@@ -263,7 +263,7 @@ When a `swap` array is present, the receiver transmits a linkage key generated w
 *Required:* no  
 *Consistency:* mandatory if present
 
-Reference to the legal data sharing agreement authorizing this exchange, the purpose of the disclosure under it, and the agreement's expiration date. A single agreement can authorize several purposes; `purpose` is a brief readable statement of the one this exchange is for, carried in cleartext into the exchange record so the record stands alone as a HIPAA 164.528 accounting / FERPA 99.32 disclosure-log entry. All three fields are required when the block is present, and `reference`, `purpose`, and `expiration_date` are each cross-checked against the partner's; a mismatch cancels the exchange. If `expiration_date` has passed, the exchange fails before any data is transmitted.
+Reference to the legal data sharing agreement authorizing this exchange, the purpose of the disclosure under it, and the agreement's expiration date. A single agreement can authorize several purposes; `purpose` is a brief readable statement of the one this exchange is for, carried in cleartext into the exchange record so the record stands alone as a HIPAA 164.528 accounting / FERPA 99.32 disclosure-log entry. All three fields are required when the block is present, and `reference`, `purpose`, and `expiration_date` are each cross-checked against the partner's; a mismatch cancels the exchange. The check is byte-exact, so both parties must configure identical text -- including the same Unicode normalization form; the same wording in a different normalization counts as a mismatch. If `expiration_date` has passed, the exchange fails before any data is transmitted.
 
 ```yaml
 linkage_terms:

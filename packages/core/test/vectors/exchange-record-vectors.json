@@ -802,6 +802,189 @@
           }
         }
       }
+    },
+    {
+      "name": "count-only-unicode-purpose",
+      "description": "psi-c with a non-ASCII legal-agreement purpose (accented Latin, em dash, Cyrillic); pins that a purpose carrying non-ASCII flows through the record and termsHash byte-identically across the Node and browser builds.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi-c",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "last",
+              "type": "lastName"
+            },
+            {
+              "name": "dob",
+              "type": "dateOfBirth"
+            },
+            {
+              "name": "ssn4",
+              "type": "ssn4"
+            },
+            {
+              "name": "email",
+              "type": "emailAddress"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB_SSN4",
+              "elements": [
+                {
+                  "field": "last"
+                },
+                {
+                  "field": "dob"
+                },
+                {
+                  "field": "ssn4"
+                }
+              ]
+            }
+          ],
+          "legalAgreement": {
+            "reference": "DUA-2026-0042",
+            "purpose": "Évaluation du programme — оценка",
+            "expirationDate": "2031-01-15"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi-c",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "last",
+              "type": "lastName"
+            },
+            {
+              "name": "dob",
+              "type": "dateOfBirth"
+            },
+            {
+              "name": "ssn4",
+              "type": "ssn4"
+            },
+            {
+              "name": "email",
+              "type": "emailAddress"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB_SSN4",
+              "elements": [
+                {
+                  "field": "last"
+                },
+                {
+                  "field": "dob"
+                },
+                {
+                  "field": "ssn4"
+                }
+              ]
+            }
+          ],
+          "legalAgreement": {
+            "reference": "DUA-2026-0042",
+            "purpose": "Évaluation du programme — оценка",
+            "expirationDate": "2031-01-15"
+          }
+        },
+        "resultSize": 3,
+        "localPayloadSent": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "partnerPayloadReceived": {
+          "columns": [],
+          "rowIndices": [],
+          "rows": []
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
+        "salts": {
+          "localPayloadSent": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+          "partnerPayloadReceived": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "w-H2Ogdyts874nfndU6DT49Hrw0gnObMyZH5VfgHTyU",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi-c",
+          "legalAgreement": {
+            "reference": "DUA-2026-0042",
+            "purpose": "Évaluation du programme — оценка",
+            "expirationDate": "2031-01-15"
+          },
+          "matchingBasis": [
+            {
+              "name": "dob",
+              "type": "dateOfBirth"
+            },
+            {
+              "name": "last",
+              "type": "lastName"
+            },
+            {
+              "name": "ssn4",
+              "type": "ssn4"
+            }
+          ],
+          "payloadSent": [],
+          "payloadReceived": []
+        },
+        "resultSize": 3,
+        "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
+        "commitments": {
+          "localPayloadSent": "xmH11zKpm1R3YGUsm9InrUnigoDTx3kXj6kuzpwPzh8",
+          "partnerPayloadReceived": "z_kr5kL0Oi3c1JTwISsJTOKResSXshhimuZ2t_7rsxg"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI",
+            "data": {
+              "columns": [],
+              "rowIndices": [],
+              "rows": []
+            }
+          }
+        }
+      }
     }
   ]
 }
