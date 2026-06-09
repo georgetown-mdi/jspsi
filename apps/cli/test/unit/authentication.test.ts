@@ -163,6 +163,22 @@ test("authentication throws for a token with valid base64url characters but wron
   );
 });
 
+test("authentication tags a malformed-secret error with psilinkRecoveryHintEmitted", async () => {
+  const mc = fromEventConnection(makeConn());
+  // The secret-format error carries the recovery-hint tag so the CLI surfaces
+  // its specific "re-invite" instruction instead of stacking the generic
+  // transport-failure advisory on top (see runProtocol's catch).
+  const err = await authenticateConnection(
+    mc,
+    { sharedSecret: "tooshort" },
+    "initiator",
+  ).catch((e: unknown) => e);
+  expect(
+    (err as { psilinkRecoveryHintEmitted?: unknown })
+      .psilinkRecoveryHintEmitted,
+  ).toBe(true);
+});
+
 // --- Authentication failure --------------------------------------------------
 
 test("authentication throws when tokens differ", async () => {

@@ -12,7 +12,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
-import { deriveAeadKey } from "../src/auth";
+import { deriveAeadKey, AEAD_CONTEXTS, type AeadContext } from "../src/auth";
 import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
 import type { HandshakeRole } from "../src/types";
 
@@ -539,6 +539,75 @@ test("deriveAeadKey known-answer vector pins the HKDF info string", async () => 
   // nonce across directions (both counters start at 0), which is catastrophic
   // for AES-GCM.
   expect(Array.from(i2r)).not.toEqual(Array.from(r2i));
+});
+
+// --- deriveAeadKey / AEAD_CONTEXTS guards -------------------------------------
+// deriveAeadKey and the frozen AEAD_CONTEXTS tuple are exported from auth.ts and
+// lost their unit coverage when pake.test.ts was deleted in the X25519 cutover.
+// The KAT above pins the exact bytes (and the per-label difference); these
+// restore the runtime guards and the remaining derivation properties. (Ported
+// from the deleted pake.test.ts.)
+
+test("deriveAeadKey derives a stable 32-byte key for each allowed label", async () => {
+  const sessionKey = new Uint8Array(32).fill(0x42);
+  for (const context of AEAD_CONTEXTS) {
+    const k1 = await deriveAeadKey(sessionKey, context);
+    const k2 = await deriveAeadKey(sessionKey, context);
+    expect(k1).toHaveLength(32);
+    expect(k1).toEqual(k2);
+  }
+});
+
+test("deriveAeadKey differs for different session keys", async () => {
+  const k1 = await deriveAeadKey(
+    new Uint8Array(32).fill(0x01),
+    "initiator-to-responder",
+  );
+  const k2 = await deriveAeadKey(
+    new Uint8Array(32).fill(0x02),
+    "initiator-to-responder",
+  );
+  expect(k1).not.toEqual(k2);
+});
+
+test("every AEAD_CONTEXTS label is printable ASCII", () => {
+  // The runtime guard's soundness against a non-NFC context rests on every
+  // allowed label being ASCII (ASCII has a single NFC form). Enforce it
+  // mechanically so a future non-ASCII label fails here at the point of
+  // addition. The class is printable, non-space ASCII (U+0021..U+007E) --
+  // stricter than "ASCII": it also rejects a stray leading/trailing space or
+  // control char that would survive NFC unchanged.
+  for (const context of AEAD_CONTEXTS) {
+    expect(context).toMatch(/^[\x21-\x7e]+$/);
+  }
+});
+
+test("AEAD_CONTEXTS is frozen against runtime mutation", () => {
+  expect(Object.isFrozen(AEAD_CONTEXTS)).toBe(true);
+  // The readonly tuple type has no `push`; cast past it to model an untyped
+  // plain-JS caller trying to widen the guard's allowlist at runtime. A frozen
+  // array throws on mutation under the strict mode ES modules always run in.
+  expect(() =>
+    (AEAD_CONTEXTS as unknown as string[]).push("evil-aead"),
+  ).toThrow(TypeError);
+});
+
+test("deriveAeadKey rejects a context outside the fixed set", async () => {
+  const sessionKey = new Uint8Array(32).fill(0x01);
+  // An untyped (plain-JS or `as`-cast) caller can bypass the compile-time
+  // AeadContext constraint with a free-form, empty, or non-ASCII label; the
+  // runtime guard must fail fast rather than silently derive a key the two
+  // parties may not agree on.
+  for (const bad of [
+    "initiator",
+    "",
+    "responder-to-initiatoŕ",
+    "é-to-responder",
+  ]) {
+    await expect(
+      deriveAeadKey(sessionKey, bad as unknown as AeadContext),
+    ).rejects.toThrow(/unknown AEAD context/);
+  }
 });
 
 // --- AEAD encrypt-path wire vector (end-to-end known-answer) -------------------
