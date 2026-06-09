@@ -365,8 +365,14 @@ export async function prepareForOnlineExchange(
  * no config behind. A failure of the config write itself is non-fatal: the
  * exchange still runs (see `onAuthenticated`), and the error -- already logged
  * by `runProtocol` -- is returned as `configWriteError` so the caller can report
- * the truthful outcome instead of claiming the config was saved. When the
- * exchange itself fails, this function rejects and never returns.
+ * the truthful outcome instead of claiming the config was saved.
+ *
+ * When the exchange itself fails after the config was already written, this
+ * function logs that the config and key are on disk -- so the user retries with
+ * `psilink exchange` rather than re-inviting -- and then rejects with the
+ * exchange error (the handler's error path surfaces the error itself). The note
+ * is logged only when the config write actually succeeded, so a hook failure
+ * followed by an exchange failure never claims a config that is not there.
  *
  * The persisted config carries the plain `connection` (no `authentication`);
  * `saveConfig` strips any PAKE material regardless, so moving the write into the
@@ -398,32 +404,55 @@ export async function runOnlineBootstrap(params: {
     },
   } as ProtocolConnectionConfig;
 
-  const { onAuthenticatedError } = await runProtocol(
-    connWithAuth,
-    params.prepared,
-    params.output,
-    params.verbosity,
-    params.loggerName,
-    params.recordOutput,
-    // saveIntent: the zero-setup `--save` bootstrap is meaningful only on the
-    // unauthenticated path; this is an authenticated exchange, so leave it unset.
-    undefined,
-    // Persist the configuration exactly at acceptance: runProtocol invokes this
-    // once, after the rotated token is saved to the key file and before the data
-    // exchange begins. Writing here (rather than after runProtocol returns) means
-    // a handshake success followed by a data-exchange failure leaves both the
-    // rotated key and the config on disk -- no re-invite needed to recover.
-    () => {
-      saveConfig(params.configPath, {
-        connection: params.connection,
-        ...params.dataSpec,
-      });
-    },
-  );
+  // Set inside the hook once saveConfig returns, so the catch below can tell a
+  // "config is on disk, retry without re-inviting" recovery from a run where the
+  // config write never succeeded (hook threw, or handshake never reached it).
+  let configWritten = false;
+  try {
+    const { onAuthenticatedError } = await runProtocol(
+      connWithAuth,
+      params.prepared,
+      params.output,
+      params.verbosity,
+      params.loggerName,
+      params.recordOutput,
+      // saveIntent: the zero-setup `--save` bootstrap is meaningful only on the
+      // unauthenticated path; this is an authenticated exchange, so leave it unset.
+      undefined,
+      // Persist the configuration exactly at acceptance: runProtocol invokes this
+      // once, after the rotated token is saved to the key file and before the
+      // data exchange begins. Writing here (rather than after runProtocol
+      // returns) means a handshake success followed by a data-exchange failure
+      // leaves both the rotated key and the config on disk -- no re-invite needed
+      // to recover.
+      () => {
+        saveConfig(params.configPath, {
+          connection: params.connection,
+          ...params.dataSpec,
+        });
+        configWritten = true;
+      },
+    );
 
-  // onAuthenticatedError is the config-write failure, if any: the hook is just
-  // the saveConfig call above, so surface it under a name the caller speaks.
-  return { configWriteError: onAuthenticatedError };
+    // onAuthenticatedError is the config-write failure, if any: the hook is just
+    // the saveConfig call above, so surface it under a name the caller speaks.
+    return { configWriteError: onAuthenticatedError };
+  } catch (err) {
+    // The exchange failed after a successful handshake. When the config was
+    // already written, tell the user it (and the rotated key) are on disk so
+    // they retry with `psilink exchange` instead of re-inviting -- the exact
+    // recovery this bootstrap exists to make possible. Logged at error level
+    // (matching runProtocol's rotation advisory) so it stays visible alongside
+    // the error the handler then reports. Only when configWritten is true: a
+    // hook failure (config not on disk) must not claim otherwise.
+    if (configWritten)
+      getLogger(params.loggerName).error(
+        `the configuration was saved to ${params.configPath} and the rotated ` +
+          `key to ${params.keyPath} before the exchange failed; retry with ` +
+          `'psilink exchange' to recover without re-inviting.`,
+      );
+    throw err;
+  }
 }
 
 /**

@@ -435,6 +435,78 @@ test("runOnlineBootstrap reports no config-write error on a clean run", async ()
   }
 });
 
+// A recovery note must point the user at `psilink exchange` only when the config
+// is actually on disk. These tests spy on the (silenced) named logger that
+// runOnlineBootstrap resolves internally via getLogger(loggerName).
+const RECOVERY_NOTE = "retry with 'psilink exchange'";
+
+test("runOnlineBootstrap notes the config is on disk when the exchange fails after the config was written", async () => {
+  // Hook writes the config (real saveConfig), then the exchange fails. The user
+  // must be told the config + key are on disk so they retry with
+  // `psilink exchange` rather than re-inviting.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = callArgs.findLast(
+      (a) => typeof a === "function",
+    ) as (() => void | Promise<void>) | undefined;
+    await onAuthenticated?.();
+    throw new Error("data exchange failed");
+  }) as never);
+
+  const log = getLogger("bootstrap-recovery-test");
+  log.setLevel("silent");
+  const errorSpy = vi.spyOn(log, "error");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await expect(
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        loggerName: "bootstrap-recovery-test",
+      }),
+    ).rejects.toThrow("data exchange failed");
+    expect(fs.existsSync(configPath)).toBe(true);
+    expect(
+      errorSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes(RECOVERY_NOTE),
+      ),
+    ).toBe(true);
+  } finally {
+    errorSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap does not log a config-on-disk note when the handshake fails", async () => {
+  // The handshake fails before the hook runs, so the config is not on disk; no
+  // recovery note must claim otherwise.
+  vi.mocked(runProtocol).mockImplementation((async () => {
+    throw new Error("partner declined the invitation");
+  }) as never);
+
+  const log = getLogger("bootstrap-recovery-test");
+  log.setLevel("silent");
+  const errorSpy = vi.spyOn(log, "error");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await expect(
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        loggerName: "bootstrap-recovery-test",
+      }),
+    ).rejects.toThrow("partner declined");
+    expect(fs.existsSync(configPath)).toBe(false);
+    expect(
+      errorSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes(RECOVERY_NOTE),
+      ),
+    ).toBe(false);
+  } finally {
+    errorSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- logOnlineBootstrapOutcome ----------------------------------------------
 
 test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
