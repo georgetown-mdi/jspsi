@@ -102,8 +102,10 @@ export interface RunProtocolResult {
    * correct its own messaging (the online invite/accept callers read it to avoid
    * claiming the config was saved when the hook's `saveConfig` actually failed).
    * The error itself was already logged at error level by {@link runProtocol}.
-   * `undefined` when no hook was passed, the hook succeeded, or the run was
-   * short-circuited by a signal. When the hook failed AND the exchange then also
+   * `undefined` when no hook was passed or the hook succeeded. On a
+   * signal-interrupted run the value is preserved as recorded: it carries the
+   * hook error if the hook had already failed before the signal arrived, and is
+   * `undefined` otherwise. When the hook failed AND the exchange then also
    * failed, `runProtocol` rejects with the exchange error and this field is
    * never observed.
    */

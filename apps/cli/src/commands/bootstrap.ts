@@ -425,6 +425,13 @@ export async function runOnlineBootstrap(params: {
       // returns) means a handshake success followed by a data-exchange failure
       // leaves both the rotated key and the config on disk -- no re-invite needed
       // to recover.
+      //
+      // saveConfig is synchronous, so `configWritten` is set only after the write
+      // has completed and a failed write throws before it -- which is what
+      // runProtocol's onAuthenticatedError and the catch below depend on. If
+      // saveConfig is ever made async, make this hook `async` and `await` it:
+      // returning a bare promise here would be silently discarded by the awaited
+      // call, so a rejected write would masquerade as a clean one.
       () => {
         saveConfig(params.configPath, {
           connection: params.connection,
@@ -479,8 +486,10 @@ export function logOnlineBootstrapOutcome(
   log.error(
     `exchange complete and the rotated key was saved to ${params.keyFile}, ` +
       `but the configuration could not be written to ${params.configFile} ` +
-      `(see the error above). Recreate it before running a recurring ` +
-      `exchange. Keep the key file private.`,
+      `(see the error above). The rotated key is saved, so you do not need to ` +
+      `re-invite: recreate ${params.configFile} to match your connection and ` +
+      `linkage settings before running a recurring 'psilink exchange'. Keep ` +
+      `the key file private.`,
   );
 }
 

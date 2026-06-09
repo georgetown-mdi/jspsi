@@ -354,13 +354,14 @@ test("runOnlineBootstrap writes the config from the hook even when the exchange 
   // the data exchange fails. The config must already be on disk so the
   // recurring-exchange setup is recoverable without re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    // The onAuthenticated hook is the last argument runOnlineBootstrap passes;
-    // select the last function argument so the mock is stable against both
-    // positional drift and any future function-typed parameter before it.
-    const onAuthenticated = callArgs.findLast(
-      (a) => typeof a === "function",
-    ) as (() => void | Promise<void>) | undefined;
-    await onAuthenticated?.();
+    // Locate the onAuthenticated hook among the call arguments by type, not
+    // position. Asserting exactly one function argument makes the mock fail
+    // loudly if a second function-typed parameter is ever added to runProtocol
+    // (in any position) rather than silently selecting the wrong one.
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
 
@@ -445,10 +446,13 @@ test("runOnlineBootstrap notes the config is on disk when the exchange fails aft
   // must be told the config + key are on disk so they retry with
   // `psilink exchange` rather than re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = callArgs.findLast(
-      (a) => typeof a === "function",
-    ) as (() => void | Promise<void>) | undefined;
-    await onAuthenticated?.();
+    // See the matching note above: select the hook by type and assert it is the
+    // sole function argument so a future function-typed parameter cannot be
+    // picked up silently.
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
 
