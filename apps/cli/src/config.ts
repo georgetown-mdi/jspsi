@@ -183,16 +183,23 @@ export const RECONCILE_UNSET = "(unset)";
  * structure. Two Unicode-equivalent strings authored in different normalization
  * forms then compare equal -- consistent with core's NFC handling in
  * standardization -- so a hand-edited config is not falsely flagged as differing
- * from an invitation whose strings arrived in another form. Only enumerable own
- * keys are copied, so no `undefined`-valued key is introduced for
- * {@link canonicalString} to reject.
+ * from an invitation whose strings arrived in another form.
+ *
+ * Keys whose value is `undefined` are dropped, so an explicit `undefined` (which
+ * an in-process object built by spread may carry, unlike a Zod-parsed one where
+ * absent optionals are simply omitted) is treated as absent rather than handed
+ * to {@link canonicalString}, which rejects it. Two values that differ only in
+ * an absent vs explicitly-`undefined` optional therefore compare equal, matching
+ * how the schema treats them.
  */
 function nfcDeep(value: unknown): unknown {
   if (typeof value === "string") return value.normalize("NFC");
   if (Array.isArray(value)) return value.map(nfcDeep);
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, nfcDeep(v)]),
+      Object.entries(value)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, nfcDeep(v)]),
     );
   return value;
 }

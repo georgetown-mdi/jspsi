@@ -509,6 +509,18 @@ test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing"
   expect(conflicts).toEqual([]);
 });
 
+test("diffLinkageTerms: an explicitly-undefined optional is treated as absent", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // An in-process object (unlike a Zod-parsed one) can carry an explicit
+  // `undefined` optional. nfcDeep must drop it rather than feed it to
+  // canonicalString (which rejects undefined and would throw); it must still
+  // compare equal to the side that simply omits `swap`.
+  existing.linkageKeys[0].swap = undefined;
+  expect(() => diffLinkageTerms(existing, incoming)).not.toThrow();
+  expect(diffLinkageTerms(existing, incoming).conflicts).toEqual([]);
+});
+
 test("diffLinkageTerms: a payload mismatch is a conflict", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
