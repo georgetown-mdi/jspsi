@@ -381,11 +381,27 @@ function reconcileAcceptConfig(params: {
       ? "the same URL and invitation"
       : "the same invitation";
 
+  // Parse in two steps with distinct error handling. A YAML *syntax* error from
+  // YAML.parse carries a snippet of the offending source lines in its message,
+  // which can include an inline connection credential (server.password /
+  // privateKey / privateKeyPassphrase) -- a config may legitimately hold those,
+  // protected at 0600. That snippet must never reach a log, so the YAML failure
+  // reports only the path. A schema failure from parseExchangeSpec (Zod) names
+  // field paths and issue kinds, not the offending values, so its message is
+  // safe to surface and helps the user fix the config.
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(fs.readFileSync(configPath, "utf8"));
+  } catch {
+    throw new UsageError(
+      `a configuration file already exists at ${configPath} but is not valid ` +
+        `YAML, so it cannot be compared against ${against}. Fix or remove it, ` +
+        `or pass --config-file to write elsewhere, then retry with ${retryWith}.`,
+    );
+  }
   let existing: ExchangeSpec;
   try {
-    existing = parseExchangeSpec(
-      YAML.parse(fs.readFileSync(configPath, "utf8")),
-    );
+    existing = parseExchangeSpec(parsed);
   } catch (err) {
     throw new UsageError(
       `a configuration file already exists at ${configPath} but could not be ` +

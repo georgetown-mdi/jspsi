@@ -284,6 +284,38 @@ test("validateAccept: a pre-existing config that cannot be parsed aborts with gu
   }
 });
 
+test("validateAccept: a malformed-YAML config does not echo an inline credential", async () => {
+  const options = testOptions();
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  // Syntactically invalid YAML (an unclosed flow map) with an inline credential
+  // on the offending line. YAML.parse's error embeds a snippet of the source
+  // lines; the reconcile must report only the path, never that snippet, or the
+  // credential leaks into the (logged) error message.
+  fs.writeFileSync(
+    options.configFile,
+    `connection:\n  channel: sftp\n  server:\n    password: {${SECRET}\n    host: h\n`,
+  );
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    let caught: unknown;
+    try {
+      await validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toMatch(/not valid YAML/);
+    // The credential must not appear anywhere in the surfaced message.
+    expect((caught as Error).message).not.toContain(SECRET);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
 test("validateAccept: online aborts (no acceptance sent) when the connection block disagrees with the URL", async () => {
   const options = testOptions();
   // Linkage terms agree; only the connection host disagrees with the URL.
