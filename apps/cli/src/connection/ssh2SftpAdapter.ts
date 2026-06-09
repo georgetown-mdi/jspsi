@@ -9,10 +9,14 @@ import {
 
 import { createCappedSink } from "./frameSizeGuard";
 import {
+  LISTING_DEADLINE_MS,
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
+  MAX_LISTING_READDIR_BATCHES,
   directoryTooLargeError,
   filenameTooLongError,
+  listingStalledByBatchCountError,
+  listingStalledByTimeoutError,
 } from "./listingGuard";
 
 // A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
@@ -132,6 +136,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * The session is reached via the same internal `sftp` property
    * createExclusive() uses; see its comment for the access-via-internals
    * rationale and the connect-time guard against an upstream API rename.
+   *
+   * The streamed read is bounded for liveness as well as for size. A hostile
+   * server admin (in scope under docs/SECURITY_DESIGN.md "Channel security") can
+   * hang this read indefinitely -- by returning valid but empty (count = 0)
+   * non-EOF readdir batches forever, which advance neither size bound and never
+   * signal EOF, or by withholding a readdir/close callback entirely so the call
+   * never settles. Both are bounded here: a total readdir round-trip cap
+   * ({@link MAX_LISTING_READDIR_BATCHES}) fails the progress-free flood, and a
+   * whole-operation wall-clock deadline ({@link LISTING_DEADLINE_MS}) fails the
+   * withheld-callback case (the only one no batch count can catch). Each surfaces
+   * a typed terminal {@link DirectoryListingStalledError} (a `UsageError`, so the
+   * poll loop treats it as terminal) and closes the open directory handle on the
+   * way out rather than leaking it.
    */
   list(path: string): Promise<FileInfo[]> {
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
@@ -150,25 +167,77 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // surface (the same reason createExclusive() uses numeric SFTP flags).
     const SSH_FX_EOF = 1;
     return new Promise<FileInfo[]>((resolve, reject) => {
-      sftp.opendir(path, (openErr, handle) => {
+      const results: FileInfo[] = [];
+      let settled = false;
+      // Undefined until opendir hands back a handle. settle() closes it only when
+      // it is set, so a deadline that fires before (or instead of) a successful
+      // opendir still settles -- with nothing to close.
+      let handle: Buffer | undefined;
+      // Round-trip counter for the liveness bound. A hostile server can return
+      // valid but empty (count = 0) non-EOF readdir batches forever: each one
+      // advances neither the entry-count nor the filename-length size bound and
+      // never carries the EOF status, so the batch loop would recurse without
+      // end. Capping the total readdir calls fails that progress-free flood with
+      // a typed terminal error. (Production is safe from deep synchronous
+      // recursion because ssh2 dispatches each readdir callback from a socket
+      // event, a fresh tick; the cap is the DoS bound, not a stack guard.)
+      let readdirCalls = 0;
+      // Always clear the deadline, close the handle if one was opened, then
+      // settle once. A close() failure on a read-only directory handle carries
+      // no data meaning, so it is swallowed rather than allowed to mask the
+      // result or the refusal (matching get()'s close handling). The `settled`
+      // guard makes a late readdir callback or a late deadline fire a no-op and
+      // prevents a double close. `deadline` is declared just below but only read
+      // when settle() runs -- always after the timer is armed -- so the forward
+      // reference resolves before it is used.
+      const settle = (action: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        if (handle === undefined) action();
+        else sftp.close(handle, () => action());
+      };
+      // Whole-operation wall-clock deadline. The round-trip cap cannot catch a
+      // server that withholds an opendir/readdir/close callback entirely -- no
+      // batch ever arrives to count -- so only elapsed time can fail that case.
+      // Armed before opendir so it also bounds an opendir that never calls back;
+      // settle() clears it on every terminal path so a completed listing leaves
+      // no pending timer.
+      const deadline = setTimeout(
+        () =>
+          settle(() =>
+            reject(listingStalledByTimeoutError(path, LISTING_DEADLINE_MS)),
+          ),
+        LISTING_DEADLINE_MS,
+      );
+      sftp.opendir(path, (openErr, openedHandle) => {
+        // The deadline may have already fired (the server withheld the opendir
+        // callback past the bound, then delivered it late); settle() is then a
+        // no-op, so do not open a read against an already-rejected listing.
+        if (settled) return;
         if (openErr) {
-          reject(openErr);
+          settle(() => reject(openErr));
           return;
         }
-        const results: FileInfo[] = [];
-        let settled = false;
-        // Always close the handle, then settle once. A close() failure on a
-        // read-only directory handle carries no data meaning, so it is swallowed
-        // rather than allowed to mask the result or the refusal (matching get()'s
-        // close handling). The `settled` guard makes a late readdir callback a
-        // no-op and prevents a double close.
-        const settle = (action: () => void): void => {
-          if (settled) return;
-          settled = true;
-          sftp.close(handle, () => action());
-        };
+        handle = openedHandle;
         const readNextBatch = (): void => {
-          sftp.readdir(handle, (readErr, list) => {
+          if (++readdirCalls > MAX_LISTING_READDIR_BATCHES) {
+            settle(() =>
+              reject(
+                listingStalledByBatchCountError(
+                  path,
+                  MAX_LISTING_READDIR_BATCHES,
+                ),
+              ),
+            );
+            return;
+          }
+          // openedHandle (not the outer `handle`) is the non-null Buffer here;
+          // the outer `handle` exists only to let settle() close it on any path.
+          sftp.readdir(openedHandle, (readErr, list) => {
+            // A readdir callback delivered after the deadline already settled
+            // must not process a batch against a rejected listing.
+            if (settled) return;
             if (readErr) {
               if (readErr.code === SSH_FX_EOF) settle(() => resolve(results));
               else settle(() => reject(readErr));
