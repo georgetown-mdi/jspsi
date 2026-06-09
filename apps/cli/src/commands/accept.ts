@@ -432,8 +432,11 @@ function reconcileAcceptConfig(params: {
     );
 
   log.info(
-    `the existing configuration at ${configPath} matches ${against}; ` +
-      "it will be reused unchanged.",
+    conn.warnings.length === 0
+      ? `the existing configuration at ${configPath} matches ${against}; ` +
+          "it will be reused unchanged."
+      : `the existing configuration at ${configPath} will be reused unchanged; ` +
+          "the connection differences above apply to this exchange only.",
   );
   return true;
 }

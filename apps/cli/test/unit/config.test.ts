@@ -529,6 +529,21 @@ test("diffLinkageTerms: a payload mismatch is a conflict", () => {
   expect(conflicts.map((c) => c.field)).toContain("payload");
 });
 
+test("diffLinkageTerms: a payload sub-field difference under matching names renders the detail", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // Same column name on both sides, differing only in description: a names-only
+  // render would print identical send=/receive= summaries, so the detail
+  // fallback must show what actually differs.
+  existing.payload = { send: [{ name: "note", description: "old" }] };
+  incoming.payload = { send: [{ name: "note", description: "new" }] };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const payloadConflict = conflicts.find((c) => c.field === "payload");
+  expect(payloadConflict).toBeDefined();
+  expect(payloadConflict?.existing).not.toBe(payloadConflict?.incoming);
+  expect(payloadConflict?.incoming).toContain("new");
+});
+
 test("formatReconcileDiffs: renders each field with its existing and required values", () => {
   const rendered = formatReconcileDiffs([
     { field: "algorithm", existing: "psi-c", incoming: "psi" },

@@ -728,6 +728,28 @@ test("diffConnectionAgainstUrl: a --server-port override that differs from the c
   expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
 });
 
+test("diffConnectionAgainstUrl: the URL stating the default port 22 against an unset config is silent", () => {
+  // An unset config port means the SFTP default (22), so a URL restating 22 is
+  // not a divergence and must not warn.
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host:22"));
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstUrl: a non-default port against an unset config warns", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const r = diffConnectionAgainstUrl(existing, new URL("sftp://host:2222"));
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
+});
+
 test("diffConnectionAgainstUrl: a --server-port override equal to the config is silent", () => {
   const existing: ConnectionConfig = {
     channel: "sftp",

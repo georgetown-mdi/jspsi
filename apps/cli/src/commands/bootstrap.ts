@@ -171,6 +171,11 @@ export function connectionFromURL(
   return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;
 }
 
+// The port an SFTP connection uses when the config sets none (ssh2's default).
+// A config with no port and a URL/override stating this value describe the same
+// endpoint, so the reconcile must not flag that as a divergence.
+const DEFAULT_SFTP_PORT = 22;
+
 /**
  * Compare a pre-existing config's connection block against an online accept's
  * target -- the URL plus any `--server-*` overrides -- splitting the
@@ -240,13 +245,22 @@ export function diffConnectionAgainstUrl(
       conflict("connection.server.path", server.path, urlPath);
 
     // port -> warn (how you reach the same host). Effective value: the override
-    // wins over the URL, matching connectionFromURL.
-    const port =
+    // wins over the URL, matching connectionFromURL. An unset config port means
+    // the SFTP default, so a URL or override that merely restates that default
+    // is not a divergence and must not warn.
+    const specifiedPort =
       overrides.serverPort !== undefined
-        ? String(overrides.serverPort)
-        : url.port || undefined;
-    if (port !== undefined && port !== server.port?.toString())
-      warnings.push(`port: specified ${port}, saved ${server.port ?? "unset"}`);
+        ? overrides.serverPort
+        : url.port
+          ? Number(url.port)
+          : undefined;
+    if (
+      specifiedPort !== undefined &&
+      specifiedPort !== (server.port ?? DEFAULT_SFTP_PORT)
+    )
+      warnings.push(
+        `port: specified ${specifiedPort}, saved ${server.port ?? "unset"}`,
+      );
 
     // credentials -> warn, value never echoed.
     const username =
@@ -632,9 +646,12 @@ export function logOnlineBootstrapOutcome(
     reuseExistingConfig?: boolean;
   },
 ): void {
-  if (params.reuseExistingConfig) {
-    // Reuse implies the config write was skipped, so there is no configWriteError
-    // to report; the existing config stands and only the rotated key was saved.
+  if (params.reuseExistingConfig && params.configWriteError === undefined) {
+    // Reuse skips the config write, so there is normally no configWriteError; the
+    // existing config stands and only the rotated key was saved. The
+    // `configWriteError === undefined` guard makes that invariant explicit: a
+    // contradictory error here is not swallowed as success but falls through to
+    // the error branch below.
     log.info(
       `exchange complete; reused the existing configuration at ` +
         `${params.configFile} and saved the rotated key to ${params.keyFile}. ` +

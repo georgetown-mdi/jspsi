@@ -222,25 +222,40 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
 }
 
 /**
- * Render the existing/incoming sides of a structural-list (linkage fields/keys)
- * conflict. Names alone are the readable choice when the lists differ *by name*.
- * But two lists can share every name and still differ in a sub-field (type,
- * constraints, `swap`, description) -- there the canonical compare flags a
- * conflict yet `renderNames` would print two identical lists, leaving the user
- * with nothing to act on. When the name renderings coincide, fall back to the
- * full JSON of each list (raw, not NFC-folded, so the user sees the actual
- * stored values to edit) so the differing sub-field is visible.
+ * When the two rendered sides of a diff come out identical despite a canonical
+ * difference -- a name-only rendering of values that share every name but differ
+ * in a sub-field (a linkage field/key's type/constraints/`swap`, a payload
+ * column's description) -- fall back to the full JSON of each value, so the
+ * conflict message shows what actually differs instead of two identical-looking
+ * summaries. The JSON is raw, not NFC-folded, so the user sees the stored values
+ * to edit.
  */
+function disambiguate(
+  existingRendered: string,
+  incomingRendered: string,
+  existingValue: unknown,
+  incomingValue: unknown,
+): { existing: string; incoming: string } {
+  if (existingRendered === incomingRendered)
+    return {
+      existing: JSON.stringify(existingValue),
+      incoming: JSON.stringify(incomingValue),
+    };
+  return { existing: existingRendered, incoming: incomingRendered };
+}
+
+/** Render the existing/incoming sides of a structural-list (linkage fields/keys)
+ *  conflict: names when the lists differ by name, else the full JSON. */
 function renderStructural(
   existing: ReadonlyArray<{ name: string }>,
   incoming: ReadonlyArray<{ name: string }>,
 ): { existing: string; incoming: string } {
-  if (renderNames(existing) === renderNames(incoming))
-    return {
-      existing: JSON.stringify(existing),
-      incoming: JSON.stringify(incoming),
-    };
-  return { existing: renderNames(existing), incoming: renderNames(incoming) };
+  return disambiguate(
+    renderNames(existing),
+    renderNames(incoming),
+    existing,
+    incoming,
+  );
 }
 
 /**
@@ -326,12 +341,15 @@ export function diffLinkageTerms(
   if (
     nfcCanonical(existing.payload ?? null) !==
     nfcCanonical(incoming.payload ?? null)
-  )
-    add(
-      "payload",
+  ) {
+    const r = disambiguate(
       renderPayload(existing.payload),
       renderPayload(incoming.payload),
+      existing.payload ?? null,
+      incoming.payload ?? null,
     );
+    add("payload", r.existing, r.incoming);
+  }
 
   if (existing.date !== incoming.date)
     warnings.push(

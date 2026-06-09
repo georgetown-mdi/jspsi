@@ -334,6 +334,7 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
   const log = getLogger("accept-port-warn-test");
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
+  const infoSpy = vi.spyOn(log, "info");
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const ready = await validateAccept({
@@ -352,8 +353,16 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
         (c) => typeof c[0] === "string" && c[0].includes("2222"),
       ),
     ).toBe(true);
+    // With connection warnings emitted, the summary must not claim the config
+    // "matches" -- that would contradict the just-emitted divergence.
+    expect(
+      infoSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes("matches"),
+      ),
+    ).toBe(false);
   } finally {
     warnSpy.mockRestore();
+    infoSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
