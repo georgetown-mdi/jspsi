@@ -260,7 +260,7 @@ const sftp: ConfigFactory = (auth) => ({
 
 beforeAll(cleanSftpDir);
 
-test("sftp: authenticated exchange over the real server matches the unauthenticated PSI result and rotates the secret", async () => {
+test("sftp: authenticated recurring exchange over the real server matches the unauthenticated PSI result and rotates the secret", async () => {
   const baseline = await runBaseline(work, sftp);
   expect(baseline.trim().split("\n").length).toBe(1 + RECEIVER_ROWS.length);
 
@@ -270,4 +270,13 @@ test("sftp: authenticated exchange over the real server matches the unauthentica
   expect(run1.receiverOut).toBe(baseline);
 
   await cleanSftpDir();
-}, 60_000);
+
+  // Recurring: the rotated secret from run 1 drives a second authenticated
+  // exchange over the real server, which must still authenticate and yield the
+  // same PSI result while rotating again to a fresh value.
+  const run2 = await runAuthenticatedPair(work, "sftp2", sftp, run1.rotated);
+  expect(run2.receiverOut).toBe(baseline);
+  expect(run2.rotated).not.toBe(run1.rotated);
+
+  await cleanSftpDir();
+}, 90_000);
