@@ -1,6 +1,6 @@
 ---
 name: light-review
-description: Multi-reviewer code review of a branch against staging. Spawns three independent Sonnet reviewers, then a fourth Sonnet agent that clusters and verifies their findings, and writes the consolidated result to review_findings_<branch>.md. Takes an optional list of documentation files the reviewers and consolidator should consult for design justification. Pure orchestration -- it does not review the code itself.
+description: Multi-reviewer code review of a branch against staging. Spawns three independent Sonnet reviewers, then a fourth Sonnet agent that clusters and verifies their findings, and writes the consolidated result into the reviewed branch's worktree as review_findings.md (or review_findings_<branch>.md at the repo root when the branch has no worktree). Takes an optional list of documentation files the reviewers and consolidator should consult for design justification. Pure orchestration -- it does not review the code itself.
 ---
 
 You are ORCHESTRATING a code review. You do not review the code yourself and you do not
@@ -84,9 +84,20 @@ severity, file, "flagged by N of 3", and the verification outcome.
 
 ## Step 5 -- Write
 
-Write the consolidation agent's markdown verbatim to `review_findings_$1.md` in the repo
-root. If `$1` contains "/", replace it with "-" in the filename. Overwrite the file if it
-already exists.
+Decide where the findings go by locating the reviewed branch's worktree:
+
+    git worktree list --porcelain
+
+Each worktree is a block of lines; the block whose `branch refs/heads/$1` line names the
+reviewed branch gives that worktree's path on its `worktree <path>` line.
+
+- If such a worktree exists, write the consolidation agent's markdown verbatim to
+  `<worktree-path>/review_findings.md`. No branch suffix -- the worktree directory already
+  identifies the branch.
+- If the branch has no worktree, fall back to the repo root: `review_findings_$1.md`,
+  replacing any "/" in `$1` with "-".
+
+Overwrite the file if it already exists, and report the path you wrote.
 
 ## What you do NOT do
 

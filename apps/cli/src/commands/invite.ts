@@ -21,6 +21,7 @@ import {
   expiresFromNow,
   generateSharedSecret,
   loadInputRows,
+  logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
   redactUrlCredentials,
@@ -271,7 +272,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // wait it is meant to precede.
       printInvitation(ready.invitation, { url: ready.url });
       log.info("waiting for the partner to accept...");
-      await runOnlineBootstrap({
+      const { configWriteError } = await runOnlineBootstrap({
         connection: ready.connection,
         dataSpec: ready.dataSpec,
         prepared: ready.prepared,
@@ -287,10 +288,11 @@ export async function handler(argv: Arguments): Promise<void> {
           recordFile: options.recordFile,
         }),
       });
-      log.info(
-        `exchange complete; saved config to ${options.configFile} and the ` +
-          `rotated key to ${options.keyFile}. Keep the key file private.`,
-      );
+      logOnlineBootstrapOutcome(log, {
+        configFile: options.configFile,
+        keyFile: options.keyFile,
+        configWriteError,
+      });
       return;
     }
 

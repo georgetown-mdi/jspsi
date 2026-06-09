@@ -20,7 +20,7 @@ If no branch is given, ask for one before doing anything else.
 
 A git worktree already checks out every *tracked* file -- including the tracked `.claude/` tree (agents, commands, skills, scripts), so the worktree gets its own copy and can carry branch-local changes to it. What it does NOT get are the gitignored locals: `CLAUDE.local.md`, `apps/web/.env*`, and `.claude/settings.local.json`. Those are symlinked in individually.
 
-The CLI integration tests run an SFTP container whose storage, host port, and Compose project name must be unique per checkout, or two checkouts clobber each other. This command gives each worktree its own.
+The CLI integration tests run an SFTP container whose storage, host port, and Compose project name must be unique per checkout, or two checkouts clobber each other. This command gives each worktree its own. No special teardown is needed.
 
 ## Steps
 
