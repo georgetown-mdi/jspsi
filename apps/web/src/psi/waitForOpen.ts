@@ -4,7 +4,7 @@ import type { DataConnection } from "peerjs";
 
 /**
  * Default ceiling for a data channel to finish opening. Matches the order of
- * magnitude of the PAKE handshake timeout: a channel that has not opened within
+ * magnitude of the key exchange timeout: a channel that has not opened within
  * this window is almost certainly never going to.
  */
 const DEFAULT_OPEN_TIMEOUT_MS = 30_000;

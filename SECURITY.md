@@ -53,7 +53,7 @@ We ask reporters to hold public disclosure until we have published the advisory 
 
 The following are in scope for this policy:
 
-- Cryptographic protocol implementation: SPAKE2 handshake, key derivation, token rotation, MAC confirmation
+- Cryptographic protocol implementation: X25519 key exchange, key derivation, secret rotation, key confirmation
 - Key file handling and credential exposure through configuration parsing
 - PSI protocol correctness: a result that leaks more than the agreed intersection
 - Authentication bypass or impersonation between exchange partners

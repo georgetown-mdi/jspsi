@@ -1,21 +1,23 @@
-import { hkdfDerive, toBase64Url } from "./utils/crypto.js";
-import { runSpake2 } from "./pake.js";
+import { hkdfDerive, toBase64Url, fromBase64Url } from "./utils/crypto.js";
+import { runKex } from "./kex.js";
 
 import type { HandshakeRole } from "./types.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
-import { PAKE_TOKEN_REGEX } from "./config/connection.js";
+import { SHARED_SECRET_REGEX } from "./config/connection.js";
 import type { Authentication } from "./config/connection.js";
 
 // --- Public API --------------------------------------------------------------
 
 /**
- * Result returned by {@link authenticateConnection} after a successful SPAKE2
- * handshake.
+ * Result returned by {@link authenticateConnection} after a successful X25519
+ * key exchange.
  */
 export interface AuthResult {
   /**
-   * 32-byte SPAKE2 session key (`Ke`).  Both parties hold the same value after
-   * a successful handshake.  Callers that need application-layer encryption
+   * 32-byte session key from the X25519 key exchange.  Both parties hold the
+   * same value after a successful handshake; it has forward secrecy (the
+   * exchange mixes a fresh ephemeral X25519 DH) and is mutually authenticated
+   * by the shared secret.  Callers that need application-layer encryption
    * (the `sftp` and `filedrop` channels) pass this to {@link deriveAeadKey} to
    * derive the AES-256-GCM keys; those keys are per direction, not per channel,
    * so the channels share one AEAD mechanism rather than each having its own
@@ -24,7 +26,7 @@ export interface AuthResult {
    */
   sessionKey: Uint8Array<ArrayBuffer>;
   /**
-   * Rotated PAKE token derived deterministically from `sessionKey`.  Both
+   * Rotated shared secret derived deterministically from `sessionKey`.  Both
    * parties compute the same value; no extra round-trip is required.  The
    * caller is responsible for persisting this to `.psilink.key` so that future
    * exchanges use the rotated credential.
@@ -32,7 +34,7 @@ export interface AuthResult {
    * The value is a base64url-encoded 32-byte HKDF output.  It has no
    * expiration and is suitable for use as a persistent shared secret.
    */
-  newToken: string;
+  rotatedSecret: string;
 }
 
 /**
@@ -71,7 +73,7 @@ export const AEAD_CONTEXTS = Object.freeze([
 export type AeadContext = (typeof AEAD_CONTEXTS)[number];
 
 /**
- * Derive a 32-byte AES-256-GCM key from the SPAKE2 session key using HKDF.
+ * Derive a 32-byte AES-256-GCM key from the session key using HKDF.
  *
  * Use this when the connection channel requires application-layer encryption.
  * Call it after {@link authenticateConnection} and pass the result to the
@@ -102,52 +104,53 @@ export async function deriveAeadKey(
 }
 
 /**
- * Run a SPAKE2 mutual-authentication handshake over an already-open
+ * Run an X25519 (NNpsk0) authenticated key exchange over an already-open
  * connection.
  *
  * Call this immediately after the connection is established and before
  * `runExchange` (exported from `./exchange.ts`). Both parties must call it
- * with the same `pakeToken`;
- * if they do not, the MAC confirmation step will fail and this function throws.
+ * with the same `sharedSecret`;
+ * if they do not, the key-confirmation step will fail and this function throws.
  *
- * IMPORTANT — runtime contract: {@link Authentication}'s `pakeToken` is typed
+ * IMPORTANT — runtime contract: {@link Authentication}'s `sharedSecret` is typed
  * as optional only to accommodate parse-time intermediate states (e.g. a
  * configuration file loaded before the key file is injected). By the time
- * this function is invoked, `authentication.pakeToken` MUST be populated
- * with a string matching {@link PAKE_TOKEN_REGEX}. If it is absent or
+ * this function is invoked, `authentication.sharedSecret` MUST be populated
+ * with a string matching {@link SHARED_SECRET_REGEX}. If it is absent or
  * malformed, this function throws synchronously (before any network activity)
  * with a tagged recovery error. Library consumers that bypass the CLI's
- * config loader are responsible for ensuring the token is present.
+ * config loader are responsible for ensuring the secret is present.
  *
  * Expiry is checked before the handshake begins and again after it completes.
  * If `authentication.expires` is set and is in the past at either point, this
- * function throws.  The post-handshake check catches tokens that expire during
- * the SPAKE2 round-trip window, bounded by the per-message 30 s handshake
+ * function throws.  The post-handshake check catches secrets that expire during
+ * the key-exchange round-trip window, bounded by the per-message 30 s handshake
  * timeout: at most one window (~30 s) for the initiator and at most two
  * windows (~60 s) for the responder, which performs two consecutive receives.
  *
- * Errors thrown by this function's own validation checks (token format,
+ * Errors thrown by this function's own validation checks (secret format,
  * pre-handshake expiry, post-handshake expiry) carry a `psilinkRecoveryHintEmitted:
  * true` property because their messages already include specific recovery
  * instructions. Higher-level code (e.g. the CLI) that adds its own generic
  * recovery advisory should check this property and suppress the generic hint
- * when it is set, to avoid contradictory user-facing messages. SPAKE2 protocol
- * failures from `runSpake2` (generic "PAKE authentication failed" or "PAKE
- * handshake timed out") do not carry the tag because their messages are
- * intentionally generic and benefit from the caller's added advisory.
+ * when it is set, to avoid contradictory user-facing messages. Key-exchange
+ * protocol failures from `runKex` (generic "key exchange authentication failed"
+ * or "key exchange handshake timed out") do not carry the tag because their
+ * messages are intentionally generic and benefit from the caller's added
+ * advisory.
  *
  * @param conn            An open, ready-to-use connection.
  * @param authentication  The authentication block from the connection config.
- *                        `pakeToken` must be present.
+ *                        `sharedSecret` must be present.
  * @param handshakeRole   This party's role (`"initiator"` or `"responder"`),
  *                        matching the role passed to subsequent protocol calls.
  *
- * @throws {Error} if `authentication.pakeToken` is absent or not a
+ * @throws {Error} if `authentication.sharedSecret` is absent or not a
  *                 base64url-encoded 32-byte value.
  * @throws {Error} if `authentication.expires` is in the past before the
- *                 handshake, or if it expires during the SPAKE2 round-trip
+ *                 handshake, or if it expires during the key-exchange round-trip
  *                 (post-handshake check).
- * @throws {Error} if the SPAKE2 handshake fails (wrong token or tampered
+ * @throws {Error} if the key exchange fails (wrong shared secret or tampered
  *                 messages).
  */
 export async function authenticateConnection(
@@ -155,15 +158,15 @@ export async function authenticateConnection(
   authentication: Authentication,
   handshakeRole: HandshakeRole,
 ): Promise<AuthResult> {
-  const { pakeToken, expires } = authentication;
+  const { sharedSecret, expires } = authentication;
 
-  if (!pakeToken || !PAKE_TOKEN_REGEX.test(pakeToken)) {
+  if (!sharedSecret || !SHARED_SECRET_REGEX.test(sharedSecret)) {
     throw Object.assign(
       new Error(
-        "authentication.pakeToken must be a base64url-encoded 32-byte value " +
+        "authentication.sharedSecret must be a base64url-encoded 32-byte value " +
           "(43 base64url characters; the final character must be in " +
-          "[AEIMQUYcgkosw048]); tokens are generated by 'psilink invite' - " +
-          "to obtain a new token, both parties must re-invite",
+          "[AEIMQUYcgkosw048]); shared secrets are generated by " +
+          "'psilink invite' - to obtain a new one, both parties must re-invite",
       ),
       { psilinkRecoveryHintEmitted: true },
     );
@@ -171,34 +174,41 @@ export async function authenticateConnection(
 
   if (expires !== undefined && new Date(expires) <= new Date()) {
     throw Object.assign(
-      new Error(`PAKE token expired at ${expires}; obtain a new invitation`),
+      new Error(`shared secret expired at ${expires}; obtain a new invitation`),
       { psilinkRecoveryHintEmitted: true },
     );
   }
 
-  const { sessionKey } = await runSpake2(conn, handshakeRole, pakeToken);
+  // runKex takes the raw 32-byte pre-shared secret; SHARED_SECRET_REGEX above
+  // guarantees `sharedSecret` decodes to exactly 32 bytes.
+  const { sessionKey } = await runKex(
+    conn,
+    handshakeRole,
+    fromBase64Url(sharedSecret),
+  );
 
-  // Post-handshake expiry check: catches tokens that expire during the SPAKE2
-  // round-trip. Each receive() is bounded by the 30 s handshake timeout; the
-  // initiator does one receive (~30 s worst case), the responder does two
-  // (~60 s worst case).
+  // Post-handshake expiry check: catches secrets that expire during the
+  // key-exchange round-trip. Each receive() is bounded by the 30 s handshake
+  // timeout; the initiator does one receive (~30 s worst case), the responder
+  // does two (~60 s worst case).
   if (expires !== undefined && new Date(expires) <= new Date()) {
     throw Object.assign(
       new Error(
-        `PAKE token expired at ${expires} during the SPAKE2 round-trip. ` +
-          `The handshake completed but the token expired before the rotated ` +
-          `token could be derived and returned; both parties must re-invite.`,
+        `shared secret expired at ${expires} during the key-exchange ` +
+          `round-trip. The handshake completed but the secret expired before ` +
+          `the rotated secret could be derived and returned; both parties ` +
+          `must re-invite.`,
       ),
       { psilinkRecoveryHintEmitted: true },
     );
   }
 
-  const newTokenBytes = await hkdfDerive(
+  const rotatedSecretBytes = await hkdfDerive(
     sessionKey,
-    "psilink-token-rotation-v1",
+    "psilink-shared-secret-rotation-v1",
     32,
   );
-  const newToken = toBase64Url(newTokenBytes);
+  const rotatedSecret = toBase64Url(rotatedSecretBytes);
 
-  return { sessionKey, newToken };
+  return { sessionKey, rotatedSecret };
 }

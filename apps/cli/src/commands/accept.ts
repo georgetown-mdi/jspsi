@@ -337,9 +337,9 @@ export async function handler(argv: Arguments): Promise<void> {
         connection: ready.connection,
         dataSpec: ready.dataSpec,
         prepared: ready.prepared,
-        pakeToken: ready.token.pakeToken,
+        sharedSecret: ready.token.sharedSecret,
         // Pass the invitation's expiry through unchanged; authenticateConnection
-        // re-checks it before and after the SPAKE2 handshake.
+        // re-checks it before and after the key exchange.
         expires: ready.token.expires,
         keyPath: options.keyFile,
         configPath: options.configFile,
@@ -367,7 +367,7 @@ export async function handler(argv: Arguments): Promise<void> {
       spec,
       // The acceptor's key file holds the invitation token without an expiry; the
       // inviter's copy carries the expiry. The token rotates on first exchange.
-      { pakeToken: ready.token.pakeToken },
+      { sharedSecret: ready.token.sharedSecret },
       { configPath: options.configFile, keyPath: options.keyFile },
     );
 

@@ -420,18 +420,18 @@ Authentication settings for the exchange. What belongs in `psilink.yaml` depends
 - **`webrtc`**: set `role` to identify the inviter and acceptor.
 - **`sftp` and `filedrop`**: no fields are user-settable here.
 
-The PAKE token and its expiration are loaded from a key file and added to the in-memory representation before the exchange runs; they never appear in `psilink.yaml` and should not be edited manually. If `pake_token`, `pakeToken`, or `expires` are present in the configuration file, the CLI will emit a warning and ignore them; values from the key file always take precedence.
+The shared secret and its expiration are loaded from a key file and added to the in-memory representation before the exchange runs; they never appear in `psilink.yaml` and should not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI will emit a warning and ignore them; values from the key file always take precedence.
 
-`pakeToken` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
+`sharedSecret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
 
 Taken together, this implies that `connection.authentication` is never required in a configuration file. It is required for in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
 
-The PAKE token is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the SPAKE2 session key using HKDF, so no extra round-trip is required. The CLI persists the new token automatically; library consumers of `authenticateConnection` are responsible for persisting `newToken` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing token remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated token and can retry without re-inviting. If the handshake succeeds but the new token cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated token, making the old token invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; persistent tokens carry none.
+The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; persistent shared secrets carry none.
 
 | Field | Type | In `psilink.yaml` | Description |
 |-------|------|-------------------|-------------|
-| `pake_token` | string | never; loaded from `.psilink.key` | PAKE shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
-| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `pake_token`; absent for persistent tokens. Do not set manually. |
+| `shared_secret` | string | never; loaded from `.psilink.key` | Shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
+| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens. Do not set manually. |
 | `role` | enum | WebRTC only | `inviter` \| `acceptor`; used to derive deterministic PeerJS peer IDs from the shared token so both parties know each other's address without out-of-band communication. Orthogonal to the PSI protocol roles, which are determined by `linkage_terms.output`. For `sftp` and `filedrop` this field is not part of the schema; the CLI emits a warning and strips it before validation. |
 
 Any other key under `connection.authentication` is also stripped before validation. The CLI emits a warning naming the field. The Zod schema itself silently strips unknown keys (its default `strip` behavior), so a library consumer that bypasses the CLI's pre-validation pass will not see a warning for unknown fields - they are dropped without comment.
@@ -553,7 +553,7 @@ Channel-agnostic and channel-specific tuning parameters. A configuration warning
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining PAKE token lifetime. |
+| `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining shared-secret lifetime. |
 | `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait during each connection attempt to the primary exchange server |
 | `max_reconnect_attempts` | integer | 3 | Maximum number of times to attempt reopening a dropped connection before giving up |
 
@@ -642,7 +642,7 @@ Optional. Configures signing of exchange receipts and the trust in the partner's
 *Type:* string (`none` | `session-derived` | `certificate`)  
 *Required:* yes, when a `signing` block is present
 
-The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared PAKE session key -- tamper-evident but not non-repudiation and not third-party verifiable. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation. (Receipt assembly and the receipt swap are not yet wired up; this field, the signing identity, and the trust checks below are in place today.)
+The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared key-exchange session key -- tamper-evident but not non-repudiation and not third-party verifiable. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation. (Receipt assembly and the receipt swap are not yet wired up; this field, the signing identity, and the trust checks below are in place today.)
 
 ### `signing.identity_file`
 

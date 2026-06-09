@@ -1,9 +1,7 @@
-// NOTE: `hexToBytes` and `bytesToHex` in `pake.ts` are also candidates to move
-// here once a second caller appears for them. `hmacSha256` has been moved here
-// (see below): the exchange-record commitment scheme is its second caller, so
-// per the CONTRIBUTING.md rule that shared cryptographic helpers are extracted
-// as soon as a second caller exists, it now lives in one place rather than being
-// re-implemented.
+// NOTE: `hmacSha256` has been moved here (see below): the exchange-record
+// commitment scheme is its second caller, so per the CONTRIBUTING.md rule that
+// shared cryptographic helpers are extracted as soon as a second caller exists,
+// it now lives in one place rather than being re-implemented.
 
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();
@@ -93,7 +91,7 @@ export function bytesEqual(
  * A zero salt is used deliberately: `info` carries all domain separation, so
  * the salt adds no security.  RFC 5869 §3.1 explicitly permits this when the
  * IKM is high-entropy key material, which is always true here (callers pass
- * either a SPAKE2 session key or a decoded 32-byte base64url token).
+ * either a session key or a decoded 32-byte base64url token).
  */
 export async function hkdfDerive(
   ikm: Uint8Array<ArrayBuffer>,
@@ -123,7 +121,7 @@ export async function hkdfDerive(
 /**
  * Compute HMAC-SHA-256 of `data` under `key`.
  *
- * Shared by the SPAKE2 confirmation MACs (`pake.ts`) and the exchange-record
+ * Shared by the key-exchange confirmation MACs (`kex.ts`) and the exchange-record
  * commitment scheme (`exchangeRecord.ts`), which keys it with a per-commitment
  * salt. Uses `crypto.subtle`, so it is identical on Node and in the browser.
  */
@@ -153,7 +151,7 @@ export async function sha256(
 
 /**
  * Return `length` cryptographically random bytes from the platform CSPRNG
- * (`crypto.getRandomValues`). Used for SPAKE2 scalars and for the exchange
+ * (`crypto.getRandomValues`). Used for key-exchange ephemeral keys and for the exchange
  * record's binding nonce and per-commitment salts.
  */
 export function randomBytes(length: number): Uint8Array<ArrayBuffer> {

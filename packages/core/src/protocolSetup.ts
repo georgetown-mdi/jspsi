@@ -6,7 +6,7 @@ import {
   parseLinkageTerms,
   validateCompatibility,
 } from "./config/linkageTerms";
-import { PAKE_TOKEN_REGEX } from "./config/connection";
+import { SHARED_SECRET_REGEX } from "./config/connection";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import {
   receiveParsed,
@@ -45,12 +45,12 @@ const recordCountMessage = z.object({
 
 // The dedicated frame that carries a freshly generated shared secret from the
 // initiator to the responder during a both-parties `--save` bootstrap (see
-// exchangeBootstrapSecret). The token format is pinned to PAKE_TOKEN_REGEX -- a
+// exchangeBootstrapSecret). The token format is pinned to SHARED_SECRET_REGEX -- a
 // base64url-encoded 32-byte value -- so it is byte-for-byte the persistent
 // secret that authenticateConnection rotates to and saveKeyFile persists; a
 // malformed value is a `protocol` ConnectionError on the responder.
 const sharedSecretMessage = z.object({
-  sharedSecret: z.string().regex(PAKE_TOKEN_REGEX),
+  sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
 });
 
 // --- Terms exchange ----------------------------------------------------------
@@ -241,7 +241,7 @@ export async function exchangeTerms(
  * record-count step already performs.
  *
  * The secret is a base64url-encoded 32 random bytes -- the same format as a
- * rotation token (see auth.ts) and {@link PAKE_TOKEN_REGEX} -- so it drops
+ * rotation token (see auth.ts) and {@link SHARED_SECRET_REGEX} -- so it drops
  * straight into the key file. On a zero-setup exchange there is no application-
  * layer AEAD, so this frame is protected only by the transport (SSH for SFTP,
  * DTLS for WebRTC, operator access controls for a file-drop). That is the
