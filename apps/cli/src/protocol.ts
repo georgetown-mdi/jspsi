@@ -95,6 +95,19 @@ export interface RunProtocolResult {
    * the no-save notices.
    */
   bootstrap?: ExchangeBootstrapResult;
+  /**
+   * The error thrown or rejected by `onAuthenticated`, when the post-handshake
+   * hook failed but the run otherwise resolved. The hook is non-fatal, so its
+   * failure does not stop the exchange; this field reports it so the caller can
+   * correct its own messaging (the online invite/accept callers read it to avoid
+   * claiming the config was saved when the hook's `saveConfig` actually failed).
+   * The error itself was already logged at error level by {@link runProtocol}.
+   * `undefined` when no hook was passed, the hook succeeded, or the run was
+   * short-circuited by a signal. When the hook failed AND the exchange then also
+   * failed, `runProtocol` rejects with the exchange error and this field is
+   * never observed.
+   */
+  onAuthenticatedError?: unknown;
 }
 
 /**
@@ -136,8 +149,10 @@ export interface RunProtocolResult {
  * -- is non-fatal: it is logged at error level (so it survives
  * `--log-level=error`) and the exchange still runs, because the data exchange is
  * the irreplaceable two-party operation and must not be aborted by a failure to
- * persist the recoverable config. Pass `undefined` (the default) on the no-auth
- * path and from callers that need no post-handshake step (zero-setup, exchange).
+ * persist the recoverable config. The failure is also reported in
+ * {@link RunProtocolResult.onAuthenticatedError} so the caller can correct its
+ * own messaging. Pass `undefined` (the default) on the no-auth path and from
+ * callers that need no post-handshake step (zero-setup, exchange).
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -535,6 +550,12 @@ export async function runProtocol(
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigterm);
 
+  // Captures a failure from the optional post-handshake hook (onAuthenticated).
+  // The hook is non-fatal, so a failure here does not stop the exchange; it is
+  // surfaced in the resolved result (onAuthenticatedError) so the caller can
+  // correct its own messaging rather than report a config that was never saved.
+  let onAuthenticatedError: unknown;
+
   try {
     if (connection.channel === "filedrop") {
       log.info("opening local path", connection.path);
@@ -697,6 +718,7 @@ export async function runProtocol(
         try {
           await onAuthenticated();
         } catch (hookErr) {
+          onAuthenticatedError = hookErr;
           log.error(
             "the post-authentication hook failed after the handshake " +
               "succeeded and the rotated key was saved; the exchange will " +
@@ -780,7 +802,10 @@ export async function runProtocol(
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.
-    return { bootstrap };
+    // onAuthenticatedError is set only when a post-handshake hook failed but the
+    // exchange above still succeeded (a hook failure followed by an exchange
+    // failure rethrows from the catch below instead of reaching here).
+    return { bootstrap, onAuthenticatedError };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
     // independently derived the same new token from the SPAKE2 session key, but

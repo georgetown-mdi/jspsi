@@ -362,8 +362,11 @@ export async function prepareForOnlineExchange(
  * rotated key and the config on disk, so the recurring-exchange setup is
  * recoverable without re-inviting. A handshake that never succeeds (declined,
  * expired, or unreachable partner) never reaches the hook, so it still leaves
- * no config behind. A failure of the config write itself is non-fatal and
- * logged by `runProtocol`; the exchange still runs (see `onAuthenticated`).
+ * no config behind. A failure of the config write itself is non-fatal: the
+ * exchange still runs (see `onAuthenticated`), and the error -- already logged
+ * by `runProtocol` -- is returned as `configWriteError` so the caller can report
+ * the truthful outcome instead of claiming the config was saved. When the
+ * exchange itself fails, this function rejects and never returns.
  *
  * The persisted config carries the plain `connection` (no `authentication`);
  * `saveConfig` strips any PAKE material regardless, so moving the write into the
@@ -381,7 +384,7 @@ export async function runOnlineBootstrap(params: {
   verbosity: number;
   loggerName: string;
   recordOutput?: RecordOutput;
-}): Promise<void> {
+}): Promise<{ configWriteError?: unknown }> {
   // `connection` is already narrowed to the channels runProtocol supports
   // (RunnableConnectionConfig), so this cast only adds the `authentication`
   // field; it bridges the spread of a discriminated union to the union target,
@@ -395,7 +398,7 @@ export async function runOnlineBootstrap(params: {
     },
   } as ProtocolConnectionConfig;
 
-  await runProtocol(
+  const { onAuthenticatedError } = await runProtocol(
     connWithAuth,
     params.prepared,
     params.output,
@@ -416,6 +419,37 @@ export async function runOnlineBootstrap(params: {
         ...params.dataSpec,
       });
     },
+  );
+
+  // onAuthenticatedError is the config-write failure, if any: the hook is just
+  // the saveConfig call above, so surface it under a name the caller speaks.
+  return { configWriteError: onAuthenticatedError };
+}
+
+/**
+ * Log the post-exchange outcome of an online invite/accept run. On a clean run
+ * both files were written. When the config write failed at acceptance
+ * (`configWriteError` set), the rotated key was still saved but the config was
+ * not, so the message must not claim otherwise -- the underlying error was
+ * already logged at error level by `runProtocol`, so this only corrects the
+ * summary and points back to it.
+ */
+export function logOnlineBootstrapOutcome(
+  log: ReturnType<typeof getLogger>,
+  params: { configFile: string; keyFile: string; configWriteError?: unknown },
+): void {
+  if (params.configWriteError === undefined) {
+    log.info(
+      `exchange complete; saved config to ${params.configFile} and the ` +
+        `rotated key to ${params.keyFile}. Keep the key file private.`,
+    );
+    return;
+  }
+  log.warn(
+    `exchange complete and the rotated key was saved to ${params.keyFile}, ` +
+      `but the configuration could not be written to ${params.configFile} ` +
+      `(see the error above). Recreate it before running a recurring ` +
+      `exchange. Keep the key file private.`,
   );
 }
 

@@ -82,7 +82,7 @@ import {
   runExchange,
 } from "@psilink/core";
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
-import { runProtocol } from "../../src/protocol";
+import { runProtocol, type RunProtocolResult } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
@@ -1747,7 +1747,7 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
     aExchangeRunAtHookTime = events.includes("exchange:A");
   };
 
-  await Promise.all([
+  const [resultA] = await Promise.all([
     runProtocol(
       {
         channel: "filedrop",
@@ -1782,6 +1782,8 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
   expect(hookSawToken).not.toBe(TOKEN_A);
   // Fired before the exchange: A's runExchange had not run when the hook fired.
   expect(aExchangeRunAtHookTime).toBe(false);
+  // A successful hook leaves no error in the result.
+  expect(resultA.onAuthenticatedError).toBeUndefined();
 });
 
 test("runProtocol persists the onAuthenticated side effect even when the data exchange then fails", async () => {
@@ -1979,6 +1981,12 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   expect(
     mockState.errors.some((m) => m.includes("simulated config write failure")),
   ).toBe(true);
+  // ...and is surfaced in the resolved result so the caller can fix its message.
+  const valueA = (resultA as PromiseFulfilledResult<RunProtocolResult>).value;
+  expect(valueA.onAuthenticatedError).toBeInstanceOf(Error);
+  expect((valueA.onAuthenticatedError as Error).message).toBe(
+    "simulated config write failure",
+  );
 });
 
 test("an async onAuthenticated that rejects is non-fatal: the exchange still runs and the rejection is logged", async () => {
@@ -2038,6 +2046,12 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
       m.includes("simulated async config write failure"),
     ),
   ).toBe(true);
+  // ...and is surfaced in the resolved result, just like a synchronous throw.
+  const valueA = (resultA as PromiseFulfilledResult<RunProtocolResult>).value;
+  expect(valueA.onAuthenticatedError).toBeInstanceOf(Error);
+  expect((valueA.onAuthenticatedError as Error).message).toBe(
+    "simulated async config write failure",
+  );
 });
 
 test("runProtocol without onAuthenticated runs a normal authenticated exchange (existing callers unaffected)", async () => {

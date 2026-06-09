@@ -12,6 +12,7 @@ import {
   connectionFromEndpoint,
   connectionFromURL,
   generatePakeToken,
+  logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
   redactUrlCredentials,
@@ -393,4 +394,78 @@ test("runOnlineBootstrap does not write the config when the handshake fails", as
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("runOnlineBootstrap returns the config-write error when the hook fails but the exchange succeeds", async () => {
+  // The hook (saveConfig) failed at acceptance, but the exchange still
+  // succeeded, so runProtocol resolves with onAuthenticatedError set.
+  // runOnlineBootstrap must forward it as configWriteError so the caller can
+  // avoid claiming the config was saved.
+  const writeError = new Error("disk full while writing config");
+  vi.mocked(runProtocol).mockImplementation((async () => ({
+    onAuthenticatedError: writeError,
+  })) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    const { configWriteError } = await runOnlineBootstrap(
+      onlineBootstrapParams(configPath),
+    );
+    expect(configWriteError).toBe(writeError);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap reports no config-write error on a clean run", async () => {
+  // runProtocol resolves with no onAuthenticatedError (the hook succeeded), so
+  // runOnlineBootstrap reports a clean outcome.
+  vi.mocked(runProtocol).mockImplementation((async () => ({})) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    const { configWriteError } = await runOnlineBootstrap(
+      onlineBootstrapParams(configPath),
+    );
+    expect(configWriteError).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- logOnlineBootstrapOutcome ----------------------------------------------
+
+test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
+  const log = { info: vi.fn(), warn: vi.fn() } as unknown as ReturnType<
+    typeof getLogger
+  >;
+  logOnlineBootstrapOutcome(log, {
+    configFile: "psilink.yaml",
+    keyFile: ".psilink.key",
+  });
+  expect(log.warn).not.toHaveBeenCalled();
+  expect(log.info).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(log.info).mock.calls[0][0]).toContain(
+    "saved config to psilink.yaml",
+  );
+});
+
+test("logOnlineBootstrapOutcome: a config-write failure warns and does not claim the config was saved", () => {
+  const log = { info: vi.fn(), warn: vi.fn() } as unknown as ReturnType<
+    typeof getLogger
+  >;
+  logOnlineBootstrapOutcome(log, {
+    configFile: "psilink.yaml",
+    keyFile: ".psilink.key",
+    configWriteError: new Error("permission denied"),
+  });
+  expect(log.info).not.toHaveBeenCalled();
+  expect(log.warn).toHaveBeenCalledTimes(1);
+  const msg = vi.mocked(log.warn).mock.calls[0][0] as string;
+  // The rotated key is still reported saved; the config is reported NOT written.
+  expect(msg).toContain("rotated key was saved to .psilink.key");
+  expect(msg).toContain("could not be written to psilink.yaml");
+  expect(msg).not.toContain("saved config to");
 });
