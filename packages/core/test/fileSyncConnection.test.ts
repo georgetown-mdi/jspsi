@@ -6689,3 +6689,17 @@ test("normalizeFiledropPath: preserves root-like paths", () => {
   expect(normalizeFiledropPath("C:/")).toBe("C:/");
   expect(normalizeFiledropPath("C:\\")).toBe("C:/");
 });
+
+test("normalizeFiledropPath: leaves interior segments and case untouched", () => {
+  // Only backslashes and trailing slashes are normalized; interior "//", "."
+  // and ".." segments and letter case are preserved verbatim. The CLI filedrop
+  // path-equality check relies on this: collapsing interior segments here would
+  // make two genuinely different drops compare equal and silently skip a real
+  // "wrong drop" conflict. Pin it so a future regex tidy-up cannot regress it.
+  expect(normalizeFiledropPath("/a//b")).toBe("/a//b");
+  expect(normalizeFiledropPath("/mnt/share/.")).toBe("/mnt/share/.");
+  expect(normalizeFiledropPath("/mnt/share/../other")).toBe(
+    "/mnt/share/../other",
+  );
+  expect(normalizeFiledropPath("/MNT/Share")).toBe("/MNT/Share");
+});

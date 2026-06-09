@@ -199,7 +199,9 @@ function filedropPathsEqual(
   // Normalize both sides through the connection's own normalizer, so the diff's
   // verdict is exactly what the live filedrop connection would open (backslashes
   // folded to forward slashes, all trailing slashes stripped, root-like paths
-  // preserved) -- no separate equality rule to drift from it.
+  // preserved) -- no separate equality rule to drift from it. The `undefined`
+  // branch is defensive only: a filedrop `path` is schema-required, so it does
+  // not fire on a parsed config.
   const norm = (p: string | undefined): string | undefined =>
     p === undefined ? undefined : normalizeFiledropPath(p);
   return norm(a) === norm(b);
