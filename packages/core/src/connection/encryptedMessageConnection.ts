@@ -90,12 +90,14 @@ export const IV_SEQ_OFFSET = 4;
  * lockstep - in the common case the receiver knows from its own message script
  * whether another frame is due, so a missing tail surfaces as a stalled
  * `receive()` (an inactivity timeout) and a marker could only reclassify that
- * timeout, not detect the omission any sooner. That lockstep premise is
- * conditional, not absolute: the per-party empty-linkage-round skip in the
- * matching loop can legitimately stop the two scripts at different points (a
- * pre-existing protocol-loop desync, tracked separately), but a marker would
- * not fix that either - it is a protocol-layer fault, not an absent-frame one.
- * See docs/SECURITY_DESIGN.md, "Channel security".
+ * timeout, not detect the omission any sooner. That lockstep premise once leaned
+ * on a per-party empty-linkage-round skip in the matching loop that could stop
+ * the two scripts at different points; that skip has been removed, so both
+ * parties now run every agreed key and the premise holds unconditionally within
+ * the implemented one-to-one / many-to-one cardinalities. Even when the skip
+ * desynced the scripts a marker would not have fixed it - a protocol-layer
+ * fault, not an absent-frame one. See docs/SECURITY_DESIGN.md, "Channel
+ * security".
  *
  * This decorator is single-consumer: it assumes at most one send() and one
  * receive() in flight at a time, matching MessageConnection's lockstep usage
