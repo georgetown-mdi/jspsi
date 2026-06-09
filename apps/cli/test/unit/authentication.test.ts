@@ -130,6 +130,23 @@ test("authentication throws for an expired token without opening a connection", 
   ).rejects.toThrow("shared secret expired");
 });
 
+test("authentication tags a pre-handshake-expiry error with psilinkRecoveryHintEmitted", async () => {
+  const mc = fromEventConnection(makeConn());
+  // Direct tag assertion, symmetric with the malformed-secret and post-
+  // handshake-expiry paths: the pre-handshake expiry error (checked before any
+  // network activity) carries the recovery-hint tag so the CLI surfaces its
+  // specific "re-invite" instruction instead of the generic advisory.
+  const err = await authenticateConnection(
+    mc,
+    { sharedSecret: TOKEN_A, expires: "2000-01-01T00:00:00.000Z" },
+    "initiator",
+  ).catch((e: unknown) => e);
+  expect(
+    (err as { psilinkRecoveryHintEmitted?: unknown })
+      .psilinkRecoveryHintEmitted,
+  ).toBe(true);
+});
+
 test("authentication throws for a token that is not 43 base64url characters", async () => {
   const mc = fromEventConnection(makeConn());
   await expect(
