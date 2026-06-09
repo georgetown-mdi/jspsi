@@ -95,6 +95,21 @@ export interface RunProtocolResult {
    * the no-save notices.
    */
   bootstrap?: ExchangeBootstrapResult;
+  /**
+   * The error thrown or rejected by `onAuthenticated`, when the post-handshake
+   * hook failed but the run otherwise resolved. The hook is non-fatal, so its
+   * failure does not stop the exchange; this field reports it so the caller can
+   * correct its own messaging (the online invite/accept callers read it to avoid
+   * claiming the config was saved when the hook's `saveConfig` actually failed).
+   * The error itself was already logged at error level by {@link runProtocol}.
+   * `undefined` when no hook was passed or the hook succeeded. On a
+   * signal-interrupted run the value is preserved as recorded: it carries the
+   * hook error if the hook had already failed before the signal arrived, and is
+   * `undefined` otherwise. When the hook failed AND the exchange then also
+   * failed, `runProtocol` rejects with the exchange error and this field is
+   * never observed.
+   */
+  onAuthenticatedError?: unknown;
 }
 
 /**
@@ -123,6 +138,25 @@ export interface RunProtocolResult {
  * zero-setup command, which then reads {@link RunProtocolResult.bootstrap} to
  * provision the saved config/key. It is only meaningful with
  * `authentication: null`.
+ *
+ * `onAuthenticated` is an optional post-handshake hook invoked exactly once, on
+ * the authenticated path only, after the rotated token is saved to the key file
+ * and before the data exchange begins -- i.e. at the moment of acceptance. The
+ * online invite/accept callers persist their configuration here, so a handshake
+ * that succeeds but whose exchange then fails leaves both the rotated key and
+ * the config on disk. A handshake that never succeeds (declined, expired, or
+ * unreachable partner) never reaches the hook. The hook may be synchronous or
+ * async; it is awaited, so a returned promise is settled before the exchange
+ * begins. A failure from the hook -- a synchronous throw or a rejected promise
+ * -- is non-fatal: it is logged at error level (so it survives
+ * `--log-level=error`) and the exchange still runs, because the data exchange is
+ * the irreplaceable two-party operation and must not be aborted by a failure to
+ * persist the recoverable config. The failure is also reported in
+ * {@link RunProtocolResult.onAuthenticatedError} so the caller can correct its
+ * own messaging. Pass `undefined` (the default) on the no-auth path and from
+ * callers that need no post-handshake step (zero-setup, exchange); passing a
+ * hook with `authentication: null` is rejected up front, since an
+ * unauthenticated exchange has no acceptance step to hook.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -132,6 +166,7 @@ export async function runProtocol(
   loggerName: string,
   recordOutput?: RecordOutput,
   saveIntent?: boolean,
+  onAuthenticated?: () => void | Promise<void>,
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
@@ -157,6 +192,17 @@ export async function runProtocol(
     throw new Error(
       "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
         "an authenticated exchange must not pass it",
+    );
+  // The mirror constraint: onAuthenticated hooks the moment of acceptance, which
+  // exists only on the authenticated path -- its invocation below is nested in
+  // `if (auth)`. Reject a hook supplied with `authentication: null` up front
+  // rather than silently dropping it, so a future caller that wires a hook to a
+  // zero-setup exchange gets a clear error instead of a persistence step that
+  // never runs.
+  if (!auth && onAuthenticated !== undefined)
+    throw new Error(
+      "onAuthenticated is only valid on an authenticated exchange; an " +
+        "unauthenticated (zero-setup) exchange has no acceptance step to hook",
     );
   // Captured in the outer scope so the post-handshake saveKeyFile call below
   // can reuse the trimmed value without re-reading auth.keyFilePath.
@@ -519,6 +565,12 @@ export async function runProtocol(
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigterm);
 
+  // Captures a failure from the optional post-handshake hook (onAuthenticated).
+  // The hook is non-fatal, so a failure here does not stop the exchange; it is
+  // surfaced in the resolved result (onAuthenticatedError) so the caller can
+  // correct its own messaging rather than report a config that was never saved.
+  let onAuthenticatedError: unknown;
+
   try {
     if (connection.channel === "filedrop") {
       log.info("opening local path", connection.path);
@@ -658,6 +710,61 @@ export async function runProtocol(
         );
       }
 
+      // The handshake has succeeded and the rotated token is now persisted to
+      // the key file. Fire the optional post-handshake hook here -- exactly at
+      // acceptance, after the key save and before the data exchange (and before
+      // encryption setup, so the hook's persistence survives even a failure in
+      // that setup or an interrupt) -- so a caller (online invite/accept) can
+      // persist its configuration at this point. The hook runs only on the
+      // authenticated path (the only path with an acceptance) and exactly once.
+      // It is awaited (so a sync or async hook both work, and a synchronous
+      // throw or a rejected promise are both caught below); the await comes
+      // after the saveKeyFile/tokenRotated assignment above, so that pair's
+      // no-await invariant is untouched.
+      //
+      // Unlike the other interruptible awaits, this one has no preceding
+      // `signalReceived` guard, by design: the gap since the last guarded await
+      // (authenticateConnection) is synchronous -- saveKeyFile plus the
+      // tokenRotated assignment -- so no signal can have arrived before we reach
+      // the hook. If a signal fires *during* an async hook, letting that write
+      // finish is the intended behavior (persist the config at acceptance); the
+      // existing signalReceived check after EncryptedMessageConnection.create
+      // then bails before the exchange.
+      //
+      // A failure from the hook is non-fatal: it is logged at error level (so it
+      // survives --log-level=error and is never silently lost) and the exchange
+      // proceeds. The data exchange is the irreplaceable two-party operation; a
+      // failure to persist the recoverable config must not abort it. In the
+      // worst case -- the hook write fails and the exchange then also fails --
+      // the outcome is no worse than before this hook existed (rotated key on
+      // disk, no config); the common case persists the config as intended.
+      if (onAuthenticated !== undefined) {
+        try {
+          await onAuthenticated();
+        } catch (hookErr) {
+          // The caller distinguishes a hook failure from success by the presence
+          // of this value, so it must be truthy even when the hook threw a falsy
+          // value (`undefined`, `null`, `0`, `""`, `false`, `NaN`). `undefined`
+          // is the success sentinel and the others would slip a downstream
+          // truthiness check, so coerce any falsy throw to an Error: a failure
+          // can then never masquerade as a clean write regardless of which check
+          // the caller uses.
+          onAuthenticatedError = hookErr
+            ? hookErr
+            : new Error(
+                "the post-authentication hook threw a falsy value: " +
+                  String(hookErr),
+              );
+          log.error(
+            "the post-authentication hook failed after the handshake " +
+              "succeeded and the rotated key was saved; the exchange will " +
+              "continue, but any persistence the hook performs (e.g. writing " +
+              "the configuration) did not complete: " +
+              (hookErr instanceof Error ? hookErr.message : String(hookErr)),
+          );
+        }
+      }
+
       // Wrap mc in the AEAD decorator now that the PAKE session key is in hand,
       // and run the PSI exchange through `secure` so every frame is encrypted on
       // the wire. create() derives the two per-direction keys via HKDF and
@@ -731,7 +838,10 @@ export async function runProtocol(
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.
-    return { bootstrap };
+    // onAuthenticatedError is set only when a post-handshake hook failed but the
+    // exchange above still succeeded (a hook failure followed by an exchange
+    // failure rethrows from the catch below instead of reaching here).
+    return { bootstrap, onAuthenticatedError };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
     // independently derived the same new token from the SPAKE2 session key, but
@@ -823,9 +933,12 @@ export async function runProtocol(
         `error in flight when ${signalReceived} arrived: ` +
           (err instanceof Error ? err.message : String(err)),
       );
-      // No bootstrap outcome: the run was cut short by a signal and the process
-      // is exiting. The caller guards against an absent bootstrap result.
-      return {};
+      // The run was cut short by a signal and the process is exiting; the
+      // caller guards against an absent bootstrap result. Preserve
+      // onAuthenticatedError so a hook failure recorded before the signal is not
+      // silently dropped here -- otherwise the caller would treat the run as a
+      // clean config write.
+      return { onAuthenticatedError };
     }
     throw err;
   } finally {
