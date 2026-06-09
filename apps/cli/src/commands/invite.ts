@@ -9,6 +9,7 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
+import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
@@ -163,12 +164,23 @@ export async function validateInvite(params: {
         `--accept-timeout must be a positive number of seconds; got ` +
           `${acceptTimeout}`,
       );
-    // Detect a pre-existing config/key before anything else so a bootstrap never
-    // clobbers a configuration partway through an exchange.
-    assertNoProvisionConflicts({
-      configPath: options.configFile,
-      keyPath: options.keyFile,
-    });
+    // Detect a pre-existing config before anything else so a bootstrap never
+    // clobbers a configuration partway through an exchange. A pre-existing config
+    // still aborts here: reusing it as the linkage-terms source is tracked
+    // separately (board 9, itemId 196895356). A pre-existing key file, on the
+    // online path only, is downgraded to a warning below -- it will be
+    // overwritten by the rotated token if the partner accepts, so surface it
+    // rather than abort (docs/CLI.md "Online invitation").
+    assertNoProvisionConflicts(
+      { configPath: options.configFile, keyPath: options.keyFile },
+      ["config"],
+    );
+    if (detectFileConflicts([options.keyFile]).length > 0)
+      log.warn(
+        `a key file already exists at ${options.keyFile}; it will be ` +
+          "overwritten by the rotated token if the partner accepts. Delete it " +
+          "or pass --key-file if reusing that secret was not intended.",
+      );
     // Validate the URL before the token is minted, so an unusable URL (e.g. a
     // not-yet-supported webrtc scheme, or one with no host) fails before the
     // caller can disclose the token.

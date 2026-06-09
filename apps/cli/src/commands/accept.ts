@@ -1,8 +1,16 @@
-import type { Argv, Arguments } from "yargs";
-import logLibrary from "loglevel";
+import fs from "node:fs";
 import { userInfo } from "node:os";
 
-import { getLogger, decodeInvitation, UsageError } from "@psilink/core";
+import type { Argv, Arguments } from "yargs";
+import logLibrary from "loglevel";
+import YAML from "yaml";
+
+import {
+  getLogger,
+  decodeInvitation,
+  parseExchangeSpec,
+  UsageError,
+} from "@psilink/core";
 import type {
   ConnectionConfig,
   ExchangeSpec,
@@ -11,6 +19,12 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
+import {
+  diffLinkageTerms,
+  formatReconcileDiffs,
+  type ReconcileDiff,
+} from "../config";
+import { detectFileConflicts } from "../fileUtils";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { resolveRecordOutput } from "../recordFile";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
@@ -20,6 +34,7 @@ import {
   connectionFromEndpoint,
   connectionFromURL,
   connectionOverridesFrom,
+  diffConnectionAgainstUrl,
   loadInputRows,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
@@ -213,7 +228,14 @@ function displayInvitation(
  * missing file, bad URL, or invalid invitation aborts before the user is asked
  * to confirm. Cleaning warnings are logged here so they precede the prompt.
  */
-type AcceptReady =
+type AcceptReady = {
+  /**
+   * True when a pre-existing config was reconciled against the invitation (and,
+   * online, the URL) and matched, so it is kept untouched and only the key file
+   * is written. False when no config existed and a fresh one will be written.
+   */
+  reuseExistingConfig: boolean;
+} & (
   | {
       mode: "online";
       url: URL;
@@ -229,7 +251,8 @@ type AcceptReady =
       connection: ConnectionConfig;
       seeded: boolean;
       dataSpec: ResolvedDataSpec;
-    };
+    }
+);
 
 /**
  * Validate and prepare an acceptance without committing any side effect. Throws
@@ -246,14 +269,16 @@ export async function validateAccept(params: {
 }): Promise<AcceptReady> {
   const { resolved, options, log } = params;
 
-  // Validate (checksum, schema, expiry) and detect file conflicts first, so the
-  // user is never prompted for an invalid invitation and a bootstrap never
-  // clobbers an existing configuration.
+  // Validate (checksum, schema, expiry) first, so the user is never prompted for
+  // an invalid invitation. A pre-existing key file remains a hard conflict on
+  // accept (docs/CLI.md "Online acceptance"): a stale token must never be
+  // silently reused. A pre-existing config, by contrast, is reconciled against
+  // the invitation below (reconcileAcceptConfig) rather than aborting.
   const token = await decodeAndValidateInvitation(resolved.invitation);
-  assertNoProvisionConflicts({
-    configPath: options.configFile,
-    keyPath: options.keyFile,
-  });
+  assertNoProvisionConflicts(
+    { configPath: options.configFile, keyPath: options.keyFile },
+    ["key"],
+  );
 
   const myIdentity = options.identity ?? userInfo().username;
   // Adopt the invitation's linkage keys, algorithm, and output policy, but record
@@ -265,6 +290,15 @@ export async function validateAccept(params: {
     // Validate the URL before reading the input file, mirroring validateInvite,
     // so a bad scheme/host fails fast without first parsing the CSV.
     const connection = connectionFromURL(url, connectionOverridesFrom(options));
+    // Reconcile a pre-existing config against the invitation AND the URL before
+    // the input is read and before any network activity, so a disagreement
+    // aborts with a diff and no acceptance is ever sent to the inviter.
+    const reuseExistingConfig = reconcileAcceptConfig({
+      configPath: options.configFile,
+      myTerms,
+      url,
+      log,
+    });
     const rows = await loadInputRows(input);
     const { dataSpec, warnings } = buildDataSpec({
       terms: myTerms,
@@ -282,10 +316,17 @@ export async function validateAccept(params: {
       connection,
       dataSpec,
       prepared,
+      reuseExistingConfig,
     };
   }
 
   // Offline.
+  const reuseExistingConfig = reconcileAcceptConfig({
+    configPath: options.configFile,
+    myTerms,
+    url: undefined,
+    log,
+  });
   const rows =
     resolved.input !== undefined
       ? await loadInputRows(resolved.input)
@@ -300,7 +341,80 @@ export async function validateAccept(params: {
   const { connection, seeded } = connectionFromEndpoint(
     token.connectionEndpoint,
   );
-  return { mode: "offline", token, connection, seeded, dataSpec };
+  return {
+    mode: "offline",
+    token,
+    connection,
+    seeded,
+    dataSpec,
+    reuseExistingConfig,
+  };
+}
+
+/**
+ * Reconcile a pre-existing configuration file against an acceptance. Returns
+ * `false` when no config exists at `configPath` (a fresh one will be written);
+ * `true` when a config exists and agrees with the invitation (and, online, the
+ * URL), so it is kept and only the key file is written. Throws a
+ * {@link UsageError} -- before the prompt and before any network activity -- when
+ * a config exists but disagrees, or cannot be parsed to compare, showing the
+ * user exactly what to resolve.
+ */
+function reconcileAcceptConfig(params: {
+  configPath: string;
+  myTerms: LinkageTerms;
+  url: URL | undefined;
+  log: ReturnType<typeof getLogger>;
+}): boolean {
+  const { configPath, myTerms, url, log } = params;
+  if (detectFileConflicts([configPath]).length === 0) return false;
+
+  // Reference to the source(s) compared against, woven into the messages so the
+  // online ("invitation and URL") and offline ("invitation") cases read right.
+  const against =
+    url !== undefined
+      ? "the invitation and the connection URL"
+      : "the invitation";
+  const retryWith =
+    url !== undefined ? "the same URL and invitation" : "the same invitation";
+
+  let existing: ExchangeSpec;
+  try {
+    existing = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configPath, "utf8")),
+    );
+  } catch (err) {
+    throw new UsageError(
+      `a configuration file already exists at ${configPath} but could not be ` +
+        `parsed to compare against ${against}: ` +
+        (err instanceof Error ? err.message : String(err)) +
+        `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
+        `retry with ${retryWith}.`,
+    );
+  }
+
+  const { conflicts, warnings } = diffLinkageTerms(
+    existing.linkageTerms,
+    myTerms,
+  );
+  for (const w of warnings) log.warn(w);
+  const connectionDiffs =
+    url !== undefined ? diffConnectionAgainstUrl(existing.connection, url) : [];
+  const all: ReconcileDiff[] = [...conflicts, ...connectionDiffs];
+
+  if (all.length > 0)
+    throw new UsageError(
+      `the configuration file at ${configPath} disagrees with ${against}:\n` +
+        formatReconcileDiffs(all) +
+        `\nResolve the differences (or pass --config-file to write elsewhere), ` +
+        `then retry with ${retryWith}.`,
+    );
+
+  log.info(
+    `the existing configuration at ${configPath} matches ${against}; ` +
+      "it will be reused unchanged.",
+  );
+  return true;
 }
 
 // --- Handler -----------------------------------------------------------------
@@ -350,11 +464,13 @@ export async function handler(argv: Arguments): Promise<void> {
           enabled: options.record,
           recordFile: options.recordFile,
         }),
+        reuseExistingConfig: ready.reuseExistingConfig,
       });
       logOnlineBootstrapOutcome(log, {
         configFile: options.configFile,
         keyFile: options.keyFile,
         configWriteError,
+        reuseExistingConfig: ready.reuseExistingConfig,
       });
       return;
     }
@@ -363,15 +479,23 @@ export async function handler(argv: Arguments): Promise<void> {
       connection: ready.connection,
       ...ready.dataSpec,
     };
+    // When reusing a pre-existing config, provisionConfigAndKey ignores `spec`
+    // and writes only the key file, leaving the user's config untouched.
     const { configPath, keyPath } = provisionConfigAndKey(
       spec,
       // The acceptor's key file holds the invitation token without an expiry; the
       // inviter's copy carries the expiry. The token rotates on first exchange.
       { pakeToken: ready.token.pakeToken },
       { configPath: options.configFile, keyPath: options.keyFile },
+      { reuseExistingConfig: ready.reuseExistingConfig },
     );
 
-    if (ready.seeded)
+    if (ready.reuseExistingConfig)
+      log.info(
+        `reused the existing configuration at ${configPath}; it already matches ` +
+          "the invitation, so the connection and linkage settings are unchanged.",
+      );
+    else if (ready.seeded)
       log.info(
         `wrote config to ${configPath}, seeding the connection block from the ` +
           "invitation's endpoint; review it and add your own credentials " +

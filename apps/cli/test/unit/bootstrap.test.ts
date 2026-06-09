@@ -5,12 +5,17 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import { getLogger, PAKE_TOKEN_REGEX, UsageError } from "@psilink/core";
-import type { ConnectionEndpoint, PreparedExchange } from "@psilink/core";
+import type {
+  ConnectionConfig,
+  ConnectionEndpoint,
+  PreparedExchange,
+} from "@psilink/core";
 
 import {
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
+  diffConnectionAgainstUrl,
   generatePakeToken,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
@@ -552,4 +557,180 @@ test("logOnlineBootstrapOutcome: a config-write failure logs at error level and 
   expect(msg).toContain("rotated key was saved to .psilink.key");
   expect(msg).toContain("could not be written to psilink.yaml");
   expect(msg).not.toContain("saved config to");
+});
+
+test("logOnlineBootstrapOutcome: a reused config reports the existing config and the rotated key", () => {
+  const log = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as unknown as ReturnType<typeof getLogger>;
+  logOnlineBootstrapOutcome(log, {
+    configFile: "psilink.yaml",
+    keyFile: ".psilink.key",
+    reuseExistingConfig: true,
+  });
+  expect(log.warn).not.toHaveBeenCalled();
+  expect(log.error).not.toHaveBeenCalled();
+  expect(log.info).toHaveBeenCalledTimes(1);
+  const msg = vi.mocked(log.info).mock.calls[0][0] as string;
+  expect(msg).toContain("reused the existing configuration");
+  expect(msg).toContain("rotated key");
+});
+
+// --- runOnlineBootstrap: reuse + write-time re-gate --------------------------
+
+test("runOnlineBootstrap with reuseExistingConfig keeps the existing config and reports no write error", async () => {
+  // The hook is a no-op when reusing: the pre-existing config is left as-is and
+  // only the rotated key (saved by runProtocol) lands.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    await onAuthenticated();
+    return {};
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    const existing = "channel: filedrop\npath: /mnt/share\n# user-authored\n";
+    fs.writeFileSync(configPath, existing);
+    const { configWriteError } = await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+    });
+    expect(configWriteError).toBeUndefined();
+    // The user's config is untouched: reuse never rewrites it.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(existing);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap re-gates the config write: a config appearing after the check is not silently overwritten", async () => {
+  // Emulate runProtocol's hook handling: a hook failure is captured as
+  // onAuthenticatedError (non-fatal), not propagated -- the same contract the
+  // real runProtocol upholds.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    try {
+      await onAuthenticated();
+      return {};
+    } catch (err) {
+      return { onAuthenticatedError: err };
+    }
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    // A config "appears" between the pre-network conflict check and the write.
+    const existing = "channel: filedrop\npath: /mnt/share\n# pre-existing\n";
+    fs.writeFileSync(configPath, existing);
+    // reuseExistingConfig is NOT set: this is the write-fresh path, so the hook
+    // must detect the appeared file and refuse rather than overwrite it.
+    const { configWriteError } = await runOnlineBootstrap(
+      onlineBootstrapParams(configPath),
+    );
+    expect(configWriteError).toBeInstanceOf(UsageError);
+    // The pre-existing file is left untouched -- not silently overwritten.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(existing);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- diffConnectionAgainstUrl ------------------------------------------------
+
+test("diffConnectionAgainstUrl: an agreeing sftp config has no diffs", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "host",
+      port: 2222,
+      path: "/drop",
+      username: "alice",
+      password: "s3cr3t",
+    },
+  };
+  expect(
+    diffConnectionAgainstUrl(existing, new URL("sftp://host:2222/drop")),
+  ).toEqual([]);
+});
+
+test("diffConnectionAgainstUrl: a host mismatch is reported", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "other-host" },
+  };
+  const diffs = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
+  expect(diffs.map((d) => d.field)).toContain("connection.server.host");
+});
+
+test("diffConnectionAgainstUrl: credentials the URL omits are not flagged", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "alice", password: "s3cr3t" },
+  };
+  // The URL carries no userinfo; the acceptor's own stored credentials must not
+  // be treated as a disagreement.
+  expect(diffConnectionAgainstUrl(existing, new URL("sftp://host"))).toEqual(
+    [],
+  );
+});
+
+test("diffConnectionAgainstUrl: a port/path the URL omits is not flagged", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222, path: "/drop" },
+  };
+  expect(diffConnectionAgainstUrl(existing, new URL("sftp://host"))).toEqual(
+    [],
+  );
+});
+
+test("diffConnectionAgainstUrl: a port the URL states is compared", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 22 },
+  };
+  const diffs = diffConnectionAgainstUrl(existing, new URL("sftp://host:2222"));
+  expect(diffs.map((d) => d.field)).toContain("connection.server.port");
+});
+
+test("diffConnectionAgainstUrl: credentials the URL states are compared", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "bob" },
+  };
+  const diffs = diffConnectionAgainstUrl(
+    existing,
+    new URL("sftp://alice@host"),
+  );
+  expect(diffs.map((d) => d.field)).toContain("connection.server.username");
+});
+
+test("diffConnectionAgainstUrl: a channel mismatch short-circuits", () => {
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const diffs = diffConnectionAgainstUrl(existing, new URL("sftp://host/drop"));
+  expect(diffs).toHaveLength(1);
+  expect(diffs[0].field).toBe("connection.channel");
+});
+
+test("diffConnectionAgainstUrl: a filedrop path mismatch is reported", () => {
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/other",
+  };
+  const diffs = diffConnectionAgainstUrl(
+    existing,
+    new URL("file:///mnt/share/drop"),
+  );
+  expect(diffs.map((d) => d.field)).toContain("connection.path");
 });

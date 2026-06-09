@@ -32,8 +32,10 @@ import {
   applyConnectionOverrides,
   saveConfig,
   type ConnectionOverrides,
+  type ReconcileDiff,
   DEFAULT_CONFIG_PATH,
 } from "../config";
+import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, validateInputFile } from "../util/cli";
@@ -166,6 +168,73 @@ export function connectionFromURL(
     },
   };
   return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;
+}
+
+/**
+ * Compare a pre-existing config's connection block against an online accept's
+ * URL, returning the explicit-field disagreements that must abort the
+ * acceptance. Only fields the URL states explicitly are compared (docs/CLI.md
+ * "Online acceptance"): the channel (from the scheme) and, for sftp, the host
+ * always; the port, path, and username/password only when the URL carries them.
+ * A credential the URL omits is never a conflict -- the acceptor supplies their
+ * own. A channel mismatch short-circuits the rest, since the per-channel fields
+ * are not comparable across channels.
+ *
+ * Compares against the URL directly (not a {@link connectionFromURL} result):
+ * that builder leaves an unspecified port/path `undefined`, which a naive
+ * field-by-field diff would read as "URL requires unset" and wrongly flag
+ * against a config that does set them. The URL's own `port`/`pathname` tell us
+ * which fields were explicit.
+ *
+ * @internal exported for testing
+ */
+export function diffConnectionAgainstUrl(
+  existing: ConnectionConfig,
+  url: URL,
+): ReconcileDiff[] {
+  const diffs: ReconcileDiff[] = [];
+  const channel = channelFromURL(url);
+  if (existing.channel !== channel) {
+    diffs.push({
+      field: "connection.channel",
+      existing: existing.channel,
+      incoming: channel,
+    });
+    return diffs;
+  }
+
+  const cmp = (field: string, have: string | undefined, want: string): void => {
+    if (have !== want)
+      diffs.push({ field, existing: have ?? "(unset)", incoming: want });
+  };
+
+  if (channel === "sftp") {
+    const { server } = existing as SFTPConnectionConfig;
+    cmp("connection.server.host", server.host, url.hostname);
+    // port/path/credentials are compared only when the URL states them; an
+    // omitted field is not a disagreement with whatever the config holds.
+    if (url.port)
+      cmp("connection.server.port", server.port?.toString(), url.port);
+    const urlPath =
+      url.pathname && url.pathname !== "/" ? url.pathname : undefined;
+    if (urlPath !== undefined)
+      cmp("connection.server.path", server.path, urlPath);
+    if (url.username)
+      cmp("connection.server.username", server.username, url.username);
+    if (url.password)
+      cmp("connection.server.password", server.password, url.password);
+  } else if (channel === "filedrop") {
+    cmp(
+      "connection.path",
+      (existing as FileDropConnectionConfig).path,
+      fileURLToPath(url),
+    );
+  }
+  // webrtc never reaches here on an online accept: connectionFromURL rejects a
+  // ws/wss URL before the connection is built, and a webrtc existing config
+  // against an sftp/filedrop URL is caught by the channel mismatch above.
+
+  return diffs;
 }
 
 /**
@@ -377,6 +446,15 @@ export async function prepareForOnlineExchange(
  * The persisted config carries the plain `connection` (no `authentication`);
  * `saveConfig` strips any PAKE material regardless, so moving the write into the
  * hook changes only when the config is persisted, not what is persisted.
+ *
+ * With `reuseExistingConfig`, the config write is skipped entirely: the accept
+ * path has already reconciled a pre-existing config against the invitation and
+ * the URL and keeps it untouched (the rotated key is still saved by
+ * `runProtocol`). Otherwise the hook re-gates the config path immediately before
+ * writing -- so a config that appeared between the pre-network conflict check
+ * and this write is not silently overwritten, matching the offline path's
+ * `provisionConfigAndKey` re-gate -- and surfaces a conflict as a non-fatal
+ * `configWriteError` rather than aborting the already-completed exchange.
  */
 export async function runOnlineBootstrap(params: {
   connection: RunnableConnectionConfig;
@@ -390,6 +468,8 @@ export async function runOnlineBootstrap(params: {
   verbosity: number;
   loggerName: string;
   recordOutput?: RecordOutput;
+  /** Keep a pre-existing, already-reconciled config: skip the config write. */
+  reuseExistingConfig?: boolean;
 }): Promise<{ configWriteError?: unknown }> {
   // `connection` is already narrowed to the channels runProtocol supports
   // (RunnableConnectionConfig), so this cast only adds the `authentication`
@@ -436,6 +516,27 @@ export async function runOnlineBootstrap(params: {
       // write settles, so a rejected write would resolve cleanly and masquerade
       // as a success.
       () => {
+        if (params.reuseExistingConfig) {
+          // The reconcile check already confirmed the pre-existing config agrees
+          // with the invitation and URL; keep it untouched. The rotated key is
+          // saved by runProtocol above; nothing is written here, so
+          // `configWritten` stays false (no fresh config was persisted).
+          return;
+        }
+        // Re-gate immediately before writing: a config that appeared between the
+        // pre-network conflict check and now must not be silently overwritten,
+        // consistent with the offline path's provisionConfigAndKey re-gate. The
+        // handshake has already succeeded and the rotated key is saved, so this
+        // throw becomes a non-fatal configWriteError (caught by runProtocol's
+        // hook handling) rather than aborting the completed exchange.
+        if (detectFileConflicts([params.configPath]).length > 0)
+          throw new UsageError(
+            `refusing to overwrite ${params.configPath}: a file appeared there ` +
+              "after the initial conflict check. The exchange completed and the " +
+              "rotated key was saved; move or remove that file (or pass " +
+              "--config-file), then rerun 'psilink exchange' to recover without " +
+              "re-inviting.",
+          );
         saveConfig(params.configPath, {
           connection: params.connection,
           ...params.dataSpec,
@@ -448,18 +549,19 @@ export async function runOnlineBootstrap(params: {
     // the saveConfig call above, so surface it under a name the caller speaks.
     return { configWriteError: onAuthenticatedError };
   } catch (err) {
-    // The exchange failed after a successful handshake. When the config was
-    // already written, tell the user it (and the rotated key) are on disk so
-    // they retry with `psilink exchange` instead of re-inviting -- the exact
-    // recovery this bootstrap exists to make possible. Logged at error level
-    // (matching runProtocol's rotation advisory) so it stays visible alongside
-    // the error the handler then reports. Only when configWritten is true: a
-    // hook failure (config not on disk) must not claim otherwise.
-    if (configWritten)
+    // The exchange failed after a successful handshake. When the config is on
+    // disk -- freshly written by the hook, or a reused pre-existing one -- tell
+    // the user it (and the rotated key) are there so they retry with `psilink
+    // exchange` instead of re-inviting, the exact recovery this bootstrap exists
+    // to make possible. Logged at error level (matching runProtocol's rotation
+    // advisory) so it stays visible alongside the error the handler then reports.
+    // Only when the config is actually on disk: a hook failure (config not
+    // written) must not claim otherwise.
+    if (configWritten || params.reuseExistingConfig)
       getLogger(params.loggerName).error(
-        `the configuration was saved to ${params.configPath} and the rotated ` +
-          `key to ${params.keyPath} before the exchange failed; retry with ` +
-          `'psilink exchange' to recover without re-inviting.`,
+        `the configuration at ${params.configPath} and the rotated key at ` +
+          `${params.keyPath} are on disk; retry with 'psilink exchange' to ` +
+          `recover without re-inviting.`,
       );
     throw err;
   }
@@ -467,18 +569,36 @@ export async function runOnlineBootstrap(params: {
 
 /**
  * Log the post-exchange outcome of an online invite/accept run. On a clean run
- * both files were written. When the config write failed at acceptance
- * (`configWriteError` set), the rotated key was still saved but the config was
- * not, so the message must not claim otherwise -- the underlying error was
- * already logged at error level by `runProtocol`, so this only corrects the
- * summary and points back to it. The failure summary is logged at `error`
- * level, not `warn`, so it (and its actionable recovery instruction) stays
- * visible at `--log-level=error`, where the error it references is also shown.
+ * both files were written. When a pre-existing config was reused
+ * (`reuseExistingConfig`), only the rotated key was saved and the config was
+ * left untouched, so the message reflects that rather than claiming a fresh
+ * write. When the config write failed at acceptance (`configWriteError` set),
+ * the rotated key was still saved but the config was not, so the message must
+ * not claim otherwise -- the underlying error was already logged at error level
+ * by `runProtocol`, so this only corrects the summary and points back to it. The
+ * failure summary is logged at `error` level, not `warn`, so it (and its
+ * actionable recovery instruction) stays visible at `--log-level=error`, where
+ * the error it references is also shown.
  */
 export function logOnlineBootstrapOutcome(
   log: ReturnType<typeof getLogger>,
-  params: { configFile: string; keyFile: string; configWriteError?: unknown },
+  params: {
+    configFile: string;
+    keyFile: string;
+    configWriteError?: unknown;
+    reuseExistingConfig?: boolean;
+  },
 ): void {
+  if (params.reuseExistingConfig) {
+    // Reuse implies the config write was skipped, so there is no configWriteError
+    // to report; the existing config stands and only the rotated key was saved.
+    log.info(
+      `exchange complete; reused the existing configuration at ` +
+        `${params.configFile} and saved the rotated key to ${params.keyFile}. ` +
+        `Keep the key file private.`,
+    );
+    return;
+  }
   if (params.configWriteError === undefined) {
     log.info(
       `exchange complete; saved config to ${params.configFile} and the ` +

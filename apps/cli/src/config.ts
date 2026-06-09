@@ -1,6 +1,11 @@
 import YAML from "yaml";
-import type { ConnectionConfig, ExchangeSpec } from "@psilink/core";
+import type {
+  ConnectionConfig,
+  ExchangeSpec,
+  LinkageTerms,
+} from "@psilink/core";
 import {
+  canonicalString,
   OPAQUE_VALUE_KEYS,
   safeParseFileSyncOptions,
   UsageError,
@@ -148,6 +153,181 @@ export function announceRetainMode(
         "(these flags are not negotiated).",
     );
   }
+}
+
+// --- Reconciliation (pre-existing config vs invitation / URL) ----------------
+
+/**
+ * One field that disagrees between a pre-existing configuration file and the
+ * source it is reconciled against -- an invitation's linkage terms, or (for the
+ * connection block, online) an accept URL. Collected into the user-facing
+ * "resolve the conflict" error so the user sees exactly what differs.
+ */
+export interface ReconcileDiff {
+  /**
+   * snake_case field path as it appears in `psilink.yaml` (e.g. `algorithm`,
+   * `linkage_keys`, `connection.server.host`).
+   */
+  field: string;
+  /** Rendering of the value in the pre-existing config; `(unset)` when absent. */
+  existing: string;
+  /** Rendering of the value the invitation or URL requires. */
+  incoming: string;
+}
+
+/** Placeholder rendered for an absent value in a {@link ReconcileDiff}. */
+export const RECONCILE_UNSET = "(unset)";
+
+/**
+ * Recursively NFC-normalize every string in a JSON-like value, preserving its
+ * structure. Two Unicode-equivalent strings authored in different normalization
+ * forms then compare equal -- consistent with core's NFC handling in
+ * standardization -- so a hand-edited config is not falsely flagged as differing
+ * from an invitation whose strings arrived in another form. Only enumerable own
+ * keys are copied, so no `undefined`-valued key is introduced for
+ * {@link canonicalString} to reject.
+ */
+function nfcDeep(value: unknown): unknown {
+  if (typeof value === "string") return value.normalize("NFC");
+  if (Array.isArray(value)) return value.map(nfcDeep);
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, nfcDeep(v)]),
+    );
+  return value;
+}
+
+/**
+ * Canonical (RFC 8785) encoding of a value after NFC-normalizing its strings,
+ * for an order-stable, Unicode-insensitive structural equality check. The
+ * canonical encoder sorts object keys, so property-insertion order does not
+ * affect the result; array order is preserved, so the caller pre-sorts any list
+ * whose order is not significant.
+ */
+function nfcCanonical(value: unknown): string {
+  return canonicalString(nfcDeep(value));
+}
+
+/** Render the identifiers of a list of named entries (linkage fields/keys,
+ *  payload columns) for a diff line, in the order given. */
+function renderNames(list: ReadonlyArray<{ name: string }>): string {
+  return `[${list.map((e) => e.name).join(", ")}]`;
+}
+
+/**
+ * Compare a pre-existing config's linkage terms against the terms an acceptance
+ * would adopt from the invitation, returning the mandatory disagreements that
+ * must abort the acceptance and the soft mismatches that only warn.
+ *
+ * This is an equality check ("do these describe the same exchange agreement?"),
+ * NOT the cross-party {@link validateCompatibility} (which checks that two
+ * different parties' terms work together). Reusing the existing config must not
+ * silently change what was agreed, so the agreement-defining fields -- version,
+ * algorithm, output policy, deduplicate, linkage fields and keys, legal
+ * agreement, and payload -- must match. `identity` is excluded (party-specific:
+ * the two copies legitimately differ, per the LinkageTerms consistency model)
+ * and `date` is soft (a mismatch warns rather than aborts, matching
+ * `validateCompatibility`). Structural fields are compared by NFC-normalized
+ * canonical form: linkage fields order-insensitively (their array order is not
+ * significant), linkage keys in place (their order is significant).
+ */
+export function diffLinkageTerms(
+  existing: LinkageTerms,
+  incoming: LinkageTerms,
+): { conflicts: ReconcileDiff[]; warnings: string[] } {
+  const conflicts: ReconcileDiff[] = [];
+  const warnings: string[] = [];
+  const add = (field: string, a: string, b: string): void => {
+    conflicts.push({ field, existing: a, incoming: b });
+  };
+
+  if (existing.version !== incoming.version)
+    add("version", existing.version, incoming.version);
+  if (existing.algorithm !== incoming.algorithm)
+    add("algorithm", existing.algorithm, incoming.algorithm);
+  if (existing.deduplicate !== incoming.deduplicate)
+    add(
+      "deduplicate",
+      String(existing.deduplicate),
+      String(incoming.deduplicate),
+    );
+
+  const renderOutput = (o: LinkageTerms["output"]): string =>
+    `expects_output=${o.expectsOutput}, share_with_partner=${o.shareWithPartner}`;
+  if (
+    existing.output.expectsOutput !== incoming.output.expectsOutput ||
+    existing.output.shareWithPartner !== incoming.output.shareWithPartner
+  )
+    add("output", renderOutput(existing.output), renderOutput(incoming.output));
+
+  // Sort linkage fields by name (their order is not significant) before the
+  // canonical compare; compare linkage keys in place (their order is). The
+  // comparator is code-unit order, matching the canonical encoder's key sort.
+  const byName = (a: { name: string }, b: { name: string }): number =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  const existingFields = [...existing.linkageFields].sort(byName);
+  const incomingFields = [...incoming.linkageFields].sort(byName);
+  if (nfcCanonical(existingFields) !== nfcCanonical(incomingFields))
+    add(
+      "linkage_fields",
+      renderNames(existingFields),
+      renderNames(incomingFields),
+    );
+
+  if (nfcCanonical(existing.linkageKeys) !== nfcCanonical(incoming.linkageKeys))
+    add(
+      "linkage_keys",
+      renderNames(existing.linkageKeys),
+      renderNames(incoming.linkageKeys),
+    );
+
+  const renderAgreement = (la: LinkageTerms["legalAgreement"]): string =>
+    la === undefined
+      ? RECONCILE_UNSET
+      : `${la.reference} (expires ${la.expirationDate})`;
+  if (
+    nfcCanonical(existing.legalAgreement ?? null) !==
+    nfcCanonical(incoming.legalAgreement ?? null)
+  )
+    add(
+      "legal_agreement",
+      renderAgreement(existing.legalAgreement),
+      renderAgreement(incoming.legalAgreement),
+    );
+
+  const renderPayload = (p: LinkageTerms["payload"]): string =>
+    p === undefined
+      ? RECONCILE_UNSET
+      : `send=${renderNames(p.send ?? [])} receive=${renderNames(p.receive ?? [])}`;
+  if (
+    nfcCanonical(existing.payload ?? null) !==
+    nfcCanonical(incoming.payload ?? null)
+  )
+    add(
+      "payload",
+      renderPayload(existing.payload),
+      renderPayload(incoming.payload),
+    );
+
+  if (existing.date !== incoming.date)
+    warnings.push(
+      `the existing config's linkage-terms date (${existing.date}) differs from ` +
+        `the invitation's (${incoming.date}); one copy may be stale`,
+    );
+
+  return { conflicts, warnings };
+}
+
+/**
+ * Render a list of {@link ReconcileDiff} as an indented, human-readable block
+ * for a reconciliation error message.
+ */
+export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
+  return diffs
+    .map(
+      (d) => `  - ${d.field}: existing ${d.existing} vs required ${d.incoming}`,
+    )
+    .join("\n");
 }
 
 // --- Config writer -----------------------------------------------------------
