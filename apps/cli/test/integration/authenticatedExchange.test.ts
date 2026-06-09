@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { prepareForExchange, SHARED_SECRET_REGEX } from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
 
@@ -174,9 +174,10 @@ beforeEach(() => {
   work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-auth-integ-"));
 });
 
-afterAll(() => {
-  // beforeEach dirs live under os.tmpdir(); the OS reclaims them, but remove the
-  // last one explicitly to be tidy.
+afterEach(() => {
+  // Each test gets its own work dir (and nests its drop dirs under it), so a
+  // recursive remove after every test cleans up everything it created rather
+  // than leaving all but the last for the OS to reclaim.
   try {
     if (work) fs.rmSync(work, { recursive: true, force: true });
   } catch {

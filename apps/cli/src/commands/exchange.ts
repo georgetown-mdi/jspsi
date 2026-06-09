@@ -282,8 +282,8 @@ export function loadConfig(
   };
   const CANONICAL_TO_HINT: Record<string, string> = {
     sharedSecret:
-      "the token is always loaded from the key file (any @-file reference " +
-      "in this field was also not resolved)",
+      "the shared secret is always loaded from the key file (any @-file " +
+      "reference in this field was also not resolved)",
     expires:
       "expiration is always loaded from the key file (any @-file reference " +
       "in this field was also not resolved)",

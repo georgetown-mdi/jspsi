@@ -51,13 +51,13 @@ export function saveKeyFile(keyFilePath: string, data: KeyFile): void {
   // Belt-and-suspenders runtime validation: the type system already requires
   // `sharedSecret` to be a string, and today's only caller (runProtocol) derives
   // it from HKDF and so always produces a valid base64url-encoded 32-byte
-  // value. A future caller (e.g. `invite` / `accept`, not yet implemented)
-  // could write a malformed token that loadKeyFile would later reject; fail
-  // here instead so the malformed token never reaches disk.
+  // value. Another caller (`invite` / `accept`, via provisionConfigAndKey)
+  // could write a malformed shared secret that loadKeyFile would later reject;
+  // fail here instead so the malformed value never reaches disk.
   //
   // UsageError (not a plain Error) so the CLI catch sites classify it as a
   // caller/usage problem (exit 64) rather than a transport failure (exit 69) --
-  // a malformed token supplied via invite/accept is bad input, and
+  // a malformed shared secret supplied via invite/accept is bad input, and
   // provisionConfigAndKey makes this the reachable write path.
   if (!SHARED_SECRET_REGEX.test(data.sharedSecret))
     throw new UsageError(
