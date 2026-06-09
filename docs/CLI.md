@@ -86,13 +86,6 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 >
 > - Generating an invitation requires an `INPUT_FILE`; reusing a pre-existing
 >   configuration file as the source of linkage terms is not yet supported.
-> - A pre-existing configuration or key file at a target path is always reported
->   as a conflict and the command aborts. Reconciling an existing config by
->   comparing its linkage terms (and, online, its connection block) against the
->   invitation or URL -- and the warn-rather-than-error handling described for a
->   pre-existing key file in the online-invitation case -- is not yet
->   implemented; remove the file or pass `--config-file` / `--key-file` to
->   proceed.
 > - Online invite does not yet revoke or expire the token early on timeout or
 >   cancellation; the token simply lapses at its 1-hour expiry.
 > - Online invite does not embed a `connectionEndpoint` in the invitation it
@@ -125,7 +118,7 @@ The `INVITATION` argument is either a base64url string or an `@path` reference t
 
 If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's; any disagreement causes acceptance to fail. The user is shown which values differ and instructed to resolve the conflict before retrying with the same invitation string or to supply an alternative configuration file path.
 
-If `--key-file` is not used and there is a pre-existing key file at the default path, a similar error and instructions are generated. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
+A pre-existing key file is treated differently from a configuration file: it is never reconciled or reused, because silently reusing a stale authentication token must never happen. If `--key-file` is not used and a key file already exists at the default path, acceptance fails outright and the user is told to delete it or supply a different key file path. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
 
 If `INPUT_FILE` is provided, its columns are inspected to infer metadata and to see if default data standardizing transformations can satisfy the linkage keys in the invitation. If the linkage terms can be satisfied, they are written to a configuration file together with the inferred metadata and the standardizing transformations. If terms cannot be satisfied, a warning is issued that the user may need to modify their data to satisfy the terms. The configuration file is then written without the metadata or standardizing transformations.
 
@@ -157,9 +150,9 @@ psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]
 
 This command is similar to [offline acceptance](#offline-acceptance), however it coordinates with the other party and executes an exchange. It decodes the invitation string and displays top-level information, including the identity of the inviting party, the PSI algorithm, which parties will receive data, and the linkage keys that will be used. The user can abort or accept. Accepting saves the configuration and newly-generated persistent keys on both sides as soon as the handshake succeeds -- before the data exchange begins -- so an exchange that fails after a successful handshake still leaves both files on disk and can be retried with `psilink exchange` without re-inviting; the exchange is then conducted and both applications exit when complete.
 
-If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's and its connection block is compared against the URL's explicit fields (scheme, hostname, port, path, and username/password if present; absence of credentials in the URL is not treated as a conflict). Any disagreement causes acceptance to fail without being rejected and without notifying the inviter. The user is shown which values differ and instructed to delete the file or use the `--config-file` option (see [Configuration](#configuration)) if they want to proceed. After this, the program exits. After addressing the conflict, the user can run `psilink accept` with the same URL and invitation string to try again.
+If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's and its connection block is compared against the connection target -- the URL plus any `--server-*` overrides. The connection comparison distinguishes *which* drop you are meeting at from *how* you reach it. A mismatch in the rendezvous location -- the host or the path -- causes acceptance to fail without notifying the inviter: the user is shown which values differ and instructed to delete the file or use the `--config-file` option (see [Configuration](#configuration)), after which the program exits, and the user can retry with the same URL and invitation string once the conflict is addressed. A difference in *how* the same drop is reached -- the protocol/channel (for example a `file://` configuration accepted against an `sftp://` URL, as with a file-sync service), the port, or the credentials -- is not an error: the specified value is used for this exchange and a warning notes that the saved configuration is left unchanged, so the user can update it if the change was meant to persist. Absence of a field from the URL (with no matching override) is never a conflict; the acceptor's own stored value stands.
 
-If `--key-file` is not used and there is a pre-existing key file at the default path, a similar error and instructions are generated. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
+A pre-existing key file is treated differently from a configuration file: it is never reconciled or reused, because silently reusing a stale authentication token must never happen. If `--key-file` is not used and a key file already exists at the default path, acceptance fails outright -- before any connection is opened -- and the user is told to delete it or supply a different key file path. In this way, accepting an invitation does not cause files to be unwittingly overwritten.
 
 ## Recurring exchange
 

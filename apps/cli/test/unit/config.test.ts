@@ -8,10 +8,16 @@ import {
   parseExchangeSpec,
   UsageError,
 } from "@psilink/core";
-import { applyConnectionOverrides, saveConfig } from "../../src/config";
+import {
+  applyConnectionOverrides,
+  diffLinkageTerms,
+  formatReconcileDiffs,
+  saveConfig,
+} from "../../src/config";
 import type {
   ConnectionConfig,
   ExchangeSpec,
+  LinkageTerms,
   SFTPConnectionConfig,
 } from "@psilink/core";
 
@@ -388,4 +394,211 @@ test("saveConfig keeps authentication when role remains after stripping (WebRTC)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- diffLinkageTerms / formatReconcileDiffs ---------------------------------
+
+// A deep clone so a test can mutate one copy without disturbing the other; both
+// start byte-identical, the equal-terms baseline these tests perturb from.
+function cloneTerms(terms: LinkageTerms): LinkageTerms {
+  return structuredClone(terms);
+}
+
+test("diffLinkageTerms: identical terms have no conflicts and no warnings", () => {
+  const a = getDefaultLinkageTerms("Inviter Org");
+  const b = getDefaultLinkageTerms("Inviter Org");
+  const { conflicts, warnings } = diffLinkageTerms(a, b);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("diffLinkageTerms: a differing identity is NOT a conflict (party-specific)", () => {
+  const existing = getDefaultLinkageTerms("Acceptor Org");
+  const incoming = getDefaultLinkageTerms("Inviter Org");
+  // identity is the only field that differs; it is excluded from the comparison.
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("diffLinkageTerms: a differing date warns rather than conflicts (soft field)", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.date = "2020-01-01";
+  incoming.date = "2024-06-09";
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("date");
+});
+
+test("diffLinkageTerms: an algorithm mismatch is a conflict naming the field", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.algorithm = "psi-c";
+  incoming.algorithm = "psi";
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].field).toBe("algorithm");
+  expect(conflicts[0].existing).toBe("psi-c");
+  expect(conflicts[0].incoming).toBe("psi");
+});
+
+test("diffLinkageTerms: a differing output policy is NOT a conflict (per-party)", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // output is a per-party preference the protocol checks as a complementary
+  // mirror at exchange time, so two valid parties differ here; reconciliation
+  // must not equality-compare it.
+  existing.output = { expectsOutput: false, shareWithPartner: true };
+  incoming.output = { expectsOutput: true, shareWithPartner: false };
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("diffLinkageTerms: a differing deduplicate flag is NOT a conflict (per-party)", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // deduplicate is per-party with no cross-party check; the acceptor's own value
+  // is legitimate. (Keep expectsOutput true to satisfy the intra-party rule that
+  // deduplicate requires it.)
+  existing.output = { expectsOutput: true, shareWithPartner: true };
+  incoming.output = { expectsOutput: true, shareWithPartner: true };
+  existing.deduplicate = true;
+  incoming.deduplicate = false;
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("diffLinkageTerms: a linkage-keys mismatch is a conflict naming the field", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // Drop a key from one side so the key sets differ.
+  incoming.linkageKeys = incoming.linkageKeys.slice(0, -1);
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
+});
+
+test("diffLinkageTerms: a sub-field difference under matching key names renders the detail", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // Same key names on both sides, but one key's element is derived from a
+  // different field. A names-only render would print two identical lists; the
+  // detail fallback must instead show what actually differs.
+  incoming.linkageKeys[0].elements[0].field =
+    existing.linkageKeys[0].elements[0].field + "_x";
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
+  expect(keyConflict).toBeDefined();
+  expect(keyConflict?.existing).not.toBe(keyConflict?.incoming);
+  expect(keyConflict?.incoming).toContain("_x");
+});
+
+test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // A transform param outside the JSON-safe integer range survives parsing
+  // (params is `z.unknown()`) but canonicalString rejects it. Both sides carry
+  // the SAME value, so the terms are identical and must reconcile cleanly: the
+  // canonical throw must not escape and abort two identical configs.
+  existing.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { big: 1e20 } },
+  ];
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { big: 1e20 } },
+  ];
+  let result!: ReturnType<typeof diffLinkageTerms>;
+  expect(() => {
+    result = diffLinkageTerms(existing, incoming);
+  }).not.toThrow();
+  // No hard conflict (so the config is reused), with a warning that the field
+  // could not be compared here -- the exchange re-checks compatibility later.
+  expect(result.conflicts).toEqual([]);
+  expect(result.warnings.some((w) => w.includes("JSON-safe range"))).toBe(true);
+});
+
+test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // Rename the first linkage key on both sides to the same logical string in
+  // different Unicode normalization forms: NFC "e-acute" (U+00E9) vs the NFD
+  // decomposition "e" + U+0301. They are canonically equivalent and must not
+  // register as a conflict.
+  existing.linkageKeys[0].name = "cl\u00e9";
+  incoming.linkageKeys[0].name = "cle\u0301";
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+});
+
+test("diffLinkageTerms: NFC-vs-NFD field names that reorder the sort are not a false conflict", () => {
+  // Two fields whose normalization form changes their sort order: NFC "\u00c5"
+  // (U+00C5) sorts after "B", but its NFD form "A\u030a" begins with "A" and
+  // sorts before "B". If the comparator sorted on the raw name the two sides
+  // would order differently and falsely conflict; the NFC-normalized comparator
+  // must keep them equal.
+  const base = getDefaultLinkageTerms("Org");
+  const field = base.linkageFields[0];
+  const existing = cloneTerms(base);
+  const incoming = cloneTerms(base);
+  existing.linkageFields = [
+    { ...structuredClone(field), name: "B" },
+    { ...structuredClone(field), name: "\u00c5" },
+  ];
+  incoming.linkageFields = [
+    { ...structuredClone(field), name: "B" },
+    { ...structuredClone(field), name: "A\u030a" },
+  ];
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((c) => c.field)).not.toContain("linkage_fields");
+  expect(conflicts).toEqual([]);
+});
+
+test("diffLinkageTerms: an explicitly-undefined optional is treated as absent", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // An in-process object (unlike a Zod-parsed one) can carry an explicit
+  // `undefined` optional. nfcDeep must drop it rather than feed it to
+  // canonicalString (which rejects undefined and would throw); it must still
+  // compare equal to the side that simply omits `swap`.
+  existing.linkageKeys[0].swap = undefined;
+  expect(() => diffLinkageTerms(existing, incoming)).not.toThrow();
+  expect(diffLinkageTerms(existing, incoming).conflicts).toEqual([]);
+});
+
+test("diffLinkageTerms: a payload mismatch is a conflict", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  incoming.payload = { send: [{ name: "extra_col" }] };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((c) => c.field)).toContain("payload");
+});
+
+test("diffLinkageTerms: a payload sub-field difference under matching names renders the detail", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // Same column name on both sides, differing only in description: a names-only
+  // render would print identical send=/receive= summaries, so the detail
+  // fallback must show what actually differs.
+  existing.payload = { send: [{ name: "note", description: "old" }] };
+  incoming.payload = { send: [{ name: "note", description: "new" }] };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const payloadConflict = conflicts.find((c) => c.field === "payload");
+  expect(payloadConflict).toBeDefined();
+  expect(payloadConflict?.existing).not.toBe(payloadConflict?.incoming);
+  expect(payloadConflict?.incoming).toContain("new");
+});
+
+test("formatReconcileDiffs: renders each field with its existing and required values", () => {
+  const rendered = formatReconcileDiffs([
+    { field: "algorithm", existing: "psi-c", incoming: "psi" },
+    { field: "connection.server.host", existing: "old-host", incoming: "host" },
+  ]);
+  expect(rendered).toContain("algorithm");
+  expect(rendered).toContain("psi-c");
+  expect(rendered).toContain("connection.server.host");
+  expect(rendered).toContain("old-host");
+  // One line per diff.
+  expect(rendered.split("\n")).toHaveLength(2);
 });

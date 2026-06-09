@@ -5,12 +5,17 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import { getLogger, SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
-import type { ConnectionEndpoint, PreparedExchange } from "@psilink/core";
+import type {
+  ConnectionConfig,
+  ConnectionEndpoint,
+  PreparedExchange,
+} from "@psilink/core";
 
 import {
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
+  diffConnectionAgainstTarget,
   generateSharedSecret,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
@@ -511,6 +516,78 @@ test("runOnlineBootstrap does not log a config-on-disk note when the handshake f
   }
 });
 
+test("runOnlineBootstrap with reuseExistingConfig does not log a recovery note when the handshake fails before the key is saved", async () => {
+  // Reuse keeps a pre-existing config (on disk), but a pre-handshake failure
+  // (declined, expired, unreachable) never reaches the hook, so runProtocol never
+  // saves the rotated key. The recovery note must not fire: `psilink exchange`
+  // would fail on the missing key. This guards the keyPersisted gate -- before
+  // it, `reuseExistingConfig` alone fired the note regardless of the key.
+  vi.mocked(runProtocol).mockImplementation((async () => {
+    throw new Error("partner declined the invitation");
+  }) as never);
+
+  const log = getLogger("bootstrap-recovery-test");
+  log.setLevel("silent");
+  const errorSpy = vi.spyOn(log, "error");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    fs.writeFileSync(configPath, "channel: filedrop\npath: /mnt/share\n");
+    await expect(
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        loggerName: "bootstrap-recovery-test",
+        reuseExistingConfig: true,
+      }),
+    ).rejects.toThrow("partner declined");
+    expect(
+      errorSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes(RECOVERY_NOTE),
+      ),
+    ).toBe(false);
+  } finally {
+    errorSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap with reuseExistingConfig logs the recovery note when the exchange fails after the handshake", async () => {
+  // The complement of the test above: the handshake succeeds (hook reached, so
+  // the rotated key is saved) and the reused config is on disk, then the exchange
+  // fails. Both files are present, so the note must point at `psilink exchange`.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    await onAuthenticated();
+    throw new Error("data exchange failed");
+  }) as never);
+
+  const log = getLogger("bootstrap-recovery-test");
+  log.setLevel("silent");
+  const errorSpy = vi.spyOn(log, "error");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    fs.writeFileSync(configPath, "channel: filedrop\npath: /mnt/share\n");
+    await expect(
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        loggerName: "bootstrap-recovery-test",
+        reuseExistingConfig: true,
+      }),
+    ).rejects.toThrow("data exchange failed");
+    expect(
+      errorSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes(RECOVERY_NOTE),
+      ),
+    ).toBe(true);
+  } finally {
+    errorSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- logOnlineBootstrapOutcome ----------------------------------------------
 
 test("logOnlineBootstrapOutcome: a clean run reports both files saved", () => {
@@ -552,4 +629,372 @@ test("logOnlineBootstrapOutcome: a config-write failure logs at error level and 
   expect(msg).toContain("rotated key was saved to .psilink.key");
   expect(msg).toContain("could not be written to psilink.yaml");
   expect(msg).not.toContain("saved config to");
+});
+
+test("logOnlineBootstrapOutcome: a reused config reports the existing config and the rotated key", () => {
+  const log = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as unknown as ReturnType<typeof getLogger>;
+  logOnlineBootstrapOutcome(log, {
+    configFile: "psilink.yaml",
+    keyFile: ".psilink.key",
+    reuseExistingConfig: true,
+  });
+  expect(log.warn).not.toHaveBeenCalled();
+  expect(log.error).not.toHaveBeenCalled();
+  expect(log.info).toHaveBeenCalledTimes(1);
+  const msg = vi.mocked(log.info).mock.calls[0][0] as string;
+  expect(msg).toContain("reused the existing configuration");
+  expect(msg).toContain("rotated key");
+});
+
+// --- runOnlineBootstrap: reuse + write-time re-gate --------------------------
+
+test("runOnlineBootstrap with reuseExistingConfig keeps the existing config and reports no write error", async () => {
+  // The hook is a no-op when reusing: the pre-existing config is left as-is and
+  // only the rotated key (saved by runProtocol) lands.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    await onAuthenticated();
+    return {};
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    const existing = "channel: filedrop\npath: /mnt/share\n# user-authored\n";
+    fs.writeFileSync(configPath, existing);
+    const { configWriteError } = await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+    });
+    expect(configWriteError).toBeUndefined();
+    // The user's config is untouched: reuse never rewrites it.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(existing);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap re-gates the config write: a config appearing after the check is not silently overwritten", async () => {
+  // Emulate runProtocol's hook handling: a hook failure is captured as
+  // onAuthenticatedError (non-fatal), not propagated -- the same contract the
+  // real runProtocol upholds.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const fnArgs = callArgs.filter((a) => typeof a === "function");
+    expect(fnArgs).toHaveLength(1);
+    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    try {
+      await onAuthenticated();
+      return {};
+    } catch (err) {
+      return { onAuthenticatedError: err };
+    }
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    // A config "appears" between the pre-network conflict check and the write.
+    const existing = "channel: filedrop\npath: /mnt/share\n# pre-existing\n";
+    fs.writeFileSync(configPath, existing);
+    // reuseExistingConfig is NOT set: this is the write-fresh path, so the hook
+    // must detect the appeared file and refuse rather than overwrite it.
+    const { configWriteError } = await runOnlineBootstrap(
+      onlineBootstrapParams(configPath),
+    );
+    expect(configWriteError).toBeInstanceOf(UsageError);
+    // The pre-existing file is left untouched -- not silently overwritten.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(existing);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- diffConnectionAgainstTarget ---------------------------------------------
+// These compare a saved config against the connection the live exchange will
+// actually use (a built RunnableConnectionConfig, as connectionFromURL would
+// produce), so the diff's verdict matches the live connection field for field.
+// URL-specific parsing (port truthiness, path "/", percent-encoding) lives in
+// connectionFromURL and is tested above.
+
+test("diffConnectionAgainstTarget: an agreeing sftp config has no conflicts or warnings", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "host",
+      port: 2222,
+      path: "/drop",
+      username: "alice",
+      password: "s3cr3t",
+    },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "host",
+      port: 2222,
+      path: "/drop",
+      username: "alice",
+      password: "s3cr3t",
+    },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a host mismatch is a conflict (which drop)", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "other-host" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts.map((d) => d.field)).toContain("connection.server.host");
+});
+
+test("diffConnectionAgainstTarget: host comparison is case-insensitive (same endpoint)", () => {
+  // DNS is case-insensitive, and the live connection uses the host as-is, so a
+  // case-only difference must not abort.
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host.example.com" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "Host.Example.COM" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: an sftp path mismatch is a conflict (which drop)", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/old" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/new" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts.map((d) => d.field)).toContain("connection.server.path");
+});
+
+test("diffConnectionAgainstTarget: a trailing-slash-only path difference is not a conflict", () => {
+  // FileSyncConnection strips a single trailing slash, so /drop and /drop/ are
+  // the same directory at runtime.
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop/" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a path the target omits is not flagged", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a differing port warns (how you reach), not conflicts", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 22 },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
+});
+
+test("diffConnectionAgainstTarget: a target port equal to the config is silent", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: the default port 22 against an unset config is silent", () => {
+  // An unset config port means the SFTP default (22), so a target restating 22
+  // is not a divergence and must not warn.
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 22 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a non-default port against an unset config warns", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", port: 2222 },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.warnings.some((w) => w.includes("2222"))).toBe(true);
+});
+
+test("diffConnectionAgainstTarget: credentials the target omits are not flagged", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "alice", password: "s3cr3t" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: differing credentials warn without echoing the value", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "bob", password: "saved-secret" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", username: "alice", password: "new-secret" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  const joined = r.warnings.join(" | ");
+  expect(joined).toContain("username");
+  expect(joined).toContain("password");
+  // No credential value -- saved or specified -- is ever echoed in a warning.
+  expect(joined).not.toContain("saved-secret");
+  expect(joined).not.toContain("new-secret");
+  expect(joined).not.toContain("alice");
+});
+
+test("diffConnectionAgainstTarget: a differing private key warns without echoing it", () => {
+  const existing: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", privateKey: "saved-key" },
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", privateKey: "new-key" },
+  };
+  const joined = diffConnectionAgainstTarget(existing, target).warnings.join(
+    " | ",
+  );
+  expect(joined).toContain("private key");
+  expect(joined).not.toContain("saved-key");
+  expect(joined).not.toContain("new-key");
+});
+
+test("diffConnectionAgainstTarget: a channel mismatch warns and compares nothing else (file-sync)", () => {
+  // file:// vs sftp:// is a legitimate different way of reaching the same drop;
+  // it warns and short-circuits the per-channel fields rather than aborting.
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop" },
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+  expect(r.warnings).toHaveLength(1);
+  expect(r.warnings[0]).toContain("channel");
+});
+
+test("diffConnectionAgainstTarget: a filedrop path mismatch is a conflict", () => {
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/other",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts.map((d) => d.field)).toContain("connection.path");
+});
+
+test("diffConnectionAgainstTarget: a filedrop trailing-slash-only difference is not a conflict", () => {
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share/",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a filedrop path differing only by multiple trailing slashes is not a conflict", () => {
+  // FileSyncConnection.open strips ALL trailing slashes from a filedrop path, so
+  // "/drop//" and "/drop" are the same drop -- the diff must not over-abort.
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/share//",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a filedrop path differing only by backslashes is not a conflict", () => {
+  // FileSyncConnection.open folds backslashes to forward slashes on a filedrop
+  // path, so "C:\\drop" and "C:/drop" are the same drop to the live connection.
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "C:\\share\\drop",
+  };
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "C:/share/drop",
+  };
+  const r = diffConnectionAgainstTarget(existing, target);
+  expect(r.conflicts).toEqual([]);
 });

@@ -190,3 +190,108 @@ test("provisionConfigAndKey writes no key file when the config write fails", () 
     fs.chmodSync(ro, 0o700); // restore so afterEach cleanup can remove it
   }
 });
+
+// --- reuseExistingConfig -----------------------------------------------------
+
+test("provisionConfigAndKey with reuseExistingConfig writes only the key, keeping the config", () => {
+  const original = "channel: filedrop\npath: /mnt/share\n# user-authored\n";
+  fs.writeFileSync(configPath, original);
+  const result = provisionConfigAndKey(
+    sampleSpec(),
+    { sharedSecret: TOKEN },
+    { configPath, keyPath },
+    { reuseExistingConfig: true },
+  );
+  expect(result).toEqual({ configPath, keyPath });
+  // The user's config is left byte-for-byte untouched ...
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  // ... and the key file is written.
+  expect(loadKeyFile(keyPath)?.sharedSecret).toBe(TOKEN);
+});
+
+test("provisionConfigAndKey with reuseExistingConfig still rejects a pre-existing key file", () => {
+  fs.writeFileSync(configPath, "channel: filedrop\npath: /mnt/share\n");
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { sharedSecret: TOKEN },
+      { configPath, keyPath },
+      { reuseExistingConfig: true },
+    ),
+  ).toThrow(keyPath);
+  // The pre-existing config is never touched on the conflict path.
+  expect(fs.readFileSync(configPath, "utf8")).toBe(
+    "channel: filedrop\npath: /mnt/share\n",
+  );
+});
+
+test("provisionConfigAndKey with reuseExistingConfig does not delete the config when the key write fails", () => {
+  const original = "channel: filedrop\npath: /mnt/share\n";
+  fs.writeFileSync(configPath, original);
+  // A malformed token makes saveKeyFile throw; the reused config must survive
+  // (the rollback only removes a config THIS call wrote, never the user's).
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { sharedSecret: "too-short" },
+      { configPath, keyPath },
+      { reuseExistingConfig: true },
+    ),
+  ).toThrow("base64url-encoded 32-byte value");
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test("provisionConfigAndKey with reuseExistingConfig aborts when the config was removed, writing no key", () => {
+  // The caller reconciled a config for reuse, but it was deleted in the window
+  // before this call. Writing the key would orphan it (a key with no matching
+  // config), so the re-gate must abort -- nothing written -- rather than leave
+  // inconsistent on-disk state. (configPath does not exist in this test.)
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { sharedSecret: TOKEN },
+      { configPath, keyPath },
+      { reuseExistingConfig: true },
+    ),
+  ).toThrow(UsageError);
+  expect(fs.existsSync(configPath)).toBe(false);
+  // No orphaned key landed.
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test("assertNoProvisionConflicts can check only the key path (accept reconciles the config)", () => {
+  fs.writeFileSync(configPath, "channel: filedrop\n");
+  // A pre-existing config does not trip the gate when only the key is checked.
+  expect(() =>
+    assertNoProvisionConflicts({ configPath, keyPath }, ["key"]),
+  ).not.toThrow();
+  // ... but a pre-existing key still does.
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
+  expect(() =>
+    assertNoProvisionConflicts({ configPath, keyPath }, ["key"]),
+  ).toThrow(keyPath);
+});
+
+test("assertNoProvisionConflicts can check only the config path (online invite warns on the key)", () => {
+  fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
+  // A pre-existing key does not trip the gate when only the config is checked.
+  expect(() =>
+    assertNoProvisionConflicts({ configPath, keyPath }, ["config"]),
+  ).not.toThrow();
+  // ... but a pre-existing config still does.
+  fs.writeFileSync(configPath, "channel: filedrop\n");
+  expect(() =>
+    assertNoProvisionConflicts({ configPath, keyPath }, ["config"]),
+  ).toThrow(configPath);
+});
+
+test("assertNoProvisionConflicts keeps the same-path guard even when narrowing the check", () => {
+  const both = path.join(dir, "shared.yaml");
+  // Neither file exists, but config and key resolve to one path: the same-path
+  // guard must still fire regardless of which targets are checked.
+  expect(() =>
+    assertNoProvisionConflicts({ configPath: both, keyPath: both }, ["key"]),
+  ).toThrow(UsageError);
+});

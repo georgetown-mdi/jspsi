@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -9,7 +10,11 @@ import {
   getLogger,
   UsageError,
 } from "@psilink/core";
-import type { InvitationToken } from "@psilink/core";
+import type {
+  ConnectionConfig,
+  InvitationToken,
+  LinkageTerms,
+} from "@psilink/core";
 
 import {
   decodeAndValidateInvitation,
@@ -18,6 +23,7 @@ import {
 } from "../../src/commands/accept";
 import { generateSharedSecret } from "../../src/commands/bootstrap";
 import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
+import { saveConfig } from "../../src/config";
 
 const silentLog = getLogger("accept-test");
 silentLog.setLevel("silent");
@@ -195,4 +201,200 @@ test("validateAccept: an unsupported URL is rejected before the input file is re
       log: silentLog,
     }),
   ).rejects.toBeInstanceOf(UsageError);
+});
+
+// --- reconciling a pre-existing config ---------------------------------------
+
+const FUTURE = () => new Date(Date.now() + 3_600_000).toISOString();
+
+/** Write a config whose linkage terms agree with the invitation's by default
+ *  (same default terms, identity aside), so a test perturbs only what it means
+ *  to test. */
+function writeExistingConfig(
+  configPath: string,
+  overrides: {
+    terms?: LinkageTerms;
+    connection?: ConnectionConfig;
+  } = {},
+): void {
+  saveConfig(configPath, {
+    connection: overrides.connection ?? {
+      channel: "filedrop",
+      path: "/mnt/share",
+    },
+    linkageTerms: overrides.terms ?? getDefaultLinkageTerms("Acceptor Org"),
+  });
+}
+
+test("validateAccept: offline reuses a config whose linkage terms match the invitation", async () => {
+  const options = testOptions();
+  writeExistingConfig(options.configFile);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options,
+      log: silentLog,
+    });
+    expect(ready.reuseExistingConfig).toBe(true);
+    expect(ready.mode).toBe("offline");
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+test("validateAccept: offline fails with a diff when the config's terms disagree", async () => {
+  const options = testOptions();
+  const terms = getDefaultLinkageTerms("Acceptor Org");
+  // The invitation's algorithm is the default "psi"; make the config disagree.
+  terms.algorithm = "psi-c";
+  writeExistingConfig(options.configFile, { terms });
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const run = () =>
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      });
+    await expect(run()).rejects.toBeInstanceOf(UsageError);
+    // The error names the differing field and points at the config file.
+    await expect(run()).rejects.toThrow(/algorithm/);
+    await expect(run()).rejects.toThrow(options.configFile);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+test("validateAccept: a pre-existing config that cannot be parsed aborts with guidance", async () => {
+  const options = testOptions();
+  // Well-formed YAML that is not a valid exchange spec: parseExchangeSpec throws.
+  fs.writeFileSync(options.configFile, "connection: 123\n");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      }),
+    ).rejects.toThrow(/could not be parsed/);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+test("validateAccept: a malformed-YAML config does not echo an inline credential", async () => {
+  const options = testOptions();
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  // Syntactically invalid YAML (an unclosed flow map) with an inline credential
+  // on the offending line. YAML.parse's error embeds a snippet of the source
+  // lines; the reconcile must report only the path, never that snippet, or the
+  // credential leaks into the (logged) error message.
+  fs.writeFileSync(
+    options.configFile,
+    `connection:\n  channel: sftp\n  server:\n    password: {${SECRET}\n    host: h\n`,
+  );
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    let caught: unknown;
+    try {
+      await validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toMatch(/not valid YAML/);
+    // The credential must not appear anywhere in the surfaced message.
+    expect((caught as Error).message).not.toContain(SECRET);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+test("validateAccept: online aborts (no acceptance sent) when the connection block disagrees with the URL", async () => {
+  const options = testOptions();
+  // Linkage terms agree; only the connection host disagrees with the URL.
+  writeExistingConfig(options.configFile, {
+    connection: {
+      channel: "sftp",
+      server: { host: "other-host", username: "alice" },
+    },
+  });
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const run = () =>
+      validateAccept({
+        resolved: {
+          mode: "online",
+          url: new URL("sftp://expected-host/drop"),
+          invitation: encoded,
+          // Never read: the reconcile check throws before the input is loaded,
+          // which is also before any network activity (so no acceptance is sent).
+          input: "/nonexistent/psilink-input.csv",
+        },
+        options,
+        log: silentLog,
+      });
+    await expect(run()).rejects.toBeInstanceOf(UsageError);
+    await expect(run()).rejects.toThrow(/connection\.server\.host/);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+test("validateAccept: online reuse warns (does not abort) on a differing --server-port override", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-online-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  // Terms and host (the abort fields) agree, so reconcile proceeds; only the
+  // overridden port differs from the saved 22 -- a "how you reach it" detail
+  // that must warn and apply, not abort.
+  saveConfig(configFile, {
+    connection: { channel: "sftp", server: { host: "host", port: 22 } },
+    linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
+  });
+  const log = getLogger("accept-port-warn-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({ configFile, keyFile, serverPort: 2222 }),
+      log,
+    });
+    expect(ready.reuseExistingConfig).toBe(true);
+    expect(
+      warnSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes("2222"),
+      ),
+    ).toBe(true);
+    // With connection warnings emitted, the summary must not claim the config
+    // "matches" -- that would contradict the just-emitted divergence.
+    expect(
+      infoSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes("matches"),
+      ),
+    ).toBe(false);
+  } finally {
+    warnSpy.mockRestore();
+    infoSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

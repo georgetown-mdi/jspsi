@@ -59,6 +59,26 @@ const parseTimestampedMessageNNN = (name: string): number | undefined => {
   return Number(nnnStr);
 };
 
+/**
+ * Canonicalize a `filedrop` connection path to the form the connection uses on
+ * disk: fold backslashes to forward slashes (so `${path}/${name}` constructions
+ * work on Windows, where `fs` accepts forward slashes), then strip trailing
+ * slashes while preserving root-like paths -- Unix "/" stays "/", and a Windows
+ * drive root "C:/" stays "C:/" (the stripped form "C:" is not a valid path
+ * argument on Windows). {@link FileSyncConnection.open} applies this to the
+ * configured path before use.
+ *
+ * Exported so a caller that compares two filedrop paths for equality -- the
+ * CLI's config reconcile -- can decide it exactly as the live connection would,
+ * by normalizing both sides through this one function rather than
+ * reimplementing, and drifting from, the rule.
+ */
+export function normalizeFiledropPath(rawPath: string): string {
+  const normalized = rawPath.replace(/\\/g, "/");
+  const stripped = normalized.replace(/\/+$/, "");
+  return /^[A-Za-z]:$/.test(stripped) ? stripped + "/" : stripped || "/";
+}
+
 // Builds the acknowledgment-marker name for the file `<originalName>.json`:
 // `<writerId>-<originalName>-ack.json`. The marker is the single construct that
 // signals "I durably received your file" on transports that cannot delete --
@@ -487,16 +507,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // default-fallback windows.
 
     if (config.channel === "filedrop") {
-      // Normalize backslashes to forward slashes so ${this.path}/${name}
-      // constructions work on Windows (fs accepts forward slashes there).
-      const normalized = config.path.replace(/\\/g, "/");
-      // Strip trailing slashes but preserve root-like paths: Unix "/" stays
-      // "/", Windows drive root "C:/" stays "C:/" (stripped form "C:" is not
-      // a valid path argument on Windows).
-      const stripped = normalized.replace(/\/+$/, "");
-      const dirPath = /^[A-Za-z]:$/.test(stripped)
-        ? stripped + "/"
-        : stripped || "/";
+      // Fold backslashes and strip trailing slashes to the on-disk form (see
+      // normalizeFiledropPath); the CLI reconcile compares paths through the same
+      // function so its verdict matches what this connection actually opens.
+      const dirPath = normalizeFiledropPath(config.path);
       this.log.debug(`[${this.role}] opening local path ${dirPath}`);
       await this.client.connect({
         path: dirPath,
