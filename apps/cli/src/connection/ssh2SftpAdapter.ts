@@ -536,33 +536,42 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             // cannot be resolved; propagate openErr unchanged so the caller
             // sees the original I/O error rather than a confusing secondary
             // one.
-            this.exists(path).then(
-              (fileExists) => {
-                reject(
-                  fileExists
-                    ? Object.assign(new Error(openErr.message), {
-                        code: "EEXIST",
-                        cause: openErr,
-                      })
-                    : Object.assign(
-                        new Error(
-                          `SFTP exclusive-create failed (SSH_FX_FAILURE) ` +
-                            `and the target file is not present, so the ` +
-                            `cause is a server-side I/O error rather than a ` +
-                            `lock-file race. Check the SFTP server logs for ` +
-                            `the underlying cause (disk full, permissions, ` +
-                            `quota) before retrying; SFTPv3 cannot ` +
-                            `distinguish a transient race from a permanent ` +
-                            `failure, so a single retry is reasonable only ` +
-                            `if a race is plausible. Original error: ` +
-                            `${openErr.message}`,
+            // Raw client existence check, not this.exists(): the public method
+            // is warnIfSlow-wrapped, and the whole `attempt` (this fallback
+            // included) is already wrapped once at the return site, so routing
+            // through this.exists() here would arm a second, overlapping slow-op
+            // warning for the same logical createExclusive. The outer wrap still
+            // bounds and reports this check.
+            this.client
+              .exists(path)
+              .then(Boolean)
+              .then(
+                (fileExists) => {
+                  reject(
+                    fileExists
+                      ? Object.assign(new Error(openErr.message), {
+                          code: "EEXIST",
+                          cause: openErr,
+                        })
+                      : Object.assign(
+                          new Error(
+                            `SFTP exclusive-create failed (SSH_FX_FAILURE) ` +
+                              `and the target file is not present, so the ` +
+                              `cause is a server-side I/O error rather than a ` +
+                              `lock-file race. Check the SFTP server logs for ` +
+                              `the underlying cause (disk full, permissions, ` +
+                              `quota) before retrying; SFTPv3 cannot ` +
+                              `distinguish a transient race from a permanent ` +
+                              `failure, so a single retry is reasonable only ` +
+                              `if a race is plausible. Original error: ` +
+                              `${openErr.message}`,
+                          ),
+                          { cause: openErr },
                         ),
-                        { cause: openErr },
-                      ),
-                );
-              },
-              () => reject(openErr),
-            );
+                  );
+                },
+                () => reject(openErr),
+              );
             return;
           }
           reject(openErr);

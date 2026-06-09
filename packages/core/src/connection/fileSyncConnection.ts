@@ -230,13 +230,15 @@ const DEFAULT_JOINER_RECOVERY_MS = 1000 * 30;
 // Reads the hello control file through the I5 partial-sync gate. Retries on a
 // transient get() failure or a JSON parse failure (indicating the sync tool has
 // not finished writing the file) until timeToLive expires, then throws a
-// transport Error. A typed UsageError from get() -- an over-cap body
-// (FrameSizeExceededError) or a stalled read (TransportOperationStalledError) --
-// is terminal, as is a fully-synced body that parses but fails the envelope
-// schema (protocol mismatch, not a transient sync gap): re-reading cannot fix
-// any of these, and retrying would let a hostile server hold the gate open until
-// the deadline. Peer-id recovery is always filename-based; this function
-// validates the body only.
+// transport Error. Any typed UsageError from get() is terminal -- today that is
+// an over-cap body (FrameSizeExceededError) or a stalled read
+// (TransportOperationStalledError), but the catch below is deliberately broad
+// rather than enumerated: a UsageError is a non-retryable usage fault by
+// definition, so re-reading cannot fix it and retrying would let a hostile
+// server hold the gate open until the deadline. A fully-synced body that parses
+// but fails the envelope schema (protocol mismatch, not a transient sync gap) is
+// terminal for the same reason. Peer-id recovery is always filename-based; this
+// function validates the body only.
 //
 // The hello is the only control file with a body, so the gate now reads only it
 // (the schema is HelloEnvelopeSchema at every call site). The acknowledgment
@@ -809,8 +811,30 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         const deadline =
           Date.now() +
           (this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
-        const filePresent = async () =>
-          (await this.client.list(path)).some((f) => f.name === lastSentFile);
+        // Bound each drain list() by the time remaining to `deadline`, not the
+        // per-call transport budget: boundTransport arms a fresh peerTimeoutMs on
+        // every list(), so a list issued late in the drain could otherwise run a
+        // full budget PAST `deadline`, blocking teardown for up to twice the
+        // budget. Racing it against the remaining window keeps total teardown
+        // within the drain deadline (the documented "drain times out" contract).
+        // This is teardown-specific and does not contradict the fresh-per-await
+        // budget the live exchange uses: the drain has its own short deadline to
+        // honor, whereas a healthy long-running poll deliberately has none. A
+        // list() that loses this race rejects and the enclosing catch falls
+        // through to cleanup(), exactly as a list() error already does.
+        const filePresent = async () => {
+          const remaining = Math.max(0, deadline - Date.now());
+          const files = await withTransportBudget(
+            this.client.list(path),
+            remaining,
+            () =>
+              new TransportOperationStalledError(
+                `drain of ${lastSentFile} did not complete within the ` +
+                  `${remaining} ms teardown window`,
+              ),
+          );
+          return files.some((f) => f.name === lastSentFile);
+        };
         try {
           if (await filePresent()) {
             this.log.debug(
@@ -846,8 +870,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     if (this.connected) {
       this.log.debug(`[${this.role}] closing connection`);
-      await this.client.end();
+      // Clear `connected` BEFORE awaiting end(): the budget wrap can make end()
+      // reject when a server withholds the session-close callback, and close() is
+      // a best-effort teardown that must stay non-throwing and idempotent.
+      // Clearing first means a bounded end() rejection neither leaves `connected`
+      // stuck true nor lets a second close() re-enter this branch and call end()
+      // again on the abandoned client; the rejection is logged like the cleanup()
+      // failure above rather than propagated to the caller.
       this.connected = false;
+      try {
+        await this.client.end();
+      } catch (err: unknown) {
+        this.log.debug(`[${this.role}] end() during close: ${errMessage(err)}`);
+      }
     }
     this.path = undefined;
     this.config = undefined;

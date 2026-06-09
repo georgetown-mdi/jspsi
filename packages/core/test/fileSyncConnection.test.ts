@@ -1171,6 +1171,33 @@ test("close() does not hang when the server withholds a cleanup safeDelete callb
   await expect(conn.close()).resolves.toBeUndefined();
 });
 
+test("close() does not hang or throw when the server withholds the end() callback", async () => {
+  // end() is budget-wrapped (the rejecting variant), so a server that withholds
+  // the SSH session-close callback makes it reject at the budget. close() is a
+  // best-effort, non-throwing, idempotent teardown: it must swallow that bounded
+  // rejection, clear `connected`, and not re-end the abandoned client on a second
+  // call.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  let endCalls = 0;
+  client.end = () => {
+    endCalls++;
+    return new Promise<void>(() => {});
+  };
+  // First close() resolves (does not reject) once the withheld end() hits the
+  // budget, and it called end() exactly once.
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(endCalls).toBe(1);
+  // Second close() neither throws nor re-enters the end() branch: `connected` was
+  // cleared despite the rejection.
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(endCalls).toBe(1);
+});
+
 test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {
   // The lock file is only gone after EEXIST if the winner crashed during the
   // narrow window between createExclusive succeeding and responsibleFiles

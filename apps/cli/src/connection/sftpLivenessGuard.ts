@@ -177,11 +177,18 @@ export function withSlowOperationWarning<T>(
   },
 ): Promise<T> {
   const thresholdMs = options.thresholdMs ?? SFTP_SLOW_OPERATION_WARNING_MS;
+  const start = Date.now();
   const timer = setTimeout(() => {
-    const observed = options.progress?.(thresholdMs);
+    // Measure actual wall-clock elapsed rather than reusing thresholdMs: under
+    // event-loop load the timer fires a little late, and the get() progress
+    // callback divides bytes by this value to report a rate, so a stale
+    // thresholdMs would inflate it. The two coincide only when the timer fires
+    // exactly on schedule.
+    const elapsedMs = Date.now() - start;
+    const observed = options.progress?.(elapsedMs);
     options.log.warn(
       `SFTP ${options.operation} of ${options.path} is still running after ` +
-        `${thresholdMs} ms${observed ? ` (${observed})` : ""}; this may be a ` +
+        `${elapsedMs} ms${observed ? ` (${observed})` : ""}; this may be a ` +
         "slow transfer or an unresponsive server",
     );
   }, thresholdMs);
