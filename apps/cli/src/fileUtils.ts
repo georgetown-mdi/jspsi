@@ -288,7 +288,11 @@ function fsyncParentDir(filePath: string): void {
     try {
       fs.closeSync(dirFd);
     } catch {
-      /* best-effort close; a genuine fsync failure surfaces from above */
+      // Swallow a close failure on either path: if fsyncSync threw, that error
+      // surfaces from the try body and must not be masked; if it succeeded, the
+      // directory is already durable and a close hiccup changes nothing. A
+      // directory-fd close failure is pathological regardless, and the fd is
+      // released at process exit.
     }
   }
 }
@@ -519,12 +523,11 @@ export function writeFileOwnerOnly(
  * security-sensitive one -- is not entangled with public-file semantics.
  *
  * Durability matches {@link writeFileOwnerOnly}: the temp file's data is
- * `fsync`'d before the rename so a power loss cannot surface the rename with the
- * contents lost, and on POSIX the parent directory is `fsync`'d after the rename
- * so the new directory entry is durable too (`fsyncParentDir` is a no-op on
- * Windows, where Node's `fs` cannot flush a directory handle). Because this
- * writer retains the temp fd on every platform, the data flush runs on Windows
- * as well -- only the directory flush is POSIX-only.
+ * `fsync`'d before the rename (on every platform -- both writers retain a write
+ * fd) so a power loss cannot surface the rename with the contents lost, and the
+ * parent directory is `fsync`'d after the rename so the new directory entry is
+ * durable too. Only that directory flush is POSIX-only (`fsyncParentDir` is a
+ * no-op on Windows, where Node's `fs` cannot open a directory handle to flush).
  */
 export function writeFileAtomic(
   destPath: string,

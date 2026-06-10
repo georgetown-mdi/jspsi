@@ -44,10 +44,12 @@ function plantSymlinkInCreateWindow(tmp: string, target: string): void {
 
 // Spy on openSync/fsyncSync and both commit steps (rename and link), recording
 // the order of the durability fsyncs relative to the commit. Each fsync is
-// mapped back to the path its fd was opened on, resolved at fsync time so a
-// reused fd number -- the temp fd is closed before the directory is opened, so
-// the OS may hand the directory the same number -- still names its real target.
-// Returns the event log the caller asserts on; spies are restored in afterEach.
+// mapped back to the path its fd was opened on: the path is stored when the fd
+// is opened and looked up at fsync time, so a reused fd number -- the temp fd is
+// closed before the directory is opened, so the OS may hand the directory the
+// same number -- still resolves to its real target (the second open overwrites
+// the map entry). Returns the event log the caller asserts on; spies are
+// restored in afterEach.
 function recordDurabilitySyncs(): string[] {
   const fdPaths = new Map<number, string>();
   const events: string[] = [];
