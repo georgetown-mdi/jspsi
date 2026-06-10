@@ -1097,12 +1097,12 @@ test("synchronize() propagates a base UsageError from a transport read as the te
   // the first pass instead of retrying at the polling cadence until the TTL.
   let peerHelloReads = 0;
   const originalGet = client.get;
-  client.get = async (path, options) => {
+  client.get = async (path: string) => {
     if (path === peerHelloPath) {
       peerHelloReads++;
       throw new UsageError(`usage fault reading ${path}`);
     }
-    return originalGet(path, options);
+    return originalGet(path);
   };
 
   const rejection = await conn.synchronize().then(
@@ -1159,8 +1159,11 @@ test("poll() stops the poller on a UsageError from a transport read, not retried
       ),
     ),
   ]);
-  // Give the poller several intervals to (wrongly) reschedule and re-read before
-  // we assert it stayed put.
+  // A terminal poller schedules no next cycle, so getCount is already final at 1
+  // the moment the error fires -- this wait cannot make a stopped poller fail. It
+  // only gives a WRONG reschedule (which fires every pollingFrequency = 10 ms)
+  // several intervals to surface and bump getCount past 1, mirroring the margin
+  // the "close() stops a running poller" test above uses for the same assertion.
   await new Promise((r) => setTimeout(r, 60));
   conn.stop();
 
