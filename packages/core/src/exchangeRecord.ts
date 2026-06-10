@@ -307,14 +307,17 @@ export interface ExchangeRecord {
   /** Readable governance metadata (the authority for, and the categories of, the
    * disclosure) that makes this record a standalone disclosure-log entry. */
   governance: ExchangeRecordGovernance;
-  /** The number of records this party contributed to the exchange -- its own
-   * participating record count, recorded for every party as a per-direction
-   * statement of what this party exposed. Distinct from {@link resultSize}: it is
-   * the size of THIS party's input, not the intersection, so it is known from the
-   * party's own data alone and stays meaningful even under a future algorithm that
-   * discloses neither the result size nor the partner's set size. Always present
-   * (a party always knows its own input size); carries no protected value -- an
-   * aggregate count of the holder's own records. */
+  /** The number of records this party contributed to the exchange -- the size of
+   * its own input, recorded for every party as a per-direction statement of what
+   * it put in. This is the input row count: it counts every contributed record,
+   * not only the rows that resolve to a usable linkage key, so it is an honest
+   * upper bound on what this party exposed rather than a derived match figure.
+   * Distinct from {@link resultSize}: it is the size of THIS party's input, not the
+   * intersection, so it is known from the party's own data alone and stays
+   * meaningful even under a future algorithm that discloses neither the result size
+   * nor the partner's set size. Always present (a party always knows its own input
+   * size); carries no protected value -- an aggregate count of the holder's own
+   * records. */
   recordsExposed: number;
   /** Intersection size, present only in the both-output case -- recorded only when
    * both parties' agreed terms have them both receive output, so it is stored only
@@ -513,7 +516,7 @@ export type CommittedPayload = {
  * successful exchange. `localTerms`/`partnerTerms` supply the agreed-terms hash,
  * the two identities, and the readable governance metadata (algorithm, legal
  * agreement, matching basis, and payload categories -- all read from
- * `localTerms`). `recordsExposed` is this party's own participating record count
+ * `localTerms`). `recordsExposed` is this party's own input row count
  * (always supplied); `resultSize` is set only when both parties are entitled to it
  * (the both-output case); `associationTable` only when this party holds it. The two
  * payload data sets are always committed (a no-data payload is committed as such).
@@ -521,8 +524,8 @@ export type CommittedPayload = {
 export interface ExchangeRecordInputs {
   localTerms: LinkageTerms;
   partnerTerms: LinkageTerms;
-  /** This party's own participating record count (the size of its input to the
-   * exchange). Always supplied -- a party always knows its own input size. */
+  /** This party's own input row count (the number of records it contributed to
+   * the exchange). Always supplied -- a party always knows its own input size. */
   recordsExposed: number;
   /** Intersection size; supply only in the both-output case. */
   resultSize?: number;
@@ -682,7 +685,7 @@ export async function buildExchangeRecord(
     // construction). Carries no values -- only names, categories, descriptions,
     // and the agreement reference.
     governance: governanceFromTerms(inputs.localTerms),
-    // This party's own participating record count, validated on build with the
+    // This party's own input row count, validated on build with the
     // same schema the parser uses (as createdAt/resultSize below): a negative or
     // non-safe-integer count throws here rather than producing a record the parser
     // would later reject.

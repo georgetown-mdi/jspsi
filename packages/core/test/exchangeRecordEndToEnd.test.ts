@@ -90,8 +90,8 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(init.record.resultSize).toBe(2);
   expect(resp.record.resultSize).toBe(2);
 
-  // Each party records its own participating record count -- the size of its own
-  // input, independent of the partner and of the result.
+  // Each party records its own input row count -- the size of its own input,
+  // independent of the partner and of the result.
   expect(init.record.recordsExposed).toBe(clientRows.length);
   expect(resp.record.recordsExposed).toBe(serverRows.length);
 
@@ -215,8 +215,8 @@ test("single-output: result size omitted, but each party records its own exposur
   expect("resultSize" in init.record).toBe(false);
   expect("resultSize" in resp.record).toBe(false);
 
-  // Each party still records its own participating record count: a per-direction
-  // figure known from its own input, independent of entitlement to the result.
+  // Each party still records its own input row count: a per-direction figure
+  // known from its own input, independent of entitlement to the result.
   expect(init.record.recordsExposed).toBe(clientRows.length);
   expect(resp.record.recordsExposed).toBe(serverRows.length);
 

@@ -375,7 +375,8 @@ export async function runExchange(
   // extra round-trip and no private key. Two disclosure figures, gated
   // differently and deliberately:
   //
-  // - recordsExposed is each party's own participating record count (rowCount).
+  // - recordsExposed is each party's own input row count (rowCount): every
+  //   contributed record, not only the rows that resolve to a usable linkage key.
   //   It is a per-direction statement of what this party put into the exchange,
   //   known from its own input alone, so it is recorded for every party
   //   regardless of role and stays meaningful even under a future algorithm that

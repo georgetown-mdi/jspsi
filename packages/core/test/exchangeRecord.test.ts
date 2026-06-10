@@ -264,10 +264,10 @@ describe("result size", () => {
   });
 });
 
-// --- Records exposed (this party's own participating count) ------------------
+// --- Records exposed (this party's own input row count) ----------------------
 
 describe("records exposed", () => {
-  test("carries this party's own participating record count", async () => {
+  test("carries this party's own input row count", async () => {
     const { record } = await buildExchangeRecord(
       { ...baseInputs, recordsExposed: 7 },
       fixedRandomness,
