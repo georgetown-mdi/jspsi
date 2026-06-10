@@ -268,6 +268,31 @@ export interface WriteFileOwnerOnlyOptions {
   exclusive?: boolean;
 }
 
+// Flush the parent directory of `filePath` so a directory entry just created by
+// a rename or link is itself durable across a power loss -- not only the file's
+// data. The data fsync the writers do before the rename is not enough on its
+// own: the entry that names the file is separate directory metadata, which a
+// crash could lose while the data survives (or the reverse), the reordering that
+// defeats the exchange record's opening-before-record crash ordering. POSIX
+// only -- Node's fs cannot open a directory handle on Windows (openSync on a
+// directory fails), so the entry flush there is left to the OS (NTFS metadata
+// journaling) and the cross-write crash-ordering guarantee is POSIX-only. A
+// no-op on win32. Shared by both atomic writers so their durability stays
+// identical rather than diverging.
+function fsyncParentDir(filePath: string): void {
+  if (process.platform === "win32") return;
+  const dirFd = fs.openSync(path.dirname(filePath), "r");
+  try {
+    fs.fsyncSync(dirFd);
+  } finally {
+    try {
+      fs.closeSync(dirFd);
+    } catch {
+      /* best-effort close; a genuine fsync failure surfaces from above */
+    }
+  }
+}
+
 /**
  * Atomically write `content` to `destPath` with owner-only permissions: `0600`
  * on Unix, a restricted ACL (current user, inheritance stripped) on Windows.
@@ -275,6 +300,19 @@ export interface WriteFileOwnerOnlyOptions {
  * with wrong permissions, and removes the temp file on any failure so a crashed
  * write leaves no `.tmp.<pid>` orphan. With `exclusive`, the final step is an
  * atomic create-if-absent that throws rather than overwriting an existing file.
+ *
+ * Durability (POSIX): the temp file's data is `fsync`'d before the rename and
+ * the parent directory is `fsync`'d after it, so a power loss cannot surface the
+ * rename while losing the file's contents. Because each call flushes its own
+ * directory entry before returning, two sequential calls are crash-ordered: if
+ * the second call's rename is durable, the first call's rename and contents are
+ * too. That ordering is what the self-attested exchange record relies on -- it
+ * writes the opening file before the record (see `recordFile.ts`) so a crash
+ * between the two preserves the proof material -- and what keeps a freshly
+ * rotated shared-secret token (`saveKeyFile`) from being lost. On Windows the
+ * directory flush is left to the OS: Node's `fs` exposes no way to open a
+ * directory handle and `FlushFileBuffers` it, so the cross-call crash-ordering
+ * guarantee is POSIX-only. See SECURITY_DESIGN.md ("Required permissions").
  *
  * Shared by every owner-only writer (the key file, the config writer,
  * exchange records, and the signing identity) so they all get the same
@@ -337,6 +375,11 @@ export function writeFileOwnerOnly(
         );
       }
       // ACL is now restricted; write the content into the already-protected file.
+      // Durability is left to the OS here: Node's fs exposes no way to open a
+      // directory handle and FlushFileBuffers it (the POSIX directory fsync
+      // below), so the cross-call crash-ordering guarantee the exchange record
+      // relies on is POSIX-only -- NTFS metadata journaling governs durability
+      // on Windows. Documented at the JSDoc above and in SECURITY_DESIGN.md.
       fs.writeFileSync(tmp, content, "utf8");
     } else {
       // Create the temp file on an exclusive, non-following descriptor so a
@@ -358,9 +401,13 @@ export function writeFileOwnerOnly(
       try {
         fs.fchmodSync(fd, 0o600);
         fs.writeFileSync(fd, content, "utf8");
+        // Flush the temp file's data to stable storage before the rename, so a
+        // power loss cannot leave the rename durable while the contents are
+        // lost. Paired with the parent-directory fsync after the rename below.
+        fs.fsyncSync(fd);
       } finally {
-        // Guard the close so its failure cannot mask an fchmod/write error in
-        // flight; the outer catch removes the temp file regardless.
+        // Guard the close so its failure cannot mask an fchmod/write/fsync error
+        // in flight; the outer catch removes the temp file regardless.
         try {
           fs.closeSync(fd);
         } catch {
@@ -407,6 +454,12 @@ export function writeFileOwnerOnly(
     } else {
       fs.renameSync(tmp, destPath);
     }
+    // Flush the parent directory so the rename/link's new directory entry is
+    // durable across a power loss too -- the entry naming the file is separate
+    // metadata from its (already fsync'd) contents. Inside the try so a flush
+    // failure runs the temp cleanup (a no-op after a successful rename, whose
+    // temp name is already gone) and propagates.
+    fsyncParentDir(destPath);
   } catch (err) {
     // Remove the temp file on any failure -- not just the icacls case -- so a
     // partial write never leaves a `.tmp.<pid>` orphan beside the destination.
@@ -433,6 +486,14 @@ export function writeFileOwnerOnly(
  * independent of the process umask. Kept deliberately separate from
  * `writeFileOwnerOnly` so the owner-only, ACL-hardened path -- the
  * security-sensitive one -- is not entangled with public-file semantics.
+ *
+ * Durability matches {@link writeFileOwnerOnly}: the temp file's data is
+ * `fsync`'d before the rename so a power loss cannot surface the rename with the
+ * contents lost, and on POSIX the parent directory is `fsync`'d after the rename
+ * so the new directory entry is durable too (`fsyncParentDir` is a no-op on
+ * Windows, where Node's `fs` cannot flush a directory handle). Because this
+ * writer retains the temp fd on every platform, the data flush runs on Windows
+ * as well -- only the directory flush is POSIX-only.
  */
 export function writeFileAtomic(
   destPath: string,
@@ -473,9 +534,16 @@ export function writeFileAtomic(
       // exported certificate.)
       fs.fchmodSync(fd, mode);
       fs.writeFileSync(fd, content, "utf8");
+      // Flush the temp file's data before the rename so a power loss cannot
+      // leave the rename durable while the contents are lost; the parent
+      // directory is flushed after the rename below. Mirrors writeFileOwnerOnly.
+      // Unlike that helper's Windows branch (which writes through a path, not a
+      // retained fd), this writer keeps the fd on every platform, so the data
+      // flush runs on Windows too -- only the directory flush below is POSIX-only.
+      fs.fsyncSync(fd);
     } finally {
-      // Guard the close so its failure cannot mask an fchmod/write error in
-      // flight; the outer catch removes the temp file regardless.
+      // Guard the close so its failure cannot mask an fchmod/write/fsync error
+      // in flight; the outer catch removes the temp file regardless.
       try {
         fs.closeSync(fd);
       } catch {
@@ -487,6 +555,10 @@ export function writeFileAtomic(
     // a redirecting symlink, which the next write heals. No portable fix in
     // Node's fs (it needs renameat2/O_TMPFILE).
     fs.renameSync(tmp, destPath);
+    // Flush the parent directory so the rename's new directory entry is durable
+    // too (POSIX only; see fsyncParentDir). Inside the try so a flush failure
+    // runs the temp cleanup -- a no-op after a successful rename -- and propagates.
+    fsyncParentDir(destPath);
   } catch (err) {
     // Remove the temp file on any failure so a partial write leaves no orphan.
     // If the failure was the exclusive open refusing a symlink planted at the
