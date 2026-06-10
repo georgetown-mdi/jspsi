@@ -309,10 +309,22 @@ function fsyncParentDir(filePath: string): void {
  * too. That ordering is what the self-attested exchange record relies on -- it
  * writes the opening file before the record (see `recordFile.ts`) so a crash
  * between the two preserves the proof material -- and what keeps a freshly
- * rotated shared-secret token (`saveKeyFile`) from being lost. On Windows the
- * directory flush is left to the OS: Node's `fs` exposes no way to open a
- * directory handle and `FlushFileBuffers` it, so the cross-call crash-ordering
- * guarantee is POSIX-only. See SECURITY_DESIGN.md ("Required permissions").
+ * rotated shared-secret token (`saveKeyFile`) from being lost. On Windows both
+ * flushes are left to the OS: the directory flush because Node's `fs` cannot
+ * open a directory handle to `FlushFileBuffers`, and the data flush because the
+ * Windows branch writes content through a path (reusing the ACL-narrowed
+ * placeholder, with no retained fd to fsync) -- unlike {@link writeFileAtomic},
+ * which keeps its fd on every platform and so flushes data on Windows too. The
+ * cross-call crash-ordering guarantee is therefore POSIX-only; NTFS metadata
+ * journaling governs Windows durability. See SECURITY_DESIGN.md ("Required
+ * permissions").
+ *
+ * On the `exclusive` path the directory flush runs after the create-if-absent
+ * (hard link) has already succeeded, so a flush failure -- a rare I/O error --
+ * throws though `destPath` was created, and not as a {@link FileExistsError}.
+ * The created file is left in place and a later run observes it as already
+ * present (the signing-identity caller adopts it); the data was fsync'd before
+ * the link, so only the directory entry's durability is in question there.
  *
  * Shared by every owner-only writer (the key file, the config writer,
  * exchange records, and the signing identity) so they all get the same
@@ -375,11 +387,15 @@ export function writeFileOwnerOnly(
         );
       }
       // ACL is now restricted; write the content into the already-protected file.
-      // Durability is left to the OS here: Node's fs exposes no way to open a
-      // directory handle and FlushFileBuffers it (the POSIX directory fsync
-      // below), so the cross-call crash-ordering guarantee the exchange record
-      // relies on is POSIX-only -- NTFS metadata journaling governs durability
-      // on Windows. Documented at the JSDoc above and in SECURITY_DESIGN.md.
+      // Durability is left to the OS on this branch -- both the data and the
+      // directory entry. The content goes through a path-based write (reusing
+      // the ACL-narrowed placeholder), so there is no retained fd to fsync the
+      // data, and Node's fs cannot open a directory handle to flush the entry
+      // (fsyncParentDir below is a no-op on win32). writeFileAtomic, by
+      // contrast, keeps its fd on every platform and so flushes data on Windows;
+      // reworking this security-sensitive ACL path to retain an fd is
+      // deliberately not done for a recoverable, NTFS-journaled durability gap.
+      // Documented at the JSDoc above and in SECURITY_DESIGN.md.
       fs.writeFileSync(tmp, content, "utf8");
     } else {
       // Create the temp file on an exclusive, non-following descriptor so a
@@ -457,8 +473,12 @@ export function writeFileOwnerOnly(
     // Flush the parent directory so the rename/link's new directory entry is
     // durable across a power loss too -- the entry naming the file is separate
     // metadata from its (already fsync'd) contents. Inside the try so a flush
-    // failure runs the temp cleanup (a no-op after a successful rename, whose
-    // temp name is already gone) and propagates.
+    // failure runs the temp cleanup and propagates; that cleanup is a no-op on
+    // either path -- after a successful rename the temp name is gone, and on the
+    // exclusive path the best-effort unlink above already removed it. On the
+    // exclusive path the create-if-absent has already succeeded by the time this
+    // runs, so a flush failure throws (not a FileExistsError) though destPath was
+    // created -- see the JSDoc contract note.
     fsyncParentDir(destPath);
   } catch (err) {
     // Remove the temp file on any failure -- not just the icacls case -- so a
