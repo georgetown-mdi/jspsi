@@ -266,6 +266,43 @@ describe("rename retry", () => {
       vi.useRealTimers();
     }
   });
+
+  test("stops retrying when a fatal session error lands between attempts", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let calls = 0;
+      const rename = vi.fn().mockImplementation(async () => {
+        calls++;
+        // A fatal protocol error lands in the inter-attempt window: it sets
+        // fatalSftpError (as the guarded wrapper 'error' listener would), but
+        // this attempt still rejects with the status-4 the server already sent.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (adapter as any).fatalSftpError = new Error("Malformed DATA packet");
+        throw sftpError("_rename: Failure", 4);
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { rename };
+
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      // The status-4 reply alone would be retried, but the next attempt's
+      // dead-session re-check rejects promptly with the terminal stalled error
+      // (not status 4) rather than buffering a request on the dead channel.
+      const assertion = expect(renaming).rejects.toBeInstanceOf(
+        TransportOperationStalledError,
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+      // Only the first attempt reached the server; the second short-circuited.
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // --- createExclusive ---------------------------------------------------------

@@ -644,8 +644,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   rename(fromPath: string, toPath: string): Promise<void> {
-    const dead = this.deadSessionError("file rename", fromPath);
-    if (dead) return Promise.reject(dead);
     // Retry a transient rename failure under put()'s bounded budget (one initial
     // attempt plus up to `retries` re-issues, 100 ms apart), but -- unlike put(),
     // which is idempotent -- only on the generic SSH_FX_FAILURE (status 4). That
@@ -663,7 +661,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // 'ERR_GENERIC_CLIENT') is not 4 and so is not retried.
     return this.warnIfSlow(
       retryPromise(
-        () => this.client.rename(fromPath, toPath).then(() => {}),
+        () => {
+          // Re-check the dead-session guard before EVERY attempt, not only at
+          // method entry. A fatal SFTP protocol error can land in the gap
+          // between attempts (an unsolicited malformed packet, or a malformed
+          // reply to a just-completed attempt): it sets fatalSftpError but
+          // leaves no in-flight request for ssh2's cleanupRequests to fail. The
+          // next attempt would then buffer its request on the
+          // destroyed-but-socket-alive channel, whose callback never fires, and
+          // hang until the consumer's whole-exchange budget -- defeating, for
+          // the retried rename, the prompt-failure guarantee this guard gives
+          // every other server-driven op. Re-checking turns it into a prompt
+          // TransportOperationStalledError, which is not status 4 and so ends
+          // the retry rather than being re-issued.
+          const dead = this.deadSessionError("file rename", fromPath);
+          if (dead) return Promise.reject(dead);
+          return this.client.rename(fromPath, toPath).then(() => {});
+        },
         // `??` not `||` so an explicit retries: 0 disables the retry rather than
         // being coerced to the default of 5.
         this.options!.retries ?? 5,
