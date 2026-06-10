@@ -2228,11 +2228,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const tempFile = `temp-${uuidv4()}.tmp`;
     const tempPath = `${path}/${tempFile}`;
 
-    // Each message carries a distinct filename (the byte count, and optionally
-    // a counter, differ per send), so a previous message the peer has not yet
-    // consumed cannot be found by an exact name. Scan for any `<id>-*.json` we
-    // still own and wait for it to clear, preserving the one-outstanding-
-    // message-at-a-time invariant the peer's poll() relies on.
     // Wait for the EXACT message we last sent to be consumed (deleted) by the
     // peer -- this.lastSentFile -- not for any <id>-<digits>.json. Under delete
     // mode's one-outstanding-per-direction rule (I9) lastSentFile is the only

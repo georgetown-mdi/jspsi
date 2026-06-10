@@ -2641,10 +2641,11 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
 // --- send(): hasOutstandingMessage excludes typed protocol files ---------------
 
 test("send() completes without spinning when a <id>-hello.json file is present in the store", async () => {
-  // Regression guard: after the hello rename, <id>-hello.json matches the
-  // `startsWith(<id>-) && endsWith(.json)` scan in hasOutstandingMessage.
-  // Without the parseMessageByteCount fix, send() would spin waiting for the
-  // hello file to be consumed. Verify it completes immediately instead.
+  // Regression guard: the drain waits only for the exact lastSentFile, which is
+  // undefined on this first send, so a pre-existing own <id>-hello.json must not
+  // block send(). (Under the old grammar-glob drain this required a
+  // parseMessageByteCount carve-out; exact-name matching ignores it for free.)
+  // Verify send() completes immediately instead of spinning.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
   conn.peerId = "stub-peer";
@@ -2683,12 +2684,11 @@ test("send() completes without spinning on a foreign <thisId>-<digits>.json (sit
   expect(files.has(foreignPath)).toBe(true);
 });
 
-test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminant excludes it)", async () => {
-  // The joining sentinel shares the `<id>-` prefix and `.json` extension but
-  // its terminal segment is the type word `joining`, not a byte count, so
-  // hasOutstandingMessage excludes it via parseMessageByteCount (I3) -- no
-  // per-suffix screening is needed. Were it mis-routed as an outstanding
-  // message, send() would spin until the peer timeout. Verify it completes.
+test("send() is not blocked by a <id>-joining.json sentinel", async () => {
+  // The joining sentinel shares the `<id>-` prefix and `.json` extension, so a
+  // broad own-prefix scan could mistake it for an outstanding message. The drain
+  // waits only for the exact lastSentFile (undefined here), so the sentinel is
+  // ignored. Were it counted, send() would spin until the peer timeout.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client);
   conn.peerId = "stub-peer";
@@ -2704,14 +2704,14 @@ test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminan
   expect(files.has(joiningPath)).toBe(true);
 });
 
-test("a <a>-<b>-lock.json tiebreaker is grammar-excluded from the .json message scans (poll() and hasOutstandingMessage)", async () => {
+test("a <a>-<b>-lock.json tiebreaker is not mistaken for a message by poll() or send()", async () => {
   // The lock tiebreaker is a `.json` control file (`<peer1>-<peer2>-lock.json`),
-  // so unlike a by-extension control name it reaches the `.json`-gated message
-  // scans in send()'s hasOutstandingMessage and in poll(). The grammar
-  // discriminant must classify it as a control file via its non-numeric terminal
-  // token `lock`: never counted as an outstanding message, never delivered as a
-  // message. A by-extension control name never reached these scans, so this path
-  // had no prior coverage.
+  // so unlike a by-extension control name it reaches the `.json`-gated scans in
+  // send()'s hasOutstandingMessage and in poll(). It must not be treated as a
+  // message in either: poll() excludes it by its non-numeric terminal token
+  // `lock` (grammar), and the send drain ignores it by waiting only for the
+  // exact lastSentFile. A by-extension control name never reached these scans,
+  // so this path had no prior coverage.
   const { client, files } = makeMockClient();
   const peerId = "peer-a";
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
@@ -2721,7 +2721,8 @@ test("a <a>-<b>-lock.json tiebreaker is grammar-excluded from the .json message 
   // (1) hasOutstandingMessage (in send()) must not count a lock file we own.
   // `<myId>-<peerId>-lock.json` shares our `<id>-` prefix and `.json` extension,
   // so a bare prefix glob would mistake it for an unconsumed message and spin
-  // send() until the peer timeout; the non-numeric `lock` terminal excludes it.
+  // send() until the peer timeout; the drain waits only for the exact
+  // lastSentFile (undefined here), so it is ignored.
   const ourLockPath = `/test/${conn.id}-${peerId}-lock.json`;
   files.set(ourLockPath, Buffer.alloc(0));
   await expect(conn.send({ check: true })).resolves.toBeUndefined();
