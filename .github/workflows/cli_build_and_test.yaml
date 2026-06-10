@@ -22,6 +22,10 @@ on:
       - "tsconfig.base.json"
       - ".github/workflows/cli_build_and_test.yaml"
 
+# Least privilege: this build/test gate only needs to read the repo.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test
