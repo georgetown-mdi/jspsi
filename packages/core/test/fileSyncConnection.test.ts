@@ -1060,6 +1060,60 @@ test("synchronize() surfaces a stalled peer-hello read as a terminal TransportOp
   expect(peerHelloReads).toBe(1);
 });
 
+test("synchronize() propagates a base UsageError from a transport read as the terminal exit-64 failure, not retried", async () => {
+  // The two cases above cover the concrete FrameSizeExceededError and
+  // TransportOperationStalledError subclasses; this pins the contract at the
+  // UsageError BASE class the gate's catch (and the poll loop) actually key off
+  // ("if (err instanceof UsageError) throw err"), so the terminal behavior is the
+  // class-level invariant rather than a per-subclass coincidence -- a future
+  // UsageError subclass thrown from a transport read is terminal for free. The
+  // rejection being an instanceof UsageError is exactly the exit-64 (EX_USAGE)
+  // classification the CLI maps from this base class.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const peerHelloPath = `${conn.path}/${peerHelloName}`;
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial check: directory is clean
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  // The peer-hello read rejects with a bare UsageError (the base class, not one of
+  // the typed transport bounds). Count reads to prove the gate propagates it on
+  // the first pass instead of retrying at the polling cadence until the TTL.
+  let peerHelloReads = 0;
+  const originalGet = client.get;
+  client.get = async (path: string) => {
+    if (path === peerHelloPath) {
+      peerHelloReads++;
+      throw new UsageError(`usage fault reading ${path}`);
+    }
+    return originalGet(path);
+  };
+
+  const rejection = await conn.synchronize().then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(rejection).toBeInstanceOf(UsageError);
+  // Terminal: read once and propagated, not retried until the TTL.
+  expect(peerHelloReads).toBe(1);
+});
+
 // --- whole-exchange liveness backstop (write/stat/delete + slow-drip read) ---
 //
 // The write-path analogue of the read-path liveness test above. The CLI adapter's
@@ -7006,7 +7060,11 @@ test("synchronize() default: a foreign file is tolerated, snapshotted, and not d
   files.set(`/test/${peerHelloName}`, LOCK_HELLO_BODY);
   files.set("/test/notes.txt", Buffer.from("unrelated"));
   client.list = async () => [
-    { name: peerHelloName, modifyTime: Date.now(), size: LOCK_HELLO_BODY.length },
+    {
+      name: peerHelloName,
+      modifyTime: Date.now(),
+      size: LOCK_HELLO_BODY.length,
+    },
     { name: "notes.txt", modifyTime: Date.now(), size: 9 },
   ];
 
@@ -7306,7 +7364,8 @@ test("synchronize() --sweep-exchange-files: one delete failure still attempts ev
   const origDelete = client.delete.bind(client);
   client.delete = async (p: string) => {
     attempted.push(p);
-    if (p.endsWith("a-b-lock.json")) throw new Error("transport refused delete");
+    if (p.endsWith("a-b-lock.json"))
+      throw new Error("transport refused delete");
     return origDelete(p);
   };
 
