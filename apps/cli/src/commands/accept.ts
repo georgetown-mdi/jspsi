@@ -178,8 +178,19 @@ export async function decodeAndValidateInvitation(
  * schema-validation failure, whose `.message` is a multi-line JSON dump; surface
  * the first issue (with its path) instead. Other failures (checksum, JSON,
  * base64) are plain `Error`s and pass through unchanged.
+ *
+ * Path components are escaped: a Zod path can name a partner-controlled object
+ * key in the general case (the invitation is crafted by the inviting party), not
+ * only a fixed schema field, so a key carrying control/ANSI or deceptive-Unicode
+ * bytes must not reach the operator's terminal raw. The issue `message` is
+ * relayed as is, because the one message that echoes a partner value -- the
+ * unrecognized-endpoint-key list -- is escaped at its source in `endpointKeyError`
+ * (invitation.ts), kept there so this concise relay does not truncate that long
+ * guidance text.
+ *
+ * @internal exported for testing
  */
-function describeDecodeError(err: unknown): string {
+export function describeDecodeError(err: unknown): string {
   if (err !== null && typeof err === "object" && "issues" in err) {
     const { issues } = err as {
       issues?: Array<{ path?: Array<PropertyKey>; message?: string }>;
@@ -188,7 +199,7 @@ function describeDecodeError(err: unknown): string {
       const first = issues[0];
       const at =
         Array.isArray(first.path) && first.path.length > 0
-          ? `${first.path.join(".")}: `
+          ? `${first.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
           : "";
       const more = issues.length > 1 ? ` (and ${issues.length - 1} more)` : "";
       return `${at}${first.message ?? "schema validation failed"}${more}`;
@@ -199,7 +210,8 @@ function describeDecodeError(err: unknown): string {
 
 // --- Display -----------------------------------------------------------------
 
-function displayInvitation(
+/** @internal exported for testing */
+export function displayInvitation(
   token: InvitationToken,
   log: ReturnType<typeof getLogger>,
 ): void {
