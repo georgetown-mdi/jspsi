@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
@@ -74,6 +74,21 @@ beforeAll(async () => {
 
 // to test race condition, Promise.all is used when synchronizing
 // to set an explicit order, one party is delayed a tick by using setImmediate
+
+// All tests in this file share one SFTP_PATH rendezvous directory and reuse the
+// module-level connections. A test that crashes mid-protocol -- e.g. a transient
+// SFTP rename failure in the joiner fast-path -- intentionally leaves its
+// <uuid>-joining.json sentinel behind (it is the peer's cross-process recovery
+// signal; see fileSyncConnection synchronize()). Without per-test cleanup that
+// stray sentinel trips the next test's session-start hygiene guard, turning one
+// transient flake into three red tests. Reset the directory and the shared
+// connection state after every test so a single failure cannot cascade to its
+// siblings.
+afterEach(async () => {
+  await cleanServer();
+  desynchronize(sftpConn);
+  desynchronize(localConn);
+});
 
 afterAll(async () => {
   await Promise.all([sftpConn.close(), localConn.close()]);
