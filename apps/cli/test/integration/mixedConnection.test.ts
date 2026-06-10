@@ -85,6 +85,16 @@ beforeAll(async () => {
 // connection state after every test so a single failure cannot cascade to its
 // siblings.
 afterEach(async () => {
+  // Quiesce any poller before touching the directory. The message-exchange
+  // tests call start() then stop() inline, but a failure between the two -- the
+  // flaky scenario this branch targets -- would leave a poller running. stop()
+  // (idempotent, and a no-op for the tests that never start one) clears
+  // pollerActive, so the next scheduled poll does not fire and any in-flight
+  // poll swallows its result instead of racing the cleanServer() below and
+  // re-throwing through the module-level on("error") handlers into the next
+  // test (see fileSyncConnection poll()'s shutdown guard).
+  sftpConn.stop();
+  localConn.stop();
   await cleanServer();
   desynchronize(sftpConn);
   desynchronize(localConn);
