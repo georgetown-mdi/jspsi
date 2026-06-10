@@ -6922,12 +6922,15 @@ test("synchronize() --sweep-exchange-files: refuses (exit 64) on a retain-only m
   expect(files.has(`/test/${ackName}`)).toBe(true);
 });
 
-test("synchronize() --sweep-exchange-files: a `-ack.json` with a single trailing digit segment is swept, not read as a retain signal", async () => {
-  // Regression for the isRetainMessageAck false positive: a non-protocol name
-  // like notes-5-ack.json matches the broad `-ack.json` grammar (so it is an
-  // unexpected protocol file, swept under the flag) but is NOT a retain message
-  // ack -- a real one ends in <NNN>-<byteCount>, two digit segments. The bare
-  // flag must proceed and delete it, not refuse for --force-retain-sweep.
+test("synchronize() --sweep-exchange-files: a `-ack.json` lacking two trailing digit segments is swept, not read as a retain signal", async () => {
+  // Regression for the isRetainMessageAck false positive. A real retain message
+  // ack ends in <NNN>-<byteCount>, two digit segments. Neither of these is one:
+  // notes-5-ack.json has a non-digit leading segment, and 100-ack.json has only
+  // ONE segment before -ack.json (the off-by-one case where the lastIndexOf
+  // arithmetic mis-sliced "100" -> "10" and wrongly matched). Both match the
+  // broad `-ack.json` grammar (so they are unexpected protocol files, swept
+  // under the flag) but neither is a retain signal: the bare flag must proceed
+  // and delete them, not refuse for --force-retain-sweep.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
@@ -6936,6 +6939,7 @@ test("synchronize() --sweep-exchange-files: a `-ack.json` with a single trailing
   conn.id = "me";
   conn.options.sweepExchangeFiles = true; // delete-mode party, bare flag
   files.set("/test/notes-5-ack.json", Buffer.alloc(0));
+  files.set("/test/100-ack.json", Buffer.alloc(0));
 
   const deleted: string[] = [];
   const origDelete = client.delete.bind(client);
@@ -6948,11 +6952,13 @@ test("synchronize() --sweep-exchange-files: a `-ack.json` with a single trailing
     () => undefined,
     (e: unknown) => e,
   );
-  // No retain refusal: it swept the file and then timed out waiting for a peer
+  // No retain refusal: it swept both files and then timed out waiting for a peer
   // (a transport Error, never a UsageError).
   expect(err).not.toBeInstanceOf(UsageError);
   expect(deleted).toContain("/test/notes-5-ack.json");
+  expect(deleted).toContain("/test/100-ack.json");
   expect(files.has("/test/notes-5-ack.json")).toBe(false);
+  expect(files.has("/test/100-ack.json")).toBe(false);
 });
 
 test("synchronize() --sweep-exchange-files: refuses (exit 64) when this party is in retain mode", async () => {
@@ -7013,11 +7019,14 @@ test("synchronize() --sweep-exchange-files --force-retain-sweep: wipes the retai
   // The retain peer hello was swept...
   expect(deleted.some((p) => p.includes(`${peerId}-hello.json`))).toBe(true);
   // ...and the destructive action was loudly warned.
-  expect(
-    logs.filter((l) =>
-      /force-retain-sweep|destructive and irreversible/i.test(l.message),
-    ).length,
-  ).toBeGreaterThanOrEqual(1);
+  const warning = logs.find((l) =>
+    /force-retain-sweep|destructive and irreversible/i.test(l.message),
+  );
+  expect(warning).toBeDefined();
+  // The warning identifies the party by id, not the pre-rendezvous sentinel
+  // (the sweep runs before this.role is assigned).
+  expect(warning?.message).toContain("[me]");
+  expect(warning?.message).not.toContain("unknown role");
 });
 
 test("synchronize() --sweep-exchange-files: a delete failure surfaces as a transport error (exit 69), not silent success", async () => {
@@ -7039,6 +7048,42 @@ test("synchronize() --sweep-exchange-files: a delete failure surfaces as a trans
   expect(err).toBeInstanceOf(Error);
   expect(err).not.toBeInstanceOf(UsageError); // -> CLI exit 69, not 64
   expect((err as Error).message).toContain("transport refused delete");
+});
+
+test("synchronize() --sweep-exchange-files: one delete failure still attempts every other delete and names the failure", async () => {
+  // allSettled, not all: a single rejection must not abandon the other deletes
+  // mid-flight. Every delete is attempted, and the surfaced error names the file
+  // that failed (and is a transport error -> exit 69, not a UsageError).
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  // Three stale protocol files, no retain signal. The middle one cannot be
+  // deleted; the other two must still be attempted and removed.
+  files.set("/test/a-b-lock.json", Buffer.alloc(0));
+  files.set("/test/peerA-hello.json", LOCK_HELLO_BODY);
+  files.set("/test/peerB-hello.json", LOCK_HELLO_BODY);
+
+  const attempted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    attempted.push(p);
+    if (p.endsWith("a-b-lock.json")) throw new Error("transport refused delete");
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain("a-b-lock.json");
+  // Every delete was attempted despite the one failure...
+  expect(attempted).toHaveLength(3);
+  // ...and the deletable files were actually removed.
+  expect(files.has("/test/peerA-hello.json")).toBe(false);
+  expect(files.has("/test/peerB-hello.json")).toBe(false);
 });
 
 test("synchronize() --sweep-exchange-files: a non-resolving peer hello is retain-uncertain and refuses the bare flag (bounded)", async () => {

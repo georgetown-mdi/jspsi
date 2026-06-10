@@ -170,6 +170,12 @@ const isProtocolGrammarName = (name: string): boolean => {
     name.endsWith(HELLO_SUFFIX) ||
     name.endsWith(LOCK_SUFFIX) ||
     name.endsWith(JOINING_SUFFIX) ||
+    // Any -ack.json counts, deliberately broad: a foreign name that happens to
+    // end -ack.json is conservatively treated as a protocol file (rejected at
+    // the no-flag guard, swept under the flag) rather than tolerated as foreign.
+    // Erring toward protocol here is the safe side -- the inverse would let a
+    // stray ack-shaped name slip past the entry guard. (isRetainMessageAck below
+    // is the narrower, retain-signal-only test over this same suffix.)
     name.endsWith("-ack.json")
   )
     return true;
@@ -196,12 +202,15 @@ const isProtocolGrammarName = (name: string): boolean => {
 // further chases false positives a filename can never fully exclude.
 const isRetainMessageAck = (name: string): boolean => {
   if (!name.endsWith("-ack.json")) return false;
-  const inner = name.slice(0, -"-ack.json".length);
-  const byteCount = inner.slice(inner.lastIndexOf("-") + 1);
-  if (!/^\d+$/.test(byteCount)) return false;
-  const beforeByteCount = inner.slice(0, inner.lastIndexOf("-"));
-  const nnn = beforeByteCount.slice(beforeByteCount.lastIndexOf("-") + 1);
-  return /^\d+$/.test(nnn);
+  // Require at least two dash-separated segments and both trailing ones all
+  // digits. Split rather than walk lastIndexOf back twice: on a single-segment
+  // inner ("100") the arithmetic form mis-slices (slice(0, -1) -> "10") and
+  // wrongly matches; split yields ["100"], length < 2, correctly rejected.
+  const segments = name.slice(0, -"-ack.json".length).split("-");
+  if (segments.length < 2) return false;
+  const nnn = segments[segments.length - 2];
+  const byteCount = segments[segments.length - 1];
+  return /^\d+$/.test(nnn) && /^\d+$/.test(byteCount);
 };
 
 // Bounded window the lock-path peer waits for a joiner that has begun arriving
@@ -946,9 +955,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // never claims to be deleting zero files.
     if (toDelete.length === 0) return;
 
+    // Entry-time logs use this.id, not this.role: the sweep runs before
+    // rendezvous, so this.role is still the "unknown role" sentinel. For the
+    // destructive-wipe warning especially, the party id is the useful identifier.
     if (retainInPlay && this.options.forceRetainSweep)
       this.log.warn(
-        `[${this.role}] --force-retain-sweep: permanently deleting a ` +
+        `[${this.id}] --force-retain-sweep: permanently deleting a ` +
           `retain-mode audit transcript (${toDelete.length} protocol file(s)) ` +
           `in ${this.path}. This is destructive and irreversible; the prior ` +
           "transcript will be lost. Only use --force-retain-sweep when you " +
@@ -962,13 +974,31 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       throw this.abortController.signal.reason;
 
     this.log.info(
-      `[${this.role}] sweeping ${toDelete.length} protocol file(s) at ` +
+      `[${this.id}] sweeping ${toDelete.length} protocol file(s) at ` +
         `${this.path} (--sweep-exchange-files): ` +
         `${toDelete.map((f) => f.name).join(", ")}`,
     );
-    await Promise.all(
+    // allSettled, not all: await every delete before reporting, so a single
+    // rejection does not leave the others running unobserved while synchronize()
+    // unwinds. The directory then reaches a known (fully-attempted) state and the
+    // error names all failures. A delete failure is a transport error (exit 69),
+    // never a UsageError. The non-atomicity caveat above still holds: a live peer
+    // could write between the listing and these deletes.
+    const results = await Promise.allSettled(
       toDelete.map((file) => this.client.delete(`${this.path}/${file.name}`)),
     );
+    const failures = results.flatMap((result, i) =>
+      result.status === "rejected"
+        ? [`${toDelete[i].name} (${errMessage(result.reason)})`]
+        : [],
+    );
+    if (failures.length > 0)
+      throw new Error(
+        `--sweep-exchange-files failed to delete ${failures.length} of ` +
+          `${toDelete.length} protocol file(s) at ${this.path}: ` +
+          `${failures.join("; ")}. The directory may be partially swept; ` +
+          "resolve the transport error and re-run.",
+      );
   }
 
   /**
@@ -1119,7 +1149,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // Single breadcrumb: a process died mid-write here. Entry is not aborted
       // on its account, but the prior crash is worth surfacing.
       this.log.info(
-        `[${this.role}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
+        `[${this.id}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
           "file(s) left by a prior crashed exchange: " +
           `${orphanedTempFiles.map((f) => f.name).join(", ")}`,
       );
@@ -1165,7 +1195,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     foreignFiles.forEach((file) => this.foreignFileSnapshot.add(file.name));
     if (foreignFiles.length > 0)
       this.log.info(
-        `[${this.role}] tolerating ${foreignFiles.length} foreign file(s) ` +
+        `[${this.id}] tolerating ${foreignFiles.length} foreign file(s) ` +
           `present at entry in ${this.path}: ` +
           `${foreignFiles.map((f) => f.name).join(", ")}`,
       );
