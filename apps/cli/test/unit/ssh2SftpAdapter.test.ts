@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
 
 import { describe, expect, test, vi, beforeEach } from "vitest";
@@ -5,6 +6,7 @@ import {
   DirectoryListingBoundsError,
   FrameSizeExceededError,
   TransportOperationStalledError,
+  UsageError,
 } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -27,11 +29,15 @@ describe("connect retry", () => {
     let calls = 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
+      // `on` models the raw wrapper's EventEmitter surface: connect() attaches a
+      // guarded fatal-'error' listener to it (so a malformed server reply cannot
+      // crash the process), so the mock must expose it like the real wrapper does.
       sftp: {
         open: vi.fn(),
         close: vi.fn(),
         opendir: vi.fn(),
         readdir: vi.fn(),
+        on: vi.fn(),
       },
       connect: vi.fn().mockImplementation(async () => {
         if (++calls < 3) throw new Error("connection refused");
@@ -90,6 +96,7 @@ describe("connect retry", () => {
         close: vi.fn(),
         opendir: vi.fn(),
         readdir: vi.fn(),
+        on: vi.fn(),
       },
       connect: vi
         .fn()
@@ -1010,5 +1017,203 @@ describe("slow-operation warning", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// --- fatal wrapper-error guard -----------------------------------------------
+
+// A stand-in for the raw ssh2 SFTPWrapper as a real EventEmitter, so the guarded
+// 'error' listener and Node's zero-listener throw semantics are exercised
+// faithfully. It carries the handle-based methods connect()'s presence guard
+// requires plus the EventEmitter surface (`on`), and tracks whether the
+// directory methods were invoked so a test can prove a post-crash operation
+// rejects WITHOUT issuing a request to the dead session.
+function makeWrapper() {
+  const wrapper = new EventEmitter() as EventEmitter & {
+    open: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+    opendir: ReturnType<typeof vi.fn>;
+    readdir: ReturnType<typeof vi.fn>;
+  };
+  wrapper.open = vi.fn();
+  wrapper.close = vi.fn();
+  wrapper.opendir = vi.fn();
+  wrapper.readdir = vi.fn();
+  return wrapper;
+}
+
+describe("fatal wrapper-error guard", () => {
+  test("connect attaches exactly one 'error' listener to the raw wrapper", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const wrapper = makeWrapper();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: wrapper,
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    expect(wrapper.listenerCount("error")).toBe(1);
+  });
+
+  test("emitting 'error' on the wrapper does not crash (listener handles it)", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const wrapper = makeWrapper();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: wrapper,
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // Node throws on an 'error' event only when there are zero listeners; the
+    // guard makes this a no-op instead of an uncaught exception.
+    expect(() =>
+      wrapper.emit("error", new Error("Malformed NAME packet")),
+    ).not.toThrow();
+  });
+
+  test("a repeated connect on the same wrapper does not duplicate the listener", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const wrapper = makeWrapper();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: wrapper,
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    // Idempotent on the same wrapper instance: no second listener (which would
+    // eventually trip MaxListenersExceeded), because the wrapper identity is
+    // unchanged.
+    expect(wrapper.listenerCount("error")).toBe(1);
+  });
+
+  test("a fresh wrapper after a reconnect gets its own listener", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const first = makeWrapper();
+    const client = {
+      sftp: first as EventEmitter,
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    // Model ssh2-sftp-client handing back a new wrapper after an end()/connect()
+    // cycle: a different object identity. The guard must attach to it too.
+    const second = makeWrapper();
+    client.sftp = second;
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+
+    expect(first.listenerCount("error")).toBe(1);
+    expect(second.listenerCount("error")).toBe(1);
+  });
+
+  test("an operation after a fatal wrapper error rejects promptly with the terminal cause", async () => {
+    // The captured-cause nice-to-have: once a fatal 'error' has killed the
+    // session, the next operation rejects at once with the typed terminal error
+    // (carrying the real cause) instead of issuing a request to the dead wrapper
+    // and waiting out the 60 s liveness deadline.
+    const adapter = new SSH2SFTPClientAdapter();
+    const wrapper = makeWrapper();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: wrapper,
+      connect: vi.fn().mockResolvedValue(undefined),
+    };
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    wrapper.emit("error", new Error("Malformed NAME packet"));
+
+    const listErr = await adapter.list("/remote/dir").catch((e: unknown) => e);
+    expect(listErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(listErr).toBeInstanceOf(UsageError);
+    expect((listErr as Error).message).toContain("Malformed NAME packet");
+    // It did not even attempt to drive the dead session.
+    expect(wrapper.opendir).not.toHaveBeenCalled();
+
+    // Same terminal, prompt rejection on the lock path.
+    const createErr = await adapter
+      .createExclusive("/remote/lock.json")
+      .catch((e: unknown) => e);
+    expect(createErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(wrapper.open).not.toHaveBeenCalled();
+  });
+
+  test("the remaining server-driven methods short-circuit after a fatal error", async () => {
+    // The crash fix's entry guard covers list/get/createExclusive, but put,
+    // delete, rename, exists, and the uncapped get() also drive the server and
+    // must short-circuit too. After a fatal error the SFTP channel is destroyed
+    // while the TCP/SSH socket stays up (a hostile server keeps it alive), so a
+    // request buffered on the closing channel never calls back -- it HANGS rather
+    // than erroring. Each guarded method must instead reject promptly with the
+    // typed terminal error WITHOUT issuing a request to the dead session; the
+    // catch + the never-called mock together prove both. safeDelete is the
+    // exception: it MUST honor its never-reject contract (callers run it in catch
+    // blocks), so on a dead session it RESOLVES promptly as a best-effort no-op.
+    const adapter = new SSH2SFTPClientAdapter();
+    const wrapper = makeWrapper();
+    // The ssh2-sftp-client surface put/delete/rename/exists/get delegate to. None
+    // may be called once the session is dead; a call would buffer on the closing
+    // channel and hang.
+    const put = vi.fn();
+    const del = vi.fn();
+    const rename = vi.fn();
+    const exists = vi.fn();
+    const get = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: wrapper,
+      connect: vi.fn().mockResolvedValue(undefined),
+      put,
+      delete: del,
+      rename,
+      exists,
+      get,
+    };
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    wrapper.emit("error", new Error("Malformed DATA packet"));
+
+    const putErr = await adapter
+      .put(Buffer.from("x"), "/remote/out.json")
+      .catch((e: unknown) => e);
+    expect(putErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(putErr).toBeInstanceOf(UsageError);
+    expect((putErr as Error).message).toContain("Malformed DATA packet");
+    expect(put).not.toHaveBeenCalled();
+
+    const deleteErr = await adapter
+      .delete("/remote/out.json")
+      .catch((e: unknown) => e);
+    expect(deleteErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(del).not.toHaveBeenCalled();
+
+    const renameErr = await adapter
+      .rename("/remote/a.json", "/remote/b.json")
+      .catch((e: unknown) => e);
+    expect(renameErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(rename).not.toHaveBeenCalled();
+
+    const existsErr = await adapter
+      .exists("/remote/out.json")
+      .catch((e: unknown) => e);
+    expect(existsErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(exists).not.toHaveBeenCalled();
+
+    // The uncapped get() path (maxBytes === undefined) is guarded at get()'s
+    // entry alongside the capped path; assert it rejects terminally and never
+    // drives the dead stream.
+    const getErr = await adapter
+      .get("/remote/out.json")
+      .catch((e: unknown) => e);
+    expect(getErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(get).not.toHaveBeenCalled();
+
+    // safeDelete honors its never-reject contract: on a dead session it RESOLVES
+    // (best-effort no-op) rather than rejecting, and does not drive the dead
+    // session. Promptness is implicit -- the default test timeout would catch a
+    // hang on the still-alive socket.
+    await expect(
+      adapter.safeDelete("/remote/out.json"),
+    ).resolves.toBeUndefined();
+    expect(del).not.toHaveBeenCalled();
   });
 });

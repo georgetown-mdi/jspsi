@@ -4,6 +4,7 @@ import {
   FileTransportClient,
   GetOptions,
   PutOptions,
+  TransportOperationStalledError,
   getLoggerForVerbosity,
   retryPromise,
 } from "@psilink/core";
@@ -62,6 +63,13 @@ interface Ssh2SftpClientInternals {
       handle: Buffer,
       callback: (err: Ssh2SftpError | null, list?: Ssh2DirEntry[]) => void,
     ): void;
+    // The raw ssh2 SFTPWrapper is an EventEmitter: ssh2 emits a fatal 'error' on
+    // it (via doFatalSFTPError) when the server returns a malformed SFTP packet.
+    // The adapter attaches its own guarded listener in connect() so that emit
+    // cannot crash the process; see the connect() comment for why no one else
+    // does. `unknown` rather than the full Node listener type keeps this minimal
+    // -- the adapter only registers and never inspects the listener set.
+    on(event: "error", listener: (err: Error) => void): unknown;
   } | null;
 }
 
@@ -69,10 +77,44 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
+  // The raw SFTPWrapper this adapter has already attached its fatal-'error'
+  // listener to, so connect() attaches exactly once per wrapper instance (see
+  // attachFatalErrorListener). Stored as the wrapper object identity, not a
+  // boolean, because ssh2-sftp-client hands back a fresh wrapper after an
+  // end()/connect() cycle and the new one needs its own listener.
+  private guardedSftp: object | undefined;
+  // The fatal SFTP-protocol error captured by that listener, if one has fired.
+  // Set once the session is dead; read by in-flight operations so they reject
+  // promptly with the real cause instead of waiting out the 60 s liveness
+  // deadline. Never cleared: a wrapper that emitted a fatal 'error' is
+  // destroyed by ssh2 and cannot recover, and connect() resets it to undefined
+  // alongside attaching a listener to a fresh wrapper.
+  private fatalSftpError: Error | undefined;
+  // The per-operation wall-clock liveness deadline (ms) every server-driven read
+  // is bounded by. Defaults to SFTP_STALL_DEADLINE_MS and is NOT exposed through
+  // any config or CLI surface -- the bound stays fixed in production for the same
+  // reason the constant is (a configurable budget risks an operator raising it
+  // high enough to reintroduce the denial of service). The only override is the
+  // internal-only test seam on the constructor's options object, which lets a
+  // fault-injection test drive the deadline in milliseconds instead of waiting
+  // the real 60 s; it is never wired to user input.
+  private readonly stallDeadlineMs: number;
 
-  constructor(verbosity = 1) {
+  /**
+   * `options.verbosity` sets the adapter's log verbosity (default 1).
+   *
+   * `options.stallDeadlineMs` is an @internal test-only override for the
+   * per-operation liveness deadline; production constructs the adapter with no
+   * argument (an empty options object) and gets {@link SFTP_STALL_DEADLINE_MS}.
+   * It is a named options field rather than a positional argument so the seam is
+   * unmistakable and a future production constructor parameter can never be
+   * passed as the deadline by accident. Deliberately not surfaced via config so
+   * the bound cannot be widened by an operator.
+   */
+  constructor(options: { verbosity?: number; stallDeadlineMs?: number } = {}) {
     this.client = new Ssh2SftpClient();
-    this.log = getLoggerForVerbosity("sftp-adapter", verbosity);
+    this.log = getLoggerForVerbosity("sftp-adapter", options.verbosity ?? 1);
+    this.stallDeadlineMs = options.stallDeadlineMs ?? SFTP_STALL_DEADLINE_MS;
   }
 
   // Layers the non-fatal slow-operation warning (observability) over an in-flight
@@ -92,6 +134,106 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       log: this.log,
       progress,
     });
+  }
+
+  // Attach a single guarded 'error' listener to the raw ssh2 SFTPWrapper.
+  //
+  // This and the other internal-ssh2 premises this adapter relies on are
+  // enumerated, with the dependency source files to re-read and the
+  // integration-test command to run, in the "Upgrading the SFTP stack" checklist
+  // in docs/SECURITY_DESIGN.md ("Channel security"). Re-verify them on any ssh2 /
+  // ssh2-sftp-client upgrade.
+  //
+  // ssh2's Client.sftp() attaches a setup-time 'error' listener to the wrapper
+  // but strips it (removeListeners() inside onReady) before handing the wrapper
+  // back, and ssh2-sftp-client attaches 'error' handlers only to the SSH Client
+  // and to per-operation read/write streams -- never to the wrapper itself. So
+  // after connect() the wrapper carries no 'error' listener. A hostile or dead
+  // SFTP server (in scope under docs/SECURITY_DESIGN.md "Channel security") that
+  // returns a malformed SFTP reply packet drives ssh2's doFatalSFTPError ->
+  // sftp.emit('error', err) on a listener-free EventEmitter, which Node turns
+  // into an uncaught exception that crashes the CLI -- skipping lock/temp-file
+  // cleanup and the typed exit-code mapping. The size guards bound memory and
+  // the liveness guards bound time, but a crash is neither; this listener closes
+  // that last hostile-server vector.
+  //
+  // Handling the 'error' leaves the session dead but the process alive. ssh2's
+  // doFatalSFTPError emits 'error', destroys the wrapper, then calls
+  // cleanupRequests, which fails every request still in _requests at once. What
+  // that bounds an IN-FLIGHT list()/get() by depends on which request the fatal
+  // packet rode in on:
+  //   - A malformed reply to the in-flight request ITSELF is NOT failed by
+  //     cleanupRequests: ssh2's NAME and DATA handlers do `delete _requests[reqid]`
+  //     unconditionally up front, BEFORE the parse/check that calls
+  //     doFatalSFTPError (node_modules/ssh2/lib/protocol/SFTP.js, NAME ~2939,
+  //     DATA ~2889); the HANDLE handler instead deletes inside its own malformed
+  //     branch, on a defined reqid, immediately before doFatalSFTPError (~2872).
+  //     The deletes differ in placement but have the same net effect: by the time
+  //     cleanupRequests runs there is no entry left for that reqid and its
+  //     callback never fires. The in-flight op therefore hangs until this
+  //     adapter's own 60 s wall-clock deadline (list()'s deadline /
+  //     withSftpOperationDeadline / the capped-sink idle window) fires -- the
+  //     deadline, not cleanupRequests, is what bounds it.
+  //   - A fatal error on a DIFFERENT request id, or a connection-level fault
+  //     (e.g. "Invalid packet length", where no reqid was consumed), leaves the
+  //     in-flight request still in _requests, so cleanupRequests does fail its
+  //     callback promptly.
+  // Either way the op is bounded; the deadline is load-bearing for the first,
+  // realistic case and must not be removed on the assumption that cleanupRequests
+  // covers in-flight ops. Capturing the cause in fatalSftpError then bounds the
+  // NEXT operation (whatever bounded the in-flight one): it consults
+  // deadSessionError at entry and rejects with the real reason instead of issuing
+  // a request the dead wrapper can never answer. The same 60 s deadline is also
+  // the sole bound for the distinct case of a server that withholds a callback
+  // WITHOUT any fatal error -- no 'error' fires there, so fatalSftpError stays
+  // unset and only elapsed time can fail it.
+  //
+  // Idempotency and the reconnect lifecycle: verified against ssh2-sftp-client
+  // 12.1.1 (node_modules/ssh2-sftp-client/src/index.js), `this.sftp` is assigned
+  // exactly once, in the 'ready' handler, and is otherwise only set to undefined
+  // (in the constructor and in end()'s close handler); there is no auto-reconnect
+  // that swaps in a fresh wrapper after connect() resolves, and connect() rejects
+  // outright if `this.sftp` is already set. A new wrapper therefore appears only
+  // when this adapter's own connect() runs again after an end(). Guarding on the
+  // wrapper's object identity attaches once per wrapper: a repeated connect() on
+  // the same live wrapper is a no-op (no duplicate listener, no
+  // MaxListenersExceeded warning), while a fresh wrapper from a reconnect gets
+  // its own listener.
+  private attachFatalErrorListener(
+    sftp: NonNullable<Ssh2SftpClientInternals["sftp"]>,
+  ): void {
+    if (this.guardedSftp === sftp) return;
+    this.guardedSftp = sftp;
+    this.fatalSftpError = undefined;
+    sftp.on("error", (err: Error) => {
+      this.fatalSftpError = err;
+    });
+  }
+
+  // A terminal error built from a previously captured fatal SFTP-protocol error,
+  // or undefined if the session has not been killed. Every server-driven
+  // operation consults this at entry so one that runs after a malformed packet
+  // already destroyed the session rejects at once with the real cause, rather
+  // than issuing a request the dead wrapper can never answer. For the
+  // deadline-bounded reads (list/get/createExclusive) that spares them the 60 s
+  // wait; for the unbounded write/stat/delete paths (put/delete/rename/exists),
+  // whose buffered request on a destroyed-but-socket-still-alive channel never
+  // calls back, it is the difference between a prompt failure and an indefinite
+  // hang. safeDelete shares the same fatalSftpError check but RESOLVES (its
+  // never-reject contract); see it for why. A typed
+  // TransportOperationStalledError (a UsageError) so the poll loop and the
+  // rendezvous gate treat it as terminal, the same as every other liveness bound.
+  private deadSessionError(
+    operation: string,
+    path: string,
+  ): TransportOperationStalledError | undefined {
+    if (this.fatalSftpError === undefined) return undefined;
+    return transportOperationStalledError(
+      operation,
+      path,
+      `the SFTP session was killed by a fatal server protocol error ` +
+        `(${this.fatalSftpError.message})`,
+    );
   }
 
   async connect(options: Record<string, unknown>): Promise<void> {
@@ -137,6 +279,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             `the ssh2-sftp-client changelog`,
         );
     }
+    // Attach the guarded fatal-'error' listener to the raw wrapper now, while it
+    // is known present and callable, so a malformed server reply can never crash
+    // the process. See attachFatalErrorListener for the full rationale and the
+    // reconnect/idempotency analysis.
+    this.attachFatalErrorListener(sftp);
   }
 
   end(): Promise<void> {
@@ -189,6 +336,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             "session property",
         ),
       );
+    const dead = this.deadSessionError("directory listing", path);
+    if (dead) return Promise.reject(dead);
     // SSH_FX_EOF: the SFTP status code ssh2 reports (as err.code) from readdir
     // once the directory is fully read. Used directly rather than via a named
     // import because ssh2 does not expose its status-code table on its public
@@ -243,11 +392,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         const deadline = setTimeout(
           () =>
             settle(() =>
-              reject(
-                listingStalledByTimeoutError(path, SFTP_STALL_DEADLINE_MS),
-              ),
+              reject(listingStalledByTimeoutError(path, this.stallDeadlineMs)),
             ),
-          SFTP_STALL_DEADLINE_MS,
+          this.stallDeadlineMs,
         );
         // The deadline is the safety bound, not real work: cleared on every
         // terminal path, so unref'ing it only matters if the process is winding
@@ -270,6 +417,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           }
           handle = openedHandle;
           const readNextBatch = (): void => {
+            // Mirror the settled-guards in settle() and the readdir callback below.
+            // Both call sites reach here synchronously after a settled check and the
+            // deadline timer cannot fire between synchronous statements, so settled
+            // is necessarily false today; re-checking at the recursion entry keeps
+            // the driver self-evidently safe against any future change that could
+            // re-enter it after the deadline fired, at the cost of only a skipped
+            // round-trip rather than a double-settle.
+            if (settled) return;
             // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
             // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
             // guard and rejects BEFORE issuing another readdir, so the server sees
@@ -348,6 +503,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
+    const dead = this.deadSessionError("file read", path);
+    if (dead) return Promise.reject(dead);
     const maxBytes = options?.maxBytes;
     if (maxBytes === undefined) {
       // Uncapped reads carry no counting sink, so they have no per-chunk
@@ -364,12 +521,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           this.client.get(path, undefined, {
             readStreamOptions: options,
           }) as Promise<Buffer<ArrayBufferLike>>,
-          SFTP_STALL_DEADLINE_MS,
+          this.stallDeadlineMs,
           () =>
             transportOperationStalledError(
               "file read",
               path,
-              `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
+              `did not complete within ${this.stallDeadlineMs} ms (the server ` +
                 `withheld the transfer)`,
             ),
         ),
@@ -399,6 +556,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const { sink, result, complete, fail, bytesReceived } = createCappedSink(
       path,
       maxBytes,
+      this.stallDeadlineMs,
     );
     // The over-cap path settles `result` from inside the sink, so this handler
     // never rejects (complete/fail are no-ops once `result` has settled);
@@ -417,6 +575,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     dest: string,
     options?: PutOptions,
   ): Promise<unknown> {
+    const dead = this.deadSessionError("file write", dest);
+    if (dead) return Promise.reject(dead);
     // Report the total payload size where it is known up front (a Buffer src,
     // which is what send()/writeAck() always pass). This is observed signal taken
     // for free from the source, NOT a bytes-acked counter: instrumenting the
@@ -437,6 +597,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   delete(path: string): Promise<void> {
+    const dead = this.deadSessionError("file delete", path);
+    if (dead) return Promise.reject(dead);
     return this.warnIfSlow(
       this.client.delete(path).then(() => {}),
       "delete",
@@ -445,6 +607,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   safeDelete(path: string): Promise<void> {
+    // safeDelete must never reject (callers use it inside catch blocks, see the
+    // FileTransportClient contract), so a dead session is a best-effort no-op
+    // that RESOLVES rather than rejecting like the other guarded methods. This
+    // is the realistic teardown path: a fatal protocol error stops the poll loop,
+    // then close() -> cleanup() -> safeDelete drives a delete against the still-
+    // alive hostile server, whose destroyed channel would buffer the request and
+    // never call back -- hanging the whole teardown. Short-circuiting here returns
+    // at once. (delete() above rejects instead: its callers want the error
+    // surfaced, whereas safeDelete's must never see one.)
+    if (this.fatalSftpError !== undefined) return Promise.resolve();
     return retryPromise(
       () =>
         this.client.delete(path, true).then(
@@ -457,6 +629,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   rename(fromPath: string, toPath: string): Promise<void> {
+    const dead = this.deadSessionError("file rename", fromPath);
+    if (dead) return Promise.reject(dead);
     return this.warnIfSlow(
       this.client.rename(fromPath, toPath).then(() => {}),
       "rename",
@@ -506,6 +680,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             "session property",
         ),
       );
+    const dead = this.deadSessionError("exclusive create", path);
+    if (dead) return Promise.reject(dead);
     // SSH_FXF_WRITE (0x02) | SSH_FXF_CREAT (0x08) | SSH_FXF_EXCL (0x20)
     const EXCL_WRITE_CREATE = 0x2a;
     const attempt = new Promise<void>((resolve, reject) => {
@@ -590,12 +766,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // (that close cannot itself complete), but the exchange fails terminally
     // rather than stalling, and the session teardown releases the session.
     return this.warnIfSlow(
-      withSftpOperationDeadline(attempt, SFTP_STALL_DEADLINE_MS, () =>
+      withSftpOperationDeadline(attempt, this.stallDeadlineMs, () =>
         transportOperationStalledError(
           "exclusive create",
           path,
-          `did not complete within ${SFTP_STALL_DEADLINE_MS} ms (the server ` +
-            `withheld the open or close response)`,
+          `did not complete within ${this.stallDeadlineMs} ms (the server ` +
+            `withheld the open, existence-check, or close response)`,
         ),
       ),
       "exclusive create",
@@ -604,6 +780,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   exists(remotePath: string): Promise<boolean> {
+    // Reject rather than return a boolean on a dead session: a destroyed channel
+    // cannot answer the stat, and a fabricated true/false would be a guess the
+    // caller could act on. (createExclusive()'s code-4 ambiguity fallback does its
+    // own existence check via the raw client, not this method, so this guard does
+    // not affect it.)
+    const dead = this.deadSessionError("existence check", remotePath);
+    if (dead) return Promise.reject(dead);
     return this.warnIfSlow(
       this.client.exists(remotePath).then(Boolean),
       "existence check",

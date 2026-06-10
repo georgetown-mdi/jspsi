@@ -2,12 +2,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { EventEmitter } from "node:events";
+
 import { afterAll, beforeAll, expect, test } from "vitest";
 import {
   FileSyncConnection,
   FrameSizeExceededError,
+  TransportOperationStalledError,
   UsageError,
 } from "@psilink/core";
+import Ssh2SftpClient from "ssh2-sftp-client";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { sftpPort } from "../container/env";
@@ -323,5 +327,169 @@ test("get returns a file at or under maxBytes unchanged", async () => {
     expect(Buffer.from(buf)).toEqual(contents);
   } finally {
     await fs.unlink(localPath).catch(() => {});
+  }
+});
+
+test("ssh2 hands back a raw SFTP wrapper carrying zero 'error' listeners of its own", async () => {
+  // CONTRACT ASSERTION pinning the load-bearing premise of the wrapper-crash fix
+  // (SSH2SFTPClientAdapter.attachFatalErrorListener), checked WITHOUT the adapter
+  // so it isolates ssh2's own behavior. The fix attaches the process's only guard
+  // against a hostile/dead server's malformed SFTP packet (which drives ssh2's
+  // doFatalSFTPError -> sftp.emit('error', err)); Node turns an 'error' emit on a
+  // listener-free EventEmitter into an uncaught exception that crashes the CLI.
+  // That guard is only sufficient if ssh2 itself leaves the handed-back wrapper
+  // with NO 'error' listener -- which today it does, because Client.sftp()'s
+  // onReady calls removeListeners() to strip its setup-time 'error'/'exit'/'close'
+  // handlers before handing the wrapper back (node_modules/ssh2/lib/client.js),
+  // and ssh2-sftp-client attaches 'error' handlers only to the SSH Client and to
+  // per-operation streams, never to the wrapper itself.
+  //
+  // If a future ssh2 stops stripping that listener (or otherwise retains one),
+  // the wrapper would arrive with a listener already attached and this assertion
+  // fails RED -- the only place that detects ssh2 silently changing the emit/
+  // listener lifecycle the fix depends on. The companion assertion in the test
+  // below (listenerCount === 1 after the ADAPTER connects) catches the same drift
+  // from the other side: zero-from-ssh2 here, exactly-the-adapter's-one there.
+  const raw = new Ssh2SftpClient();
+  try {
+    await raw.connect({
+      host: "localhost",
+      port: SFTP_PORT,
+      username: "usera",
+      password: "usera",
+      retries: 0,
+    });
+    // Reach the raw ssh2 SFTPWrapper exactly as the adapter does: ssh2-sftp-client
+    // stores it on `this.sftp`. This is the same internal coupling the adapter
+    // documents; pinning it here means an upgrade that breaks the premise fails in
+    // this test rather than silently in production.
+    const wrapper = (raw as unknown as { sftp: EventEmitter }).sftp;
+    expect(wrapper.listenerCount("error")).toBe(0);
+  } finally {
+    await raw.end().catch(() => {});
+  }
+});
+
+test("a fatal 'error' on the raw SFTP wrapper does not crash and fails terminally", async () => {
+  // Regression guard for the wrapper-crash vector. After a real connect, the raw
+  // ssh2 SFTPWrapper carries no 'error' listener of its own: ssh2's Client.sftp()
+  // strips its setup-time listener before handing the wrapper back, and
+  // ssh2-sftp-client attaches 'error' handlers only to the SSH Client and to
+  // per-operation streams. A hostile/dead server that returns a malformed SFTP
+  // reply drives ssh2's doFatalSFTPError -> sftp.emit('error', err); on a
+  // listener-free EventEmitter Node turns that into an uncaught exception that
+  // crashes the CLI, skipping lock/temp-file cleanup and the typed exit-code
+  // mapping. The adapter must attach a guarded 'error' listener in connect() so
+  // the emit is handled. This runs against the real ssh2-sftp-client wrapper
+  // lifecycle (a real connect over the integration container), so it locks in the
+  // fix on the actual object whose listeners the bug is about.
+  //
+  // Determinism: Node throws on an 'error' event ONLY when the emitter has zero
+  // listeners, so listener-presence plus a handled synthetic emit is a sufficient
+  // and non-flaky proof -- no need to synthesize a malformed packet on the wire
+  // (which would be timing-dependent). The synthetic Error mirrors doFatalSFTPError's
+  // shape (a plain Error with level 'sftp-protocol').
+  const crashSFTP = new SSH2SFTPClientAdapter();
+  await crashSFTP.connect({
+    host: "localhost",
+    port: SFTP_PORT,
+    username: "usera",
+    password: "usera",
+    maxReconnectAttempts: 0,
+  });
+  try {
+    // Reach the raw wrapper the same way the adapter does, to assert against the
+    // exact EventEmitter ssh2's doFatalSFTPError emits on.
+    const wrapper = (crashSFTP as unknown as { client: { sftp: EventEmitter } })
+      .client.sftp;
+
+    // The guarded listener is present: this is what keeps Node from throwing on
+    // the 'error' event. Without the fix this count is 0 and the emit below would
+    // crash the process. The count is EXACTLY 1, not >= 1, and the exactness is
+    // load-bearing against ssh2 upgrade drift: the crash fix rests on ssh2's
+    // Client.sftp() stripping its own setup-time 'error' listener (removeListeners
+    // in onReady, node_modules/ssh2/lib/client.js) before handing the wrapper
+    // back, so the only listener after connect() is the adapter's own. If a future
+    // ssh2 stops stripping it the count becomes 2 and this assertion fails RED --
+    // a deliberate tripwire, not an off-by-one. The "ssh2 leaves zero of its own"
+    // half of the premise is pinned independently by the raw-wrapper test below,
+    // which connects WITHOUT the adapter.
+    expect(wrapper.listenerCount("error")).toBe(1);
+
+    // A baseline operation works before the session is killed, so the terminal
+    // rejection afterward is attributable to the fatal error, not a bad connect.
+    await expect(crashSFTP.list(SFTP_PATH)).resolves.toBeInstanceOf(Array);
+
+    // Emit the synthetic fatal error. If this crashed the process the test run
+    // would abort here; reaching the next line is itself part of the proof.
+    const fatal = Object.assign(new Error("Malformed NAME packet"), {
+      level: "sftp-protocol",
+    });
+    expect(() => wrapper.emit("error", fatal)).not.toThrow();
+
+    // The adapter is left in a clean, terminal state: a subsequent operation
+    // rejects promptly with the typed terminal error (a UsageError the poll loop
+    // and rendezvous gate treat as terminal) carrying the fatal cause, rather than
+    // hanging forever or surfacing an uncaught throw. Prompt -- it must not wait
+    // out the 60 s liveness deadline, which the default test timeout would catch.
+    const listErr = await crashSFTP.list(SFTP_PATH).catch((e: unknown) => e);
+    expect(listErr).toBeInstanceOf(TransportOperationStalledError);
+    expect(listErr).toBeInstanceOf(UsageError);
+    expect((listErr as Error).message).toContain("Malformed NAME packet");
+
+    // The same terminal failure on the lock path (createExclusive) and the read
+    // path (get), so every server-driven operation fails cleanly post-crash.
+    const createErr = await crashSFTP
+      .createExclusive(`${SFTP_PATH}/never.json`)
+      .catch((e: unknown) => e);
+    expect(createErr).toBeInstanceOf(TransportOperationStalledError);
+
+    const getErr = await crashSFTP
+      .get(`${SFTP_PATH}/never.json`, { maxBytes: 32 })
+      .catch((e: unknown) => e);
+    expect(getErr).toBeInstanceOf(TransportOperationStalledError);
+
+    // The remaining server-driven methods short-circuit too. Against the real
+    // still-alive container socket, an unguarded put/delete/rename/exists/uncapped
+    // get would buffer on the destroyed SFTP channel and HANG until the default
+    // test timeout (the original residual this change closes); each must instead
+    // reject promptly with the typed terminal error.
+    const putErr = await crashSFTP
+      .put(Buffer.from("x"), `${SFTP_PATH}/never.json`)
+      .catch((e: unknown) => e);
+    expect(putErr).toBeInstanceOf(TransportOperationStalledError);
+
+    const deleteErr = await crashSFTP
+      .delete(`${SFTP_PATH}/never.json`)
+      .catch((e: unknown) => e);
+    expect(deleteErr).toBeInstanceOf(TransportOperationStalledError);
+
+    const renameErr = await crashSFTP
+      .rename(`${SFTP_PATH}/a.json`, `${SFTP_PATH}/b.json`)
+      .catch((e: unknown) => e);
+    expect(renameErr).toBeInstanceOf(TransportOperationStalledError);
+
+    const existsErr = await crashSFTP
+      .exists(`${SFTP_PATH}/never.json`)
+      .catch((e: unknown) => e);
+    expect(existsErr).toBeInstanceOf(TransportOperationStalledError);
+
+    const uncappedGetErr = await crashSFTP
+      .get(`${SFTP_PATH}/never.json`)
+      .catch((e: unknown) => e);
+    expect(uncappedGetErr).toBeInstanceOf(TransportOperationStalledError);
+
+    // safeDelete must never reject (callers use it in catch blocks): on a dead
+    // session it RESOLVES promptly as a best-effort no-op. This is the realistic
+    // teardown path -- FileSyncConnection.close() drives safeDelete -- so without
+    // the resolve-on-dead guard a teardown after the crash would hang here against
+    // the still-alive container rather than completing.
+    await expect(
+      crashSFTP.safeDelete(`${SFTP_PATH}/never.json`),
+    ).resolves.toBeUndefined();
+  } finally {
+    // The session is already dead; end() is best-effort cleanup. Swallow any
+    // error so a failed teardown does not mask the assertions above.
+    await crashSFTP.end().catch(() => {});
   }
 });

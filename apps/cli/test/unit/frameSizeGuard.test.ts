@@ -139,7 +139,11 @@ describe("createCappedSink", () => {
     // the wall-clock span from creation to completion exceeds the window.
     vi.useFakeTimers();
     try {
-      const { sink, result, complete } = createCappedSink("/p/slow.bin", 32, 1_000);
+      const { sink, result, complete } = createCappedSink(
+        "/p/slow.bin",
+        32,
+        1_000,
+      );
       await vi.advanceTimersByTimeAsync(800); // under the window
       sink.write(Buffer.from("hi")); // progress: resets the idle window
       await vi.advanceTimersByTimeAsync(800); // under the window again (1600 total)
