@@ -28,19 +28,22 @@ const UNIT_MS: Record<string, number> = {
  * overflow a safe integer.
  */
 export function parseDuration(input: string): number {
-  const match = /^(\d+)(s|m|h|d)$/.exec(input.trim());
+  const trimmed = input.trim();
+  const match = /^(\d+)(s|m|h|d)$/.exec(trimmed);
   if (match === null)
     throw new UsageError(
-      `invalid duration ${JSON.stringify(input)}: expected a positive integer ` +
-        "followed by a unit (s, m, h, or d), e.g. 45s, 30m, 2h, or 1d",
+      `invalid duration ${JSON.stringify(trimmed)}: expected a positive ` +
+        "integer followed by a unit (s, m, h, or d), e.g. 45s, 30m, 2h, or 1d",
     );
+  // The regex matches only a run of digits, so the magnitude is never negative;
+  // zero is the only non-positive value that can reach here.
   const magnitude = Number(match[1]);
-  if (magnitude <= 0)
+  if (magnitude === 0)
     throw new UsageError(
-      `duration must be greater than zero; got ${JSON.stringify(input)}`,
+      `duration must be greater than zero; got ${JSON.stringify(trimmed)}`,
     );
   const ms = magnitude * UNIT_MS[match[2]];
   if (!Number.isSafeInteger(ms))
-    throw new UsageError(`duration ${JSON.stringify(input)} is too large`);
+    throw new UsageError(`duration ${JSON.stringify(trimmed)} is too large`);
   return ms;
 }

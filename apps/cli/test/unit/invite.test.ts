@@ -455,3 +455,29 @@ test("validateInvite: a zero --expires-in is rejected before any token is minted
   await expect(promise).rejects.toBeInstanceOf(UsageError);
   await expect(promise).rejects.toThrow(/duration/);
 });
+
+test("validateInvite: online warns when --expires-in is shorter than --accept-timeout", async () => {
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-lifetime-warn-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  // 5m lifetime under a 15m accept-timeout: the inviter would wait past the
+  // point the token can be honored, so the warning fires and names the resolved
+  // override lifetime (300s), not the default hour.
+  await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options,
+    acceptTimeout: 900,
+    expiresIn: "5m",
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) =>
+        typeof c[0] === "string" &&
+        c[0].includes("exceeds the invitation") &&
+        c[0].includes("(300s)"),
+    ),
+  ).toBe(true);
+  warnSpy.mockRestore();
+});
