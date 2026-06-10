@@ -107,7 +107,7 @@ export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
 // Bounds the pre-sweep retain-signal inspection's peer-hello read (see
-// sweepExchangeFiles). The read goes through the I5a gate, which retries a
+// sweepProtocolFiles). The read goes through the I5a gate, which retries a
 // partially-synced body until its deadline; bounding it to a small multiple of
 // the polling frequency -- a near-future deadline, never the full peer timeout
 // -- keeps a non-resolving hello from stalling the sweep. The gate's do-while
@@ -176,20 +176,24 @@ const isProtocolGrammarName = (name: string): boolean => {
   return parseMessageByteCount(name) !== undefined;
 };
 
-// True for a retain-only message ack: it names a consumed message, which in
-// retain mode is always timestamped (<id>-<ts>-<NNN>-<byteCount>.json, since
-// retain requires timestamp_in_filename), so the ack
+// True for a name SHAPED like a retain-only message ack. A retain message is
+// always timestamped (<id>-<ts>-<NNN>-<byteCount>.json, since retain requires
+// timestamp_in_filename), so a genuine ack
 // <writerId>-<id>-<ts>-<NNN>-<byteCount>-ack.json ends in TWO all-digit dash
-// segments -- the NNN and the byte count. Both are required, not just the byte
-// count: a rendezvous hello-ack ends in `-hello` (written in lockless-delete
-// mode too, so not a retain signal), and a stray non-protocol name with a single
-// trailing digit segment (e.g. notes-5-ack.json, report-2024-ack.json) would
-// otherwise read as a false retain signal and refuse the sweep. A message ack is
-// written only in retain mode (delete mode deletes the consumed message rather
-// than acking it), so a genuine one is a definitive retain signal detectable
-// without reading any body. Missing one here is harmless: the load-bearing
-// signal is the peer hello's retain_files flag, which a retain directory always
-// carries.
+// segments (the NNN and the byte count). Requiring both -- not just the byte
+// count -- trims the common foreign collisions (notes-5-ack.json,
+// report-2024-ack.json) and excludes a rendezvous hello-ack, which ends in
+// `-hello` and is written in lockless-delete mode too.
+//
+// This is a deliberately CONSERVATIVE heuristic, not a precise classifier: a
+// filename alone cannot prove writer-id structure, so a contrived foreign name
+// with two trailing digit segments (e.g. backup-100-200-ack.json) still
+// matches. That is acceptable. It errs toward refusing a DESTRUCTIVE sweep --
+// which the operator clears with --force-retain-sweep -- and the authoritative
+// retain signal is the peer hello's retain_files flag (read below), which a
+// retain directory always carries (I4b). So a miss here is harmless and a false
+// match only over-asks for confirmation; neither risks data. Tightening it
+// further chases false positives a filename can never fully exclude.
 const isRetainMessageAck = (name: string): boolean => {
   if (!name.endsWith("-ack.json")) return false;
   const inner = name.slice(0, -"-ack.json".length);
@@ -846,17 +850,23 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // Best-effort and non-atomic: between this scan and the deletes a live peer
   // could write a file this never saw. Acceptable only because the operator
   // asserted no concurrent session by passing the flag.
-  private async sweepExchangeFiles(
+  private async sweepProtocolFiles(
     peerHellos: Array<FileInfo>,
     unexpectedProtocol: Array<FileInfo>,
-    files: Array<FileInfo>,
   ): Promise<void> {
     const signals: string[] = [];
     let retainUncertain = false;
 
     if (this.options.retainFiles) signals.push("this party is in retain mode");
 
-    const messageAck = files.find((file) => isRetainMessageAck(file.name));
+    // A retain message ack matches the protocol grammar (-ack.json) and is not a
+    // peer hello, so it is already in unexpectedProtocol -- scan that set rather
+    // than the raw entry listing, keeping the retain inspection in step with the
+    // ignored-filtered classification (no orphaned temp or other ignored name
+    // can reach it).
+    const messageAck = unexpectedProtocol.find((file) =>
+      isRetainMessageAck(file.name),
+    );
     if (messageAck)
       signals.push(`a retain-mode message ack (${messageAck.name})`);
 
@@ -1121,7 +1131,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       orphanedTempFiles.forEach((file) => ignored.add(file.name));
     }
 
-    let peerHellos = files.filter((file) => isPeerHello(file.name));
+    // All three classifications exclude `ignored` (currently only orphaned
+    // temp-*.tmp). A temp name can never satisfy isPeerHello, so the guard is a
+    // no-op today, but keeping it symmetric with the two filters below avoids a
+    // latent trap if `ignored` ever gains a name that could pass isPeerHello.
+    let peerHellos = files.filter(
+      (file) => !ignored.has(file.name) && isPeerHello(file.name),
+    );
     // Single classification (isProtocolGrammarName), two sides: a FOREIGN file
     // fails the protocol grammar; an unexpected PROTOCOL file matches it but is
     // not the one tolerated peer hello. A name therefore cannot be both
@@ -1131,8 +1147,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
     // Protocol-grammar files that are not the tolerated peer hello: a self-hello,
     // a lock, a joining sentinel, an ack marker, or a stale message. A SECOND
-    // peer hello is counted in peerHellos and caught by the >1 guard below, not
-    // here.
+    // peer hello is counted in peerHellos, not here: on the no-sweep path the >1
+    // guard (else branch below) rejects it; under --sweep-exchange-files it is
+    // swept along with the first, so that guard is not reached.
     const unexpectedProtocol = files.filter(
       (file) =>
         !ignored.has(file.name) &&
@@ -1158,7 +1175,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // peer's) and rendezvous against a clean slate, after a retain-signal
       // inspection that refuses to destroy an audit transcript without
       // --force-retain-sweep. Foreign files are never swept.
-      await this.sweepExchangeFiles(peerHellos, unexpectedProtocol, files);
+      await this.sweepProtocolFiles(peerHellos, unexpectedProtocol);
       // Every protocol file was deleted, so rendezvous proceeds as if the
       // directory held only the (untouched) foreign files.
       peerHellos = [];
