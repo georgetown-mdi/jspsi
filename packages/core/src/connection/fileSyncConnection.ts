@@ -888,14 +888,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // the hello read is the load-bearing check but the only one that costs a
     // network round trip.
     if (signals.length === 0) {
-      // One deadline shared across all peer hellos, deliberately: it bounds the
-      // TOTAL inspection regardless of how many stale hellos a messy directory
-      // holds, so a pile of unreadable hellos cannot multiply the stall. A
-      // readable hello returns as soon as its body resolves (the gate retries
-      // only on failure), consuming little budget; the only way a later hello is
-      // starved is an earlier read exhausting the budget by failing -- which has
-      // already set retainUncertain, so the refuse/proceed decision is the same
-      // either way (a starved hello cannot flip it).
+      // One deadline shared across all peer hellos: it bounds the total
+      // inspection even in the all-readable case. A readable hello returns as
+      // soon as its body resolves (the gate retries only on failure), so a
+      // delete-mode directory's hellos read quickly. The FIRST hello that cannot
+      // be read sets retainUncertain and breaks out (below): uncertainty is
+      // sticky and already forces the refuse-or-force decision, so reading the
+      // rest cannot change the outcome -- and breaking caps the work a pile of
+      // unreadable hellos (e.g. a hostile directory under --sweep-exchange-files)
+      // can impose, instead of one bounded read apiece.
       const inspectionDeadline = new Date(
         Date.now() +
           RETAIN_INSPECTION_POLL_CYCLES * this.options.pollingFrequency,
@@ -928,7 +929,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // loss the guard prevents. Refuse rather than risk it.
           if (err instanceof UsageError) throw err;
           if (this.abortController.signal.aborted) throw err;
+          // Stop at the first unreadable hello: uncertainty is sticky and
+          // already forces refuse (bare flag) or the danger warning (force), so
+          // further reads cannot change the outcome and only add latency.
           retainUncertain = true;
+          break;
         }
       }
     }

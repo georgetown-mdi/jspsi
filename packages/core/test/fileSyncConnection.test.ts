@@ -7161,6 +7161,84 @@ test("synchronize() --sweep-exchange-files: a non-resolving peer hello is retain
   expect(elapsed).toBeLessThan(2_000);
 });
 
+test("synchronize() --sweep-exchange-files: the retain inspection stops at the first unreadable hello", async () => {
+  // Short-circuit: once a hello body cannot be read, retain-uncertainty is sticky
+  // and the decision (refuse on the bare flag, warn under --force) is fixed, so
+  // the inspection must not read later hellos -- a hostile directory of
+  // unreadable hellos cannot be made to cost one network read apiece.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  const firstHello = "peerA-hello.json";
+  const secondHello = "peerB-hello.json";
+  files.set(`/test/${firstHello}`, RETAIN_HELLO_BODY);
+  files.set(`/test/${secondHello}`, RETAIN_HELLO_BODY);
+
+  const bodyReads: string[] = [];
+  const origGet = client.get.bind(client);
+  client.get = async (p: string) => {
+    bodyReads.push(p);
+    if (p.endsWith(firstHello)) throw new Error("partial sync"); // never resolves
+    return origGet(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/retain-uncertain|did not resolve/i);
+  // The loop broke on the first unreadable hello: the second was never read.
+  expect(bodyReads.some((p) => p.endsWith(firstHello))).toBe(true);
+  expect(bodyReads.some((p) => p.endsWith(secondHello))).toBe(false);
+});
+
+test("synchronize() --sweep-exchange-files --force-retain-sweep: an earlier unreadable hello shadows a later malformed one and the forced sweep proceeds", async () => {
+  // The one behavior the break changes: under --force the operator has authorized
+  // the wipe, so breaking on the first unreadable hello means a later malformed
+  // hello is never read and cannot veto the forced sweep (the old read-every-
+  // hello behavior would have thrown a terminal UsageError on it and aborted).
+  // Both hellos are swept and the danger warning still fires.
+  const peerA = "peerA-hello.json"; // unreadable: body never finishes syncing
+  const peerB = "peerB-hello.json"; // fully synced but malformed (not a HelloEnvelope)
+  const deleted: string[] = [];
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, {
+      pollingFrequency: 10,
+      timeToLiveMs: 120,
+    });
+    conn.id = "me";
+    conn.options.sweepExchangeFiles = true;
+    conn.options.forceRetainSweep = true;
+    files.set(`/test/${peerA}`, RETAIN_HELLO_BODY);
+    files.set(`/test/${peerB}`, Buffer.from("{}")); // missing required flags
+
+    const origGet = client.get.bind(client);
+    client.get = async (p: string) => {
+      if (p.endsWith(peerA)) throw new Error("partial sync"); // never resolves
+      return origGet(p);
+    };
+    const origDelete = client.delete.bind(client);
+    client.delete = async (p: string) => {
+      deleted.push(p);
+      return origDelete(p);
+    };
+
+    // Proceeds past the malformed peerB instead of aborting, then times out
+    // waiting for a real peer on the now-clean directory.
+    await conn.synchronize().catch(() => {});
+  });
+  expect(deleted.some((p) => p.endsWith(peerA))).toBe(true);
+  expect(deleted.some((p) => p.endsWith(peerB))).toBe(true);
+  expect(
+    logs.some((l) =>
+      /force-retain-sweep|destructive and irreversible/i.test(l.message),
+    ),
+  ).toBe(true);
+});
+
 test("synchronize() --sweep-exchange-files: sweeps a second peer hello, overriding the I1 concurrent-session guard", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
