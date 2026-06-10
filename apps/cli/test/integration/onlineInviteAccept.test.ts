@@ -17,6 +17,7 @@ import {
   type CommonBootstrapOptions,
 } from "../../src/commands/bootstrap";
 import { loadKeyFile } from "../../src/keyFile";
+import { openingPathFor, resolveRecordOutput } from "../../src/recordFile";
 
 // Net-new coverage: the ONLINE invite + accept wiring, end to end, with both
 // sides on their real online code path (a live authenticated handshake, not the
@@ -71,16 +72,20 @@ log.setLevel("silent");
 // value is pure safety margin, not a tuning knob.
 const PEER_TIMEOUT_SECONDS = 30;
 
-// Minimal options with config/key at fresh, non-existent paths under the work
-// dir, so the invite/accept conflict gates pass and each run writes its own
-// files. Mirrors the unit tests' testOptions shape.
+// Minimal options with config/key/record at fresh paths under the work dir, so
+// the invite/accept conflict gates pass and each run writes its own files.
+// `record` is left at the shipped CLI default (true) -- matching what the real
+// handlers do -- so the default-on audit-record path is exercised; recordFile is
+// pinned under the work dir (rather than the default `./psilink-record-<stamp>`,
+// which would litter the process cwd) so the artifacts are cleaned up with it.
 function testOptions(label: string): CommonBootstrapOptions {
   return {
     configFile: path.join(work, `${label}.yaml`),
     keyFile: path.join(work, `${label}.key`),
     identity: label,
     peerTimeout: PEER_TIMEOUT_SECONDS,
-    record: false,
+    record: true,
+    recordFile: path.join(work, `${label}-record.json`),
     logLevel: logLibrary.levels.SILENT,
     verbosity: 0,
   };
@@ -122,7 +127,7 @@ async function readStableOutput(file: string, dataRows: number): Promise<string>
   }
 }
 
-test("filedrop: online invite + accept round-trip authenticates, finds the intersection, rotates the token, and persists both configs", async () => {
+test("filedrop: online invite + accept round-trip authenticates, finds the intersection, rotates the token, and persists both configs and audit records", async () => {
   // Both parties meet at the same file-drop directory; the URL is what each would
   // pass on the command line (psilink invite/accept <URL> ...).
   const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
@@ -204,6 +209,10 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
       output: inviteReady.output,
       verbosity: 0,
       loggerName: "invite",
+      recordOutput: resolveRecordOutput({
+        enabled: inviteOptions.record,
+        recordFile: inviteOptions.recordFile,
+      }),
     }),
     runOnlineBootstrap({
       connection: acceptReady.connection,
@@ -216,6 +225,10 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
       output: acceptReady.output,
       verbosity: 0,
       loggerName: "accept",
+      recordOutput: resolveRecordOutput({
+        enabled: acceptOptions.record,
+        recordFile: acceptOptions.recordFile,
+      }),
       reuseExistingConfig: acceptReady.reuseExistingConfig,
     }),
   ]);
@@ -282,5 +295,29 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
     // check on `authentication?.sharedSecret` alone would pass vacuously whether
     // the block was stripped or merely missing that one field.
     expect(spec.connection.authentication).toBeUndefined();
+  }
+
+  // -- The default-on audit record lands on disk for both sides. --
+  // record defaults to true in the shipped CLI, so a successful online exchange
+  // writes a self-attested record plus its private opening file. This is the only
+  // layer of the record path nothing else covers end to end: the helpers and the
+  // runProtocol write-wiring are unit-tested, and core tests the record building,
+  // but only here does a real two-party PSI exchange produce a real audit that is
+  // then serialized to disk through the CLI's default. Assert both files exist and
+  // the record round-trips as JSON naming this exchange's participants.
+  for (const party of [
+    { recordFile: inviteOptions.recordFile!, local: "invite", partner: "accept" },
+    { recordFile: acceptOptions.recordFile!, local: "accept", partner: "invite" },
+  ]) {
+    expect(fs.existsSync(party.recordFile)).toBe(true);
+    expect(fs.existsSync(openingPathFor(party.recordFile))).toBe(true);
+    const record = JSON.parse(fs.readFileSync(party.recordFile, "utf8")) as {
+      version?: unknown;
+      localIdentity?: unknown;
+      partnerIdentity?: unknown;
+    };
+    expect(record.version).toBe("psilink-exchange-record/v1");
+    expect(record.localIdentity).toBe(party.local);
+    expect(record.partnerIdentity).toBe(party.partner);
   }
 }, 60_000);
