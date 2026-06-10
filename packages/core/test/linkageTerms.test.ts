@@ -200,14 +200,12 @@ test("safeParseLinkageTerms returns success: false on invalid input", () => {
   expect(result.success).toBe(false);
 });
 
-test("a parse error does not echo the partner-supplied received value", () => {
-  // protocolSetup leaves the Zod parse-error message unsanitized on the premise
-  // that Zod reports the expected type/options and the schema path, never the
-  // received value, so the message carries no partner-controlled bytes. Pin that
-  // premise: invalid fields carrying control/ANSI and bidi-override bytes must
-  // not surface raw in the error message. A future Zod upgrade that began echoing
-  // received values would fail here, flagging that the parse-error path now needs
-  // sanitizing before it reaches operator output (CLI logs, web error alert).
+test("a parse error does not echo a partner-supplied received value", () => {
+  // protocolSetup leaves the Zod parse-error message unsanitized because the
+  // issue codes reachable here (type mismatch, enum, semver/date format,
+  // too_small) report the expected type/options and the schema path, not the
+  // received value. Pin that: invalid fields carrying control/ANSI and
+  // bidi-override bytes must not surface raw in the error message.
   const evil = "\x1b[31mEVIL\x1b[0m‮";
   const result = safeParseLinkageTerms({
     ...base,
@@ -219,6 +217,21 @@ test("a parse error does not echo the partner-supplied received value", () => {
     expect(result.error.message).not.toContain("\x1b");
     expect(result.error.message).not.toContain("‮");
   }
+});
+
+test("an unknown partner key is stripped, not echoed (non-strict invariant)", () => {
+  // The one default Zod message that echoes a received value is unrecognized_keys
+  // ("Unrecognized key: \"<key>\""), raised only by a .strict() object. The
+  // linkage-terms schemas are non-strict z.object, so an unknown key -- even one
+  // whose NAME carries control bytes -- is stripped and parsing still succeeds;
+  // the raw key never reaches the (unsanitized) parse-error message. Adding
+  // .strict() to the schema would make this parse fail with the key echoed,
+  // failing this test and flagging that the parse-error path now needs sanitizing.
+  const result = safeParseLinkageTerms({
+    ...base,
+    "\x1b[2J\x1b[31mEVIL": 1,
+  });
+  expect(result.success).toBe(true);
 });
 
 // ─── version semver format ───────────────────────────────────────────────────
