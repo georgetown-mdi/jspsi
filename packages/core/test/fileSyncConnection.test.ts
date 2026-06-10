@@ -6896,9 +6896,13 @@ test("synchronize() --sweep-exchange-files: refuses (exit 64) on a retain-only m
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "me";
   conn.options.sweepExchangeFiles = true;
-  // A retain-only message ack: the segment before `ack` is a numeric byte count
-  // (vs `hello` for a rendezvous hello-ack, which is not a retain signal).
-  files.set("/test/peer-peer-100-ack.json", Buffer.alloc(0));
+  // A retain-only message ack the peer wrote for a message this party sent. A
+  // retain message is always timestamped (<id>-<ts>-<NNN>-<byteCount>.json), so
+  // its ack ends in two all-digit segments (NNN then byte count) -- both
+  // required, vs `hello` for a rendezvous hello-ack, which is not a retain
+  // signal.
+  const ackName = "peer-me-20260101T000000-000-100-ack.json";
+  files.set(`/test/${ackName}`, Buffer.alloc(0));
 
   const deleted: string[] = [];
   const origDelete = client.delete.bind(client);
@@ -6912,10 +6916,43 @@ test("synchronize() --sweep-exchange-files: refuses (exit 64) on a retain-only m
     (e: unknown) => e,
   );
   expect(err).toBeInstanceOf(UsageError);
-  expect((err as Error).message).toContain("peer-peer-100-ack.json");
+  expect((err as Error).message).toContain(ackName);
   expect((err as Error).message).toContain("--force-retain-sweep");
   expect(deleted).toHaveLength(0);
-  expect(files.has("/test/peer-peer-100-ack.json")).toBe(true);
+  expect(files.has(`/test/${ackName}`)).toBe(true);
+});
+
+test("synchronize() --sweep-exchange-files: a `-ack.json` with a single trailing digit segment is swept, not read as a retain signal", async () => {
+  // Regression for the isRetainMessageAck false positive: a non-protocol name
+  // like notes-5-ack.json matches the broad `-ack.json` grammar (so it is an
+  // unexpected protocol file, swept under the flag) but is NOT a retain message
+  // ack -- a real one ends in <NNN>-<byteCount>, two digit segments. The bare
+  // flag must proceed and delete it, not refuse for --force-retain-sweep.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 120,
+  });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true; // delete-mode party, bare flag
+  files.set("/test/notes-5-ack.json", Buffer.alloc(0));
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  // No retain refusal: it swept the file and then timed out waiting for a peer
+  // (a transport Error, never a UsageError).
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(deleted).toContain("/test/notes-5-ack.json");
+  expect(files.has("/test/notes-5-ack.json")).toBe(false);
 });
 
 test("synchronize() --sweep-exchange-files: refuses (exit 64) when this party is in retain mode", async () => {
@@ -7069,4 +7106,75 @@ test("synchronize() --sweep-exchange-files: sweeps a second peer hello, overridi
   expect(err).not.toBeInstanceOf(UsageError);
   expect(deleted).toContain("/test/peerA-hello.json");
   expect(deleted).toContain("/test/peerB-hello.json");
+});
+
+test("synchronize() --sweep-exchange-files --force-retain-sweep: no danger warning when there is nothing to delete", async () => {
+  // Local retain mode is the only retain signal and the directory holds no peer
+  // protocol files, so the sweep deletes nothing. The danger warning must not
+  // fire (it would otherwise claim to permanently delete 0 protocol files).
+  const deleted: string[] = [];
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client } = makeMockClient();
+    const conn = await makeConnectedConn(client, {
+      pollingFrequency: 10,
+      timeToLiveMs: 120,
+    });
+    conn.id = "me";
+    conn.options.sweepExchangeFiles = true;
+    conn.options.forceRetainSweep = true;
+    // Local retain mode (the lone signal); set the flags it implies so the
+    // synchronize() retain preconditions do not fire first.
+    conn.options.retainFiles = true;
+    conn.options.locklessRendezvous = true;
+    conn.options.timestampInFilename = true;
+
+    const origDelete = client.delete.bind(client);
+    client.delete = async (p: string) => {
+      deleted.push(p);
+      return origDelete(p);
+    };
+
+    // Empty directory: nothing to sweep, then the initiator times out.
+    await conn.synchronize().catch(() => {});
+  });
+  expect(deleted).toHaveLength(0);
+  expect(
+    logs.filter((l) =>
+      /permanently deleting|destructive and irreversible/i.test(l.message),
+    ),
+  ).toHaveLength(0);
+});
+
+test("synchronize() --sweep-exchange-files: a close() during the retain-signal inspection surfaces as a clean shutdown, not retain-uncertain", async () => {
+  // A close() racing the bounded hello-body inspection aborts the gate read with
+  // the ConnectionClosedError reason. That must propagate as a clean shutdown
+  // (exit 69), NOT be masked as a retain-uncertain UsageError (exit 64).
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    // Large frequency so the gate parks on its retry backoff until the abort.
+    pollingFrequency: 10_000,
+    timeToLiveMs: 60_000,
+  });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true; // bare flag, delete-mode party
+  // A peer hello is present, so the inspection enters the gate read; get() parks
+  // (always throws) so the gate retries via cancellableDelay until the abort.
+  files.set("/test/peer-hello.json", RETAIN_HELLO_BODY);
+  let reachedGate!: () => void;
+  const parked = new Promise<void>((r) => (reachedGate = r));
+  client.get = async () => {
+    reachedGate();
+    throw new Error("partial sync; retry");
+  };
+
+  const outcome = conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  await parked;
+  await expect(conn.close()).resolves.toBeUndefined();
+
+  const err = await outcome;
+  expect(err).toBeInstanceOf(ConnectionClosedError);
+  expect(err).not.toBeInstanceOf(UsageError);
 });

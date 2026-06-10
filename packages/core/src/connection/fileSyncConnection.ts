@@ -176,19 +176,28 @@ const isProtocolGrammarName = (name: string): boolean => {
   return parseMessageByteCount(name) !== undefined;
 };
 
-// True for a retain-only message ack: an `-ack.json` whose segment immediately
-// before `ack` is all digits (the consumed message's byte count). A rendezvous
-// hello-ack has `hello` in that position instead and is written in
-// lockless-delete mode too, so it is NOT a retain signal -- the scan must be
-// grammar-aware, not a bare `-ack.json` match (194304738 unified both markers as
-// `-ack.json`). A message ack is written only in retain mode (delete mode
-// deletes the consumed message rather than acking it), so its mere presence is a
-// definitive retain signal detectable without reading any body.
+// True for a retain-only message ack: it names a consumed message, which in
+// retain mode is always timestamped (<id>-<ts>-<NNN>-<byteCount>.json, since
+// retain requires timestamp_in_filename), so the ack
+// <writerId>-<id>-<ts>-<NNN>-<byteCount>-ack.json ends in TWO all-digit dash
+// segments -- the NNN and the byte count. Both are required, not just the byte
+// count: a rendezvous hello-ack ends in `-hello` (written in lockless-delete
+// mode too, so not a retain signal), and a stray non-protocol name with a single
+// trailing digit segment (e.g. notes-5-ack.json, report-2024-ack.json) would
+// otherwise read as a false retain signal and refuse the sweep. A message ack is
+// written only in retain mode (delete mode deletes the consumed message rather
+// than acking it), so a genuine one is a definitive retain signal detectable
+// without reading any body. Missing one here is harmless: the load-bearing
+// signal is the peer hello's retain_files flag, which a retain directory always
+// carries.
 const isRetainMessageAck = (name: string): boolean => {
   if (!name.endsWith("-ack.json")) return false;
   const inner = name.slice(0, -"-ack.json".length);
-  const preAck = inner.slice(inner.lastIndexOf("-") + 1);
-  return /^\d+$/.test(preAck);
+  const byteCount = inner.slice(inner.lastIndexOf("-") + 1);
+  if (!/^\d+$/.test(byteCount)) return false;
+  const beforeByteCount = inner.slice(0, inner.lastIndexOf("-"));
+  const nnn = beforeByteCount.slice(beforeByteCount.lastIndexOf("-") + 1);
+  return /^\d+$/.test(nnn);
 };
 
 // Bounded window the lock-path peer waits for a joiner that has begun arriving
@@ -855,6 +864,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // the hello read is the load-bearing check but the only one that costs a
     // network round trip.
     if (signals.length === 0) {
+      // One deadline shared across all peer hellos, deliberately: it bounds the
+      // TOTAL inspection regardless of how many stale hellos a messy directory
+      // holds, so a pile of unreadable hellos cannot multiply the stall. A
+      // readable hello returns as soon as its body resolves (the gate retries
+      // only on failure), consuming little budget; the only way a later hello is
+      // starved is an earlier read exhausting the budget by failing -- which has
+      // already set retainUncertain, so the refuse/proceed decision is the same
+      // either way (a starved hello cannot flip it).
       const inspectionDeadline = new Date(
         Date.now() +
           RETAIN_INSPECTION_POLL_CYCLES * this.options.pollingFrequency,
@@ -876,10 +893,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         } catch (err) {
           // A fully-synced hello that fails the schema (or an over-cap body) is a
           // terminal UsageError (I5b), same classification as 193901017 -- let it
-          // propagate. Any other failure is an unresolved read within the bounded
-          // budget: treat it as retain-uncertain and refuse rather than risk
-          // sweeping a transcript whose mode could not be read.
+          // propagate. A close() during inspection aborts the gate read with the
+          // ConnectionClosedError reason (close()'s abort() invariant); propagate
+          // that as a clean shutdown (exit 69) rather than masking it as a
+          // retain-uncertain UsageError. Any other failure is an unresolved read
+          // within the bounded budget: treat it as retain-uncertain. This is
+          // sticky -- a later hello reading retain_files=false does NOT clear it,
+          // because the unreadable hello could itself be an unsynced retain
+          // hello, and wiping it without --force-retain-sweep is exactly the data
+          // loss the guard prevents. Refuse rather than risk it.
           if (err instanceof UsageError) throw err;
+          if (this.abortController.signal.aborted) throw err;
           retainUncertain = true;
         }
       }
@@ -888,10 +912,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const retainInPlay = signals.length > 0 || retainUncertain;
 
     if (retainInPlay && !this.options.forceRetainSweep) {
-      const reason = retainUncertain
-        ? "a peer hello body that did not resolve within the inspection budget " +
-          "(retain-uncertain)"
-        : signals.join("; ");
+      // Prefer a concrete signal in the diagnostic: retainUncertain can coexist
+      // with a definitive one (an earlier hello read failed, a later resolved to
+      // retain_files=true), and the concrete cause is the more useful report.
+      const reason =
+        signals.length > 0
+          ? signals.join("; ")
+          : "a peer hello body that did not resolve within the inspection " +
+            "budget (retain-uncertain)";
       throw new UsageError(
         `path ${this.path} shows a retain-mode signal (${reason}), so ` +
           "--sweep-exchange-files refuses to delete what may be a durable audit " +
@@ -903,6 +931,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     const toDelete = [...peerHellos, ...unexpectedProtocol];
 
+    // Nothing to delete (e.g. local retain mode is the only signal and the
+    // directory holds no peer protocol files): return before the warning so it
+    // never claims to be deleting zero files.
+    if (toDelete.length === 0) return;
+
     if (retainInPlay && this.options.forceRetainSweep)
       this.log.warn(
         `[${this.role}] --force-retain-sweep: permanently deleting a ` +
@@ -912,7 +945,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "intend to discard it.",
       );
 
-    if (toDelete.length === 0) return;
+    // A close() may have raced the inspection; do not dispatch deletes against a
+    // tearing-down client. Propagate the abort reason (ConnectionClosedError) so
+    // it classifies as a clean shutdown (exit 69), not a delete transport error.
+    if (this.abortController.signal.aborted)
+      throw this.abortController.signal.reason;
 
     this.log.info(
       `[${this.role}] sweeping ${toDelete.length} protocol file(s) at ` +
@@ -989,6 +1026,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
 
     this.log.info(`[${this.role}] synchronizing at path ${this.path}`);
+
+    // Reset the foreign-file snapshot up front so it is rebuilt fresh on every
+    // synchronize() entry even when the list() below throws: a failed entry must
+    // not leave a prior session's snapshot behind for a same-instance retry.
+    this.foreignFileSnapshot.clear();
 
     let files: Array<FileInfo>;
     try {
@@ -1098,12 +1140,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         isProtocolGrammarName(file.name),
     );
 
-    // Foreign-file snapshot (always, both modes, flag or not). Rebuilt fresh each
-    // rendezvous; it deletes nothing, so it is safe in retain mode where
-    // sync-mediated conflict copies are expected noise. Feeds the poll loop's
-    // isRecognizedLoopFile so these names are tolerated and 194800733's "new
-    // foreign file" warning measures only names that appear after entry.
-    this.foreignFileSnapshot.clear();
+    // Foreign-file snapshot (always, both modes, flag or not). Cleared at entry
+    // above and populated here; it deletes nothing, so it is safe in retain mode
+    // where sync-mediated conflict copies are expected noise. Feeds the poll
+    // loop's isRecognizedLoopFile so these names are tolerated and 194800733's
+    // "new foreign file" warning measures only names that appear after entry.
     foreignFiles.forEach((file) => this.foreignFileSnapshot.add(file.name));
     if (foreignFiles.length > 0)
       this.log.info(
