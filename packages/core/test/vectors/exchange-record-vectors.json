@@ -2,7 +2,7 @@
   "vectors": [
     {
       "name": "both-output-with-payloads",
-      "description": "Both parties learn the result size and hold the association table; each sends and receives one payload column under a named data-sharing agreement. Exercises the full governance block -- a legal-agreement reference, purpose, and expiration, payload columns with data-dictionary descriptions sent and received, the psi algorithm, and the matching basis (the ssn linkage field, recorded as name + type) -- alongside the commitments. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
+      "description": "Both parties learn the result size and hold the association table, and each records its own input row count (recordsExposed); each sends and receives one payload column under a named data-sharing agreement. Exercises the full governance block -- a legal-agreement reference, purpose, and expiration, payload columns with data-dictionary descriptions sent and received, the psi algorithm, and the matching basis (the ssn linkage field, recorded as name + type) -- alongside the commitments. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -111,7 +111,8 @@
           "rowIndices": [1, 0],
           "rows": [["active"], [null]]
         },
-        "createdAt": "2026-01-02T03:04:05.000Z"
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 5
       },
       "randomness": {
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -153,6 +154,7 @@
             }
           ]
         },
+        "recordsExposed": 5,
         "resultSize": 2,
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "commitments": {
@@ -260,7 +262,8 @@
           "rowIndices": [],
           "rows": []
         },
-        "createdAt": "2026-01-02T03:04:05.000Z"
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 3
       },
       "randomness": {
         "bindingNonce": "EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA",
@@ -287,6 +290,7 @@
           "payloadSent": [],
           "payloadReceived": []
         },
+        "recordsExposed": 3,
         "resultSize": 1,
         "bindingNonce": "EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA",
         "commitments": {
@@ -323,7 +327,7 @@
     },
     {
       "name": "single-output-sender",
-      "description": "A single-output sender: the local party's terms set expectsOutput false and the partner's set it true, so this party receives no output. It holds no association table (no associationTable commitment) and the result size is omitted (recorded only when both parties' terms have them both receive output). It sent its payload (one column, with a data-dictionary description) and received an empty one, so governance records a populated payloadSent and an empty payloadReceived. This is the sender's side of the same exchange as single-output-receiver below, so both reproduce the same termsHash, and this sent payload equals the receiver's received payload. Pins the canonical serialization of a record with both the association-table commitment and resultSize absent.",
+      "description": "A single-output sender: the local party's terms set expectsOutput false and the partner's set it true, so this party receives no output. It holds no association table (no associationTable commitment) and the result size is omitted (recorded only when both parties' terms have them both receive output); its own input row count is still recorded as recordsExposed, the per-direction figure that does not depend on entitlement. It sent its payload (one column, with a data-dictionary description) and received an empty one, so governance records a populated payloadSent and an empty payloadReceived. This is the sender's side of the same exchange as single-output-receiver below, so both reproduce the same termsHash, and this sent payload equals the receiver's received payload. Pins the canonical serialization of the single-output helper's disclosure entry: recordsExposed present, both the association-table commitment and resultSize absent.",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -405,7 +409,8 @@
           "rowIndices": [],
           "rows": []
         },
-        "createdAt": "2026-01-02T03:04:05.000Z"
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 4
       },
       "randomness": {
         "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
@@ -436,6 +441,7 @@
           ],
           "payloadReceived": []
         },
+        "recordsExposed": 4,
         "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
         "commitments": {
           "localPayloadSent": "VvZx4jpnLTBMz5saojCMNCuxb1nRhefvMDstxr5T34Y",
@@ -466,7 +472,7 @@
     },
     {
       "name": "single-output-receiver",
-      "description": "A single-output receiver: the local party's terms set expectsOutput true and the partner's set it false. It receives output, so it holds the association table (associationTable commitment present), but the result size is still omitted because only one party receives output. It sent an empty payload and received the partner's (one column, with a data-dictionary description), so governance records an empty payloadSent and a populated payloadReceived. This is the receiver's side of the same exchange as single-output-sender above (same agreed terms, hence the same termsHash; the received payload equals that vector's sent payload). Pins the only real combination no other vector covers: an association-table commitment present while resultSize is absent.",
+      "description": "A single-output receiver: the local party's terms set expectsOutput true and the partner's set it false. It receives output, so it holds the association table (associationTable commitment present), but the result size is still omitted because only one party receives output; recordsExposed still records its own input row count, as on every record. It sent an empty payload and received the partner's (one column, with a data-dictionary description), so governance records an empty payloadSent and a populated payloadReceived. This is the receiver's side of the same exchange as single-output-sender above (same agreed terms, hence the same termsHash; the received payload equals that vector's sent payload). Pins the only real combination no other vector covers: an association-table commitment present while resultSize is absent.",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -552,7 +558,8 @@
           "rowIndices": [0, 2],
           "rows": [["10mg"], ["20mg"]]
         },
-        "createdAt": "2026-01-02T03:04:05.000Z"
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 6
       },
       "randomness": {
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
@@ -584,6 +591,7 @@
             }
           ]
         },
+        "recordsExposed": 6,
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
         "commitments": {
           "localPayloadSent": "xNLnO6uv5Pc5Im2d1iiDEo5rwKcr01KZavRuNe7f1eA",
@@ -622,7 +630,7 @@
     },
     {
       "name": "count-only-psi-c",
-      "description": "A count-only psi-c exchange: both parties learn only the intersection size, so the result size is recorded but no association table is held or committed and no payload is exchanged. Exercises the psi-c algorithm (only a count was disclosed, not matched identifiers), a legal-agreement reference and purpose, empty sent/received payload lists, and a multi-field matching basis recorded as name + type and sorted by name. The terms also declare an unused linkage field (emailAddress) that no linkage key references; it is excluded from the matching basis, which therefore covers only the fields the keys actually matched on (dob, last, ssn4).",
+      "description": "A count-only psi-c exchange: both parties learn only the intersection size, so the result size is recorded (and each records its own recordsExposed count) but no association table is held or committed and no payload is exchanged. Exercises the psi-c algorithm (only a count was disclosed, not matched identifiers), a legal-agreement reference and purpose, empty sent/received payload lists, and a multi-field matching basis recorded as name + type and sorted by name. The terms also declare an unused linkage field (emailAddress) that no linkage key references; it is excluded from the matching basis, which therefore covers only the fields the keys actually matched on (dob, last, ssn4).",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -735,7 +743,8 @@
           "rowIndices": [],
           "rows": []
         },
-        "createdAt": "2026-01-02T03:04:05.000Z"
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 8
       },
       "randomness": {
         "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
@@ -774,6 +783,7 @@
           "payloadSent": [],
           "payloadReceived": []
         },
+        "recordsExposed": 8,
         "resultSize": 3,
         "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
         "commitments": {
@@ -918,7 +928,8 @@
           "rowIndices": [],
           "rows": []
         },
-        "createdAt": "2026-01-02T03:04:05.000Z"
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 8
       },
       "randomness": {
         "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
@@ -957,6 +968,7 @@
           "payloadSent": [],
           "payloadReceived": []
         },
+        "recordsExposed": 8,
         "resultSize": 3,
         "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
         "commitments": {

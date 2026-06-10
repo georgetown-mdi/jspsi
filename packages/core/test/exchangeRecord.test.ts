@@ -71,6 +71,7 @@ const partnerPayloadReceived: CommittedPayload = {
 const baseInputs: ExchangeRecordInputs = {
   localTerms: termsA,
   partnerTerms: termsB,
+  recordsExposed: 5,
   resultSize: 2,
   associationTable: [
     [0, 2],
@@ -260,6 +261,63 @@ describe("result size", () => {
         fixedRandomness,
       ),
     ).rejects.toThrow();
+  });
+});
+
+// --- Records exposed (this party's own input row count) ----------------------
+
+describe("records exposed", () => {
+  test("carries this party's own input row count", async () => {
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, recordsExposed: 7 },
+      fixedRandomness,
+    );
+    expect(record.recordsExposed).toBe(7);
+  });
+
+  test("accepts zero (a party that contributed no records)", async () => {
+    // Zero is the lower bound of the valid range: an empty input still produces
+    // a record, and its outbound exposure is honestly zero rather than absent.
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, recordsExposed: 0 },
+      fixedRandomness,
+    );
+    expect(record.recordsExposed).toBe(0);
+  });
+
+  test("is recorded even when the result size is omitted (single-output side)", async () => {
+    // The records-exposed count is per-direction and known from this party's own
+    // input, so it is present regardless of whether this party is entitled to the
+    // intersection size. This is the single-output helper's case: no resultSize,
+    // but its own exposure is still recorded.
+    const { resultSize: _omit, ...withoutSize } = baseInputs;
+    const { record } = await buildExchangeRecord(
+      { ...withoutSize, recordsExposed: 4 },
+      fixedRandomness,
+    );
+    expect("resultSize" in record).toBe(false);
+    expect(record.recordsExposed).toBe(4);
+  });
+
+  test("is rejected on build when negative or not a safe integer", async () => {
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, recordsExposed: -1 },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, recordsExposed: Number.MAX_SAFE_INTEGER + 1 },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("a record missing it is rejected on parse", async () => {
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const { recordsExposed: _drop, ...withoutCount } = record;
+    expect(() => parseExchangeRecord(withoutCount)).toThrow();
   });
 });
 

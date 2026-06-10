@@ -114,6 +114,42 @@ test("deduplicate: false with expectsOutput: false is valid", () => {
   expect(result.success).toBe(true);
 });
 
+// ─── Cross-field constraint: expectsOutput: false → no payload.receive ───────
+
+test("expectsOutput: false with a non-empty payload.receive is invalid", () => {
+  // A party that receives no output cannot receive payload columns for matched
+  // records it never gets; reject the incoherent configuration.
+  const result = safeParseLinkageTerms({
+    ...base,
+    output: { expectsOutput: false, shareWithPartner: true },
+    payload: { receive: [{ name: "case_id" }] },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const paths = result.error.issues.map((i) => i.path.join("."));
+  expect(paths).toContain("payload.receive");
+});
+
+test("expectsOutput: false with payload.send but no payload.receive is valid", () => {
+  // A non-receiving party may still SEND payload (the receiver gets it); only
+  // receiving payload is incoherent for it.
+  const result = safeParseLinkageTerms({
+    ...base,
+    output: { expectsOutput: false, shareWithPartner: true },
+    payload: { send: [{ name: "dose" }] },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("expectsOutput: true with a non-empty payload.receive is valid", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    output: { expectsOutput: true, shareWithPartner: true },
+    payload: { receive: [{ name: "case_id" }] },
+  });
+  expect(result.success).toBe(true);
+});
+
 // ─── allowedCharacters regex validation ──────────────────────────────────────
 
 test("allowedCharacters accepts a valid character class", () => {
