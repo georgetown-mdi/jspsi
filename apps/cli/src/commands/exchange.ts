@@ -16,6 +16,7 @@ import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
 import {
   applyConnectionOverrides,
   announceRetainMode,
+  assertRetainSweepGuard,
   DEFAULT_CONFIG_PATH,
 } from "../config";
 import { expandTilde } from "../fileUtils";
@@ -148,6 +149,27 @@ export function builder(cmd: Argv): Argv {
         "directory with retained files from a prior session is rejected with " +
         "an error at startup",
     })
+    .option("sweep-exchange-files", {
+      type: "boolean",
+      describe:
+        "before rendezvous, delete every protocol file left in the directory " +
+        "(this party's and the peer's: hellos, acks, locks, joining sentinels, " +
+        "messages) and start a fresh exchange. Foreign (non-protocol) files are " +
+        "never deleted. Use to recover a directory after a crashed or " +
+        "mismatched prior run, once you have confirmed no other session is " +
+        "using it. CLI-only and invocation-scoped: it is never persisted to " +
+        "psilink.yaml. Refuses on a retain-mode signal unless " +
+        "--force-retain-sweep is also set",
+    })
+    .option("force-retain-sweep", {
+      type: "boolean",
+      describe:
+        "DANGEROUS. Permit --sweep-exchange-files to delete a retain-mode audit " +
+        "transcript (a directory that is, or whose peer is, in retain mode); the " +
+        "prior transcript is permanently lost. Requires --sweep-exchange-files " +
+        "-- on its own it is rejected. Only use when you intend to discard the " +
+        "transcript",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -176,6 +198,10 @@ interface ExchangeArgs {
   peerId?: string;
   timestampInFilename?: boolean;
   retainFiles?: boolean;
+  // CLI-only sweep controls (see protocol.FileSyncRuntimeOptions). Excluded from
+  // ExchangeOptions below so they never reach loadConfig / the config schema.
+  sweepExchangeFiles: boolean;
+  forceRetainSweep: boolean;
   record: boolean;
   recordFile?: string;
   logLevel: logLibrary.LogLevelNumbers;
@@ -184,7 +210,12 @@ interface ExchangeArgs {
 
 type ExchangeOptions = Omit<
   ExchangeArgs,
-  "input" | "output" | "logLevel" | "verbosity"
+  | "input"
+  | "output"
+  | "logLevel"
+  | "verbosity"
+  | "sweepExchangeFiles"
+  | "forceRetainSweep"
 >;
 
 function parseArgs(argv: Arguments): ExchangeArgs {
@@ -223,6 +254,12 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     peerId: argv["peer-id"] as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
+    // CLI-only, never persisted: resolve to a definite boolean here since there
+    // is no config layer to merge with (unlike the flags above).
+    sweepExchangeFiles:
+      (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
+    forceRetainSweep:
+      (argv["force-retain-sweep"] as boolean | undefined) ?? false,
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
@@ -458,10 +495,25 @@ async function prepareDataset(
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  const { input, output, logLevel, verbosity, ...options } = parseArgs(argv);
+  const {
+    input,
+    output,
+    logLevel,
+    verbosity,
+    sweepExchangeFiles,
+    forceRetainSweep,
+    ...options
+  } = parseArgs(argv);
 
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("exchange");
+
+  try {
+    assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(64);
+  }
 
   let configResult: ReturnType<typeof loadConfig>;
   try {
@@ -515,6 +567,11 @@ export async function handler(argv: Arguments): Promise<void> {
       verbosity,
       "exchange",
       recordOutput,
+      // saveIntent and onAuthenticated are both undefined on the authenticated
+      // exchange path; the trailing object carries the CLI-only sweep controls.
+      undefined,
+      undefined,
+      { sweepExchangeFiles, forceRetainSweep },
     );
   } catch (err) {
     log.error(err instanceof Error ? err.message : String(err));

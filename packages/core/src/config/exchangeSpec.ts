@@ -27,6 +27,16 @@ export const ExchangeSpecSchema = z.object({
   // location). Absent in exchanges that do not sign receipts; see signing.ts and
   // EXCHANGE_SPEC.md.
   signing: SigningConfigSchema.optional(),
+  // Optional self-facing retention/disposition pointer for the self-attested
+  // exchange record: a free-text operator note describing where this party files
+  // its copy of the result and under what retention schedule it is held or
+  // disposed of. Per-party and local -- it is written into THIS party's record
+  // only, never swapped with the partner, cross-validated, or folded into the
+  // agreed-terms hash (unlike linkageTerms). Metadata only: it must carry no
+  // protected, linkage-field, or payload value. Non-empty when present (an absent
+  // pointer is the omitted key, not an empty string). See EXCHANGE_SPEC.md and
+  // PROTOCOL.md ("Self-attested record").
+  retentionDisposition: z.string().min(1).optional(),
 });
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;

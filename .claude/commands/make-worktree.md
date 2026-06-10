@@ -69,7 +69,21 @@ This gives the worktree its own Compose project and a free host port, so its con
 
     cd "$WORKTREE" && npm install
 
-### 6. Print the summary
+### 6. Enter the worktree
+
+Switch the session into the worktree with the `EnterWorktree` tool (this is a
+tool call, not a Bash command):
+
+    EnterWorktree({ path: "$WORKTREE" })
+
+This makes the harness own the working directory, so the cwd persists across
+turns and any subagents inherit it -- the continuing session then runs plain
+commands in the worktree with no `cd`/`git -C` scoping. (CLAUDE.local.md is the
+project-instruction authorization this tool requires.) If these setup steps ran
+in an isolated subagent rather than the working session, the switch applies only
+to that subagent; the working session must then call `EnterWorktree` itself.
+
+### 7. Print the summary
 
 Output this block and nothing after it:
 
@@ -81,16 +95,14 @@ Output this block and nothing after it:
     Linked locals: <list, noting any skipped>
     SFTP container: project psilink-sftp-<branch>, host port <PORT> (isolated)
 
-    To work here:
-      cd <worktree>
-      claude          # or continue this session: "work in the worktree above"
+    This session is now inside the worktree (via EnterWorktree). Run plain
+    commands here -- `git commit`, `npm test`, `npm run build` -- with no
+    `cd`/`git -C` scoping; the cwd persists across turns and subagents inherit
+    it. Only Read/Edit/Write still take worktree-absolute paths.
 
-    If you continue THIS session: the Bash CWD does not reliably persist across
-    turns -- it resets to the repo root, checked out on a protected branch. So
-    target this worktree explicitly on every command: use
-    `git -C <worktree> ...`, absolute paths, or a leading `cd <worktree> &&`
-    within the same command. A bare git write (commit/amend/add/push) would
-    otherwise hit a protected branch (staging or main), not your feature branch.
+    To work here from a SEPARATE session instead:
+      cd <worktree>
+      claude
 
 ## What you do NOT do
 

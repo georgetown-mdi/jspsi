@@ -200,11 +200,11 @@ test("fromEventConnection over FileSyncConnection: a send-time transport failure
   });
   conn.peerId = "peer-test";
   // A previous unconsumed message blocks send(); with a short TTL the wait
-  // times out and send() rejects, which the bridge latches as terminal.
-  files.set(
-    `/test/${conn.id}-99.json`,
-    Buffer.from(JSON.stringify({ stale: 1 })),
-  );
+  // times out and send() rejects, which the bridge latches as terminal. The
+  // drain waits for the exact lastSentFile, so point it at the planted name.
+  const outName = `${conn.id}-99.json`;
+  files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: 1 })));
+  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
 
   const mc = fromEventConnection(conn);
   const err = await mc.send({ next: true }).catch((e: unknown) => e);
