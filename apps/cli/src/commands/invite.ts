@@ -13,6 +13,7 @@ import type {
 import { loadConfigLinkageSource } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
+import { parseDuration } from "../util/duration";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   addCommonBootstrapOptions,
@@ -38,10 +39,20 @@ import {
 } from "./bootstrap";
 
 // Invitation tokens carry a 1-hour lifetime by default, per
-// docs/SECURITY_DESIGN.md. The --expires-in override is a separate epic item;
-// the value is hard-coded here. Distinct from --accept-timeout, which bounds how
-// long the inviter waits at the rendezvous, not how long the token stays valid.
+// docs/SECURITY_DESIGN.md. --expires-in overrides it (see the builder option).
+// Distinct from --accept-timeout, which bounds how long the inviter waits at
+// the rendezvous, not how long the token stays valid.
 const INVITATION_LIFETIME_SECONDS = 60 * 60;
+
+// Upper bound on an --expires-in override. The setup secret is short-lived by
+// design (docs/SECURITY_DESIGN.md), so its lifetime is bounded -- but the bound
+// is deliberately generous, not tight: exchanges often run only monthly, and an
+// agency may need the invitation to outlast several months of breakage before
+// re-inviting, against credential-rotation schedules that in practice are often
+// "never". A one-year ceiling accommodates that while still rejecting an absurd
+// value (a fat-fingered "999999d") that would make the secret effectively
+// permanent and defeat the bounded-lifetime property.
+const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
@@ -70,12 +81,20 @@ export function builder(cmd: Argv): Argv {
           "pre-existing configuration file when present (the INPUT_FILE, if given,\n" +
           "is checked against it) and inferred from INPUT_FILE otherwise.",
       ),
-  ).option("accept-timeout", {
-    type: "number",
-    describe:
-      "online only: seconds to wait for the partner to accept before giving " +
-      `up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}, i.e. 15 minutes)`,
-  });
+  )
+    .option("accept-timeout", {
+      type: "number",
+      describe:
+        "online only: seconds to wait for the partner to accept before giving " +
+        `up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}, i.e. 15 minutes)`,
+    })
+    .option("expires-in", {
+      type: "string",
+      describe:
+        "override the invitation lifetime (default: 1 hour, maximum: 365d). A " +
+        "duration with a required unit suffix: s, m, h, or d, e.g. 45s, 30m, " +
+        "2h, or 1d",
+    });
 }
 
 // --- Positional parsing ------------------------------------------------------
@@ -162,16 +181,37 @@ type InviteReady =
  * the shared secret at encode time so the lifetime clock starts when the shared
  * secret exists, not at process entry.
  *
+ * `expiresIn`, when given, overrides the default 1-hour lifetime. It is parsed
+ * (and rejected if zero, negative, or malformed) at the very top -- before any
+ * conflict gate, input read, or token mint -- so a bad value never produces a
+ * token or touches disk.
+ *
  * @internal exported for testing
  */
 export async function validateInvite(params: {
   resolved: ReturnType<typeof resolveInvitePositionals>;
   options: CommonBootstrapOptions;
   acceptTimeout: number;
+  expiresIn?: string;
   log: ReturnType<typeof getLogger>;
 }): Promise<InviteReady> {
-  const { resolved, options, acceptTimeout, log } = params;
+  const { resolved, options, acceptTimeout, expiresIn, log } = params;
   const identity = options.identity ?? userInfo().username;
+  // parseDuration yields whole milliseconds at second granularity (its smallest
+  // unit), so dividing by 1000 is exact: the lifetime is always a whole number
+  // of seconds, whether defaulted or overridden, and feeds expiresFromNow below.
+  const lifetimeSeconds =
+    expiresIn !== undefined
+      ? parseDuration(expiresIn) / 1000
+      : INVITATION_LIFETIME_SECONDS;
+  // Reject an override past the ceiling before any side effect (mirrors the
+  // zero/negative rejection inside parseDuration). The default path cannot
+  // exceed it, so only an --expires-in override is ever bounded here.
+  if (lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS)
+    throw new UsageError(
+      `--expires-in must not exceed ${MAX_INVITATION_LIFETIME_SECONDS / 86400}d ` +
+        `(the maximum invitation lifetime); got ${expiresIn}`,
+    );
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
@@ -207,12 +247,13 @@ export async function validateInvite(params: {
       connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
     );
 
-    // The token's lifetime is fixed; an accept-timeout longer than it would keep
-    // waiting at the rendezvous past the point the token can be honored.
-    if (acceptTimeout > INVITATION_LIFETIME_SECONDS)
+    // An accept-timeout longer than the token's lifetime would keep waiting at
+    // the rendezvous past the point the token can be honored. Compare against
+    // the resolved lifetime so an --expires-in override is respected here too.
+    if (acceptTimeout > lifetimeSeconds)
       log.warn(
         `--accept-timeout (${acceptTimeout}s) exceeds the invitation ` +
-          `lifetime (${INVITATION_LIFETIME_SECONDS}s); the token will expire ` +
+          `lifetime (${lifetimeSeconds}s); the token will expire ` +
           "first and a later acceptance will be rejected.",
       );
 
@@ -220,7 +261,7 @@ export async function validateInvite(params: {
     const { dataSpec, warnings } = buildDataSpec({ identity, rows });
     for (const w of warnings) log.warn(w);
 
-    const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
+    const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();
     const invitation = await encodeInvitation({
       version: "1",
@@ -305,7 +346,7 @@ export async function validateInvite(params: {
       );
     }
 
-    const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
+    const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();
     const invitation = await encodeInvitation({
       version: "1",
@@ -339,7 +380,7 @@ export async function validateInvite(params: {
   const { dataSpec, warnings } = buildDataSpec({ identity, rows });
   for (const w of warnings) log.warn(w);
 
-  const expires = expiresFromNow(INVITATION_LIFETIME_SECONDS);
+  const expires = expiresFromNow(lifetimeSeconds);
   const sharedSecret = generateSharedSecret();
   const invitation = await encodeInvitation({
     version: "1",
@@ -366,12 +407,20 @@ export async function handler(argv: Arguments): Promise<void> {
     const acceptTimeout =
       (argv["accept-timeout"] as number | undefined) ??
       DEFAULT_ACCEPT_TIMEOUT_SECONDS;
+    // yargs collects a repeated flag into an array; reject that cleanly rather
+    // than letting an array reach the string-typed parseDuration (which would
+    // throw a raw TypeError on .trim() and surface as a confusing exit 69).
+    const expiresInArg = argv["expires-in"];
+    if (Array.isArray(expiresInArg))
+      throw new UsageError("--expires-in may be given only once");
+    const expiresIn = expiresInArg as string | undefined;
     const positionals = (argv["args"] as Array<string> | undefined) ?? [];
     const resolved = resolveInvitePositionals(positionals);
     const ready = await validateInvite({
       resolved,
       options,
       acceptTimeout,
+      expiresIn,
       log,
     });
 
