@@ -75,6 +75,23 @@ test("rejects when keyFilePath itself is an existing directory", () => {
 });
 
 test.skipIf(process.platform === "win32")(
+  "accepts a symlink at the key path, even one resolving to a directory",
+  () => {
+    // saveKeyFile renames a temp file onto the key path, which replaces the
+    // symlink itself rather than following it, so a symlink here -- including
+    // one resolving to a directory -- is overwritten cleanly and must NOT be
+    // rejected. Locks the guard against a future false-positive "reject
+    // symlinks" change.
+    const { log } = makeLogger();
+    const realDir = path.join(dir, "some-dir");
+    fs.mkdirSync(realDir);
+    const linkAtKeyPath = path.join(dir, "key-symlink");
+    fs.symlinkSync(realDir, linkAtKeyPath);
+    expect(preflightKeyFilePath(linkAtKeyPath, log)).toBe(linkAtKeyPath);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
   "rejects when keyFilePath is an existing non-regular node (socket)",
   async () => {
     // A unix-domain socket is a non-regular, non-directory, non-symlink node,

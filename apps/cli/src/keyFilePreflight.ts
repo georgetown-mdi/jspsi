@@ -45,13 +45,17 @@ export function preflightKeyFilePath(
       "connection.authentication must include a non-empty keyFilePath",
     );
   const kfp = keyFilePath.trim();
-  // Pre-validate that the key file path itself, if it already exists, is
-  // a regular file rather than a directory or other special node. If it
-  // is a directory, saveKeyFile's renameSync would fail post-handshake
-  // (when the partner may already hold the rotated token) and force a
-  // re-invitation that is preventable here. Use lstatSync so a symlink at
-  // the key file path is inspected as-is rather than followed: a symlink
-  // pointing at a directory should still be rejected.
+  // Pre-validate the key path itself: it is fine as a regular file or a
+  // symlink, and rejected only if it already exists as a directory or other
+  // special node. saveKeyFile writes a temp file and renameSync()s it onto
+  // this path, and rename replaces the final component in place -- acting on a
+  // symlink as the link itself rather than following it -- so a regular file or
+  // a symlink (to anything, including a directory) is overwritten cleanly. Only
+  // a real directory or special node, which rename cannot overwrite, would make
+  // that write fail post-handshake, when the partner may already hold the
+  // rotated token and recovery needs a preventable re-invitation. Use lstatSync
+  // (not statSync) so a symlink is classified as a symlink and accepted as-is
+  // rather than resolved to its target's type.
   try {
     const targetStat = fs.lstatSync(kfp);
     if (!targetStat.isFile() && !targetStat.isSymbolicLink())
