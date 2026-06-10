@@ -839,8 +839,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // and the peer's: hellos, locks, joining sentinels, acks, messages) so
   // rendezvous can start against a clean slate -- but only after confirming the
   // directory is not a retain-mode audit transcript. Retain never deletes its
-  // hellos (I4b), so a retain directory always advertises itself; the inspection
-  // checks two signals with DIFFERENT coverage:
+  // hellos (I4b), so a retain directory in which a PEER participated always
+  // carries that peer's retain hello (signal b below). The one gap is a
+  // peer-less, self-started retain half-start re-run in delete mode: the body
+  // read covers only PEER hellos, so it is caught only by local retain mode
+  // (signal: this.options.retainFiles) -- which a delete-mode re-run does not
+  // set. That loses only this operator's own abandoned half-start, not a
+  // two-party transcript. The inspection checks signals with DIFFERENT coverage:
   //   (a) a retain-only message ack (isRetainMessageAck) -- a filename-only,
   //       body-free signal. Strictly additive: it does not cover an
   //       early-rendezvous retain peer that has written no message ack yet.
@@ -1120,9 +1125,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // legitimately pre-exist as the protocol grows; the foreign-file snapshot
     // below (195255994) is a sibling tolerance mechanism for grammar-failing
     // names.
-    const isPeerHello = (name: string) =>
-      name.endsWith(HELLO_SUFFIX) &&
-      name.slice(0, -HELLO_SUFFIX.length) !== this.id;
+    const isPeerHello = (name: string) => {
+      if (!name.endsWith(HELLO_SUFFIX)) return false;
+      const id = name.slice(0, -HELLO_SUFFIX.length);
+      // Reject an empty id (a bare "-hello.json"). It is not a usable peer hello:
+      // accepting it would commit rendezvous to peerId="", after which poll()
+      // scans every "-"-prefixed file as a peer message and the lockless ack
+      // barrier waits for an ack no honest peer writes. Classifying it as an
+      // unexpected protocol file instead (it still matches the grammar) rejects
+      // it at the no-flag guard and sweeps it under --sweep-exchange-files,
+      // rather than tolerating a planted bare hello as a phantom peer.
+      return id.length > 0 && id !== this.id;
+    };
     const ignored = new Set<string>();
 
     // Sweep orphaned in-flight temp writes left by a prior crashed exchange.

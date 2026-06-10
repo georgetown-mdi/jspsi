@@ -5181,6 +5181,14 @@ const entryPreconditionKinds: Array<{
     present: [`${ENTRY_SELF_ID}-hello.json`],
     outcome: "reject",
   },
+  // A bare "-hello.json" has an empty id: it is NOT a usable peer hello (it would
+  // commit rendezvous to peerId="") and must be rejected as an unexpected
+  // protocol file, never tolerated as a phantom peer.
+  {
+    kind: "empty-id hello",
+    present: ["-hello.json"],
+    outcome: "reject",
+  },
   {
     kind: "two peer hellos",
     present: [`${ENTRY_PEER_ID}-hello.json`, `${ENTRY_PEER_ID_2}-hello.json`],
@@ -7151,6 +7159,36 @@ test("synchronize() --sweep-exchange-files: sweeps a second peer hello, overridi
   expect(err).not.toBeInstanceOf(UsageError);
   expect(deleted).toContain("/test/peerA-hello.json");
   expect(deleted).toContain("/test/peerB-hello.json");
+});
+
+test("synchronize() --sweep-exchange-files: a bare empty-id hello is swept, not adopted as the peer hello", async () => {
+  // A planted "-hello.json" has an empty id. It must be treated as an unexpected
+  // protocol file (swept under the flag), never adopted as a peer hello -- which
+  // would otherwise commit rendezvous to peerId="".
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 120,
+  });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  files.set("/test/-hello.json", Buffer.alloc(0));
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  // Swept (not adopted), then the initiator timed out waiting for a real peer.
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(deleted).toContain("/test/-hello.json");
+  expect(files.has("/test/-hello.json")).toBe(false);
 });
 
 test("synchronize() --sweep-exchange-files --force-retain-sweep: no danger warning when there is nothing to delete", async () => {
