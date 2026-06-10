@@ -603,11 +603,13 @@ test("send waits for a previous unconsumed message before writing the next", asy
   const conn = await makeConnectedConn(client);
   conn.peerId = "stub-peer";
 
-  // Simulate a message from this connection already sitting in the store
-  // (e.g. the peer's poller hasn't run yet). The exact byte count is
-  // irrelevant; send() detects any `<id>-*.json` it still owns.
-  const outPath = `/test/${conn.id}-99.json`;
+  // Simulate a message this connection sent that is still on disk (the peer's
+  // poller hasn't consumed it yet). send() waits for the EXACT lastSentFile, so
+  // point that at the planted name as a real prior send() would have.
+  const outName = `${conn.id}-99.json`;
+  const outPath = `/test/${outName}`;
   files.set(outPath, Buffer.from(JSON.stringify({ stale: true })));
+  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
 
   // After 50 ms, simulate the peer consuming (deleting) the stale message.
   const consumed = new Promise<void>((resolve) => {
@@ -631,9 +633,11 @@ test("send times out when the previous message is never consumed", async () => {
   });
   conn.peerId = "stub-peer";
 
-  // Plant a stale message that nobody will ever delete.
-  const outPath = `/test/${conn.id}-99.json`;
-  files.set(outPath, Buffer.from(JSON.stringify({ stale: true })));
+  // Plant a message this party sent that nobody will ever delete, and point
+  // lastSentFile at it (the drain waits for that exact name to disappear).
+  const outName = `${conn.id}-99.json`;
+  files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: true })));
+  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
 
   await expect(conn.send({ next: true })).rejects.toThrow("timed out");
 });
@@ -2656,6 +2660,29 @@ test("send() completes without spinning when a <id>-hello.json file is present i
   expect(files.has(helloPath)).toBe(true);
 });
 
+test("send() completes without spinning on a foreign <thisId>-<digits>.json (site-4 residual)", async () => {
+  // A foreign/stray file carrying this party's own id and a numeric terminal
+  // (a sync-tool artifact, or a leftover the peer never sent) matches the
+  // message grammar. The old hasOutstandingMessage glob counted it as an
+  // unconsumed own-message and span send() to the peer timeout. The drain now
+  // waits for the EXACT lastSentFile -- undefined on the first send -- so send()
+  // completes and leaves the foreign file untouched.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 200, // a regression fails fast here instead of hanging the run
+  });
+  conn.peerId = "stub-peer";
+
+  const foreignPath = `/test/${conn.id}-99.json`;
+  files.set(foreignPath, Buffer.from("not ours"));
+
+  await expect(conn.send({ check: true })).resolves.toBeUndefined();
+
+  // send() does not own the foreign file and must leave it in place.
+  expect(files.has(foreignPath)).toBe(true);
+});
+
 test("send() is not blocked by a <id>-joining.json sentinel (grammar discriminant excludes it)", async () => {
   // The joining sentinel shares the `<id>-` prefix and `.json` extension but
   // its terminal segment is the type word `joining`, not a byte count, so
@@ -3012,8 +3039,11 @@ test("send() message timeout throws UsageError", async () => {
     pollingFrequency: 10,
   });
   conn.peerId = "stub-peer";
-  // Plant a stale outbound message that nobody will consume.
-  files.set(`${conn.path}/${conn.id}-99.json`, Buffer.from("stale"));
+  // Plant a stale outbound message that nobody will consume, and point
+  // lastSentFile at it (the drain waits for that exact name).
+  const outName = `${conn.id}-99.json`;
+  files.set(`${conn.path}/${outName}`, Buffer.from("stale"));
+  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
   await expect(conn.send({ next: true })).rejects.toBeInstanceOf(UsageError);
 });
 
@@ -6333,10 +6363,10 @@ test("close() cancels an in-flight delete-mode consume-wait promptly (site 5)", 
   });
   conn.peerId = "peer";
   // An outstanding message nobody consumes drives send() into the consume-wait.
-  files.set(
-    `/test/${conn.id}-99.json`,
-    Buffer.from(JSON.stringify({ stale: true })),
-  );
+  // The drain waits for the exact lastSentFile, so point it at the planted name.
+  const outName = `${conn.id}-99.json`;
+  files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: true })));
+  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
 
   let parked!: () => void;
   const reachedWait = new Promise<void>((r) => (parked = r));

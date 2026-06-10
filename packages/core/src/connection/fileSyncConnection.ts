@@ -2233,10 +2233,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // consumed cannot be found by an exact name. Scan for any `<id>-*.json` we
     // still own and wait for it to clear, preserving the one-outstanding-
     // message-at-a-time invariant the peer's poll() relies on.
-    // Typed protocol files (hello and ack) share the `<id>-` prefix and `.json`
-    // extension but have a non-numeric terminal segment. Exclude them via
-    // parseMessageByteCount so a renamed hello or an ack marker does not cause
-    // send() to spin waiting for a protocol file to disappear.
+    // Wait for the EXACT message we last sent to be consumed (deleted) by the
+    // peer -- this.lastSentFile -- not for any <id>-<digits>.json. Under delete
+    // mode's one-outstanding-per-direction rule (I9) lastSentFile is the only
+    // legitimate unconsumed own-message, and it is undefined before the first
+    // send (nothing to wait for). Keying on the message grammar instead would
+    // (a) require parseMessageByteCount to exclude our own hello/ack markers
+    // and, worse, (b) spin forever on a foreign or stray <thisId>-<digits>.json
+    // that the peer will never delete (the documented site-4 residual). Exact-
+    // name matching avoids both, and mirrors the close() drain, which already
+    // waits on lastSentFile by exact name.
     // The list() result also prunes responsibleFiles: any entry no longer on
     // the server was consumed by the peer and need not be swept at close time.
     const hasOutstandingMessage = async () => {
@@ -2246,11 +2252,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         if (!fileNames.includes(fileName))
           this.responsibleFiles.delete(fileName);
       });
-      return currentFiles.some(
-        (file) =>
-          file.name.startsWith(`${this.id}-`) &&
-          file.name.endsWith(".json") &&
-          parseMessageByteCount(file.name) !== undefined,
+      return (
+        this.lastSentFile !== undefined &&
+        fileNames.includes(this.lastSentFile)
       );
     };
 
