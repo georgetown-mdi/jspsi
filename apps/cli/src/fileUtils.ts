@@ -359,7 +359,13 @@ export function writeFileOwnerOnly(
         fs.fchmodSync(fd, 0o600);
         fs.writeFileSync(fd, content, "utf8");
       } finally {
-        fs.closeSync(fd);
+        // Guard the close so its failure cannot mask an fchmod/write error in
+        // flight; the outer catch removes the temp file regardless.
+        try {
+          fs.closeSync(fd);
+        } catch {
+          /* best-effort close; a genuine failure surfaces from the body above */
+        }
       }
     }
     if (options.exclusive) {
@@ -398,7 +404,9 @@ export function writeFileOwnerOnly(
     // Remove the temp file on any failure -- not just the icacls case -- so a
     // partial write never leaves a `.tmp.<pid>` orphan beside the destination.
     // A caller's own rollback cannot do this: it does not know the pid-qualified
-    // temp name.
+    // temp name. When the failure was the exclusive open refusing a symlink
+    // planted at the temp path, this removes that link itself (unlink never
+    // follows it, so the link's target is untouched), clearing the slot.
     try {
       fs.unlinkSync(tmp);
     } catch {
@@ -436,9 +444,11 @@ export function writeFileAtomic(
   try {
     // Create the temp file on an exclusive, non-following descriptor so a
     // symlink planted at the temp path in the unlink->create window cannot
-    // redirect the write to the link's target (O_EXCL refuses an existing entry,
-    // O_NOFOLLOW a final-component symlink). On Windows O_NOFOLLOW is absent from
-    // fs.constants and ORs in as 0, leaving the exclusive create intact.
+    // redirect the write to the link's target. O_EXCL is the cross-platform
+    // guard -- it refuses to create over any existing entry, a symlink included;
+    // O_NOFOLLOW adds POSIX-only defense-in-depth against a final-component
+    // symlink. O_NOFOLLOW is absent from fs.constants on Windows and ORs in
+    // harmlessly as 0, so the O_EXCL create is unchanged there.
     const fd = fs.openSync(
       tmp,
       fs.constants.O_CREAT |
@@ -456,10 +466,20 @@ export function writeFileAtomic(
       fs.fchmodSync(fd, mode);
       fs.writeFileSync(fd, content, "utf8");
     } finally {
-      fs.closeSync(fd);
+      // Guard the close so its failure cannot mask an fchmod/write error in
+      // flight; the outer catch removes the temp file regardless.
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* best-effort close; a genuine failure surfaces from the body above */
+      }
     }
     fs.renameSync(tmp, destPath);
   } catch (err) {
+    // Remove the temp file on any failure so a partial write leaves no orphan.
+    // If the failure was the exclusive open refusing a symlink planted at the
+    // temp path, this removes that link itself (unlink never follows it, so the
+    // link's target is untouched).
     try {
       fs.unlinkSync(tmp);
     } catch {

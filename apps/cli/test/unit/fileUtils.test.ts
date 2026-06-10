@@ -135,6 +135,9 @@ describe("writeFileOwnerOnly", () => {
     expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow();
     expect(fs.readFileSync(target, "utf8")).toBe("original-target");
     expect(fs.existsSync(dest)).toBe(false);
+    // the catch-path cleanup removes the planted link (not its target)
+    expect(fs.existsSync(tmp)).toBe(false);
+    expect(fs.existsSync(target)).toBe(true);
   });
 });
 
@@ -192,6 +195,9 @@ describe("writeFileAtomic", () => {
     expect(() => writeFileAtomic(dest, "public-content")).toThrow();
     expect(fs.readFileSync(target, "utf8")).toBe("original-target");
     expect(fs.existsSync(dest)).toBe(false);
+    // the catch-path cleanup removes the planted link (not its target)
+    expect(fs.existsSync(tmp)).toBe(false);
+    expect(fs.existsSync(target)).toBe(true);
   });
 });
 
