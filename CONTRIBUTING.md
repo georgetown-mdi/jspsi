@@ -151,6 +151,8 @@ PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencie
 
 **Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, key-agreement, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 
+**SFTP stack (`ssh2` / `ssh2-sftp-client`)** - the CLI's SFTP adapter (`apps/cli/src/connection/ssh2SftpAdapter.ts`) deliberately drives `ssh2` internals past the public `ssh2-sftp-client` API, so both packages are exact-pinned in `apps/cli/package.json`: every bump - including a security patch, which is then a deliberate edit rather than an `npm audit fix` that slips in unreviewed - must re-verify that coupling before it merges. Before raising either version, follow the upgrade checklist in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) ("Upgrading the SFTP stack"), which names the internal premises, the source files to re-read, and the contract-assertion test (run in CI by the CLI integration suite) that fails red on a lifecycle change.
+
 Per-dependency licenses are recorded authoritatively in the CycloneDX SBOM attached to each release - every direct and transitive dependency with its license; see [docs/RELEASES.md](docs/RELEASES.md#software-bill-of-materials-sbom). Attributions for redistributed and vendored components are in the top-level [`NOTICE`](NOTICE).
 
 ## Export Control
