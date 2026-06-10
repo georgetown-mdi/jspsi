@@ -319,7 +319,12 @@ function fsyncParentDir(filePath: string): void {
  * flush is POSIX-only -- Node's `fs` cannot open a directory handle to
  * `FlushFileBuffers` on Windows -- so the cross-call crash-ordering guarantee is
  * POSIX-only and NTFS metadata journaling governs the Windows directory entry.
- * See SECURITY_DESIGN.md ("Required permissions").
+ * Within POSIX the guarantee is full on Linux (the CLI's production/Docker
+ * target); on macOS Node issues `fsync(2)`, not `F_FULLFSYNC`, which moves the
+ * data from the OS to the drive but does not force the drive's volatile cache to
+ * media or stop the drive reordering writes, so there the crash-ordering holds
+ * against process death but not necessarily a true power loss -- recoverable by
+ * re-running. See SECURITY_DESIGN.md ("Required permissions").
  *
  * On the `exclusive` path the directory flush runs after the create-if-absent
  * (hard link) has already succeeded, so a flush failure -- a rare I/O error --

@@ -113,12 +113,14 @@ export function recordPathsFor(
  *
  * The opening data is written first (it is the proof material; if the process
  * dies between the two writes, the salts and committed data are preserved and
- * only the summary record is missing on the next run). On POSIX this ordering
+ * only the summary record is missing on the next run). On Linux this ordering
  * survives a power loss, not just a process death: {@link writeFileOwnerOnly}
  * fsyncs each file's data and its parent directory entry before returning, so a
- * durable record rename implies a durable opening rename. On Windows the
- * directory flush is unreachable from Node's fs, so that crash-ordering is left
- * to the OS (see `writeFileOwnerOnly` and SECURITY_DESIGN.md).
+ * durable record rename implies a durable opening rename. On macOS Node's
+ * `fsync` does not force the drive's write cache to media, so there the ordering
+ * holds against process death but not necessarily a power loss (recoverable by
+ * re-running); on Windows the directory flush is unreachable from Node's fs. See
+ * `writeFileOwnerOnly` and SECURITY_DESIGN.md.
  */
 export function writeExchangeRecord(
   output: RecordOutput,
