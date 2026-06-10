@@ -368,6 +368,13 @@ export function writeFileOwnerOnly(
         }
       }
     }
+    // Known limitation: the exclusive create above closes the unlink->create
+    // window, but a narrow one remains between it and the rename/link below,
+    // where a directory-writer could swap tmp for a symlink and leave destPath a
+    // redirecting link. It leaks nothing -- the secret is already in the real
+    // tmp inode, never written through a link -- and the next write heals it;
+    // fully closing it needs renameat2(RENAME_NOREPLACE)/O_TMPFILE, which Node's
+    // fs does not expose.
     if (options.exclusive) {
       // Atomic create-if-absent: linkSync fails if destPath already exists,
       // closing the create-time race that renameSync (which silently overwrites)
@@ -447,14 +454,15 @@ export function writeFileAtomic(
     // redirect the write to the link's target. O_EXCL is the cross-platform
     // guard -- it refuses to create over any existing entry, a symlink included;
     // O_NOFOLLOW adds POSIX-only defense-in-depth against a final-component
-    // symlink. O_NOFOLLOW is absent from fs.constants on Windows and ORs in
-    // harmlessly as 0, so the O_EXCL create is unchanged there.
+    // symlink. @types/node types O_NOFOLLOW as a number, but it is genuinely
+    // absent on Windows, so `?? 0` drops it from the mask there (rather than
+    // relying on `undefined | x === x`), leaving the O_EXCL create unchanged.
     const fd = fs.openSync(
       tmp,
       fs.constants.O_CREAT |
         fs.constants.O_EXCL |
         fs.constants.O_WRONLY |
-        fs.constants.O_NOFOLLOW,
+        (fs.constants.O_NOFOLLOW ?? 0),
       mode,
     );
     try {
@@ -474,6 +482,10 @@ export function writeFileAtomic(
         /* best-effort close; a genuine failure surfaces from the body above */
       }
     }
+    // Same narrow tmp-swap window as writeFileOwnerOnly (between the close above
+    // and this rename); for this public artifact it only risks leaving destPath
+    // a redirecting symlink, which the next write heals. No portable fix in
+    // Node's fs (it needs renameat2/O_TMPFILE).
     fs.renameSync(tmp, destPath);
   } catch (err) {
     // Remove the temp file on any failure so a partial write leaves no orphan.
