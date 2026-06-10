@@ -320,4 +320,26 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
     expect(record.localIdentity).toBe(party.local);
     expect(record.partnerIdentity).toBe(party.partner);
   }
+
+  // -- Every secret-bearing artifact is written owner-only (0600). --
+  // The key files hold the rotated shared secret, a config may hold inline SFTP
+  // credentials, and the opening file holds the matched data in plaintext -- all
+  // are written via writeFileOwnerOnly / saveKeyFile precisely so group/other
+  // cannot read them. Assert that end to end here (this is the only test that
+  // produces all four real artifacts at once) so a regression that widened any of
+  // their modes is caught, not just one that changed their contents. POSIX-only:
+  // writeFileOwnerOnly uses ACLs on Windows, where the mode bits do not reflect it.
+  if (process.platform !== "win32") {
+    const ownerOnly = [
+      inviteOptions.keyFile,
+      acceptOptions.keyFile,
+      inviteOptions.configFile,
+      acceptOptions.configFile,
+      inviteOptions.recordFile!,
+      acceptOptions.recordFile!,
+      openingPathFor(inviteOptions.recordFile!),
+      openingPathFor(acceptOptions.recordFile!),
+    ];
+    for (const f of ownerOnly) expect(fs.statSync(f).mode & 0o077).toBe(0);
+  }
 }, 60_000);
