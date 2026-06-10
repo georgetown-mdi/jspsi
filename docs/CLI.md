@@ -89,8 +89,6 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 >   invitation" below). A pre-existing configuration on the online path is still
 >   reported as a conflict and the command aborts; remove it or pass
 >   `--config-file` to proceed.
-> - Online invite does not yet revoke or expire the token early on timeout or
->   cancellation; the token simply lapses at its 1-hour expiry.
 > - Online invite does not embed a `connectionEndpoint` in the invitation it
 >   prints; the server location is conveyed only by the printed `psilink accept
 >   URL ...` hint. An offline acceptor of an online-generated invitation

@@ -584,6 +584,80 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   expect(loadKeyFile(keyFileB)?.sharedSecret).toBe(TOKEN_A);
 });
 
+// --- Online invite early-invalidation: nothing persisted before acceptance ---
+//
+// The online-invite revocation guarantee holds by construction: the setup secret
+// is held only in memory and the key file is written only after a successful
+// handshake (saveKeyFile runs inside the post-authentication block). So when the
+// inviter exits before acceptance -- the partner never arrives (accept-timeout /
+// connection timeout) or the user cancels -- no usable credential is left behind.
+// These two tests lock that in for the lone-inviter case.
+
+test("runProtocol writes no key when the partner never arrives (accept-timeout)", async () => {
+  // A lone inviter waits at the rendezvous and the accept-timeout (modeled by a
+  // short peerTimeoutMs) elapses with no peer. The run rejects with a timeout and
+  // must persist nothing: the key file is never created.
+  const keyFile = path.join(tmpDir, "a.key");
+  await expect(
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+        authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+  ).rejects.toThrow(/timed out/i);
+  expect(fs.existsSync(keyFile)).toBe(false);
+});
+
+test("runProtocol writes no key when SIGINT cancels before the handshake completes", async () => {
+  // Cancelling the lone inviter mid-wait (before any peer arrives, so before the
+  // handshake) must leave no usable credential: the in-memory setup secret is
+  // discarded and the key file is never written. process.exit is mocked so the
+  // signal handler runs to completion without terminating the test process.
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  const keyFile = path.join(tmpDir, "a.key");
+  // peerTimeoutMs is generous so the wait does not time out on its own before the
+  // signal arrives; the SIGINT is what ends the run.
+  const p = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1, peerTimeoutMs: 5_000 },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+  );
+  try {
+    // Wait until the inviter has published its rendezvous file (it is now waiting
+    // for a peer in synchronize()), then cancel. A lone party has no peer whose
+    // lock files the cleanup could disrupt, so cancelling during synchronize() is
+    // safe here.
+    await vi.waitFor(
+      () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
+      { timeout: 5_000 },
+    );
+    process.emit("SIGINT");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
+      timeout: 5_000,
+    });
+    // The interrupted run resolves cleanly (the signal handler owns the exit
+    // code); the key file must never have been written.
+    await p;
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
 // --- Token rotation via runProtocol ------------------------------------------
 
 test("both key files hold the same rotated token after a successful exchange", async () => {
