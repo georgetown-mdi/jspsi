@@ -678,6 +678,24 @@ Under `certificate` mode a receipt is accepted only if its asserted [`linkage_te
 
 ---
 
+## Retention and disposition
+
+Optional. A self-facing operator note for the [self-attested exchange record](PROTOCOL.md#self-attested-record): where this party files its copy of the result and under what retention schedule it is held or disposed of. It is purely local -- written into **this** party's record only, never swapped with the partner, cross-checked, or folded into the agreed-terms hash (unlike [linkage terms](#linkage-terms)) -- so the two parties' notes are independent and need not match. Metadata only: it must carry no protected, linkage-field, or payload value.
+
+### `retention_disposition`
+
+*Type:* string  
+*Required:* no  
+*Consistency:* none (per-party; not exchanged)
+
+A free-text pointer recorded verbatim in the exchange record, so an auditor can see from the record alone where the result (the association table and any received payload) went and under what retention schedule -- without hunting that information down separately. When present it must be non-empty; omit the field entirely to record no pointer (its absence is explicit, not an empty string). Because the record is unsigned and local, retention and access control of the record itself remain the holder's responsibility.
+
+```yaml
+retention_disposition: "Filed in Agency A association DB (links.prod); retained 6 years per records schedule RM-7, then purged."
+```
+
+---
+
 ## Input metadata
 
 Optional field-level descriptions of the input dataset. If omitted, semantic types are inferred from column names. If no identifier columns are specified, output row indices reference positions in the input file.

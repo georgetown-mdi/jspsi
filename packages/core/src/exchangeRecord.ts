@@ -24,10 +24,12 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // what was disclosed -- the governing data-sharing agreement, the algorithm, the
 // categories of data exchanged (payload column names/descriptions and the linkage
 // fields the match keyed on), both self-asserted identities, the timestamp, the
-// count of records this party exposed to the exchange, and the result size when
-// both parties are entitled to it -- so an operator can populate a HIPAA accounting
-// of disclosures or a FERPA disclosure record without re-matching the original
-// linkage-terms config. It carries readable governance metadata but NO
+// count of records this party exposed to the exchange, the result size when both
+// parties are entitled to it, and an optional self-facing pointer to where this
+// party filed its copy of the result and under what retention schedule -- so an
+// operator can populate a HIPAA accounting of disclosures or a FERPA disclosure
+// record without re-matching the original linkage-terms config. It carries
+// readable governance metadata but NO
 // protected data: no payload values, no linkage-field values, no matched
 // identifiers. The data exchanged is bound by privacy-preserving commitments, not
 // embedded.
@@ -329,6 +331,17 @@ export interface ExchangeRecord {
    * not by what is theoretically discoverable. Each party's own outbound exposure
    * is carried by {@link recordsExposed} instead. */
   resultSize?: number;
+  /** Optional self-facing retention/disposition pointer: a free-text operator
+   * note recording where this party filed its copy of the result (the
+   * association table / received payload) and under what retention schedule it is
+   * held or disposed of, so the record stands alone for this party's own audit.
+   * Unlike the {@link governance} block, it is NOT drawn from the agreed terms: it
+   * is sourced from this party's local exchange config, never exchanged with the
+   * partner, and not folded into {@link ExchangeRecord.termsHash} -- so the two
+   * parties' records legitimately carry different pointers (or none). Metadata
+   * only: it carries no protected, linkage-field, or payload value. Omitted
+   * entirely when absent -- its absence is explicit, never an empty string. */
+  retentionDisposition?: string;
   /** Per-exchange CSPRNG binder (base64url, >= 128 bits) so two runs with
    * identical terms still produce distinct records. Distinct from the
    * per-commitment salts; not a hiding secret. */
@@ -400,6 +413,11 @@ const nonNegativeCountSchema = (label: string) =>
 const resultSizeSchema = nonNegativeCountSchema("result size");
 const recordsExposedSchema = nonNegativeCountSchema("records exposed");
 
+// The retention/disposition pointer is a non-empty free-text note. An absent
+// pointer is the omitted key, never an empty string, so reject "" here: the
+// builder validates with this same schema, keeping the absence explicit.
+const retentionDispositionSchema = z.string().min(1);
+
 // Shared by the parser and the builder so both agree on what `createdAt` may be:
 // an ISO 8601 datetime in UTC (ending in `Z`). `z.iso.datetime()` rejects
 // timezone offsets by default, which holds the timestamp to a single canonical
@@ -467,6 +485,7 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   governance: ExchangeRecordGovernanceSchema,
   recordsExposed: recordsExposedSchema,
   resultSize: resultSizeSchema.optional(),
+  retentionDisposition: retentionDispositionSchema.optional(),
   bindingNonce: base64UrlSchema,
   commitments: ExchangeRecordCommitmentsSchema,
 });
@@ -518,8 +537,10 @@ export type CommittedPayload = {
  * agreement, matching basis, and payload categories -- all read from
  * `localTerms`). `recordsExposed` is this party's own input row count
  * (always supplied); `resultSize` is set only when both parties are entitled to it
- * (the both-output case); `associationTable` only when this party holds it. The two
- * payload data sets are always committed (a no-data payload is committed as such).
+ * (the both-output case); `associationTable` only when this party holds it;
+ * `retentionDisposition` is an optional self-facing pointer from this party's local
+ * config, independent of `localTerms`/`partnerTerms` and never put on the wire. The
+ * two payload data sets are always committed (a no-data payload is committed as such).
  */
 export interface ExchangeRecordInputs {
   localTerms: LinkageTerms;
@@ -529,6 +550,11 @@ export interface ExchangeRecordInputs {
   recordsExposed: number;
   /** Intersection size; supply only in the both-output case. */
   resultSize?: number;
+  /** Optional self-facing retention/disposition pointer, sourced from this
+   * party's local exchange config (NOT the agreed terms): where this party filed
+   * its copy of the result and its retention schedule. Per-party, never exchanged
+   * with the partner, never hashed. Omit when absent. */
+  retentionDisposition?: string;
   /** The association table; supply only when this party received output. */
   associationTable?: AssociationTable;
   /** The payload this party sent, in the record's canonical committed form. */
@@ -698,6 +724,19 @@ export async function buildExchangeRecord(
     // would later reject or that cannot canonically encode.
     ...(inputs.resultSize !== undefined
       ? { resultSize: resultSizeSchema.parse(inputs.resultSize) }
+      : {}),
+    // Self-facing retention/disposition pointer, copied verbatim from this
+    // party's local config. Omit the key entirely when absent (an absent field
+    // and a null/undefined field are distinct in the canonical encoding the
+    // signing phase will hash over this record). Validate with the same schema the
+    // parser uses, so an empty string throws here rather than producing a record
+    // the parser would later reject.
+    ...(inputs.retentionDisposition !== undefined
+      ? {
+          retentionDisposition: retentionDispositionSchema.parse(
+            inputs.retentionDisposition,
+          ),
+        }
       : {}),
     bindingNonce: toBase64Url(bindingNonce),
     commitments: recordCommitments as ExchangeRecordCommitments,
