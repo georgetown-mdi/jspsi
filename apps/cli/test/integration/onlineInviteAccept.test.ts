@@ -86,21 +86,38 @@ function testOptions(label: string): CommonBootstrapOptions {
   };
 }
 
-// writeOutput closes its write stream without awaiting 'finish', so the file may
-// lag a tick behind runOnlineBootstrap resolving. Poll until present and stable.
-async function readWhenReady(file: string): Promise<string> {
+// writeOutput emits the header and each row as separate write() calls and closes
+// the stream without awaiting 'finish', so a reader can briefly observe a partial
+// file (header only, or header plus some rows). Poll until the file holds exactly
+// the expected line count (header + dataRows) AND is byte-stable across two reads,
+// so a partial flush that happens to repeat within one 20 ms window is never
+// mistaken for the complete output. On timeout, report the last content seen, so a
+// genuine stall (or an unexpected row count) is diagnosable rather than blamed on
+// an empty file. Stricter than the sibling authenticatedExchange test's
+// stability-only poll because here the exact output shape is known up front.
+async function readStableOutput(file: string, dataRows: number): Promise<string> {
+  const expectedLines = 1 + dataRows;
   const deadline = Date.now() + 5_000;
   let last = "";
   for (;;) {
+    let cur = "";
     try {
-      const cur = await fsp.readFile(file, "utf8");
-      if (cur.length > 0 && cur === last) return cur;
-      last = cur;
+      cur = await fsp.readFile(file, "utf8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
+    if (
+      cur.length > 0 &&
+      cur === last &&
+      cur.trim().split("\n").length === expectedLines
+    )
+      return cur;
     if (Date.now() > deadline)
-      throw new Error(`output file ${file} never stabilized with content`);
+      throw new Error(
+        `output file ${file} did not reach ${expectedLines} stable lines ` +
+          `within 5s; last saw ${cur.length} bytes: ${JSON.stringify(cur)}`,
+      );
+    last = cur;
     await new Promise<void>((r) => setTimeout(r, 20));
   }
 }
@@ -218,27 +235,28 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   // side's output is the association table -- "row_id,their_row_id" -- pairing the
   // local matched row index to the partner's. The two matched records (Bob row 0,
   // Carol row 1) appear on both sides; the inviter's extra Dave (row 2) does not.
-  const inviteCsv = await readWhenReady(inviteOut);
-  const acceptCsv = await readWhenReady(acceptOut);
-  const matched = (csv: string): { header: string; ourRowIds: Set<string> } => {
+  // Both files are written concurrently by the two runOnlineBootstrap calls, so
+  // poll them concurrently; readStableOutput already pins each to exactly two data
+  // rows, so a wrong count fails there with a diagnostic rather than here.
+  const [inviteCsv, acceptCsv] = await Promise.all([
+    readStableOutput(inviteOut, 2),
+    readStableOutput(acceptOut, 2),
+  ]);
+  const matched = (csv: string): { header: string; pairs: Set<string> } => {
     const lines = csv.trim().split("\n");
-    return {
-      header: lines[0],
-      ourRowIds: new Set(lines.slice(1).map((l) => l.split(",")[0])),
-    };
+    return { header: lines[0], pairs: new Set(lines.slice(1)) };
   };
   const inviteMatched = matched(inviteCsv);
   const acceptMatched = matched(acceptCsv);
-  // Header plus exactly the two matched pairs on each side (the count assertion
-  // also guards against duplicate rows the Set below would otherwise mask).
-  expect(inviteCsv.trim().split("\n").length).toBe(1 + 2);
-  expect(acceptCsv.trim().split("\n").length).toBe(1 + 2);
   expect(inviteMatched.header).toBe("row_id,their_row_id");
   expect(acceptMatched.header).toBe("row_id,their_row_id");
-  // Exactly rows 0 (Bob) and 1 (Carol) matched on both sides; the inviter's
-  // extra Dave (row 2) is absent, so the intersection filtered him out.
-  expect(inviteMatched.ourRowIds).toEqual(new Set(["0", "1"]));
-  expect(acceptMatched.ourRowIds).toEqual(new Set(["0", "1"]));
+  // Assert the full association, both columns: Bob (row 0) and Carol (row 1)
+  // matched and are identity-mapped to the partner's rows -- both inputs list them
+  // in the same order -- so a bug that cross-wired the partner indices would fail
+  // here, not just one that dropped a row. The inviter's extra Dave (row 2) is
+  // absent from both, so the intersection filtered him out.
+  expect(inviteMatched.pairs).toEqual(new Set(["0,0", "1,1"]));
+  expect(acceptMatched.pairs).toEqual(new Set(["0,0", "1,1"]));
 
   // -- Both config files are written after the exchange (saveConfig-after-
   //    runProtocol), carrying the connection but never the shared secret. --
@@ -249,7 +267,10 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
     expect((spec.connection as FileDropConnectionConfig).path).toBe(
       fileURLToPath(url),
     );
-    // The shared secret lives only in the key file; saveConfig strips it.
-    expect(spec.connection.authentication?.sharedSecret).toBeUndefined();
+    // The shared secret lives only in the key file. saveConfig persists the bare
+    // connection (no authentication), so assert the whole block is absent -- a
+    // check on `authentication?.sharedSecret` alone would pass vacuously whether
+    // the block was stripped or merely missing that one field.
+    expect(spec.connection.authentication).toBeUndefined();
   }
 }, 60_000);
