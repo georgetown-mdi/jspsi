@@ -209,8 +209,8 @@ export async function validateInvite(params: {
   // exceed it, so only an --expires-in override is ever bounded here.
   if (lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS)
     throw new UsageError(
-      `--expires-in must not exceed 365d (the maximum invitation lifetime); ` +
-        `got ${expiresIn}`,
+      `--expires-in must not exceed ${MAX_INVITATION_LIFETIME_SECONDS / 86400}d ` +
+        `(the maximum invitation lifetime); got ${expiresIn}`,
     );
 
   if (resolved.mode === "online") {
@@ -407,7 +407,13 @@ export async function handler(argv: Arguments): Promise<void> {
     const acceptTimeout =
       (argv["accept-timeout"] as number | undefined) ??
       DEFAULT_ACCEPT_TIMEOUT_SECONDS;
-    const expiresIn = argv["expires-in"] as string | undefined;
+    // yargs collects a repeated flag into an array; reject that cleanly rather
+    // than letting an array reach the string-typed parseDuration (which would
+    // throw a raw TypeError on .trim() and surface as a confusing exit 69).
+    const expiresInArg = argv["expires-in"];
+    if (Array.isArray(expiresInArg))
+      throw new UsageError("--expires-in may be given only once");
+    const expiresIn = expiresInArg as string | undefined;
     const positionals = (argv["args"] as Array<string> | undefined) ?? [];
     const resolved = resolveInvitePositionals(positionals);
     const ready = await validateInvite({
