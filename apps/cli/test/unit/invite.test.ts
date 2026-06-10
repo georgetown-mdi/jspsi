@@ -456,6 +456,46 @@ test("validateInvite: a zero --expires-in is rejected before any token is minted
   await expect(promise).rejects.toThrow(/duration/);
 });
 
+test("validateInvite: an --expires-in beyond the one-year maximum is rejected before any token is minted", async () => {
+  // Nonexistent input, as in the zero case: the override is bounded at the top
+  // of validateInvite, so the ceiling rejection -- not the missing input -- is
+  // what surfaces, proving no token is minted.
+  const promise = validateInvite({
+    resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+    options: testOptions(),
+    acceptTimeout: 900,
+    expiresIn: "366d",
+    log: silentLog,
+  });
+  await expect(promise).rejects.toBeInstanceOf(UsageError);
+  await expect(promise).rejects.toThrow(/expires-in must not exceed/);
+});
+
+test("validateInvite: an --expires-in at the one-year maximum is accepted", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-max-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const before = Date.now();
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    expiresIn: "365d",
+    log: silentLog,
+  });
+  const after = Date.now();
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.expires).toBeDefined();
+  if (token.expires === undefined) return;
+  const oneYear = 365 * 24 * 60 * 60 * 1000;
+  const expiresMs = new Date(token.expires).getTime();
+  expect(expiresMs).toBeGreaterThanOrEqual(before + oneYear);
+  expect(expiresMs).toBeLessThanOrEqual(after + oneYear);
+});
+
 test("validateInvite: --expires-in applies on the offlineFromConfig path", async () => {
   const terms = defaultTerms();
   const { dir, configPath, keyPath } = withConfig(terms);

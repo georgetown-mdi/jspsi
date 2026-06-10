@@ -44,6 +44,16 @@ import {
 // the rendezvous, not how long the token stays valid.
 const INVITATION_LIFETIME_SECONDS = 60 * 60;
 
+// Upper bound on an --expires-in override. The setup secret is short-lived by
+// design (docs/SECURITY_DESIGN.md), so its lifetime is bounded -- but the bound
+// is deliberately generous, not tight: exchanges often run only monthly, and an
+// agency may need the invitation to outlast several months of breakage before
+// re-inviting, against credential-rotation schedules that in practice are often
+// "never". A one-year ceiling accommodates that while still rejecting an absurd
+// value (a fat-fingered "999999d") that would make the secret effectively
+// permanent and defeat the bounded-lifetime property.
+const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
+
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
     cmd
@@ -81,8 +91,9 @@ export function builder(cmd: Argv): Argv {
     .option("expires-in", {
       type: "string",
       describe:
-        "override the invitation lifetime (default: 1 hour). A duration with " +
-        "a required unit suffix: s, m, h, or d, e.g. 45s, 30m, 2h, or 1d",
+        "override the invitation lifetime (default: 1 hour, maximum: 365d). A " +
+        "duration with a required unit suffix: s, m, h, or d, e.g. 45s, 30m, " +
+        "2h, or 1d",
     });
 }
 
@@ -193,6 +204,14 @@ export async function validateInvite(params: {
     expiresIn !== undefined
       ? parseDuration(expiresIn) / 1000
       : INVITATION_LIFETIME_SECONDS;
+  // Reject an override past the ceiling before any side effect (mirrors the
+  // zero/negative rejection inside parseDuration). The default path cannot
+  // exceed it, so only an --expires-in override is ever bounded here.
+  if (lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS)
+    throw new UsageError(
+      `--expires-in must not exceed 365d (the maximum invitation lifetime); ` +
+        `got ${expiresIn}`,
+    );
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
