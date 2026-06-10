@@ -92,9 +92,10 @@ describe("sanitizeForDisplay", () => {
   });
 
   test("bounds the output length, not the input code-point count", () => {
-    // Each astral emoji escapes to a 10-char \u{1f600}; a code-point cap would
-    // let the output run to ~10x. The cap bounds the escaped output instead, so
-    // even an all-astral hostile value stays small.
+    // Each astral emoji escapes to a 9-char \u{1f600} (up to 10 for a 6-hex-digit
+    // code point); a code-point cap would let the output run to ~10x. The cap
+    // bounds the escaped output instead, so an all-astral hostile value stays
+    // small.
     const hostile = "\u{1f600}".repeat(500);
     const out = sanitizeForDisplay(hostile, { maxLength: 64 });
     expect(out.length).toBeLessThanOrEqual(

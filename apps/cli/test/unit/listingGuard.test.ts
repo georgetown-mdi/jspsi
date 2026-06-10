@@ -73,8 +73,9 @@ describe("filenameTooLongError", () => {
   });
 
   test("stays bounded even when the name is all non-ASCII (escapes expand each char)", () => {
-    // Each astral emoji escapes to a 10-char \u{...}; the preview bounds the
-    // escaped output, not the code-point count, so the message cannot balloon.
+    // Each astral emoji escapes to a 9-char \u{...} (up to 10 for a 6-hex-digit
+    // code point); the preview bounds the escaped output, not the code-point
+    // count, so the message cannot balloon.
     const hostile = "\u{1f600}".repeat(5000);
     const err = filenameTooLongError("/drop", hostile, 255);
     expect(err.message).not.toContain(hostile);

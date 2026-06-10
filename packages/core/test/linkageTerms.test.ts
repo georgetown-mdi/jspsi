@@ -200,6 +200,27 @@ test("safeParseLinkageTerms returns success: false on invalid input", () => {
   expect(result.success).toBe(false);
 });
 
+test("a parse error does not echo the partner-supplied received value", () => {
+  // protocolSetup leaves the Zod parse-error message unsanitized on the premise
+  // that Zod reports the expected type/options and the schema path, never the
+  // received value, so the message carries no partner-controlled bytes. Pin that
+  // premise: invalid fields carrying control/ANSI and bidi-override bytes must
+  // not surface raw in the error message. A future Zod upgrade that began echoing
+  // received values would fail here, flagging that the parse-error path now needs
+  // sanitizing before it reaches operator output (CLI logs, web error alert).
+  const evil = "\x1b[31mEVIL\x1b[0m‮";
+  const result = safeParseLinkageTerms({
+    ...base,
+    algorithm: evil, // invalid enum
+    version: evil, // invalid semver
+  });
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.message).not.toContain("\x1b");
+    expect(result.error.message).not.toContain("‮");
+  }
+});
+
 // ─── version semver format ───────────────────────────────────────────────────
 
 test.each([

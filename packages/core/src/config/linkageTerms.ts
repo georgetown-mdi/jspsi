@@ -571,13 +571,16 @@ export function validateCompatibility(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // Every value interpolated into an operator-facing message below is routed
-  // through sanitizeForDisplay. A mismatch echoes a partner-supplied string (a
-  // mutually-distrusting party controls reference/purpose/identity/column names)
-  // into the local operator's logs or UI, where raw ANSI/control characters or
-  // deceptive Unicode could spoof or mislead; the schema-bounded fields go
-  // through it too, for uniformity and defense in depth if a bound is ever
-  // loosened. The equality CHECKS always compare the RAW values -- sanitizing is
+  // Every value interpolated into an operator-facing message below -- both the
+  // local and the partner side of a mismatch -- is routed through
+  // sanitizeForDisplay. The threat is the partner side: a mutually-distrusting
+  // party controls reference/purpose/identity/column names, and raw ANSI/control
+  // characters or deceptive Unicode there could spoof or mislead in the local
+  // operator's logs or UI. The local values are the operator's own validated
+  // config, so sanitizing them is a no-op today; they take the same path anyway,
+  // for uniformity (no future edit reintroduces a raw interpolation beside a
+  // sanitized one) and defense in depth (a loosened schema bound stays covered).
+  // The equality CHECKS always compare the RAW values -- sanitizing is
   // display-only and lossy (it truncates), so comparing sanitized forms could
   // mask a genuine mismatch.
   if (local.version !== partner.version) {
