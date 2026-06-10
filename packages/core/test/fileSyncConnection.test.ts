@@ -6958,10 +6958,21 @@ test("poll refuses an over-cap message before reading it into memory", async () 
         ),
       ),
     ]);
+    // The over-cap refusal must be terminal, not just typed: the poller stops
+    // itself before emitting. Do NOT stop it here, so a wrong reschedule -- which
+    // would re-list the still-present over-cap file and re-emit every
+    // pollingFrequency -- surfaces instead of being hidden by an immediate stop().
+    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+      false,
+    );
+    // Several poll intervals; a rescheduled poll would emit a second error.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     conn.stop();
   });
 
   expect(getCount).toBe(0);
+  // Exactly one error after the settle above: refused once and stopped, not
+  // re-emitted on the never-deleted over-cap file each cycle.
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(FrameSizeExceededError);
   // FrameSizeExceededError is a UsageError, so the failure is the terminal,
