@@ -30,18 +30,24 @@ export const withTimeout = <T>(
  * Calls `fn` up to `retries + 1` times, waiting `delay` ms between attempts.
  * Resolves with the first successful result; rejects with the last error if
  * all attempts fail.
+ *
+ * `shouldRetry` gates each retry on the error just thrown (default: retry on any
+ * error). A caller whose operation is not idempotent passes a predicate so only
+ * errors that prove the operation did not take effect are re-issued; an error
+ * for which it returns false rejects immediately without consuming a retry.
  */
 export const retryPromise = <T>(
   fn: () => Promise<T>,
   retries: number,
   delay: number,
+  shouldRetry: (error: unknown) => boolean = () => true,
 ) => {
   return new Promise<T>((resolve, reject) => {
     function attempt() {
       fn()
         .then(resolve)
         .catch((error: unknown) => {
-          if (retries > 0) {
+          if (retries > 0 && shouldRetry(error)) {
             --retries;
             setTimeout(attempt, delay);
           } else {

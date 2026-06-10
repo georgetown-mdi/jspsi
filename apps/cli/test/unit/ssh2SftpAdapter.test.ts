@@ -136,13 +136,21 @@ describe("connect retry", () => {
 // --- rename retry ------------------------------------------------------------
 
 describe("rename retry", () => {
-  // rename() wraps client.rename in the same retryPromise(fn, retries, 100) as
-  // put(), so a transient SSH_FX_FAILURE under load (the `_rename: Failure` that
-  // crashed the mixed-connection rendezvous joiner) recovers on a re-issue
-  // instead of aborting the exchange. These tests pin that bounded-retry
-  // contract: a transient failure is absorbed, a persistent one still surfaces
-  // after a bounded number of attempts.
-  test("retries a transient rename failure and resolves", async () => {
+  // rename() wraps client.rename in retryPromise, but -- unlike the idempotent
+  // put() -- gates the retry on the generic SSH_FX_FAILURE (status 4): the
+  // "operation did not take effect" code that surfaced as the `_rename: Failure`
+  // crashing the mixed-connection rendezvous joiner under load. These tests pin
+  // that contract: a transient status-4 failure is absorbed within a bounded
+  // budget, a persistent one still surfaces after the bound, and a non-status-4
+  // failure (e.g. SSH_FX_NO_SUCH_FILE) is terminal and is NOT retried, so a
+  // succeeded-but-lost-reply rename cannot be amplified into a spurious error.
+
+  // An error shaped like the one ssh2-sftp-client surfaces: the raw numeric SFTP
+  // status on `code` (passed through fmtError).
+  const sftpError = (message: string, code: number) =>
+    Object.assign(new Error(message), { code });
+
+  test("retries a transient SSH_FX_FAILURE and resolves", async () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
@@ -150,7 +158,7 @@ describe("rename retry", () => {
       const rename = vi.fn().mockImplementation(async () => {
         // Fail the first two attempts with the server's generic failure, then
         // succeed -- the shape of the observed transient flake.
-        if (++calls < 3) throw new Error("_rename: Failure");
+        if (++calls < 3) throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).log = { warn: vi.fn() };
@@ -170,14 +178,14 @@ describe("rename retry", () => {
     }
   });
 
-  test("rejects with the last error after exhausting the bounded retries", async () => {
+  test("rejects after exhausting the bounded retries on persistent SSH_FX_FAILURE", async () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
       let calls = 0;
       const rename = vi.fn().mockImplementation(async () => {
         calls++;
-        throw new Error("_rename: Failure");
+        throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).log = { warn: vi.fn() };
@@ -194,6 +202,37 @@ describe("rename retry", () => {
       await vi.advanceTimersByTimeAsync(250);
       await assertion;
       expect(calls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not retry a non-SSH_FX_FAILURE error (NO_SUCH_FILE surfaces at once)", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let calls = 0;
+      const rename = vi.fn().mockImplementation(async () => {
+        calls++;
+        // SSH_FX_NO_SUCH_FILE (2): the code a second attempt would see if the
+        // first rename had actually succeeded but its reply was lost. Retrying
+        // it would manufacture a spurious failure from a successful rename, so
+        // it must be terminal -- one attempt, no re-issue.
+        throw sftpError("_rename: No such file or directory", 2);
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { rename };
+
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      const assertion = expect(renaming).rejects.toThrow("No such file");
+      // Advancing well past several retry windows proves no retry was scheduled.
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+      expect(calls).toBe(1);
     } finally {
       vi.useRealTimers();
     }

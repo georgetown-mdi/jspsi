@@ -44,6 +44,13 @@ interface Ssh2DirEntry {
 // Error carrying the numeric SFTP status code on `code`.
 type Ssh2SftpError = Error & { code?: number };
 
+// SSH_FX_FAILURE: the generic SFTPv3 status (4) a server returns when an
+// operation did not take effect for a reason it does not further classify. The
+// numeric value reaches us because ssh2-sftp-client passes ssh2's raw status
+// through fmtError onto err.code (the same premise createExclusive's code-4
+// handling relies on).
+const SSH_FX_FAILURE = 4;
+
 // Typed interface for the internal ssh2 SFTPWrapper that ssh2-sftp-client
 // exposes as `this.sftp`. Defined at file scope so connect(), createExclusive(),
 // and list() can share it without repeating the declaration.
@@ -637,20 +644,27 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   rename(fromPath: string, toPath: string): Promise<void> {
     const dead = this.deadSessionError("file rename", fromPath);
     if (dead) return Promise.reject(dead);
-    // Mirror put()'s transient-fault retry. A momentary SSH_FX_FAILURE from the
-    // server under load -- observed as `_rename: Failure` on the rendezvous
-    // joiner's <id>-joining.json -> <id>-hello.json publish, and equally
-    // reachable on send()/writeAck()'s temp-file -> final-name publishes --
-    // recovers on a re-issue against the still-live session. A deterministic
-    // failure (e.g. the destination already exists) still exhausts the attempts
-    // and surfaces, so the retry smooths transient faults without masking a real
-    // error. The retry count tracks put()'s so the mutating SFTP ops share one
-    // resilience policy rather than rename being the lone op without it.
+    // Retry a transient rename failure under put()'s bounded budget (one initial
+    // attempt plus up to `retries` re-issues, 100 ms apart), but -- unlike put(),
+    // which is idempotent -- only on the generic SSH_FX_FAILURE (status 4). That
+    // is the "operation did not take effect" code that surfaced as the
+    // intermittent `_rename: Failure` on the rendezvous joiner's
+    // <id>-joining.json -> <id>-hello.json publish (and is equally reachable on
+    // send()/writeAck()'s temp-file -> final-name publishes): the server reported
+    // the rename did not happen, so `fromPath` still exists and a re-issue is
+    // safe. Every other status is terminal and surfaces at once -- crucially
+    // SSH_FX_NO_SUCH_FILE (2), which a second attempt would see if the first had
+    // actually succeeded but its reply was lost; retrying that would turn a
+    // succeeded rename into a spurious error. ssh2-sftp-client passes the raw
+    // ssh2 numeric status through fmtError to err.code (the same premise
+    // createExclusive relies on); a non-status library error (e.g. a dead-session
+    // 'ERR_GENERIC_CLIENT') is not 4 and so is not retried.
     return this.warnIfSlow(
       retryPromise(
         () => this.client.rename(fromPath, toPath).then(() => {}),
         this.options!.retries || 5,
         100,
+        (error) => (error as Ssh2SftpError | null | undefined)?.code === SSH_FX_FAILURE,
       ),
       "rename",
       `${fromPath} to ${toPath}`,
