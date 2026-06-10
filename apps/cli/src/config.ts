@@ -161,6 +161,26 @@ export function announceRetainMode(
   }
 }
 
+/**
+ * Validates the CLI-only entry-sweep flags. `--force-retain-sweep` is an
+ * escalation of `--sweep-exchange-files`, never a standalone control: passing it
+ * on its own is a {@link UsageError} (CLI exit 64) so it cannot be left set as a
+ * permanent "always force" habit. Whether retain is actually "in play" is a
+ * runtime property of the directory (the PEER may be the retain party), so it is
+ * NOT checked here -- the connection's pre-sweep inspection enforces that. Shared
+ * by the `exchange` and `zero-setup` commands so the rule cannot drift.
+ */
+export function assertRetainSweepGuard(
+  sweepExchangeFiles: boolean,
+  forceRetainSweep: boolean,
+): void {
+  if (forceRetainSweep && !sweepExchangeFiles)
+    throw new UsageError(
+      "--force-retain-sweep requires --sweep-exchange-files; it escalates the " +
+        "sweep to wipe a retain-mode transcript and is meaningless on its own.",
+    );
+}
+
 // --- Reconciliation (pre-existing config vs invitation / URL) ----------------
 
 /**

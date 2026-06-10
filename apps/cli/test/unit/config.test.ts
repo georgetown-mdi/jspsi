@@ -10,6 +10,7 @@ import {
 } from "@psilink/core";
 import {
   applyConnectionOverrides,
+  assertRetainSweepGuard,
   diffLinkageTerms,
   formatReconcileDiffs,
   loadConfigLinkageSource,
@@ -737,4 +738,47 @@ test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- CLI-only entry-sweep flags (195255994) ----------------------------------
+
+test("connection.options.sweep_exchange_files is not a persistable config field (CLI-only)", () => {
+  // The entry sweep is invocation-scoped: FileSyncOptionsSchema has no such
+  // field, so the snake_case key is stripped at parse rather than flowing into
+  // the connection options (where open() would otherwise read it).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const spec: ExchangeSpec = {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+    saveConfig(configPath, spec);
+    const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    raw.connection.options = {
+      ...(raw.connection.options ?? {}),
+      sweep_exchange_files: true,
+      force_retain_sweep: true,
+    };
+    const parsed = parseExchangeSpec(raw);
+    const options = parsed.connection.options as
+      | Record<string, unknown>
+      | undefined;
+    expect(options?.["sweepExchangeFiles"]).toBeUndefined();
+    expect(options?.["forceRetainSweep"]).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other combinations pass", () => {
+  expect(() => assertRetainSweepGuard(false, true)).toThrow(UsageError);
+  expect(() => assertRetainSweepGuard(false, true)).toThrow(
+    "--force-retain-sweep requires --sweep-exchange-files",
+  );
+  expect(() => assertRetainSweepGuard(true, true)).not.toThrow();
+  expect(() => assertRetainSweepGuard(true, false)).not.toThrow();
+  expect(() => assertRetainSweepGuard(false, false)).not.toThrow();
 });
