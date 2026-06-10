@@ -109,7 +109,7 @@ The pre-shared secret remains the baseline authentication anchor -- low setup fr
 
 ## Required permissions
 
-**Unix**: The CLI writes `.psilink.key` with mode `0600` (owner-read-only). If an existing key file has any group or world permission bits set (i.e. `mode & 0o077` is non-zero), the CLI emits a warning on load. Correct the permissions before running further exchanges:
+**Unix**: The CLI writes `.psilink.key` with mode `0600` (owner-read-only). The write goes to a sibling temp file created on an exclusive, non-following descriptor (`O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW`) whose mode is set on the descriptor before any content is written, then atomically renamed into place, mirroring the Windows create-then-restrict discipline below: a symlink planted at the temp path cannot redirect the write to another file. If an existing key file has any group or world permission bits set (i.e. `mode & 0o077` is non-zero), the CLI emits a warning on load. Correct the permissions before running further exchanges:
 
 ```sh
 chmod 0600 .psilink.key
