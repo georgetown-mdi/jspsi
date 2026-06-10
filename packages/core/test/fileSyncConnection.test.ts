@@ -1060,6 +1060,120 @@ test("synchronize() surfaces a stalled peer-hello read as a terminal TransportOp
   expect(peerHelloReads).toBe(1);
 });
 
+test("synchronize() propagates a base UsageError from a transport read as the terminal exit-64 failure, not retried", async () => {
+  // The two cases above cover the concrete FrameSizeExceededError and
+  // TransportOperationStalledError subclasses; this pins the contract at the
+  // UsageError BASE class the gate's catch (and the poll loop) actually key off
+  // ("if (err instanceof UsageError) throw err"), so the terminal behavior is the
+  // class-level invariant rather than a per-subclass coincidence -- a future
+  // UsageError subclass thrown from a transport read is terminal for free. The
+  // rejection being an instanceof UsageError is exactly the exit-64 (EX_USAGE)
+  // classification the CLI maps from this base class.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const peerHelloPath = `${conn.path}/${peerHelloName}`;
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial check: directory is clean
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  // The peer-hello read rejects with a bare UsageError (the base class, not one of
+  // the typed transport bounds). Count reads to prove the gate propagates it on
+  // the first pass instead of retrying at the polling cadence until the TTL.
+  let peerHelloReads = 0;
+  const originalGet = client.get;
+  client.get = async (path: string) => {
+    if (path === peerHelloPath) {
+      peerHelloReads++;
+      throw new UsageError(`usage fault reading ${path}`);
+    }
+    return originalGet(path);
+  };
+
+  const rejection = await conn.synchronize().then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(rejection).toBeInstanceOf(UsageError);
+  // Terminal: read once and propagated, not retried until the TTL.
+  expect(peerHelloReads).toBe(1);
+});
+
+test("poll() stops the poller on a UsageError from a transport read, not retried", async () => {
+  // Companion to the synchronize() propagation tests above, for the OTHER
+  // transport-read retry consumer: the background poll loop. A UsageError from a
+  // message read -- here a stalled get() -- is terminal: poll() stops the poller
+  // and emits the error rather than rescheduling into the same stall. (A transient
+  // non-UsageError read failure reschedules instead; the ENOENT poll tests above
+  // cover that half.) With readControlFileWithGate's gate tests, this pins
+  // terminal-on-UsageError behaviorally at both real consumers of a transport read.
+  const peerId = "peer-test";
+  const errors: unknown[] = [];
+  let getCount = 0;
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+
+  const { client } = makeMockClient();
+  // A peer message whose on-disk size matches its declared byte count, so poll()
+  // clears the frame-size and sync gates and reaches get().
+  client.list = async () => [
+    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+  ];
+  client.get = async () => {
+    getCount++;
+    throw new TransportOperationStalledError(
+      "SFTP file read stalled: received no data for 60000 ms",
+    );
+  };
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+  // Deliberately do NOT stop the poller in the handler: the poller must stop
+  // itself on a UsageError. Were it to reschedule instead, get() would be
+  // re-called every pollingFrequency and getCount would climb past 1.
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2000,
+      ),
+    ),
+  ]);
+  // A terminal poller schedules no next cycle, so getCount is already final at 1
+  // the moment the error fires -- this wait cannot make a stopped poller fail. It
+  // only gives a WRONG reschedule (which fires every pollingFrequency = 10 ms)
+  // several intervals to surface and bump getCount past 1, mirroring the margin
+  // the "close() stops a running poller" test above uses for the same assertion.
+  await new Promise((r) => setTimeout(r, 60));
+  conn.stop();
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect(errors[0]).toBeInstanceOf(TransportOperationStalledError);
+  // Terminal: read once and the poller stopped, not retried at the poll cadence.
+  expect(getCount).toBe(1);
+});
+
 // --- whole-exchange liveness backstop (write/stat/delete + slow-drip read) ---
 //
 // The write-path analogue of the read-path liveness test above. The CLI adapter's
@@ -6844,10 +6958,21 @@ test("poll refuses an over-cap message before reading it into memory", async () 
         ),
       ),
     ]);
+    // The over-cap refusal must be terminal, not just typed: the poller stops
+    // itself before emitting. Do NOT stop it here, so a wrong reschedule -- which
+    // would re-list the still-present over-cap file and re-emit every
+    // pollingFrequency -- surfaces instead of being hidden by an immediate stop().
+    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+      false,
+    );
+    // Several poll intervals; a rescheduled poll would emit a second error.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     conn.stop();
   });
 
   expect(getCount).toBe(0);
+  // Exactly one error after the settle above: refused once and stopped, not
+  // re-emitted on the never-deleted over-cap file each cycle.
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(FrameSizeExceededError);
   // FrameSizeExceededError is a UsageError, so the failure is the terminal,
@@ -7006,7 +7131,11 @@ test("synchronize() default: a foreign file is tolerated, snapshotted, and not d
   files.set(`/test/${peerHelloName}`, LOCK_HELLO_BODY);
   files.set("/test/notes.txt", Buffer.from("unrelated"));
   client.list = async () => [
-    { name: peerHelloName, modifyTime: Date.now(), size: LOCK_HELLO_BODY.length },
+    {
+      name: peerHelloName,
+      modifyTime: Date.now(),
+      size: LOCK_HELLO_BODY.length,
+    },
     { name: "notes.txt", modifyTime: Date.now(), size: 9 },
   ];
 
@@ -7306,7 +7435,8 @@ test("synchronize() --sweep-exchange-files: one delete failure still attempts ev
   const origDelete = client.delete.bind(client);
   client.delete = async (p: string) => {
     attempted.push(p);
-    if (p.endsWith("a-b-lock.json")) throw new Error("transport refused delete");
+    if (p.endsWith("a-b-lock.json"))
+      throw new Error("transport refused delete");
     return origDelete(p);
   };
 
