@@ -339,12 +339,42 @@ export function writeFileOwnerOnly(
       // ACL is now restricted; write the content into the already-protected file.
       fs.writeFileSync(tmp, content, "utf8");
     } else {
-      // chmodSync corrects for a restrictive umask (e.g. 0277 -> 0400) that
-      // would prevent the CLI from rewriting the file (e.g. the rotated token)
-      // on a later run.
-      fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
-      fs.chmodSync(tmp, 0o600);
+      // Create the temp file on an exclusive, non-following descriptor so a
+      // symlink planted at the temp path in the unlink->create window cannot
+      // redirect the write to the link's target. O_EXCL refuses to open through
+      // an existing entry at the temp path; O_NOFOLLOW additionally refuses when
+      // the final component is itself a symlink. fchmodSync then sets the exact
+      // mode on the descriptor -- correcting for a restrictive umask (e.g. 0277
+      // -> 0400) that would otherwise prevent a later rewrite of the rotated
+      // token -- rather than chmod-ing a resolved path after the write.
+      const fd = fs.openSync(
+        tmp,
+        fs.constants.O_CREAT |
+          fs.constants.O_EXCL |
+          fs.constants.O_WRONLY |
+          fs.constants.O_NOFOLLOW,
+        0o600,
+      );
+      try {
+        fs.fchmodSync(fd, 0o600);
+        fs.writeFileSync(fd, content, "utf8");
+      } finally {
+        // Guard the close so its failure cannot mask an fchmod/write error in
+        // flight; the outer catch removes the temp file regardless.
+        try {
+          fs.closeSync(fd);
+        } catch {
+          /* best-effort close; a genuine failure surfaces from the body above */
+        }
+      }
     }
+    // Known limitation: the exclusive create above closes the unlink->create
+    // window, but a narrow one remains between it and the rename/link below,
+    // where a directory-writer could swap tmp for a symlink and leave destPath a
+    // redirecting link. It leaks nothing -- the secret is already in the real
+    // tmp inode, never written through a link -- and the next write heals it;
+    // fully closing it needs renameat2(RENAME_NOREPLACE)/O_TMPFILE, which Node's
+    // fs does not expose.
     if (options.exclusive) {
       // Atomic create-if-absent: linkSync fails if destPath already exists,
       // closing the create-time race that renameSync (which silently overwrites)
@@ -381,7 +411,9 @@ export function writeFileOwnerOnly(
     // Remove the temp file on any failure -- not just the icacls case -- so a
     // partial write never leaves a `.tmp.<pid>` orphan beside the destination.
     // A caller's own rollback cannot do this: it does not know the pid-qualified
-    // temp name.
+    // temp name. When the failure was the exclusive open refusing a symlink
+    // planted at the temp path, this removes that link itself (unlink never
+    // follows it, so the link's target is untouched), clearing the slot.
     try {
       fs.unlinkSync(tmp);
     } catch {
@@ -417,14 +449,49 @@ export function writeFileAtomic(
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
   try {
-    fs.writeFileSync(tmp, content, { encoding: "utf8", mode });
-    // writeFileSync's mode is masked by the umask; chmod sets it exactly so a
-    // restrictive umask cannot leave the shared file unreadable to its audience.
-    // (On Windows chmod only toggles the read-only bit; the public default ACL
-    // already lets a partner read the exported certificate.)
-    fs.chmodSync(tmp, mode);
+    // Create the temp file on an exclusive, non-following descriptor so a
+    // symlink planted at the temp path in the unlink->create window cannot
+    // redirect the write to the link's target. O_EXCL is the cross-platform
+    // guard -- it refuses to create over any existing entry, a symlink included;
+    // O_NOFOLLOW adds POSIX-only defense-in-depth against a final-component
+    // symlink. @types/node types O_NOFOLLOW as a number, but it is genuinely
+    // absent on Windows, so `?? 0` drops it from the mask there (rather than
+    // relying on `undefined | x === x`), leaving the O_EXCL create unchanged.
+    const fd = fs.openSync(
+      tmp,
+      fs.constants.O_CREAT |
+        fs.constants.O_EXCL |
+        fs.constants.O_WRONLY |
+        (fs.constants.O_NOFOLLOW ?? 0),
+      mode,
+    );
+    try {
+      // The open mode is masked by the umask; fchmod sets it exactly on the
+      // descriptor so a restrictive umask cannot leave the shared file
+      // unreadable to its audience. (On Windows fchmod only toggles the
+      // read-only bit; the public default ACL already lets a partner read the
+      // exported certificate.)
+      fs.fchmodSync(fd, mode);
+      fs.writeFileSync(fd, content, "utf8");
+    } finally {
+      // Guard the close so its failure cannot mask an fchmod/write error in
+      // flight; the outer catch removes the temp file regardless.
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* best-effort close; a genuine failure surfaces from the body above */
+      }
+    }
+    // Same narrow tmp-swap window as writeFileOwnerOnly (between the close above
+    // and this rename); for this public artifact it only risks leaving destPath
+    // a redirecting symlink, which the next write heals. No portable fix in
+    // Node's fs (it needs renameat2/O_TMPFILE).
     fs.renameSync(tmp, destPath);
   } catch (err) {
+    // Remove the temp file on any failure so a partial write leaves no orphan.
+    // If the failure was the exclusive open refusing a symlink planted at the
+    // temp path, this removes that link itself (unlink never follows it, so the
+    // link's target is untouched).
     try {
       fs.unlinkSync(tmp);
     } catch {
