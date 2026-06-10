@@ -106,6 +106,17 @@ const ackMarkerName = (writerId: string, originalName: string): string =>
 export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
+// Bounds the pre-sweep retain-signal inspection's peer-hello read (see
+// sweepExchangeFiles). The read goes through the I5a gate, which retries a
+// partially-synced body until its deadline; bounding it to a small multiple of
+// the polling frequency -- a near-future deadline, never the full peer timeout
+// -- keeps a non-resolving hello from stalling the sweep. The gate's do-while
+// still guarantees one read, so a stale directory's hello resolves on the first
+// attempt; this budget only absorbs sync-tool flush jitter on sync-mediated
+// transports. Hellos are tiny (two booleans), so the read is never
+// bandwidth-bound. Expressed as poll cycles rather than a raw millisecond
+// magic constant so it tracks the configured cadence.
+const RETAIN_INSPECTION_POLL_CYCLES = 2;
 // Consecutive ENOENT from get() after list() surfaced the file indicates a
 // filesystem state that is unlikely to self-resolve: emit an error rather
 // than looping silently until the peer timeout fires.
@@ -140,6 +151,45 @@ const LOCK_SUFFIX = "-lock.json";
 // `joining` (never a `.joining` extension), so the grammar discriminant already
 // excludes it from the message scan (it is not all-digits).
 const JOINING_SUFFIX = "-joining.json";
+
+// Classifies a filename against the protocol filename grammar: true for any
+// protocol artifact (an in-flight temp write, a hello, a lock, a joining
+// sentinel, an ack marker, or a message whose terminal segment is a byte
+// count), false for a "foreign" name that fails the grammar (a conflict copy, a
+// partial download, an unrelated file). This is the single inverse of "foreign"
+// the entry guard and the foreign-file snapshot share, so a name cannot be both
+// snapshotted-as-foreign and a recognized protocol file -- which would silently
+// reintroduce the (rejected) reading where I0 tolerates message-shaped files at
+// entry. A message-shaped <id>-<digits>.json MATCHES here and is therefore a
+// protocol file, never foreign: at the no-flag entry guard it is an unexpected
+// protocol file (rejected), and under --sweep-exchange-files it is swept.
+const isProtocolGrammarName = (name: string): boolean => {
+  if (name.startsWith("temp-") && name.endsWith(".tmp")) return true;
+  if (!name.endsWith(".json")) return false;
+  if (
+    name.endsWith(HELLO_SUFFIX) ||
+    name.endsWith(LOCK_SUFFIX) ||
+    name.endsWith(JOINING_SUFFIX) ||
+    name.endsWith("-ack.json")
+  )
+    return true;
+  return parseMessageByteCount(name) !== undefined;
+};
+
+// True for a retain-only message ack: an `-ack.json` whose segment immediately
+// before `ack` is all digits (the consumed message's byte count). A rendezvous
+// hello-ack has `hello` in that position instead and is written in
+// lockless-delete mode too, so it is NOT a retain signal -- the scan must be
+// grammar-aware, not a bare `-ack.json` match (194304738 unified both markers as
+// `-ack.json`). A message ack is written only in retain mode (delete mode
+// deletes the consumed message rather than acking it), so its mere presence is a
+// definitive retain signal detectable without reading any body.
+const isRetainMessageAck = (name: string): boolean => {
+  if (!name.endsWith("-ack.json")) return false;
+  const inner = name.slice(0, -"-ack.json".length);
+  const preAck = inner.slice(inner.lastIndexOf("-") + 1);
+  return /^\d+$/.test(preAck);
+};
 
 // Bounded window the lock-path peer waits for a joiner that has begun arriving
 // (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
@@ -237,6 +287,19 @@ interface Options {
   // on the order in which retainFiles/locklessRendezvous are assigned during
   // open(). An explicit value always wins.
   unexpectedFiles?: "error" | "warn" | "ignore";
+  // CLI-only, NON-persistable runtime controls for the entry sweep
+  // (--sweep-exchange-files / --force-retain-sweep). Deliberately NOT mirrored
+  // on FileSyncOptions / the Zod config schema: anything there is persistable in
+  // psilink.yaml by construction, which contradicts "invocation-scoped, never
+  // persisted". They reach this type only through the constructor's
+  // Partial<Options> (the verbose/joinerRecoveryMs precedent), never from
+  // config.options in open(). The CLI command layer threads them on a path
+  // separate from config construction (see docs/FILE_SYNC.md).
+  sweepExchangeFiles: boolean;
+  // Escalation of sweepExchangeFiles: permits the sweep to wipe a directory that
+  // shows a retain signal (a durable audit transcript). Meaningless without
+  // sweepExchangeFiles, which the CLI enforces by rejecting it on its own.
+  forceRetainSweep: boolean;
   // How long the lock-path peer waits for a mid-arrival joiner (a visible
   // `<id>-joining.json` sentinel) to finish before treating it as crashed. Not
   // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
@@ -258,6 +321,8 @@ const getDefaultOptions = (): Options => {
     timestampInFilename: false,
     locklessRendezvous: false,
     retainFiles: false,
+    sweepExchangeFiles: false,
+    forceRetainSweep: false,
     joinerRecoveryMs: DEFAULT_JOINER_RECOVERY_MS,
   };
 };
@@ -391,6 +456,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // (resetSessionState) so a name reused across exchanges on the same instance
   // can warn again.
   private warnedUnexpectedFiles = new Set<string>();
+  // Foreign (grammar-failing) file names present in the directory at
+  // synchronize() entry. Recorded so the poll loop tolerates them
+  // (isRecognizedLoopFile) and 194800733's "new foreign file" warning measures
+  // only names that appear AFTER entry. Grammar-MATCHING names are never stored
+  // here: a message-shaped <id>-<digits>.json is a protocol file, rejected at
+  // the no-flag entry guard or swept under --sweep-exchange-files, never
+  // snapshotted (see I0). Rebuilt fresh at each synchronize() entry; deliberately
+  // NOT cleared in resetSessionState, whose mid-rendezvous recovery resets would
+  // otherwise wipe a snapshot taken before the rendezvous loop.
+  private foreignFileSnapshot = new Set<string>();
   // An `error` emitted while no listener is registered is held here so the
   // next protocol-layer receive can detect failures that arrived in the gap
   // between listener-registration cycles. Reading clears the value; only the
@@ -737,6 +812,118 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return undefined;
   }
 
+  // Pre-sweep retain-signal inspection followed by the protocol-file sweep for
+  // --sweep-exchange-files. Deletes every protocol-grammar file (this party's
+  // and the peer's: hellos, locks, joining sentinels, acks, messages) so
+  // rendezvous can start against a clean slate -- but only after confirming the
+  // directory is not a retain-mode audit transcript. Retain never deletes its
+  // hellos (I4b), so a retain directory always advertises itself; the inspection
+  // checks two signals with DIFFERENT coverage:
+  //   (a) a retain-only message ack (isRetainMessageAck) -- a filename-only,
+  //       body-free signal. Strictly additive: it does not cover an
+  //       early-rendezvous retain peer that has written no message ack yet.
+  //   (b) the peer hello's `retain_files` flag, read through the I5a gate. This
+  //       is the load-bearing signal -- a retain directory always carries its
+  //       hello, even mid-rendezvous before any message ack exists. The read is
+  //       bounded (RETAIN_INSPECTION_POLL_CYCLES, never peer_timeout_ms) so a
+  //       non-resolving body cannot stall the sweep; an unresolved or
+  //       unparseable body is retain-uncertain and refuses the bare flag.
+  // Local retain mode is a signal too. When any signal is present the bare flag
+  // refuses (exit 64); --force-retain-sweep then permits the wipe after a loud
+  // warning. The sweep uses client.delete (rejects), NOT safeDelete (swallows),
+  // so a delete failure on a transport that cannot delete surfaces as a
+  // transport error (exit 69) rather than a silent "clean slate".
+  //
+  // Best-effort and non-atomic: between this scan and the deletes a live peer
+  // could write a file this never saw. Acceptable only because the operator
+  // asserted no concurrent session by passing the flag.
+  private async sweepExchangeFiles(
+    peerHellos: Array<FileInfo>,
+    unexpectedProtocol: Array<FileInfo>,
+    files: Array<FileInfo>,
+  ): Promise<void> {
+    const signals: string[] = [];
+    let retainUncertain = false;
+
+    if (this.options.retainFiles) signals.push("this party is in retain mode");
+
+    const messageAck = files.find((file) => isRetainMessageAck(file.name));
+    if (messageAck)
+      signals.push(`a retain-mode message ack (${messageAck.name})`);
+
+    // Read peer hello bodies only when no cheaper signal has decided it already:
+    // the hello read is the load-bearing check but the only one that costs a
+    // network round trip.
+    if (signals.length === 0) {
+      const inspectionDeadline = new Date(
+        Date.now() +
+          RETAIN_INSPECTION_POLL_CYCLES * this.options.pollingFrequency,
+      );
+      for (const hello of peerHellos) {
+        try {
+          const envelope = await readControlFileWithGate(
+            this.client,
+            `${this.path}/${hello.name}`,
+            inspectionDeadline,
+            this.options.pollingFrequency,
+            HelloEnvelopeSchema,
+            this.abortController.signal,
+          );
+          if (envelope.retainFiles) {
+            signals.push(`peer hello ${hello.name} advertises retain_files=true`);
+            break;
+          }
+        } catch (err) {
+          // A fully-synced hello that fails the schema (or an over-cap body) is a
+          // terminal UsageError (I5b), same classification as 193901017 -- let it
+          // propagate. Any other failure is an unresolved read within the bounded
+          // budget: treat it as retain-uncertain and refuse rather than risk
+          // sweeping a transcript whose mode could not be read.
+          if (err instanceof UsageError) throw err;
+          retainUncertain = true;
+        }
+      }
+    }
+
+    const retainInPlay = signals.length > 0 || retainUncertain;
+
+    if (retainInPlay && !this.options.forceRetainSweep) {
+      const reason = retainUncertain
+        ? "a peer hello body that did not resolve within the inspection budget " +
+          "(retain-uncertain)"
+        : signals.join("; ");
+      throw new UsageError(
+        `path ${this.path} shows a retain-mode signal (${reason}), so ` +
+          "--sweep-exchange-files refuses to delete what may be a durable audit " +
+          "transcript. Re-run with --force-retain-sweep to wipe the prior " +
+          "transcript and start a fresh exchange, after confirming no concurrent " +
+          "session is using this path.",
+      );
+    }
+
+    const toDelete = [...peerHellos, ...unexpectedProtocol];
+
+    if (retainInPlay && this.options.forceRetainSweep)
+      this.log.warn(
+        `[${this.role}] --force-retain-sweep: permanently deleting a ` +
+          `retain-mode audit transcript (${toDelete.length} protocol file(s)) ` +
+          `in ${this.path}. This is destructive and irreversible; the prior ` +
+          "transcript will be lost. Only use --force-retain-sweep when you " +
+          "intend to discard it.",
+      );
+
+    if (toDelete.length === 0) return;
+
+    this.log.info(
+      `[${this.role}] sweeping ${toDelete.length} protocol file(s) at ` +
+        `${this.path} (--sweep-exchange-files): ` +
+        `${toDelete.map((f) => f.name).join(", ")}`,
+    );
+    await Promise.all(
+      toDelete.map((file) => this.client.delete(`${this.path}/${file.name}`)),
+    );
+  }
+
   /**
    * Negotiates rendezvous with the peer by exchanging `-hello.json` and
    * `<peer1>-<peer2>-lock.json` files (lock mode) or `-hello.json` and
@@ -820,18 +1007,25 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.responsibleFiles.delete(fileName);
       });
     // Unified entry precondition (mode-agnostic, both delete and retain). At
-    // synchronize() entry the directory must be empty except for at most one
-    // peer hello -- a hello file whose id is not this party's own. That is the
-    // only file kind that can legitimately predate this party's entry: a party
-    // writes its own hello/lock/ack only after observing the peer's hello, and
-    // messages and ack markers exist only once rendezvous has completed. So the
-    // only thing that can already be present is the other party's hello.
+    // synchronize() entry the only PROTOCOL file that may legitimately predate
+    // this party's entry is at most one peer hello -- a hello whose id is not
+    // this party's own: a party writes its own hello/lock/ack only after
+    // observing the peer's hello, and messages and ack markers exist only once
+    // rendezvous has completed.
     //
-    // Anything else is a protocol error: a second peer hello, a self-hello (a
-    // same-id leftover from a crashed session), a lock, an ack marker, a
-    // message, or any foreign file. This is strict-empty by design (the
-    // directory is the state machine), so a foreign file is rejected rather
-    // than ignored.
+    // Any other protocol file is an error: a second peer hello, a self-hello (a
+    // same-id leftover from a crashed session), a lock, an ack marker, a joining
+    // sentinel, or a stale message. The directory is the state machine, so by
+    // default this stays strict-empty for protocol files. This item (195255994)
+    // adds two relaxations, in the foreign and sweep branches below:
+    //   - FOREIGN files (names that FAIL the protocol grammar -- conflict copies,
+    //     partial downloads, unrelated files) are snapshotted and tolerated in
+    //     both modes, deleting nothing. A message-shaped <id>-<digits>.json is
+    //     NOT foreign (it matches the grammar) and stays a protocol file.
+    //   - --sweep-exchange-files clears the protocol files (this party's and the
+    //     peer's) and proceeds against a clean slate, after a retain-signal
+    //     inspection that refuses to destroy an audit transcript without the
+    //     --force-retain-sweep guard.
     //
     // The one kind that legitimately pre-exists and is NOT rejected is an
     // orphaned temp-*.tmp -- a send()/writeAck() in-flight write whose process
@@ -841,8 +1035,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // (safeDelete then added to `ignored`) so a prior crash's temp artifact is
     // cleaned up rather than left as litter and entry is not aborted on its
     // account. `ignored` is the sanctioned extension point for kinds that may
-    // legitimately pre-exist as the protocol grows -- a future directory
-    // snapshot would extend it the same way.
+    // legitimately pre-exist as the protocol grows; the foreign-file snapshot
+    // below (195255994) is a sibling tolerance mechanism for grammar-failing
+    // names.
     const isPeerHello = (name: string) =>
       name.endsWith(HELLO_SUFFIX) &&
       name.slice(0, -HELLO_SUFFIX.length) !== this.id;
@@ -884,36 +1079,79 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       orphanedTempFiles.forEach((file) => ignored.add(file.name));
     }
 
-    const peerHellos = files.filter((file) => isPeerHello(file.name));
-    const unexpected = files.filter(
-      (file) => !isPeerHello(file.name) && !ignored.has(file.name),
+    let peerHellos = files.filter((file) => isPeerHello(file.name));
+    // Single classification (isProtocolGrammarName), two sides: a FOREIGN file
+    // fails the protocol grammar; an unexpected PROTOCOL file matches it but is
+    // not the one tolerated peer hello. A name therefore cannot be both
+    // snapshotted-as-foreign and a protocol file.
+    const foreignFiles = files.filter(
+      (file) => !ignored.has(file.name) && !isProtocolGrammarName(file.name),
+    );
+    // Protocol-grammar files that are not the tolerated peer hello: a self-hello,
+    // a lock, a joining sentinel, an ack marker, or a stale message. A SECOND
+    // peer hello is counted in peerHellos and caught by the >1 guard below, not
+    // here.
+    const unexpectedProtocol = files.filter(
+      (file) =>
+        !ignored.has(file.name) &&
+        !isPeerHello(file.name) &&
+        isProtocolGrammarName(file.name),
     );
 
-    if (unexpected.length > 0)
-      throw new UsageError(
-        `path ${this.path} must be empty except for a single peer hello at ` +
-          "the start of the protocol, but contains " +
-          `${unexpected.length} unexpected file(s): ` +
-          `${unexpected.map((f) => f.name).join(", ")}. A pre-existing lock ` +
-          "file (-lock.json), ack marker (-ack.json), joining sentinel " +
-          "(-joining.json), message, or " +
-          "self-hello usually " +
-          "means a previous exchange was terminated by SIGKILL/OOM/power loss " +
-          "before its cleanup ran, or -- in retain mode, which never deletes " +
-          "-- that this directory was reused for a second exchange. Remove the " +
-          "listed files after confirming no other session is using this path. " +
-          "An ack marker specifically indicates a crashed lockless rendezvous " +
-          "or a reused retain-mode directory; if a live lockless peer is " +
-          "mid-rendezvous, wait for it to complete or time out before retrying.",
+    // Foreign-file snapshot (always, both modes, flag or not). Rebuilt fresh each
+    // rendezvous; it deletes nothing, so it is safe in retain mode where
+    // sync-mediated conflict copies are expected noise. Feeds the poll loop's
+    // isRecognizedLoopFile so these names are tolerated and 194800733's "new
+    // foreign file" warning measures only names that appear after entry.
+    this.foreignFileSnapshot.clear();
+    foreignFiles.forEach((file) => this.foreignFileSnapshot.add(file.name));
+    if (foreignFiles.length > 0)
+      this.log.info(
+        `[${this.role}] tolerating ${foreignFiles.length} foreign file(s) ` +
+          `present at entry in ${this.path}: ` +
+          `${foreignFiles.map((f) => f.name).join(", ")}`,
       );
 
-    if (peerHellos.length > 1)
-      throw new UsageError(
-        `path ${this.path} contains ${peerHellos.length} peer hello files ` +
-          `(${peerHellos.map((f) => f.name).join(", ")}); only one peer may ` +
-          "share a rendezvous directory -- are there other sessions using " +
-          "this path?",
-      );
+    if (this.options.sweepExchangeFiles) {
+      // Opt-in sweep: clear this exchange's protocol files (its own AND the
+      // peer's) and rendezvous against a clean slate, after a retain-signal
+      // inspection that refuses to destroy an audit transcript without
+      // --force-retain-sweep. Foreign files are never swept.
+      await this.sweepExchangeFiles(peerHellos, unexpectedProtocol, files);
+      // Every protocol file was deleted, so rendezvous proceeds as if the
+      // directory held only the (untouched) foreign files.
+      peerHellos = [];
+    } else {
+      // Default strict-empty entry guard: only a single peer hello and the
+      // snapshotted foreign files are tolerated; any other protocol file is a
+      // terminal usage error that now also points at the opt-in sweep.
+      if (unexpectedProtocol.length > 0)
+        throw new UsageError(
+          `path ${this.path} must be empty except for a single peer hello at ` +
+            "the start of the protocol, but contains " +
+            `${unexpectedProtocol.length} unexpected protocol file(s): ` +
+            `${unexpectedProtocol.map((f) => f.name).join(", ")}. A pre-existing ` +
+            "lock file (-lock.json), ack marker (-ack.json), joining sentinel " +
+            "(-joining.json), message, or self-hello usually means a previous " +
+            "exchange was terminated by SIGKILL/OOM/power loss before its " +
+            "cleanup ran, or -- in retain mode, which never deletes -- that " +
+            "this directory was reused for a second exchange. Remove the listed " +
+            "files after confirming no other session is using this path, or " +
+            "re-run with --sweep-exchange-files to clear all protocol files " +
+            "automatically. An ack marker specifically indicates a crashed " +
+            "lockless rendezvous or a reused retain-mode directory; if a live " +
+            "lockless peer is mid-rendezvous, wait for it to complete or time " +
+            "out before retrying.",
+        );
+
+      if (peerHellos.length > 1)
+        throw new UsageError(
+          `path ${this.path} contains ${peerHellos.length} peer hello files ` +
+            `(${peerHellos.map((f) => f.name).join(", ")}); only one peer may ` +
+            "share a rendezvous directory -- are there other sessions using " +
+            "this path?",
+        );
+    }
 
     const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;
 
@@ -2113,20 +2351,27 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // a grammar word) is NOT recognized and falls to the unexpected-file policy
   // -- the case this detection exists to catch.
   //
-  // This is the single extensible baseline for site 3. A later relaxation that
-  // tolerates foreign files already present at entry (a directory snapshot,
-  // deferred and out of scope here -- I0 stays strict-empty) must feed those
-  // tolerated names into THIS predicate rather than standing up a parallel set,
-  // so the loop keeps one notion of "recognized". That relaxation also owns the
-  // remaining seams this item leaves for a foreign `<peerId>-<digits>.json` that
-  // mimics a message: with a matching NNN it is selected as a message in poll()
+  // This is the single extensible baseline for site 3. Foreign files present at
+  // entry are snapshotted (195255994) and tolerated through this predicate -- see
+  // the foreignFileSnapshot check at the top -- so the loop keeps one notion of
+  // "recognized". The snapshot holds only grammar-FAILING names: a
+  // `<peerId>-<digits>.json` MATCHES the message grammar, so it is a protocol
+  // file (rejected at the no-flag entry guard, swept by --sweep-exchange-files),
+  // never snapshotted. The seams it leaves are therefore for such a file reaching
+  // the loop by another path -- appearing after entry, or surviving a flag sweep
+  // that then re-races: with a matching NNN it is selected as a message in poll()
   // and rejected; in retain mode with a non-matching NNN it is silently skipped
-  // by the recvSeq `continue` there. Both escape the unexpected-file policy, and
+  // by the recvSeq `continue` there. Both escape the unexpected-file policy and
   // neither is fixable by name -- such a file is indistinguishable from a
-  // legitimately retained, already-consumed peer message, so telling them apart
-  // needs the snapshot's identity. Both only matter once such a file can
-  // legitimately pre-exist.
+  // legitimately retained, already-consumed peer message.
   private isRecognizedLoopFile(name: string, peerId: string): boolean {
+    // Foreign files snapshotted at synchronize() entry are tolerated for the
+    // session: they predate the exchange and are not new noise (195255994). The
+    // snapshot holds only grammar-FAILING names, so this never shadows the
+    // message scan -- a <peerId>-<digits>.json matches the grammar, is never
+    // snapshotted, and is selected then rejected by poll() rather than
+    // recognized here.
+    if (this.foreignFileSnapshot.has(name)) return true;
     if (name.startsWith("temp-") && name.endsWith(".tmp")) return true;
     if (!name.endsWith(".json")) return false;
     const ownPrefixed = name.startsWith(`${this.id}-`);
@@ -2315,9 +2560,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // message, so skip it. A foreign message-shaped file with a non-
               // matching NNN is skipped here too and so escapes the unexpected-
               // file policy -- it is indistinguishable by name from a retained
-              // message, so detecting it needs 195255994's directory snapshot
-              // (see the isRecognizedLoopFile seam note); out of scope under
-              // strict-empty I0, where no such file can pre-exist.
+              // message. 195255994's snapshot does not cover it: a
+              // `<peerId>-<digits>.json` matches the message grammar, so it is a
+              // protocol file (rejected at the no-flag entry guard, swept by
+              // --sweep-exchange-files), never snapshotted. This residual skip
+              // applies only to such a file reaching the loop by another path
+              // (appearing after entry, or surviving a sweep).
               if (nnn !== this.recvSeq) continue;
             }
             messages.push({ file, declaredSize });

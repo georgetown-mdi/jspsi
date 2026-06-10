@@ -79,6 +79,22 @@ export type ProtocolConnectionConfig = DistributedOmit<
   authentication: AuthPersist | null;
 };
 
+/**
+ * CLI-only, non-persistable runtime controls for the file-sync transport's entry
+ * sweep, threaded straight to the {@link FileSyncConnection} constructor. They
+ * are deliberately NOT part of {@link ProtocolConnectionConfig} / FileSyncOptions
+ * / the Zod config schema: anything there is persistable in psilink.yaml, which
+ * contradicts "invocation-scoped, never persisted". The CLI command layer
+ * resolves these from argv and passes them here on a path separate from config
+ * construction (applyConnectionOverrides).
+ */
+export interface FileSyncRuntimeOptions {
+  /** `--sweep-exchange-files`: clear protocol files at entry (see FILE_SYNC.md). */
+  sweepExchangeFiles?: boolean;
+  /** `--force-retain-sweep`: permit the sweep to wipe a retain-mode transcript. */
+  forceRetainSweep?: boolean;
+}
+
 /** The value {@link runProtocol} resolves with. */
 export interface RunProtocolResult {
   /**
@@ -157,6 +173,12 @@ export interface RunProtocolResult {
  * callers that need no post-handshake step (zero-setup, exchange); passing a
  * hook with `authentication: null` is rejected up front, since an
  * unauthenticated exchange has no acceptance step to hook.
+ *
+ * `fileSyncRuntime` carries the CLI-only, non-persistable file-sync entry-sweep
+ * controls (`--sweep-exchange-files` / `--force-retain-sweep`) straight to the
+ * {@link FileSyncConnection} constructor, bypassing config construction so they
+ * can never be persisted to psilink.yaml. Defaults to `{}` (no sweep) and is
+ * inert on any non-file-sync transport.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -167,6 +189,7 @@ export async function runProtocol(
   recordOutput?: RecordOutput,
   saveIntent?: boolean,
   onAuthenticated?: () => void | Promise<void>,
+  fileSyncRuntime: FileSyncRuntimeOptions = {},
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
@@ -386,7 +409,19 @@ export async function runProtocol(
     connection.channel === "filedrop"
       ? new LocalFSClient()
       : new SSH2SFTPClientAdapter();
-  const conn = new FileSyncConnection(client, { verbose: verbosity });
+  // CLI-only sweep controls are passed straight to the constructor (the
+  // verbose/joinerRecoveryMs precedent), never through config.options, so they
+  // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
+  // does not clobber the constructor default.
+  const conn = new FileSyncConnection(client, {
+    verbose: verbosity,
+    ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
+      sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
+    }),
+    ...(fileSyncRuntime.forceRetainSweep !== undefined && {
+      forceRetainSweep: fileSyncRuntime.forceRetainSweep,
+    }),
+  });
 
   // The PSI protocol layer (authenticateConnection / runExchange) consumes the
   // pull-based MessageConnection interface. Bridge the event-based

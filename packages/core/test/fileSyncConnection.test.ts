@@ -5233,9 +5233,12 @@ const entryPreconditionKinds: Array<{
   // the guard's `ignored` set, so it proceeds past the guard rather than being
   // rejected as a strict-empty violation.
   { kind: "temp file", present: ["temp-abc.tmp"], outcome: "proceed" },
-  // A foreign (non-protocol) file: the directory is the state machine, so it
-  // must be clean at entry.
-  { kind: "foreign file", present: ["notes.txt"], outcome: "reject" },
+  // A foreign (non-protocol) file is snapshotted and tolerated at entry
+  // (195255994): names that FAIL the protocol grammar are not rejected, so it
+  // proceeds past the guard (then times out waiting for a peer in this setup).
+  // A message-shaped <id>-<digits>.json is NOT foreign -- it matches the grammar
+  // and stays in the "reject" rows above.
+  { kind: "foreign file", present: ["notes.txt"], outcome: "proceed" },
 ];
 
 const entryPreconditionModes: Array<{ label: string; retain: boolean }> = [
@@ -6702,4 +6705,337 @@ test("normalizeFiledropPath: leaves interior segments and case untouched", () =>
     "/mnt/share/../other",
   );
   expect(normalizeFiledropPath("/MNT/Share")).toBe("/MNT/Share");
+});
+
+// --- synchronize(): session-start directory hygiene (195255994) --------------
+//
+// Entry-guard classification (foreign vs protocol), the foreign-file snapshot,
+// the opt-in --sweep-exchange-files sweep, and its pre-sweep retain-signal
+// inspection / --force-retain-sweep guard.
+
+// A hello body advertising retain mode (lockless + retain), planted as a peer
+// hello so the pre-sweep inspection reads it as a retain signal.
+const RETAIN_HELLO_BODY = Buffer.from(
+  JSON.stringify({ locklessRendezvous: true, retainFiles: true }),
+);
+
+test("synchronize() default: an unexpected protocol file is exit-64 and points at --sweep-exchange-files", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  // A stale rendezvous hello-ack: a protocol-grammar file that is not the one
+  // tolerated peer hello, so the default entry guard rejects it.
+  files.set("/test/old-peer-old-hello-ack.json", Buffer.alloc(0));
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain("old-peer-old-hello-ack.json");
+  expect((err as Error).message).toContain("--sweep-exchange-files");
+  // Rejected, not swept: the file is untouched.
+  expect(files.has("/test/old-peer-old-hello-ack.json")).toBe(true);
+});
+
+test("synchronize() default: a message-shaped <id>-<digits>.json is rejected at entry, not snapshotted (Reading A)", async () => {
+  // A message-shaped name MATCHES the protocol grammar, so it is a protocol
+  // file, not a foreign file: the default guard rejects it at entry rather than
+  // snapshotting it and letting it reach poll().
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  files.set("/test/peer-12345.json", Buffer.from("stale"));
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain("peer-12345.json");
+  // Grammar-matching names are never recorded in the foreign snapshot.
+  const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
+    .foreignFileSnapshot;
+  expect(snapshot.has("peer-12345.json")).toBe(false);
+});
+
+test("synchronize() default: a foreign file is tolerated, snapshotted, and not deleted", async () => {
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`/test/${peerHelloName}`, LOCK_HELLO_BODY);
+  files.set("/test/notes.txt", Buffer.from("unrelated"));
+  client.list = async () => [
+    { name: peerHelloName, modifyTime: Date.now(), size: LOCK_HELLO_BODY.length },
+    { name: "notes.txt", modifyTime: Date.now(), size: 9 },
+  ];
+
+  await conn.synchronize();
+
+  expect(conn.handshakeRole).toBe("initiator");
+  // The foreign file survived rendezvous untouched...
+  expect(files.has("/test/notes.txt")).toBe(true);
+  // ...and was recorded in the entry snapshot so the loop tolerates it.
+  const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
+    .foreignFileSnapshot;
+  expect(snapshot.has("notes.txt")).toBe(true);
+});
+
+test("poll(): a foreign file snapshotted at entry does not warn, but a new foreign file warns once (195255994 + 194800733)", async () => {
+  const errors: unknown[] = [];
+  let listCount = 0;
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+    conn.peerId = "peer-test";
+    conn.options.unexpectedFiles = "warn";
+    // Simulate the entry snapshot: one foreign file was present at entry.
+    (
+      conn as unknown as { foreignFileSnapshot: Set<string> }
+    ).foreignFileSnapshot = new Set(["preexisting.json"]);
+    files.set("/test/preexisting.json", Buffer.from("old"));
+    files.set("/test/newcomer.json", Buffer.from("new"));
+    conn.on("error", (err) => errors.push(err));
+
+    let notifyEnough!: () => void;
+    const enough = new Promise<void>((r) => (notifyEnough = r));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      if (++listCount === 5) notifyEnough();
+      return origList(p);
+    };
+    conn.start();
+    try {
+      await Promise.race([
+        enough,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out")), 2_000),
+        ),
+      ]);
+    } finally {
+      conn.stop();
+    }
+  });
+  expect(errors).toHaveLength(0);
+  // The snapshotted file is tolerated -- never warned.
+  expect(
+    logs.filter((l) => l.message.includes("preexisting.json")),
+  ).toHaveLength(0);
+  // The newcomer is warned exactly once.
+  expect(logs.filter((l) => l.message.includes("newcomer.json"))).toHaveLength(
+    1,
+  );
+});
+
+test("synchronize() --sweep-exchange-files: sweeps stale delete-mode protocol files and passes the entry guard", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 120,
+  });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  // Stale delete-mode residue: a lock and a rendezvous hello-ack (NOT a retain
+  // signal -- the pre-`ack` segment is `hello`, not a numeric byte count).
+  files.set("/test/x-y-lock.json", Buffer.alloc(0));
+  files.set("/test/a-b-hello-ack.json", Buffer.alloc(0));
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  // Got past the entry guard (no UsageError); the initiator then timed out
+  // waiting for a peer on the swept-clean directory.
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(deleted).toContain("/test/x-y-lock.json");
+  expect(deleted).toContain("/test/a-b-hello-ack.json");
+  expect(files.has("/test/x-y-lock.json")).toBe(false);
+  expect(files.has("/test/a-b-hello-ack.json")).toBe(false);
+});
+
+test("synchronize() --sweep-exchange-files: refuses (exit 64) on a peer hello advertising retain_files=true, without deleting it", async () => {
+  const peerId = "peer-uuid";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true; // delete-mode party, bare flag
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`/test/${peerHelloName}`, RETAIN_HELLO_BODY);
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/retain/i);
+  expect((err as Error).message).toContain("--force-retain-sweep");
+  // The retain peer's transcript hello is preserved -- nothing was deleted.
+  expect(deleted).toHaveLength(0);
+  expect(files.has(`/test/${peerHelloName}`)).toBe(true);
+});
+
+test("synchronize() --sweep-exchange-files: refuses (exit 64) on a retain-only message ack, without deleting it", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  // A retain-only message ack: the segment before `ack` is a numeric byte count
+  // (vs `hello` for a rendezvous hello-ack, which is not a retain signal).
+  files.set("/test/peer-peer-100-ack.json", Buffer.alloc(0));
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain("peer-peer-100-ack.json");
+  expect((err as Error).message).toContain("--force-retain-sweep");
+  expect(deleted).toHaveLength(0);
+  expect(files.has("/test/peer-peer-100-ack.json")).toBe(true);
+});
+
+test("synchronize() --sweep-exchange-files: refuses (exit 64) when this party is in retain mode", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  // Local retain mode is itself a retain signal; set the flags it implies so the
+  // synchronize() retain preconditions do not fire first.
+  conn.options.retainFiles = true;
+  conn.options.locklessRendezvous = true;
+  conn.options.timestampInFilename = true;
+  files.set("/test/me-100-0-50.json", Buffer.from("stale transcript"));
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/retain/i);
+  expect((err as Error).message).toContain("--force-retain-sweep");
+  expect(deleted).toHaveLength(0);
+});
+
+test("synchronize() --sweep-exchange-files --force-retain-sweep: wipes the retain transcript with a danger warning", async () => {
+  const peerId = "peer-uuid";
+  const deleted: string[] = [];
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, {
+      pollingFrequency: 10,
+      timeToLiveMs: 120,
+    });
+    conn.id = "me";
+    conn.options.sweepExchangeFiles = true;
+    conn.options.forceRetainSweep = true; // delete-mode party forcing a retain sweep
+    const peerHelloName = `${peerId}-hello.json`;
+    files.set(`/test/${peerHelloName}`, RETAIN_HELLO_BODY);
+
+    const origDelete = client.delete.bind(client);
+    client.delete = async (p: string) => {
+      deleted.push(p);
+      return origDelete(p);
+    };
+
+    // The wipe succeeds; the delete-mode initiator then times out waiting for a
+    // peer on the now-empty directory.
+    await conn.synchronize().catch(() => {});
+    expect(files.has(`/test/${peerHelloName}`)).toBe(false);
+  });
+  // The retain peer hello was swept...
+  expect(deleted.some((p) => p.includes(`${peerId}-hello.json`))).toBe(true);
+  // ...and the destructive action was loudly warned.
+  expect(
+    logs.filter((l) =>
+      /force-retain-sweep|destructive and irreversible/i.test(l.message),
+    ).length,
+  ).toBeGreaterThanOrEqual(1);
+});
+
+test("synchronize() --sweep-exchange-files: a delete failure surfaces as a transport error (exit 69), not silent success", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  files.set("/test/x-y-lock.json", Buffer.alloc(0)); // stale, no retain signal
+  // Transport cannot delete: client.delete rejects (unlike safeDelete, which
+  // swallows). The sweep must surface that, not silently claim a clean slate.
+  client.delete = async () => {
+    throw new Error("transport refused delete");
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError); // -> CLI exit 69, not 64
+  expect((err as Error).message).toContain("transport refused delete");
+});
+
+test("synchronize() --sweep-exchange-files: a non-resolving peer hello is retain-uncertain and refuses the bare flag (bounded)", async () => {
+  const peerId = "peer-uuid";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  const peerHelloName = `${peerId}-hello.json`;
+  files.set(`/test/${peerHelloName}`, RETAIN_HELLO_BODY); // present in the listing...
+  // ...but its body never finishes syncing: every get() for it throws, so the
+  // bounded gate exhausts its budget and the read is treated as retain-uncertain.
+  const origGet = client.get.bind(client);
+  client.get = async (p: string) => {
+    if (p.endsWith(peerHelloName)) throw new Error("partial sync");
+    return origGet(p);
+  };
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const start = Date.now();
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  const elapsed = Date.now() - start;
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/retain-uncertain|did not resolve/i);
+  expect(deleted).toHaveLength(0);
+  // Bounded: it refused within a couple of poll cycles, not the peer timeout.
+  expect(elapsed).toBeLessThan(2_000);
 });
