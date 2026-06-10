@@ -100,10 +100,12 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 When both parties are not simultaneously available or prefer not to use a coordination server, invite and accept can be performed without any server connection.
 
 ```sh
-psilink invite [INPUT_FILE]
+psilink invite [--expires-in DURATION] [INPUT_FILE]
 ```
 
 This generates a shared secret, saves the `sharedSecret` and an `expires` field to a key file, prints an invitation string (see [Invitation strings](#invitation-strings)) and instructions for its use, and then exits immediately. The invitation should be forwarded to the user's partner using a trusted out-of-band channel (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
+
+By default the invitation expires one hour after the shared secret is generated. Pass `--expires-in DURATION` to override that lifetime - for example when the out-of-band coordination window is longer or shorter than an hour. Prefer the shortest window your coordination allows: a longer lifetime proportionally widens the period in which a leaked-but-unaccepted invitation could be used by a third party. `DURATION` is a positive integer followed by a required unit suffix: `s` (seconds), `m` (minutes), `h` (hours), or `d` (days), for example `30m`, `2h`, or `1d`. A zero, negative, or otherwise malformed value is rejected with an error before any invitation is generated, as is a value beyond the one-year maximum (`365d`): the setup secret is short-lived by design, so its lifetime is bounded even when overridden (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
 
 Generating an invitation requires either a pre-existing configuration file or an `INPUT_FILE` from which linkage terms are inferred. If both types of files are present the content of the configuration file is checked against the input. A conflict occurs if the columns in the input cannot be transformed through available data standardizations to produce the linkage fields defined in the configuration file, meaning the file cannot satisfy the linkage keys the partner will expect. In this case, an error is raised and the reason why an invite cannot be generated is given.
 
@@ -128,10 +130,12 @@ After acceptance, both parties run `psilink exchange` at their convenience.
 ## Online invitation
 
 ```sh
-psilink invite [--accept-timeout=N] URL INPUT_FILE [OUTPUT_FILE]
+psilink invite [--accept-timeout=N] [--expires-in DURATION] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
 Similar to [offline invitation](#offline-invitation), this generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it and instructions for the user to forward to their partner by a secure, out-of-band channel. Those instructions include copy/pasteable templates for the invocation of `psilink accept` that reference the shared server. After printing the invitation information, the program connects to the server and waits for the partner to respond.
+
+`--expires-in DURATION` overrides the one-hour invitation lifetime exactly as in the [offline invitation](#offline-invitation). When the resulting lifetime is shorter than `--accept-timeout`, the command warns that the token will expire before the wait ends and a later acceptance will be rejected.
 
 The application exits when the token expires, when the connection times out, when the user cancels, or when the `--accept-timeout` (default 15 minutes) is reached; in all four cases the invitation can no longer be accepted, because the inviter has left the rendezvous and the handshake cannot be completed (and the secret in any case lapses at its expiry). This prevents the partner from completing the setup against an inviter who has given up; it does not destroy the secret, so a leaked invitation must still be treated as a compromise (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)). Accept-timeout is the maximum time the inviter will wait for the entire acceptance handshake to complete - from the moment the invitation is printed to the moment an acceptance message is received.
 

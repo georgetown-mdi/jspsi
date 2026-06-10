@@ -42,6 +42,47 @@ function plantSymlinkInCreateWindow(tmp: string, target: string): void {
     .mockImplementation((p) => realUnlink(p));
 }
 
+// Spy on openSync/fsyncSync and both commit steps (rename and link), recording
+// the order of the durability fsyncs relative to the commit. Each fsync is
+// mapped back to the path its fd was opened on: the path is stored when the fd
+// is opened and looked up at fsync time, so a reused fd number -- the temp fd is
+// closed before the directory is opened, so the OS may hand the directory the
+// same number -- still resolves to its real target (the second open overwrites
+// the map entry). Returns the event log the caller asserts on; spies are
+// restored in afterEach.
+function recordDurabilitySyncs(): string[] {
+  const fdPaths = new Map<number, string>();
+  const events: string[] = [];
+  const realOpen = fs.openSync;
+  vi.spyOn(fs, "openSync").mockImplementation(
+    (...args: Parameters<typeof fs.openSync>) => {
+      const fd = realOpen(...args);
+      fdPaths.set(fd, String(args[0]));
+      return fd;
+    },
+  );
+  const realFsync = fs.fsyncSync;
+  vi.spyOn(fs, "fsyncSync").mockImplementation((fd: number) => {
+    events.push(`fsync:${fdPaths.get(fd)}`);
+    return realFsync(fd);
+  });
+  const realRename = fs.renameSync;
+  vi.spyOn(fs, "renameSync").mockImplementation(
+    (...args: Parameters<typeof fs.renameSync>) => {
+      events.push("rename");
+      return realRename(args[0], args[1]);
+    },
+  );
+  const realLink = fs.linkSync;
+  vi.spyOn(fs, "linkSync").mockImplementation(
+    (...args: Parameters<typeof fs.linkSync>) => {
+      events.push("link");
+      return realLink(args[0], args[1]);
+    },
+  );
+  return events;
+}
+
 // --- detectFileConflicts -----------------------------------------------------
 
 describe("detectFileConflicts", () => {
@@ -139,6 +180,37 @@ describe("writeFileOwnerOnly", () => {
     expect(fs.existsSync(tmp)).toBe(false);
     expect(fs.existsSync(target)).toBe(true);
   });
+
+  test("fsyncs the temp file before the rename and the parent dir after it (POSIX)", () => {
+    // The directory fsync opens a directory handle, which Node's fs cannot do on
+    // Windows; the directory-flush path is POSIX-only by design.
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "secret");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    const events = recordDurabilitySyncs();
+
+    writeFileOwnerOnly(dest, "x");
+
+    // data flushed before the rename, the directory entry flushed after it
+    expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
+    expect(fs.readFileSync(dest, "utf8")).toBe("x");
+    // exercising the durability syncs leaves no orphaned temp file
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("with exclusive, fsyncs the temp file before the link and the parent dir after it (POSIX)", () => {
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "secret");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    const events = recordDurabilitySyncs();
+
+    writeFileOwnerOnly(dest, "only", { exclusive: true });
+
+    // the exclusive create-if-absent (linkSync) gets the same fsync bracketing
+    expect(events).toEqual([`fsync:${tmp}`, "link", `fsync:${dir}`]);
+    expect(fs.readFileSync(dest, "utf8")).toBe("only");
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
 });
 
 // --- writeFileAtomic ---------------------------------------------------------
@@ -198,6 +270,20 @@ describe("writeFileAtomic", () => {
     // the catch-path cleanup removes the planted link (not its target)
     expect(fs.existsSync(tmp)).toBe(false);
     expect(fs.existsSync(target)).toBe(true);
+  });
+
+  test("fsyncs the temp file before the rename and the parent dir after it (POSIX)", () => {
+    // Durability parity with writeFileOwnerOnly, via the shared fsyncParentDir.
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "cert.json");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    const events = recordDurabilitySyncs();
+
+    writeFileAtomic(dest, "x");
+
+    expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
+    expect(fs.readFileSync(dest, "utf8")).toBe("x");
+    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
   });
 });
 

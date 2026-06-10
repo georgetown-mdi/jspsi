@@ -22,9 +22,11 @@ A git worktree already checks out every *tracked* file -- including the tracked 
 
 The CLI integration tests run an SFTP container whose storage, host port, and Compose project name must be unique per checkout, or two checkouts clobber each other. This command gives each worktree its own. No special teardown is needed.
 
+**Enter order matters.** This command calls `EnterWorktree` *before* it does any `cd` into the worktree, and never `cd`s into it afterward. That is deliberate, not stylistic: `EnterWorktree` only registers the harness-owned cwd switch when it is invoked from a *different* cwd than the target. If a shell `cd` has already moved the session into the worktree, `EnterWorktree` refuses with "is the current working directory" and the switch silently never takes -- the shell happens to sit in the worktree for the rest of that turn, then reverts to the main checkout at the next turn boundary, and the continuing session runs bare commands against `staging` without any error. (Verified.) Entering first also means every setup step below runs *bare* inside the worktree, with no `cd`/`git -C` scoping -- the same pattern the implementing session uses.
+
 ## Steps
 
-Run every step with Bash. Do not read source files.
+Run every step with Bash unless it says otherwise. Do not read source files.
 
 ### 1. Resolve paths
 
@@ -35,6 +37,8 @@ Worktrees live under `.worktrees/` at the repo root (gitignored), NOT under `.cl
 
 ### 2. Create (or reuse) the worktree
 
+Run this from the main checkout -- do NOT `cd` into the worktree.
+
 New branch:
 
     git -C "$MAIN" worktree add "$WORKTREE" -b <BRANCH> <BASE>
@@ -43,9 +47,32 @@ If the branch already exists, drop `-b`:
 
     git -C "$MAIN" worktree add "$WORKTREE" <BRANCH>
 
-If the worktree path already exists, report it and skip to step 5.
+If the worktree path already exists, report it, then go straight to step 3 to enter it and step 6 to install -- skip the symlink and SFTP steps so you do not clobber its existing `.env`.
 
-### 3. Symlink the gitignored locals
+### 3. Enter the worktree
+
+Switch the session into the worktree with the `EnterWorktree` tool (this is a
+tool call, not a Bash command), while the shell is still in the main checkout:
+
+    EnterWorktree({ path: "$WORKTREE" })
+
+Then confirm the switch actually registered with a bare check:
+
+    pwd && git branch --show-current
+
+It must print the worktree path and `<BRANCH>`. If it still shows the main
+checkout or `staging`, the switch did not take -- the most common cause is a
+shell `cd` into the worktree before this call (see "Enter order matters"); do
+not `cd` first. The other cause is that these setup steps ran in an isolated
+subagent rather than the working session, so the switch applied only to that
+subagent; the working session must then call `EnterWorktree` itself.
+
+From here on the session's cwd is the worktree and persists across turns, so
+every remaining step runs *bare* -- no `cd`, no `git -C`, no absolute scoping.
+(CLAUDE.local.md is the project-instruction authorization `EnterWorktree`
+requires.)
+
+### 4. Symlink the gitignored locals
 
     ln -sf  "$MAIN/CLAUDE.local.md"               "$WORKTREE/CLAUDE.local.md"
     ln -sf  "$MAIN/apps/web/.env"                 "$WORKTREE/apps/web/.env"
@@ -54,9 +81,10 @@ If the worktree path already exists, report it and skip to step 5.
 
 Link only the gitignored locals. Do NOT symlink the whole `.claude` directory: it is tracked, so the worktree already has its own copy, and `ln -sf` onto that existing directory would nest the link inside it (`$WORKTREE/.claude/.claude`) rather than replace it. The worktree's checkout of `.claude/` already provides `settings.local.json`'s sibling files; only `settings.local.json` itself is gitignored and needs linking. Skip any symlink whose source does not exist and note the skip in the summary.
 
-### 4. Give the worktree its own SFTP test container
+### 5. Give the worktree its own SFTP test container
 
-    cd "$WORKTREE"
+You are already in the worktree (step 3), so run these bare:
+
     sh apps/cli/test/container/setup.sh   # host keys, srv/, default .env
 
     PORT=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})')
@@ -65,23 +93,9 @@ Link only the gitignored locals. Do NOT symlink the whole `.claude` directory: i
 
 This gives the worktree its own Compose project and a free host port, so its container can run alongside the main checkout's. The integration tests read `SFTP_PORT` from this file.
 
-### 5. Install dependencies
+### 6. Install dependencies
 
-    cd "$WORKTREE" && npm install
-
-### 6. Enter the worktree
-
-Switch the session into the worktree with the `EnterWorktree` tool (this is a
-tool call, not a Bash command):
-
-    EnterWorktree({ path: "$WORKTREE" })
-
-This makes the harness own the working directory, so the cwd persists across
-turns and any subagents inherit it -- the continuing session then runs plain
-commands in the worktree with no `cd`/`git -C` scoping. (CLAUDE.local.md is the
-project-instruction authorization this tool requires.) If these setup steps ran
-in an isolated subagent rather than the working session, the switch applies only
-to that subagent; the working session must then call `EnterWorktree` itself.
+    npm install
 
 ### 7. Print the summary
 
@@ -95,10 +109,11 @@ Output this block and nothing after it:
     Linked locals: <list, noting any skipped>
     SFTP container: project psilink-sftp-<branch>, host port <PORT> (isolated)
 
-    This session is now inside the worktree (via EnterWorktree). Run plain
-    commands here -- `git commit`, `npm test`, `npm run build` -- with no
-    `cd`/`git -C` scoping; the cwd persists across turns and subagents inherit
-    it. Only Read/Edit/Write still take worktree-absolute paths.
+    This session is now inside the worktree (via EnterWorktree, confirmed with
+    pwd/git branch). Run plain commands here -- `git commit`, `npm test`, `npm
+    run build` -- with no `cd`/`git -C` scoping; the cwd persists across turns
+    and subagents inherit it. Only Read/Edit/Write still take worktree-absolute
+    paths.
 
     To work here from a SEPARATE session instead:
       cd <worktree>
@@ -109,3 +124,4 @@ Output this block and nothing after it:
 - Do not read source files or make implementation decisions.
 - Do not modify files in the worktree beyond the symlinks and the SFTP `.env`.
 - Do not run builds or tests (npm install only).
+- Do not `cd` into the worktree at any point -- enter it with `EnterWorktree` (step 3) and run everything bare.

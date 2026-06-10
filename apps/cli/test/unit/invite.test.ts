@@ -324,7 +324,11 @@ test("validateInvite: a config's explicit standardization lets an otherwise-unsa
   // as an identifier, not ssn) rather than an ssn column, so without the
   // standardization the ssn field would be unsatisfiable.
   const { dir, configPath, keyPath } = withConfig(terms, [
-    { output: "ssn", input: "tax_id", steps: [{ function: "trim_whitespace" }] },
+    {
+      output: "ssn",
+      input: "tax_id",
+      steps: [{ function: "trim_whitespace" }],
+    },
   ]);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,tax_id");
@@ -382,4 +386,164 @@ test("validateInvite: with no config and an input file, terms are inferred and w
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- validateInvite: --expires-in override -----------------------------------
+
+test("validateInvite: --expires-in sets the token's expiry to the override", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-expires-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const before = Date.now();
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    expiresIn: "2h",
+    log: silentLog,
+  });
+  const after = Date.now();
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.expires).toBeDefined();
+  if (token.expires === undefined) return;
+  // The expiry is two hours past the moment the token was minted, which lies in
+  // [before, after]; bound it on both sides rather than assert an exact value.
+  const twoHours = 2 * 60 * 60 * 1000;
+  const expiresMs = new Date(token.expires).getTime();
+  expect(expiresMs).toBeGreaterThanOrEqual(before + twoHours);
+  expect(expiresMs).toBeLessThanOrEqual(after + twoHours);
+});
+
+test("validateInvite: omitting --expires-in keeps the one-hour default", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-default-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const before = Date.now();
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const after = Date.now();
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.expires).toBeDefined();
+  if (token.expires === undefined) return;
+  const oneHour = 60 * 60 * 1000;
+  const expiresMs = new Date(token.expires).getTime();
+  expect(expiresMs).toBeGreaterThanOrEqual(before + oneHour);
+  expect(expiresMs).toBeLessThanOrEqual(after + oneHour);
+});
+
+test("validateInvite: a zero --expires-in is rejected before any token is minted", async () => {
+  // A non-existent input would itself error once read; the duration is parsed at
+  // the very top of validateInvite, so the duration rejection -- not the missing
+  // input -- is what surfaces, proving no token is minted on a bad override.
+  const promise = validateInvite({
+    resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+    options: testOptions(),
+    acceptTimeout: 900,
+    expiresIn: "0m",
+    log: silentLog,
+  });
+  await expect(promise).rejects.toBeInstanceOf(UsageError);
+  await expect(promise).rejects.toThrow(/duration/);
+});
+
+test("validateInvite: an --expires-in beyond the one-year maximum is rejected before any token is minted", async () => {
+  // Nonexistent input, as in the zero case: the override is bounded at the top
+  // of validateInvite, so the ceiling rejection -- not the missing input -- is
+  // what surfaces, proving no token is minted.
+  const promise = validateInvite({
+    resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+    options: testOptions(),
+    acceptTimeout: 900,
+    expiresIn: "366d",
+    log: silentLog,
+  });
+  await expect(promise).rejects.toBeInstanceOf(UsageError);
+  await expect(promise).rejects.toThrow(/expires-in must not exceed/);
+});
+
+test("validateInvite: an --expires-in at the one-year maximum is accepted", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-max-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const before = Date.now();
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    expiresIn: "365d",
+    log: silentLog,
+  });
+  const after = Date.now();
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.expires).toBeDefined();
+  if (token.expires === undefined) return;
+  const oneYear = 365 * 24 * 60 * 60 * 1000;
+  const expiresMs = new Date(token.expires).getTime();
+  expect(expiresMs).toBeGreaterThanOrEqual(before + oneYear);
+  expect(expiresMs).toBeLessThanOrEqual(after + oneYear);
+});
+
+test("validateInvite: --expires-in applies on the offlineFromConfig path", async () => {
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const before = Date.now();
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      expiresIn: "2h",
+      log: silentLog,
+    });
+    const after = Date.now();
+    expect(ready.mode).toBe("offlineFromConfig");
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.expires).toBeDefined();
+    if (token.expires === undefined) return;
+    const twoHours = 2 * 60 * 60 * 1000;
+    const expiresMs = new Date(token.expires).getTime();
+    expect(expiresMs).toBeGreaterThanOrEqual(before + twoHours);
+    expect(expiresMs).toBeLessThanOrEqual(after + twoHours);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: online warns when --expires-in is shorter than --accept-timeout", async () => {
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-lifetime-warn-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  // 5m lifetime under a 15m accept-timeout: the inviter would wait past the
+  // point the token can be honored, so the warning fires and names the resolved
+  // override lifetime (300s), not the default hour.
+  await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options,
+    acceptTimeout: 900,
+    expiresIn: "5m",
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) =>
+        typeof c[0] === "string" &&
+        c[0].includes("exceeds the invitation") &&
+        c[0].includes("(300s)"),
+    ),
+  ).toBe(true);
+  warnSpy.mockRestore();
 });
