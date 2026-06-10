@@ -99,11 +99,11 @@ test("snakeizeKeys is the inverse of camelizeKeys for schema keys", () => {
   expect(snakeizeKeys(camelizeKeys(onDisk))).toEqual(onDisk);
 });
 
-test("an opaque subtree is left verbatim in both directions, snake keys included", () => {
-  // Guards the latent hazard the co-location removes: even a snake_case key
-  // inside an opaque map (not the typed camelCase ExchangeSpec saveConfig feeds)
-  // must be left verbatim by snakeizeKeys, because opacity is decided on the
-  // canonicalized key, not the raw one.
+test("an opaque map's contents survive a read -> write round-trip verbatim", () => {
+  // A snake_case key authored inside provider_options is left verbatim by
+  // camelizeKeys (read), and re-snakeizing the camelized form leaves it verbatim
+  // again -- the round-trip stability the shared skip exists to guarantee. The
+  // direct raw-snake-into-snakeizeKeys path is covered by the next test.
   const input = {
     connection: {
       provider_options: { ready_timeout: 5000, keepAlive: true },
@@ -116,7 +116,6 @@ test("an opaque subtree is left verbatim in both directions, snake keys included
     ready_timeout: 5000,
     keepAlive: true,
   });
-  // Re-snakeizing the camelized form preserves the opaque map's keys verbatim.
   const snakeized = snakeizeKeys(camelized) as {
     connection: { provider_options: Record<string, unknown> };
   };
@@ -124,4 +123,44 @@ test("an opaque subtree is left verbatim in both directions, snake keys included
     ready_timeout: 5000,
     keepAlive: true,
   });
+});
+
+test("snakeizeKeys skips an opaque subtree even given raw snake_case keys", () => {
+  // The latent hazard the co-location removes: opacity is decided on the
+  // canonicalized key, not the raw one, so a snake_case `provider_options` key
+  // routed DIRECTLY through snakeizeKeys -- not the typed camelCase ExchangeSpec
+  // saveConfig feeds -- is still skipped. Non-opaque camelCase siblings are
+  // snakeized as usual, proving the walker is active rather than short-circuited.
+  const snakeized = snakeizeKeys({
+    provider_options: { ready_timeout: 5000, keepAlive: true },
+    someCamelKey: { innerCamel: 1 },
+  }) as Record<string, Record<string, unknown>>;
+  expect(snakeized.provider_options).toEqual({
+    ready_timeout: 5000,
+    keepAlive: true,
+  });
+  expect(snakeized.some_camel_key).toEqual({ inner_camel: 1 });
+});
+
+test("an opaque map is verbatim all the way down (nested objects, arrays), both directions", () => {
+  // The walker skips an opaque value by not recursing into it AT ALL, so opacity
+  // holds at every depth -- a nested object and an array of objects with
+  // case-bearing keys must survive byte-for-byte through both directions. This
+  // pins the "opaque all the way down" promise that a future "recurse one more
+  // level" change could otherwise break with no test noticing. The probe carries
+  // both a snake_case key (would change if camelized) and a camelCase key (would
+  // change if snakeized) at depth, so a regression in either direction is caught.
+  const opaque = {
+    ready_timeout: 5000,
+    algorithms: { server_host_key: ["ssh-ed25519"], readyDeep: true },
+    forward_list: [{ src_port: 1 }, { dstHost: "h" }],
+  };
+  const camelized = camelizeKeys({ provider_options: opaque }) as {
+    providerOptions: typeof opaque;
+  };
+  expect(camelized.providerOptions).toEqual(opaque);
+  const snakeized = snakeizeKeys({ providerOptions: opaque }) as {
+    provider_options: typeof opaque;
+  };
+  expect(snakeized.provider_options).toEqual(opaque);
 });
