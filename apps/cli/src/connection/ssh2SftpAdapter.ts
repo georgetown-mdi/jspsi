@@ -1,3 +1,9 @@
+// This adapter drives ssh2's raw SFTPWrapper internals past the public
+// ssh2-sftp-client API, so ssh2 and ssh2-sftp-client are exact-pinned in
+// package.json. On any upgrade of either, re-verify the internal premises per
+// the checklist in docs/SECURITY_DESIGN.md ("Upgrading the SFTP stack") before
+// it merges -- a "compatible" bump can silently break a premise no normal-path
+// test exercises.
 import Ssh2SftpClient from "ssh2-sftp-client";
 import {
   FileInfo,

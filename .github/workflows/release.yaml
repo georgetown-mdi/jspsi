@@ -24,14 +24,16 @@ jobs:
       - name: Unit tests (CLI)
         run: npm run test:unit -w apps/cli
 
-      # Integration tests are not yet wired into CI — they require Docker Compose
-      # and need validation in the GitHub Actions environment before being made a
-      # release gate. The container is now self-managing (a vitest globalSetup
-      # brings it up and tears it down, generating host keys on first run), so
-      # enabling them on a Docker-capable runner is a single step:
-      #
-      #   - name: Integration tests (CLI)
-      #     run: npm run test:integration -w apps/cli
+      # Integration tests exercise the real ssh2 SFTPWrapper contract the SFTP
+      # adapter couples to (unit tests run against mocks). The dedicated CLI
+      # workflow (cli_build_and_test.yaml) runs this suite on pull requests as
+      # the merge gate; here it is the ship-gate backstop, since publish needs
+      # this job. The suite is self-managing: a vitest globalSetup brings up and
+      # tears down its own atmoz/sftp container (generating host keys/.env on
+      # first run), and ubuntu-latest ships Docker Compose, so no extra setup
+      # step is needed.
+      - name: Integration tests (CLI)
+        run: npm run test:integration -w apps/cli
 
   publish:
     name: Publish Docker image

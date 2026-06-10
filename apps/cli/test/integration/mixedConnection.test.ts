@@ -7,7 +7,7 @@ import { FileSyncConnection } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { sftpPort } from "../container/env";
+import { ensureServerDir, sftpPort } from "../container/env";
 
 import log from "loglevel";
 
@@ -55,7 +55,7 @@ localConn.on("error", (err: unknown) => {
 });
 
 beforeAll(async () => {
-  await fs.mkdir(SFTP_LOCAL_DIRECTORY, { recursive: true });
+  await ensureServerDir(SFTP_LOCAL_DIRECTORY);
   await cleanServer();
   await Promise.all([
     sftpConn.open({

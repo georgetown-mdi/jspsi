@@ -58,11 +58,7 @@ This runs an SFTP server on localhost that can be used for testing. After starti
 
 ### If on Mac OS or other ARM
 
-Do once:
-
-```sh
-DOCKER_DEFAULT_PLATFORM=linux/arm64 docker compose -f apps/cli/test/container/compose.yaml build
-```
+No extra step is needed. `atmoz/sftp` publishes `linux/amd64` only, and the compose file pins that image by digest, so on an ARM machine (Apple Silicon) Docker runs it under emulation automatically. Expect a harmless `platform (linux/amd64) does not match ... host platform (linux/arm64)` warning.
 
 ### Regular usage
 

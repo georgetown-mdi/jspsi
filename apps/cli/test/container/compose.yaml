@@ -2,8 +2,13 @@ name: ${COMPOSE_PROJECT_NAME:-psilink-sftp}
 
 services:
   sftp:
-    image: atmoz/sftp
-    build: https://github.com/atmoz/sftp.git
+    # Pinned to a specific image digest (not the mutable :latest) so local and
+    # CI runs use a byte-identical, reproducible image; bump the digest
+    # deliberately when updating the SFTP test image. atmoz/sftp publishes
+    # linux/amd64 only, so this is the amd64 manifest -- native on the CI runner,
+    # run under emulation on arm64 dev machines (Apple Silicon). No build
+    # fallback: building the unpinned upstream HEAD would defeat the pin.
+    image: atmoz/sftp@sha256:0960390462a4441dbb63698d7c185b76a41ffcee7b78ff4adf275f3e66f9c475
     pull_policy: missing
     ports:
       - "${SFTP_PORT:-2222}:22"
