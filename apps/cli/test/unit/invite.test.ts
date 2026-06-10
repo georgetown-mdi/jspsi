@@ -4,12 +4,20 @@ import path from "node:path";
 
 import { afterEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
-import { getLogger, UsageError } from "@psilink/core";
+import {
+  decodeInvitation,
+  getDefaultLinkageTerms,
+  getLogger,
+  inferMetadata,
+  UsageError,
+} from "@psilink/core";
+import type { LinkageTerms, Standardization } from "@psilink/core";
 
 import {
   resolveInvitePositionals,
   validateInvite,
 } from "../../src/commands/invite";
+import { saveConfig } from "../../src/config";
 import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
 
 const silentLog = getLogger("invite-test");
@@ -194,4 +202,168 @@ test("validateInvite: online still aborts on a pre-existing config file", async 
       log: silentLog,
     }),
   ).rejects.toThrow(options.configFile);
+});
+
+// --- validateInvite: offline, config as the linkage-terms source -------------
+
+// Terms an inviter's config would carry after being generated from an input
+// with first/last name, dob, and ssn columns: passing that metadata drops the
+// default keys (and the ssn4 field) the input cannot satisfy, so the terms
+// reference exactly firstName, lastName, dateOfBirth, and ssn.
+function defaultTerms(): LinkageTerms {
+  return getDefaultLinkageTerms(
+    "Agency A",
+    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+  );
+}
+
+// A pre-existing config carrying `terms` (and optionally an explicit
+// `standardization`) is written to a temp dir; the helper returns the paths so a
+// test can point its options at them. The connection is a placeholder -- invite
+// does not use it.
+function withConfig(
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): { dir: string; configPath: string; keyPath: string } {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-cfg-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: terms,
+    ...(standardization !== undefined && { standardization }),
+  });
+  return { dir, configPath, keyPath: path.join(dir, ".psilink.key") };
+}
+
+function writeCsv(dir: string, header: string): string {
+  const p = path.join(dir, "input.csv");
+  fs.writeFileSync(p, `${header}\nAlice,Smith,1990-01-02,123456789\n`);
+  return p;
+}
+
+test("validateInvite: derives terms from a config when no input file is given", async () => {
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    expect(ready.configPath).toBe(configPath);
+    expect(ready.linkageTerms).toEqual(terms);
+    // The minted invitation carries the config's terms, not inferred ones.
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms).toEqual(terms);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config plus an agreeing input file succeeds from the config", async () => {
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    expect(ready.linkageTerms).toEqual(terms);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config plus a disagreeing input fails naming the unsatisfiable fields", async () => {
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    // Only a first-name column: last name, dob, and ssn cannot be produced.
+    const input = writeCsv(dir, "first_name,notes,memo,comment");
+    const promise = validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    await expect(promise).rejects.toBeInstanceOf(UsageError);
+    await expect(promise).rejects.toThrow(/lastName/);
+    await expect(promise).rejects.toThrow(/cannot satisfy/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config's explicit standardization lets an otherwise-unsatisfying input pass", async () => {
+  const terms = defaultTerms();
+  // The config maps tax_id -> ssn explicitly; the input carries tax_id (inferred
+  // as an identifier, not ssn) rather than an ssn column, so without the
+  // standardization the ssn field would be unsatisfiable.
+  const { dir, configPath, keyPath } = withConfig(terms, [
+    { output: "ssn", input: "tax_id", steps: [{ function: "trim_whitespace" }] },
+  ]);
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,tax_id");
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: config-sourced invite still refuses a pre-existing key file", async () => {
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    fs.writeFileSync(
+      keyPath,
+      JSON.stringify({
+        sharedSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      }),
+    );
+    await expect(
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      }),
+    ).rejects.toBeInstanceOf(UsageError);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: with no config and an input file, terms are inferred and written", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input },
+      // Fresh, non-existent config/key paths: the input-only inference path.
+      options: testOptions(),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offline");
+    if (ready.mode !== "offline") return;
+    expect(ready.dataSpec.linkageTerms.identity).toBeTypeOf("string");
+    expect(ready.dataSpec.metadata).toBeDefined();
+    expect(ready.dataSpec.standardization).toBeDefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

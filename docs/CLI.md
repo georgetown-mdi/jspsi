@@ -84,8 +84,11 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 > intended design. The current implementation has the following gaps, each
 > tracked for a follow-up:
 >
-> - Generating an invitation requires an `INPUT_FILE`; reusing a pre-existing
->   configuration file as the source of linkage terms is not yet supported.
+> - Online `invite` does not yet reuse a pre-existing configuration file as the
+>   source of its linkage terms (offline `invite` now does -- see "Offline
+>   invitation" below). A pre-existing configuration on the online path is still
+>   reported as a conflict and the command aborts; remove it or pass
+>   `--config-file` to proceed.
 > - Online invite does not yet revoke or expire the token early on timeout or
 >   cancellation; the token simply lapses at its 1-hour expiry.
 > - Online invite does not embed a `connectionEndpoint` in the invitation it
