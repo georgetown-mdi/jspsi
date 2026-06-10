@@ -1,0 +1,145 @@
+import { describe, expect, test, vi } from "vitest";
+
+import {
+  SFTP_SLOW_OPERATION_WARNING_MS,
+  withSlowOperationWarning,
+} from "../../src/connection/sftpLivenessGuard";
+
+// The slow-operation warning is observability, NOT a security control: it tells a
+// watching operator that an operation is taking a while, and must stay entirely
+// outside the terminal-error paths so it can never alter a result. These tests pin
+// that contract -- it fires once at the threshold, reports observed progress where
+// supplied, and forwards the underlying settlement (value or rejection) unchanged.
+
+describe("withSlowOperationWarning", () => {
+  test("emits one warning at the threshold naming the operation, path, and elapsed time", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      // An operation that never settles on its own within the test window.
+      const op = new Promise<string>(() => {});
+      void withSlowOperationWarning(op, {
+        operation: "file write",
+        path: "/dir/temp-x.tmp",
+        log: { warn },
+        thresholdMs: 1_000,
+      });
+      // Just before the threshold: silent.
+      await vi.advanceTimersByTimeAsync(999);
+      expect(warn).not.toHaveBeenCalled();
+      // At the threshold: exactly one warning, naming the op, path, and elapsed.
+      await vi.advanceTimersByTimeAsync(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0][0] as string;
+      expect(message).toContain("file write");
+      expect(message).toContain("/dir/temp-x.tmp");
+      expect(message).toContain("1000 ms");
+      // It does not re-fire after the threshold.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("includes observed progress (with the elapsed time) when a progress callback is supplied", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      const op = new Promise<string>(() => {});
+      void withSlowOperationWarning(op, {
+        operation: "file read",
+        path: "/dir/msg.json",
+        log: { warn },
+        thresholdMs: 1_000,
+        // The callback receives the elapsed time so it can report a rate.
+        progress: (elapsedMs) => `42 bytes in ${elapsedMs} ms`,
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("(42 bytes in 1000 ms)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("defaults to SFTP_SLOW_OPERATION_WARNING_MS when no threshold is given", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      const op = new Promise<string>(() => {});
+      void withSlowOperationWarning(op, {
+        operation: "rename",
+        path: "/dir/a to /dir/b",
+        log: { warn },
+      });
+      await vi.advanceTimersByTimeAsync(SFTP_SLOW_OPERATION_WARNING_MS - 1);
+      expect(warn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not warn when the operation settles before the threshold", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      const wrapped = withSlowOperationWarning(Promise.resolve("done"), {
+        operation: "delete",
+        path: "/dir/x.json",
+        log: { warn },
+        thresholdMs: 1_000,
+      });
+      await expect(wrapped).resolves.toBe("done");
+      // The timer was cleared on settle, so advancing past the threshold is silent.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("is non-fatal: forwards the resolved value unchanged even after warning", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      let resolveOp!: (value: string) => void;
+      const op = new Promise<string>((resolve) => {
+        resolveOp = resolve;
+      });
+      const wrapped = withSlowOperationWarning(op, {
+        operation: "file write",
+        path: "/dir/x.tmp",
+        log: { warn },
+        thresholdMs: 1_000,
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(warn).toHaveBeenCalledTimes(1);
+      resolveOp("payload");
+      await expect(wrapped).resolves.toBe("payload");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("is non-fatal: forwards a rejection unchanged", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      const failure = new Error("transport failed");
+      const wrapped = withSlowOperationWarning(Promise.reject(failure), {
+        operation: "delete",
+        path: "/dir/x.json",
+        log: { warn },
+        thresholdMs: 1_000,
+      });
+      await expect(wrapped).rejects.toBe(failure);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

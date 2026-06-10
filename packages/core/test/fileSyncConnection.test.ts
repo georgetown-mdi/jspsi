@@ -21,6 +21,7 @@ import {
   BilateralModeMismatchError,
   ConnectionClosedError,
   FrameSizeExceededError,
+  TransportOperationStalledError,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { withCapturedLogs } from "../src/testing";
@@ -997,6 +998,204 @@ test("synchronize() surfaces an over-cap peer hello as a terminal FrameSizeExcee
   );
   // Terminal: read once and propagated, not retried until the TTL.
   expect(peerHelloReads).toBe(1);
+});
+
+test("synchronize() surfaces a stalled peer-hello read as a terminal TransportOperationStalledError", async () => {
+  // Liveness sibling of the over-cap case above. The rendezvous gate
+  // (readControlFileWithGate) must treat a stalled hello read as terminal
+  // rather than retrying it: a hostile server that withholds the transfer makes
+  // each get() reject with the typed liveness error, and retrying at the polling
+  // cadence would loop back into the stall every pass until the hour-long peer
+  // TTL instead of failing fast in seconds. TransportOperationStalledError is a
+  // UsageError, so the gate's catch rethrows it exactly as it does the over-cap
+  // FrameSizeExceededError.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 5_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const peerHelloPath = `${conn.path}/${peerHelloName}`;
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // initial check: directory is clean
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: 0 },
+    ];
+  };
+
+  // The peer hello is present in the listing, but the server withholds the
+  // transfer so the adapter's liveness bound rejects the read. Count reads to
+  // prove the gate does not retry at the polling cadence.
+  let peerHelloReads = 0;
+  const originalGet = client.get;
+  client.get = async (path: string) => {
+    if (path === peerHelloPath) {
+      peerHelloReads++;
+      throw new TransportOperationStalledError(
+        `SFTP file read of ${path} stalled: received no data for 60000 ms ` +
+          `(the server withheld the transfer); refusing to wait on the server ` +
+          `further`,
+      );
+    }
+    return originalGet(path);
+  };
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(
+    TransportOperationStalledError,
+  );
+  // Terminal: read once and propagated, not retried until the TTL.
+  expect(peerHelloReads).toBe(1);
+});
+
+// --- whole-exchange liveness backstop (write/stat/delete + slow-drip read) ---
+//
+// The write-path analogue of the read-path liveness test above. The CLI adapter's
+// per-operation bounds fast-fail a stalled READ (list/get/createExclusive) in 60s,
+// but the always-executed write/stat/delete ops (put/rename/delete/exists) have no
+// per-op bound, so a server that withholds the callback on one of them used to
+// hang the exchange forever (the blocking S1 finding). FileSyncConnection now backstops
+// EVERY transport await with the peer-inactivity budget, so a withheld callback
+// fails the exchange with a terminal TransportOperationStalledError within the
+// budget instead of hanging. The mock here withholds the callback (a never-settling
+// promise) -- it does NOT throw -- so the failure can only come from the
+// consumer-layer budget, not from any per-op adapter wrapper (none of these tests
+// name one), which is what makes the backstop op-agnostic. A short peerTimeoutMs
+// keeps the wall-clock wait small; timeToLiveMs is left large so the rendezvous /
+// send-wait loops never fire first and the budget race is the sole cause.
+
+test("send() fails within the peer budget when the server withholds the put callback", async () => {
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  // The server accepts the request but never invokes the put callback.
+  client.put = () => new Promise<void>(() => {});
+  await expect(conn.send({ hello: "world" })).rejects.toBeInstanceOf(
+    TransportOperationStalledError,
+  );
+});
+
+test("send() fails within the peer budget when the server withholds the rename callback", async () => {
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  // The put lands but the durable rename never gets its callback. rename sits on
+  // the always-executed send path right after put, so it is bounded too.
+  client.rename = () => new Promise<void>(() => {});
+  await expect(conn.send({ hello: "world" })).rejects.toBeInstanceOf(
+    TransportOperationStalledError,
+  );
+});
+
+test("synchronize() fails within the peer budget when the server withholds the delete callback", async () => {
+  // The lock-mode joiner fast-path publishes a joining sentinel, then deletes the
+  // discovered peer hello, then renames the sentinel to its own hello. A server
+  // that withholds the delete callback used to hang the rendezvous forever; the
+  // budget now fails it terminally. delete is never individually wrapped, so this
+  // failure is the consumer-layer backstop alone.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  // A valid peer hello so the bilateral-flag gate passes and the joiner proceeds
+  // to the delete; the put(sentinel) before it succeeds against the mock store.
+  files.set(`${conn.path}/${peerId}-hello.json`, LOCK_HELLO_BODY);
+  client.delete = () => new Promise<void>(() => {});
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(
+    TransportOperationStalledError,
+  );
+});
+
+test("poll() fails within the peer budget when the server withholds (slow-drips) the get callback", async () => {
+  // The S2 slow-drip read: a server that trickles under-cap bytes forever (or
+  // withholds the transfer entirely) never trips the adapter's per-chunk idle
+  // window -- each chunk resets it -- so the capped get() never settles. At the
+  // consumer seam that is simply a get() promise that never resolves; total
+  // elapsed crosses the budget and the poll loop fails terminally instead of
+  // draining forever. (A mock has no adapter idle window at all, which is exactly
+  // the LocalFSClient / filedrop case the same backstop also covers -- S3.)
+  const peerId = "peer-test";
+  const { client } = makeMockClient();
+  client.list = async () => [
+    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+  ];
+  client.get = () => new Promise<Buffer<ArrayBufferLike>>(() => {});
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    pollingFrequency: 10,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = peerId;
+  const emittedError = new Promise<unknown>((resolve) =>
+    conn.once("error", resolve),
+  );
+  conn.start();
+  const err = await emittedError;
+  await conn.close();
+  expect(err).toBeInstanceOf(TransportOperationStalledError);
+});
+
+test("close() does not hang when the server withholds a cleanup safeDelete callback", async () => {
+  // safeDelete must never reject (callers use it in catch blocks), so its budget
+  // wrapper RESOLVES at the deadline rather than throwing: a hung cleanup delete
+  // stops waiting at the budget instead of hanging teardown. close() sweeps a
+  // responsible file via safeDelete, so a withheld callback there must not wedge
+  // close().
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  await conn.send({ hello: "world" }); // makes this side responsible for a file
+  client.safeDelete = () => new Promise<void>(() => {});
+  // Resolves (does not reject, does not hang) once the cleanup delete hits the
+  // budget.
+  await expect(conn.close()).resolves.toBeUndefined();
+});
+
+test("close() does not hang or throw when the server withholds the end() callback", async () => {
+  // end() is budget-wrapped (the rejecting variant), so a server that withholds
+  // the SSH session-close callback makes it reject at the budget. close() is a
+  // best-effort, non-throwing, idempotent teardown: it must swallow that bounded
+  // rejection, clear `connected`, and not re-end the abandoned client on a second
+  // call.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = "stub-peer";
+  let endCalls = 0;
+  client.end = () => {
+    endCalls++;
+    return new Promise<void>(() => {});
+  };
+  // First close() resolves (does not reject) once the withheld end() hits the
+  // budget, and it called end() exactly once.
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(endCalls).toBe(1);
+  // Second close() neither throws nor re-enters the end() branch: `connected` was
+  // cleared despite the rejection.
+  await expect(conn.close()).resolves.toBeUndefined();
+  expect(endCalls).toBe(1);
 });
 
 test("synchronize() throws when createExclusive throws EEXIST but lock file is already gone (peer abandoned)", async () => {

@@ -1,4 +1,9 @@
-import { DirectoryListingBoundsError } from "@psilink/core";
+import {
+  DirectoryListingBoundsError,
+  type TransportOperationStalledError,
+} from "@psilink/core";
+
+import { transportOperationStalledError } from "./sftpLivenessGuard";
 
 /**
  * Directory-listing enforcement primitives shared by the file-transport adapters
@@ -102,5 +107,71 @@ export function filenameTooLongError(
     `directory ${dirPath} contains an entry whose filename is ${name.length} ` +
       `characters, exceeding the maximum of ${max} (${shown}); refusing to ` +
       `process it`,
+  );
+}
+
+/**
+ * Maximum number of `readdir` round-trips (server batches) a single transport
+ * `list()` will issue before it is refused. Enforced in the SFTP adapter's
+ * streamed read loop. This is the LIVENESS sibling of the memory-size bounds
+ * above: those cap what a hostile directory can allocate; this one caps the
+ * round-trips a hostile server can make the listing consume. The size bounds do
+ * not cover this vector -- a server that keeps returning empty, non-EOF readdir
+ * batches advances neither {@link MAX_DIRECTORY_ENTRIES} (no entry accumulates)
+ * nor {@link MAX_FILENAME_LENGTH} (no name to measure) and never signals
+ * end-of-directory, so without this cap the batch loop recurses forever. See
+ * docs/SECURITY_DESIGN.md, "Channel security".
+ *
+ * Value: `2 * MAX_DIRECTORY_ENTRIES` (16,384). Derived from the size bounds, not
+ * chosen as a round number, so the two move together. Every compliant non-EOF
+ * READDIR response carries at least one name (an empty, non-EOF `SSH_FXP_NAME` is
+ * not protocol-conformant; a server with no more names sends `SSH_FX_EOF`), so a
+ * legitimate listing makes at most {@link MAX_DIRECTORY_ENTRIES} batches before
+ * the entry-count bound refuses it -- and only in the pathological-but-legal case
+ * of one entry per batch; an honest server packs many entries per packet and
+ * finishes in a single batch for a normal rendezvous directory. Setting the cap
+ * to twice that worst case leaves an honest one-entry-per-batch server full
+ * headroom over the point at which the entry-count bound would already have
+ * refused it, so this cap only ever bites a progress-free (empty-batch) flood.
+ *
+ * Fixed, not operator-configurable, for the same reason as the size bounds: a
+ * configurable cap risks an operator raising it high enough to reintroduce the
+ * denial of service.
+ */
+export const MAX_LISTING_READDIR_BATCHES = 2 * MAX_DIRECTORY_ENTRIES;
+
+/**
+ * Construct the typed, terminal liveness error for a listing that exceeded the
+ * round-trip cap ({@link MAX_LISTING_READDIR_BATCHES}) without completing -- the
+ * empty-batch / no-progress flood. Builds the shared
+ * {@link ./sftpLivenessGuard.transportOperationStalledError} so this listing-
+ * specific stall and the `get()` / `createExclusive()` stalls are one error type.
+ */
+export function listingStalledByBatchCountError(
+  dirPath: string,
+  max: number,
+): TransportOperationStalledError {
+  return transportOperationStalledError(
+    "directory listing",
+    dirPath,
+    `made no progress over ${max} readdir round-trips without reaching ` +
+      `end-of-directory`,
+  );
+}
+
+/**
+ * Construct the typed, terminal liveness error for a listing that exceeded the
+ * wall-clock deadline ({@link ./sftpLivenessGuard.SFTP_STALL_DEADLINE_MS})
+ * without completing -- the server withheld a readdir/close callback.
+ */
+export function listingStalledByTimeoutError(
+  dirPath: string,
+  deadlineMs: number,
+): TransportOperationStalledError {
+  return transportOperationStalledError(
+    "directory listing",
+    dirPath,
+    `did not complete within ${deadlineMs} ms (the server withheld a ` +
+      `directory-read response)`,
   );
 }

@@ -385,7 +385,7 @@ export async function runProtocol(
   const client =
     connection.channel === "filedrop"
       ? new LocalFSClient()
-      : new SSH2SFTPClientAdapter();
+      : new SSH2SFTPClientAdapter({ verbosity });
   const conn = new FileSyncConnection(client, { verbose: verbosity });
 
   // The PSI protocol layer (authenticateConnection / runExchange) consumes the
