@@ -35,6 +35,16 @@ export interface AuthResult {
    * expiration and is suitable for use as a persistent shared secret.
    */
   rotatedSecret: string;
+  /**
+   * The negotiated decision to wrap the connection in an additional
+   * application-encryption layer, forwarded from the key exchange
+   * ({@link KexResult.applyEncryption}): the OR of this party's
+   * `requestEncryption` argument and the peer's request, transcript-bound so both
+   * parties agree on it.  The caller applies {@link deriveAeadKey} and an
+   * `EncryptedMessageConnection` wrap when this is `true`.  File-sync callers
+   * request encryption unconditionally, so it is always `true` for them.
+   */
+  applyEncryption: boolean;
 }
 
 /**
@@ -144,6 +154,14 @@ export async function deriveAeadKey(
  *                        `sharedSecret` must be present.
  * @param handshakeRole   This party's role (`"initiator"` or `"responder"`),
  *                        matching the role passed to subsequent protocol calls.
+ * @param requestEncryption  Whether this party requests an additional
+ *                        application-encryption layer over the connection. It is
+ *                        bound into the handshake transcript and OR'd with the
+ *                        peer's request; the result is returned as
+ *                        {@link AuthResult.applyEncryption}. File-sync transports
+ *                        pass `true` (the server admin can snoop); a transport
+ *                        already end-to-end confidential against any in-path party
+ *                        passes `false`.
  *
  * @throws {Error} if `authentication.sharedSecret` is absent or not a
  *                 base64url-encoded 32-byte value.
@@ -157,6 +175,7 @@ export async function authenticateConnection(
   conn: MessageConnection,
   authentication: Authentication,
   handshakeRole: HandshakeRole,
+  requestEncryption: boolean,
 ): Promise<AuthResult> {
   const { sharedSecret, expires } = authentication;
 
@@ -181,10 +200,11 @@ export async function authenticateConnection(
 
   // runKex takes the raw 32-byte pre-shared secret; SHARED_SECRET_REGEX above
   // guarantees `sharedSecret` decodes to exactly 32 bytes.
-  const { sessionKey } = await runKex(
+  const { sessionKey, applyEncryption } = await runKex(
     conn,
     handshakeRole,
     fromBase64Url(sharedSecret),
+    requestEncryption,
   );
 
   // Post-handshake expiry check: catches secrets that expire during the
@@ -210,5 +230,5 @@ export async function authenticateConnection(
   );
   const rotatedSecret = toBase64Url(rotatedSecretBytes);
 
-  return { sessionKey, rotatedSecret };
+  return { sessionKey, rotatedSecret, applyEncryption };
 }

@@ -3,11 +3,18 @@
 // This reimplements the psilink-kex-v1 key schedule from scratch using Node's
 // OpenSSL-backed `crypto` (createHash/createHmac/hkdfSync) -- a different code
 // path from the module under test, which uses WebCrypto (crypto.subtle). The
-// module's kex.test.ts asserts computeKexKeys reproduces the vector this
+// module's kex.test.ts asserts computeKexKeys reproduces the vectors this
 // produces, so agreement is a genuine cross-implementation check of the
 // composition, not a self-test. It also re-checks the external anchors the
 // "handshake core" corresponds to: RFC 7748 section 6.1 (X25519) and RFC 5869
 // test case 3 (the Noise-style chaining HKDF).
+//
+// The handshake carries a per-party request-encryption flag, bound into the
+// transcript as a single byte MixHash'd as each message's handshake payload. The
+// vectors below cover all four (initiator, responder) flag combinations so both
+// flag values are pinned at each position; the chaining key and confirmation key
+// are flag-independent (the flag enters h only, via MixHash) and are recorded
+// once.
 //
 // Run:  node packages/core/test/vectors/generate-kex-vectors.mjs
 // It prints the JSON to stdout; redirect into kex-vectors.json to refresh.
@@ -26,6 +33,8 @@ const fromHex = (s) => Buffer.from(s, "hex");
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const sha256 = (d) => createHash("sha256").update(d).digest();
 const hmac = (k, d) => createHmac("sha256", k).update(d).digest();
+// Canonical single-byte encoding of a request-encryption flag for the transcript.
+const flagByte = (requested) => Buffer.from([requested ? 1 : 0]);
 // Mirrors utils/crypto.ts hkdfDerive: HKDF-SHA-256, 32-byte zero salt, named info.
 const hkdfApp = (ikm, info, len) =>
   Buffer.from(
@@ -42,7 +51,7 @@ function noiseHkdf(ck, ikm, n) {
   return [o1, o2, o3];
 }
 
-function computeKexKeys(psk, eInitPub, eRespPub, dh) {
+function computeKexKeys(psk, eInitPub, eRespPub, dh, iReq, rReq) {
   let h = sha256(Buffer.from(PROTOCOL_NAME, "utf8"));
   let ck = h;
   h = sha256(Buffer.concat([h, Buffer.alloc(0)])); // mixHash(empty prologue)
@@ -51,11 +60,16 @@ function computeKexKeys(psk, eInitPub, eRespPub, dh) {
     ck = o1;
     h = sha256(Buffer.concat([h, o2]));
   }
-  // PSK mode: each `e` token is MixHash + MixKey (Noise rev 34 section 9.2).
+  // PSK mode: each `e` token is MixHash + MixKey (Noise rev 34 section 9.2). Each
+  // party's request-encryption flag is MixHash'd as that message's payload, right
+  // after its `e` token (MixHash only -- the flag need not be confidential, and
+  // entering h alone leaves ck and the confirm key flag-independent).
   h = sha256(Buffer.concat([h, eInitPub])); // mixHash(initiator e)
   ck = noiseHkdf(ck, eInitPub, 2)[0]; // mixKey(initiator e)
+  h = sha256(Buffer.concat([h, flagByte(iReq)])); // mixHash(initiator flag): msg1 payload
   h = sha256(Buffer.concat([h, eRespPub])); // mixHash(responder e)
   ck = noiseHkdf(ck, eRespPub, 2)[0]; // mixKey(responder e)
+  h = sha256(Buffer.concat([h, flagByte(rReq)])); // mixHash(responder flag): msg2 payload
   {
     const [o1] = noiseHkdf(ck, dh, 2); // mixKey(ee)
     ck = o1;
@@ -106,7 +120,7 @@ const tc3Out = Buffer.concat(
 ).subarray(0, 42);
 if (hex(tc3Out) !== TC3.okm) throw new Error("RFC 5869 TC3 self-check failed");
 
-// --- Known-answer vector -----------------------------------------------------
+// --- Known-answer vectors ----------------------------------------------------
 
 const psk = Buffer.alloc(32, 0x42);
 const eInitPriv = Buffer.from(Array.from({ length: 32 }, (_, i) => i + 1));
@@ -117,25 +131,72 @@ const dh = x25519.getSharedSecret(eInitPriv, eRespPub);
 const dhCheck = x25519.getSharedSecret(eRespPriv, eInitPub);
 if (hex(dh) !== hex(dhCheck)) throw new Error("DH disagreement");
 
-const k = computeKexKeys(psk, eInitPub, eRespPub, dh);
+// All four (initiator, responder) request-encryption combinations, so both flag
+// values are pinned at each position. applyEncryption is the OR both parties agree on.
+const FLAG_CASES = [
+  { name: "neither-requests", initiator: false, responder: false },
+  { name: "initiator-only", initiator: true, responder: false },
+  { name: "responder-only", initiator: false, responder: true },
+  { name: "both-request", initiator: true, responder: true },
+];
+
+const computed = FLAG_CASES.map((c) => ({
+  c,
+  k: computeKexKeys(psk, eInitPub, eRespPub, dh, c.initiator, c.responder),
+}));
+
+// The flag enters h only (MixHash), so the chaining key and the confirmation key
+// derived from it are flag-independent. Assert that here and record them once.
+const chainingKeyHex = hex(computed[0].k.ck);
+const confirmKeyHex = hex(computed[0].k.confirmKey);
+for (const { k } of computed) {
+  if (hex(k.ck) !== chainingKeyHex || hex(k.confirmKey) !== confirmKeyHex)
+    throw new Error(
+      "request-encryption flag perturbed ck or confirmKey; it must MixHash into h only",
+    );
+}
+
+const cases = computed.map(({ c, k }) => ({
+  name: c.name,
+  initiatorRequestsEncryption: c.initiator,
+  responderRequestsEncryption: c.responder,
+  applyEncryption: c.initiator || c.responder,
+  handshakeHashHex: hex(k.h),
+  sessionKeyHex: hex(k.sessionKey),
+  initiatorConfirmHex: hex(k.initiatorConfirm),
+  responderConfirmHex: hex(k.responderConfirm),
+  wire: {
+    msg1: { kexMsg: "1", e: b64url(eInitPub), reqEnc: c.initiator },
+    msg2: {
+      kexMsg: "2",
+      e: b64url(eRespPub),
+      confirm: b64url(k.responderConfirm),
+      reqEnc: c.responder,
+    },
+    msg3: { kexMsg: "3", confirm: b64url(k.initiatorConfirm) },
+  },
+}));
 
 const vector = {
   description:
-    "Known-answer vector for the psilink-kex-v1 X25519 authenticated key " +
+    "Known-answer vectors for the psilink-kex-v1 X25519 authenticated key " +
     "exchange (Noise NNpsk0 over X25519 + explicit role-asymmetric key " +
-    "confirmation). Fixes the pre-shared secret and both ephemeral X25519 " +
-    "private keys, and records the derived session key and both confirmation " +
-    "tags. computeKexKeys in packages/core/src/kex.ts reproduces session_key, " +
-    "initiator_confirm, and responder_confirm from these inputs; kex.test.ts " +
-    "checks it. The key-schedule mix chain is faithful Noise NNpsk0 (PSK mode: " +
-    "each e token is MixHash + MixKey), but the overall handshake is pinned by " +
-    "this file and is NOT wire-compatible with generic Noise: the protocol name " +
-    "differs (so the initial h differs) and, instead of Noise Split(), the " +
-    "session key uses a custom KDF over ck||h with an added explicit " +
-    "confirmation round. So no end-to-end Noise vector corresponds. What does " +
-    "correspond is checked separately: the X25519 DH against RFC 7748 section " +
-    "6.1 and the Noise-style chaining HKDF against RFC 5869 test case 3 (see " +
-    "external_anchors and kex.test.ts).",
+    "confirmation + a per-party request-encryption flag bound into the " +
+    "transcript). Fixes the pre-shared secret and both ephemeral X25519 private " +
+    "keys, and records, for all four (initiator, responder) flag combinations, " +
+    "the handshake hash, session key, and both confirmation tags. computeKexKeys " +
+    "in packages/core/src/kex.ts reproduces them from these inputs; kex.test.ts " +
+    "checks it. The chaining key and confirmation key are flag-independent (the " +
+    "flag is MixHash'd into h only) and recorded once under derived. The " +
+    "key-schedule mix chain is faithful Noise NNpsk0 (PSK mode: each e token is " +
+    "MixHash + MixKey; each message's flag is the MixHash'd handshake payload), " +
+    "but the overall handshake is pinned by this file and is NOT wire-compatible " +
+    "with generic Noise: the protocol name differs (so the initial h differs) " +
+    "and, instead of Noise Split(), the session key uses a custom KDF over ck||h " +
+    "with an added explicit confirmation round. So no end-to-end Noise vector " +
+    "corresponds. What does correspond is checked separately: the X25519 DH " +
+    "against RFC 7748 section 6.1 and the Noise-style chaining HKDF against RFC " +
+    "5869 test case 3 (see external_anchors and kex.test.ts).",
   construction: {
     pattern: "Noise NNpsk0 over X25519",
     protocolName: PROTOCOL_NAME,
@@ -146,13 +207,18 @@ const vector = {
     confirmKeyLabel: CONFIRM_KEY_LABEL,
     initiatorConfirmLabel: INITIATOR_CONFIRM_LABEL,
     responderConfirmLabel: RESPONDER_CONFIRM_LABEL,
+    requestEncryptionFlag:
+      "Single byte (0x01 if the party requests the additional " +
+      "application-encryption layer, else 0x00), MixHash'd as that message's " +
+      "handshake payload right after the party's e token. MixHash only.",
     note:
       "h0 = SHA-256(protocolName); ck0 = h0. Tokens (PSK mode -- each e is " +
-      "MixHash then MixKey): MixHash(''), MixKeyAndHash(psk), " +
-      "MixHash(eInitiatorPub), MixKey(eInitiatorPub), MixHash(eResponderPub), " +
-      "MixKey(eResponderPub), MixKey(dh). sessionKey = HKDF(ck||h, " +
-      "sessionLabel, 32); confirmKey = HKDF(ck, confirmKeyLabel, 32); confirm " +
-      "tags = HMAC(confirmKey, label||h).",
+      "MixHash then MixKey; each flag is MixHash'd as the message payload): " +
+      "MixHash(''), MixKeyAndHash(psk), MixHash(eInitiatorPub), " +
+      "MixKey(eInitiatorPub), MixHash(initiatorFlagByte), MixHash(eResponderPub), " +
+      "MixKey(eResponderPub), MixHash(responderFlagByte), MixKey(dh). sessionKey " +
+      "= HKDF(ck||h, sessionLabel, 32); confirmKey = HKDF(ck, confirmKeyLabel, " +
+      "32); confirm tags = HMAC(confirmKey, label||h).",
   },
   inputs: {
     pskHex: hex(psk),
@@ -163,25 +229,10 @@ const vector = {
     initiatorEphemeralPublicHex: hex(eInitPub),
     responderEphemeralPublicHex: hex(eRespPub),
     dhSharedSecretHex: hex(dh),
-    chainingKeyHex: hex(k.ck),
-    handshakeHashHex: hex(k.h),
+    chainingKeyHex,
+    confirmKeyHex,
   },
-  outputs: {
-    sessionKeyHex: hex(k.sessionKey),
-    confirmKeyHex: hex(k.confirmKey),
-    initiatorConfirmHex: hex(k.initiatorConfirm),
-    responderConfirmHex: hex(k.responderConfirm),
-  },
-  wire: {
-    note: "Exactly the base64url fields runKex puts on the wire.",
-    msg1: { kexMsg: "1", e: b64url(eInitPub) },
-    msg2: {
-      kexMsg: "2",
-      e: b64url(eRespPub),
-      confirm: b64url(k.responderConfirm),
-    },
-    msg3: { kexMsg: "3", confirm: b64url(k.initiatorConfirm) },
-  },
+  cases,
   externalAnchors: {
     note:
       "The externally-published references the handshake core corresponds to. " +

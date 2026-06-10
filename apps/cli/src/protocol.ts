@@ -418,11 +418,13 @@ export async function runProtocol(
   let cleaned = false;
   let opened = false;
   let started = false;
-  // The AEAD decorator that wraps `mc` once a session key is available
-  // (authenticated path only). Declared in the outer scope so doCleanup can
-  // close it; left undefined on the no-auth path, where the exchange runs over
-  // the unencrypted `mc`. secure.close() delegates to mc.close(), so closing it
-  // closes the underlying FileSyncConnection and sweeps its responsible files.
+  // The AEAD decorator that wraps `mc` when the handshake negotiates encryption.
+  // Declared in the outer scope so doCleanup can close it; left undefined
+  // whenever no wrap is applied -- the no-auth path (no session key) and the
+  // authenticated path where the negotiated applyEncryption is false -- in which
+  // case the exchange runs over the unencrypted `mc`. secure.close() delegates to
+  // mc.close(), so closing it closes the underlying FileSyncConnection and sweeps
+  // its responsible files.
   let secure: EncryptedMessageConnection | undefined;
   // Set synchronously immediately before `await authenticateConnection`.
   // The partner can complete its own handshake and persist the rotated token
@@ -443,13 +445,14 @@ export async function runProtocol(
     cleaned = true;
     if (started) log.info("stopping polling");
     if (opened) log.info("closing connection");
-    // When the AEAD decorator was built (authenticated path), close it: its
+    // When the AEAD decorator was built (encryption negotiated), close it: its
     // close() delegates to mc.close(), which detaches the bridge's data/error
-    // listeners and closes the underlying FileSyncConnection. Closing secure is
-    // a no-op for the no-auth path (secure is undefined there) and for the
-    // window where a signal arrived between authenticateConnection returning and
-    // create resolving (secure still undefined) -- the mc.close() below then
-    // closes the transport directly. All of these are idempotent.
+    // listeners and closes the underlying FileSyncConnection. secure is undefined
+    // whenever no wrap was applied -- the no-auth path, the authenticated path
+    // where applyEncryption is false, and the window where a signal arrived
+    // between authenticateConnection returning and create resolving -- and the
+    // mc.close() below then closes the transport directly. All of these are
+    // idempotent.
     if (secure !== undefined) {
       await secure.close().catch((err: unknown) => {
         log.debug("secure.close() during cleanup:", err);
@@ -670,11 +673,13 @@ export async function runProtocol(
       // same value. It keys the per-direction AEAD encryption set up below, so
       // every PSI frame after this point is opaque on the wire to an SFTP/
       // file-drop admin. rotatedSecret is the new shared secret persisted to disk.
-      const { rotatedSecret, sessionKey } = await authenticateConnection(
-        mc,
-        authParams,
-        role,
-      );
+      // requestEncryption is true unconditionally here: this code path serves
+      // only the file-sync channels (sftp, filedrop), whose server admin can
+      // snoop the transport, so the application-encryption layer always applies.
+      // applyEncryption is the negotiated OR decision both parties agree on; it
+      // gates the EncryptedMessageConnection wrap below.
+      const { rotatedSecret, sessionKey, applyEncryption } =
+        await authenticateConnection(mc, authParams, role, true);
       try {
         // saveKeyFile is synchronous; the assignment below runs in the same
         // microtask tick. A signal cannot interleave between them, so any
@@ -765,10 +770,16 @@ export async function runProtocol(
         }
       }
 
-      // Wrap mc in the AEAD decorator now that the session key is in hand,
-      // and run the PSI exchange through `secure` so every frame is encrypted on
-      // the wire. create() derives the two per-direction keys via HKDF and
-      // registers no listeners on mc, so a signal arriving between
+      // Wrap mc in the AEAD decorator when the handshake negotiated it, and run
+      // the PSI exchange through `secure` so every frame is encrypted on the
+      // wire. The wrap is gated on applyEncryption -- the transcript-bound OR of
+      // both parties' requests -- rather than on the bare authentication state:
+      // file-sync requests it unconditionally (true is passed above), so the
+      // observable behavior is unchanged here (an authenticated file-sync
+      // exchange always encrypts), while the gate readies the path for a future
+      // caller that authenticates over an already-confidential transport and
+      // declines the extra layer. create() derives the two per-direction keys via
+      // HKDF and registers no listeners on mc, so a signal arriving between
       // authenticateConnection returning and this resolving needs no listener
       // juggling: the handler's doCleanup closes mc/conn directly. If the signal
       // lands before create() resolves, doCleanup runs while secure is still
@@ -777,8 +788,12 @@ export async function runProtocol(
       // closed and the decorator holds only CryptoKey objects, reclaimed when
       // runProtocol returns. The signalReceived check below mirrors the
       // post-open and post-synchronize guards, bailing before runExchange so the
-      // encrypted stream is never started against an already-closed mc.
-      secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
+      // encrypted stream is never started against an already-closed mc; it runs
+      // whether or not the wrap was applied, since a signal may also have arrived
+      // during the awaited onAuthenticated hook above.
+      if (applyEncryption) {
+        secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
+      }
       if (signalReceived !== undefined) {
         throw new Error(
           `interrupted by ${signalReceived} during channel encryption setup`,
@@ -791,10 +806,12 @@ export async function runProtocol(
     );
     const { associationTable, partnerPayload, audit, bootstrap } =
       await runExchange(
-        // Authenticated path: `secure` is the AEAD decorator over mc, so PSI
-        // frames are encrypted on the wire. No-auth path: secure is undefined
-        // and the exchange runs over the unencrypted mc (transport security
-        // only) -- this is the zero-setup path that carries the --save bootstrap.
+        // Encrypted path: `secure` is the AEAD decorator over mc (the handshake
+        // negotiated applyEncryption), so PSI frames are encrypted on the wire.
+        // Otherwise secure is undefined and the exchange runs over the unencrypted
+        // mc (transport security only): the no-auth zero-setup path that carries
+        // the --save bootstrap, and the authenticated path where the negotiated
+        // applyEncryption is false.
         secure ?? mc,
         role,
         prepared,

@@ -39,7 +39,14 @@ const PSK_LEN = 32;
 // and every confirmation tag. A future authenticated mode (e.g. a
 // certificate-chain variant) is an additive new version selected out-of-band:
 // bumping this string makes a mismatched peer derive a different transcript and
-// fail closed. See docs/SECURITY_DESIGN.md ("Key-agreement design").
+// fail closed. The version is reserved for a genuine cryptographic-suite change
+// and is not bumped for an additive payload such as the request-encryption flag
+// below: a flag-aware and a flag-unaware peer already fail closed at parse. The
+// flag-aware side rejects a message that omits reqEnc by the schema's
+// required-field check; an old flag-unaware side rejects a message that carries
+// the (to it unknown) reqEnc key by its strict (.strict()) schema. Either way
+// the message is rejected before any transcript is computed. See
+// docs/SECURITY_DESIGN.md ("Key-agreement design").
 const PROTOCOL_NAME = "psilink-kex-v1:NNpsk0_25519_SHA256";
 
 // Domain-separation labels, all namespaced under psilink-kex-v1: and disjoint
@@ -80,17 +87,23 @@ const EMPTY = new Uint8Array(0);
 // being silently stripped. A message arriving with unexpected fields indicates
 // either a peer bug or a malicious actor fuzzing the parser, and either case
 // should fail fast. `e` is a base64url-encoded 32-byte X25519 public key;
-// `confirm` is a base64url-encoded 32-byte HMAC-SHA-256 tag.
+// `confirm` is a base64url-encoded 32-byte HMAC-SHA-256 tag. `reqEnc` is this
+// party's "request additional application-encryption layer" flag: it rides the
+// party's own message (initiator's on msg1, responder's on msg2), is a required
+// field (a flag-aware peer always sends it), and is bound into the transcript
+// hash by computeKexKeys so tampering with it fails the handshake closed.
 
 interface KexMsg1 {
   kexMsg: "1";
   e: string;
+  reqEnc: boolean;
 }
 
 const KexMsg1Schema: z.ZodType<KexMsg1> = z
   .object({
     kexMsg: z.literal("1"),
     e: z.string(),
+    reqEnc: z.boolean(),
   })
   .strict();
 
@@ -98,6 +111,7 @@ interface KexMsg2 {
   kexMsg: "2";
   e: string;
   confirm: string;
+  reqEnc: boolean;
 }
 
 const KexMsg2Schema: z.ZodType<KexMsg2> = z
@@ -105,6 +119,7 @@ const KexMsg2Schema: z.ZodType<KexMsg2> = z
     kexMsg: z.literal("2"),
     e: z.string(),
     confirm: z.string(),
+    reqEnc: z.boolean(),
   })
   .strict();
 
@@ -157,6 +172,14 @@ function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> | undefined {
   } catch {
     return undefined;
   }
+}
+
+// Canonical single-byte encoding of a party's request-encryption flag for the
+// transcript hash: 0x01 when the party requests the additional
+// application-encryption layer, 0x00 otherwise. Both implementations (this one
+// and the independent vector generator) must agree on these bytes.
+function flagByte(requested: boolean): Uint8Array<ArrayBuffer> {
+  return Uint8Array.of(requested ? 1 : 0);
 }
 
 // --- Noise NNpsk0 symmetric state --------------------------------------------
@@ -245,16 +268,28 @@ async function mixKeyAndHash(
  * The NNpsk0 token sequence (`-> psk, e` / `<- e, ee`, empty prologue) folds the
  * pre-shared secret in at position 0 (MixKeyAndHash), both ephemeral public keys
  * (in PSK mode each `e` token is MixHash + MixKey, in initiator-then-responder
- * order), and the ephemeral-ephemeral DH output (MixKey). The session key and a
+ * order), and the ephemeral-ephemeral DH output (MixKey). Each party's
+ * request-encryption flag is MixHash'd as that message's handshake payload, right
+ * after the party's `e` token (initiator's after e_initiator, responder's after
+ * e_responder) -- MixHash only, since the flag need not be confidential. The
+ * session key and a
  * distinct confirmation key are then
  * derived over BOTH the resulting chaining key `ck` (which carries the psk and
  * the X25519 DH output) AND the handshake hash `h` (which carries the
- * protocol-version tag and both ephemeral public keys in role order). Deriving
+ * protocol-version tag, both ephemeral public keys in role order, and both
+ * request-encryption flags). Deriving
  * from ck||h is the load-bearing invariant: the session key depends on the
  * X25519 output, so it is neither the pre-shared secret alone (which would have
  * no forward secrecy) nor the raw DH output alone (which would not be
  * transcript-bound). SP 800-56A Rev. 3 section 5.8.1 (KDF over the shared secret
  * plus FixedInfo) and section 5.9 / 6.2.1.5 (key confirmation).
+ *
+ * The two flags enter `h` only (MixHash, not MixKey), so `ck` -- and therefore
+ * the confirmation key derived from `ck` -- is independent of them; `h`, the
+ * session key, and both confirmation tags depend on both flags. A flag tampered
+ * with on the wire yields a different `h` on the two sides, so the role-asymmetric
+ * confirmation tags mismatch and the handshake aborts rather than proceeding with
+ * a disagreed-upon encryption decision.
  *
  * @internal exported only for the known-answer-vector and RFC cross-check tests.
  */
@@ -263,6 +298,8 @@ export async function computeKexKeys(
   initiatorEphemeralPublic: Uint8Array<ArrayBuffer>,
   responderEphemeralPublic: Uint8Array<ArrayBuffer>,
   dhSharedSecret: Uint8Array<ArrayBuffer>,
+  initiatorRequestsEncryption: boolean,
+  responderRequestsEncryption: boolean,
 ): Promise<{
   sessionKey: Uint8Array<ArrayBuffer>;
   confirmKey: Uint8Array<ArrayBuffer>;
@@ -272,20 +309,26 @@ export async function computeKexKeys(
   chainingKey: Uint8Array<ArrayBuffer>;
 }> {
   const s = await initializeSymmetric();
-  // NNpsk0 token sequence: -> psk, e ; <- e, ee. Empty prologue.
+  // NNpsk0 token sequence: -> psk, e ; <- e, ee. Empty prologue. Each message's
+  // request-encryption flag is mixed in as that message's handshake payload,
+  // right after its `e` token.
   //
   // In a PSK handshake Noise (rev 34 section 9.2) processes every `e` token with
   // MixKey(e.public) IN ADDITION to MixHash(e.public): the ephemeral publics are
   // folded into the chaining key, not only the hash. We do both, so this is
   // faithful NNpsk0. (MixHash touches only h and MixKey only ck -- disjoint
   // state -- so their order within an `e` token is immaterial; the ck-chain
-  // order psk -> e_i -> e_r -> ee is what matters and is preserved here.)
+  // order psk -> e_i -> e_r -> ee is what matters and is preserved here. The flag
+  // MixHash'es likewise only touch h, so they commute with the surrounding MixKey
+  // calls; the h-chain order e_i -> flag_i -> e_r -> flag_r is what is fixed.)
   await mixHash(s, EMPTY);
   await mixKeyAndHash(s, psk); // psk token at position 0
   await mixHash(s, initiatorEphemeralPublic); // initiator e: MixHash
   await mixKey(s, initiatorEphemeralPublic); //              and MixKey (PSK mode)
+  await mixHash(s, flagByte(initiatorRequestsEncryption)); // msg1 payload: initiator flag
   await mixHash(s, responderEphemeralPublic); // responder e: MixHash
   await mixKey(s, responderEphemeralPublic); //              and MixKey (PSK mode)
+  await mixHash(s, flagByte(responderRequestsEncryption)); // msg2 payload: responder flag
   await mixKey(s, dhSharedSecret); // ee
 
   const master = concatBytes(s.ck, s.h);
@@ -388,6 +431,16 @@ async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
 export interface KexResult {
   /** 32-byte session key. */
   sessionKey: Uint8Array<ArrayBuffer>;
+  /**
+   * The negotiated decision to wrap the post-handshake connection in an
+   * additional application-encryption layer: `own request OR peer request`.
+   * Both parties compute the same value (each holds both flags before
+   * `computeKexKeys`), and it is transcript-bound, so a tampered flag aborts the
+   * handshake rather than yielding a split decision. The caller applies the
+   * extra AEAD layer when this is `true` and a session key is in hand. It is
+   * `false` only when neither party requested the layer.
+   */
+  applyEncryption: boolean;
 }
 
 // --- Protocol ----------------------------------------------------------------
@@ -397,8 +450,9 @@ export interface KexResult {
  * connection.
  *
  * Message flow (initiator sends first throughout):
- *   1. Initiator -> Responder : `{ kexMsg: "1", e: e_I }`
- *   2. Responder -> Initiator : `{ kexMsg: "2", e: e_R, confirm: MAC_R }`
+ *   1. Initiator -> Responder : `{ kexMsg: "1", e: e_I, reqEnc: req_I }`
+ *   2. Responder -> Initiator : `{ kexMsg: "2", e: e_R, confirm: MAC_R,
+ *      reqEnc: req_R }`
  *   3. Initiator -> Responder : `{ kexMsg: "3", confirm: MAC_I }` or
  *      `{ kexMsg: "abort" }`
  *
@@ -410,6 +464,15 @@ export interface KexResult {
  * pre-shared secret fails closed before any non-handshake frame is sent. The
  * connection's inbound queue buffers any frame that arrives before this side is
  * ready to read it, so a fast peer cannot race ahead of a receive.
+ *
+ * `req_I` and `req_R` are each party's `requestEncryption` flag, riding the
+ * party's own message. Both sides therefore hold both flags before
+ * `computeKexKeys`, which binds them into the transcript hash; the returned
+ * {@link KexResult.applyEncryption} is `req_I OR req_R`, identical on both ends.
+ * Because the flags are transcript-bound, an attacker flipping either flag on the
+ * wire produces a different transcript hash on the two sides, so the confirmation
+ * tags mismatch and the handshake aborts -- it cannot be downgraded to a
+ * different encryption decision than the parties agreed.
  *
  * The construction is Noise NNpsk0 over X25519 plus an explicit key
  * confirmation, following NIST SP 800-56A; the DH is a @noble/curves call, not
@@ -436,11 +499,18 @@ export interface KexResult {
  *   non-transport reason (e.g. a deliberate local {@link MessageConnection.close}
  *   during the handshake). Such a close is deliberately not masked as an
  *   authentication failure.
+ *
+ * @param requestEncryption  This party's request for an additional
+ *   application-encryption layer over the post-handshake connection. It is sent
+ *   on this party's handshake message and bound into the transcript. The
+ *   negotiated decision (this OR the peer's flag) is returned as
+ *   {@link KexResult.applyEncryption}.
  */
 export async function runKex(
   conn: MessageConnection,
   handshakeRole: HandshakeRole,
   psk: Uint8Array<ArrayBuffer>,
+  requestEncryption: boolean,
 ): Promise<KexResult> {
   if (psk.length !== PSK_LEN) {
     throw new Error(`runKex: psk must be ${PSK_LEN} bytes, got ${psk.length}`);
@@ -451,10 +521,11 @@ export async function runKex(
   const mySecret = ephemeral.secretKey;
 
   if (handshakeRole === "initiator") {
-    // Message 1: send our ephemeral public key.
+    // Message 1: send our ephemeral public key and our request-encryption flag.
     await conn.send({
       kexMsg: "1",
       e: toBase64Url(myPublic),
+      reqEnc: requestEncryption,
     } satisfies KexMsg1);
 
     // Message 2: receive responder's ephemeral + confirmation.
@@ -475,8 +546,18 @@ export async function runKex(
       await sendAbort(conn);
       throw new Error(GENERIC_FAILURE);
     }
+    // We are the initiator, so our flag is the initiator flag and the responder's
+    // (msg2.reqEnc) is the responder flag. Binding both into the transcript means
+    // a tampered responder flag yields a responder tag we will reject below.
     const { sessionKey, initiatorConfirm, responderConfirm } =
-      await computeKexKeys(psk, myPublic, peerPublic, dh);
+      await computeKexKeys(
+        psk,
+        myPublic,
+        peerPublic,
+        dh,
+        requestEncryption,
+        msg2.data.reqEnc,
+      );
 
     // No explicit length check on the decoded tag: bytesEqual is total and
     // returns false on any length mismatch (unlike the public key above, whose
@@ -496,7 +577,10 @@ export async function runKex(
       confirm: toBase64Url(initiatorConfirm),
     } satisfies KexMsg3);
 
-    return { sessionKey };
+    return {
+      sessionKey,
+      applyEncryption: requestEncryption || msg2.data.reqEnc,
+    };
   } else {
     // Message 1: receive initiator's ephemeral public key.
     // Every failure path below sends an abort so the initiator stops waiting.
@@ -515,15 +599,26 @@ export async function runKex(
       await sendAbort(conn);
       throw new Error(GENERIC_FAILURE);
     }
-    // peerPublic is the initiator's e; myPublic is the responder's e.
+    // peerPublic is the initiator's e; myPublic is the responder's e. The
+    // initiator's flag (msg1.reqEnc) is the initiator flag and ours is the
+    // responder flag; both are bound into the transcript before the tags are
+    // computed, so the confirm we send below already commits to both flags.
     const { sessionKey, initiatorConfirm, responderConfirm } =
-      await computeKexKeys(psk, peerPublic, myPublic, dh);
+      await computeKexKeys(
+        psk,
+        peerPublic,
+        myPublic,
+        dh,
+        msg1.data.reqEnc,
+        requestEncryption,
+      );
 
-    // Message 2: send our ephemeral + confirmation.
+    // Message 2: send our ephemeral + confirmation + our request-encryption flag.
     await conn.send({
       kexMsg: "2",
       e: toBase64Url(myPublic),
       confirm: toBase64Url(responderConfirm),
+      reqEnc: requestEncryption,
     } satisfies KexMsg2);
 
     // Message 3: receive and verify the initiator's confirmation (or abort). No
@@ -550,6 +645,9 @@ export async function runKex(
       throw new Error(GENERIC_FAILURE);
     }
 
-    return { sessionKey };
+    return {
+      sessionKey,
+      applyEncryption: msg1.data.reqEnc || requestEncryption,
+    };
   }
 }

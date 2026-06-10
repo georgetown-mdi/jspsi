@@ -84,13 +84,43 @@ test("both parties derive the same rotated token over a real connection", async 
   const roleB = connB.handshakeRole as HandshakeRole;
 
   const [a, b] = await Promise.all([
-    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
-    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB),
+    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
+    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB, true),
   ]).finally(() => teardown(connA, connB));
 
   expect(a.rotatedSecret).toBe(b.rotatedSecret);
   expect(a.rotatedSecret).not.toBe(TOKEN_A);
   expect(SHARED_SECRET_REGEX.test(a.rotatedSecret)).toBe(true);
+  // Both parties requested encryption, so both surface the same wrap decision.
+  expect(a.applyEncryption).toBe(true);
+  expect(b.applyEncryption).toBe(true);
+});
+
+test("applyEncryption surfaces own-OR-peer through authenticateConnection across flag combinations", async () => {
+  // The OR semantics are pinned at the runKex layer; this asserts they survive
+  // through authenticateConnection, whose AuthResult now carries applyEncryption.
+  // All four combinations are exercised so the auth layer pins both the
+  // unencrypted (false, false) -> false decision and the own-OR-peer rule on its
+  // own, rather than leaning on the (true, true) success path above. Run over an
+  // in-memory pipe -- the handshake completes the same as over a real transport,
+  // without the file-drop setup the rotation tests need.
+  const combos: Array<[boolean, boolean, boolean]> = [
+    [false, false, false],
+    [true, false, true],
+    [false, true, true],
+    [true, true, true],
+  ];
+  for (const [reqInit, reqResp, expected] of combos) {
+    const [a, b] = createMessagePipe();
+    const [resA, resB] = await Promise.all([
+      authenticateConnection(a, { sharedSecret: TOKEN_A }, "initiator", reqInit),
+      authenticateConnection(b, { sharedSecret: TOKEN_A }, "responder", reqResp),
+    ]);
+    expect(resA.applyEncryption).toBe(expected);
+    expect(resB.applyEncryption).toBe(expected);
+    // The rotated secret still agrees regardless of the flag values.
+    expect(resA.rotatedSecret).toBe(resB.rotatedSecret);
+  }
 });
 
 test("rotated token written to the key file carries no expiry", async () => {
@@ -105,8 +135,8 @@ test("rotated token written to the key file carries no expiry", async () => {
   const roleB = connB.handshakeRole as HandshakeRole;
 
   const [{ rotatedSecret }] = await Promise.all([
-    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
-    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB),
+    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
+    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB, true),
   ]).finally(() => teardown(connA, connB));
 
   const keyFilePath = path.join(tmpDir, "rotated.key");
@@ -126,6 +156,7 @@ test("authentication throws for an expired token without opening a connection", 
       mc,
       { sharedSecret: TOKEN_A, expires: "2000-01-01T00:00:00.000Z" },
       "initiator",
+      true,
     ),
   ).rejects.toThrow("shared secret expired");
 });
@@ -140,6 +171,7 @@ test("authentication tags a pre-handshake-expiry error with psilinkRecoveryHintE
     mc,
     { sharedSecret: TOKEN_A, expires: "2000-01-01T00:00:00.000Z" },
     "initiator",
+    true,
   ).catch((e: unknown) => e);
   expect(
     (err as { psilinkRecoveryHintEmitted?: unknown })
@@ -150,7 +182,7 @@ test("authentication tags a pre-handshake-expiry error with psilinkRecoveryHintE
 test("authentication throws for a token that is not 43 base64url characters", async () => {
   const mc = fromEventConnection(makeConn());
   await expect(
-    authenticateConnection(mc, { sharedSecret: "tooshort" }, "initiator"),
+    authenticateConnection(mc, { sharedSecret: "tooshort" }, "initiator", true),
   ).rejects.toThrow(
     "authentication.sharedSecret must be a base64url-encoded 32-byte value",
   );
@@ -161,7 +193,7 @@ test("authentication throws for a token containing non-base64url characters", as
   // 43 chars but contains '=' (standard base64 padding, not valid base64url)
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   await expect(
-    authenticateConnection(mc, { sharedSecret: badToken }, "initiator"),
+    authenticateConnection(mc, { sharedSecret: badToken }, "initiator", true),
   ).rejects.toThrow(
     "authentication.sharedSecret must be a base64url-encoded 32-byte value",
   );
@@ -174,7 +206,7 @@ test("authentication throws for a token with valid base64url characters but wron
   // 2 zero padding bits for a 32-byte value.
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB";
   await expect(
-    authenticateConnection(mc, { sharedSecret: badToken }, "initiator"),
+    authenticateConnection(mc, { sharedSecret: badToken }, "initiator", true),
   ).rejects.toThrow(
     "authentication.sharedSecret must be a base64url-encoded 32-byte value",
   );
@@ -189,6 +221,7 @@ test("authentication tags a malformed-secret error with psilinkRecoveryHintEmitt
     mc,
     { sharedSecret: "tooshort" },
     "initiator",
+    true,
   ).catch((e: unknown) => e);
   expect(
     (err as { psilinkRecoveryHintEmitted?: unknown })
@@ -210,8 +243,8 @@ test("authentication throws when tokens differ", async () => {
   const roleB = connB.handshakeRole as HandshakeRole;
 
   const [resultA, resultB] = await Promise.allSettled([
-    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA),
-    authenticateConnection(mcB, { sharedSecret: TOKEN_B }, roleB),
+    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
+    authenticateConnection(mcB, { sharedSecret: TOKEN_B }, roleB, true),
   ]).finally(() => teardown(connA, connB));
 
   expect(resultA.status).toBe("rejected");
@@ -241,6 +274,7 @@ test("a legacy SPAKE2-shaped first message fails a new responder with a clean er
     a,
     { sharedSecret: TOKEN_A },
     "responder",
+    true,
   );
   // `b` is the legacy client: it opens with a SPAKE2 message-1 shape.
   await b.send({ pakeMsg: "1", point: TOKEN_A });
@@ -254,6 +288,7 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
     a,
     { sharedSecret: TOKEN_A },
     "initiator",
+    true,
   );
   // `b` is the legacy responder: it consumes the initiator's frame and replies
   // with a SPAKE2 message-2 shape, which the new initiator cannot parse.
@@ -284,8 +319,18 @@ test("authentication throws when the shared secret expires during the key-exchan
   });
   const [a, b] = createMessagePipe();
   const authPromise = Promise.allSettled([
-    authenticateConnection(a, { sharedSecret: TOKEN_A, expires }, "initiator"),
-    authenticateConnection(b, { sharedSecret: TOKEN_A, expires }, "responder"),
+    authenticateConnection(
+      a,
+      { sharedSecret: TOKEN_A, expires },
+      "initiator",
+      true,
+    ),
+    authenticateConnection(
+      b,
+      { sharedSecret: TOKEN_A, expires },
+      "responder",
+      true,
+    ),
   ]);
   // Advance past expires while the round-trip is still in flight.
   await Promise.resolve().then(() =>
@@ -310,8 +355,18 @@ test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintE
   });
   const [a, b] = createMessagePipe();
   const authPromise = Promise.allSettled([
-    authenticateConnection(a, { sharedSecret: TOKEN_A, expires }, "initiator"),
-    authenticateConnection(b, { sharedSecret: TOKEN_A, expires }, "responder"),
+    authenticateConnection(
+      a,
+      { sharedSecret: TOKEN_A, expires },
+      "initiator",
+      true,
+    ),
+    authenticateConnection(
+      b,
+      { sharedSecret: TOKEN_A, expires },
+      "responder",
+      true,
+    ),
   ]);
   await Promise.resolve().then(() =>
     vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
