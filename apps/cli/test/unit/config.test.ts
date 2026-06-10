@@ -287,8 +287,8 @@ test("saveConfig round-trips provider_options verbatim in both directions", () =
     // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
     // and a snake_case key must both survive the writer + reader unchanged. The
     // writer must not snakeize readyTimeout, and the reader must not camelize
-    // keepalive_interval. The field name itself (`providerOptions`) is camelCase,
-    // which is what snakeizeKeys' raw-key opaque check relies on to skip it.
+    // keepalive_interval, because core's shared walker treats the providerOptions
+    // subtree as opaque in both directions.
     const spec: ExchangeSpec = {
       connection: {
         channel: "sftp",
