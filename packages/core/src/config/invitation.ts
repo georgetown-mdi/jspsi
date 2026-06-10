@@ -2,6 +2,7 @@ import { z } from "zod";
 import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
+import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -69,13 +70,17 @@ export type ConnectionEndpoint =
 // not enumerate every connection field a future schema might add.
 const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code === "unrecognized_keys") {
+    // The rejected key names are partner-controlled (the inviter crafts the
+    // token), and this message is surfaced to the accepting operator's terminal
+    // via describeDecodeError. Escape each name so a key like "\x1b[31m..."
+    // cannot inject terminal control/ANSI sequences or deceptive Unicode.
     return (
       "a connection endpoint may carry only a credential-free locator " +
       "(channel plus host/port/path); every other field is rejected so that no " +
       "credential or server-identity material (such as a password, private " +
       "key, or host-key fingerprint) can ride along. Remove unexpected " +
       "field(s): " +
-      issue.keys.join(", ")
+      issue.keys.map((k) => sanitizeForDisplay(k)).join(", ")
     );
   }
   // Returning undefined delegates to Zod's default error map (the documented

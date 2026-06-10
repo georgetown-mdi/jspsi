@@ -9,6 +9,7 @@ import {
   getLogger,
   decodeInvitation,
   parseExchangeSpec,
+  sanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -204,7 +205,10 @@ function displayInvitation(
 ): void {
   const t = token.linkageTerms;
   log.info("Invitation details:");
-  log.info(`  inviting party: ${t.identity}`);
+  // identity and linkage-key names are partner-controlled free text (the inviter
+  // crafts the token); escape them before they reach the acceptor's terminal,
+  // since this summary is shown before the operator confirms acceptance.
+  log.info(`  inviting party: ${sanitizeForDisplay(t.identity)}`);
   log.info(`  PSI algorithm: ${t.algorithm}`);
   log.info(
     `  inviter receives output: ${t.output.expectsOutput ? "yes" : "no"}`,
@@ -213,7 +217,10 @@ function displayInvitation(
     `  inviter shares result with partner: ` +
       `${t.output.shareWithPartner ? "yes" : "no"}`,
   );
-  log.info(`  linkage keys: ${t.linkageKeys.map((k) => k.name).join(", ")}`);
+  log.info(
+    `  linkage keys: ` +
+      `${t.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", ")}`,
+  );
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
 }
 

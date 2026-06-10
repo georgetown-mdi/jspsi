@@ -71,6 +71,33 @@ describe("sanitizeForDisplay", () => {
     expect(sanitizeForDisplay("\u{1f600}")).toBe("\\u{1f600}");
   });
 
+  test("escapes a lone surrogate rather than splitting or dropping it", () => {
+    // Code-point iteration yields a lone high surrogate as one unit; it must be
+    // escaped (a future switch to UTF-16 iteration would split it -- this pins
+    // against that).
+    expect(sanitizeForDisplay("\ud83d")).toBe("\\ud83d");
+  });
+
+  test("escapes a combining mark per code point (NFD sequence)", () => {
+    // "e" + combining acute (U+0301): the base passes as ASCII, the mark escapes.
+    expect(sanitizeForDisplay("e" + String.fromCodePoint(0x301))).toBe(
+      "e\\u0301",
+    );
+  });
+
+  test("returns a bare marker when maxLength is smaller than the first escape", () => {
+    // Degenerate cap: the astral first char's escape (9 chars) exceeds a cap of
+    // 3, so nothing fits and only the marker is emitted -- bounded and safe, no
+    // mid-escape. maxLength 0 behaves the same for any non-empty input.
+    expect(sanitizeForDisplay("\u{1f600}abc", { maxLength: 3 })).toBe(
+      DISPLAY_TRUNCATION_MARKER,
+    );
+    expect(sanitizeForDisplay("a", { maxLength: 0 })).toBe(
+      DISPLAY_TRUNCATION_MARKER,
+    );
+    expect(sanitizeForDisplay("", { maxLength: 0 })).toBe("");
+  });
+
   test("truncates an over-long value and appends the marker", () => {
     const value = "a".repeat(DEFAULT_MAX_DISPLAY_LENGTH + 50);
     const out = sanitizeForDisplay(value);
