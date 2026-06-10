@@ -1886,6 +1886,93 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
   expect(loadKeyFile(keyFileB)?.sharedSecret).not.toBe(TOKEN_A);
 }, 15_000);
 
+test("runProtocol's recovery hint does not promise a clean retry when the post-handshake hook failed", async () => {
+  // Compound-failure regression: the handshake succeeds and the key rotates,
+  // then the post-handshake persistence hook throws (so the config the bootstrap
+  // callers write is NOT on disk), and the data exchange then also fails. The
+  // catch must not tell the user to "retry the exchange without re-inviting" --
+  // `psilink exchange` would have no config to run against -- but instead point
+  // at the failed persistence step.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  async function waitForRotationThenThrow(): Promise<never> {
+    const { readFileSync } = await import("node:fs");
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      try {
+        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
+        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
+        if (a !== TOKEN_A && b !== TOKEN_A) break;
+      } catch {
+        // file may not exist yet; retry
+      }
+      if (Date.now() > deadline)
+        throw new Error("timed out waiting for both key files to rotate");
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    throw new Error("simulated data-exchange failure after rotation");
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrow)
+    .mockImplementationOnce(waitForRotationThenThrow);
+
+  // The hook stands in for the bootstrap config write; throwing leaves
+  // onAuthenticatedError set with no config on disk.
+  const failingHook = () => {
+    throw new Error("simulated config-write failure");
+  };
+
+  const pA = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1 },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+    undefined,
+    undefined,
+    failingHook,
+  );
+  const pB = runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      options: { pollIntervalMs: 1 },
+      authentication: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+    undefined,
+    undefined,
+    failingHook,
+  );
+
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+
+  // The corrected advisory is shown...
+  expect(
+    mockState.errors.some((m) => m.includes("nothing to run against")),
+  ).toBe(true);
+  // ...and the clean-retry advisory -- which would point `psilink exchange` at a
+  // config that was never written -- is suppressed on both sides.
+  expect(
+    mockState.errors.some((m) =>
+      m.includes("Retry the exchange without re-inviting"),
+    ),
+  ).toBe(false);
+}, 15_000);
+
 test("runProtocol does not invoke onAuthenticated when the handshake fails", async () => {
   // An expired token fails the pre-handshake expiry check in
   // authenticateConnection, before any token rotation. The hook must not fire

@@ -243,6 +243,34 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
   }
 });
 
+test("validateAccept: a matching config is reconciled but a pre-existing key file still hard-aborts", async () => {
+  // The reconcile path (#61) makes a pre-existing CONFIG reusable, but a
+  // pre-existing KEY file must still abort -- a stale authentication token must
+  // never be silently reused. The config here matches the invitation (so on its
+  // own it would be reused), proving the key gate fires independently of, and
+  // ahead of, config reconciliation.
+  const options = testOptions();
+  writeExistingConfig(options.configFile);
+  fs.writeFileSync(options.keyFile, "stale-key-file");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const run = () =>
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      });
+    await expect(run()).rejects.toBeInstanceOf(UsageError);
+    // The abort is the key-file overwrite refusal naming the key path, not a
+    // terms diff (which would name a linkage field and the config path).
+    await expect(run()).rejects.toThrow(/refusing to overwrite/);
+    await expect(run()).rejects.toThrow(options.keyFile);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+    fs.rmSync(options.keyFile, { force: true });
+  }
+});
+
 test("validateAccept: offline fails with a diff when the config's terms disagree", async () => {
   const options = testOptions();
   const terms = getDefaultLinkageTerms("Acceptor Org");

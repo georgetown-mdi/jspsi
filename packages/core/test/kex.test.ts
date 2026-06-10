@@ -381,6 +381,30 @@ test("tampering the initiator's public key breaks confirmation (responder side)"
   await expect(responder).rejects.toThrow(GENERIC_FAILURE);
 });
 
+test("the responder folds an explicit abort delivered as msg3 into a generic failure", async () => {
+  // The responder's final receive parses msg3 as a union of the msg3 and abort
+  // schemas. An explicit { kexMsg: "abort" } -- the initiator's signal that it
+  // rejected the responder's tag (e.g. on a psk mismatch) -- parses successfully
+  // but is deliberately folded into the same generic authentication failure as a
+  // malformed msg3. This exercises that abort arm of the union directly; its only
+  // other coverage is indirect, through malformed-msg3 cases.
+  const [connA, connB] = createMessagePipe();
+  const responder = runKex(connB, "responder", PSK_A, false);
+  responder.catch(() => {});
+  // A well-formed msg1 so the responder advances to send msg2 and then waits on
+  // msg3.
+  const eph = x25519.keygen();
+  await connA.send({
+    kexMsg: "1",
+    e: toBase64Url(toBytes(eph.publicKey)),
+    reqEnc: false,
+  });
+  expect(((await connA.receive()) as { kexMsg: string }).kexMsg).toBe("2");
+  // The initiator aborts instead of confirming.
+  await connA.send({ kexMsg: "abort" });
+  await expect(responder).rejects.toThrow(GENERIC_FAILURE);
+});
+
 test("a low-order (all-zero) peer share is rejected by the contributory check", async () => {
   const [connA, connB] = createMessagePipe();
   const initiator = runKex(connA, "initiator", PSK_A, false);
