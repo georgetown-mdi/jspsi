@@ -62,6 +62,15 @@ afterEach(() => {
 const log = getLogger("online-integ-test");
 log.setLevel("silent");
 
+// Bound each side's transport wait -- the inviter via acceptTimeout, the acceptor
+// via options.peerTimeout -- well under the 60s vitest test timeout below, so a
+// genuine stall fails fast with a clean peer-timeout error instead of racing the
+// framework's kill. This matters because core's default peer timeout is one hour
+// (DEFAULT_PEER_TIMEOUT_MS), which would otherwise leave a hung acceptor waiting
+// far past the test timeout. The happy path completes in a few seconds, so the
+// value is pure safety margin, not a tuning knob.
+const PEER_TIMEOUT_SECONDS = 30;
+
 // Minimal options with config/key at fresh, non-existent paths under the work
 // dir, so the invite/accept conflict gates pass and each run writes its own
 // files. Mirrors the unit tests' testOptions shape.
@@ -70,6 +79,7 @@ function testOptions(label: string): CommonBootstrapOptions {
     configFile: path.join(work, `${label}.yaml`),
     keyFile: path.join(work, `${label}.key`),
     identity: label,
+    peerTimeout: PEER_TIMEOUT_SECONDS,
     record: false,
     logLevel: logLibrary.levels.SILENT,
     verbosity: 0,
@@ -130,7 +140,7 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   const inviteReady = await validateInvite({
     resolved: inviteResolved,
     options: inviteOptions,
-    acceptTimeout: 60,
+    acceptTimeout: PEER_TIMEOUT_SECONDS,
     log,
   });
   expect(inviteReady.mode).toBe("online");
@@ -225,11 +235,10 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   expect(acceptCsv.trim().split("\n").length).toBe(1 + 2);
   expect(inviteMatched.header).toBe("row_id,their_row_id");
   expect(acceptMatched.header).toBe("row_id,their_row_id");
-  // Rows 0 (Bob) and 1 (Carol) matched on both sides.
+  // Exactly rows 0 (Bob) and 1 (Carol) matched on both sides; the inviter's
+  // extra Dave (row 2) is absent, so the intersection filtered him out.
   expect(inviteMatched.ourRowIds).toEqual(new Set(["0", "1"]));
   expect(acceptMatched.ourRowIds).toEqual(new Set(["0", "1"]));
-  // Dave was inviter-only (row 2), so he is filtered out of the intersection.
-  expect(inviteMatched.ourRowIds.has("2")).toBe(false);
 
   // -- Both config files are written after the exchange (saveConfig-after-
   //    runProtocol), carrying the connection but never the shared secret. --
