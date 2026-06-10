@@ -1,0 +1,48 @@
+name: CLI Build and Test
+
+# Pull-request gate for the CLI (apps/cli), kept separate from
+# eb_build_and_test.yaml -- which builds and tests only the web app for its
+# Elastic Beanstalk deploy. This is the merge-time gate that catches a
+# dependency bump breaking the ssh2 SFTPWrapper coupling the SFTP adapter
+# relies on (see docs/SECURITY_DESIGN.md, "Upgrading the SFTP stack"); the same
+# integration suite also runs in release.yaml as the ship gate before publish.
+#
+# Scoped by path to CLI-affecting changes. If this job is made a required
+# status check, configure branch protection so a path-skipped run does not
+# block an unrelated PR -- a skipped required check otherwise stays pending.
+
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "apps/cli/**"
+      - "packages/core/**"
+      - "lib/**"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/cli_build_and_test.yaml"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build -w packages/core -w apps/cli
+      - name: Unit tests (CLI)
+        run: npm run test:unit -w apps/cli
+      # Integration tests exercise the real ssh2 SFTPWrapper contract end to end
+      # (unit tests run against mocks), so they are what actually catches a
+      # dependency bump that breaks the coupling. The suite is self-managing: a
+      # vitest globalSetup brings up and tears down its own atmoz/sftp container
+      # (generating host keys/.env on first run), and ubuntu-latest ships Docker
+      # Compose, so no extra setup step is needed.
+      - name: Integration tests (CLI)
+        run: npm run test:integration -w apps/cli

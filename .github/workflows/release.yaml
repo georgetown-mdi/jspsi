@@ -25,12 +25,13 @@ jobs:
         run: npm run test:unit -w apps/cli
 
       # Integration tests exercise the real ssh2 SFTPWrapper contract the SFTP
-      # adapter couples to. Unit tests run against mocks, so this suite is the
-      # only CI coverage that catches an in-range ssh2/ssh2-sftp-client bump
-      # breaking that contract. The suite is self-managing: a vitest globalSetup
-      # brings up and tears down its own atmoz/sftp container (generating host
-      # keys/.env on first run). ubuntu-latest ships Docker Compose, so no extra
-      # setup step is needed.
+      # adapter couples to (unit tests run against mocks). The dedicated CLI
+      # workflow (cli_build_and_test.yaml) runs this suite on pull requests as
+      # the merge gate; here it is the ship-gate backstop, since publish needs
+      # this job. The suite is self-managing: a vitest globalSetup brings up and
+      # tears down its own atmoz/sftp container (generating host keys/.env on
+      # first run), and ubuntu-latest ships Docker Compose, so no extra setup
+      # step is needed.
       - name: Integration tests (CLI)
         run: npm run test:integration -w apps/cli
 
