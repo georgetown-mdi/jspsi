@@ -170,6 +170,68 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
+test.skipIf(process.platform === "win32")(
+  "reports an inaccessible parent when an ancestor of the parent is a file",
+  () => {
+    // kfp's grandparent is a regular file, so statSync(parent) throws ENOTDIR
+    // and hits the "is not accessible" arm -- distinct from the direct
+    // parent-is-a-file case, which yields "exists but is not a directory".
+    const { log } = makeLogger();
+    const fileAncestor = path.join(dir, "file-ancestor");
+    fs.writeFileSync(fileAncestor, "");
+    expect(() =>
+      preflightKeyFilePath(path.join(fileAncestor, "sub", "key.json"), log),
+    ).toThrow("is not accessible");
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "reports a parent that cannot be created under a read-only ancestor",
+  () => {
+    // root bypasses mode bits, so the mkdir would succeed; skip there.
+    if (process.getuid?.() === 0) return;
+    // A missing parent under a non-writable ancestor: statSync(parent) is
+    // ENOENT, then mkdirSync fails with EACCES for a non-symlink reason, so
+    // this exercises the "cannot be created" arm with an empty dangling hint
+    // (distinct from the dangling-symlink case, which carries the hint).
+    const { log } = makeLogger();
+    const readOnlyDir = path.join(dir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    fs.chmodSync(readOnlyDir, 0o555);
+    try {
+      expect(() =>
+        preflightKeyFilePath(path.join(readOnlyDir, "newsub", "key.json"), log),
+      ).toThrow("cannot be created");
+    } finally {
+      // Restore mode so afterEach can remove the tmp dir.
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+  },
+);
+
+// --- stale write-probe sweep -------------------------------------------------
+
+test("sweeps stale probe files but spares look-alike names", () => {
+  // The pre-flight unlinks leftover probe files from prior crashed runs,
+  // matching the exact `.psilink-write-probe-<pid>-<8 hex>` grammar. The
+  // anchored regex must not delete a user's file that merely shares the
+  // prefix -- a broadened pattern would silently remove unrelated files.
+  const { log } = makeLogger();
+  const stale = ".psilink-write-probe-99999-deadbeef"; // matches: swept
+  const lookAlikeBadSuffix = ".psilink-write-probe-12-zzzzzzzz"; // non-hex
+  const lookAlikeNoSuffix = ".psilink-write-probe-keep"; // no -<digits>-<hex>
+  const unrelated = "important.txt";
+  for (const name of [stale, lookAlikeBadSuffix, lookAlikeNoSuffix, unrelated])
+    fs.writeFileSync(path.join(dir, name), "");
+
+  preflightKeyFilePath(path.join(dir, "key.json"), log);
+
+  expect(fs.existsSync(path.join(dir, stale))).toBe(false);
+  expect(fs.existsSync(path.join(dir, lookAlikeBadSuffix))).toBe(true);
+  expect(fs.existsSync(path.join(dir, lookAlikeNoSuffix))).toBe(true);
+  expect(fs.existsSync(path.join(dir, unrelated))).toBe(true);
+});
+
 // --- valid cases -------------------------------------------------------------
 
 test("accepts a non-existent path under an existing writable directory", () => {
