@@ -7039,3 +7039,34 @@ test("synchronize() --sweep-exchange-files: a non-resolving peer hello is retain
   // Bounded: it refused within a couple of poll cycles, not the peer timeout.
   expect(elapsed).toBeLessThan(2_000);
 });
+
+test("synchronize() --sweep-exchange-files: sweeps a second peer hello, overriding the I1 concurrent-session guard", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 120,
+  });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  // Two peer hellos -- without the flag this is the I1 "other sessions using
+  // this path?" error. Both advertise delete mode, so there is no retain signal
+  // and the bare flag sweeps them.
+  files.set("/test/peerA-hello.json", LOCK_HELLO_BODY);
+  files.set("/test/peerB-hello.json", LOCK_HELLO_BODY);
+
+  const deleted: string[] = [];
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    deleted.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  // No I1 error: both peer hellos were swept and the initiator then timed out.
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(deleted).toContain("/test/peerA-hello.json");
+  expect(deleted).toContain("/test/peerB-hello.json");
+});
