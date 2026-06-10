@@ -508,14 +508,19 @@ test("writes the self-attested record and opening when runExchange returns an au
 // --- Expired token via runProtocol -------------------------------------------
 
 test("runProtocol rejects an expired token without rotating, and the tagged recovery hint suppresses the generic catch advisory", async () => {
-  // Pre-handshake expiry check in authenticateConnection fires before any
-  // key-exchange message is exchanged. Both parties supply the same expired token
-  // so each side trips the same check independently. The resulting error
-  // carries `psilinkRecoveryHintEmitted: true` (set in auth.ts), so the
-  // runProtocol catch must NOT log either of its generic advisory lines -
-  // those would contradict the specific "obtain a new invitation" message.
-  // Also verifies that no token rotation occurred: the original key file
-  // contents must be unchanged after the failure.
+  // runProtocol checks the pre-handshake expiry (assertSharedSecretReadyForHandshake)
+  // BEFORE opening any connection, so each party trips the same check independently
+  // with no rendezvous I/O. Both parties supply the same expired token, so both
+  // reject deterministically with the "expired" hint. (Before that check was
+  // hoisted ahead of connect(), an expired token first drove the file-drop
+  // rendezvous, and the losing side could race into a "peer appears to have
+  // abandoned the handshake; retry" error instead -- a misleading hint for a dead
+  // credential, and the source of a ~1-in-10 flake in this assertion.) The error
+  // carries `psilinkRecoveryHintEmitted: true` (set in auth.ts), so the runProtocol
+  // catch must NOT log either of its generic advisory lines - those would
+  // contradict the specific "obtain a new invitation" message. Also verifies that
+  // no token rotation occurred: the original key file contents must be unchanged
+  // after the failure.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, {
@@ -582,6 +587,57 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   // Token must remain unchanged on both sides.
   expect(loadKeyFile(keyFileA)?.sharedSecret).toBe(TOKEN_A);
   expect(loadKeyFile(keyFileB)?.sharedSecret).toBe(TOKEN_A);
+});
+
+test("runProtocol rejects an already-expired token before opening any connection (no rendezvous I/O)", async () => {
+  // The regression guard for hoisting the pre-handshake expiry check ahead of
+  // connect(). A LONE party with an expired token must reject at once with the
+  // "expired" hint, WITHOUT entering the file-drop rendezvous: it writes no
+  // hello/lock files and never waits for a peer. Were the check moved back inside
+  // authenticateConnection (which runs only after the connection is open), this
+  // lone party would instead write its hello and block at the rendezvous until
+  // peerTimeoutMs, then reject with a timeout rather than "expired" -- failing the
+  // message and empty-directory assertions below. The short peerTimeoutMs keeps
+  // that regression mode fast rather than letting it hang the suite. This is also
+  // why the two-party expired-token test above is now deterministic: neither side
+  // reaches the rendezvous, so its loser can no longer race into a "peer abandoned
+  // the handshake" error in place of "expired".
+  const keyFile = path.join(tmpDir, "lone.key");
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2000-01-01T00:00:00.000Z",
+  });
+
+  await expect(
+    runProtocol(
+      {
+        channel: "filedrop",
+        path: dropDir,
+        options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+        authentication: {
+          sharedSecret: TOKEN_A,
+          expires: "2000-01-01T00:00:00.000Z",
+          keyFilePath: keyFile,
+        },
+      },
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-lone",
+    ),
+  ).rejects.toThrow("expired");
+
+  // The rendezvous was never entered: nothing was written to the drop directory.
+  expect(fs.readdirSync(dropDir)).toEqual([]);
+  // The tagged hint means runProtocol emits neither generic catch advisory, and
+  // the credential is left untouched (no rotation on a pre-connect failure).
+  expect(
+    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
+  ).toBe(true);
+  expect(
+    mockState.errors.every((m) => !m.includes("already rotated and saved")),
+  ).toBe(true);
+  expect(loadKeyFile(keyFile)?.sharedSecret).toBe(TOKEN_A);
 });
 
 // --- Online invite early-invalidation: nothing persisted before acceptance ---

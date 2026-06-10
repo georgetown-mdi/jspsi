@@ -14,6 +14,7 @@ import {
   runExchange,
   buildOutputTable,
   authenticateConnection,
+  assertSharedSecretReadyForHandshake,
 } from "@psilink/core";
 import type {
   Authentication,
@@ -231,6 +232,19 @@ export async function runProtocol(
   // can reuse the trimmed value without re-reading auth.keyFilePath.
   let trimmedKeyFilePath: string | undefined;
   if (auth) {
+    // Fail fast on the locally-knowable secret preconditions -- a malformed or
+    // already-expired shared secret -- BEFORE opening any connection. Both are
+    // determinable without a peer, and deferring them to authenticateConnection
+    // (which runs only after the connection is open) would let a dead credential
+    // first drive the file-sync rendezvous, whose losing side can then surface a
+    // misleading "peer abandoned the handshake; retry" hint for what is really an
+    // expired or malformed secret. Running the same tagged check here keeps both
+    // parties' failure deterministic and correctly hinted, with no rendezvous
+    // I/O. authenticateConnection still runs it (and the post-handshake expiry
+    // check) as the authoritative boundary for library consumers that bypass
+    // runProtocol. The shared check carries psilinkRecoveryHintEmitted, so the
+    // catch block below suppresses its generic advisory.
+    assertSharedSecretReadyForHandshake(auth);
     // Guards against a missing or whitespace-only keyFilePath before any
     // connection is opened (a whitespace-only path would create a file named
     // " " in the current directory rather than failing clearly). Trim leading
