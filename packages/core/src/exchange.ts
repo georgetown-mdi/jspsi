@@ -54,6 +54,14 @@ export type ExchangeDataSpec = Prettify<
 export interface PreparedExchange {
   metadata: Metadata;
   linkageTerms: LinkageTerms;
+  /**
+   * Optional self-facing retention/disposition pointer carried from the local
+   * exchange config (NOT the agreed linkage terms): where this party files its
+   * copy of the result and under what retention schedule. Threaded into the
+   * self-attested record at the end of the exchange; never sent to the partner
+   * and never folded into the agreed-terms hash.
+   */
+  retentionDisposition?: string;
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
@@ -150,6 +158,9 @@ export function prepareForExchange(
   return {
     metadata,
     linkageTerms,
+    // A self-facing operator note, passed through untouched from the local
+    // config to the record builder; absent when the config omits it.
+    retentionDisposition: exchangeDataSpec.retentionDisposition,
     dataset,
     rawRows,
     rowCount: rawRows.length,
@@ -297,7 +308,7 @@ export async function runExchange(
   prepared: PreparedExchange,
   options: RunExchangeOptions,
 ): Promise<ExchangeResult> {
-  const { dataset, linkageTerms, rowCount } = prepared;
+  const { dataset, linkageTerms, rowCount, retentionDisposition } = prepared;
   const { psiLibrary } = options;
   const onStage = options.onStage ?? (() => {});
   const onWarning = options.onWarning ?? (() => {});
@@ -412,6 +423,9 @@ export async function runExchange(
       partnerTerms,
       recordsExposed: rowCount,
       resultSize: bothExpectOutput ? associationTable[0].length : undefined,
+      // Self-facing audit pointer from this party's local config; undefined when
+      // unconfigured, in which case the record omits it.
+      retentionDisposition,
       associationTable: heldAssociationTable ? associationTable : undefined,
       localPayloadSent: toCommittedPayload(localPayload),
       partnerPayloadReceived: toCommittedPayload(partnerPayload),

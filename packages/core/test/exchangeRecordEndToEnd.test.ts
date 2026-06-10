@@ -194,6 +194,56 @@ test("both-output: a legal-agreement purpose flows end-to-end into both records"
   expect(init.record.termsHash).toBe(resp.record.termsHash);
 });
 
+test("retention/disposition pointer is per-party and self-facing end-to-end", async () => {
+  // The pointer is sourced from each party's own exchange config (a sibling of
+  // linkageTerms, NOT part of the agreed terms). Only the party that configures
+  // one carries it; it is never exchanged with the partner and never folded into
+  // the agreed-terms hash. Set it on the initiator alone and assert the asymmetry.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const note =
+    "Result filed in Initiator Co association DB; retained 6 years per RM-7.";
+  const withPointer = (
+    identity: string,
+    rows: typeof serverRows,
+    retentionDisposition?: string,
+  ) =>
+    prepareForExchange(
+      {
+        linkageTerms: { ...firstNameTerms, identity, output: both },
+        ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
+      },
+      identity,
+      rows,
+      ["first_name", "note"],
+    );
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator, responder] = await Promise.all([
+    runExchange(
+      connInitiator,
+      "initiator",
+      withPointer("Initiator Co", clientRows, note),
+      { psiLibrary },
+    ),
+    runExchange(
+      connResponder,
+      "responder",
+      withPointer("Responder Co", serverRows),
+      { psiLibrary },
+    ),
+  ]);
+  const init = built(initiator);
+  const resp = built(responder);
+
+  // The configuring party carries its own pointer verbatim...
+  expect(init.record.retentionDisposition).toBe(note);
+  // ...and the partner, which configured none, omits it entirely -- the pointer is
+  // never put on the wire, so it cannot leak into the partner's record.
+  expect("retentionDisposition" in resp.record).toBe(false);
+  // It is not part of the agreed terms, so both parties still hash to one value
+  // despite the asymmetry.
+  expect(init.record.termsHash).toBe(resp.record.termsHash);
+});
+
 test("single-output: result size omitted, but each party records its own exposure", async () => {
   // Initiator receives output; responder only sends. resolveRole makes the
   // initiator the receiver (it expects output and the partner does not).
