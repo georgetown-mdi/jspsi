@@ -23,6 +23,12 @@ export {
   CanonicalEncodingError,
 } from "./utils/canonical";
 export type { CanonicalValue } from "./utils/canonical";
+export {
+  sanitizeForDisplay,
+  DISPLAY_TRUNCATION_MARKER,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "./utils/sanitizeForDisplay";
+export type { SanitizeForDisplayOptions } from "./utils/sanitizeForDisplay";
 
 export * from "./config/standardization";
 export * from "./config/connection";

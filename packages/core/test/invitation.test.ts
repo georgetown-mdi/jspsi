@@ -356,6 +356,23 @@ test.each(nonLocatorCases)(
   },
 );
 
+test("escapes a hostile unrecognized endpoint key name in the rejection message", async () => {
+  // The unrecognized-key rejection echoes the key NAME, which the inviter
+  // controls; accept.ts surfaces that message (the issue's message string) to
+  // the accepting operator's terminal via describeDecodeError. A name carrying
+  // control/ANSI bytes must be escaped, not relayed raw.
+  const hostileKey = "\x1b[31mFAKE";
+  const encoded = await encodeRaw({
+    ...baseToken,
+    connectionEndpoint: { ...CHANNEL_SHAPES.sftp.minimal, [hostileKey]: "x" },
+  });
+  const err = await decodeInvitation(encoded).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ZodError);
+  const messages = (err as ZodError).issues.map((i) => i.message).join("\n");
+  expect(messages).not.toContain("\x1b");
+  expect(messages).toContain("\\x1b");
+});
+
 // Structural rejections are an explicit table rather than a generated product:
 // each row's expectation is channel-specific (the required field differs, and
 // the discriminator and null cases are not per-channel).

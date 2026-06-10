@@ -294,6 +294,17 @@ export interface ExchangeRecordGovernance {
  * names both parties and the disclosure in cleartext, retention and access
  * control are the holder's responsibility. This is a local audit artifact, not a
  * signed or non-repudiable receipt.
+ *
+ * Rendering note (forward-looking): this record stores partner-supplied free text
+ * -- `partnerIdentity`, `governance.legalAgreement.reference`/`purpose`, and the
+ * payload column names/descriptions -- byte-for-byte, as required for the
+ * byte-exact cross-party validation and the canonical encoding a record is hashed
+ * over. A party can place terminal control/ANSI sequences or deceptive Unicode
+ * (bidi-override, zero-width, homoglyph) in these fields. No viewer or exporter
+ * renders a record to a person today; when one is built, it MUST route each such
+ * field through `sanitizeForDisplay` (the helper `validateCompatibility` uses) at
+ * the display boundary -- never mutate the stored value, which must stay
+ * byte-exact.
  */
 export interface ExchangeRecord {
   /** Single recognized format version for v1; readers reject anything else. */

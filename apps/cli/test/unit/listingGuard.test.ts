@@ -61,4 +61,24 @@ describe("filenameTooLongError", () => {
     // The message itself stays small regardless of the input name length.
     expect(err.message.length).toBeLessThan(300);
   });
+
+  test("escapes control/ANSI characters so a hostile name cannot spoof the terminal", () => {
+    const hostile = "evil\x1b[31m" + "n".repeat(300);
+    const err = filenameTooLongError("/drop", hostile, 255);
+    // The raw ESC never reaches the operator's terminal; it survives as text.
+    expect(err.message).not.toContain("\x1b");
+    expect(err.message).toContain("\\x1b");
+    // The true length is still reported.
+    expect(err.message).toContain(`${hostile.length} characters`);
+  });
+
+  test("stays bounded even when the name is all non-ASCII (escapes expand each char)", () => {
+    // Each astral emoji escapes to a 9-char \u{...} (up to 10 for a 6-hex-digit
+    // code point); the preview bounds the escaped output, not the code-point
+    // count, so the message cannot balloon.
+    const hostile = "\u{1f600}".repeat(5000);
+    const err = filenameTooLongError("/drop", hostile, 255);
+    expect(err.message).not.toContain(hostile);
+    expect(err.message.length).toBeLessThan(300);
+  });
 });

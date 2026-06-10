@@ -18,6 +18,8 @@ import type {
 
 import {
   decodeAndValidateInvitation,
+  describeDecodeError,
+  displayInvitation,
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
@@ -424,5 +426,89 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
     warnSpy.mockRestore();
     infoSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- partner-string sanitization on the accept path --------------------------
+// The invitation is crafted by the mutually-distrusting inviter; the fields it
+// renders to the operator before acceptance must be escaped. These mirror the
+// sanitizeForDisplay categories: control/ANSI and deceptive Unicode neutralized,
+// ordinary values unchanged.
+
+// Encodes a token WITHOUT schema validation (encodeInvitation would reject a
+// malicious token), reproducing decodeInvitation's checksum + base64url framing
+// so the decode path runs on attacker-shaped input.
+async function encodeRaw(obj: unknown): Promise<string> {
+  const toBase64Url = (b: Uint8Array): string =>
+    btoa(Array.from(b, (byte) => String.fromCharCode(byte)).join(""))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return toBase64Url(bytes) + toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
+}
+
+test("decode error escapes a hostile unrecognized endpoint key name end to end", async () => {
+  // A malicious inviter adds an endpoint key whose NAME carries control/ANSI
+  // bytes; strictObject rejects it, echoing the name into the message that
+  // decodeAndValidateInvitation surfaces to the operator as a UsageError.
+  const encoded = await encodeRaw({
+    ...sampleToken(FUTURE()),
+    connectionEndpoint: {
+      channel: "sftp",
+      host: "h",
+      "\x1b[2J\x1b[31mFAKE": 1,
+    },
+  });
+  const err = await decodeAndValidateInvitation(encoded).catch(
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  const msg = (err as Error).message;
+  expect(msg).not.toContain("\x1b");
+  expect(msg).toContain("\\x1b");
+});
+
+test("describeDecodeError escapes a partner-controlled path component", () => {
+  // A Zod path can name a partner-controlled object key in the general case; pin
+  // that the path is escaped even though the current invitation schema does not
+  // surface one (a synthetic issue stands in).
+  const out = describeDecodeError({
+    issues: [{ path: ["connectionEndpoint", "\x1b[31mKEY"], message: "bad" }],
+  });
+  expect(out).not.toContain("\x1b");
+  expect(out).toContain("\\x1b");
+});
+
+test("describeDecodeError leaves an ordinary path and message unchanged", () => {
+  expect(
+    describeDecodeError({
+      issues: [{ path: ["connectionEndpoint", "host"], message: "Invalid" }],
+    }),
+  ).toBe("connectionEndpoint.host: Invalid");
+});
+
+test("displayInvitation escapes a hostile inviter identity and key names", () => {
+  const token: InvitationToken = {
+    ...sampleToken(FUTURE()),
+    linkageTerms: {
+      ...getDefaultLinkageTerms("Inviter Org"),
+      identity: "\x1b[31mEVIL‮",
+      linkageKeys: [{ name: "k\x1b[0m", elements: [{ field: "ssn" }] }],
+    },
+  };
+  const log = getLogger("accept-display-test");
+  log.setLevel("silent");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    displayInvitation(token, log);
+    const joined = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(joined).not.toContain("\x1b");
+    expect(joined).not.toContain("‮");
+    expect(joined).toContain("\\x1b");
+    expect(joined).toContain("\\u202e");
+  } finally {
+    infoSpy.mockRestore();
   }
 });

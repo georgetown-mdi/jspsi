@@ -11,6 +11,7 @@ import {
   buildOutputTable,
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
+  sanitizeForDisplay,
 } from "@psilink/core";
 import type {
   Authentication,
@@ -704,7 +705,13 @@ export async function runProtocol(
           },
           onWarning: (msg: string) => log.warn("terms exchange:", msg),
           onProtocolConfirmed: (partnerTerms, resolvedRole) => {
-            log.info("terms agreed, partner identity:", partnerTerms.identity);
+            // identity is partner-controlled free text with no consistency check
+            // (a mutually-distrusting party sets it), so escape it before it
+            // reaches the operator's terminal/logs.
+            log.info(
+              "terms agreed, partner identity:",
+              sanitizeForDisplay(partnerTerms.identity),
+            );
             log.info("role:", resolvedRole);
           },
         },
