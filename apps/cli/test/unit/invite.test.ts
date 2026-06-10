@@ -14,6 +14,7 @@ import {
 import type { LinkageTerms, Standardization } from "@psilink/core";
 
 import {
+  onlineWaitInvalidationNotice,
   resolveInvitePositionals,
   validateInvite,
 } from "../../src/commands/invite";
@@ -132,6 +133,21 @@ test("validateInvite: a non-positive accept-timeout is rejected", async () => {
       log: silentLog,
     }),
   ).rejects.toBeInstanceOf(UsageError);
+});
+
+// --- onlineWaitInvalidationNotice --------------------------------------------
+
+test("onlineWaitInvalidationNotice: states the invitation is void on cancel/timeout and points at re-invite", () => {
+  const notice = onlineWaitInvalidationNotice(900);
+  // The accept-timeout bound is surfaced so the user knows how long the wait lasts.
+  expect(notice).toContain("900s");
+  // Each pre-acceptance exit that voids the invitation is named.
+  expect(notice).toContain("Ctrl-C");
+  expect(notice).toContain("connection times out");
+  expect(notice).toContain("accept-timeout");
+  // The consequence and the recovery: the invitation is unusable; re-invite.
+  expect(notice).toContain("can no longer be accepted");
+  expect(notice).toContain("psilink invite");
 });
 
 // --- pre-existing config/key on the online path ------------------------------
