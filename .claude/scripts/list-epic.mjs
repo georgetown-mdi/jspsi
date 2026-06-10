@@ -31,31 +31,41 @@ import {
   OWNER,
 } from "./lib/projectItems.mjs";
 
-// One page covers every board today (board 9 has ~85 items); we ask for the max
-// the API allows in a single page and detect, rather than silently swallow, an
-// over-limit board. Bump to real pagination if a board ever exceeds this.
+// GitHub's projectV2 items connection caps `first` at 100, so this is also the
+// per-page size: fetchAllItems pages through the connection 100 at a time rather
+// than relying on a single page covering the whole board.
 const PAGE_SIZE = 100;
 
 /**
  * Fetch all items of a project with their field values and node IDs, returning
  * [{ id, title, fields }] where id is the numeric item ID and fields is the
- * { name -> value } map (see extractFields). Throws if the board has more items
- * than one page holds, so items are never dropped without notice.
+ * { name -> value } map (see extractFields). Pages through the items connection
+ * with a cursor until hasNextPage is false, so no item is dropped however large
+ * the board grows.
  */
 function fetchAllItems(projectNumber) {
-  const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { items(first: ${PAGE_SIZE}) { totalCount pageInfo { hasNextPage } nodes { id ${FIELD_VALUES_FRAGMENT} content { __typename ... on DraftIssue { title } ... on Issue { title } } } } } } }`;
-  const data = JSON.parse(gh(["api", "graphql", "-f", `query=${query}`])).data;
-  const project = data?.organization?.projectV2;
-  if (!project) {
-    throw new Error(`project ${projectNumber} not found under owner ${OWNER}`);
-  }
-  const conn = project.items;
-  if (conn.pageInfo.hasNextPage) {
-    throw new Error(
-      `project ${projectNumber} has ${conn.totalCount} items, more than the ${PAGE_SIZE}-item page this script fetches; add pagination before trusting the list`,
-    );
-  }
-  return conn.nodes.map((node) => ({
+  const nodes = [];
+  let cursor = null;
+  do {
+    // Inline the cursor into the query the same way the other args are inlined;
+    // GitHub's endCursor is an opaque base64 token with no quote/backslash chars
+    // to escape. Omit `after` entirely on the first page.
+    const after = cursor === null ? "" : `, after: "${cursor}"`;
+    const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { items(first: ${PAGE_SIZE}${after}) { pageInfo { hasNextPage endCursor } nodes { id ${FIELD_VALUES_FRAGMENT} content { __typename ... on DraftIssue { title } ... on Issue { title } } } } } } }`;
+    const data = JSON.parse(
+      gh(["api", "graphql", "-f", `query=${query}`]),
+    ).data;
+    const project = data?.organization?.projectV2;
+    if (!project) {
+      throw new Error(
+        `project ${projectNumber} not found under owner ${OWNER}`,
+      );
+    }
+    const conn = project.items;
+    nodes.push(...conn.nodes);
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+  } while (cursor !== null);
+  return nodes.map((node) => ({
     id: numericIdFromNodeId(node.id),
     title: node.content?.title ?? null,
     fields: extractFields(node.fieldValues),

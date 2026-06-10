@@ -38,8 +38,19 @@ is non-empty, substituting the actual paths for `<DOCS>`.
 
 --- reviewer prompt ---
 You are a senior software engineer reviewing the `$1` branch of this repository. Generate
-the diff yourself with `git diff "staging...$1"` and review only those changes. Open another
-file only if a hunk cannot be judged without it.
+the diff yourself with `git diff "staging...$1"` -- the three-dot form is deliberate and
+non-negotiable: it shows ONLY what `$1` added since it forked from `staging`, and it
+excludes every commit `staging` gained after the fork. That diff is the complete and
+exclusive scope of your review. Never widen it: do not run a two-dot `git diff staging $1`,
+do not diff against `HEAD~N`, the tip of `staging`, or any other base.
+
+Review the branch's own changes and nothing else. Anything attributable to `staging`
+advancing since `$1` forked -- the branch's base or starting point moving, the "root" of
+the branch changing, upstream commits the branch has not yet absorbed -- is OUT OF SCOPE
+and not this branch's responsibility. Do not flag it, describe it, or even mention that
+the base moved; treat such material as invisible. If a hunk merely re-states upstream
+`staging` work rather than introducing new behavior authored on `$1`, ignore it. Open
+another file only if a hunk cannot be judged without it.
 
 [IF DOCS NON-EMPTY: First read these docs for design context: <DOCS>. When an issue could
 be a deliberate design decision, check whether these docs justify it before flagging it.]
@@ -73,8 +84,13 @@ order to verify. If any reviewer's block was not parseable JSON (see Step 3), te
 salvage what findings it can and note which reviewer's output could not be parsed. In a
 single response -- no sub-agents, no iteration -- it must:
 
-1. Cluster findings that describe the same underlying issue across reviewers.
-2. Verify each cluster's core claim by reading only the specific hunks or files that
+1. Drop any finding that is not about `$1`'s own changes. The three-dot diff scopes the
+   review to what `$1` authored since it forked from `staging`; any finding describing the
+   branch's base/root moving, or `staging`'s progress since the fork, is out of scope and
+   must NOT appear in the output -- discard it before clustering, do not even list it as
+   refuted.
+2. Cluster the remaining findings that describe the same underlying issue across reviewers.
+3. Verify each cluster's core claim by reading only the specific hunks or files that
    cluster names -- not the whole diff -- and mark it Confirmed / Refuted / Unverifiable
    with a one-line reason.
 
