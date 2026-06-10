@@ -144,16 +144,18 @@ beforeAll(async () => {
           // enclosing promise unsettled and hang beforeAll until its timeout.
           .catch(reject);
       });
+      peer.on("error", (err) => reject(err));
     });
   })();
 
   const clientConnPromise: Promise<DataConnection> = (() => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       clientPeer.on("connection", (conn) => {
         conn.on("open", () => {
           resolve(conn);
         });
       });
+      clientPeer.on("error", (err) => reject(err));
     });
   })();
 
