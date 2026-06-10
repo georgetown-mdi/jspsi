@@ -133,6 +133,73 @@ describe("connect retry", () => {
   });
 });
 
+// --- rename retry ------------------------------------------------------------
+
+describe("rename retry", () => {
+  // rename() wraps client.rename in the same retryPromise(fn, retries, 100) as
+  // put(), so a transient SSH_FX_FAILURE under load (the `_rename: Failure` that
+  // crashed the mixed-connection rendezvous joiner) recovers on a re-issue
+  // instead of aborting the exchange. These tests pin that bounded-retry
+  // contract: a transient failure is absorbed, a persistent one still surfaces
+  // after a bounded number of attempts.
+  test("retries a transient rename failure and resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let calls = 0;
+      const rename = vi.fn().mockImplementation(async () => {
+        // Fail the first two attempts with the server's generic failure, then
+        // succeed -- the shape of the observed transient flake.
+        if (++calls < 3) throw new Error("_rename: Failure");
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // rename reads this.options!.retries; an empty object falls back to 5.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { rename };
+
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      // Advance past the two 100 ms retry delays; the third attempt succeeds.
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(renaming).resolves.toBeUndefined();
+      expect(calls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("rejects with the last error after exhausting the bounded retries", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let calls = 0;
+      const rename = vi.fn().mockImplementation(async () => {
+        calls++;
+        throw new Error("_rename: Failure");
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // Bound the retries explicitly so the attempt count is asserted, not the
+      // default: 2 retries == 3 total attempts.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = { retries: 2 };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { rename };
+
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      // Attach before advancing so the mid-advance rejection is not unhandled.
+      const assertion = expect(renaming).rejects.toThrow("_rename: Failure");
+      await vi.advanceTimersByTimeAsync(250);
+      await assertion;
+      expect(calls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // --- createExclusive ---------------------------------------------------------
 
 describe("createExclusive", () => {

@@ -637,8 +637,21 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   rename(fromPath: string, toPath: string): Promise<void> {
     const dead = this.deadSessionError("file rename", fromPath);
     if (dead) return Promise.reject(dead);
+    // Mirror put()'s transient-fault retry. A momentary SSH_FX_FAILURE from the
+    // server under load -- observed as `_rename: Failure` on the rendezvous
+    // joiner's <id>-joining.json -> <id>-hello.json publish, and equally
+    // reachable on send()/writeAck()'s temp-file -> final-name publishes --
+    // recovers on a re-issue against the still-live session. A deterministic
+    // failure (e.g. the destination already exists) still exhausts the attempts
+    // and surfaces, so the retry smooths transient faults without masking a real
+    // error. The retry count tracks put()'s so the mutating SFTP ops share one
+    // resilience policy rather than rename being the lone op without it.
     return this.warnIfSlow(
-      this.client.rename(fromPath, toPath).then(() => {}),
+      retryPromise(
+        () => this.client.rename(fromPath, toPath).then(() => {}),
+        this.options!.retries || 5,
+        100,
+      ),
       "rename",
       `${fromPath} to ${toPath}`,
     );
