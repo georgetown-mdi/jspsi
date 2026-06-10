@@ -91,10 +91,23 @@ describe("sanitizeForDisplay", () => {
     );
   });
 
-  test("counts truncation by code point, not UTF-16 unit", () => {
-    // Five astral emoji are ten UTF-16 units but five code points; with a cap of
-    // three, exactly three are retained (escaped) before the marker.
-    const out = sanitizeForDisplay("\u{1f600}".repeat(5), { maxLength: 3 });
-    expect(out).toBe("\\u{1f600}".repeat(3) + DISPLAY_TRUNCATION_MARKER);
+  test("bounds the output length, not the input code-point count", () => {
+    // Each astral emoji escapes to a 10-char \u{1f600}; a code-point cap would
+    // let the output run to ~10x. The cap bounds the escaped output instead, so
+    // even an all-astral hostile value stays small.
+    const hostile = "\u{1f600}".repeat(500);
+    const out = sanitizeForDisplay(hostile, { maxLength: 64 });
+    expect(out.length).toBeLessThanOrEqual(
+      64 + DISPLAY_TRUNCATION_MARKER.length,
+    );
+    expect(out.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+  });
+
+  test("appends only whole escapes when truncating (never ends mid-escape)", () => {
+    // Each emoji escapes to "\u{1f600}" (9 chars); with a 20-char cap exactly two
+    // fit (18 chars), the third would overflow, so the cut lands on an escape
+    // boundary rather than splitting "\u{1f60...".
+    const out = sanitizeForDisplay("\u{1f600}".repeat(5), { maxLength: 20 });
+    expect(out).toBe("\\u{1f600}".repeat(2) + DISPLAY_TRUNCATION_MARKER);
   });
 });

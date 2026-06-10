@@ -577,9 +577,9 @@ export function validateCompatibility(
   // into the local operator's logs or UI, where raw ANSI/control characters or
   // deceptive Unicode could spoof or mislead; the schema-bounded fields go
   // through it too, for uniformity and defense in depth if a bound is ever
-  // loosened. The equality CHECKS always compare the RAW values -- escaping is
-  // display-only and not injective, so comparing escaped forms could mask a
-  // genuine mismatch.
+  // loosened. The equality CHECKS always compare the RAW values -- sanitizing is
+  // display-only and lossy (it truncates), so comparing sanitized forms could
+  // mask a genuine mismatch.
   if (local.version !== partner.version) {
     // TODO: implement migration when new versions exist
     errors.push(
