@@ -339,11 +339,28 @@ export function writeFileOwnerOnly(
       // ACL is now restricted; write the content into the already-protected file.
       fs.writeFileSync(tmp, content, "utf8");
     } else {
-      // chmodSync corrects for a restrictive umask (e.g. 0277 -> 0400) that
-      // would prevent the CLI from rewriting the file (e.g. the rotated token)
-      // on a later run.
-      fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
-      fs.chmodSync(tmp, 0o600);
+      // Create the temp file on an exclusive, non-following descriptor so a
+      // symlink planted at the temp path in the unlink->create window cannot
+      // redirect the write to the link's target. O_EXCL refuses to open through
+      // an existing entry at the temp path; O_NOFOLLOW additionally refuses when
+      // the final component is itself a symlink. fchmodSync then sets the exact
+      // mode on the descriptor -- correcting for a restrictive umask (e.g. 0277
+      // -> 0400) that would otherwise prevent a later rewrite of the rotated
+      // token -- rather than chmod-ing a resolved path after the write.
+      const fd = fs.openSync(
+        tmp,
+        fs.constants.O_CREAT |
+          fs.constants.O_EXCL |
+          fs.constants.O_WRONLY |
+          fs.constants.O_NOFOLLOW,
+        0o600,
+      );
+      try {
+        fs.fchmodSync(fd, 0o600);
+        fs.writeFileSync(fd, content, "utf8");
+      } finally {
+        fs.closeSync(fd);
+      }
     }
     if (options.exclusive) {
       // Atomic create-if-absent: linkSync fails if destPath already exists,
@@ -417,12 +434,30 @@ export function writeFileAtomic(
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
   try {
-    fs.writeFileSync(tmp, content, { encoding: "utf8", mode });
-    // writeFileSync's mode is masked by the umask; chmod sets it exactly so a
-    // restrictive umask cannot leave the shared file unreadable to its audience.
-    // (On Windows chmod only toggles the read-only bit; the public default ACL
-    // already lets a partner read the exported certificate.)
-    fs.chmodSync(tmp, mode);
+    // Create the temp file on an exclusive, non-following descriptor so a
+    // symlink planted at the temp path in the unlink->create window cannot
+    // redirect the write to the link's target (O_EXCL refuses an existing entry,
+    // O_NOFOLLOW a final-component symlink). On Windows O_NOFOLLOW is absent from
+    // fs.constants and ORs in as 0, leaving the exclusive create intact.
+    const fd = fs.openSync(
+      tmp,
+      fs.constants.O_CREAT |
+        fs.constants.O_EXCL |
+        fs.constants.O_WRONLY |
+        fs.constants.O_NOFOLLOW,
+      mode,
+    );
+    try {
+      // The open mode is masked by the umask; fchmod sets it exactly on the
+      // descriptor so a restrictive umask cannot leave the shared file
+      // unreadable to its audience. (On Windows fchmod only toggles the
+      // read-only bit; the public default ACL already lets a partner read the
+      // exported certificate.)
+      fs.fchmodSync(fd, mode);
+      fs.writeFileSync(fd, content, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(tmp, destPath);
   } catch (err) {
     try {

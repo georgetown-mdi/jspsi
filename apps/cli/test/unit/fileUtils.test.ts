@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   detectFileConflicts,
@@ -18,8 +18,29 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// Drive the writer's first `fs.unlinkSync` (its stale-temp cleanup) and then,
+// in the window before the writer creates the temp file, plant `target` as a
+// symlink at `tmp` -- simulating an attacker who wins the unlink->create race.
+// A symlink planted *before* the writer runs would just be removed by that same
+// stale-temp unlink, so exercising the actual TOCTOU window is the only way a
+// test distinguishes the hardened create from the old write-through.
+function plantSymlinkInCreateWindow(tmp: string, target: string): void {
+  const realUnlink = fs.unlinkSync.bind(fs);
+  vi.spyOn(fs, "unlinkSync")
+    .mockImplementationOnce((p) => {
+      try {
+        realUnlink(p);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
+      fs.symlinkSync(target, tmp);
+    })
+    .mockImplementation((p) => realUnlink(p));
+}
 
 // --- detectFileConflicts -----------------------------------------------------
 
@@ -85,6 +106,36 @@ describe("writeFileOwnerOnly", () => {
     writeFileOwnerOnly(p, "x");
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
   });
+
+  test("does not write through a symlink pre-planted at the temp path", () => {
+    // POSIX symlink-follow hardening; the Windows branch already creates its
+    // placeholder with O_CREAT | O_EXCL. A symlink sitting at the temp path
+    // before the writer runs is removed by the writer's stale-temp unlink, so
+    // the secret lands in the destination, never the link's target.
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "secret");
+    const target = path.join(dir, "attacker-target");
+    fs.writeFileSync(target, "original-target");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    fs.symlinkSync(target, tmp);
+    writeFileOwnerOnly(dest, "secret-content");
+    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+    expect(fs.readFileSync(dest, "utf8")).toBe("secret-content");
+  });
+
+  test("refuses a symlink planted in the temp-path create window", () => {
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "secret");
+    const target = path.join(dir, "attacker-target");
+    fs.writeFileSync(target, "original-target");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    plantSymlinkInCreateWindow(tmp, target);
+    // The exclusive, non-following create must refuse the planted link rather
+    // than write the secret through to its target.
+    expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow();
+    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+    expect(fs.existsSync(dest)).toBe(false);
+  });
 });
 
 // --- writeFileAtomic ---------------------------------------------------------
@@ -116,6 +167,31 @@ describe("writeFileAtomic", () => {
     writeFileAtomic(p, "x", 0o600);
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+
+  test("does not write through a symlink pre-planted at the temp path", () => {
+    // POSIX symlink-follow hardening, mirroring writeFileOwnerOnly.
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "cert.json");
+    const target = path.join(dir, "attacker-target");
+    fs.writeFileSync(target, "original-target");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    fs.symlinkSync(target, tmp);
+    writeFileAtomic(dest, "public-content");
+    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+    expect(fs.readFileSync(dest, "utf8")).toBe("public-content");
+  });
+
+  test("refuses a symlink planted in the temp-path create window", () => {
+    if (process.platform === "win32") return;
+    const dest = path.join(dir, "cert.json");
+    const target = path.join(dir, "attacker-target");
+    fs.writeFileSync(target, "original-target");
+    const tmp = `${dest}.tmp.${process.pid}`;
+    plantSymlinkInCreateWindow(tmp, target);
+    expect(() => writeFileAtomic(dest, "public-content")).toThrow();
+    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+    expect(fs.existsSync(dest)).toBe(false);
   });
 });
 
