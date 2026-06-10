@@ -26,7 +26,9 @@ import {
   listingStalledByTimeoutError,
 } from "./listingGuard";
 import {
+  SFTP_PUT_PROGRESS_CHUNK_BYTES,
   SFTP_STALL_DEADLINE_MS,
+  createBoundedPutSource,
   transportOperationStalledError,
   withSftpOperationDeadline,
   withSlowOperationWarning,
@@ -103,8 +105,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // destroyed by ssh2 and cannot recover, and connect() resets it to undefined
   // alongside attaching a listener to a fresh wrapper.
   private fatalSftpError: Error | undefined;
-  // The per-operation wall-clock liveness deadline (ms) every server-driven read
-  // is bounded by. Defaults to SFTP_STALL_DEADLINE_MS and is NOT exposed through
+  // The per-operation liveness bound (ms) every server-driven op is held to: the
+  // wall-clock deadline for the reads and the metadata write/stat/delete ops, and
+  // the no-progress idle window for put. Defaults to SFTP_STALL_DEADLINE_MS and is
+  // NOT exposed through
   // any config or CLI surface -- the bound stays fixed in production for the same
   // reason the constant is (a configurable budget risks an operator raising it
   // high enough to reintroduce the denial of service). The only override is the
@@ -147,6 +151,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       log: this.log,
       progress,
     });
+  }
+
+  // Bound a single-round-trip server-driven operation by the per-operation
+  // wall-clock deadline, surfacing the typed terminal TransportOperationStalledError
+  // when the server withholds its callback past the bound. `response` names what the
+  // server failed to send (e.g. "rename", "delete", "stat"), filled into the
+  // standard "withheld the <response> response" detail. The metadata write/stat/
+  // delete ops (rename/delete/exists) and createExclusive all bound a single
+  // round-trip this way; put() instead uses the progress-based idle window
+  // (createBoundedPutSource), because a large legitimate upload can exceed a flat
+  // deadline while still progressing.
+  private boundByDeadline<T>(
+    promise: Promise<T>,
+    operation: string,
+    path: string,
+    response: string,
+  ): Promise<T> {
+    return withSftpOperationDeadline(promise, this.stallDeadlineMs, () =>
+      transportOperationStalledError(
+        operation,
+        path,
+        `did not complete within ${this.stallDeadlineMs} ms (the server ` +
+          `withheld the ${response} response)`,
+      ),
+    );
   }
 
   // Attach a single guarded 'error' listener to the raw ssh2 SFTPWrapper.
@@ -227,12 +256,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // or undefined if the session has not been killed. Every server-driven
   // operation consults this at entry so one that runs after a malformed packet
   // already destroyed the session rejects at once with the real cause, rather
-  // than issuing a request the dead wrapper can never answer. For the
-  // deadline-bounded reads (list/get/createExclusive) that spares them the 60 s
-  // wait; for the unbounded write/stat/delete paths (put/delete/rename/exists),
-  // whose buffered request on a destroyed-but-socket-still-alive channel never
-  // calls back, it is the difference between a prompt failure and an indefinite
-  // hang. safeDelete shares the same fatalSftpError check but RESOLVES (its
+  // than issuing a request the dead wrapper can never answer. Every server-driven
+  // op now carries its own per-operation bound -- the deadline-bounded reads and
+  // metadata ops (list/get/createExclusive/rename/delete/exists) and put's idle
+  // window -- so this entry guard is no longer the ONLY thing standing between a
+  // dead-session call and an indefinite hang; its job now is to spare the wait. A
+  // request buffered on a destroyed-but-socket-still-alive channel never calls
+  // back, so without this guard each such op would ride its full 60 s bound (or,
+  // for put, the idle window, since the never-opened write stream never pulls the
+  // source) before failing; consulting the captured error rejects at once instead.
+  // safeDelete shares the same fatalSftpError check but RESOLVES (its
   // never-reject contract); see it for why. A typed
   // TransportOperationStalledError (a UsageError) so the poll loop and the
   // rendezvous gate treat it as terminal, the same as every other liveness bound.
@@ -590,32 +623,85 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   ): Promise<unknown> {
     const dead = this.deadSessionError("file write", dest);
     if (dead) return Promise.reject(dead);
-    // Report the total payload size where it is known up front (a Buffer src,
-    // which is what send()/writeAck() always pass). This is observed signal taken
-    // for free from the source, NOT a bytes-acked counter: instrumenting the
-    // upload stream to count acked bytes would put observability machinery inside
-    // the always-on write path, which the warning must stay clear of. A stream src
-    // has no cheap size, so it falls back to elapsed-only.
-    const totalBytes = Buffer.isBuffer(src) ? src.length : undefined;
+    if (!Buffer.isBuffer(src)) {
+      // string (a local file path) and ReadableStream are permitted by the
+      // transport-agnostic FileTransportClient.put signature but never produced by
+      // this app: every FileSyncConnection put() call site builds a Buffer. They
+      // carry no per-op idle window -- it needs a re-runnable source for the retry,
+      // which a one-shot stream cannot give, and a string would mean re-opening a
+      // local file the library is the right place to handle -- so they stay bounded
+      // by the whole-exchange budget, exactly as before. A stream/string src has no
+      // cheap size, so the slow-op warning falls back to elapsed-only.
+      return this.warnIfSlow(
+        retryPromise(
+          () => this.client.put(src, dest, { writeStreamOptions: options }),
+          // `??` not `||` so an explicit retries: 0 disables the retry rather than
+          // being coerced to the default of 5.
+          this.options!.retries ?? 5,
+          100,
+        ),
+        "file write",
+        dest,
+      );
+    }
+
+    // Buffer src -- the only kind this app produces. Bound the upload by a
+    // progress-based idle window (createBoundedPutSource): the payload is streamed
+    // in chunks so a withheld write acknowledgement stalls the source and trips the
+    // window, while a slow-but-progressing large upload keeps resetting it and is
+    // never false-failed. A flat whole-operation deadline (as the metadata ops use)
+    // would wrongly fail a legitimately large/slow ciphertext write.
+    const payload = src;
     return this.warnIfSlow(
       retryPromise(
-        () => this.client.put(src, dest, { writeStreamOptions: options }),
+        () => {
+          // Fresh source + idle window per attempt: the source is single-use, but
+          // it is rebuilt from the retained Buffer on each retry, so the broad
+          // retry behavior is preserved. The over-window stall is owned by the
+          // source, decided at the point of detection; this attempt's settle only
+          // feeds the non-stall outcomes via complete()/fail().
+          const { source, result, complete, fail } = createBoundedPutSource(
+            dest,
+            payload,
+            SFTP_PUT_PROGRESS_CHUNK_BYTES,
+            this.stallDeadlineMs,
+          );
+          void this.client
+            .put(source, dest, { writeStreamOptions: options })
+            .then(complete, fail);
+          return result;
+        },
         // `??` not `||` so an explicit retries: 0 disables the retry rather than
         // being coerced to the default of 5.
         this.options!.retries ?? 5,
         100,
+        // Do not retry the idle-window stall: a TransportOperationStalledError is
+        // terminal (a server withholding acks will keep withholding), so retrying
+        // would stack the 60 s bound. Mirrors rename(), which likewise excludes the
+        // typed stall from its retry predicate; the dead-session short-circuit (also
+        // a TransportOperationStalledError) is excluded for the same reason.
+        (error) => !(error instanceof TransportOperationStalledError),
       ),
       "file write",
       dest,
-      totalBytes === undefined ? undefined : () => `${totalBytes} byte payload`,
+      () => `${payload.length} byte payload`,
     );
   }
 
   delete(path: string): Promise<void> {
     const dead = this.deadSessionError("file delete", path);
     if (dead) return Promise.reject(dead);
+    // delete is a single metadata round-trip with no payload, so a flat
+    // per-operation deadline carries negligible false-fail risk (same profile as
+    // createExclusive); it fast-fails a withheld delete callback in 60 s rather
+    // than letting it ride the whole-exchange budget.
     return this.warnIfSlow(
-      this.client.delete(path).then(() => {}),
+      this.boundByDeadline(
+        this.client.delete(path).then(() => {}),
+        "file delete",
+        path,
+        "delete",
+      ),
       "delete",
       path,
     );
@@ -676,7 +762,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           // the retry rather than being re-issued.
           const dead = this.deadSessionError("file rename", fromPath);
           if (dead) return Promise.reject(dead);
-          return this.client.rename(fromPath, toPath).then(() => {});
+          // Bound each attempt's server round-trip: a withheld rename callback
+          // fast-fails in 60 s with the typed terminal error (which, not being
+          // SSH_FX_FAILURE, ends the retry below) rather than hanging this attempt
+          // forever and stalling the whole exchange. rename is a single metadata
+          // round-trip, so the flat deadline carries negligible false-fail risk.
+          return this.boundByDeadline(
+            this.client.rename(fromPath, toPath).then(() => {}),
+            "file rename",
+            fromPath,
+            "rename",
+          );
         },
         // `??` not `||` so an explicit retries: 0 disables the retry rather than
         // being coerced to the default of 5.
@@ -818,13 +914,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // (that close cannot itself complete), but the exchange fails terminally
     // rather than stalling, and the session teardown releases the session.
     return this.warnIfSlow(
-      withSftpOperationDeadline(attempt, this.stallDeadlineMs, () =>
-        transportOperationStalledError(
-          "exclusive create",
-          path,
-          `did not complete within ${this.stallDeadlineMs} ms (the server ` +
-            `withheld the open, existence-check, or close response)`,
-        ),
+      this.boundByDeadline(
+        attempt,
+        "exclusive create",
+        path,
+        "open, existence-check, or close",
       ),
       "exclusive create",
       path,
@@ -839,8 +933,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // not affect it.)
     const dead = this.deadSessionError("existence check", remotePath);
     if (dead) return Promise.reject(dead);
+    // exists is a single metadata stat round-trip, so a flat per-operation deadline
+    // carries negligible false-fail risk and fast-fails a withheld stat callback in
+    // 60 s rather than letting the lock-path race check ride the whole-exchange
+    // budget.
     return this.warnIfSlow(
-      this.client.exists(remotePath).then(Boolean),
+      this.boundByDeadline(
+        this.client.exists(remotePath).then(Boolean),
+        "existence check",
+        remotePath,
+        "stat",
+      ),
       "existence check",
       remotePath,
     );

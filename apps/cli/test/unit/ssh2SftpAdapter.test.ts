@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import {
@@ -16,6 +16,7 @@ import {
   MAX_LISTING_READDIR_BATCHES,
 } from "../../src/connection/listingGuard";
 import {
+  SFTP_PUT_PROGRESS_CHUNK_BYTES,
   SFTP_SLOW_OPERATION_WARNING_MS,
   SFTP_STALL_DEADLINE_MS,
 } from "../../src/connection/sftpLivenessGuard";
@@ -570,6 +571,104 @@ describe("createExclusive", () => {
   });
 });
 
+// --- bounded metadata write/stat/delete --------------------------------------
+//
+// rename/delete/exists are single metadata round-trips (no payload), so each is
+// bounded by the same flat 60 s withSftpOperationDeadline that createExclusive
+// uses: a server that accepts the request but withholds the callback fast-fails
+// with the typed terminal TransportOperationStalledError rather than riding the
+// ~1 h whole-exchange budget. Each op needs its own case (a single op's test does
+// not prove the others are wrapped). The dead-session short-circuit for the same
+// four ops is covered by the fatal-wrapper-error guard tests below.
+
+describe("bounded metadata write/stat/delete", () => {
+  test("bounds a withheld rename by the operation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // rename reads this.options!.retries; an empty object falls back to 5.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        // Accepts the call but never settles: the server withholds the rename ack.
+        rename: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      // Capture before advancing so the mid-advance rejection is not unhandled.
+      const captured = renaming.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("withheld the rename response");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("bounds a withheld delete by the operation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        delete: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+      const deleting = adapter.delete("/remote/x.json");
+      const captured = deleting.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("withheld the delete response");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("bounds a withheld exists by the operation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        exists: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+      const checking = adapter.exists("/remote/lock.json");
+      const captured = checking.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("withheld the stat response");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not deadline a metadata op that completes promptly", async () => {
+    // The deadline must not penalize a normal sub-second round-trip: a delete
+    // that resolves at once settles on its own result, leaving no pending timer.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      await expect(adapter.delete("/remote/x.json")).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // --- capped get --------------------------------------------------------------
 
 describe("capped get", () => {
@@ -706,6 +805,131 @@ describe("capped get", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// --- bounded put (idle window) -----------------------------------------------
+//
+// Unlike the metadata ops, put carries a payload whose legitimate transfer can
+// exceed a flat 60 s deadline over a slow link, so it is bounded by a
+// progress-based idle window (createBoundedPutSource): the payload is streamed in
+// chunks, and the window resets on each chunk pulled under the write stream's
+// ack-driven backpressure. A withheld/stalled (no-progress) upload trips the
+// window; a slow-but-progressing one keeps resetting it and is never false-failed.
+// Both cases need their own test (one is not sufficient for the other).
+
+describe("bounded put (idle window)", () => {
+  test("bounds a put that progresses then stalls via the idle window", async () => {
+    // The server accepts and acks the first couple of chunks, then withholds all
+    // further acks (stops consuming the source). The idle window, reset by those
+    // chunks, then fires on the no-progress gap with the typed terminal error --
+    // proving the bound catches a transfer that genuinely started and then stalled,
+    // not merely one that never began.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation((source: Readable) => {
+          // Never resolves: the stall is what settles the adapter's promise.
+          return new Promise<never>(() => {
+            let consumed = 0;
+            source.on("data", () => {
+              consumed += 1;
+              // Consume two chunks, then withhold acks entirely by pausing -- no
+              // further chunks are pulled, so progress stops.
+              if (consumed >= 2) source.pause();
+            });
+          });
+        }),
+      };
+      const payload = Buffer.alloc(3 * SFTP_PUT_PROGRESS_CHUNK_BYTES, 7);
+      const writing = adapter.put(payload, "/remote/out.bin");
+      const captured = writing.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("made no upload progress");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not stall a slow but progressing upload (window resets on each chunk)", async () => {
+    // The idle bound must not penalize a legitimately large, slow upload: each
+    // chunk consumed resets the window, so an upload whose chunk gaps stay under
+    // the window completes even though its TOTAL time spans several windows --
+    // which a flat whole-operation deadline would have wrongly failed.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // Consume one chunk per half-window: each gap stays under the 60 s window,
+      // but the six-chunk total spans ~3 windows.
+      const gap = SFTP_STALL_DEADLINE_MS / 2;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation((source: Readable) => {
+          return new Promise<string>((resolve) => {
+            source.on("data", () => {
+              source.pause();
+              setTimeout(() => source.resume(), gap);
+            });
+            source.on("end", () => resolve("uploaded data stream"));
+          });
+        }),
+      };
+      const payload = Buffer.alloc(6 * SFTP_PUT_PROGRESS_CHUNK_BYTES, 7);
+      const writing = adapter.put(payload, "/remote/big.bin");
+      let settled: "resolved" | "rejected" | "pending" = "pending";
+      void writing.then(
+        () => (settled = "resolved"),
+        () => (settled = "rejected"),
+      );
+      // Past a full window, still uploading (not stalled, not yet done): the
+      // window has been reset by intervening chunks rather than firing.
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      expect(settled).toBe("pending");
+      // Drive the remaining paced chunks and completion.
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS * 3);
+      await expect(writing).resolves.toBe("uploaded data stream");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("uploads the exact payload bytes through the chunked source", async () => {
+    // The chunked source must reassemble to the original payload byte-for-byte --
+    // chunking for the progress signal must not corrupt or reorder the upload.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).options = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn() };
+    const received: Buffer[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      put: vi.fn().mockImplementation((source: Readable) => {
+        return new Promise<string>((resolve) => {
+          source.on("data", (c: Buffer) => received.push(c));
+          source.on("end", () => resolve("uploaded data stream"));
+        });
+      }),
+    };
+    // A payload that is not a whole multiple of the chunk size, so the final
+    // short chunk is exercised too.
+    const payload = Buffer.alloc(SFTP_PUT_PROGRESS_CHUNK_BYTES + 123);
+    for (let i = 0; i < payload.length; i += 1)
+      payload[i] = (i * 31 + 7) & 0xff;
+    await adapter.put(payload, "/remote/exact.bin");
+    expect(Buffer.concat(received).equals(payload)).toBe(true);
   });
 });
 
