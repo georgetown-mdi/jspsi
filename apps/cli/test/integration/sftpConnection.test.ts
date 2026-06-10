@@ -14,7 +14,7 @@ import {
 import Ssh2SftpClient from "ssh2-sftp-client";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { sftpPort } from "../container/env";
+import { ensureServerDir, sftpPort } from "../container/env";
 
 import log from "loglevel";
 
@@ -75,7 +75,7 @@ clientConn.on("error", (err: unknown) => {
 });
 
 beforeAll(async () => {
-  await fs.mkdir(SFTP_LOCAL_DIRECTORY, { recursive: true });
+  await ensureServerDir(SFTP_LOCAL_DIRECTORY);
   await cleanServer();
   await Promise.all([
     serverConn.open({

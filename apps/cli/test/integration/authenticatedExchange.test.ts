@@ -22,7 +22,7 @@ import {
   type ProtocolConnectionConfig,
 } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
-import { sftpPort } from "../container/env";
+import { ensureServerDir, sftpPort } from "../container/env";
 
 // Net-new coverage: the full authenticated CLI path -- X25519 handshake +
 // per-direction AEAD -- driven end to end over both real transports. The other
@@ -265,7 +265,7 @@ describe("sftp", () => {
   // directory the container serves so the SFTP path exists before either party
   // connects (the connection does not create remote directories).
   async function sftpForPhase(tag: string): Promise<ConfigFactory> {
-    await fsp.mkdir(path.join(SFTP_LOCAL_ROOT, tag), { recursive: true });
+    await ensureServerDir(path.join(SFTP_LOCAL_ROOT, tag));
     const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
     return (auth) => ({
       channel: "sftp",
