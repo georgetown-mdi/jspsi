@@ -321,6 +321,72 @@ describe("records exposed", () => {
   });
 });
 
+// --- Retention/disposition pointer (self-facing, from local config) ----------
+
+describe("retention/disposition pointer", () => {
+  const note =
+    "Result filed in Agency A association table links.prod; held 6 years.";
+
+  test("is carried verbatim into the record when supplied", async () => {
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, retentionDisposition: note },
+      fixedRandomness,
+    );
+    expect(record.retentionDisposition).toBe(note);
+  });
+
+  test("is omitted entirely when not supplied", async () => {
+    // baseInputs has no retentionDisposition, so the key is absent (not an empty
+    // string): absence is explicit, mirroring resultSize.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect("retentionDisposition" in record).toBe(false);
+  });
+
+  test("is rejected on build when an empty string", async () => {
+    // The builder validates with the same schema the parser uses (min length 1),
+    // so it cannot emit a record whose pointer is present-but-empty: an absent
+    // pointer must be the omitted key.
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, retentionDisposition: "" },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("does not affect the termsHash or commitments (self-facing, not an agreed term)", async () => {
+    // The pointer is sourced from local config, not the agreed terms, so adding it
+    // leaves the agreed-terms hash and every commitment byte-identical -- the
+    // record differs only by the pointer itself.
+    const { record: without } = await buildExchangeRecord(
+      baseInputs,
+      fixedRandomness,
+    );
+    const { record: withPointer } = await buildExchangeRecord(
+      { ...baseInputs, retentionDisposition: note },
+      fixedRandomness,
+    );
+    expect(withPointer.termsHash).toBe(without.termsHash);
+    expect(withPointer.commitments).toEqual(without.commitments);
+  });
+
+  test("round-trips through serialize -> parse, and parse rejects an empty pointer", async () => {
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, retentionDisposition: note },
+      fixedRandomness,
+    );
+    const parsed = parseExchangeRecord(
+      JSON.parse(serializeExchangeRecord(record)),
+    );
+    expect(parsed).toEqual(record);
+    expect(parsed.retentionDisposition).toBe(note);
+    // A present-but-empty pointer is invalid on parse, not just on build.
+    expect(() =>
+      parseExchangeRecord({ ...record, retentionDisposition: "" }),
+    ).toThrow();
+  });
+});
+
 // --- Identity validation (at the record-build boundary) ----------------------
 
 describe("identities", () => {

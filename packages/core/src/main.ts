@@ -7,7 +7,11 @@ export * from "./connection/fileSyncConnection";
 export type { HelloEnvelope } from "./connection/controlEnvelope";
 export * from "./connection/messageConnection";
 export { EncryptedMessageConnection } from "./connection/encryptedMessageConnection";
-export { getLogger, setLogPrefixer } from "./utils/logger";
+export {
+  getLogger,
+  getLoggerForVerbosity,
+  setLogPrefixer,
+} from "./utils/logger";
 export { retryPromise, withTimeout } from "./utils/promise";
 // @internal: shared with the CLI config writer so read/write skip identical
 // subtrees; not a stable public API (see the declaration's JSDoc).

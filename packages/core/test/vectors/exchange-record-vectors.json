@@ -997,6 +997,200 @@
           }
         }
       }
+    },
+    {
+      "name": "both-output-with-retention-disposition",
+      "description": "The both-output-with-payloads exchange, with this party's optional self-facing retention/disposition pointer set. The pointer is copied verbatim into this party's record and changes nothing else: the termsHash, the commitments, the binding nonce, and the opening are byte-identical to both-output-with-payloads, because the pointer is sourced from this party's local config (not the agreed linkage terms), is never swapped with the partner, and is not folded into the agreed-terms hash. Pins that retentionDisposition flows through to the record unmodified and that a record carrying it reproduces byte-identically across the Node and browser builds.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "dose",
+                "description": "Administered dose in milligrams."
+              }
+            ],
+            "receive": [
+              {
+                "name": "status",
+                "description": "Enrollment status at the most recent visit."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "status",
+                "description": "Enrollment status at the most recent visit."
+              }
+            ],
+            "receive": [
+              {
+                "name": "dose",
+                "description": "Administered dose in milligrams."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          }
+        },
+        "resultSize": 2,
+        "associationTable": [
+          [0, 2],
+          [1, 0]
+        ],
+        "localPayloadSent": {
+          "columns": ["dose"],
+          "rowIndices": [0, 2],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["status"],
+          "rowIndices": [1, 0],
+          "rows": [["active"], [null]]
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 5,
+        "retentionDisposition": "Result filed in Agency A association table links.prod; held 6 years per records schedule RM-7, then disposed."
+      },
+      "randomness": {
+        "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "salts": {
+          "localPayloadSent": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+          "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+          "associationTable": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v1",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "Mr4_C8Ph6lEic9fzLvBPbCDbDr8FZo2-9BtAA5my_DE",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi",
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          },
+          "matchingBasis": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "payloadSent": [
+            {
+              "name": "dose",
+              "description": "Administered dose in milligrams."
+            }
+          ],
+          "payloadReceived": [
+            {
+              "name": "status",
+              "description": "Enrollment status at the most recent visit."
+            }
+          ]
+        },
+        "recordsExposed": 5,
+        "resultSize": 2,
+        "retentionDisposition": "Result filed in Agency A association table links.prod; held 6 years per records schedule RM-7, then disposed.",
+        "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "commitments": {
+          "localPayloadSent": "q0KQEdxUTLl82wK4N3MYGg8VeoitYa8C04KR8mqGZJA",
+          "partnerPayloadReceived": "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+          "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
+        }
+      },
+      "opening": {
+        "version": "psilink-exchange-opening/v1",
+        "commitments": {
+          "localPayloadSent": {
+            "salt": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "data": {
+              "columns": ["dose"],
+              "rowIndices": [0, 2],
+              "rows": [["10mg"], ["20mg"]]
+            }
+          },
+          "partnerPayloadReceived": {
+            "salt": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+            "data": {
+              "columns": ["status"],
+              "rowIndices": [1, 0],
+              "rows": [["active"], [null]]
+            }
+          },
+          "associationTable": {
+            "salt": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+            "data": [
+              [0, 2],
+              [1, 0]
+            ]
+          }
+        }
+      }
     }
   ]
 }

@@ -408,7 +408,7 @@ export async function runProtocol(
   const client =
     connection.channel === "filedrop"
       ? new LocalFSClient()
-      : new SSH2SFTPClientAdapter();
+      : new SSH2SFTPClientAdapter({ verbosity });
   // CLI-only sweep controls are passed straight to the constructor (the
   // verbose/joinerRecoveryMs precedent), never through config.options, so they
   // cannot be persisted to psilink.yaml. Spread conditionally so an unset value

@@ -380,6 +380,14 @@ export async function handler(argv: Arguments): Promise<void> {
       // succeeded. Nothing fallible runs after this print except the network
       // wait it is meant to precede.
       printInvitation(ready.invitation, { url: ready.url });
+      // State the invitation's validity contract before announcing the wait. The
+      // inviter's exit (cancel, connection timeout, or accept-timeout) already
+      // makes the printed invitation unacceptable -- the setup secret is held
+      // only in memory until a handshake succeeds and the rendezvous is swept on
+      // cleanup -- so this notice is the user-facing half of that guarantee. It
+      // is logged here rather than at exit because a SIGINT exits via the signal
+      // handler's process.exit before any post-wait line could run.
+      log.info(onlineWaitInvalidationNotice(acceptTimeout));
       log.info("waiting for the partner to accept...");
       const { configWriteError } = await runOnlineBootstrap({
         connection: ready.connection,
@@ -457,6 +465,31 @@ function specWithPlaceholderConnection(
   const connection: ConnectionConfig =
     connectionFromEndpoint(undefined).connection;
   return { connection, ...dataSpec };
+}
+
+/**
+ * The notice logged once an online invitation has been printed and the inviter
+ * begins waiting, stating the invitation's validity contract: it can be accepted
+ * only while this command waits at the rendezvous. Cancelling (Ctrl-C), the
+ * connection timing out, or reaching the accept-timeout all leave the rendezvous
+ * and discard the one-time setup secret (held only in memory until a handshake
+ * succeeds), so the printed invitation can no longer be accepted afterward and a
+ * fresh one must be issued. This is the user-facing half of the early-revocation
+ * guarantee the inviter's exit already enforces (see docs/CLI.md "Online
+ * invitation").
+ *
+ * @internal exported for testing
+ */
+export function onlineWaitInvalidationNotice(
+  acceptTimeoutSeconds: number,
+): string {
+  return (
+    "This invitation can be accepted only while this command is waiting. If " +
+    "you cancel it (Ctrl-C), the connection times out, or the accept-timeout " +
+    `(${acceptTimeoutSeconds}s) is reached before your partner accepts, the ` +
+    "invitation can no longer be accepted -- run 'psilink invite' again to " +
+    "issue a fresh one."
+  );
 }
 
 /**
