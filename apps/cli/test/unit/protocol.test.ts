@@ -649,9 +649,11 @@ test("runProtocol writes no key when SIGINT cancels before the handshake complet
     await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
       timeout: 5_000,
     });
-    // The interrupted run resolves cleanly (the signal handler owns the exit
-    // code); the key file must never have been written.
-    await p;
+    // Drain the interrupted run before asserting. It resolves cleanly via the
+    // signal path, but settle it with allSettled so a cleanup-race rejection
+    // cannot skip the key-file invariant below (and to match the other
+    // SIGINT-mid-synchronize tests in this file).
+    await Promise.allSettled([p]);
     expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
     exitSpy.mockRestore();

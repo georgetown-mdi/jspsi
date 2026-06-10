@@ -380,8 +380,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // succeeded. Nothing fallible runs after this print except the network
       // wait it is meant to precede.
       printInvitation(ready.invitation, { url: ready.url });
-      log.info("waiting for the partner to accept...");
-      // State the invitation's validity contract up front, before the wait. The
+      // State the invitation's validity contract before announcing the wait. The
       // inviter's exit (cancel, connection timeout, or accept-timeout) already
       // makes the printed invitation unacceptable -- the setup secret is held
       // only in memory until a handshake succeeds and the rendezvous is swept on
@@ -389,6 +388,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // is logged here rather than at exit because a SIGINT exits via the signal
       // handler's process.exit before any post-wait line could run.
       log.info(onlineWaitInvalidationNotice(acceptTimeout));
+      log.info("waiting for the partner to accept...");
       const { configWriteError } = await runOnlineBootstrap({
         connection: ready.connection,
         dataSpec: ready.dataSpec,
