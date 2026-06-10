@@ -8,6 +8,7 @@ import {
 } from "./config/linkageTerms";
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { randomBytes, toBase64Url } from "./utils/crypto";
+import { sanitizeForDisplay } from "./utils/sanitizeForDisplay";
 import {
   receiveParsed,
   type MessageConnection,
@@ -143,7 +144,9 @@ export async function exchangeTerms(
     if (msg.decision === "abort") {
       throw new Error(
         "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length ? `: ${msg.abortReasons.join("; ")}` : ""),
+          (msg.abortReasons?.length
+            ? `: ${msg.abortReasons.map((r) => sanitizeForDisplay(r)).join("; ")}`
+            : ""),
       );
     }
 
@@ -152,6 +155,13 @@ export async function exchangeTerms(
       partnerTerms = parseLinkageTerms(msg.linkageTerms);
     } catch (parseErr) {
       await sendAbort(conn, ["partner linkage terms failed to parse"]);
+      // The schema-validation message is NOT routed through sanitizeForDisplay:
+      // Zod v4 reports the expected type/options and the schema path, never the
+      // partner-supplied received value, so it carries no partner-controlled
+      // bytes -- and leaving it raw keeps the multi-line report readable for the
+      // common case of an honestly malformed config. (A partner value echoed
+      // into a curated diagnostic IS sanitized -- see validateCompatibility and
+      // the identity log in apps/cli/src/protocol.ts.)
       throw new Error(
         "partner linkage terms failed to parse: " +
           (parseErr instanceof Error ? parseErr.message : String(parseErr)),
@@ -194,6 +204,8 @@ export async function exchangeTerms(
     const { errors, warnings } =
       parseError !== undefined
         ? {
+            // Not sanitized -- the Zod message carries no partner-supplied bytes
+            // (see the parse-error note in the initiator branch above).
             errors: [`partner linkage terms failed to parse: ${parseError}`],
             warnings: [],
           }
@@ -216,7 +228,9 @@ export async function exchangeTerms(
     if (msg.decision === "abort") {
       throw new Error(
         "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length ? `: ${msg.abortReasons.join("; ")}` : ""),
+          (msg.abortReasons?.length
+            ? `: ${msg.abortReasons.map((r) => sanitizeForDisplay(r)).join("; ")}`
+            : ""),
       );
     }
 

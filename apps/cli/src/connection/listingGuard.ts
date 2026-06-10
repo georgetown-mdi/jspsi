@@ -1,5 +1,6 @@
 import {
   DirectoryListingBoundsError,
+  sanitizeForDisplay,
   type TransportOperationStalledError,
 } from "@psilink/core";
 
@@ -93,16 +94,19 @@ export function directoryTooLargeError(
 
 /**
  * Construct the typed, terminal error for a directory entry whose filename
- * exceeds {@link MAX_FILENAME_LENGTH}. The offending name is truncated in the
- * message so the error (and any log line carrying it) cannot itself relay an
- * attacker-sized string.
+ * exceeds {@link MAX_FILENAME_LENGTH}. The offending name is routed through
+ * {@link sanitizeForDisplay}, which both truncates it (so the error -- and any
+ * log line carrying it -- cannot relay an attacker-sized string) and escapes
+ * control/ANSI/deceptive-Unicode characters (so a hostile server cannot spoof
+ * the operator's terminal through a crafted filename). The true length is
+ * reported separately and unsanitized: it is a number, not partner text.
  */
 export function filenameTooLongError(
   dirPath: string,
   name: string,
   max: number,
 ): DirectoryListingBoundsError {
-  const shown = name.length > 64 ? `${name.slice(0, 64)}...` : name;
+  const shown = sanitizeForDisplay(name, { maxLength: 64 });
   return new DirectoryListingBoundsError(
     `directory ${dirPath} contains an entry whose filename is ${name.length} ` +
       `characters, exceeding the maximum of ${max} (${shown}); refusing to ` +

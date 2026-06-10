@@ -61,4 +61,14 @@ describe("filenameTooLongError", () => {
     // The message itself stays small regardless of the input name length.
     expect(err.message.length).toBeLessThan(300);
   });
+
+  test("escapes control/ANSI characters so a hostile name cannot spoof the terminal", () => {
+    const hostile = "evil\x1b[31m" + "n".repeat(300);
+    const err = filenameTooLongError("/drop", hostile, 255);
+    // The raw ESC never reaches the operator's terminal; it survives as text.
+    expect(err.message).not.toContain("\x1b");
+    expect(err.message).toContain("\\x1b");
+    // The true length is still reported.
+    expect(err.message).toContain(`${hostile.length} characters`);
+  });
 });

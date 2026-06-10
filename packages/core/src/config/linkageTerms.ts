@@ -3,6 +3,7 @@ import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
+import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 
 // --- Output ------------------------------------------------------------------
 
@@ -570,18 +571,27 @@ export function validateCompatibility(
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  // Every value interpolated into an operator-facing message below is routed
+  // through sanitizeForDisplay. A mismatch echoes a partner-supplied string (a
+  // mutually-distrusting party controls reference/purpose/identity/column names)
+  // into the local operator's logs or UI, where raw ANSI/control characters or
+  // deceptive Unicode could spoof or mislead; the schema-bounded fields go
+  // through it too, for uniformity and defense in depth if a bound is ever
+  // loosened. The equality CHECKS always compare the RAW values -- escaping is
+  // display-only and not injective, so comparing escaped forms could mask a
+  // genuine mismatch.
   if (local.version !== partner.version) {
     // TODO: implement migration when new versions exist
     errors.push(
-      `version mismatch: local is ${local.version}, partner is ` +
-        `${partner.version}`,
+      `version mismatch: local is ${sanitizeForDisplay(local.version)}, ` +
+        `partner is ${sanitizeForDisplay(partner.version)}`,
     );
   }
 
   if (local.algorithm !== partner.algorithm) {
     errors.push(
-      `algorithm mismatch: local is ${local.algorithm}, partner is ` +
-        `${partner.algorithm}`,
+      `algorithm mismatch: local is ${sanitizeForDisplay(local.algorithm)}, ` +
+        `partner is ${sanitizeForDisplay(partner.algorithm)}`,
     );
   }
 
@@ -609,8 +619,9 @@ export function validateCompatibility(
 
   if (local.date !== partner.date) {
     warnings.push(
-      `date mismatch: local is ${local.date}, partner is ${partner.date}; ` +
-        "one party may have a stale copy of the linkage terms",
+      `date mismatch: local is ${sanitizeForDisplay(local.date)}, partner ` +
+        `is ${sanitizeForDisplay(partner.date)}; one party may have a stale ` +
+        "copy of the linkage terms",
     );
   }
 
@@ -701,15 +712,15 @@ export function validateCompatibility(
       if (local.legalAgreement.reference !== partner.legalAgreement.reference) {
         errors.push(
           "legal agreement reference mismatch: local is " +
-            `"${local.legalAgreement.reference}", partner is ` +
-            `"${partner.legalAgreement.reference}"`,
+            `"${sanitizeForDisplay(local.legalAgreement.reference)}", ` +
+            `partner is "${sanitizeForDisplay(partner.legalAgreement.reference)}"`,
         );
       }
       if (local.legalAgreement.purpose !== partner.legalAgreement.purpose) {
         errors.push(
           "legal agreement purpose mismatch: local is " +
-            `"${local.legalAgreement.purpose}", partner is ` +
-            `"${partner.legalAgreement.purpose}"`,
+            `"${sanitizeForDisplay(local.legalAgreement.purpose)}", ` +
+            `partner is "${sanitizeForDisplay(partner.legalAgreement.purpose)}"`,
         );
       }
       if (
@@ -718,46 +729,56 @@ export function validateCompatibility(
       ) {
         errors.push(
           "legal agreement expiration date mismatch: local is " +
-            `${local.legalAgreement.expirationDate}, partner is ` +
-            `${partner.legalAgreement.expirationDate}`,
+            `${sanitizeForDisplay(local.legalAgreement.expirationDate)}, ` +
+            `partner is ${sanitizeForDisplay(partner.legalAgreement.expirationDate)}`,
         );
       }
       const today = new Date().toISOString().slice(0, 10);
       if (local.legalAgreement.expirationDate < today) {
         errors.push(
-          `legal agreement expired on ${local.legalAgreement.expirationDate}`,
+          "legal agreement expired on " +
+            `${sanitizeForDisplay(local.legalAgreement.expirationDate)}`,
         );
       }
     }
   }
 
-  const localSendNames = (local.payload?.send ?? [])
-    .map((c) => c.name)
-    .sort()
-    .join(",");
+  // Compare the raw, comma-joined names; display each name sanitized. A column
+  // name is partner-controlled free text, so the displayed list is escaped
+  // per-name while the equality check stays byte-exact.
+  const localSendNames = (local.payload?.send ?? []).map((c) => c.name).sort();
   const partnerReceiveNames = (partner.payload?.receive ?? [])
     .map((c) => c.name)
-    .sort()
-    .join(",");
-  if (localSendNames !== partnerReceiveNames) {
+    .sort();
+  if (localSendNames.join(",") !== partnerReceiveNames.join(",")) {
+    const localShown = localSendNames
+      .map((n) => sanitizeForDisplay(n))
+      .join(",");
+    const partnerShown = partnerReceiveNames
+      .map((n) => sanitizeForDisplay(n))
+      .join(",");
     errors.push(
-      `payload mismatch: local send columns [${localSendNames}] do not match ` +
-        `partner receive columns [${partnerReceiveNames}]`,
+      `payload mismatch: local send columns [${localShown}] do not match ` +
+        `partner receive columns [${partnerShown}]`,
     );
   }
 
   const localReceiveNames = (local.payload?.receive ?? [])
     .map((c) => c.name)
-    .sort()
-    .join(",");
+    .sort();
   const partnerSendNames = (partner.payload?.send ?? [])
     .map((c) => c.name)
-    .sort()
-    .join(",");
-  if (localReceiveNames !== partnerSendNames) {
+    .sort();
+  if (localReceiveNames.join(",") !== partnerSendNames.join(",")) {
+    const localShown = localReceiveNames
+      .map((n) => sanitizeForDisplay(n))
+      .join(",");
+    const partnerShown = partnerSendNames
+      .map((n) => sanitizeForDisplay(n))
+      .join(",");
     errors.push(
-      `payload mismatch: local receive columns [${localReceiveNames}] do not ` +
-        `match partner send columns [${partnerSendNames}]`,
+      `payload mismatch: local receive columns [${localShown}] do not ` +
+        `match partner send columns [${partnerShown}]`,
     );
   }
 

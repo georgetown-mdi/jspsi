@@ -7,6 +7,10 @@ import {
   validateCompatibility,
 } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
+import {
+  DISPLAY_TRUNCATION_MARKER,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "../src/utils/sanitizeForDisplay";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -747,6 +751,98 @@ test("matching payload send/receive columns are compatible", () => {
     },
   );
   expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
+});
+
+// ─── validateCompatibility: partner-string sanitization ──────────────────────
+// A mismatch echoes a partner-supplied value into operator-facing output; these
+// pin that every such value is routed through sanitizeForDisplay (control/ANSI
+// and deceptive Unicode neutralized, over-long values truncated) while ordinary
+// values and the mismatch detection itself are unaffected.
+
+const withAgreement = (
+  terms: LinkageTerms,
+  reference: string,
+  purpose: string,
+): LinkageTerms => ({
+  ...terms,
+  legalAgreement: { reference, purpose, expirationDate: "2030-01-01" },
+});
+
+test("a partner reference with an ANSI/control sequence is neutralized", () => {
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, "MOU-\x1b[31m002\x1b[0m", "Care coordination"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement reference mismatch"),
+  );
+  expect(msg).toBeDefined();
+  // The raw ESC is gone (no terminal injection); it survives only as visible text.
+  expect(msg).not.toContain("\x1b");
+  expect(msg).toContain("\\x1b");
+  // The trusted local value is intact and the mismatch is still reported.
+  expect(msg).toContain('"MOU-001"');
+});
+
+test("a partner value with bidi-override / zero-width characters is neutralized", () => {
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, "MOU-001", "Care​ coordination‮EVIL"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement purpose mismatch"),
+  );
+  expect(msg).toBeDefined();
+  expect(msg).not.toContain("​");
+  expect(msg).not.toContain("‮");
+  expect(msg).toContain("\\u200b");
+  expect(msg).toContain("\\u202e");
+});
+
+test("an over-long partner value is truncated with the marker", () => {
+  const hostile = "B".repeat(DEFAULT_MAX_DISPLAY_LENGTH + 100);
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, hostile, "Care coordination"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement reference mismatch"),
+  );
+  expect(msg).toBeDefined();
+  expect(msg).not.toContain(hostile);
+  expect(msg).toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("an ordinary partner value passes through the error unchanged", () => {
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, "MOU-9999", "Care coordination"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement reference mismatch"),
+  );
+  expect(msg).toBeDefined();
+  expect(msg).toContain('"MOU-9999"');
+});
+
+test("a partner payload column name with a control sequence is neutralized", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      payload: { send: [{ name: "case_id" }], receive: [{ name: "x" }] },
+    },
+    {
+      ...termsB,
+      payload: {
+        send: [{ name: "x" }],
+        receive: [{ name: "case_id\x1b[31m" }],
+      },
+    },
+  );
+  const msg = errors.find((e) => e.includes("payload mismatch"));
+  expect(msg).toBeDefined();
+  expect(msg).not.toContain("\x1b");
+  expect(msg).toContain("\\x1b");
 });
 
 // ─── deduplicate: no cross-party consistency check ───────────────────────────
