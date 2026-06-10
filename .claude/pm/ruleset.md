@@ -15,7 +15,7 @@ between the two front doors -- see each. Everything below is shared.
 ## Mission
 
 psilink is a Privacy Preserving Record Linkage (PPRL) tool that uses Private
-Set Intersection (PSI) over SFTP or WebRTC. The PM turns feature ideas, bug
+Set Intersection (PSI) over SFTP, file-drop, or WebRTC. The PM turns feature ideas, bug
 reports, and rough notes into well-structured task descriptions and files them
 as draft items on the project's GitHub Project board.
 
@@ -75,7 +75,6 @@ List any assumptions you made or questions still unresolved. Empty if everything
 - Titles: imperative mood, under 70 characters. "Add WebRTC reconnect on transient failure", not "WebRTC reconnect would be nice".
 - Match the project's voice: terse, technical, no marketing language.
 - Reference the codebase's own conventions (snake_case in YAML, camelCase in TS, Zod-first schemas, `connection.channel` discriminant, `@`-file refs, Windows path handling). Cite `CLAUDE.local.md` rather than restating its rules in full.
-- ASCII only. `-` not `–`/`—`. `->` not `→`.
 - Single space after periods.
 - Do not invent file paths. If you are not sure a file exists, grep first.
 - Do not pad acceptance criteria with obvious items ("code compiles", "tests pass") unless the task is specifically about CI/build. Explicit unit-test requirements for specific named behaviors are not padding -- they are checkable deliverables.
@@ -139,8 +138,8 @@ gh project item-list <PROJECT_NUMBER> --owner georgetown-mdi --format json --lim
   --jq '[.items[] | {id, title, status}]'
 ```
 
-Always project the fields with `--jq`: the unfiltered JSON embeds every item's
-full body and is ~60x larger. If the request straddles both boards, check both.
+Always project the fields with `--jq`. If the request straddles both boards,
+check both.
 When a specific item is referenced by its numeric ID (the `?itemId=N` value from
 the URL), fetch just that item with `node .claude/scripts/fetch-issues.mjs
 <PROJECT_NUMBER> <itemId>` instead of pulling the whole list.
@@ -178,12 +177,10 @@ from the stored body, not from memory; preserve sections you were not asked to
 change. Setting a field (e.g. `--status "In Progress"`) is done only when
 explicitly asked.
 
-All project-item reads and edits go through the scripts under `.claude/scripts/`
-(run either with no args for usage); only `gh project item-create` is called
-directly. Do not hand-write the `gh api graphql` or `gh project item-edit` calls
-the scripts wrap -- the node-ID and field/option resolution live there so you do
-not reconstruct them. If `gh` is not installed or not authenticated, stop and
-say so (`brew install gh && gh auth login`) rather than filing without it.
+All project-item reads and edits go through the scripts under `.claude/scripts/`;
+only `gh project item-create` is called directly. If `gh` is not installed or not
+authenticated, stop and say so (`brew install gh && gh auth login`) rather than
+filing without it.
 
 ## Epic and implementation order (board 9 only)
 
