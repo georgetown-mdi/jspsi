@@ -128,8 +128,15 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
   const url = pathToFileURL(dropDir).href;
 
-  // Inviter has an extra, non-matching row (Dave) so the output proves the PSI
-  // actually filters rather than echoing every record. Intersection: Bob, Carol.
+  // Each side carries a non-matching row -- the inviter's Dave (row 2), the
+  // acceptor's Zoe (row 0) -- so the output proves the PSI filters on both sides
+  // rather than echoing every record. The two non-matchers sit at deliberately
+  // different positions so the shared records land at different local indices on
+  // each side (Bob at invite row 0 / accept row 1; Carol at invite row 1 / accept
+  // row 2). That makes the association table asymmetric, so the assertions below
+  // pin the actual local->partner mapping, not merely which rows matched: a bug
+  // that swapped or mis-keyed the partner index would change the pairs.
+  // Intersection: Bob, Carol.
   const inviteInput = path.join(work, "invite-input.csv");
   fs.writeFileSync(
     inviteInput,
@@ -142,6 +149,7 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   fs.writeFileSync(
     acceptInput,
     "first_name,last_name,date_of_birth\n" +
+      "Zoe,Adams,2001-03-03\n" +
       "Bob,Jones,1990-01-02\n" +
       "Carol,Lee,1985-07-16\n",
   );
@@ -250,13 +258,15 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   const acceptMatched = matched(acceptCsv);
   expect(inviteMatched.header).toBe("row_id,their_row_id");
   expect(acceptMatched.header).toBe("row_id,their_row_id");
-  // Assert the full association, both columns: Bob (row 0) and Carol (row 1)
-  // matched and are identity-mapped to the partner's rows -- both inputs list them
-  // in the same order -- so a bug that cross-wired the partner indices would fail
-  // here, not just one that dropped a row. The inviter's extra Dave (row 2) is
-  // absent from both, so the intersection filtered him out.
-  expect(inviteMatched.pairs).toEqual(new Set(["0,0", "1,1"]));
-  expect(acceptMatched.pairs).toEqual(new Set(["0,0", "1,1"]));
+  // Assert the full association, both columns (local row_id -> partner their_row_id).
+  // With the de-symmetrized inputs above the mapping is non-trivial: from the
+  // inviter, Bob (row 0) -> accept row 1 and Carol (row 1) -> accept row 2; from
+  // the acceptor, Bob (row 1) -> invite row 0 and Carol (row 2) -> invite row 1.
+  // The pair sets are transpose-asymmetric, so a swapped or mis-keyed partner
+  // index fails here, not just a dropped row. Neither non-matcher (Dave at invite
+  // row 2, Zoe at accept row 0) appears, so the intersection filtered both out.
+  expect(inviteMatched.pairs).toEqual(new Set(["0,1", "1,2"]));
+  expect(acceptMatched.pairs).toEqual(new Set(["1,0", "2,1"]));
 
   // -- Both config files are written after the exchange (saveConfig-after-
   //    runProtocol), carrying the connection but never the shared secret. --
