@@ -4,7 +4,7 @@ import { UsageError } from "@psilink/core";
 // weeks/months/years): a CLI duration is a coordination window, and ambiguous
 // or calendar-dependent units (a "month" has no fixed length) would invite the
 // very confusion the required-suffix rule exists to prevent.
-const UNIT_MS: Record<string, number> = {
+const UNIT_MS: Record<"s" | "m" | "h" | "d", number> = {
   s: 1_000,
   m: 60_000,
   h: 3_600_000,
@@ -42,7 +42,7 @@ export function parseDuration(input: string): number {
     throw new UsageError(
       `duration must be greater than zero; got ${JSON.stringify(trimmed)}`,
     );
-  const ms = magnitude * UNIT_MS[match[2]];
+  const ms = magnitude * UNIT_MS[match[2] as keyof typeof UNIT_MS];
   if (!Number.isSafeInteger(ms))
     throw new UsageError(`duration ${JSON.stringify(trimmed)} is too large`);
   return ms;

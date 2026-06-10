@@ -456,6 +456,32 @@ test("validateInvite: a zero --expires-in is rejected before any token is minted
   await expect(promise).rejects.toThrow(/duration/);
 });
 
+test("validateInvite: --expires-in applies on the offlineFromConfig path", async () => {
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const before = Date.now();
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      expiresIn: "2h",
+      log: silentLog,
+    });
+    const after = Date.now();
+    expect(ready.mode).toBe("offlineFromConfig");
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.expires).toBeDefined();
+    if (token.expires === undefined) return;
+    const twoHours = 2 * 60 * 60 * 1000;
+    const expiresMs = new Date(token.expires).getTime();
+    expect(expiresMs).toBeGreaterThanOrEqual(before + twoHours);
+    expect(expiresMs).toBeLessThanOrEqual(after + twoHours);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: online warns when --expires-in is shorter than --accept-timeout", async () => {
   const { input, options } = onlineFixture();
   const log = getLogger("invite-lifetime-warn-test");
