@@ -1097,12 +1097,12 @@ test("synchronize() propagates a base UsageError from a transport read as the te
   // the first pass instead of retrying at the polling cadence until the TTL.
   let peerHelloReads = 0;
   const originalGet = client.get;
-  client.get = async (path: string) => {
+  client.get = async (path, options) => {
     if (path === peerHelloPath) {
       peerHelloReads++;
       throw new UsageError(`usage fault reading ${path}`);
     }
-    return originalGet(path);
+    return originalGet(path, options);
   };
 
   const rejection = await conn.synchronize().then(

@@ -45,22 +45,47 @@ interface Violation {
   text: string;
 }
 
-function some(node: ts.Node, predicate: (n: ts.Node) => boolean): boolean {
+const FUNCTION_LIKE = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.FunctionDeclaration,
+  ts.SyntaxKind.FunctionExpression,
+  ts.SyntaxKind.ArrowFunction,
+  ts.SyntaxKind.MethodDeclaration,
+  ts.SyntaxKind.GetAccessor,
+  ts.SyntaxKind.SetAccessor,
+  ts.SyntaxKind.Constructor,
+]);
+
+// True when `match` holds for any node in `root`'s OWN scope. Descent stops at
+// nested function bodies -- a throw or await buried in an arrow/callback belongs
+// to that inner scope, not to `root`'s control flow -- and at any subtree `prune`
+// rejects. This scoping is what keeps the catch checker from being fooled by a
+// nested throw (a logging wrapper that internally throws is not a rethrow of the
+// caught error) and the try scan from counting a read inside a defined-but-
+// uncalled inner function.
+function someInScope(
+  root: ts.Node,
+  match: (n: ts.Node) => boolean,
+  prune?: (n: ts.Node) => boolean,
+): boolean {
   let found = false;
-  const visit = (n: ts.Node): void => {
+  const walk = (n: ts.Node): void => {
     if (found) return;
-    if (predicate(n)) {
+    if (match(n)) {
       found = true;
       return;
     }
-    ts.forEachChild(n, visit);
+    ts.forEachChild(n, (child) => {
+      if (found || FUNCTION_LIKE.has(child.kind)) return;
+      if (prune?.(child)) return;
+      walk(child);
+    });
   };
-  visit(node);
+  walk(root);
   return found;
 }
 
 // An `await x.get(...)` / `await x.list(...)` / `await x.createExclusive(...)`.
-// Requiring the await is what distinguishes a transport read from an unrelated
+// Requiring the await distinguishes a transport read from an unrelated
 // synchronous `.get(` (e.g. a Map lookup), which is never awaited.
 function isAwaitedTransportRead(node: ts.Node): boolean {
   if (!ts.isAwaitExpression(node)) return false;
@@ -73,16 +98,32 @@ function isAwaitedTransportRead(node: ts.Node): boolean {
   );
 }
 
-// A catch "accounts for" UsageError if it either rethrows (any `throw`, which
-// propagates the caught error or a derived one) or names UsageError (an
-// `instanceof UsageError` branch, the terminal-handling shape poll() uses). A
-// catch that does neither swallows whatever it caught -- including a UsageError --
-// and falls through to retry, which is the violation.
+// `err instanceof UsageError` -- the terminal-handling branch poll() uses (set a
+// flag rather than rethrow). Matching the instanceof expression specifically,
+// rather than any identifier named UsageError, excludes type positions such as
+// `err as UsageError` or a `: UsageError` annotation that carry no runtime check.
+function isUsageErrorInstanceofCheck(node: ts.Node): boolean {
+  return (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword &&
+    ts.isIdentifier(node.right) &&
+    node.right.text === "UsageError"
+  );
+}
+
+// A catch "accounts for" UsageError if, in its own scope, it either rethrows (any
+// `throw`, which propagates the caught error or a derived one) or branches on
+// `instanceof UsageError` (the shape poll() uses to stop terminally without
+// rethrowing). A catch that does neither swallows whatever it caught -- including
+// a UsageError -- and falls through to retry, which is the violation. The
+// nested-catch prune keeps a `throw` inside an INNER try/catch (which handles the
+// inner error, not the one this catch received) from masking an outer catch that
+// still swallows.
 function catchAccountsForUsageError(clause: ts.CatchClause): boolean {
-  return some(
+  return someInScope(
     clause.block,
-    (n) =>
-      ts.isThrowStatement(n) || (ts.isIdentifier(n) && n.text === "UsageError"),
+    (n) => ts.isThrowStatement(n) || isUsageErrorInstanceofCheck(n),
+    (n) => ts.isCatchClause(n),
   );
 }
 
@@ -96,7 +137,7 @@ function findSwallowingTransportRetries(source: ts.SourceFile): Violation[] {
   const visit = (node: ts.Node): void => {
     if (ts.isTryStatement(node) && node.catchClause) {
       if (
-        some(node.tryBlock, isAwaitedTransportRead) &&
+        someInScope(node.tryBlock, isAwaitedTransportRead) &&
         !catchAccountsForUsageError(node.catchClause)
       ) {
         const { line } = source.getLineAndCharacterOfPosition(
@@ -176,6 +217,75 @@ describe("terminal-on-UsageError guard", () => {
     expect(findSwallowingTransportRetries(parse(badCreate))).toHaveLength(1);
   });
 
+  test("flags a swallow whose only throw is inside a nested function", () => {
+    // The throw belongs to the inner arrow's scope, not the catch's control flow,
+    // so it must not count as a rethrow of the caught transport error.
+    const bad = `
+      async function f(client) {
+        do {
+          try {
+            return await client.get(p);
+          } catch (err) {
+            const wrap = () => { throw new Error("inner"); };
+            await delay();
+            continue;
+          }
+        } while (cond);
+      }`;
+    expect(findSwallowingTransportRetries(parse(bad))).toHaveLength(1);
+  });
+
+  test("flags a swallow whose only throw is inside an inner catch", () => {
+    // The inner catch's throw handles the cleanup failure, not the transport error
+    // the outer catch received, so the outer catch still swallows.
+    const bad = `
+      async function f(client) {
+        do {
+          try {
+            return await client.get(p);
+          } catch (err) {
+            try { cleanup(); } catch (e) { throw e; }
+            await delay();
+            continue;
+          }
+        } while (cond);
+      }`;
+    expect(findSwallowingTransportRetries(parse(bad))).toHaveLength(1);
+  });
+
+  test("flags a swallow that names UsageError only in a type position", () => {
+    // A type cast or annotation carries no runtime check, so it must not be read
+    // as accounting for the error.
+    const badCast = `
+      async function f(client) {
+        while (true) {
+          try {
+            return await client.list(p);
+          } catch (err) {
+            const e = err as UsageError;
+            log(e);
+            await delay();
+          }
+        }
+      }`;
+    const badAnnotation = `
+      async function f(client) {
+        while (true) {
+          try {
+            return await client.list(p);
+          } catch (err) {
+            const e: UsageError | undefined = undefined;
+            log(e);
+            await delay();
+          }
+        }
+      }`;
+    expect(findSwallowingTransportRetries(parse(badCast))).toHaveLength(1);
+    expect(findSwallowingTransportRetries(parse(badAnnotation))).toHaveLength(
+      1,
+    );
+  });
+
   test("passes a catch that rethrows UsageError and retries other errors", () => {
     const good = `
       async function f(client) {
@@ -208,7 +318,7 @@ describe("terminal-on-UsageError guard", () => {
 
   test("passes a catch that branches on UsageError without rethrowing", () => {
     // poll()'s shape: terminal-on-UsageError handled by stopping rather than
-    // rethrowing, so the catch names UsageError but has no throw.
+    // rethrowing, so the catch branches on UsageError but has no throw.
     const good = `
       async function f(client) {
         try {
@@ -231,6 +341,24 @@ describe("terminal-on-UsageError guard", () => {
           try {
             await client.put(src, dest);
             const cached = map.get(k);
+          } catch (err) {
+            await delay();
+          }
+        }
+      }`;
+    expect(findSwallowingTransportRetries(parse(fine))).toEqual([]);
+  });
+
+  test("ignores a transport read inside a defined-but-uncalled nested function", () => {
+    // The awaited read lives in an inner arrow's scope, not the try's own control
+    // flow, so the surrounding catch (which legitimately swallows a non-transport
+    // error) must not be paired with it.
+    const fine = `
+      async function f(client) {
+        while (true) {
+          try {
+            const helper = async () => { return await client.list(p); };
+            await somethingElse();
           } catch (err) {
             await delay();
           }
