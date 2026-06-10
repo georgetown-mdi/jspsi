@@ -301,23 +301,21 @@ function fsyncParentDir(filePath: string): void {
  * write leaves no `.tmp.<pid>` orphan. With `exclusive`, the final step is an
  * atomic create-if-absent that throws rather than overwriting an existing file.
  *
- * Durability (POSIX): the temp file's data is `fsync`'d before the rename and
- * the parent directory is `fsync`'d after it, so a power loss cannot surface the
- * rename while losing the file's contents. Because each call flushes its own
- * directory entry before returning, two sequential calls are crash-ordered: if
- * the second call's rename is durable, the first call's rename and contents are
- * too. That ordering is what the self-attested exchange record relies on -- it
- * writes the opening file before the record (see `recordFile.ts`) so a crash
- * between the two preserves the proof material -- and what keeps a freshly
- * rotated shared-secret token (`saveKeyFile`) from being lost. On Windows both
- * flushes are left to the OS: the directory flush because Node's `fs` cannot
- * open a directory handle to `FlushFileBuffers`, and the data flush because the
- * Windows branch writes content through a path (reusing the ACL-narrowed
- * placeholder, with no retained fd to fsync) -- unlike {@link writeFileAtomic},
- * which keeps its fd on every platform and so flushes data on Windows too. The
- * cross-call crash-ordering guarantee is therefore POSIX-only; NTFS metadata
- * journaling governs Windows durability. See SECURITY_DESIGN.md ("Required
- * permissions").
+ * Durability: the temp file's data is `fsync`'d before the rename and the parent
+ * directory is `fsync`'d after it, so a power loss cannot surface the rename
+ * while losing the file's contents. Because each call flushes its own directory
+ * entry before returning, two sequential calls are crash-ordered: if the second
+ * call's rename is durable, the first call's rename and contents are too. That
+ * ordering is what the self-attested exchange record relies on -- it writes the
+ * opening file before the record (see `recordFile.ts`) so a crash between the two
+ * preserves the proof material -- and what keeps a freshly rotated shared-secret
+ * token (`saveKeyFile`) from being lost. The data flush runs on every platform
+ * (the Windows branch reopens the ACL-narrowed placeholder to write and flush
+ * through a retained fd, like {@link writeFileAtomic}), but the parent-directory
+ * flush is POSIX-only -- Node's `fs` cannot open a directory handle to
+ * `FlushFileBuffers` on Windows -- so the cross-call crash-ordering guarantee is
+ * POSIX-only and NTFS metadata journaling governs the Windows directory entry.
+ * See SECURITY_DESIGN.md ("Required permissions").
  *
  * On the `exclusive` path the directory flush runs after the create-if-absent
  * (hard link) has already succeeded, so a flush failure -- a rare I/O error --
@@ -386,17 +384,30 @@ export function writeFileOwnerOnly(
             "owner-read-only via icacls or File Properties",
         );
       }
-      // ACL is now restricted; write the content into the already-protected file.
-      // Durability is left to the OS on this branch -- both the data and the
-      // directory entry. The content goes through a path-based write (reusing
-      // the ACL-narrowed placeholder), so there is no retained fd to fsync the
-      // data, and Node's fs cannot open a directory handle to flush the entry
-      // (fsyncParentDir below is a no-op on win32). writeFileAtomic, by
-      // contrast, keeps its fd on every platform and so flushes data on Windows;
-      // reworking this security-sensitive ACL path to retain an fd is
-      // deliberately not done for a recoverable, NTFS-journaled durability gap.
-      // Documented at the JSDoc above and in SECURITY_DESIGN.md.
-      fs.writeFileSync(tmp, content, "utf8");
+      // ACL is now restricted; write the content into the already-protected
+      // file through a retained fd so the data can be fsync'd before the rename,
+      // matching writeFileAtomic and the POSIX branch. Reopen by path -- the same
+      // exposure the prior path-based writeFileSync already had -- rather than
+      // disturb the placeholder-create/close/icacls sequence above. O_TRUNC
+      // mirrors writeFileSync's 'w' semantics; the placeholder is empty, so it is
+      // a no-op that also defends against any stale tail. FlushFileBuffers on the
+      // write handle is reachable because the owner's Modify (M) grant includes
+      // FILE_GENERIC_WRITE. Only the directory-entry flush (fsyncParentDir below)
+      // stays POSIX-only -- Node's fs offers no directory handle on Windows.
+      const contentFd = fs.openSync(
+        tmp,
+        fs.constants.O_WRONLY | fs.constants.O_TRUNC,
+      );
+      try {
+        fs.writeFileSync(contentFd, content, "utf8");
+        fs.fsyncSync(contentFd);
+      } finally {
+        try {
+          fs.closeSync(contentFd);
+        } catch {
+          /* best-effort close; a genuine write/fsync failure surfaces above */
+        }
+      }
     } else {
       // Create the temp file on an exclusive, non-following descriptor so a
       // symlink planted at the temp path in the unlink->create window cannot
@@ -556,10 +567,10 @@ export function writeFileAtomic(
       fs.writeFileSync(fd, content, "utf8");
       // Flush the temp file's data before the rename so a power loss cannot
       // leave the rename durable while the contents are lost; the parent
-      // directory is flushed after the rename below. Mirrors writeFileOwnerOnly.
-      // Unlike that helper's Windows branch (which writes through a path, not a
-      // retained fd), this writer keeps the fd on every platform, so the data
-      // flush runs on Windows too -- only the directory flush below is POSIX-only.
+      // directory is flushed after the rename below. Mirrors writeFileOwnerOnly,
+      // including its Windows branch: both writers retain a write fd and fsync
+      // the data on every platform, so only the directory flush below is
+      // POSIX-only.
       fs.fsyncSync(fd);
     } finally {
       // Guard the close so its failure cannot mask an fchmod/write/fsync error
