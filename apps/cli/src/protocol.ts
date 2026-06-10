@@ -910,11 +910,25 @@ export async function runProtocol(
     };
     const hintAlreadyEmitted = isHintTagged(err);
     if (!hintAlreadyEmitted) {
-      if (tokenRotated) {
+      if (tokenRotated && onAuthenticatedError === undefined) {
         log.error(
           "The shared secret was already rotated and saved before this error. " +
             "Retry the exchange without re-inviting; if authentication " +
             "fails on retry, both parties must re-invite.",
+        );
+      } else if (tokenRotated) {
+        // The rotated key is on disk, but the post-handshake persistence hook
+        // failed (onAuthenticatedError is set), so whatever it would have
+        // written -- e.g. the online invite/accept config -- is not on disk. A
+        // plain "retry the exchange without re-inviting" is misleading here:
+        // `psilink exchange` may have no config to run against. The specific
+        // hook failure was already logged at error level when it happened, so
+        // emit a corrected advisory rather than the clean-retry one, which would
+        // point the user at a recovery path that cannot succeed.
+        log.error(
+          "The shared secret was rotated and saved, but a post-handshake " +
+            "persistence step failed earlier (logged above); resolve that " +
+            "before retrying, as the retry may have nothing to run against.",
         );
       } else if (authStarted) {
         log.error(
