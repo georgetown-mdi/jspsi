@@ -23,6 +23,7 @@ import {
   redactUrlCredentials,
   runOnlineBootstrap,
   runOrExit,
+  unsatisfiedLinkageFields,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
 import { runProtocol } from "../../src/protocol";
@@ -324,6 +325,85 @@ test("buildDataSpec: supplied terms plus input infer metadata and standardizatio
   expect(dataSpec.linkageTerms).toEqual(inferred.linkageTerms);
   expect(dataSpec.metadata).toBeDefined();
   expect(dataSpec.standardization).toBeDefined();
+});
+
+// --- unsatisfiedLinkageFields ------------------------------------------------
+
+test("unsatisfiedLinkageFields: an input that covers every field's type is satisfiable", () => {
+  // Terms inferred from these same columns reference only fields the columns
+  // provide, so nothing is unsatisfiable.
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  expect(unsatisfiedLinkageFields(COLUMNS, dataSpec.linkageTerms)).toEqual([]);
+});
+
+test("unsatisfiedLinkageFields: names the fields whose type no input column provides", () => {
+  // Terms requiring first/last name, dob, and ssn against an input that only
+  // carries first name: last name, dob, and ssn cannot be produced.
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const unsatisfied = unsatisfiedLinkageFields(
+    ["first_name"],
+    dataSpec.linkageTerms,
+  );
+  const names = unsatisfied.map((f) => f.name).sort();
+  expect(names).toContain("lastName");
+  expect(names).toContain("dateOfBirth");
+  expect(names).toContain("ssn");
+  expect(names).not.toContain("firstName");
+});
+
+test("unsatisfiedLinkageFields: a column of the right type but different name still satisfies", () => {
+  // Satisfaction is by inferred semantic type, not by exact name: `fname` and
+  // `dob` are aliases of firstName / dateOfBirth.
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const unsatisfied = unsatisfiedLinkageFields(
+    ["fname", "lname", "dob", "ssn"],
+    dataSpec.linkageTerms,
+  );
+  expect(unsatisfied).toEqual([]);
+});
+
+test("unsatisfiedLinkageFields: an explicit standardization mapping a present column satisfies a field its type does not", () => {
+  // ssn is required, but the input carries `tax_id` (inferred as identifier, not
+  // ssn) instead of an ssn column. An explicit standardization mapping tax_id ->
+  // ssn makes the field satisfiable, matching the exchange-time resolution.
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const columns = ["first_name", "last_name", "dob", "tax_id"];
+  // Without the standardization, ssn cannot be produced.
+  expect(
+    unsatisfiedLinkageFields(columns, dataSpec.linkageTerms).map((f) => f.name),
+  ).toContain("ssn");
+  // With it, every field is satisfied.
+  expect(
+    unsatisfiedLinkageFields(columns, dataSpec.linkageTerms, [
+      { output: "ssn", input: "tax_id" },
+    ]),
+  ).toEqual([]);
+});
+
+test("unsatisfiedLinkageFields: an explicit standardization whose input column is absent does not satisfy", () => {
+  // The standardization maps tax_id -> ssn, but the input has no tax_id column,
+  // so the mapping produces no values and ssn stays unsatisfiable.
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const unsatisfied = unsatisfiedLinkageFields(
+    ["first_name", "last_name", "dob"],
+    dataSpec.linkageTerms,
+    [{ output: "ssn", input: "tax_id" }],
+  );
+  expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+});
+
+test("unsatisfiedLinkageFields: an explicit standardization with an absent input preempts the type fallback", () => {
+  // The config maps ssn from `tax_id` (absent) even though the input HAS an `ssn`
+  // column. At exchange time the explicit transformation binds ssn to the missing
+  // column and the identity-by-type fallback is skipped, so ssn produces no values
+  // and is genuinely unsatisfiable; the check must not be fooled by the ssn column.
+  const { dataSpec } = buildDataSpec({ identity: "Agency A", rows: ROWS });
+  const unsatisfied = unsatisfiedLinkageFields(
+    ["first_name", "last_name", "dob", "ssn"],
+    dataSpec.linkageTerms,
+    [{ output: "ssn", input: "tax_id" }],
+  );
+  expect(unsatisfied.map((f) => f.name)).toContain("ssn");
 });
 
 // --- runOnlineBootstrap: config persisted at handshake success ---------------

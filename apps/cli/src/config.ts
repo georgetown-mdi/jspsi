@@ -1,14 +1,19 @@
+import fs from "node:fs";
+
 import YAML from "yaml";
 import type {
   ConnectionConfig,
   ExchangeSpec,
   LinkageTerms,
+  Standardization,
 } from "@psilink/core";
 import {
   canonicalString,
   CanonicalEncodingError,
   OPAQUE_VALUE_KEYS,
   safeParseFileSyncOptions,
+  safeParseLinkageTerms,
+  StandardizationSchema,
   UsageError,
 } from "@psilink/core";
 
@@ -505,4 +510,112 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
       delete sanitized.connection.authentication;
   }
   writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
+}
+
+// --- Config reader -----------------------------------------------------------
+
+/**
+ * The portion of a pre-existing config that `invite` uses as the source for an
+ * invitation: the linkage terms (which the invitation carries) and the explicit
+ * data standardization, if any (which the config-vs-input reconciliation honors
+ * so an input column the standardization maps to a linkage field counts as
+ * satisfying it). Metadata and the connection block are intentionally omitted --
+ * `invite` does not use them.
+ */
+export interface ConfigLinkageSource {
+  linkageTerms: LinkageTerms;
+  /** The config's explicit `standardization` block, absent when not present. */
+  standardization?: Standardization;
+}
+
+/**
+ * Read the linkage-terms source from a pre-existing config file, for `invite`'s
+ * config-as-source path. Returns `undefined` when no file exists at `configPath`
+ * (the caller then falls back to inferring terms from an input file).
+ *
+ * Only the `linkage_terms` and `standardization` blocks are parsed and
+ * validated: a config present at the target path is the authoritative source of
+ * the invitation's linkage terms, but `invite` never uses the connection (the
+ * config persists for a later `psilink exchange` to read and validate), so a
+ * still-placeholder or otherwise unfinished connection block must not block
+ * generating an invitation.
+ *
+ * A file that exists but cannot be read, is not valid YAML, carries no valid
+ * `linkage_terms`, or carries an invalid `standardization` is a {@link UsageError}
+ * rather than a silent fall-through to input inference: a config present at the
+ * path is treated as intentional, so a broken one is surfaced for the user to
+ * fix. Mirrors {@link saveConfig}'s snake_case-on-disk convention -- the
+ * top-level keys are read as either `linkage_terms`/`standardization` (the
+ * written form) or their camelCase spellings, and `safeParseLinkageTerms`
+ * camelizes the nested keys.
+ */
+export function loadConfigLinkageSource(
+  configPath: string,
+): ConfigLinkageSource | undefined {
+  let raw: unknown;
+  try {
+    raw = YAML.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new UsageError(
+      `config file ${configPath} could not be read or parsed: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  // A top-level YAML mapping is required. Exclude an array (also
+  // `typeof === "object"`) and a scalar explicitly, so a malformed config is
+  // reported as such rather than misattributed to a missing `linkage_terms`
+  // block (an array has no such key, so it would otherwise fall through below).
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+    throw new UsageError(
+      `config file ${configPath} is not a valid configuration object ` +
+        "(expected a YAML mapping at the top level)",
+    );
+  const obj = raw as Record<string, unknown>;
+  const rawTerms = obj["linkage_terms"] ?? obj["linkageTerms"];
+  if (rawTerms === undefined)
+    throw new UsageError(
+      `config file ${configPath} has no linkage_terms and cannot be used as ` +
+        "the source for an invitation; supply an input file or a configuration " +
+        "that defines linkage terms",
+    );
+
+  const result = safeParseLinkageTerms(rawTerms);
+  if (!result.success)
+    throw new UsageError(
+      `config file ${configPath} has invalid linkage_terms: ` +
+        result.error.issues
+          .map((i) => {
+            // Prefix each issue with its field path (e.g. "linkageKeys.0.name")
+            // so the user can locate the offending field, mirroring accept's
+            // decode-error formatting. The path is relative to linkage_terms.
+            const at = i.path.length > 0 ? `${i.path.join(".")}: ` : "";
+            return `${at}${i.message}`;
+          })
+          .join("; "),
+    );
+
+  // The explicit standardization is optional. Its `output`/`input`/`steps` keys
+  // are single words (snake == camel) and `params` is free-form, so the schema
+  // parses the on-disk form without camelizing. An invalid block is surfaced as
+  // a usage error, like invalid linkage_terms above.
+  const rawStd = obj["standardization"];
+  let standardization: Standardization | undefined;
+  if (rawStd !== undefined) {
+    const stdResult = StandardizationSchema.safeParse(rawStd);
+    if (!stdResult.success)
+      throw new UsageError(
+        `config file ${configPath} has invalid standardization: ` +
+          stdResult.error.issues
+            .map((i) => {
+              const at = i.path.length > 0 ? `${i.path.join(".")}: ` : "";
+              return `${at}${i.message}`;
+            })
+            .join("; "),
+      );
+    standardization = stdResult.data;
+  }
+
+  return { linkageTerms: result.data, standardization };
 }

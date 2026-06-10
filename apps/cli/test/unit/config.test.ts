@@ -12,6 +12,7 @@ import {
   applyConnectionOverrides,
   diffLinkageTerms,
   formatReconcileDiffs,
+  loadConfigLinkageSource,
   saveConfig,
 } from "../../src/config";
 import type {
@@ -601,4 +602,139 @@ test("formatReconcileDiffs: renders each field with its existing and required va
   expect(rendered).toContain("old-host");
   // One line per diff.
   expect(rendered.split("\n")).toHaveLength(2);
+});
+
+// --- loadConfigLinkageSource -------------------------------------------------
+
+test("loadConfigLinkageSource returns undefined when no file exists", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    expect(
+      loadConfigLinkageSource(path.join(dir, "absent.yaml")),
+    ).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource round-trips the terms a saveConfig wrote", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+    });
+    const source = loadConfigLinkageSource(configPath);
+    expect(source?.linkageTerms).toEqual(terms);
+    // No standardization block was written, so none is returned.
+    expect(source?.standardization).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource round-trips an explicit standardization block", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    const standardization = [
+      { output: "ssn", input: "tax_id", steps: [{ function: "trim_whitespace" }] },
+    ];
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+      standardization,
+    });
+    expect(loadConfigLinkageSource(configPath)?.standardization).toEqual(
+      standardization,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: filedrop\n  path: /x\n",
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow("no linkage_terms");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // linkage_terms present but missing the mandatory fields the schema requires.
+    fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "invalid linkage_terms",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource rejects an invalid standardization block", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    // Valid linkage_terms but a standardization entry missing its required input.
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+    });
+    fs.appendFileSync(
+      configPath,
+      "standardization:\n  - output: ssn\n    steps: []\n",
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "invalid standardization",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource rejects malformed YAML", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "could not be read or parsed",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // A top-level YAML array parses as an object in JS; it must be reported as a
+    // malformed config, not misattributed to a missing linkage_terms block.
+    fs.writeFileSync(configPath, "- a\n- b\n");
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "not a valid configuration object",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

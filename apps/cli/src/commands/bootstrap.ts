@@ -23,9 +23,11 @@ import type {
   ExchangeSpec,
   ExchangeDataSpec,
   FileDropConnectionConfig,
+  LinkageField,
   LinkageTerms,
   PreparedExchange,
   SFTPConnectionConfig,
+  Standardization,
   WebRTCConnectionConfig,
 } from "@psilink/core";
 
@@ -466,6 +468,57 @@ export function buildDataSpec(args: {
     );
     return { dataSpec: { linkageTerms }, warnings };
   }
+}
+
+/**
+ * The linkage fields in `terms` that the input `columns` cannot satisfy through
+ * the available data standardizations, for `invite`'s config-vs-input
+ * reconciliation. This mirrors how {@link buildStandardizedDataset} resolves a
+ * linkage field to an input column at exchange time: a field is producible when
+ *
+ * 1. the config carries an explicit `standardization` for it whose source input
+ *    column is present (an explicit transformation is the most direct available
+ *    standardization), OR
+ * 2. the field has NO explicit standardization and the input has a column whose
+ *    inferred semantic type matches the field's type (the default pipeline /
+ *    identity transform).
+ *
+ * An explicit standardization preempts the type fallback at exchange time:
+ * {@link buildStandardizedDataset} binds the field to the named input column and
+ * skips identity-by-type resolution whether or not that column exists. So a field
+ * whose explicit source column is absent is unsatisfiable even when a same-typed
+ * column is present -- the exchange would bind it to the missing column and emit
+ * no values. The type-match basis (2) is sound because a `LinkageField`'s type is
+ * restricted to the standardizable semantic types -- the `other`/`identifier`
+ * types `inferMetadata` assigns to unrecognized input columns can appear in the
+ * input's type set but never as a linkage-field type (the schema rejects them),
+ * and every permitted field type has a default pipeline. An empty result means
+ * every configured field can be produced; a non-empty result names the fields
+ * that cannot, so the caller can reject the input and say which keys it failed to
+ * satisfy.
+ *
+ * @internal exported for testing
+ */
+export function unsatisfiedLinkageFields(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): LinkageField[] {
+  const present = new Set(columns);
+  const inputTypes = new Set(inferMetadata(columns).map((c) => c.type));
+  // Field name -> the input column its explicit standardization reads. The schema
+  // permits at most one transformation per output, so a Map is exact. A field
+  // present here is resolved by the explicit transformation at exchange time
+  // (which preempts the type fallback), so it is producible iff that column
+  // exists; a field absent here falls back to semantic-type coverage.
+  const explicitInput = new Map(
+    (standardization ?? []).map((t) => [t.output, t.input]),
+  );
+  return terms.linkageFields.filter((f) => {
+    const mapped = explicitInput.get(f.name);
+    if (mapped !== undefined) return !present.has(mapped);
+    return !inputTypes.has(f.type);
+  });
 }
 
 /** Build a {@link PreparedExchange} for an online run from a resolved spec. */
