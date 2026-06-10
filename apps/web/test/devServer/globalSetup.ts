@@ -2,22 +2,33 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-// Vitest globalSetup for the `integration` project: brings the Vite/TanStack
-// dev server up before the suite and tears it down after, so `npm run
-// test:integration` is self-contained rather than requiring the operator to
-// start `npm run dev` first. Only the integration project references this file,
-// so the unit project (and `npm run test`) never touches the dev server.
+import type { TestProject } from "vitest/node";
+
+// Vitest globalSetup shared by the `integration` and `browser` projects: it
+// brings the Vite/TanStack dev server up before the suite and tears it down
+// after, so `npm run test:integration` and `npm run test:browser` are each
+// self-contained rather than requiring the operator to start `npm run dev`
+// first. The unit project does not reference this file, so `npm run test` never
+// touches the dev server.
 //
 // The dev server runs on 127.0.0.1 (the Vite bind host -- not `localhost`,
 // which may resolve to ::1 and miss the IPv4 bind). The port comes from the
 // PORT env var (default 3000), matching vite.config.ts. The integration tests
-// derive their target from the same `process.env.PORT ?? "3000"`, so the
-// launched/probed port and the tested port cannot drift.
+// (Node) derive their target from the same `process.env.PORT ?? "3000"`. The
+// browser tests run in Chromium and cannot read `process.env`, so the resolved
+// port is published via `provide()` for them to `inject()` -- so neither
+// consumer's tested port can drift from the launched/probed one.
 //
 // If a server is already listening on 127.0.0.1:PORT when the suite starts,
 // it is reused and left running on teardown, so a developer's long-lived
 // `npm run dev` is not killed mid-session -- matching the CLI integration
 // suite's warm-container reuse behavior.
+
+declare module "vitest" {
+  interface ProvidedContext {
+    webDevServerPort?: number;
+  }
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 // apps/web/test/devServer -> apps/web is two levels up.
@@ -72,9 +83,15 @@ async function waitForServer(url: string): Promise<void> {
   }
 }
 
-export default async function setup(): Promise<() => Promise<void>> {
+export default async function setup({
+  provide,
+}: TestProject): Promise<() => Promise<void>> {
   const port = getPort();
   const url = `http://127.0.0.1:${port}/`;
+
+  // Publish the port for browser tests, which cannot read `process.env`. Done
+  // before the reuse early-return so it is set on every path.
+  provide("webDevServerPort", port);
 
   // Reuse a server already listening on the port (manual `npm run dev`, or a
   // warm one from a prior run): skip launch and leave it running on teardown.

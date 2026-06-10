@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { beforeAll, expect, test } from "vitest";
+import { beforeAll, expect, inject, test } from "vitest";
 
 import Peer from "peerjs";
 
@@ -24,7 +24,11 @@ interface AddressInfo {
 const addressInfo: AddressInfo = {
   address: "127.0.0.1",
   family: "IpV4",
-  port: 3000,
+  // The `browser` project's globalSetup publishes the port it launched the dev
+  // server on (browser tests run in Chromium and cannot read `process.env`), so
+  // the probe and exchange below cannot drift from the running server. Falls
+  // back to the Vite default when this file is run without that setup.
+  port: inject("webDevServerPort") ?? 3000,
 };
 const protocol = "http:";
 
@@ -32,8 +36,7 @@ const hostString =
   `${protocol}//${addressInfo.address}` +
   `${addressInfo.port ? ":" + addressInfo.port.toString() : ""}`;
 
-const serverUnreachableNote =
-  "PeerJS coordination server on 127.0.0.1:3000 unreachable";
+const serverUnreachableNote = `PeerJS coordination server at ${hostString} unreachable`;
 
 // Probe the PeerJS coordination server with a short timeout. The `browser`
 // vitest project stands this server up via the dev-server globalSetup, so a
@@ -84,15 +87,17 @@ const firstNameOnlyTerms = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
-let reachable = false;
-let serverResult: ReturnType<typeof sortAssociationTable>;
-let clientResult: ReturnType<typeof sortAssociationTable>;
+// Undefined until a reachable server lets beforeAll run the exchange; the tests
+// gate on this, so an unreachable server skips rather than reading a stale or
+// absent result.
+let serverResult: ReturnType<typeof sortAssociationTable> | undefined;
+let clientResult: ReturnType<typeof sortAssociationTable> | undefined;
 
 // Generous timeout: peer coordination, the WASM load, and the round-trip
 // exchange all happen here. Previously this ran at module scope with no bound;
 // the hook timeout now turns a stuck server into a clear failure, not a hang.
 beforeAll(async () => {
-  reachable = await canReachServer();
+  const reachable = await canReachServer();
   if (!reachable) return;
 
   const session = await (async () => {
@@ -249,13 +254,13 @@ beforeAll(async () => {
 }, 60_000);
 
 test("server and client yield identical results", (ctx) => {
-  ctx.skip(!reachable, serverUnreachableNote);
+  if (!serverResult || !clientResult) return ctx.skip(serverUnreachableNote);
   expect(serverResult[0]).toStrictEqual(clientResult[1]);
   expect(serverResult[1]).toStrictEqual(clientResult[0]);
 });
 
 test("psi yields correct results", (ctx) => {
-  ctx.skip(!reachable, serverUnreachableNote);
+  if (!serverResult) return ctx.skip(serverUnreachableNote);
   expect(serverResult[0]).toStrictEqual([2, 4]);
   expect(serverResult[1]).toStrictEqual([0, 1]);
 });
