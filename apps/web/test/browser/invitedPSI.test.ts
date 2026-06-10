@@ -128,17 +128,21 @@ beforeAll(async () => {
           body: JSON.stringify({
             invitedPeerId: id,
           }),
-        }).then((response) => {
-          if (!response.ok) {
-            reject(
-              new Error(
-                `error posting peer id: ${response.status}, text: ${response.statusText}`,
-              ),
-            );
-          } else {
-            resolve(peer);
-          }
-        });
+        })
+          .then((response) => {
+            if (!response.ok) {
+              reject(
+                new Error(
+                  `error posting peer id: ${response.status}, text: ${response.statusText}`,
+                ),
+              );
+            } else {
+              resolve(peer);
+            }
+          })
+          // Without this, a rejected fetch (refused/aborted) would leave the
+          // enclosing promise unsettled and hang beforeAll until its timeout.
+          .catch(reject);
       });
     });
   })();
