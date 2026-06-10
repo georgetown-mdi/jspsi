@@ -1114,6 +1114,63 @@ test("synchronize() propagates a base UsageError from a transport read as the te
   expect(peerHelloReads).toBe(1);
 });
 
+test("poll() stops the poller on a UsageError from a transport read, not retried", async () => {
+  // Companion to the synchronize() propagation tests above, for the OTHER
+  // transport-read retry consumer: the background poll loop. A UsageError from a
+  // message read -- here a stalled get() -- is terminal: poll() stops the poller
+  // and emits the error rather than rescheduling into the same stall. (A transient
+  // non-UsageError read failure reschedules instead; the ENOENT poll tests above
+  // cover that half.) With readControlFileWithGate's gate tests, this pins
+  // terminal-on-UsageError behaviorally at both real consumers of a transport read.
+  const peerId = "peer-test";
+  const errors: unknown[] = [];
+  let getCount = 0;
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+
+  const { client } = makeMockClient();
+  // A peer message whose on-disk size matches its declared byte count, so poll()
+  // clears the frame-size and sync gates and reaches get().
+  client.list = async () => [
+    { name: `${peerId}-5.json`, modifyTime: 0, size: 5 },
+  ];
+  client.get = async () => {
+    getCount++;
+    throw new TransportOperationStalledError(
+      "SFTP file read stalled: received no data for 60000 ms",
+    );
+  };
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+  // Deliberately do NOT stop the poller in the handler: the poller must stop
+  // itself on a UsageError. Were it to reschedule instead, get() would be
+  // re-called every pollingFrequency and getCount would climb past 1.
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2000,
+      ),
+    ),
+  ]);
+  // Give the poller several intervals to (wrongly) reschedule and re-read before
+  // we assert it stayed put.
+  await new Promise((r) => setTimeout(r, 60));
+  conn.stop();
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect(errors[0]).toBeInstanceOf(TransportOperationStalledError);
+  // Terminal: read once and the poller stopped, not retried at the poll cadence.
+  expect(getCount).toBe(1);
+});
+
 // --- whole-exchange liveness backstop (write/stat/delete + slow-drip read) ---
 //
 // The write-path analogue of the read-path liveness test above. The CLI adapter's
