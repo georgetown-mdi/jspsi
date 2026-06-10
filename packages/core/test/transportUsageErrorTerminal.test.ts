@@ -74,10 +74,13 @@ function someInScope(
       found = true;
       return;
     }
+    // forEachChild stops as soon as the callback returns a truthy value, so
+    // returning `found` short-circuits the sibling scan once a match lands
+    // instead of walking the rest of a large subtree.
     ts.forEachChild(n, (child) => {
-      if (found || FUNCTION_LIKE.has(child.kind)) return;
-      if (prune?.(child)) return;
+      if (FUNCTION_LIKE.has(child.kind) || prune?.(child)) return undefined;
       walk(child);
+      return found ? true : undefined;
     });
   };
   walk(root);
@@ -107,10 +110,13 @@ function isAwaitedTransportRead(node: ts.Node): boolean {
   );
 }
 
-// `err instanceof UsageError` -- the terminal-handling branch poll() uses (set a
-// flag rather than rethrow). Matching the instanceof expression specifically,
+// `err instanceof UsageError`. Matching the instanceof expression specifically,
 // rather than any identifier named UsageError, excludes type positions such as
 // `err as UsageError` or a `: UsageError` annotation that carry no runtime check.
+// Keyed on the UsageError BASE class per the issue's implementation note (the poll
+// loop and gate key their terminal behavior off the base); a catch that branches
+// only on a subclass and stops without rethrowing would be flagged, which nudges
+// new sites toward the base-class guard rather than a per-subclass one.
 function isUsageErrorInstanceofCheck(node: ts.Node): boolean {
   return (
     ts.isBinaryExpression(node) &&
@@ -121,9 +127,12 @@ function isUsageErrorInstanceofCheck(node: ts.Node): boolean {
 }
 
 // A catch "accounts for" UsageError if, in its own scope, it either rethrows (any
-// `throw`, which propagates the caught error or a derived one) or branches on
-// `instanceof UsageError` (the shape poll() uses to stop terminally without
-// rethrowing). A catch that does neither swallows whatever it caught -- including
+// `throw`, which propagates the caught error or a derived one) or GATES a branch on
+// `instanceof UsageError` -- an `if`/ternary whose condition tests it, the shape
+// poll() uses to stop terminally without rethrowing. The branch requirement is what
+// distinguishes a real guard from a disconnected `const x = err instanceof
+// UsageError` that computes the test but still swallows; the bare expression no
+// longer counts. A catch that does neither swallows whatever it caught -- including
 // a UsageError -- and falls through to retry, which is the violation.
 //
 // The nested-try prune drops any `throw` buried inside an INNER try/catch/finally:
@@ -133,10 +142,17 @@ function isUsageErrorInstanceofCheck(node: ts.Node): boolean {
 // readControlFileWithGate and poll() do; requiring that (and erring toward
 // flagging when propagation hides in a nested handler) keeps the guard from a
 // silent false negative.
+function conditionTestsUsageError(condition: ts.Node): boolean {
+  return someInScope(condition, isUsageErrorInstanceofCheck);
+}
+
 function catchAccountsForUsageError(clause: ts.CatchClause): boolean {
   return someInScope(
     clause.block,
-    (n) => ts.isThrowStatement(n) || isUsageErrorInstanceofCheck(n),
+    (n) =>
+      ts.isThrowStatement(n) ||
+      (ts.isIfStatement(n) && conditionTestsUsageError(n.expression)) ||
+      (ts.isConditionalExpression(n) && conditionTestsUsageError(n.condition)),
     (n) => ts.isTryStatement(n),
   );
 }
@@ -145,6 +161,16 @@ function catchAccountsForUsageError(clause: ts.CatchClause): boolean {
  * Returns every catch clause in `source` that guards a try whose body awaits a
  * transport read yet neither rethrows nor branches on UsageError -- a retry site
  * that could swallow a terminal UsageError. Empty means the invariant holds.
+ *
+ * Structural scope: it matches a transport read awaited DIRECTLY in the try
+ * (`await client.get(...)`), which is the shape the original swallow took
+ * (readControlFileWithGate). A read indirected through a helper or IIFE
+ * (`await filePresent()`, where the read lives in the helper body) is out of
+ * scope by the function-boundary stop -- and that indirection is where the
+ * legitimate teardown swallow already lives (close()'s drain bounds its own
+ * list() and falls through to cleanup rather than retrying into the hang), so
+ * descending into helpers would false-positive that correct teardown. The
+ * realistic reintroduction is a direct read; that is what this catches.
  */
 function findSwallowingTransportRetries(source: ts.SourceFile): Violation[] {
   const violations: Violation[] = [];
@@ -318,6 +344,24 @@ describe("terminal-on-UsageError guard", () => {
     );
   });
 
+  test("flags a swallow where instanceof UsageError gates no branch", () => {
+    // The instanceof is computed into a variable but never controls a throw or a
+    // stopping branch, so the catch still swallows the error.
+    const bad = `
+      async function f(client) {
+        while (true) {
+          try {
+            return await client.list(p);
+          } catch (err) {
+            const isUsage = err instanceof UsageError;
+            log(isUsage);
+            await delay();
+          }
+        }
+      }`;
+    expect(findSwallowingTransportRetries(parse(bad))).toHaveLength(1);
+  });
+
   test("passes a catch that rethrows UsageError and retries other errors", () => {
     const good = `
       async function f(client) {
@@ -397,5 +441,29 @@ describe("terminal-on-UsageError guard", () => {
         }
       }`;
     expect(findSwallowingTransportRetries(parse(fine))).toEqual([]);
+  });
+
+  test("does not see a read indirected through a helper (documented scope)", () => {
+    // Structural limitation, asserted so it is visible rather than surprising: a
+    // transport read awaited through a helper -- as close()'s drain does with
+    // filePresent -- is out of scope, because that indirection is where the
+    // legitimate teardown swallow lives and descending into it would false-positive
+    // correct cleanup. The realistic reintroduction is a direct awaited read, which
+    // the scanner does catch (the "flags ..." cases above).
+    const indirected = `
+      async function f(client) {
+        const filePresent = async () => {
+          const files = await client.list(p);
+          return files.length > 0;
+        };
+        while (true) {
+          try {
+            if (await filePresent()) return;
+          } catch (err) {
+            await delay();
+          }
+        }
+      }`;
+    expect(findSwallowingTransportRetries(parse(indirected))).toEqual([]);
   });
 });
