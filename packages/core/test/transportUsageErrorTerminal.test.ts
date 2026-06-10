@@ -87,6 +87,15 @@ function someInScope(
 // An `await x.get(...)` / `await x.list(...)` / `await x.createExclusive(...)`.
 // Requiring the await distinguishes a transport read from an unrelated
 // synchronous `.get(` (e.g. a Map lookup), which is never awaited.
+//
+// Matched by method name on any receiver, deliberately. The guard scans only the
+// transport consumer (fileSyncConnection.ts), where these names are always the
+// transport client, and a backstop should err toward a false positive rather than
+// a false negative: an unrelated `await someMap.get(k)` in a swallowing try would
+// be flagged loudly and is trivially silenced by propagating UsageError, whereas a
+// receiver-type filter risks a SILENT miss if the transport variable is ever
+// renamed -- the worse failure for a guard whose whole job is to not miss a
+// reintroduced swallow.
 function isAwaitedTransportRead(node: ts.Node): boolean {
   if (!ts.isAwaitExpression(node)) return false;
   const call = node.expression;
@@ -115,15 +124,20 @@ function isUsageErrorInstanceofCheck(node: ts.Node): boolean {
 // `throw`, which propagates the caught error or a derived one) or branches on
 // `instanceof UsageError` (the shape poll() uses to stop terminally without
 // rethrowing). A catch that does neither swallows whatever it caught -- including
-// a UsageError -- and falls through to retry, which is the violation. The
-// nested-catch prune keeps a `throw` inside an INNER try/catch (which handles the
-// inner error, not the one this catch received) from masking an outer catch that
-// still swallows.
+// a UsageError -- and falls through to retry, which is the violation.
+//
+// The nested-try prune drops any `throw` buried inside an INNER try/catch/finally:
+// such a throw may be absorbed by the inner catch (`try { throw err } catch {}`) or
+// handle a different error, so it is not a guaranteed propagation of the error
+// THIS catch received. A real rethrow sits in the catch's own flow, as both
+// readControlFileWithGate and poll() do; requiring that (and erring toward
+// flagging when propagation hides in a nested handler) keeps the guard from a
+// silent false negative.
 function catchAccountsForUsageError(clause: ts.CatchClause): boolean {
   return someInScope(
     clause.block,
     (n) => ts.isThrowStatement(n) || isUsageErrorInstanceofCheck(n),
-    (n) => ts.isCatchClause(n),
+    (n) => ts.isTryStatement(n),
   );
 }
 
@@ -245,6 +259,24 @@ describe("terminal-on-UsageError guard", () => {
             return await client.get(p);
           } catch (err) {
             try { cleanup(); } catch (e) { throw e; }
+            await delay();
+            continue;
+          }
+        } while (cond);
+      }`;
+    expect(findSwallowingTransportRetries(parse(bad))).toHaveLength(1);
+  });
+
+  test("flags a swallow whose only throw is inside an inner try body", () => {
+    // The throw is absorbed by the inner catch, not propagated out of the outer
+    // catch, so the outer catch still swallows the transport error.
+    const bad = `
+      async function f(client) {
+        do {
+          try {
+            return await client.get(p);
+          } catch (err) {
+            try { throw err; } catch (e) {}
             await delay();
             continue;
           }
