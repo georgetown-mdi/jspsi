@@ -324,7 +324,11 @@ test("validateInvite: a config's explicit standardization lets an otherwise-unsa
   // as an identifier, not ssn) rather than an ssn column, so without the
   // standardization the ssn field would be unsatisfiable.
   const { dir, configPath, keyPath } = withConfig(terms, [
-    { output: "ssn", input: "tax_id", steps: [{ function: "trim_whitespace" }] },
+    {
+      output: "ssn",
+      input: "tax_id",
+      steps: [{ function: "trim_whitespace" }],
+    },
   ]);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,tax_id");
@@ -382,4 +386,72 @@ test("validateInvite: with no config and an input file, terms are inferred and w
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- validateInvite: --expires-in override -----------------------------------
+
+test("validateInvite: --expires-in sets the token's expiry to the override", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-expires-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const before = Date.now();
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    expiresIn: "2h",
+    log: silentLog,
+  });
+  const after = Date.now();
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.expires).toBeDefined();
+  if (token.expires === undefined) return;
+  // The expiry is two hours past the moment the token was minted, which lies in
+  // [before, after]; bound it on both sides rather than assert an exact value.
+  const twoHours = 2 * 60 * 60 * 1000;
+  const expiresMs = new Date(token.expires).getTime();
+  expect(expiresMs).toBeGreaterThanOrEqual(before + twoHours);
+  expect(expiresMs).toBeLessThanOrEqual(after + twoHours);
+});
+
+test("validateInvite: omitting --expires-in keeps the one-hour default", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-default-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const before = Date.now();
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const after = Date.now();
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.expires).toBeDefined();
+  if (token.expires === undefined) return;
+  const oneHour = 60 * 60 * 1000;
+  const expiresMs = new Date(token.expires).getTime();
+  expect(expiresMs).toBeGreaterThanOrEqual(before + oneHour);
+  expect(expiresMs).toBeLessThanOrEqual(after + oneHour);
+});
+
+test("validateInvite: a zero --expires-in is rejected before any token is minted", async () => {
+  // A non-existent input would itself error once read; the duration is parsed at
+  // the very top of validateInvite, so the duration rejection -- not the missing
+  // input -- is what surfaces, proving no token is minted on a bad override.
+  const promise = validateInvite({
+    resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+    options: testOptions(),
+    acceptTimeout: 900,
+    expiresIn: "0m",
+    log: silentLog,
+  });
+  await expect(promise).rejects.toBeInstanceOf(UsageError);
+  await expect(promise).rejects.toThrow(/duration/);
 });
