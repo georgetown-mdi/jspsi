@@ -682,7 +682,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // being coerced to the default of 5.
         this.options!.retries ?? 5,
         100,
-        (error) => (error as Ssh2SftpError | null | undefined)?.code === SSH_FX_FAILURE,
+        (error) =>
+          (error as Ssh2SftpError | null | undefined)?.code === SSH_FX_FAILURE,
       ),
       "rename",
       `${fromPath} to ${toPath}`,
