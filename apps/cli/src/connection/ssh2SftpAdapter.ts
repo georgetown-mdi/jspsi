@@ -600,7 +600,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.warnIfSlow(
       retryPromise(
         () => this.client.put(src, dest, { writeStreamOptions: options }),
-        this.options!.retries || 5,
+        // `??` not `||` so an explicit retries: 0 disables the retry rather than
+        // being coerced to the default of 5.
+        this.options!.retries ?? 5,
         100,
       ),
       "file write",
@@ -662,7 +664,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.warnIfSlow(
       retryPromise(
         () => this.client.rename(fromPath, toPath).then(() => {}),
-        this.options!.retries || 5,
+        // `??` not `||` so an explicit retries: 0 disables the retry rather than
+        // being coerced to the default of 5.
+        this.options!.retries ?? 5,
         100,
         (error) => (error as Ssh2SftpError | null | undefined)?.code === SSH_FX_FAILURE,
       ),
@@ -739,7 +743,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             );
             return;
           }
-          if (errCode === 4) {
+          if (errCode === SSH_FX_FAILURE) {
             // If exists() itself rejects (e.g., a second network failure
             // immediately after the exclusive-open failure), the ambiguity
             // cannot be resolved; propagate openErr unchanged so the caller

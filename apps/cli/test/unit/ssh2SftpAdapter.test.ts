@@ -237,6 +237,35 @@ describe("rename retry", () => {
       vi.useRealTimers();
     }
   });
+
+  test("honors an explicit retries: 0 (no retry even on SSH_FX_FAILURE)", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      let calls = 0;
+      const rename = vi.fn().mockImplementation(async () => {
+        calls++;
+        throw sftpError("_rename: Failure", 4);
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // retries: 0 must disable the retry, not be coerced to the default of 5 --
+      // the `?? 5` (not `|| 5`) guard. A status-4 failure that would otherwise be
+      // retried is surfaced after the single attempt.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = { retries: 0 };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { rename };
+
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      const assertion = expect(renaming).rejects.toThrow("_rename: Failure");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // --- createExclusive ---------------------------------------------------------
