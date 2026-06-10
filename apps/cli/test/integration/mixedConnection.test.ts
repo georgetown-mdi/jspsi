@@ -144,6 +144,56 @@ test("basic synchronization", async () => {
   desynchronize(sftpConn);
 });
 
+test("joiner rendezvous recovers from a transient rename failure", async () => {
+  // End-to-end guard for acceptance criterion (a): a transient SSH_FX_FAILURE on
+  // the joiner's atomic <id>-joining.json -> <id>-hello.json rename must recover
+  // transparently rather than crash the rendezvous (the original flake). The
+  // mocked unit tests pin the adapter's retry contract in isolation; this drives
+  // it through the real adapter and a real server so an adapter<->core wiring
+  // regression (e.g. the predicate stops matching the real numeric code) is
+  // caught here, where the unit tests would not see it.
+  await sftpAdapter.put(
+    Buffer.from(
+      JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
+    ),
+    `${SFTP_PATH}/${localConn.id}-hello.json`,
+  );
+
+  // Inject one status-4 failure at the ssh2-sftp-client layer -- below the
+  // adapter's retry -- then delegate to the real rename so the retry's second
+  // attempt actually succeeds against the server.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const client = (sftpAdapter as any).client;
+  const realRename = client.rename.bind(client);
+  let injectedFailure = false;
+  client.rename = (from: string, to: string) => {
+    if (!injectedFailure) {
+      injectedFailure = true;
+      return Promise.reject(Object.assign(new Error("Failure"), { code: 4 }));
+    }
+    return realRename(from, to);
+  };
+
+  try {
+    await sftpConn.synchronize();
+  } finally {
+    client.rename = realRename;
+  }
+
+  const currentFiles = await sftpAdapter.list(SFTP_PATH);
+  await sftpAdapter.safeDelete(`${SFTP_PATH}/${sftpConn.id}-hello.json`);
+
+  // The failure path was actually exercised (guards against a false green), and
+  // the rendezvous still completed.
+  expect(injectedFailure).toBe(true);
+  expect(sftpConn.peerId).toBe(localConn.id);
+  expect(sftpConn.handshakeRole).toBe("initiator");
+  expect(currentFiles.length).toBe(1);
+  expect(currentFiles[0].name).toBe(`${sftpConn.id}-hello.json`);
+
+  desynchronize(sftpConn);
+});
+
 test("sftp sends, local receives", async () => {
   const sftpSyncPromise = sftpConn.synchronize();
   const localSyncPromise = new Promise<void>((resolve, reject) => {
