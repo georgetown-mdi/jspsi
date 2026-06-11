@@ -32,11 +32,10 @@ function invitationLocation(): InvitationLocation {
   };
 }
 
-/** A labelled, copy-to-clipboard view of one shareable artifact. It reads
- * `navigator` at render, so it is kept off the server-rendered tree by the
- * `invitation` state guard at its only call site below: `invitation` starts
- * `undefined`, so the `{invitation && ...}` branch that renders CopyRow does not
- * run during SSR. */
+/** A labelled, copy-to-clipboard view of one shareable artifact. Its `navigator`
+ * read is guarded with `typeof navigator`, so it is SSR-safe on its own; it is
+ * additionally only rendered behind the `invitation` state guard at its call site
+ * (`invitation` starts `undefined`), so it does not run during SSR regardless. */
 function CopyRow({
   label,
   description,
@@ -60,7 +59,7 @@ function CopyRow({
         </Code>
         {
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          navigator.clipboard ? (
+          typeof navigator !== "undefined" && navigator.clipboard ? (
             <CopyButton value={value} timeout={1000}>
               {({ copied, copy }) => (
                 <Tooltip label={copied ? "Copied" : "Copy to clipboard"}>
@@ -129,7 +128,12 @@ export function InvitationTab() {
                 onChange={(e) => handleChange(e.target.value)}
                 onBlur={handleBlur}
                 error={
-                  state.meta.errors.length > 0
+                  // Only after the field is blurred, so the "required" message
+                  // does not flash on every keystroke while the user is still
+                  // typing (isTouched flips on the first change; isBlurred does
+                  // not). A cold submit with an empty name is caught by the
+                  // native `required` attribute's own bubble instead.
+                  state.meta.isBlurred && state.meta.errors.length > 0
                     ? state.meta.errors.join(", ")
                     : undefined
                 }
