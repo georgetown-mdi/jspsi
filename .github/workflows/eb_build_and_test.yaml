@@ -77,4 +77,4 @@ jobs:
           compression-level: 0
       - name: Output artifact name
         id: artifact-name
-        run: echo "artifactName=${{env.ARTIFACT_NAME}}" >> $GITHUB_OUTPUT
+        run: echo "artifactName=${{env.ARTIFACT_NAME}}" >> "$GITHUB_OUTPUT"

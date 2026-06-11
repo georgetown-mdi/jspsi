@@ -51,7 +51,7 @@ jobs:
                 --application-name ${{vars.EB_APPLICATION_NAME}} \
                 --version-label ${{github.sha}} \
                 --description "${{env.ENVIRONMENT_NAME}}-${{github.sha}}" \
-                --source-bundle S3Bucket="elasticbeanstalk-${{vars.AWS_REGION_NAME}}-${{secrets.AWS_ACCOUNT_ID}}",S3Key="${{github.sha}}.zip"
+                --source-bundle "S3Bucket=elasticbeanstalk-${{vars.AWS_REGION_NAME}}-${{secrets.AWS_ACCOUNT_ID}},S3Key=${{github.sha}}.zip"
           fi
           aws elasticbeanstalk update-environment \
               --application-name ${{vars.EB_APPLICATION_NAME}} \
