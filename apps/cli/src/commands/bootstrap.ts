@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
@@ -386,14 +385,11 @@ export function connectionFromEndpoint(
 
 // --- shared secret --------------------------------------------------------------
 
-/**
- * Generate a fresh invitation shared secret: a base64url-encoded 32 random bytes,
- * matching `SHARED_SECRET_REGEX`. The rotation token derived after the first
- * successful handshake replaces it; this is only the short-lived setup credential.
- */
-export function generateSharedSecret(): string {
-  return crypto.randomBytes(32).toString("base64url");
-}
+// Secret generation lives in @psilink/core (one definition shared with the web
+// inviter, per the CONTRIBUTING rule against re-implementing crypto helpers);
+// re-exported here so the CLI's invitation call sites keep importing it from this
+// module.
+export { generateSharedSecret } from "@psilink/core";
 
 /** ISO 8601 datetime `durationSeconds` from now, for an invitation's `expires`. */
 export function expiresFromNow(durationSeconds: number): string {
