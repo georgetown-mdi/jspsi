@@ -20,6 +20,7 @@ on:
       - "lib/**"
       - "package-lock.json"
       - "tsconfig.base.json"
+      - ".github/actions/setup/**"
       - ".github/workflows/cli_build_and_test.yaml"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.

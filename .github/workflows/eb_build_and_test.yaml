@@ -29,6 +29,7 @@ on:
       - "packages/core/package.json"
       - "packages/core/rollup.config.ts"
       - "packages/core/tsconfig.json"
+      - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
 
   workflow_call:
