@@ -146,14 +146,21 @@ function waitForPeerOpen(
  *
  * @param sharedSecret  The invitation's shared secret; the inviter id is derived
  *                      from it.
- * @param options       `peerFactory` injects the {@link Peer} constructor for
- *                      testing.
+ * @param options       `signal` cancels the listen before or during broker
+ *                      registration; `peerFactory` injects the {@link Peer}
+ *                      constructor for testing.
  */
 export async function listenAsInviter(
   sharedSecret: string,
-  options?: { peerFactory?: PeerFactory },
+  options?: { signal?: AbortSignal; peerFactory?: PeerFactory },
 ): Promise<Peer> {
   const makePeer = options?.peerFactory ?? defaultPeerFactory;
+  const signal = options?.signal;
+  // Short-circuit before any broker contact if the caller has already aborted
+  // (e.g. the component unmounted before this ran): no peer is constructed, so
+  // no derived id is ever registered with the broker.
+  if (signal?.aborted)
+    throw new Error("connecting to the signaling server was aborted");
   const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
   const loc = inviterLocationFromWindow();
   log.info(
@@ -161,7 +168,7 @@ export async function listenAsInviter(
   );
   const peer = makePeer(inviterId, buildPeerOptions(loc));
   try {
-    await waitForPeerOpen(peer);
+    await waitForPeerOpen(peer, { signal });
   } catch (err) {
     peer.destroy();
     throw err;
@@ -286,8 +293,14 @@ async function dialInviterWithRetry(
   const deadline = Date.now() + totalTimeoutMs;
   for (;;) {
     if (signal?.aborted) throw new Error("dialing the inviter was aborted");
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      throw new Error("timed out waiting for the inviter to come online");
     const attempt = await attemptDial(peer, inviterId, {
-      openTimeoutMs,
+      // Clamp the per-attempt open timeout to the remaining budget so an attempt
+      // started near the deadline cannot run up to openTimeoutMs past it: the
+      // total budget is the hard ceiling, shared with the inviter's inbound wait.
+      openTimeoutMs: Math.min(openTimeoutMs, remaining),
       signal,
     });
     if (attempt.outcome === "open") return attempt.conn;

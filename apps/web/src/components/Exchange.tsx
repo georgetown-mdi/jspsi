@@ -217,7 +217,7 @@ export function Exchange(config: ExchangeConfig) {
         // Listen on the derived inviter id, then await the acceptor's inbound
         // connection. Destroy the peer on a wait failure so acquisition stays
         // atomic (the owner's teardown only ever covers a returned {peer, conn}).
-        const peer = await listenAsInviter(config.sharedSecret);
+        const peer = await listenAsInviter(config.sharedSecret, { signal });
         try {
           const conn = await waitForIncomingConnection(peer, { signal });
           return { peer, conn, psi, prepared };

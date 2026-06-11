@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   Alert,
+  Button,
   Center,
   Container,
   Divider,
@@ -71,6 +72,10 @@ function TermsReview({ invitation }: { invitation: AcceptableInvitation }) {
 function Accept() {
   const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
   const [acceptorName, setAcceptorName] = useState("");
+  // The name, committed by an explicit "Continue". Until it is set the field is
+  // editable; once set it seeds the in-flight exchange and the field locks, so
+  // an edit cannot unmount the Exchange and silently abort a running dial.
+  const [confirmedName, setConfirmedName] = useState<string>();
 
   useEffect(() => {
     // Abort on unmount so a resolving decode does not setState after teardown.
@@ -129,18 +134,31 @@ function Accept() {
               browser connects directly to your partner.
             </Text>
             <TextInput
-              value={acceptorName}
+              value={confirmedName ?? acceptorName}
               onChange={(e) => setAcceptorName(e.target.value)}
+              disabled={confirmedName !== undefined}
               withAsterisk
               required
               label="Your name"
               description="Recorded in your exchange record so your partner can identify you"
               placeholder="Your name"
             />
-            {acceptorName.trim() && (
+            {confirmedName === undefined ? (
+              <Button
+                disabled={!acceptorName.trim()}
+                onClick={() => setConfirmedName(acceptorName.trim())}
+              >
+                Continue
+              </Button>
+            ) : (
+              // Keyed by the secret so it never persists across a different
+              // invitation; the name above is locked while it runs, so the
+              // exchange completes rather than being torn down by an edit.
+              // Reload the page to start over with a different name.
               <Exchange
+                key={decode.invitation.token.sharedSecret}
                 role="acceptor"
-                partyName={acceptorName.trim()}
+                partyName={confirmedName}
                 sharedSecret={decode.invitation.token.sharedSecret}
                 endpoint={decode.invitation.endpoint}
               />

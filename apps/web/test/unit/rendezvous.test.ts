@@ -99,6 +99,25 @@ describe("listenAsInviter", () => {
     await expect(promise).rejects.toThrow("broker unreachable");
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });
+
+  test("rejects before constructing a peer when already aborted", async () => {
+    stubWindow();
+    const controller = new AbortController();
+    controller.abort();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+
+    await expect(
+      listenAsInviter(generateSharedSecret(), {
+        signal: controller.signal,
+        peerFactory: cap.factory,
+      }),
+    ).rejects.toThrow(/aborted/i);
+
+    // No peer was constructed, so no derived id reached the broker.
+    expect(() => cap.id()).toThrow("peer not constructed");
+    expect(fake.destroy).not.toHaveBeenCalled();
+  });
 });
 
 describe("dialAsAcceptor", () => {

@@ -93,11 +93,24 @@ const firstNameOnlyTerms = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
-/** Resolve once `peer` has registered with the broker (its `open` event). */
+/** Resolve once `peer` has registered with the broker (its `open` event).
+ * Settles exactly once and detaches both listeners, so an `open` and an `error`
+ * firing in the same tick cannot both resolve and reject the promise. */
 function peerOpened(peer: Peer): Promise<void> {
   return new Promise((resolve, reject) => {
-    peer.on("open", () => resolve());
-    peer.on("error", reject);
+    let settled = false;
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      peer.off("open", onOpen);
+      peer.off("error", onError);
+      action();
+    };
+    const onOpen = () => settle(resolve);
+    const onError = (err: unknown) =>
+      settle(() => reject(err instanceof Error ? err : new Error(String(err))));
+    peer.once("open", onOpen);
+    peer.once("error", onError);
   });
 }
 

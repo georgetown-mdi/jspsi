@@ -27,6 +27,7 @@ describe("the session-coordination backend is removed", () => {
   test("POST /api/psi/create is gone", async () => {
     const response = await fetch(`${base}/api/psi/create`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ initiatedName: "a", invitedName: "b" }),
     });
     expect(response.status).toBe(404);
@@ -35,6 +36,7 @@ describe("the session-coordination backend is removed", () => {
   test("POST /api/psi/join is gone", async () => {
     const response = await fetch(`${base}/api/psi/join`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uuid: "whatever" }),
     });
     expect(response.status).toBe(404);
