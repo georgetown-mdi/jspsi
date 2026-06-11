@@ -40,7 +40,7 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // work. A bare hash of a low-entropy result (e.g. an association table over
 // identifiers) would be brute-forceable by anyone holding the record, leaking the
 // intersection; commitments with fresh per-commitment randomness bind to the data
-// without revealing it. See docs/PROTOCOL.md ("Self-attested record") and
+// without revealing it. See docs/EXCHANGE_RECORD.md and
 // docs/CANONICAL_ENCODING.md. The deferred signing work reuses this module's
 // commitment scheme and on-disk format.
 
@@ -434,7 +434,7 @@ const retentionDispositionSchema = z.string().min(1);
 // timezone offsets by default, which holds the timestamp to a single canonical
 // form -- the signing phase signs over createdAt's canonical bytes, so one UTC
 // form avoids two records for the same instant differing only by offset. The
-// UTC-only requirement is documented in PROTOCOL.md. Reused at build time (see
+// UTC-only requirement is documented in EXCHANGE_RECORD.md. Reused at build time (see
 // buildExchangeRecord) so a malformed timestamp throws there rather than
 // producing a record the parser would later reject.
 const createdAtSchema = z.iso.datetime();
