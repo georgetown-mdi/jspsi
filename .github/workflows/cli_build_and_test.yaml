@@ -37,14 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: "npm"
-      - name: Install dependencies
-        run: npm ci
-      - name: Build
-        run: npm run build -w packages/core -w apps/cli
+      # Pins Node, installs from the lockfile, and builds @psilink/core.
+      - uses: ./.github/actions/setup
+      - name: Build CLI
+        run: npm run build -w apps/cli
       - name: Unit tests (CLI)
         run: npm run test:unit -w apps/cli
       # Integration tests exercise the real ssh2 SFTPWrapper contract end to end

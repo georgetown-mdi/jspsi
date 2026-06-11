@@ -1,0 +1,29 @@
+# Shared CI setup prologue: pin Node, install from the lockfile, and build
+# @psilink/core. The four build/test workflows (static_checks, cli_build_and_test,
+# release, eb_build_and_test) each run this before their app-specific build and
+# test steps, so the Node version and install/cache strategy live in one place.
+#
+# Checkout is deliberately NOT part of this action: a local action referenced as
+# ./.github/actions/setup only exists on the runner after actions/checkout has
+# run, so each workflow keeps its own checkout step before calling this.
+#
+# Core is built here because the apps consume @psilink/core from its built dist/
+# (the same way they do locally), so typecheck/build/test in every workflow needs
+# it present first.
+name: "Setup"
+description: "Set up Node, install dependencies, and build @psilink/core"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: "24"
+        cache: "npm"
+    - name: Install dependencies
+      run: npm ci
+      shell: bash
+    - name: Build core
+      run: npm run build -w packages/core
+      shell: bash
