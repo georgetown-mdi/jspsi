@@ -110,6 +110,11 @@ export async function generateInvitation(params: {
 }): Promise<GeneratedInvitation> {
   const { inviterName, location } = params;
 
+  // No `expires` deliberately: unlike the CLI (which exposes --expires-in), the
+  // web app has no UI to choose a lifetime, and the acceptor that would enforce
+  // expiry is the paired rendezvous task (item 196035727), not yet built. A
+  // bounded default for web invitations is a deferred product decision, so the
+  // field is omitted rather than guessed at here.
   const token: InvitationToken = {
     version: "1",
     linkageTerms: getDefaultLinkageTerms(inviterName),

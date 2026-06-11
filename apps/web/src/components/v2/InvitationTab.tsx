@@ -32,9 +32,11 @@ function invitationLocation(): InvitationLocation {
   };
 }
 
-/** A labelled, copy-to-clipboard view of one shareable artifact. Only mounts
- * after a generation (client-side), so the `navigator` access never runs on the
- * server. */
+/** A labelled, copy-to-clipboard view of one shareable artifact. It reads
+ * `navigator` at render, so it is kept off the server-rendered tree by the
+ * `invitation` state guard at its only call site below: `invitation` starts
+ * `undefined`, so the `{invitation && ...}` branch that renders CopyRow does not
+ * run during SSR. */
 function CopyRow({
   label,
   description,
@@ -84,7 +86,7 @@ export function InvitationTab() {
   const [error, setError] = useState<string>();
 
   const form = useForm({
-    defaultValues: { initiatedName: "" },
+    defaultValues: { inviterName: "" },
     onSubmit: async ({ value }) => {
       setError(undefined);
       try {
@@ -93,7 +95,7 @@ export function InvitationTab() {
         // and one invitation is not expected to back more than one exchange.
         setInvitation(
           await generateInvitation({
-            inviterName: value.initiatedName,
+            inviterName: value.inviterName.trim(),
             location: invitationLocation(),
           }),
         );
@@ -116,10 +118,10 @@ export function InvitationTab() {
       >
         <Stack>
           <form.Field
-            name="initiatedName"
+            name="inviterName"
             validators={{
               onChange: ({ value }) =>
-                !value ? "Your name is required" : undefined,
+                !value.trim() ? "Your name is required" : undefined,
             }}
             children={({ state, handleChange, handleBlur }) => (
               <TextInput
