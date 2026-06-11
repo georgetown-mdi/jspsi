@@ -24,10 +24,11 @@ interface AddressInfo {
 const addressInfo: AddressInfo = {
   address: "127.0.0.1",
   family: "IpV4",
-  // The `browser` project's globalSetup publishes the port it launched the dev
-  // server on (browser tests run in Chromium and cannot read `process.env`), so
-  // the probe and exchange below cannot drift from the running server. Falls
-  // back to the Vite default when this file is run without that setup.
+  // The `browser` project's globalSetup publishes the port it probed/launched
+  // the dev server on (browser tests run in Chromium and cannot read
+  // `process.env`), so the probe and exchange below target that exact port
+  // rather than a hardcoded guess. Falls back to the Vite default when this
+  // file is run without that setup, where an unreachable server skips the suite.
   port: inject("webDevServerPort") ?? 3000,
 };
 const protocol = "http:";

@@ -12,12 +12,16 @@ import type { TestProject } from "vitest/node";
 // touches the dev server.
 //
 // The dev server runs on 127.0.0.1 (the Vite bind host -- not `localhost`,
-// which may resolve to ::1 and miss the IPv4 bind). The port comes from the
-// PORT env var (default 3000), matching vite.config.ts. The integration tests
-// (Node) derive their target from the same `process.env.PORT ?? "3000"`. The
-// browser tests run in Chromium and cannot read `process.env`, so the resolved
-// port is published via `provide()` for them to `inject()` -- so neither
-// consumer's tested port can drift from the launched/probed one.
+// which may resolve to ::1 and miss the IPv4 bind). This setup resolves the
+// port as `process.env.PORT ?? "3000"` and probes/launches there, matching
+// vite.config.ts. The integration tests (Node) read their target from the same
+// expression. The browser tests run in Chromium and cannot read `process.env`,
+// so the resolved port is published via `provide()` for them to `inject()`,
+// pinning each browser test to the exact port this setup probed rather than a
+// hardcoded guess. All three derive from `process.env.PORT ?? "3000"`, so they
+// agree whenever PORT is set in the environment or unset (the repo's `.env`
+// pins 3000); a non-3000 PORT set only in `.env` would not reach this read and
+// is unsupported.
 //
 // If a server is already listening on 127.0.0.1:PORT when the suite starts,
 // it is reused and left running on teardown, so a developer's long-lived
