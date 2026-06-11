@@ -174,6 +174,15 @@ test("throws a UsageError at config load when a preserved @path credential file 
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("@-file reference");
+  // The missing credential file is surfaced as a credential-access failure, not
+  // re-wrapped as an "invalid exchange spec" (a schema error it is not).
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).not.toContain("is not a valid exchange spec");
 });
 
 // --- key file errors ---------------------------------------------------------

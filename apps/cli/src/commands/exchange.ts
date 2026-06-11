@@ -393,9 +393,17 @@ export function loadConfig(options: ExchangeOptions): {
       log,
     );
 
+  // Resolve @-file references before schema validation, and outside the parse
+  // try/catch below: a missing or unreadable referenced file (including a
+  // preserved @path credential whose file has since moved) is already a
+  // UsageError naming the reference (exit 64), so it must propagate as-is rather
+  // than be re-wrapped as an "invalid exchange spec", which would mislabel a
+  // credential-access failure as a schema error.
+  const resolvedConfig = resolveAtSignRefs(rawConfig);
+
   let parsedSpec: ReturnType<typeof parseExchangeSpec>;
   try {
-    parsedSpec = parseExchangeSpec(resolveAtSignRefs(rawConfig));
+    parsedSpec = parseExchangeSpec(resolvedConfig);
   } catch (err) {
     // Well-formed YAML that fails schema validation is still invalid caller
     // configuration (exit 64), not a transport failure.
