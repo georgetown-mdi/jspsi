@@ -266,7 +266,12 @@ test("warnAndStripInjectedAuthFields admits an operator-policy field and warns o
   // An operator-policy field (a future token_max_age_days lands here) is NOT an
   // injected field, so the loader must leave it untouched -- no strip, no warning
   // -- and let schema validation decide its fate. Tested at the strip helper
-  // because no policy field exists in the schema yet for an end-to-end check.
+  // because no policy field exists in the schema yet for an end-to-end check:
+  // AuthenticationSchema is a plain z.object today, so it would strip this field
+  // at parse time, and this assertion covers only the loader's strip step, not
+  // the full loadConfig path. When the first policy field is added to
+  // AuthenticationSchema, add an end-to-end loadConfig test asserting it reaches
+  // result.authentication, rather than relying on this helper-level check.
   const log = getLogger("test");
   const rawAuth: Record<string, unknown> = { token_max_age_days: 30 };
   warnAndStripInjectedAuthFields(rawAuth, configFile, log);
