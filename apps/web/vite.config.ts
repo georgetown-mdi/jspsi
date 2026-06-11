@@ -74,6 +74,12 @@ export default defineConfig((_configEnv) => {
               "test/**/*.browser.{test,spec}.ts",
             ],
             name: "browser",
+            // Stand up the dev server (PeerJS coordination + /api) the same way
+            // the integration project does, so a cold `test:browser` is green:
+            // the server-dependent suite (invitedPSI) needs :3000, and the setup
+            // reuses a developer's running `npm run dev` rather than starting a
+            // second one. The server-less vector suites pay a reuse-aware probe.
+            globalSetup: ["./test/devServer/globalSetup.ts"],
             browser: {
               provider: playwright(),
               headless: true,
