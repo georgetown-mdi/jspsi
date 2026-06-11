@@ -206,6 +206,12 @@ export function Exchange(config: ExchangeConfig) {
     // first frame.
     const acquire: Acquire = async ({ signal, onStage, onStages }) => {
       const psi = PSI() as Promise<PSILibrary>;
+      // The responder (inviter) returns `psi` unresolved and the owner awaits it
+      // late; if the connection setup fails or the signal aborts first, that await
+      // is never reached. Attach a fire-and-forget handler so a rejecting PSI()
+      // (e.g. a WASM-asset load failure) on a torn-down exchange cannot surface as
+      // an unhandled rejection -- the real `await psi` still throws and is handled.
+      void psi.catch(() => undefined);
       const csvResult = await loadCSVFile(files[0]);
       const rawRows = csvResult.data as Array<Record<string, string>>;
       const prepared = prepareForExchange(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -23,6 +23,8 @@ import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { Exchange } from "@components/Exchange";
 
+import type { Ref } from "react";
+
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 export const Route = createFileRoute("/accept")({
@@ -42,12 +44,23 @@ type DecodeState =
 /** Minimal review of the inviter's linkage terms, enough to satisfy informed
  * acceptance; the richer consent screen (full terms, expiry context, an explicit
  * consent gate) is a separate task. */
-function TermsReview({ invitation }: { invitation: AcceptableInvitation }) {
+function TermsReview({
+  invitation,
+  headingRef,
+}: {
+  invitation: AcceptableInvitation;
+  headingRef?: Ref<HTMLHeadingElement>;
+}) {
   const { token } = invitation;
   const { linkageTerms } = token;
   return (
     <Stack gap="xs">
-      <Title order={3}>Invitation from {linkageTerms.identity}</Title>
+      {/* tabIndex + ref so the accept page can move focus here when decoding
+          resolves, announcing the invitation to assistive tech (mirrors the
+          inviter panel's post-generate focus move). */}
+      <Title order={3} ref={headingRef} tabIndex={-1}>
+        Invitation from {linkageTerms.identity}
+      </Title>
       <Text size="sm">
         Records will be matched on{" "}
         {linkageTerms.algorithm === "psi-c"
@@ -107,6 +120,14 @@ function Accept() {
     return () => controller.abort();
   }, []);
 
+  // Move focus to the invitation heading once decoding resolves to "ready", so a
+  // screen-reader/keyboard user is taken to the revealed terms rather than left on
+  // the spinner (mirrors InvitePanel's post-generate focus move).
+  const readyHeadingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (decode.status === "ready") readyHeadingRef.current?.focus();
+  }, [decode.status]);
+
   return (
     <Container size="sm" mt="md">
       <Paper>
@@ -123,7 +144,10 @@ function Accept() {
         )}
         {decode.status === "ready" && (
           <Stack mt="md">
-            <TermsReview invitation={decode.invitation} />
+            <TermsReview
+              invitation={decode.invitation}
+              headingRef={readyHeadingRef}
+            />
             <Divider
               my="sm"
               label="Accept and exchange"

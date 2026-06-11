@@ -7,9 +7,9 @@ import {
 import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
 
 /**
- * Path a PeerJS client dials this app's signaling server at. Matches the working
- * dialer in `psi/client.ts` (`path: "/api/"`), which the server -- mounted at
- * `/api` by `apps/web/src/peerServer.ts` -- accepts. The acceptor reads this off
+ * Path a PeerJS client dials this app's signaling server at. Matches the dial
+ * path used in `psi/rendezvous.ts` (`path: "/api/"`), which the server -- mounted
+ * at `/api` by `apps/web/src/peerServer.ts` -- accepts. The acceptor reads this off
  * the endpoint and dials it the same way a client does, so it must carry the
  * client's dial path (trailing slash included), not the server's mount path.
  */
@@ -66,10 +66,11 @@ export interface GeneratedInvitation {
 /**
  * Build the credential-free WebRTC signaling locator the acceptor uses to reach
  * this app's PeerJS server, from the inviter's browser location. Mirrors the
- * PeerJS client (`psi/client.ts`): `localhost` is normalized to a loopback
- * literal a peer can dial, and a default-port location omits the port. The
- * endpoint schema requires a reachable 1-65535 port when present, so a blank or
- * out-of-range port is dropped rather than encoded as a meaningless locator.
+ * acceptor's dial-location handling (`psi/rendezvous.ts`): `localhost` is
+ * normalized to a loopback literal a peer can dial, and a default-port location
+ * omits the port. The endpoint schema requires a reachable 1-65535 port when
+ * present, so a blank or out-of-range port is dropped rather than encoded as a
+ * meaningless locator.
  */
 export function webrtcEndpointFromLocation(loc: {
   hostname: string;
