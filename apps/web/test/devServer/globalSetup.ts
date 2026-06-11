@@ -87,6 +87,45 @@ async function waitForServer(url: string): Promise<void> {
   }
 }
 
+// Vite dev compiles route modules lazily, on first request. The PeerJS
+// signaling server mounted under /api/peerjs attaches its WebSocket `upgrade`
+// handler only when that module first loads -- and waitForServer above probes
+// `/`, which never touches it. A browser peer that dials the signaling
+// WebSocket directly then stalls on an unhandled upgrade until its own timeout.
+// (An auto-id peer hid this by fetching GET /api/peerjs/id first, which loads
+// the module; a peer created with an explicit, pre-derived id skips that and
+// goes straight to the WebSocket.) So waiting only for `/` understates
+// readiness: warm the id endpoint here to load the module and attach the
+// upgrade handler, so a cold `test:browser` finds signaling already accepting
+// peers rather than hanging. Node-side, so there is no cross-origin concern
+// (the id endpoint sets no CORS headers a browser fetch would need).
+async function warmPeerSignaling(port: number): Promise<void> {
+  const idUrl = `http://127.0.0.1:${port}/api/peerjs/id`;
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    try {
+      const res = await fetch(idUrl, { signal: controller.signal });
+      // Once the module is live the id endpoint answers text/plain with a peer
+      // id; before that, the SPA 404 fallback answers text/html. Keying off the
+      // content type avoids coupling readiness to the id's exact shape.
+      if (res.ok && res.headers.get("content-type")?.includes("text/plain"))
+        return;
+    } catch {
+      // Not ready yet -- fall through to the deadline check and retry.
+    } finally {
+      clearTimeout(timer);
+    }
+    if (Date.now() >= deadline)
+      throw new Error(
+        `PeerJS signaling did not become ready at ${idUrl} within ` +
+          `${READY_TIMEOUT_MS / 1000}s.`,
+      );
+    await new Promise((r) => setTimeout(r, PROBE_SLEEP_MS));
+  }
+}
+
 export default async function setup({
   provide,
 }: TestProject): Promise<() => Promise<void>> {
@@ -103,6 +142,10 @@ export default async function setup({
     console.log(
       `[dev-server] reusing server already listening on port ${port}`,
     );
+    // Even a reused server may never have been asked for /api/peerjs/* (a bare
+    // `npm run dev` no one exercised), so warm signaling here too; it is
+    // idempotent on an already-warm server.
+    await warmPeerSignaling(port);
     return () => Promise.resolve();
   }
 
@@ -168,6 +211,10 @@ export default async function setup({
     await new Promise<void>((r) => setImmediate(r));
     if (launchError) throw launchError;
     await waitForServer(url);
+    // Readiness is not just an HTTP response on `/`: a browser peer needs the
+    // PeerJS signaling WebSocket, whose handler attaches only once the
+    // /api/peerjs module is first loaded. Warm it before declaring ready.
+    await warmPeerSignaling(port);
   } catch (err) {
     await stopServer();
     throw err;
