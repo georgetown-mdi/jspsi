@@ -293,8 +293,14 @@ export async function handler(argv: Arguments): Promise<void> {
       throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
     logLevel = resolved;
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(err instanceof UsageError ? 64 : 69);
+    // Mirror the pre-logger parse guard in exchange.ts / zeroSetup.ts: a usage
+    // error (a repeated --log-level or an unrecognized value) is reported on
+    // stderr and exited 64 here; any other (unexpected) error propagates to the
+    // top-level handler with its stack intact rather than being flattened to a
+    // bare exit 69 with the cause lost.
+    if (!(err instanceof UsageError)) throw err;
+    console.error(err.message);
+    process.exit(64);
   }
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("fingerprint");
