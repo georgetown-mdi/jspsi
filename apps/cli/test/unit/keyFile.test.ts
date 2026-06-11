@@ -202,3 +202,24 @@ test("checkKeyFileExpiry returns expired even when a threshold is given", () => 
     ),
   ).toBe("expired");
 });
+
+test("checkKeyFileExpiry handles a fractional threshold (non-multiple of 3)", () => {
+  // token_max_age_days / 3 is fractional for non-multiples (10 / 3 = 3.333...);
+  // the millisecond comparison handles it without rounding. 3 days remaining is
+  // within 3.333 days (expiring soon); 4 days remaining is beyond it (ok).
+  const threshold = 10 / 3;
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2026-01-04T00:00:00.000Z" },
+      FIXED_NOW,
+      { warnThresholdDays: threshold },
+    ),
+  ).toBe("expiring-soon");
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2026-01-05T00:00:00.000Z" },
+      FIXED_NOW,
+      { warnThresholdDays: threshold },
+    ),
+  ).toBe("ok");
+});

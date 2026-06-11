@@ -12,6 +12,7 @@ import {
   loadConfig,
   warnAndStripInjectedAuthFields,
   shouldWarnTokenExpiring,
+  tokenExpiringAdvisory,
   warnThresholdDaysForPolicy,
   EXPIRY_WARN_THRESHOLD_DIVISOR,
 } from "../../src/commands/exchange";
@@ -387,6 +388,9 @@ test("warnThresholdDaysForPolicy is token_max_age_days / 3, undefined without a 
   expect(EXPIRY_WARN_THRESHOLD_DIVISOR).toBe(3);
   expect(warnThresholdDaysForPolicy(30)).toBe(10);
   expect(warnThresholdDaysForPolicy(90)).toBe(30);
+  // A non-multiple of 3 yields a fractional threshold; the downstream millisecond
+  // comparison handles it, so no rounding is applied.
+  expect(warnThresholdDaysForPolicy(10)).toBeCloseTo(10 / 3);
   // No policy in force -> no threshold, so checkKeyFileExpiry never reports
   // "expiring-soon" and the advisory is suppressed.
   expect(warnThresholdDaysForPolicy(undefined)).toBeUndefined();
@@ -409,6 +413,50 @@ test("shouldWarnTokenExpiring never warns when the token was not expiring soon a
   expect(shouldWarnTokenExpiring("ok", "ok")).toBe(false);
   expect(shouldWarnTokenExpiring("ok", "expiring-soon")).toBe(false);
   expect(shouldWarnTokenExpiring("ok", "expired")).toBe(false);
+});
+
+// --- tokenExpiringAdvisory (handler re-read path) ----------------------------
+
+// A fixed clock so the expiry windows below are deterministic.
+const ADVISORY_NOW = Date.parse("2026-01-01T00:00:00.000Z");
+
+test("tokenExpiringAdvisory is silent when the token was not expiring soon at load", () => {
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(tokenExpiringAdvisory("ok", keyFile, ADVISORY_NOW, 10)).toBeUndefined();
+});
+
+test("tokenExpiringAdvisory warns with the on-disk expiry when rotation did not refresh the token", () => {
+  // (e) Failed exchange: the on-disk token is unchanged and still expiring soon.
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2026-01-05T00:00:00.000Z",
+  });
+  const msg = tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10);
+  expect(msg).toContain("expiring soon");
+  expect(msg).toContain("2026-01-05T00:00:00.000Z");
+  // The reworded message no longer over-claims a failed-rotation cause.
+  expect(msg).not.toContain("did not complete a successful key rotation");
+});
+
+test("tokenExpiringAdvisory is silent when rotation refreshed the token", () => {
+  // (d) Successful rotation: the re-read token is now past the threshold (30 days
+  // out, threshold 10), so the advisory would mislead and is suppressed.
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2026-01-31T00:00:00.000Z",
+  });
+  expect(
+    tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
+  ).toBeUndefined();
+});
+
+test("tokenExpiringAdvisory is silent when the key file is unreadable after the exchange", () => {
+  // The file was deleted between rotation and the re-read: the post-exchange state
+  // cannot be confirmed, so no advisory is emitted (and no false cause asserted).
+  // keyFile is never written here.
+  expect(
+    tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
+  ).toBeUndefined();
 });
 
 // --- handler: repeated single-value flag -------------------------------------

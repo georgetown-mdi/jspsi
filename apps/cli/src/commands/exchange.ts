@@ -558,6 +558,53 @@ export function shouldWarnTokenExpiring(
   return before === "expiring-soon" && after !== "ok";
 }
 
+/**
+ * Build the "token expiring soon" advisory message to emit after an exchange, or
+ * `undefined` to stay silent. Call only when the exchange attempt has finished
+ * (success or failure); `now` and `warnThresholdDays` are the same values used
+ * for the load-time check.
+ *
+ * Re-reads the (possibly rotated) key file to decide: a successful rotation under
+ * a max-age policy stamped a fresh `expires` farther out, so the token is no
+ * longer expiring soon and the advisory would mislead. The message reports the
+ * on-disk expiry, not the value loaded before the exchange. If the file can no
+ * longer be read -- deleted or corrupted between rotation and now, the only way
+ * the re-read yields nothing -- the token's post-exchange state cannot be
+ * confirmed, so this stays silent rather than assert a cause; a missing or
+ * corrupt key file is its own, louder problem surfaced on the next run. The
+ * re-read suppresses the over-permissive-file warning already emitted at load.
+ *
+ * @internal exported for testing
+ */
+export function tokenExpiringAdvisory(
+  expiryBefore: KeyFileExpiryStatus,
+  keyFilePath: string,
+  now: number,
+  warnThresholdDays: number | undefined,
+): string | undefined {
+  if (expiryBefore !== "expiring-soon") return undefined;
+  let reloaded: KeyFile | undefined;
+  try {
+    reloaded = loadKeyFile(keyFilePath, { warnOnPermissive: false });
+  } catch {
+    reloaded = undefined;
+  }
+  if (reloaded === undefined) return undefined;
+  const expiryAfter = checkKeyFileExpiry(reloaded, now, { warnThresholdDays });
+  if (!shouldWarnTokenExpiring(expiryBefore, expiryAfter)) return undefined;
+  // shouldWarnTokenExpiring is true only when expiryAfter is "expiring-soon" or
+  // "expired", both of which require `expires` to be set, so the fallback is
+  // unreachable -- it is here to keep the message a definite string for the type
+  // checker rather than risk rendering "undefined".
+  const expiresShown = reloaded.expires ?? "(unknown)";
+  return (
+    `the shared secret in ${keyFilePath} is expiring soon (expires ` +
+    `${expiresShown}) and was not refreshed by this exchange. Run a successful ` +
+    `exchange before it expires; once it lapses, both parties must re-invite. ` +
+    `See docs/CLI.md#out-of-sync-tokens.`
+  );
+}
+
 // --- Data preparation --------------------------------------------------------
 
 async function prepareDataset(
@@ -705,36 +752,18 @@ export async function handler(argv: Arguments): Promise<void> {
     exchangeError = err;
   }
 
-  // Emit the "token expiring soon" advisory only when the token was expiring soon
-  // at load and the exchange did not refresh it. Re-read the (possibly rotated)
-  // key file: a successful rotation under a max-age policy stamped a fresh
-  // `expires`, so the token is no longer expiring soon and the advisory would
-  // contradict runProtocol's "retry without re-inviting" guidance. The re-read
-  // suppresses the over-permissive warning already emitted at load.
-  if (expiryBefore === "expiring-soon") {
-    let expiryAfter: KeyFileExpiryStatus = "expiring-soon";
-    try {
-      const reloaded = loadKeyFile(authentication.keyFilePath, {
-        warnOnPermissive: false,
-      });
-      if (reloaded !== undefined)
-        expiryAfter = checkKeyFileExpiry(reloaded, Date.now(), {
-          warnThresholdDays,
-        });
-    } catch {
-      // A re-read failure leaves expiryAfter at its "expiring-soon" default: the
-      // refresh could not be confirmed, so surface the advisory rather than drop
-      // it.
-    }
-    if (shouldWarnTokenExpiring(expiryBefore, expiryAfter))
-      log.warn(
-        `the shared secret in ${authentication.keyFilePath} is expiring soon ` +
-          `(expires ${authentication.expires}) and was not refreshed because ` +
-          "this exchange did not complete a successful key rotation. Run a " +
-          "successful exchange before it expires; once it lapses, both parties " +
-          "must re-invite. See docs/CLI.md#out-of-sync-tokens.",
-      );
-  }
+  // Emit the "token expiring soon" advisory when the token was expiring soon at
+  // load and the exchange did not refresh it (a successful rotation stamps a
+  // fresh, farther-out expires, so the advisory would contradict runProtocol's
+  // "retry without re-inviting" guidance). The decision and message are built by
+  // tokenExpiringAdvisory, which re-reads the on-disk token.
+  const advisory = tokenExpiringAdvisory(
+    expiryBefore,
+    authentication.keyFilePath,
+    Date.now(),
+    warnThresholdDays,
+  );
+  if (advisory !== undefined) log.warn(advisory);
 
   if (exchangeError !== undefined) {
     log.error(
