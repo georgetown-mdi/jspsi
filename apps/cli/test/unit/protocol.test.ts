@@ -82,7 +82,11 @@ import {
   runExchange,
 } from "@psilink/core";
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
-import { runProtocol, type RunProtocolResult } from "../../src/protocol";
+import {
+  runProtocol,
+  PEER_SILENCE_GUIDANCE,
+  type RunProtocolResult,
+} from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
@@ -115,6 +119,27 @@ afterEach(async () => {
   vi.mocked(runExchange).mockImplementation(defaultRunExchange as never);
   mockState.dropDir = "";
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// --- Peer-silence guidance ---------------------------------------------------
+
+// The sender-side residue of board item 195173462: the receiver names its own
+// cause locally, but the remote sender only sees the inactivity timeout, so it
+// surfaces guidance about likely receiver-side causes. runProtocol threads this
+// text to fromEventConnection's inactivityHint, which the core layer appends to
+// the peer-silence error (the append mechanism is pinned in
+// packages/core/test/messageConnection.test.ts). This pins the wording itself:
+// the deliverable per the acceptance criteria.
+test("PEER_SILENCE_GUIDANCE names likely receiver-side causes without overclaiming", () => {
+  // Names the two probable receiver-side faults.
+  expect(PEER_SILENCE_GUIDANCE).toContain("exited");
+  expect(PEER_SILENCE_GUIDANCE).toContain("unwritable");
+  // Directs the operator to where the real cause was recorded.
+  expect(PEER_SILENCE_GUIDANCE).toContain("logs");
+  // Hedges rather than asserting a single definite cause (no overclaim).
+  expect(PEER_SILENCE_GUIDANCE).toContain("may have");
+  // Notes the slow-large-dataset case so the timeout is not misread as a death.
+  expect(PEER_SILENCE_GUIDANCE).toContain("--peer-timeout");
 });
 
 // --- Pre-flight validation ---------------------------------------------------
