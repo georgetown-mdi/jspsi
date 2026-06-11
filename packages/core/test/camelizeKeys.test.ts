@@ -99,6 +99,19 @@ test("snakeizeKeys is the inverse of camelizeKeys for schema keys", () => {
   expect(snakeizeKeys(camelizeKeys(onDisk))).toEqual(onDisk);
 });
 
+test("only keys are rewritten; string values are left verbatim, both directions", () => {
+  // The walker applies its transform to object keys only, never to values: a
+  // value that happens to look like the other casing (e.g. the `firstName` in
+  // `type: firstName`) must survive unchanged. Asserted in both directions so
+  // neither path can start transforming values undetected.
+  expect(camelizeKeys({ some_key: "first_name" })).toEqual({
+    someKey: "first_name",
+  });
+  expect(snakeizeKeys({ someKey: "firstName" })).toEqual({
+    some_key: "firstName",
+  });
+});
+
 test("an opaque map's contents survive a read -> write round-trip verbatim", () => {
   // A snake_case key authored inside provider_options is left verbatim by
   // camelizeKeys (read), and re-snakeizing the camelized form leaves it verbatim
