@@ -5930,6 +5930,61 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   expect(errors).toHaveLength(1);
 });
 
+// The JSON.parse error itself carries peer bytes: V8 quotes a span of the
+// offending input in its message (`Unexpected token 'x', "...." is not valid
+// JSON`). The message body is fully peer-controlled (`payload: z.json()`), so
+// that quoted span is a control/ANSI/Unicode injection vector one interpolation
+// over from the filename -- it must be escaped like the filename and peerId.
+async function pollUnparseableBodyError(body: Buffer): Promise<Error> {
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
+  const conn = makeRetainConn(client, "receiver-me", peerId);
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+  conn.stop();
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  return errors[0] as Error;
+}
+
+test("poll() terminal: the unparseable-body error escapes control/ANSI bytes echoed by the JSON parser", async () => {
+  const err = await pollUnparseableBodyError(
+    Buffer.from("\x1b[2J\x1b[31mEVIL not json"),
+  );
+  expect(err.message).toContain("not valid JSON");
+  // The peer's raw ESC, quoted back by the parser, never reaches the terminal.
+  expect(err.message).not.toContain("\x1b");
+  expect(err.message).toContain("\\x1b");
+});
+
+test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode echoed by the JSON parser", async () => {
+  // Leading bidi-override (RLO), zero-width, and Cyrillic homoglyph -- all
+  // invalid JSON starts, all quoted raw in V8's parse error, all escaped here.
+  const err = await pollUnparseableBodyError(Buffer.from("‮​а not json"));
+  expect(err.message).toContain("not valid JSON");
+  expect(err.message).not.toContain("‮");
+  expect(err.message).not.toContain("​");
+  expect(err.message).not.toContain("а");
+  expect(err.message).toContain("\\u202e");
+});
+
 test("poll() terminal: a fully-synced message that fails schema validation stops the poller", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";

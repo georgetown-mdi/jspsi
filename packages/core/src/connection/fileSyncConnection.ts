@@ -361,6 +361,13 @@ async function readControlFileWithGate(
     }
     const result = schema.safeParse(parsed);
     if (!result.success) {
+      // Only filePath is escaped here; result.error.message is deliberately
+      // left raw. The sole schema at every call site is HelloEnvelopeSchema --
+      // two `z.boolean()` fields under `.strip()` -- whose zod error reports the
+      // expected type and a fixed field path, never a peer-supplied value or key
+      // (strip drops extras without naming them), so it carries no partner bytes.
+      // This differs from poll()'s message-body parse, which escapes its
+      // error text because that body is open peer-controlled JSON.
       throw new UsageError(
         `control file at ${sanitizeForDisplay(filePath)} has a malformed ` +
           `payload: ${result.error.message}`,
@@ -3017,18 +3024,29 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             try {
               parsed = JSON.parse(message.toString());
             } catch (parseErr: unknown) {
+              // The parser's own message is sanitized too: V8's JSON.parse error
+              // quotes a span of the offending input (`Unexpected token 'x',
+              // "...." is not valid JSON`), so this whole error string carries
+              // the peer's raw message bytes -- the same control/ANSI/Unicode
+              // injection vector as the filename, one interpolation over.
               throw new UsageError(
                 `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-                  `${sanitizeForDisplay(peerId)} is fully ` +
-                  `synced but is not valid JSON: ${errMessage(parseErr)}`,
+                  `${sanitizeForDisplay(peerId)} is fully synced but is not ` +
+                  `valid JSON: ${sanitizeForDisplay(errMessage(parseErr))}`,
               );
             }
             const result = Message.safeParse(parsed);
             if (!result.success)
+              // Sanitized as well: the Message body is fully peer-controlled
+              // (`payload: z.json()`), and though today's zod reports schema
+              // paths and expected types rather than the received value, routing
+              // the parse-error text through the same escape keeps this sibling
+              // throw uniform with the JSON-parse one above and robust to a
+              // future schema/zod change that began echoing peer bytes.
               throw new UsageError(
                 `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-                  `${sanitizeForDisplay(peerId)} is fully ` +
-                  `synced but failed schema validation: ${result.error.message}`,
+                  `${sanitizeForDisplay(peerId)} is fully synced but failed ` +
+                  `schema validation: ${sanitizeForDisplay(result.error.message)}`,
               );
             return result.data;
           };
