@@ -1057,7 +1057,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       try {
         await this.client.end();
       } catch (err: unknown) {
-        this.log.debug(`[${this.role}] end() during close: ${errMessage(err)}`);
+        this.log.debug(
+          `[${this.role}] end() during close: ${sanitizeForDisplay(errMessage(err))}`,
+        );
       }
     }
     this.path = undefined;
@@ -1644,7 +1646,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.log.debug(
                 `[joiner] advertise-hello write failed (attempt ` +
                   `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
-                  `${errMessage(writeErr)}`,
+                  `${sanitizeForDisplay(errMessage(writeErr))}`,
               );
               try {
                 await this.wait(this.options.pollingFrequency);
@@ -1674,7 +1676,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.log.debug(
                 `[joiner] could not advertise hello on mismatch after ` +
                   `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
-                  `instead of fast-failing: ${errMessage(writeErr)}`,
+                  `instead of fast-failing: ${sanitizeForDisplay(errMessage(writeErr))}`,
               );
             }
           }
