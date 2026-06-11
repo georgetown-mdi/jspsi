@@ -105,14 +105,21 @@ const ackMarkerName = (writerId: string, originalName: string): string =>
 // and the CLI classifies it exit-64 -- the same typed failure the CLI adapter's
 // per-operation read bounds raise, so a hang surfaces identically wherever it is
 // caught. See docs/SECURITY_DESIGN.md, "Channel security".
+//
+// `operation` is routed through sanitizeForDisplay: the target it names is a
+// transport path, and on a get/delete of a peer message file that path embeds
+// the partner-chosen filename, so a stalled read of a hostile name would
+// otherwise echo its control/ANSI/Unicode bytes raw to the operator. This is the
+// core-side whole-exchange-budget twin of the CLI adapter's per-operation
+// transportOperationStalledError, which escapes its path the same way.
 const transportBudgetExceededError = (
   operation: string,
   budgetMs: number,
 ): TransportOperationStalledError =>
   new TransportOperationStalledError(
-    `transport ${operation} exceeded the ${budgetMs} ms peer-inactivity budget; ` +
-      `the peer or server has not responded within the budget, so the exchange ` +
-      `is failing rather than waiting on it further`,
+    `transport ${sanitizeForDisplay(operation)} exceeded the ${budgetMs} ms ` +
+      `peer-inactivity budget; the peer or server has not responded within the ` +
+      `budget, so the exchange is failing rather than waiting on it further`,
   );
 
 // Races a transport operation against the peer-inactivity budget so a server that

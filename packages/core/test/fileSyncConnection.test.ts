@@ -1349,6 +1349,38 @@ test("poll() fails within the peer budget when the server withholds (slow-drips)
   expect(err).toBeInstanceOf(TransportOperationStalledError);
 });
 
+test("poll() budget error escapes a hostile peer filename in the stalled-operation path", async () => {
+  // The whole-exchange budget builds its TransportOperationStalledError from the
+  // operation target; on a stalled get() that target is `${path}/${name}`, so a
+  // peer message filename carrying control/ANSI bytes would otherwise reach the
+  // operator raw. (The core-side budget twin of the CLI adapter's per-operation
+  // transportOperationStalledError, which escapes its path the same way.)
+  const peerId = "peer-test";
+  // A valid peer-message name (peer prefix, numeric byte-count terminal) so it is
+  // selected and get() is attempted, with an embedded ANSI sequence in its body.
+  const hostileName = `${peerId}-\x1b[2J\x1b[31mEVIL-5.json`;
+  const { client } = makeMockClient();
+  client.list = async () => [{ name: hostileName, modifyTime: 0, size: 5 }];
+  client.get = () => new Promise<Buffer<ArrayBufferLike>>(() => {});
+  const conn = await makeConnectedConn(client, {
+    peerTimeoutMs: 100,
+    pollingFrequency: 10,
+    timeToLiveMs: 60_000,
+  });
+  conn.peerId = peerId;
+  const emittedError = new Promise<unknown>((resolve) =>
+    conn.once("error", resolve),
+  );
+  conn.start();
+  const err = await emittedError;
+  await conn.close();
+  expect(err).toBeInstanceOf(TransportOperationStalledError);
+  const message = (err as Error).message;
+  // The raw ESC from the peer filename never reaches the operator's terminal.
+  expect(message).not.toContain("\x1b");
+  expect(message).toContain("\\x1b");
+});
+
 test("close() does not hang when the server withholds a cleanup safeDelete callback", async () => {
   // safeDelete must never reject (callers use it in catch blocks), so its budget
   // wrapper RESOLVES at the deadline rather than throwing: a hung cleanup delete
