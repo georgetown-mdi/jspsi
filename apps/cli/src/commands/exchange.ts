@@ -240,9 +240,13 @@ function parseArgs(argv: Arguments): ExchangeArgs {
   // boolean/count options keep their plain casts: a repeat is valid for them.
   // `input`/`output` are positionals, not repeatable flags, so they stay plain.
   return {
-    // Local filesystem paths accept a leading `~`; server-private-key /
-    // -password are NOT paths here (resolveAtSignRefs already turned any @file
-    // ref into its contents), so they must not be tilde-expanded.
+    // Local filesystem paths accept a leading `~`; server-password /
+    // -private-key are credential values, not paths to tilde-expand here.
+    // Unlike the persistence commands (zero-setup --save, invite/accept),
+    // which defer @path resolution so a saved config keeps the reference,
+    // exchange resolves any @path credential ref here at parse time: it only
+    // ever reads a config, never writes one, so there is no reference to
+    // preserve and the resolved value is needed immediately for the connection.
     input: expandTilde(argv["input"] as string),
     output: expandTilde(argv["output"] as string | undefined),
     configFile: expandTilde(
