@@ -21,6 +21,12 @@ import { generateInvitation } from "@psi/invitation";
 
 import type { GeneratedInvitation, InvitationLocation } from "@psi/invitation";
 
+/** Upper bound on the inviter's name. It flows into the token's linkage terms
+ * and so into the encoded invitation and its deep-link URL; bounding it keeps the
+ * shared artifact a sensible length rather than letting an arbitrarily long name
+ * produce an unwieldy, possibly over-long link. */
+const MAX_INVITER_NAME_LENGTH = 200;
+
 /** This page's location, in the shape {@link generateInvitation} consumes. It
  * reads `window`, so it must be called from a client-side path; it throws rather
  * than return a wrong value if ever reached during SSR, since there is no
@@ -179,6 +185,7 @@ export function InvitationTab() {
                 // otherwise a silent <p>); the input already gets aria-invalid
                 // and aria-describedby automatically.
                 errorProps={{ role: "alert" }}
+                maxLength={MAX_INVITER_NAME_LENGTH}
                 withAsterisk
                 required
                 label="Your name"
