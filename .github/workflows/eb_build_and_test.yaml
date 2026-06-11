@@ -29,6 +29,7 @@ on:
       - "packages/core/package.json"
       - "packages/core/rollup.config.ts"
       - "packages/core/tsconfig.json"
+      - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
 
   workflow_call:
@@ -48,15 +49,11 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v6
-      - name: Setup NodeJS
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: "npm"
-      - name: Install dependencies
-        run: npm ci
+      # Pins Node, installs from the lockfile, and builds @psilink/core.
+      - name: Set up and build core
+        uses: ./.github/actions/setup
       - name: Build server
-        run: npm run -w packages/core -w apps/web build
+        run: npm run -w apps/web build
       - name: Run tests
         run: |
           npm run -w packages/core test

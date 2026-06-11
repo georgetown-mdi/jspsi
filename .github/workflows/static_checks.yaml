@@ -31,16 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: "npm"
-      - name: Install dependencies
-        run: npm ci
-      # Built first so the CLI and web typechecks can resolve @psilink/core's
-      # declarations from its dist (the same way the apps consume it).
-      - name: Build core
-        run: npm run build -w packages/core
+      # Pins Node, installs from the lockfile, and builds @psilink/core (built
+      # first so the CLI and web typechecks resolve its declarations from dist,
+      # the same way the apps consume it).
+      - uses: ./.github/actions/setup
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
