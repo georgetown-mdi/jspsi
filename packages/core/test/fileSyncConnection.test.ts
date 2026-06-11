@@ -1174,6 +1174,81 @@ test("poll() stops the poller on a UsageError from a transport read, not retried
   expect(getCount).toBe(1);
 });
 
+test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-emitted", async () => {
+  // The delete-mode consume path deletes a validated message (the go-ahead signal
+  // to the sender) before emitting it. A TRANSIENT delete failure is swallowed and
+  // the file re-read next cycle -- but a terminal UsageError (the per-op stall
+  // deadline a withheld delete callback now trips) must NOT be swallowed: doing so
+  // would emit the message while its consume-delete never landed, leaving the file
+  // on disk to be re-emitted as a duplicate every cycle (a ~120 s/cycle stall loop).
+  // The poller must instead stop and surface the terminal error, like every other
+  // transport-call site. Companion to the read-stall poll test above, for the
+  // consume-delete consumer.
+  const peerId = "peer-test";
+  const validMessage = Buffer.from(
+    JSON.stringify({
+      ts: 1,
+      seq: 0,
+      type: "Object",
+      payload: { hello: "world" },
+    }),
+  );
+  const peerName = `${peerId}-${validMessage.length}.json`;
+  const peerPath = `/test/${peerName}`;
+
+  const errors: unknown[] = [];
+  const received: unknown[] = [];
+  let deleteCount = 0;
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+
+  const { client, files } = makeMockClient();
+  // Pre-seed the message so the default get() reads it; it parses and validates,
+  // reaching the consume-delete.
+  files.set(peerPath, validMessage);
+  client.list = async () => [
+    { name: peerName, modifyTime: 0, size: validMessage.length },
+  ];
+  // The consume-delete stalls terminally (a withheld callback the adapter's per-op
+  // deadline surfaces as this typed UsageError).
+  client.delete = async () => {
+    deleteCount++;
+    throw new TransportOperationStalledError(
+      "SFTP file delete stalled: did not complete within 60000 ms",
+    );
+  };
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = peerId;
+  // Do NOT stop the poller in the handler: it must stop itself on the UsageError.
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.on("data", (msg) => received.push(msg));
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2000,
+      ),
+    ),
+  ]);
+  // Give a wrong reschedule several poll intervals to surface (bump deleteCount or
+  // deliver a duplicate); a terminal poller does neither.
+  await new Promise((r) => setTimeout(r, 60));
+  conn.stop();
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect(errors[0]).toBeInstanceOf(TransportOperationStalledError);
+  // Terminal: the consume-delete ran once and the poller stopped -- not retried at
+  // the poll cadence -- and the un-consumed message was NOT delivered.
+  expect(deleteCount).toBe(1);
+  expect(received).toHaveLength(0);
+});
+
 // --- whole-exchange liveness backstop (write/stat/delete + slow-drip read) ---
 //
 // The write-path analogue of the read-path liveness test above. The CLI adapter's
