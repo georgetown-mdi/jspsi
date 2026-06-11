@@ -4,8 +4,9 @@ title: "Canonical Encoding for Receipts"
 
 # Canonical encoding for receipts
 
-PSI-Link receipts -- the self-attested record and the certificate-backed
-non-repudiation receipt (see [PROTOCOL.md](PROTOCOL.md#non-repudiation)) -- are
+PSI-Link receipts -- the [self-attested record](EXCHANGE_RECORD.md) and the
+certificate-backed non-repudiation receipt (see
+[PROTOCOL.md](PROTOCOL.md#non-repudiation)) -- are
 hashed and signed over a byte string. For a hash or signature to verify, every
 party that produces or checks a receipt must derive exactly the same bytes from
 the same logical object. That includes an independent third party -- an auditor
@@ -38,7 +39,8 @@ platform-independent.
 
 This encoding is the single canonicalization primitive for everything that is
 hashed, committed, or signed: the agreed-terms object embedded in a receipt, the
-self-attested record, the receipt itself, and the signing certificate -- whose
+[self-attested record](EXCHANGE_RECORD.md), the receipt itself, and the signing
+certificate -- whose
 self-signature is computed over, and whose pinned fingerprint is a SHA-256 of,
 the canonical bytes of its body (see
 [PROTOCOL.md](PROTOCOL.md#signing-identity-and-certificate-pinning)). It
@@ -232,6 +234,8 @@ bytes; the normative definition is RFC 8785 over the value domain above.
 ## See also
 
 - [PROTOCOL.md](PROTOCOL.md#non-repudiation) - how receipts use these bytes
+- [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested record whose
+  commitments and agreed-terms hash are computed over these bytes
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - the exchange specification whose
   linkage terms are embedded, canonically encoded, in a receipt
 - [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) - JSON Canonicalization Scheme
