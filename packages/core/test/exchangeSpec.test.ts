@@ -185,6 +185,33 @@ test("rejects a non-integer token_max_age_days", () => {
   expect(result.success).toBe(false);
 });
 
+test("accepts token_max_age_days at the 36500-day maximum", () => {
+  const result = parseExchangeSpec({
+    ...minimalSpec,
+    authentication: { token_max_age_days: 36500 },
+  });
+  expect(result.authentication?.tokenMaxAgeDays).toBe(36500);
+});
+
+test("rejects a token_max_age_days above the maximum", () => {
+  // An upper bound keeps the rotation-time `now + N days` stamp inside the
+  // representable Date range; a value large enough to overflow it must not reach
+  // the rotation write path. Just past the ceiling and an overflow-scale value
+  // are both rejected at parse.
+  expect(
+    safeParseExchangeSpec({
+      ...minimalSpec,
+      authentication: { token_max_age_days: 36501 },
+    }).success,
+  ).toBe(false);
+  expect(
+    safeParseExchangeSpec({
+      ...minimalSpec,
+      authentication: { token_max_age_days: 100_000_000 },
+    }).success,
+  ).toBe(false);
+});
+
 test("rejects an unrecognized key in the authentication block (strict)", () => {
   // The authentication block is strictObject: a misspelled policy key is rejected
   // at parse time rather than silently dropped, so a typo cannot disable the

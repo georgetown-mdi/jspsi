@@ -654,7 +654,7 @@ Why `authentication` and `signing` are two separate blocks (rather than one trus
 
 ### `authentication.token_max_age_days`
 
-*Type:* integer (positive)  
+*Type:* integer (positive, at most 36500 -- about 100 years)  
 *Required:* no
 
 An operator-policy field, not key-file-injected. Rotation tokens written after each successful exchange carry no expiration by default, on the assumption that active partnerships exchange frequently. A dormant partnership (a monthly cadence, a holiday gap) could otherwise hold a valid token indefinitely. When `token_max_age_days` is set, a successful exchange stamps `expires` = (the moment of rotation) + `token_max_age_days` days into the rotated `.psilink.key`, bounding a token's age independently of exchange frequency. When it is omitted, rotated tokens carry no expiry (the unchanged default).

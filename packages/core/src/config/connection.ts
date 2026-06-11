@@ -226,11 +226,22 @@ export interface Authentication {
    * hold a valid token indefinitely between exchanges; when omitted, rotated
    * tokens carry no expiry (the default). Unlike `sharedSecret`/`expires` this
    * is operator-authored in `psilink.yaml`, not key-file-injected. A positive
-   * integer; the expiry stamp is computed at rotation time (in the CLI), not at
-   * config-parse time.
+   * integer, bounded above by {@link MAX_TOKEN_MAX_AGE_DAYS}; the expiry stamp is
+   * computed at rotation time (in the CLI), not at config-parse time.
    */
   tokenMaxAgeDays?: number;
 }
+
+/**
+ * Upper bound on {@link Authentication.tokenMaxAgeDays} (~100 years). Not a
+ * policy statement -- any realistic max-age is far smaller (the sibling
+ * invitation lifetime is capped at 1 year) -- but a sanity ceiling: it keeps the
+ * rotation-time stamp `now + tokenMaxAgeDays` days within the representable
+ * `Date` range (and a 4-digit ISO year), so a value large enough to overflow that
+ * range cannot reach the rotation write path and throw there, after a handshake
+ * the partner has already completed, with no clear cause.
+ */
+export const MAX_TOKEN_MAX_AGE_DAYS = 36500;
 
 /**
  * Schema for the top-level `authentication` block, exported so
@@ -250,7 +261,7 @@ export interface Authentication {
 export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
   sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
-  tokenMaxAgeDays: z.int().positive().optional(),
+  tokenMaxAgeDays: z.int().positive().max(MAX_TOKEN_MAX_AGE_DAYS).optional(),
 });
 
 // --- TURN and ICE (WebRTC only) ----------------------------------------------

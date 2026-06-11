@@ -86,9 +86,23 @@ export function buildRotatedKeyFile(
       "buildRotatedKeyFile: tokenMaxAgeDays must be a positive integer; got " +
         String(tokenMaxAgeDays),
     );
+  // Guard the date-range overflow too. A value large enough that now + N days
+  // leaves the representable Date range (or a 4-digit ISO year) would otherwise
+  // make toISOString() throw an opaque RangeError -- here, after a successful
+  // handshake the partner has already rotated against, with no clear cause and no
+  // recovery short of editing the config. The config schema bounds this at the
+  // front door (MAX_TOKEN_MAX_AGE_DAYS); this is the backstop for a caller that
+  // bypasses parse, failing as bad input (UsageError -> exit 64) before the
+  // broken expiry reaches disk, consistent with the positive-integer guard above.
+  const expires = new Date(now + tokenMaxAgeDays * MS_PER_DAY);
+  if (Number.isNaN(expires.getTime()) || expires.getUTCFullYear() > 9999)
+    throw new UsageError(
+      "buildRotatedKeyFile: tokenMaxAgeDays is too large; the computed expiry " +
+        "is outside the supported date range",
+    );
   return {
     sharedSecret: rotatedSecret,
-    expires: new Date(now + tokenMaxAgeDays * MS_PER_DAY).toISOString(),
+    expires: expires.toISOString(),
   };
 }
 

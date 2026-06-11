@@ -149,6 +149,20 @@ test("buildRotatedKeyFile rejects a non-integer tokenMaxAgeDays", () => {
   expect(() => buildRotatedKeyFile(TOKEN, 1.5, FIXED_NOW)).toThrow(UsageError);
 });
 
+test("buildRotatedKeyFile rejects a tokenMaxAgeDays that overflows the date range", () => {
+  // Backstop for a caller bypassing the config-schema cap (MAX_TOKEN_MAX_AGE_DAYS):
+  // a value whose `now + N days` stamp leaves the representable Date range fails
+  // as a UsageError (exit 64) here, not as an opaque RangeError from toISOString()
+  // after a handshake. ~1e8 days overflows the Date range; ~5e6 days stays in
+  // range but stamps a >4-digit ISO year that loadKeyFile could not parse back.
+  expect(() => buildRotatedKeyFile(TOKEN, 100_000_000, FIXED_NOW)).toThrow(
+    UsageError,
+  );
+  expect(() => buildRotatedKeyFile(TOKEN, 5_000_000, FIXED_NOW)).toThrow(
+    UsageError,
+  );
+});
+
 // --- checkKeyFileExpiry ------------------------------------------------------
 
 test("checkKeyFileExpiry returns ok when there is no expires", () => {
