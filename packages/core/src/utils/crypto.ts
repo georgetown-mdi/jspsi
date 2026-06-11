@@ -32,6 +32,19 @@ export function toBase64Url(bytes: Uint8Array<ArrayBuffer>): string {
 }
 
 /**
+ * Encode a byte array as a lowercase hexadecimal string (two characters per
+ * byte). Used where an encoding must stay within `[0-9a-f]` -- e.g. a derived
+ * PeerJS peer id, whose client-side validator rejects the `-`/`_` that base64url
+ * can produce.
+ */
+export function toHex(bytes: Uint8Array<ArrayBuffer>): string {
+  let hex = "";
+  for (let i = 0; i < bytes.length; i++)
+    hex += (bytes[i] as number).toString(16).padStart(2, "0");
+  return hex;
+}
+
+/**
  * Decode a base64url string (with or without padding) to a byte array.
  *
  * @throws {Error} if `str` is empty, contains non-base64url characters

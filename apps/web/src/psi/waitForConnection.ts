@@ -3,15 +3,13 @@ import type Peer from "peerjs";
 
 /**
  * Human-timescale ceiling for one operator to wait for the other party to show
- * up. Shared by both roles' browsers: the client role's
- * {@link waitForIncomingConnection} and the server role's browser-side bound on
- * its SSE wait (`waitForPeerId`). It exists so an abandoned wait surfaces an
- * error instead of hanging the page.
+ * up. Shared by both roles' browsers: the inviter's inbound wait
+ * ({@link waitForIncomingConnection}) and the acceptor's dial-retry budget (the
+ * `dialAsAcceptor` rendezvous), so neither side hangs the page waiting on the
+ * other. It exists so an abandoned wait surfaces an error instead of hanging.
  *
- * It sits *under* the rendezvous session TTL (15 min by default), which is the
- * true outer bound on a wait, so this is a secondary cap. It is distinct from
- * the 30s channel-open bound in `waitForOpen.ts`, which times the WebRTC
- * handshake once both peers are already dialing.
+ * It is distinct from the 30s channel-open bound in `waitForOpen.ts`, which times
+ * the WebRTC handshake once both peers are already dialing.
  */
 export const DEFAULT_PEER_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 

@@ -47,6 +47,18 @@ describe("generateInvitation", () => {
     });
   });
 
+  test("returns the embedded shared secret so the inviter can derive its id", async () => {
+    const { encoded, sharedSecret } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+    });
+
+    // The returned secret is exactly the one inside the encoded token: the
+    // inviter derives its rendezvous peer id from it without re-decoding.
+    const token = await decodeInvitation(encoded);
+    expect(sharedSecret).toBe(token.sharedSecret);
+  });
+
   test("two successive generations yield different secrets (so different derived ids)", async () => {
     const inviterName = "County Health Dept";
     const first = await generateInvitation({ inviterName, location });

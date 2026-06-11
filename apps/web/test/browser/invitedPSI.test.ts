@@ -4,7 +4,12 @@ import { beforeAll, expect, inject, test } from "vitest";
 
 import Peer from "peerjs";
 
-import { prepareForExchange, runExchange } from "@psilink/core";
+import {
+  deriveRendezvousPeerId,
+  generateSharedSecret,
+  prepareForExchange,
+  runExchange,
+} from "@psilink/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -27,8 +32,8 @@ const addressInfo: AddressInfo = {
   // The `browser` project's globalSetup publishes the port it probed/launched
   // the dev server on (browser tests run in Chromium and cannot read
   // `process.env`), so the probe and exchange below target that exact port
-  // rather than a hardcoded guess. Falls back to the Vite default when this
-  // file is run without that setup, where an unreachable server skips the suite.
+  // rather than a hardcoded guess. Falls back to the Vite default when this file
+  // is run without that setup, where an unreachable server skips the suite.
   port: inject("webDevServerPort") ?? 3000,
 };
 const protocol = "http:";
@@ -88,6 +93,14 @@ const firstNameOnlyTerms = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
+/** Resolve once `peer` has registered with the broker (its `open` event). */
+function peerOpened(peer: Peer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    peer.on("open", () => resolve());
+    peer.on("error", reject);
+  });
+}
+
 // Undefined until a reachable server lets beforeAll run the exchange; the tests
 // gate on this, so an unreachable server skips rather than reading a stale or
 // absent result.
@@ -95,128 +108,55 @@ let serverResult: ReturnType<typeof sortAssociationTable> | undefined;
 let clientResult: ReturnType<typeof sortAssociationTable> | undefined;
 
 // Generous timeout: peer coordination, the WASM load, and the round-trip
-// exchange all happen here. Previously this ran at module scope with no bound;
-// the hook timeout now turns a stuck server into a clear failure, not a hang.
+// exchange all happen here. The hook timeout turns a stuck server into a clear
+// failure, not a hang.
 beforeAll(async () => {
   const reachable = await canReachServer();
   if (!reachable) return;
 
-  const session = await (async () => {
-    const response = await fetch(`${hostString}/api/psi/create`, {
-      method: "POST",
-      body: JSON.stringify({
-        initiatedName: "Test Server",
-        invitedName: "Test Code",
-        description: "Testing invited",
-      }),
+  // The backend-free rendezvous: a fresh shared secret stands in for the
+  // invitation, and both peer ids are derived from it -- no /api/psi/* session.
+  // The inviter (PSI responder) listens on its derived id; the acceptor (PSI
+  // initiator) dials it.
+  const sharedSecret = generateSharedSecret();
+  const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
+  const acceptorId = await deriveRendezvousPeerId(sharedSecret, "acceptor");
+
+  const inviterPeer = new Peer(inviterId, {
+    host: addressInfo.address,
+    path: "/api/",
+    port: addressInfo.port,
+  });
+  await peerOpened(inviterPeer);
+
+  // Listen for the acceptor's inbound connection before it dials.
+  const inviterConnPromise: Promise<DataConnection> = new Promise(
+    (resolve, reject) => {
+      inviterPeer.on("connection", (conn) => {
+        conn.on("open", () => resolve(conn));
+      });
+      inviterPeer.on("error", reject);
+    },
+  );
+
+  // Acceptor dials the inviter's derived id directly (the inviter is already
+  // listening, so there is no peer-unavailable retry to exercise here).
+  const acceptorPeer = new Peer(acceptorId, {
+    host: addressInfo.address,
+    path: "/api/",
+    port: addressInfo.port,
+  });
+  const acceptorConn: DataConnection = await new Promise((resolve, reject) => {
+    acceptorPeer.on("open", () => {
+      const conn = acceptorPeer.connect(inviterId, { reliable: true });
+      conn.on("open", () => resolve(conn));
     });
-    return await response.json();
-  })();
-
-  const clientPeer: Peer = await (() => {
-    return new Promise((resolve, reject) => {
-      const peer = new Peer({
-        host: addressInfo.address,
-        path: "/api/",
-        port: addressInfo.port,
-      });
-      peer.on("open", (id: string) => {
-        fetch(`${hostString}/api/psi/${session["uuid"]}`, {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          method: "POST",
-          body: JSON.stringify({
-            invitedPeerId: id,
-          }),
-        })
-          .then((response) => {
-            if (!response.ok) {
-              reject(
-                new Error(
-                  `error posting peer id: ${response.status}, text: ${response.statusText}`,
-                ),
-              );
-            } else {
-              resolve(peer);
-            }
-          })
-          // Without this, a rejected fetch (refused/aborted) would leave the
-          // enclosing promise unsettled and hang beforeAll until its timeout.
-          .catch(reject);
-      });
-      peer.on("error", (err) => reject(err));
-    });
-  })();
-
-  const clientConnPromise: Promise<DataConnection> = (() => {
-    return new Promise((resolve, reject) => {
-      clientPeer.on("connection", (conn) => {
-        conn.on("open", () => {
-          resolve(conn);
-        });
-      });
-      clientPeer.on("error", (err) => reject(err));
-    });
-  })();
-
-  const clientPeerId: string = await (() => {
-    return new Promise((resolve, reject) => {
-      const eventSource = new EventSource(
-        `${hostString}/api/psi/${session.uuid}/wait`,
-        { withCredentials: false },
-      );
-
-      eventSource.addEventListener("message", (ev: MessageEvent<any>) => {
-        try {
-          const messageData = ev.data && JSON.parse(ev.data);
-          if (!("invitedPeerId" in messageData)) {
-            throw new Error("unexpected message from server: " + ev.data);
-          } else {
-            const invitedPeerId = messageData["invitedPeerId"];
-            eventSource.close();
-            resolve(invitedPeerId);
-          }
-        } catch (err) {
-          eventSource.close();
-          reject(err);
-        }
-      });
-
-      eventSource.addEventListener("error", () => {
-        // An EventSource "error" Event carries no enumerable detail
-        // (JSON.stringify yields "{}"), so name the endpoint that failed
-        // instead -- otherwise this surfaces as an opaque message.
-        eventSource.close();
-        reject(
-          new Error(
-            "EventSource error while waiting for the invited peer id at " +
-              `${hostString}/api/psi/${session.uuid}/wait`,
-          ),
-        );
-      });
-    });
-  })();
-
-  const [serverPeer, serverConn]: [Peer, DataConnection] = await (async () => {
-    return new Promise((resolve, reject) => {
-      const peer = new Peer({
-        host: addressInfo.address,
-        path: "/api/",
-        port: addressInfo.port,
-      });
-      peer.on("open", () => {
-        const conn = peer.connect(clientPeerId, { reliable: true });
-        resolve([peer, conn]);
-      });
-
-      peer.on("error", (err) => reject(err));
-    });
-  })();
+    acceptorPeer.on("error", reject);
+  });
 
   const psiLibrary = await (PSI() as Promise<PSILibrary>);
 
-  const clientConn = await clientConnPromise;
+  const inviterConn = await inviterConnPromise;
 
   const serverPrepared = prepareForExchange(
     { linkageTerms: { ...firstNameOnlyTerms, identity: "server" } },
@@ -231,8 +171,8 @@ beforeAll(async () => {
     ["first_name"],
   );
 
-  const serverMc = await openPeerMessageConnection(serverConn);
-  const clientMc = await openPeerMessageConnection(clientConn);
+  const serverMc = await openPeerMessageConnection(inviterConn);
+  const clientMc = await openPeerMessageConnection(acceptorConn);
 
   const runServerPSI = async () => {
     const { associationTable } = await runExchange(
@@ -261,8 +201,8 @@ beforeAll(async () => {
 
   await serverMc.close();
   await clientMc.close();
-  serverPeer.disconnect();
-  clientPeer.disconnect();
+  inviterPeer.disconnect();
+  acceptorPeer.disconnect();
 
   serverResult = sortAssociationTable(rawServerResult);
   clientResult = sortAssociationTable(rawClientResult, true);

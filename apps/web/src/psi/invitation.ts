@@ -53,6 +53,14 @@ export interface GeneratedInvitation {
    * docs/SECURITY_DESIGN.md, "Invitation contents and confidentiality".
    */
   deepLink: string;
+  /**
+   * The fresh shared secret embedded in the token. Returned so the inviter can
+   * derive its own rendezvous peer id and listen on it (the acceptor derives the
+   * same id from the same secret carried in the invitation). It is the value
+   * already inside `encoded`, surfaced here rather than re-decoded; it stays in
+   * the browser and is never sent to a backend.
+   */
+  sharedSecret: string;
 }
 
 /**
@@ -115,13 +123,18 @@ export async function generateInvitation(params: {
   // expiry is the paired rendezvous task (item 196035727), not yet built. A
   // bounded default for web invitations is a deferred product decision, so the
   // field is omitted rather than guessed at here.
+  const sharedSecret = generateSharedSecret();
   const token: InvitationToken = {
     version: "1",
     linkageTerms: getDefaultLinkageTerms(inviterName),
-    sharedSecret: generateSharedSecret(),
+    sharedSecret,
     connectionEndpoint: webrtcEndpointFromLocation(location),
   };
 
   const encoded = await encodeInvitation(token);
-  return { encoded, deepLink: deepLinkFor(location.origin, encoded) };
+  return {
+    encoded,
+    deepLink: deepLinkFor(location.origin, encoded),
+    sharedSecret,
+  };
 }
