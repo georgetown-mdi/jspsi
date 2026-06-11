@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { randomBytes, toBase64Url } from "../utils/crypto.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -150,6 +151,23 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
  * to the 16-character set `[AEIMQUYcgkosw048]`.
  */
 export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+/**
+ * Generate a fresh shared secret: 32 cryptographically random bytes
+ * (`crypto.getRandomValues`) encoded as base64url, always matching
+ * {@link SHARED_SECRET_REGEX}. Co-located with that regex so the producer and
+ * the format contract stay in sync.
+ *
+ * This is the single definition of secret generation, shared by the CLI
+ * invitation flow and the web inviter rather than re-implemented in each. The
+ * value it produces is the 256-bit short-lived setup secret the X25519 key
+ * exchange consumes and, in the web rendezvous flow, the seed for the derived
+ * peer id; it is rotated to a persistent secret on the first successful
+ * handshake.
+ */
+export function generateSharedSecret(): string {
+  return toBase64Url(randomBytes(32));
+}
 
 // Named const for the `sharedSecret` field schema so the regex and error
 // message live in one place.
