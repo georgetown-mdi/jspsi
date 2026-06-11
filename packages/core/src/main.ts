@@ -57,3 +57,5 @@ export {
 export type { AuthResult, AeadContext } from "./auth";
 export { runKex } from "./kex";
 export type { KexResult } from "./kex";
+export { deriveRendezvousPeerId, RENDEZVOUS_ROLES } from "./rendezvous";
+export type { RendezvousRole } from "./rendezvous";

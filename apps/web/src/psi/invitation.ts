@@ -7,9 +7,9 @@ import {
 import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
 
 /**
- * Path a PeerJS client dials this app's signaling server at. Matches the working
- * dialer in `psi/client.ts` (`path: "/api/"`), which the server -- mounted at
- * `/api` by `apps/web/src/peerServer.ts` -- accepts. The acceptor reads this off
+ * Path a PeerJS client dials this app's signaling server at. Matches the dial
+ * path used in `psi/rendezvous.ts` (`path: "/api/"`), which the server -- mounted
+ * at `/api` by `apps/web/src/peerServer.ts` -- accepts. The acceptor reads this off
  * the endpoint and dials it the same way a client does, so it must carry the
  * client's dial path (trailing slash included), not the server's mount path.
  */
@@ -53,15 +53,24 @@ export interface GeneratedInvitation {
    * docs/SECURITY_DESIGN.md, "Invitation contents and confidentiality".
    */
   deepLink: string;
+  /**
+   * The fresh shared secret embedded in the token. Returned so the inviter can
+   * derive its own rendezvous peer id and listen on it (the acceptor derives the
+   * same id from the same secret carried in the invitation). It is the value
+   * already inside `encoded`, surfaced here rather than re-decoded; it stays in
+   * the browser and is never sent to a backend.
+   */
+  sharedSecret: string;
 }
 
 /**
  * Build the credential-free WebRTC signaling locator the acceptor uses to reach
  * this app's PeerJS server, from the inviter's browser location. Mirrors the
- * PeerJS client (`psi/client.ts`): `localhost` is normalized to a loopback
- * literal a peer can dial, and a default-port location omits the port. The
- * endpoint schema requires a reachable 1-65535 port when present, so a blank or
- * out-of-range port is dropped rather than encoded as a meaningless locator.
+ * acceptor's dial-location handling (`psi/rendezvous.ts`): `localhost` is
+ * normalized to a loopback literal a peer can dial, and a default-port location
+ * omits the port. The endpoint schema requires a reachable 1-65535 port when
+ * present, so a blank or out-of-range port is dropped rather than encoded as a
+ * meaningless locator.
  */
 export function webrtcEndpointFromLocation(loc: {
   hostname: string;
@@ -115,13 +124,18 @@ export async function generateInvitation(params: {
   // expiry is the paired rendezvous task (item 196035727), not yet built. A
   // bounded default for web invitations is a deferred product decision, so the
   // field is omitted rather than guessed at here.
+  const sharedSecret = generateSharedSecret();
   const token: InvitationToken = {
     version: "1",
     linkageTerms: getDefaultLinkageTerms(inviterName),
-    sharedSecret: generateSharedSecret(),
+    sharedSecret,
     connectionEndpoint: webrtcEndpointFromLocation(location),
   };
 
   const encoded = await encodeInvitation(token);
-  return { encoded, deepLink: deepLinkFor(location.origin, encoded) };
+  return {
+    encoded,
+    deepLink: deepLinkFor(location.origin, encoded),
+    sharedSecret,
+  };
 }

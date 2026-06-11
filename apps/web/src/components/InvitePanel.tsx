@@ -6,6 +6,7 @@ import {
   Button,
   Code,
   CopyButton,
+  Divider,
   Group,
   Paper,
   Stack,
@@ -18,6 +19,8 @@ import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 
 import { generateInvitation } from "@psi/invitation";
+
+import { Exchange } from "@components/Exchange";
 
 import type { GeneratedInvitation, InvitationLocation } from "@psi/invitation";
 
@@ -84,9 +87,9 @@ function CopyRow({
                   <ActionIcon
                     onClick={copy}
                     variant={copied ? "light" : "filled"}
-                    // Name reflects the copied state so a screen reader
-                    // announces the success (the icon/tooltip change alone is
-                    // not conveyed to assistive tech).
+                    // Name reflects the copied state so a screen reader announces
+                    // the success (the icon/tooltip change alone is not conveyed
+                    // to assistive tech).
                     aria-label={
                       copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
                     }
@@ -103,8 +106,16 @@ function CopyRow({
   );
 }
 
-export function InvitationTab() {
-  const [invitation, setInvitation] = useState<GeneratedInvitation>();
+/** A generated invitation together with the inviter name that produced it. The
+ * name is the inviter's own identity in the exchange below, and the secret seeds
+ * the rendezvous peer id the inviter listens on. */
+interface InviterSession {
+  invitation: GeneratedInvitation;
+  inviterName: string;
+}
+
+export function InvitePanel() {
+  const [session, setSession] = useState<InviterSession>();
   const [error, setError] = useState<string>();
 
   // Move focus to the result heading once an invitation is generated, so a
@@ -112,31 +123,30 @@ export function InvitationTab() {
   // button with the new region announced only if they happen to explore for it.
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    if (invitation) resultHeadingRef.current?.focus();
-  }, [invitation]);
+    if (session) resultHeadingRef.current?.focus();
+  }, [session]);
 
   const form = useForm({
     defaultValues: { inviterName: "" },
     onSubmit: async ({ value }) => {
       setError(undefined);
+      const inviterName = value.inviterName.trim();
       try {
         // A fresh secret each time, so generating again supersedes any prior
         // unsent invitation -- a new secret means a new derived rendezvous id,
         // and one invitation is not expected to back more than one exchange.
-        setInvitation(
-          await generateInvitation({
-            inviterName: value.inviterName.trim(),
-            location: invitationLocation(),
-          }),
-        );
+        const invitation = await generateInvitation({
+          inviterName,
+          location: invitationLocation(),
+        });
+        setSession({ invitation, inviterName });
       } catch (e) {
-        setInvitation(undefined);
+        setSession(undefined);
         // generateInvitation only fails on internal, non-user-actionable errors
         // (a schema ZodError, an SSR misuse). Show a fixed message rather than
-        // the raw error: a raw ZodError dump is unhelpful to the user, and not
-        // echoing error internals into a secret-bearing flow keeps a future Zod
-        // version that embeds a failing field's value out of the UI. Log only
-        // the error type for diagnosis -- never the value-bearing error itself.
+        // the raw error: a raw ZodError dump is unhelpful, and not echoing error
+        // internals into a secret-bearing flow keeps a future Zod version that
+        // embeds a failing field's value out of the UI. Log only the error type.
         console.error(
           "invitation generation failed:",
           e instanceof Error ? e.name : typeof e,
@@ -169,13 +179,13 @@ export function InvitationTab() {
                 onChange={(e) => handleChange(e.target.value)}
                 onBlur={handleBlur}
                 error={
-                  // Show the required-name error once the user has left the
-                  // field (isBlurred) or attempted a submit (submissionAttempts)
-                  // -- not on every keystroke while typing. The submit case
-                  // matters for a whitespace-only name: it passes the native
-                  // `required` check (non-empty) but fails this validator, so
-                  // without the submit guard the error would never appear and
-                  // the click would do nothing visible.
+                  // Show the required-name error once the user has left the field
+                  // (isBlurred) or attempted a submit (submissionAttempts) -- not
+                  // on every keystroke. The submit case matters for a
+                  // whitespace-only name: it passes the native `required` check
+                  // (non-empty) but fails this validator, so without the submit
+                  // guard the error would never appear and the click would do
+                  // nothing visible.
                   (state.meta.isBlurred || form.state.submissionAttempts > 0) &&
                   state.meta.errors.length > 0
                     ? state.meta.errors.join(", ")
@@ -201,9 +211,7 @@ export function InvitationTab() {
                 loading={isSubmitting}
                 disabled={isSubmitting}
               >
-                {invitation
-                  ? "Generate a new invitation"
-                  : "Generate invitation"}
+                {session ? "Generate a new invitation" : "Generate invitation"}
               </Button>
             )}
           </form.Subscribe>
@@ -215,7 +223,7 @@ export function InvitationTab() {
         </Stack>
       </form>
 
-      {invitation && (
+      {session && (
         <Stack mt="md">
           <Title order={3} ref={resultHeadingRef} tabIndex={-1}>
             Share this invitation
@@ -229,12 +237,30 @@ export function InvitationTab() {
           <CopyRow
             label="Invitation link"
             description="Opens the accept page with the invitation prefilled"
-            value={invitation.deepLink}
+            value={session.invitation.deepLink}
           />
           <CopyRow
             label="Invitation code"
             description="Paste into the accept form if the link cannot be used"
-            value={invitation.encoded}
+            value={session.invitation.encoded}
+          />
+
+          <Divider
+            my="sm"
+            label="Then run the exchange"
+            labelPosition="center"
+          />
+          <Text size="sm" c="dimmed">
+            Choose your data file and start. Your browser waits for your partner
+            to accept the invitation and connect; keep this tab open.
+          </Text>
+          {/* A fresh secret per invitation keys a fresh exchange, so remounting
+              on regenerate (keyed by the secret) resets the file/stage state. */}
+          <Exchange
+            key={session.invitation.sharedSecret}
+            role="inviter"
+            partyName={session.inviterName}
+            sharedSecret={session.invitation.sharedSecret}
           />
         </Stack>
       )}

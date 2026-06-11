@@ -10,6 +10,7 @@ cosign.key
 .nitro
 .tanstack
 .output
+.vitest-attachments
 *.swp
 terraform.tfvars
 scratch

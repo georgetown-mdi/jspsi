@@ -1,8 +1,8 @@
-import { Center, Group, Paper } from "@mantine/core";
+import { Container, Group } from "@mantine/core";
 import { createFileRoute } from "@tanstack/react-router";
 
-import CreatePSIForm from "@components/CreatePSIForm";
-import JoinPSIForm from "@components/JoinPSIForm";
+import AcceptForm from "@components/AcceptForm";
+import { InvitePanel } from "@components/InvitePanel";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -10,15 +10,11 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   return (
-    <Center>
-      <Group justify="space-between" align="stretch" grow>
-        <Paper>
-          <CreatePSIForm />
-        </Paper>
-        <Paper>
-          <JoinPSIForm />
-        </Paper>
+    <Container>
+      <Group justify="space-between" align="flex-start" grow mt="md">
+        <InvitePanel />
+        <AcceptForm />
       </Group>
-    </Center>
+    </Container>
   );
 }
