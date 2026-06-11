@@ -24,6 +24,10 @@ import {
   TransportOperationStalledError,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
+import {
+  fromEventConnection,
+  ConnectionError,
+} from "../src/connection/messageConnection";
 import { withCapturedLogs } from "../src/testing";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
@@ -5928,6 +5932,91 @@ test("poll() retryable: a transient list() failure reschedules and the message i
   // ...and the poller rescheduled and delivered the message exactly once.
   expect(received).toHaveLength(1);
   expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(1);
+});
+
+test("composed via fromEventConnection: the first transient poll() error is terminal -- receive() fails once naming the cause, and the poller does not reschedule", async () => {
+  // The isolation test directly above proves a transient list() failure is
+  // retryable: poll() reschedules and delivers on a later cycle. That is a
+  // property of poll() STANDALONE. In the CLI a FileSyncConnection is never
+  // consumed directly -- apps/cli/src/protocol.ts always bridges it through
+  // fromEventConnection (fromEventConnection -> conn.start() -> mc.receive()),
+  // whose error listener routes every emitted poll() error into
+  // QueuedMessageConnection.fail(). fail() synchronously calls hooks.close() ->
+  // conn.close(), whose first statement -- before any await -- is conn.stop(),
+  // so pollerActive is cleared within that synchronous prefix, before poll()'s
+  // finally runs; the first emitted error is therefore terminal and the
+  // reschedule never happens. This pins that composed contract alongside the
+  // isolation tests; see the "Production composition note" under I8 in
+  // docs/FILE_SYNC.md.
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  const body = Buffer.from(
+    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
+  );
+  files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
+  const conn = makeRetainConn(client, "receiver-me", peerId);
+
+  // The SAME injection the isolation test uses: a transient list() failure that
+  // throws only on the first call. In isolation the poller reschedules and the
+  // second list() delivers the message; under composition the first emit is
+  // terminal, so the second list() never runs.
+  let listCalls = 0;
+  const realList = client.list.bind(client);
+  client.list = async (dir: string) => {
+    listCalls += 1;
+    if (listCalls === 1) throw new Error("transient list failure");
+    return realList(dir);
+  };
+
+  // Compose through the production bridge and drive the protocol layer's
+  // awaited receive(), exactly as protocol.ts does (conn.start() then
+  // mc.receive()). No conn.on("data") proxy is attached: delivery is the
+  // bridge's job, and "no message was delivered" is proven below by recvSeq
+  // staying 0 (poll() advances it only after a successful emit), not by a
+  // parallel raw-connection listener that would shadow the bridge's own.
+  const mc = fromEventConnection(conn);
+  conn.start();
+
+  // Bound the receive so a future async-scheduling regression that never
+  // delivers the poll error fails fast (with the bridge's "gone silent"
+  // inactivity error, which the assertions below reject) instead of hanging for
+  // the full default inactivity window. The real poll error fires on the first
+  // cycle, far inside this bound, so it always wins the race.
+  const err = await mc.receive(1_000).then(
+    () => {
+      throw new Error(
+        "receive() resolved; expected the poll error to reject it",
+      );
+    },
+    (e: unknown) => e,
+  );
+
+  // The surfaced error names the underlying cause (the injected transport
+  // failure), carried as a transport ConnectionError with that cause attached
+  // -- NOT the bridge's generic peer-silence inactivity message.
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as Error).message).toContain("transient list failure");
+  expect((err as Error).message).not.toContain("gone silent");
+  expect((err as ConnectionError).cause).toBeInstanceOf(Error);
+  expect(((err as ConnectionError).cause as Error).message).toBe(
+    "transient list failure",
+  );
+
+  // The connection stopped: stop() (close()'s synchronous first statement,
+  // reached via fail() -> close()) cleared pollerActive inside the emit, before
+  // poll()'s finally could reschedule.
+  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
+    false,
+  );
+
+  // The poller did not reschedule: across several polling intervals the message
+  // is never reprocessed -- list() ran exactly once (the failed call) and
+  // recvSeq never advanced, so the message was neither read nor delivered. (In
+  // isolation this same setup advances recvSeq to 1 and delivers the message.)
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listCalls).toBe(1);
+  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
 });
 
 test("poll() terminal: delete mode also stops the poller on a fully-synced corrupt message", async () => {
