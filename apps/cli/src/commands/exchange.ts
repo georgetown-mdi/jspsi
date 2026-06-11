@@ -484,15 +484,20 @@ export function loadConfig(options: ExchangeOptions): {
   // key-file cases above. (The threshold-dependent "expiring soon" advisory is
   // emitted later, in the handler, because it is conditional on the rotation
   // outcome.)
-  if (checkKeyFileExpiry(keyData, Date.now()) === "expired")
+  if (checkKeyFileExpiry(keyData, Date.now()) === "expired") {
+    // keyData.expires is necessarily set when the status is "expired", but
+    // TypeScript does not narrow it across the call; the fallback keeps the
+    // message a definite string rather than risk rendering "undefined".
+    const expiredAt = keyData.expires ?? "(unknown)";
     throw new UsageError(
-      `the shared secret in ${options.keyFile} expired at ${keyData.expires} ` +
+      `the shared secret in ${options.keyFile} expired at ${expiredAt} ` +
         "and cannot be used; no exchange was attempted. Both parties must " +
         "re-invite to establish a new shared secret: run 'psilink invite URL " +
         "...' and 'psilink accept URL INVITATION' (the existing psilink.yaml is " +
         "reused; only the key file is recreated). See " +
         "docs/CLI.md#out-of-sync-tokens.",
     );
+  }
   const authPersist: AuthPersist = {
     // Operator-policy fields parsed from the YAML `authentication` block (today,
     // token_max_age_days), carried end to end -- protocol.ts reads
@@ -576,12 +581,15 @@ export function shouldWarnTokenExpiring(
  * directed straight to re-invitation). If the key file is absent on the re-read
  * (deleted between rotation and now), the post-exchange state cannot be
  * confirmed, so this stays silent rather than assert a cause. A genuine
- * read/parse failure is NOT swallowed: it propagates so the caller can record it
- * -- the load-time read already validated the file, so a failure here means it
- * became unreadable during the exchange. The re-read suppresses the
- * over-permissive-file warning already emitted at load.
+ * read/parse failure (the file existed and validated at load but became
+ * unreadable or corrupt during the exchange) is not swallowed here; it propagates
+ * to the caller, which decides how to treat it. The advisory is best-effort, so
+ * the handler logs such a failure at debug and continues rather than surfacing it
+ * as the exchange's outcome. The re-read suppresses the over-permissive-file
+ * warning already emitted at load.
  *
- * @throws if the key file exists but cannot be read or parsed on the re-read.
+ * @throws if the key file exists but cannot be read or parsed on the re-read; the
+ *         sole caller (the exchange handler) catches this and logs it at debug.
  * @internal exported for testing
  */
 export function tokenExpiringAdvisory(
@@ -699,10 +707,15 @@ export async function handler(argv: Arguments): Promise<void> {
   const { connection, authentication, ...exchangeDataSpec } = configResult;
 
   // Token expiry advisory baseline: was the token expiring soon at load time?
-  // loadConfig already hard-stopped a fully-expired token, so this is "ok" or
-  // "expiring-soon". The threshold comes from the max-age policy; without a
-  // policy it is undefined and the status is always "ok". Re-evaluated after the
-  // exchange to decide whether to warn (see shouldWarnTokenExpiring).
+  // This recheck uses a fresh clock just after loadConfig's hard stop, so in the
+  // (sub-millisecond) gap a token can tip from "expiring-soon" to "expired". That
+  // is handled, not guaranteed away: the advisory below is keyed on
+  // "expiring-soon" and self-skips on "expired", and runProtocol's pre-handshake
+  // assertSharedSecretReadyForHandshake aborts an expired token with the re-invite
+  // message before any handshake. The threshold comes from the max-age policy;
+  // without a policy it is undefined and the status is "ok" (never
+  // "expiring-soon"). Re-evaluated after the exchange to decide whether to warn
+  // (see shouldWarnTokenExpiring).
   const warnThresholdDays = warnThresholdDaysForPolicy(
     authentication.tokenMaxAgeDays,
   );

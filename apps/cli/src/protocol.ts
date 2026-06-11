@@ -572,6 +572,20 @@ export async function runProtocol(
       // gates the EncryptedMessageConnection wrap below.
       const { rotatedSecret, sessionKey, applyEncryption } =
         await authenticateConnection(mc, authParams, role, true);
+      // buildRotatedKeyFile stamps `expires` = now + tokenMaxAgeDays days when the
+      // operator set a max-age policy, and omits it otherwise. The stamp is
+      // computed here, at the moment of rotation, so it reflects the real rotation
+      // time rather than config-parse time. It is built BEFORE the try/catch below
+      // so its input-validation guard (a non-positive or non-integer
+      // tokenMaxAgeDays -- reachable only by a caller bypassing the config schema)
+      // propagates as the UsageError it is (exit 64, bad input) rather than being
+      // caught and re-wrapped as a "could not be saved" transport-style failure
+      // (exit 69).
+      const rotatedKeyFile = buildRotatedKeyFile(
+        rotatedSecret,
+        auth.tokenMaxAgeDays,
+        Date.now(),
+      );
       try {
         // saveKeyFile is synchronous; the assignment below runs in the same
         // microtask tick. A signal cannot interleave between them, so any
@@ -579,15 +593,7 @@ export async function runProtocol(
         // state (tokenRotated=false) or both post-save state (tokenRotated
         // =true). Maintain this invariant: do not insert awaits between
         // saveKeyFile and the assignment.
-        //
-        // buildRotatedKeyFile stamps `expires` = now + tokenMaxAgeDays days when
-        // the operator set a max-age policy, and omits it otherwise. The stamp is
-        // computed here, at the moment of rotation, so it reflects the real
-        // rotation time rather than config-parse time.
-        saveKeyFile(
-          keyFilePath,
-          buildRotatedKeyFile(rotatedSecret, auth.tokenMaxAgeDays, Date.now()),
-        );
+        saveKeyFile(keyFilePath, rotatedKeyFile);
         tokenRotated = true;
       } catch (err) {
         // "may already hold": both parties independently derive rotatedSecret from
