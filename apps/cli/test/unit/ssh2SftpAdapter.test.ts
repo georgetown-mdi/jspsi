@@ -669,6 +669,52 @@ describe("bounded metadata write/stat/delete", () => {
   });
 });
 
+// --- bounded safeDelete (best-effort, never rejects) -------------------------
+//
+// safeDelete gets the same 60 s per-op deadline as delete(), so a hostile server
+// withholding the delete callback during teardown can no longer stall to the
+// coarse whole-exchange budget -- but it must keep its never-reject contract, so
+// both the delete's own error AND the deadline's stall error are swallowed: it
+// always resolves, just within 60 s.
+
+describe("bounded safeDelete", () => {
+  test("bounds a withheld safeDelete by the deadline and still resolves (never rejects)", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        // Withholds the delete callback: the inner promise never settles, so only
+        // the deadline can end it.
+        delete: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+      const deleting = adapter.safeDelete("/remote/x.json");
+      // Resolves (not rejects) once the deadline fires -- the stall error is
+      // swallowed to honor the never-reject contract.
+      const assertion = expect(deleting).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("swallows a safeDelete error and resolves without waiting the deadline", async () => {
+    // A delete that fails for its own reason (e.g. permissions) settles at once;
+    // safeDelete swallows it and resolves promptly, never arming a lingering wait.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn() };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      delete: vi.fn().mockRejectedValue(new Error("permission denied")),
+    };
+    await expect(adapter.safeDelete("/remote/x.json")).resolves.toBeUndefined();
+  });
+});
+
 // --- capped get --------------------------------------------------------------
 
 describe("capped get", () => {

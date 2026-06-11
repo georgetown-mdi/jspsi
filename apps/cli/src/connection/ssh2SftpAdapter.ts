@@ -746,28 +746,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // at once. (delete() above rejects instead: its callers want the error
     // surfaced, whereas safeDelete's must never see one.)
     //
-    // Unlike delete()/rename()/exists(), safeDelete deliberately carries NO per-op
-    // wall-clock deadline. It runs only on the best-effort cleanup path, and its
-    // never-reject contract is what a per-op deadline would fight: a withheld
-    // delete callback that is NOT preceded by a fatal protocol error (so the
-    // short-circuit above does not fire) is bounded instead by the whole-exchange
-    // budget, which the consumer applies to safeDelete through a never-reject
-    // variant (`withTransportBudgetVoid` in FileSyncConnection) that swallows the
-    // budget's stall rather than surfacing it. So a hostile server can stall this
-    // cleanup delete to the coarse whole-exchange budget, not the 60 s per-op
-    // bound -- an accepted teardown-path coarseness, the same trade the local-
-    // filesystem adapter makes for every op. A tighter per-op bound here would
-    // have to swallow its own deadline error to keep the contract; it is a
-    // possible follow-up, not a gap left silent.
+    // The OTHER stall -- a server that withholds the delete callback WITHOUT a
+    // preceding fatal error, so the short-circuit above does not fire -- is bounded
+    // by the same 60 s per-op deadline as delete()/rename()/exists(), so a hostile
+    // server cannot stall teardown to the coarse whole-exchange budget while every
+    // other write op fast-fails in 60 s. The never-reject contract is preserved by
+    // swallowing BOTH the delete's own error (the inner .then(noop, noop)) AND the
+    // deadline's TransportOperationStalledError (the trailing .then(noop, noop)):
+    // safeDelete still always resolves, just within 60 s rather than the budget.
+    // The whole-exchange budget (withTransportBudgetVoid in FileSyncConnection)
+    // remains the backstop beneath. No retry: a best-effort cleanup delete does not
+    // need one, exactly as delete() does not -- and the prior retryPromise here was
+    // in any case a no-op, since the inner swallow resolved every attempt so it
+    // never saw a rejection to re-issue.
     if (this.fatalSftpError !== undefined) return Promise.resolve();
-    return retryPromise(
-      () =>
-        this.client.delete(path, true).then(
-          () => {},
-          () => {},
-        ),
-      1,
-      100,
+    return this.boundByDeadline(
+      this.client.delete(path, true).then(
+        () => {},
+        () => {},
+      ),
+      "file delete",
+      path,
+      "delete",
+    ).then(
+      () => {},
+      () => {},
     );
   }
 
