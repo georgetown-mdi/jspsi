@@ -75,6 +75,17 @@ export function buildRotatedKeyFile(
   now: number,
 ): KeyFile {
   if (tokenMaxAgeDays === undefined) return { sharedSecret: rotatedSecret };
+  // Belt-and-suspenders, mirroring saveKeyFile's runtime check below: the config
+  // schema already enforces a positive integer (z.int().positive()), but a
+  // library caller that bypasses parse could pass 0, a negative, or a float,
+  // stamping an expiry that is immediately expired or on a sub-day boundary.
+  // Reject it here so a broken expiry never reaches disk. UsageError -> CLI exit
+  // 64, classified as bad input.
+  if (!Number.isInteger(tokenMaxAgeDays) || tokenMaxAgeDays <= 0)
+    throw new UsageError(
+      "buildRotatedKeyFile: tokenMaxAgeDays must be a positive integer; got " +
+        String(tokenMaxAgeDays),
+    );
   return {
     sharedSecret: rotatedSecret,
     expires: new Date(now + tokenMaxAgeDays * MS_PER_DAY).toISOString(),

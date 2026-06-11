@@ -559,21 +559,29 @@ export function shouldWarnTokenExpiring(
 }
 
 /**
- * Build the "token expiring soon" advisory message to emit after an exchange, or
+ * Build the token-expiry advisory message to emit after an exchange, or
  * `undefined` to stay silent. Call only when the exchange attempt has finished
- * (success or failure); `now` and `warnThresholdDays` are the same values used
- * for the load-time check.
+ * (success or failure).
+ *
+ * `now` is the CURRENT time -- deliberately later than the load-time `now` that
+ * produced `expiryBefore`, so the re-check reflects time that elapsed during the
+ * exchange and can catch a token that lapsed mid-run; `warnThresholdDays` is the
+ * same value used at load.
  *
  * Re-reads the (possibly rotated) key file to decide: a successful rotation under
  * a max-age policy stamped a fresh `expires` farther out, so the token is no
  * longer expiring soon and the advisory would mislead. The message reports the
- * on-disk expiry, not the value loaded before the exchange. If the file can no
- * longer be read -- deleted or corrupted between rotation and now, the only way
- * the re-read yields nothing -- the token's post-exchange state cannot be
- * confirmed, so this stays silent rather than assert a cause; a missing or
- * corrupt key file is its own, louder problem surfaced on the next run. The
- * re-read suppresses the over-permissive-file warning already emitted at load.
+ * on-disk expiry, not the value loaded before the exchange, and distinguishes a
+ * token that merely nears expiry from one that has already lapsed (which is
+ * directed straight to re-invitation). If the key file is absent on the re-read
+ * (deleted between rotation and now), the post-exchange state cannot be
+ * confirmed, so this stays silent rather than assert a cause. A genuine
+ * read/parse failure is NOT swallowed: it propagates so the caller can record it
+ * -- the load-time read already validated the file, so a failure here means it
+ * became unreadable during the exchange. The re-read suppresses the
+ * over-permissive-file warning already emitted at load.
  *
+ * @throws if the key file exists but cannot be read or parsed on the re-read.
  * @internal exported for testing
  */
 export function tokenExpiringAdvisory(
@@ -583,20 +591,26 @@ export function tokenExpiringAdvisory(
   warnThresholdDays: number | undefined,
 ): string | undefined {
   if (expiryBefore !== "expiring-soon") return undefined;
-  let reloaded: KeyFile | undefined;
-  try {
-    reloaded = loadKeyFile(keyFilePath, { warnOnPermissive: false });
-  } catch {
-    reloaded = undefined;
-  }
+  // loadKeyFile returns undefined only for ENOENT (file gone); any other failure
+  // (EACCES, malformed JSON) throws and is left to propagate to the caller rather
+  // than being silently swallowed.
+  const reloaded = loadKeyFile(keyFilePath, { warnOnPermissive: false });
   if (reloaded === undefined) return undefined;
   const expiryAfter = checkKeyFileExpiry(reloaded, now, { warnThresholdDays });
   if (!shouldWarnTokenExpiring(expiryBefore, expiryAfter)) return undefined;
   // shouldWarnTokenExpiring is true only when expiryAfter is "expiring-soon" or
-  // "expired", both of which require `expires` to be set, so the fallback is
-  // unreachable -- it is here to keep the message a definite string for the type
-  // checker rather than risk rendering "undefined".
+  // "expired", both of which require `expires` to be set; the fallback keeps the
+  // message a definite string for the type checker.
   const expiresShown = reloaded.expires ?? "(unknown)";
+  if (expiryAfter === "expired")
+    // The token lapsed during the exchange and was not refreshed. "Run before it
+    // expires" would be wrong (it already has), so direct straight to re-invite,
+    // matching the load-time hard-stop guidance.
+    return (
+      `the shared secret in ${keyFilePath} expired at ${expiresShown} during ` +
+      `this exchange and was not refreshed; both parties must re-invite to ` +
+      `establish a new shared secret. See docs/CLI.md#out-of-sync-tokens.`
+    );
   return (
     `the shared secret in ${keyFilePath} is expiring soon (expires ` +
     `${expiresShown}) and was not refreshed by this exchange. Run a successful ` +
@@ -752,17 +766,29 @@ export async function handler(argv: Arguments): Promise<void> {
     exchangeError = err;
   }
 
-  // Emit the "token expiring soon" advisory when the token was expiring soon at
-  // load and the exchange did not refresh it (a successful rotation stamps a
-  // fresh, farther-out expires, so the advisory would contradict runProtocol's
-  // "retry without re-inviting" guidance). The decision and message are built by
+  // Emit the token-expiry advisory when the token was expiring soon at load and
+  // the exchange did not refresh it (a successful rotation stamps a fresh,
+  // farther-out expires, so the advisory would contradict runProtocol's "retry
+  // without re-inviting" guidance). The decision and message are built by
   // tokenExpiringAdvisory, which re-reads the on-disk token.
-  const advisory = tokenExpiringAdvisory(
-    expiryBefore,
-    authentication.keyFilePath,
-    Date.now(),
-    warnThresholdDays,
-  );
+  let advisory: string | undefined;
+  try {
+    advisory = tokenExpiringAdvisory(
+      expiryBefore,
+      authentication.keyFilePath,
+      Date.now(),
+      warnThresholdDays,
+    );
+  } catch (err) {
+    // The advisory is best-effort. A re-read failure here (the file became
+    // unreadable or corrupt during the exchange; the load-time read had already
+    // validated it) is non-fatal -- record it at debug rather than let it mask
+    // the exchange's own outcome reported below.
+    log.debug(
+      "could not re-read the key file for the token-expiry advisory:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
   if (advisory !== undefined) log.warn(advisory);
 
   if (exchangeError !== undefined) {

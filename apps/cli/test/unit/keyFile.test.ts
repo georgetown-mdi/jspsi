@@ -137,6 +137,18 @@ test("buildRotatedKeyFile uses the exact 86_400_000 ms-per-day formula", () => {
   expect(Date.parse(result.expires as string) - FIXED_NOW).toBe(86_400_000);
 });
 
+test("buildRotatedKeyFile rejects a non-positive tokenMaxAgeDays", () => {
+  // Belt-and-suspenders against a caller bypassing schema validation: 0 or a
+  // negative would stamp an immediately-expired token. UsageError -> exit 64.
+  expect(() => buildRotatedKeyFile(TOKEN, 0, FIXED_NOW)).toThrow(UsageError);
+  expect(() => buildRotatedKeyFile(TOKEN, -5, FIXED_NOW)).toThrow(UsageError);
+});
+
+test("buildRotatedKeyFile rejects a non-integer tokenMaxAgeDays", () => {
+  // A float would stamp a sub-day boundary the schema's z.int() forbids.
+  expect(() => buildRotatedKeyFile(TOKEN, 1.5, FIXED_NOW)).toThrow(UsageError);
+});
+
 // --- checkKeyFileExpiry ------------------------------------------------------
 
 test("checkKeyFileExpiry returns ok when there is no expires", () => {

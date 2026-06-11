@@ -450,13 +450,36 @@ test("tokenExpiringAdvisory is silent when rotation refreshed the token", () => 
   ).toBeUndefined();
 });
 
-test("tokenExpiringAdvisory is silent when the key file is unreadable after the exchange", () => {
-  // The file was deleted between rotation and the re-read: the post-exchange state
-  // cannot be confirmed, so no advisory is emitted (and no false cause asserted).
-  // keyFile is never written here.
+test("tokenExpiringAdvisory reports a lapsed token as expired, directing to re-invite", () => {
+  // The token expired during the exchange (on-disk expires now in the past) and
+  // was not refreshed. The message must not say "run before it expires" -- it
+  // already has -- but direct to re-invitation.
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2025-12-31T00:00:00.000Z",
+  });
+  const msg = tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10);
+  expect(msg).toContain("expired at 2025-12-31T00:00:00.000Z");
+  expect(msg).toContain("re-invite");
+  expect(msg).not.toContain("Run a successful");
+});
+
+test("tokenExpiringAdvisory is silent when the key file is absent after the exchange", () => {
+  // The file was deleted between rotation and the re-read (ENOENT): the
+  // post-exchange state cannot be confirmed, so no advisory is emitted (and no
+  // false cause asserted). keyFile is never written here.
   expect(
     tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
   ).toBeUndefined();
+});
+
+test("tokenExpiringAdvisory propagates a read/parse failure rather than swallowing it", () => {
+  // A corrupt key file on the re-read is not silently dropped: it throws so the
+  // caller can record it (the handler logs it at debug, non-fatally).
+  fs.writeFileSync(keyFile, "not-json");
+  expect(() =>
+    tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
+  ).toThrow();
 });
 
 // --- handler: repeated single-value flag -------------------------------------
