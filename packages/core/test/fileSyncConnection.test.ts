@@ -5944,11 +5944,25 @@ const entryPreconditionKinds: Array<{
     ],
     outcome: "reject",
   },
-  // An orphaned in-flight temp file (a crashed send()/writeAck() artifact) is
-  // swept at the entry guard (193792285): deleted via safeDelete and added to
-  // the guard's `ignored` set, so it proceeds past the guard rather than being
-  // rejected as a strict-empty violation.
-  { kind: "temp file", present: ["temp-abc.tmp"], outcome: "proceed" },
+  // An orphaned in-flight temp file (a crashed send()/writeAck() artifact),
+  // named with the protocol's own temp-<uuidv4()>.tmp shape, is swept at the
+  // entry guard (193792285): deleted via safeDelete and added to the guard's
+  // `ignored` set, so it proceeds past the guard rather than being rejected as a
+  // strict-empty violation.
+  {
+    kind: "temp file",
+    present: ["temp-00000000-0000-4000-8000-00000000abcd.tmp"],
+    outcome: "proceed",
+  },
+  // A foreign temp-*.tmp whose stem is NOT a v4 UUID is not the protocol's temp
+  // shape (198451188): it fails the grammar, so it is snapshotted and tolerated
+  // like any other foreign file rather than swept. It proceeds past the guard
+  // (then times out waiting for a peer), exactly as notes.txt does below.
+  {
+    kind: "foreign temp file",
+    present: ["temp-export.tmp"],
+    outcome: "proceed",
+  },
   // A foreign (non-protocol) file is snapshotted and tolerated at entry
   // (195255994): names that FAIL the protocol grammar are not rejected, so it
   // proceeds past the guard (then times out waiting for a peer in this setup).
@@ -6038,7 +6052,7 @@ test("synchronize() sweeps an orphaned temp file at the entry guard and does not
   conn.connected = true;
   conn.path = "/test";
 
-  const tempPath = `/test/temp-${"a".repeat(8)}.tmp`;
+  const tempPath = `/test/temp-11111111-1111-4111-8111-111111111111.tmp`;
   files.set(tempPath, Buffer.alloc(0));
 
   const safeDeleted: string[] = [];
@@ -6102,7 +6116,7 @@ test("synchronize() sweeps a temp file alongside a single peer hello and complet
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = myId;
 
-  const tempPath = `${conn.path}/temp-${"b".repeat(8)}.tmp`;
+  const tempPath = `${conn.path}/temp-22222222-2222-4222-9222-222222222222.tmp`;
   const peerHelloPath = `${conn.path}/${peerId}-hello.json`;
   files.set(tempPath, Buffer.alloc(0));
   files.set(peerHelloPath, LOCK_HELLO_BODY);
@@ -6137,9 +6151,9 @@ test("synchronize() sweeps multiple orphaned temp files at the entry guard", asy
   conn.path = "/test";
 
   const tempPaths = [
-    `/test/temp-${"a".repeat(8)}.tmp`,
-    `/test/temp-${"b".repeat(8)}.tmp`,
-    `/test/temp-${"c".repeat(8)}.tmp`,
+    `/test/temp-33333333-3333-4333-a333-333333333333.tmp`,
+    `/test/temp-44444444-4444-4444-b444-444444444444.tmp`,
+    `/test/temp-55555555-5555-4555-8555-555555555555.tmp`,
   ];
   for (const p of tempPaths) files.set(p, Buffer.alloc(0));
 
@@ -6159,6 +6173,139 @@ test("synchronize() sweeps multiple orphaned temp files at the entry guard", asy
     expect(safeDeleted).toContain(p);
     expect(files.has(p)).toBe(false);
   }
+});
+
+test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID; it is tolerated as foreign", async () => {
+  // 198451188: the entry sweep matches only the protocol's own
+  // temp-<uuidv4()>.tmp shape, so a foreign `temp-export.tmp` (a user or
+  // sync-tool file in a namespace collision) is NOT deleted. It fails the
+  // protocol grammar, so it is snapshotted and tolerated exactly as notes.txt
+  // is -- the data-loss the broad `temp-`/`.tmp` match could cause is gone.
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + 60),
+    verbose: -1,
+  });
+  conn.id = "00000000-0000-4000-8000-000000000001";
+  conn.connected = true;
+  conn.path = "/test";
+
+  const foreignTempPath = "/test/temp-export.tmp";
+  files.set(foreignTempPath, Buffer.from("unrelated"));
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  // Proceeded past the guard (a timeout Error), tolerating the foreign temp.
+  expect(err).not.toBeInstanceOf(UsageError);
+  // The foreign temp survived: never swept, still on disk...
+  expect(safeDeleted).not.toContain(foreignTempPath);
+  expect(files.has(foreignTempPath)).toBe(true);
+  // ...and recorded in the entry snapshot so the loop tolerates it.
+  const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
+    .foreignFileSnapshot;
+  expect(snapshot.has("temp-export.tmp")).toBe(true);
+});
+
+test("synchronize() does NOT sweep a foreign temp whose stem is an UPPERCASE v4 UUID", async () => {
+  // 198451188: the uuid package's validate() carries the /i flag, so an
+  // uppercase-but-syntactically-valid v4 stem would pass a bare validate(); but
+  // uuidv4() only ever emits lowercase, so the protocol's own temp is always
+  // lowercase. A foreign temp-<UPPERCASE-v4>.tmp must therefore be treated as
+  // foreign (not swept), closing the residual case-collision data-loss window.
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + 60),
+    verbose: -1,
+  });
+  conn.id = "00000000-0000-4000-8000-000000000001";
+  conn.connected = true;
+  conn.path = "/test";
+
+  // A valid v4 UUID in uppercase -- accepted by a case-insensitive validate(),
+  // rejected by the lowercase-only protocol-temp match.
+  const foreignTempPath = "/test/temp-953D0248-D2F0-46F2-94DC-5082EED218F9.tmp";
+  files.set(foreignTempPath, Buffer.from("unrelated"));
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  // Proceeded past the guard, tolerating the uppercase-stem foreign temp.
+  expect(err).not.toBeInstanceOf(UsageError);
+  // The foreign temp survived: never swept, still on disk...
+  expect(safeDeleted).not.toContain(foreignTempPath);
+  expect(files.has(foreignTempPath)).toBe(true);
+  // ...and recorded in the entry snapshot so the loop tolerates it.
+  const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
+    .foreignFileSnapshot;
+  expect(snapshot.has("temp-953D0248-D2F0-46F2-94DC-5082EED218F9.tmp")).toBe(
+    true,
+  );
+});
+
+test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID temp-*.tmp as foreign", async () => {
+  // 198451188: isRecognizedLoopFile narrows its temp branch to the protocol's
+  // own temp-<uuidv4()>.tmp shape. A real protocol temp appearing mid-loop is
+  // recognized (no warning); a foreign `temp-export.tmp` that is not in the
+  // entry snapshot is not recognized and falls to the unexpected-file policy
+  // (warned once under "warn"), proving the two shapes are handled differently.
+  const errors: unknown[] = [];
+  let listCount = 0;
+  const [, logs] = await withCapturedLogs(async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
+    conn.peerId = "peer-test";
+    conn.options.unexpectedFiles = "warn";
+    // Both appear during the loop (neither is in the entry snapshot).
+    files.set(
+      "/test/temp-77777777-7777-4777-8777-777777777777.tmp",
+      Buffer.alloc(0),
+    );
+    files.set("/test/temp-export.tmp", Buffer.from("unrelated"));
+    conn.on("error", (err) => errors.push(err));
+
+    let notifyEnough!: () => void;
+    const enough = new Promise<void>((r) => (notifyEnough = r));
+    const origList = client.list.bind(client);
+    client.list = async (p: string) => {
+      if (++listCount === 5) notifyEnough();
+      return origList(p);
+    };
+    conn.start();
+    try {
+      await Promise.race([
+        enough,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out")), 2_000),
+        ),
+      ]);
+    } finally {
+      conn.stop();
+    }
+  });
+  expect(errors).toHaveLength(0);
+  // The protocol temp is recognized -- never warned.
+  expect(logs.filter((l) => l.message.includes("temp-77777777"))).toHaveLength(
+    0,
+  );
+  // The foreign temp is warned exactly once.
+  expect(
+    logs.filter((l) => l.message.includes("temp-export.tmp")),
+  ).toHaveLength(1);
 });
 
 // --- poll() error classification: terminal vs retryable ----------------------
@@ -7102,7 +7249,7 @@ test("poll(): recognized loop files (hellos, acks, lock, our writes, temp) never
       "peer-me-hello-ack.json", // peer rendezvous ack of our hello
       "me-peer-20260101T000000-000-42-ack.json", // our message-ack
       "peer-me-20260101T000000-000-42-ack.json", // peer message-ack
-      "temp-abc123.tmp", // in-flight write
+      "temp-66666666-6666-4666-8666-666666666666.tmp", // in-flight write
     ];
     for (const name of recognized) files.set(`/test/${name}`, Buffer.alloc(0));
 

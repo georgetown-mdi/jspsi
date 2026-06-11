@@ -1,6 +1,10 @@
 import * as z from "zod";
 import { default as EventEmitter } from "eventemitter3";
-import { v4 as uuidv4 } from "uuid";
+import {
+  v4 as uuidv4,
+  validate as uuidValidate,
+  version as uuidVersion,
+} from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
@@ -256,6 +260,30 @@ const peerIdFromControlName = (
   return id.length > 0 ? id : undefined;
 };
 
+// True only for the protocol's OWN in-flight temp file: `temp-<uuidv4()>.tmp`,
+// the exact shape send() and writeAck() write (`temp-${uuidv4()}.tmp`,
+// independent of any id). Validating the stem as a v4 UUID is what lets every
+// other `temp-*.tmp` -- a foreign `temp-export.tmp`, an unrelated sync-tool
+// scratch file -- fall through to the foreign-file policy (tolerated) rather
+// than being deleted by the entry sweep. The original orphaned-temp sweep
+// (193792285) matched any `temp-`/`.tmp` name, which destroyed such a foreign
+// file in a namespace collision; this narrows it so the two notions of
+// "foreign" (here and the foreign-file snapshot) agree. uuidVersion() throws on
+// a non-UUID stem, so the uuidValidate() short-circuit must precede it.
+const isProtocolTempName = (name: string): boolean => {
+  if (!name.startsWith("temp-") || !name.endsWith(".tmp")) return false;
+  const stem = name.slice("temp-".length, -".tmp".length);
+  // Match ONLY the canonical lowercase form uuidv4() emits. The uuid package's
+  // validate() carries the /i flag, so without this guard a foreign
+  // temp-<UPPERCASE-but-valid-v4>.tmp would be accepted and swept -- a residual
+  // slice of the very namespace-collision data loss this narrowing removes.
+  // uuidv4() (uuid v14) always emits lowercase, so this rejects no name our own
+  // send()/writeAck() writes. toLowerCase() is locale-independent for a UUID's
+  // ASCII hex/hyphen, so there is no Turkish-I hazard.
+  if (stem !== stem.toLowerCase()) return false;
+  return uuidValidate(stem) && uuidVersion(stem) === 4;
+};
+
 // Classifies a filename against the protocol filename grammar: true for any
 // protocol artifact (an in-flight temp write, a hello, a lock, a joining
 // sentinel, an ack marker, or a message whose terminal segment is a byte
@@ -266,9 +294,11 @@ const peerIdFromControlName = (
 // reintroduce the (rejected) reading where I0 tolerates message-shaped files at
 // entry. A message-shaped <id>-<digits>.json MATCHES here and is therefore a
 // protocol file, never foreign: at the no-flag entry guard it is an unexpected
-// protocol file (rejected), and under --sweep-exchange-files it is swept.
+// protocol file (rejected), and under --sweep-exchange-files it is swept. A
+// `temp-*.tmp` whose stem is not a v4 UUID is NOT the protocol's temp shape
+// (isProtocolTempName), so it fails the grammar here and is treated as foreign.
 const isProtocolGrammarName = (name: string): boolean => {
-  if (name.startsWith("temp-") && name.endsWith(".tmp")) return true;
+  if (isProtocolTempName(name)) return true;
   if (!name.endsWith(".json")) return false;
   if (
     name.endsWith(HELLO_SUFFIX) ||
@@ -1397,13 +1427,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const ignored = new Set<string>();
 
     // Sweep orphaned in-flight temp writes left by a prior crashed exchange.
-    // Match the temp-<uuid>.tmp shape send()/writeAck() produce by its exact
-    // `temp-` prefix and `.tmp` extension, never a final <id>.json message -- in
-    // retain mode the directory is intentionally full of *.json (the
-    // transcript), which can never match `.tmp`. Delete each with the
-    // non-throwing safeDelete, then add its name to `ignored` so the
-    // already-taken `files` snapshot does not re-trip the guard below on a name
-    // we just removed.
+    // Match ONLY the protocol's own temp shape, temp-<uuidv4()>.tmp
+    // (isProtocolTempName), which send()/writeAck() produce -- never a final
+    // <id>.json message (in retain mode the directory is intentionally full of
+    // *.json (the transcript), which can never match `.tmp`), and never a
+    // FOREIGN temp-*.tmp whose stem is not a v4 UUID (a user/sync-tool
+    // `temp-export.tmp`), which falls through to the foreign-file snapshot below
+    // and is tolerated rather than destroyed in a namespace collision. Delete
+    // each with the non-throwing safeDelete, then add its name to `ignored` so
+    // the already-taken `files` snapshot does not re-trip the guard below on a
+    // name we just removed.
     //
     // The delete is best-effort and the `ignored` add is unconditional (it does
     // not branch on the delete's outcome): a safeDelete that silently fails (a
@@ -1413,8 +1446,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // permanent. Tracking the orphan in `responsibleFiles` would not help: its
     // writer already died, so that process's cleanup() never runs -- which is the
     // whole reason this rendezvous-time sweep exists.
-    const orphanedTempFiles = files.filter(
-      (file) => file.name.startsWith("temp-") && file.name.endsWith(".tmp"),
+    const orphanedTempFiles = files.filter((file) =>
+      isProtocolTempName(file.name),
     );
     if (orphanedTempFiles.length > 0) {
       // Single breadcrumb: a process died mid-write here. Entry is not aborted
@@ -2745,8 +2778,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   // True when `name` is a file legitimately present during the message loop
   // (Phase 2), judged against the two known party ids and the filename grammar.
-  // The recognized set is: an in-flight `temp-*.tmp` write; and any `.json`
-  // file written by either party (prefixed by `<this.id>-` or `<peerId>-`)
+  // The recognized set is: an in-flight `temp-<uuidv4()>.tmp` write; and any
+  // `.json` file written by either party (prefixed by `<this.id>-` or `<peerId>-`)
   // that is one of: the two hellos (`<id>-hello.json`) and the single lock
   // tiebreaker (`<first>-<second>-lock.json`), matched by exact name since each
   // has exactly one legal form; or -- for the cases whose names are unbounded --
@@ -2786,7 +2819,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // snapshotted, and is selected then rejected by poll() rather than
     // recognized here.
     if (this.foreignFileSnapshot.has(name)) return true;
-    if (name.startsWith("temp-") && name.endsWith(".tmp")) return true;
+    // Only the protocol's own temp shape (temp-<uuidv4()>.tmp) is recognized; a
+    // foreign temp-*.tmp with a non-UUID stem is not a loop file and falls to
+    // the foreign-file policy, the same as any other foreign name.
+    if (isProtocolTempName(name)) return true;
     if (!name.endsWith(".json")) return false;
     const ownPrefixed = name.startsWith(`${this.id}-`);
     if (!ownPrefixed && !name.startsWith(`${peerId}-`)) return false;
