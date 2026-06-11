@@ -23,6 +23,16 @@ export const MAX_ERROR_CAUSE_DEPTH = 8;
 const CAUSE_SEPARATOR = "\ncaused by: ";
 
 /**
+ * Fallback emitted for a cause-chain link whose message cannot be read -- a
+ * hostile or malformed error whose `.message`/`.cause` getter or
+ * `toString`/`Symbol.toPrimitive` throws, or whose `.message` is a non-string.
+ * Plain ASCII, so it passes through {@link sanitizeForDisplay} unchanged and
+ * keeps this renderer total: it never throws at the operator-facing, last-resort
+ * boundary it exists to protect.
+ */
+const UNREADABLE_LINK = "[unreadable error]";
+
+/**
  * Render an arbitrary thrown value as operator-safe display text: its own
  * message followed by each chained `cause` message, every link passed through
  * {@link sanitizeForDisplay} so partner- or server-controlled bytes embedded in
@@ -49,7 +59,11 @@ const CAUSE_SEPARATOR = "\ncaused by: ";
  *   flood -- the whole output is bounded without a separate total-length cap;
  * - it suppresses a link whose raw message repeats the link before it -- the
  *   common case, since `asConnectionError` sets a wrapper's message to its
- *   cause's message -- so the same text is not printed twice.
+ *   cause's message -- so the same text is not printed twice;
+ * - it never throws: a link whose message cannot be read (a throwing
+ *   `.message`/`.cause` getter or `toString`, or a non-string `.message`)
+ *   renders as `[unreadable error]` rather than propagating, since a renderer at
+ *   a last-resort catch boundary must not become a second failure.
  *
  * An error with no `cause` renders exactly as
  * `sanitizeForDisplay(errorMessage(err))`, and a non-`Error` value (including
@@ -61,7 +75,17 @@ export function sanitizeErrorForDisplay(err: unknown): string {
   const seen = new Set<unknown>();
   let current: unknown = err;
   for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
-    const message = errorMessage(current);
+    // Read each link defensively. This is a last-resort display path, so a
+    // hostile or malformed error -- a `.message` getter or `toString` that
+    // throws, or a non-string `.message` that would make sanitizeForDisplay's
+    // code-point walk throw -- must yield a marker, never crash the renderer.
+    let message: string;
+    try {
+      const raw = errorMessage(current);
+      message = typeof raw === "string" ? raw : String(raw);
+    } catch {
+      message = UNREADABLE_LINK;
+    }
     // Suppress a link that repeats the previous link's raw message: a wrapper
     // built by asConnectionError carries its cause's message verbatim, so the
     // outer and first inner links are usually byte-identical.
@@ -71,11 +95,17 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     seen.add(current);
     // Follow `.cause` on any object link (mirrors the cause walker in the CLI
     // protocol layer); a non-object link has no chain to follow. typeof null is
-    // "object", so the null guard is load-bearing.
-    const next =
-      typeof current === "object" && current !== null
-        ? (current as { cause?: unknown }).cause
-        : undefined;
+    // "object", so the null guard is load-bearing. A throwing `.cause` getter
+    // ends the chain rather than propagating.
+    let next: unknown;
+    try {
+      next =
+        typeof current === "object" && current !== null
+          ? (current as { cause?: unknown }).cause
+          : undefined;
+    } catch {
+      next = undefined;
+    }
     if (next === undefined || next === null || seen.has(next)) break;
     current = next;
   }

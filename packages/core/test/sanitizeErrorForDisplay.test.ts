@@ -137,4 +137,66 @@ describe("sanitizeErrorForDisplay", () => {
   test("escapes control/ANSI bytes in a non-Error thrown value", () => {
     expect(sanitizeErrorForDisplay("evil\x1b[31m")).toBe("evil\\x1b[31m");
   });
+
+  test("does not throw on an error whose message getter throws", () => {
+    const hostile = new Error("placeholder");
+    Object.defineProperty(hostile, "message", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(sanitizeErrorForDisplay(hostile)).toBe("[unreadable error]");
+  });
+
+  test("ends the chain on an error whose cause getter throws", () => {
+    const hostile = new Error("real failure");
+    Object.defineProperty(hostile, "cause", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    // The readable top message still renders; the throwing cause read stops the
+    // walk rather than propagating.
+    expect(sanitizeErrorForDisplay(hostile)).toBe("real failure");
+  });
+
+  test("renders readable links on both sides of an unreadable middle cause", () => {
+    // An unreadable link (throwing message getter) in the middle of the chain
+    // becomes the marker but does not stop the walk: its own `.cause` is a normal
+    // data property, so a readable inner link beyond it still renders.
+    const mid = new Error("placeholder", { cause: new Error("inner") });
+    Object.defineProperty(mid, "message", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(sanitizeErrorForDisplay(new Error("outer", { cause: mid }))).toBe(
+      "outer\ncaused by: [unreadable error]\ncaused by: inner",
+    );
+  });
+
+  test("coerces a non-string message rather than letting the sanitizer throw", () => {
+    // A malformed Error with a numeric .message would make sanitizeForDisplay's
+    // code-point iteration throw; the helper coerces it to a string first.
+    const weird = new Error("placeholder");
+    (weird as unknown as { message: unknown }).message = 12345;
+    expect(sanitizeErrorForDisplay(weird)).toBe("12345");
+  });
+
+  test("renders an empty-message link inside a chain via the errorMessage fallback", () => {
+    expect(
+      sanitizeErrorForDisplay(new Error("outer", { cause: new Error("") })),
+    ).toBe("outer\ncaused by: Error");
+  });
+
+  test("stringifies a non-Error object cause instead of reading its message field", () => {
+    // A non-Error object cause matches errorMessage's String(...) contract: it
+    // renders as [object Object]; its own .message is not duck-typed. (Its
+    // .cause is still followed, like any object link -- exercised elsewhere.)
+    expect(
+      sanitizeErrorForDisplay(
+        new Error("outer", { cause: { message: "ignored" } }),
+      ),
+    ).toBe("outer\ncaused by: [object Object]");
+  });
 });
