@@ -6508,9 +6508,7 @@ test("poll(): an unrecognized file mid-loop is a terminal UsageError under the d
 // that its partner-controlled name is now routed through sanitizeForDisplay,
 // mirroring the sanitizeForDisplay categories. Driven through the default error
 // policy, the same path the ordinary-name test above exercises.
-async function pollForeignFileError(
-  hostileName: string,
-): Promise<Error> {
+async function pollForeignFileError(hostileName: string): Promise<Error> {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = "peer-test";

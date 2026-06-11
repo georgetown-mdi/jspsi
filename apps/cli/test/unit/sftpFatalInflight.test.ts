@@ -119,7 +119,16 @@ async function startMalformedServer(kind: InflightKind): Promise<{
           // get() issues an FSTAT before READ to size the transfer; answer it
           // with a small size so the library proceeds to the READ we corrupt.
           sftp.on("FSTAT", (reqid) => {
-            sftp.attrs(reqid, { size: 8, mode: 0o100644 });
+            // Only `size` matters here (it sizes the transfer); the rest are
+            // zero-filled to satisfy the full Attributes shape, as in name() below.
+            sftp.attrs(reqid, {
+              mode: 0o100644,
+              uid: 0,
+              gid: 0,
+              size: 8,
+              atime: 0,
+              mtime: 0,
+            });
           });
           // For "oversizeName", READDIR is answered once with a valid NAME
           // batch carrying an over-length filename, then with EOF; the batch

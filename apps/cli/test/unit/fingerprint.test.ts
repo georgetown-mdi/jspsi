@@ -305,7 +305,9 @@ test("handler refuses to export the certificate over the identity file itself", 
   }
   // The identity file is byte-for-byte intact: the private key was not destroyed.
   expect(fs.readFileSync(idPath, "utf8")).toBe(before);
-  expect(loadSigningIdentity(idPath).privateKey).toBeDefined();
+  const reloaded = loadSigningIdentity(idPath);
+  expect(reloaded).toBeDefined();
+  expect(reloaded?.privateKey).toBeDefined();
 });
 
 // --- handler: repeated single-value flag -------------------------------------

@@ -14,7 +14,9 @@ test("singleValue: returns a single scalar value unchanged", () => {
   // The caller casts to the option's declared type; the helper only rejects the
   // array case, so a lone number or string passes through untouched.
   expect(singleValue(argv({ "server-port": 2222 }), "server-port")).toBe(2222);
-  expect(singleValue(argv({ "log-level": "debug" }), "log-level")).toBe("debug");
+  expect(singleValue(argv({ "log-level": "debug" }), "log-level")).toBe(
+    "debug",
+  );
 });
 
 test("singleValue: an absent flag is undefined", () => {
