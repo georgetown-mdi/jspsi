@@ -1273,6 +1273,108 @@ test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-
   expect(received).toHaveLength(0);
 });
 
+test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-and-re-emitted", async () => {
+  // Retain mode never deletes the message; the consumption signal the sender
+  // waits for is instead a zero-length ack marker writeAck() publishes (a put
+  // then a rename) BEFORE poll() emits the payload and advances
+  // recvSeq/lastAckedNNN. A TRANSIENT ack-write failure reschedules and the
+  // never-deleted message is reprocessed next cycle -- but a terminal UsageError
+  // (the per-op stall deadline a withheld put callback now trips) must NOT be
+  // swallowed: re-attempting just re-hits the stall, and advancing past it would
+  // emit a message whose ack never landed, leaving the sender blocked forever on
+  // an ack it will never see. The poller must instead stop and surface the
+  // terminal error, like every other transport-call site. This is the retain
+  // sibling of the read-stall and consume-delete poll tests above -- the
+  // ack-write consumer in that terminal-on-UsageError family. It mirrors the
+  // consume-delete test's structure; its retain consume harness (an inline
+  // retain-mode connection reading a timestamped, recvSeq-matched message) is
+  // adapted from the retain-mode tests below.
+  const peerId = "peer-sender";
+  const id = "receiver-me";
+  const validMessage = Buffer.from(
+    JSON.stringify({
+      ts: 1,
+      seq: 0,
+      type: "Object",
+      payload: { hello: "world" },
+    }),
+  );
+  // Retain filename grammar: <peerId>-<timestamp>-<NNN>-<byteCount>.json, with
+  // NNN === recvSeq (0) so poll() selects it as this cycle's message.
+  const peerName = `${peerId}-20260101T000000-000-${validMessage.length}.json`;
+  const peerPath = `/test/${peerName}`;
+
+  const errors: unknown[] = [];
+  const received: unknown[] = [];
+  let putCount = 0;
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+
+  const { client, files } = makeMockClient();
+  // Pre-seed the message so the default get() reads it; it parses and validates
+  // (body seq matches the filename NNN), reaching the ack-write before emit.
+  files.set(peerPath, validMessage);
+  // The ack-write stalls terminally. put is writeAck()'s first transport op, so
+  // a stall there is the ack-write itself failing (a withheld callback the
+  // adapter's per-op deadline surfaces as this typed UsageError). poll() does no
+  // other put on this path, so putCount counts ack-write attempts exactly.
+  client.put = async () => {
+    putCount++;
+    throw new TransportOperationStalledError(
+      "SFTP file write stalled: did not complete within 60000 ms",
+    );
+  };
+
+  // Inline retain-mode connection (locklessRendezvous + timestampInFilename +
+  // retainFiles): this cluster's makeConnectedConn does not set them, and the
+  // equivalent makeRetainConn lives far below in the retain section, away from
+  // these poll-terminal siblings.
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  conn.id = id;
+  conn.connected = true;
+  conn.path = "/test";
+  conn.peerId = peerId;
+  // Do NOT stop the poller in the handler: it must stop itself on the UsageError.
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.on("data", (msg) => received.push(msg));
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2000,
+      ),
+    ),
+  ]);
+  // Give a wrong reschedule several poll intervals to surface (bump putCount or
+  // deliver the message); a terminal poller does neither.
+  await new Promise((r) => setTimeout(r, 60));
+  conn.stop();
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect(errors[0]).toBeInstanceOf(TransportOperationStalledError);
+  // Terminal: the ack-write ran once and the poller stopped -- not retried at the
+  // poll cadence. recvSeq/lastAckedNNN advance only after writeAck() resolves (it
+  // never did), and emit() sits after the ack-write, so the message was neither
+  // acked-and-advanced nor delivered: received stays empty, with no duplicate.
+  // (recvSeq/lastAckedNNN are private; their non-advance is pinned behaviorally
+  // here, as in the consume-delete sibling, not by reading the fields.)
+  expect(putCount).toBe(1);
+  expect(received).toHaveLength(0);
+});
+
 // --- whole-exchange liveness backstop (write/stat/delete + slow-drip read) ---
 //
 // The write-path analogue of the read-path liveness test above. The CLI adapter's
