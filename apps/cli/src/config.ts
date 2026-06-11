@@ -451,9 +451,10 @@ export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
 
 /**
  * Serialize an {@link ExchangeSpec} and write it to `configPath` as snake_case
- * YAML, owner-read-only -- a config may carry inline SFTP credentials
- * (`server.password`, `server.privateKey`), so it gets the same `0600` / ACL
- * protection as the key file via {@link writeFileOwnerOnly}.
+ * YAML, owner-read-only -- a config may carry an SFTP credential: a literal
+ * `server.password`/`server.privateKey` is a secret at rest, while an `@path`-
+ * supplied one is preserved as the reference, not inlined. Either way it gets the
+ * same `0600` / ACL protection as the key file via {@link writeFileOwnerOnly}.
  *
  * The shared secret and its expiration live only in the key file and never belong
  * in the config; they are stripped from the top-level `authentication` block here
