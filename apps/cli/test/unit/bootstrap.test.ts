@@ -4,11 +4,13 @@ import path from "node:path";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
+import YAML from "yaml";
 import { getLogger, SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
   PreparedExchange,
+  SFTPConnectionConfig,
 } from "@psilink/core";
 
 import {
@@ -579,6 +581,51 @@ test("runOnlineBootstrap reports no config-write error on a clean run", async ()
       onlineBootstrapParams(configPath),
     );
     expect(configWriteError).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap persists an @path credential as the reference while connecting with the resolved value", async () => {
+  // The invite/accept persistence path: the connection carries an @path
+  // server-password. saveConfig (in the hook) must write the @path, never the
+  // secret, while runProtocol receives the resolved value to actually connect.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const pwFile = path.join(dir, "pw");
+  fs.writeFileSync(pwFile, "s3cret\n");
+  const configPath = path.join(dir, "psilink.yaml");
+
+  let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      | (() => void | Promise<void>)
+      | undefined;
+    await onAuthenticated?.();
+    return {};
+  }) as never);
+
+  try {
+    const params = onlineBootstrapParams(configPath);
+    const connection: SFTPConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org", password: `@${pwFile}` },
+    };
+    await runOnlineBootstrap({ ...params, connection });
+
+    // runProtocol connected with the resolved secret.
+    expect(connectionPassedToRunProtocol?.server.password).toBe("s3cret");
+
+    // The persisted config records the @path reference, not the secret. (Read
+    // the value back through the YAML parser rather than as a raw substring: the
+    // serializer may line-wrap a long quoted scalar, so a substring check on the
+    // file text is brittle across temp-path lengths.)
+    const written = fs.readFileSync(configPath, "utf8");
+    expect(written).not.toContain("s3cret");
+    const parsed = YAML.parse(written) as {
+      connection: SFTPConnectionConfig;
+    };
+    expect(parsed.connection.server.password).toBe(`@${pwFile}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

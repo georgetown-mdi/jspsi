@@ -155,6 +155,27 @@ test("throws a UsageError when config file fails schema validation", () => {
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
+test("throws a UsageError at config load when a preserved @path credential file is missing", () => {
+  // A saved config keeps the @path reference, not the secret; the reference is
+  // resolved when the config loads, before any network activity. A moved or
+  // deleted file therefore fails the next exchange here, with a usage error
+  // (exit 64) naming the reference -- the documented failure for a stale @path.
+  const missing = path.join(dir, "no-such-secret");
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      connection: {
+        channel: "sftp",
+        server: { host: "sftp.example.org", password: `@${missing}` },
+      },
+      linkage_terms: minimalLinkageTerms,
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow("@-file reference");
+});
+
 // --- key file errors ---------------------------------------------------------
 
 test("throws a UsageError with 'does not exist' when key file is absent", () => {
