@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "formatcheck": "prettier --list-different .",
-    "typecheck": "tsc -p packages/core/tsconfig.test.json && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
     "test": "npm run test -w packages/core -w apps/cli -w apps/web"
   },
   "keywords": [
