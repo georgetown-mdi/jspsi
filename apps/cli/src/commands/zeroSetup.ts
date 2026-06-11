@@ -718,21 +718,16 @@ export async function handler(argv: Arguments): Promise<void> {
 
   let runResult: Awaited<ReturnType<typeof runProtocol>>;
   try {
-    // Spread + cast: `connection` is `ConnectionConfig` (which includes the
-    // webrtc channel), so TypeScript cannot verify that the spread result fits
-    // `ProtocolConnectionConfig` (constrained to sftp and filedrop). The double
-    // cast through `unknown` is intentional; the channel guard inside
-    // `runProtocol` rejects unsupported channels at runtime. The satisfies
-    // check verifies that the authentication override is structurally valid for
-    // ProtocolConnectionConfig.
-    // authentication: null is the explicit opt-out that tells runProtocol to
-    // proceed without authentication and without a warning.
-    const authOverride = { authentication: null } satisfies Pick<
-      ProtocolConnectionConfig,
-      "authentication"
-    >;
+    // Cast: `connection` is `ConnectionConfig` (which includes the webrtc
+    // channel), so TypeScript cannot verify it fits `ProtocolConnectionConfig`
+    // (constrained to sftp and filedrop). The double cast through `unknown` is
+    // intentional; the channel guard inside `runProtocol` rejects unsupported
+    // channels at runtime.
+    // auth: null is the explicit opt-out that tells runProtocol to proceed
+    // without authentication and without a warning.
     runResult = await runProtocol(
-      { ...connection, ...authOverride } as unknown as ProtocolConnectionConfig,
+      connection as unknown as ProtocolConnectionConfig,
+      null,
       prepared,
       output,
       verbosity,

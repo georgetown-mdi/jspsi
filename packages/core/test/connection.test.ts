@@ -82,14 +82,11 @@ test("parses a minimal SFTP connection", () => {
   expect(result.server.host).toBe("sftp.example.org");
 });
 
-test("parses a full WebRTC connection with stun, turn, and authentication", () => {
+test("parses a full WebRTC connection with stun, turn, and role", () => {
   const result = parseConnectionConfig({
     channel: "webrtc",
     server: { host: "peerjs.example.org", port: 443, key: "mykey" },
-    authentication: {
-      role: "inviter",
-      expires: "2027-01-01T00:00:00Z",
-    },
+    role: "inviter",
     stun: ["stun:stun.example.org:3478", "stuns:stun2.example.org:5349"],
     turn: [
       {
@@ -105,7 +102,7 @@ test("parses a full WebRTC connection with stun, turn, and authentication", () =
   if (result.channel !== "webrtc") return;
   expect(result.stun).toHaveLength(2);
   expect(result.turn).toHaveLength(1);
-  expect(result.authentication?.role).toBe("inviter");
+  expect(result.role).toBe("inviter");
 });
 
 test("parses a full SFTP connection with private key auth", () => {
@@ -437,9 +434,7 @@ test("parses snake_case keys from disk", () => {
   const result = parseConnectionConfig({
     channel: "webrtc",
     server: { host: "peerjs.example.org" },
-    authentication: {
-      role: "acceptor",
-    },
+    role: "acceptor",
     ice_provision: {
       host: "nts.twilio.com",
       auth: { username: "sid", password: "key" },
@@ -447,7 +442,7 @@ test("parses snake_case keys from disk", () => {
   });
   expect(result.channel).toBe("webrtc");
   if (result.channel !== "webrtc") return;
-  expect(result.authentication?.role).toBe("acceptor");
+  expect(result.role).toBe("acceptor");
   expect(result.iceProvision?.host).toBe("nts.twilio.com");
 });
 

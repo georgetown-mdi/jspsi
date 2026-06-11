@@ -16,8 +16,6 @@ import {
 import type {
   Authentication,
   ConnectionConfig,
-  SFTPConnectionConfig,
-  FileDropConnectionConfig,
   PreparedExchange,
   ExchangeBootstrapResult,
 } from "@psilink/core";
@@ -61,6 +59,9 @@ export const PEER_SILENCE_GUIDANCE =
 /**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
  * the rotated shared secret is persisted after each successful key exchange.
+ * Passed to {@link runProtocol} on its own `auth` parameter, separate from the
+ * connection config (the shared secret is a channel-agnostic partner-trust
+ * concern, no longer embedded in the connection).
  *
  * `sharedSecret` is narrowed from optional in {@link Authentication} to required
  * here: every authenticated exchange must supply a valid token before the
@@ -71,41 +72,19 @@ export interface AuthPersist extends Authentication {
   keyFilePath: string;
 }
 
-// Distributive Omit: applied to each union member independently so that
-// discriminated-union narrowing (e.g. on `channel`) is preserved.
-type DistributedOmit<T, K extends PropertyKey> = T extends unknown
-  ? Omit<T, K>
-  : never;
-
 /**
- * A {@link ConnectionConfig} where `authentication` carries one of two
- * explicit states (no `undefined` third state):
- *
- * - `AuthPersist` — authenticated exchange; the token is persisted to
- *   `keyFilePath` after each successful key exchange.
- * - `null` — intentionally unauthenticated exchange (e.g. zero-setup); the
- *   caller has acknowledged the security tradeoff and `runProtocol` proceeds
- *   without authentication.
- *
- * The required (non-optional) field forces every CLI caller to make the
- * authentication choice explicit at construction time. There is no library
- * "fall through with a warning" branch — the only consumers of `runProtocol`
- * are the CLI commands, and both currently produce one of the two values.
- *
- * `Extract` narrows the base to the channels that `runProtocol` actually
- * supports (`"sftp"` and `"filedrop"`), so passing a WebRTC config requires
- * an explicit `as unknown as` cast and cannot happen by accident. The
- * distributive `Omit` then removes `authentication` from each union member
- * independently so that discriminant narrowing on `channel` is preserved, and
- * the field is redefined here as required so that `null` is a valid state but
- * `undefined` is not.
+ * The connection configs {@link runProtocol} can run: the `sftp` and `filedrop`
+ * channels. `Extract` narrows {@link ConnectionConfig} to those channels so
+ * passing a WebRTC config requires an explicit `as unknown as` cast and cannot
+ * happen by accident. Authentication is no longer part of the connection union
+ * (it is a top-level spec block); `runProtocol` takes it on a separate `auth`
+ * parameter, so this type is just the channel-narrowed connection with no
+ * `Omit`/`null` machinery.
  */
-export type ProtocolConnectionConfig = DistributedOmit<
-  Extract<ConnectionConfig, { channel: "sftp" | "filedrop" }>,
-  "authentication"
-> & {
-  authentication: AuthPersist | null;
-};
+export type ProtocolConnectionConfig = Extract<
+  ConnectionConfig,
+  { channel: "sftp" | "filedrop" }
+>;
 
 /**
  * CLI-only, non-persistable runtime controls for the file-sync transport's entry
@@ -158,19 +137,23 @@ export interface RunProtocolResult {
 
 /**
  * Runs the PSI protocol over an SFTP or file-drop connection and writes
- * results to output.
+ * results to output. Authentication is supplied on the separate `auth`
+ * parameter, not embedded in `connection`.
  *
- * When `connection.authentication` is set, `keyFilePath` must be a non-empty,
+ * When `auth` is an {@link AuthPersist}, `keyFilePath` must be a non-empty,
  * non-whitespace string; this is checked before any connection is opened so
  * that a whitespace-only path does not silently create a file named " " in
  * the current directory. `sharedSecret` is validated by {@link authenticateConnection}
  * after the connection opens. `keyFilePath` is checked for non-emptiness only
  * — invalid paths are caught with a clear OS error at the key-file write step.
  *
- * When `connection.authentication` is `null` the exchange runs without authentication;
- * this is the path taken by callers (e.g. zero-setup) that explicitly
- * acknowledge relying on transport-layer security only. The field is required
- * (no `undefined`) so the choice is always explicit.
+ * When `auth` is `null` the exchange runs without authentication; this is the
+ * path taken by callers (e.g. zero-setup) that explicitly acknowledge relying
+ * on transport-layer security only. The parameter has no `undefined` state, so
+ * every caller makes the authentication choice explicit: `AuthPersist` to
+ * authenticate, `null` to opt out. There is no library "fall through with a
+ * warning" branch -- the only consumers of `runProtocol` are the CLI commands,
+ * and both produce one of the two values.
  *
  * When `recordOutput` is provided, the self-attested exchange record and its
  * private opening data are written after the results (non-fatal on failure; see
@@ -180,8 +163,7 @@ export interface RunProtocolResult {
  * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
  * (the default) on every authenticated path; pass a boolean only from the
  * zero-setup command, which then reads {@link RunProtocolResult.bootstrap} to
- * provision the saved config/key. It is only meaningful with
- * `authentication: null`.
+ * provision the saved config/key. It is only meaningful with `auth: null`.
  *
  * `onAuthenticated` is an optional post-handshake hook invoked exactly once, on
  * the authenticated path only, after the rotated token is saved to the key file
@@ -199,8 +181,8 @@ export interface RunProtocolResult {
  * {@link RunProtocolResult.onAuthenticatedError} so the caller can correct its
  * own messaging. Pass `undefined` (the default) on the no-auth path and from
  * callers that need no post-handshake step (zero-setup, exchange); passing a
- * hook with `authentication: null` is rejected up front, since an
- * unauthenticated exchange has no acceptance step to hook.
+ * hook with `auth: null` is rejected up front, since an unauthenticated
+ * exchange has no acceptance step to hook.
  *
  * `fileSyncRuntime` carries the CLI-only, non-persistable file-sync entry-sweep
  * controls (`--sweep-exchange-files` / `--force-retain-sweep`) straight to the
@@ -210,6 +192,7 @@ export interface RunProtocolResult {
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
+  auth: AuthPersist | null,
   prepared: PreparedExchange,
   output: string | undefined,
   verbosity: number,
@@ -230,15 +213,14 @@ export async function runProtocol(
         (connection as unknown as { channel: string }).channel,
     );
 
-  const auth = connection.authentication;
   // saveIntent drives the zero-setup `--save` bootstrap, which exists only on
   // the unauthenticated path: an authenticated exchange already has a persistent
   // key and no provisioning step to consume a bootstrap result, so a stray
   // saveIntent here would advertise a save field (and possibly transmit a secret
   // frame) inside the authenticated channel with nothing reading it back. Reject
   // the combination rather than leave the footgun open to a future caller; the
-  // type docs already mark saveIntent as meaningful only with `authentication:
-  // null`, and both current callers honor that.
+  // type docs already mark saveIntent as meaningful only with `auth: null`, and
+  // both current callers honor that.
   if (auth && saveIntent !== undefined)
     throw new Error(
       "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
@@ -246,10 +228,9 @@ export async function runProtocol(
     );
   // The mirror constraint: onAuthenticated hooks the moment of acceptance, which
   // exists only on the authenticated path -- its invocation below is nested in
-  // `if (auth)`. Reject a hook supplied with `authentication: null` up front
-  // rather than silently dropping it, so a future caller that wires a hook to a
-  // zero-setup exchange gets a clear error instead of a persistence step that
-  // never runs.
+  // `if (auth)`. Reject a hook supplied with `auth: null` up front rather than
+  // silently dropping it, so a future caller that wires a hook to a zero-setup
+  // exchange gets a clear error instead of a persistence step that never runs.
   if (!auth && onAuthenticated !== undefined)
     throw new Error(
       "onAuthenticated is only valid on an authenticated exchange; an " +
@@ -501,15 +482,10 @@ export async function runProtocol(
         connection.options,
       );
     }
-    // Destructure authentication out before calling open(): conn.open() does
-    // not use the field, and null (from the no-auth path) is not assignable to
-    // Authentication | undefined. The spread + cast is required because
-    // DistributedOmit does not produce a type TypeScript can narrow back to the
-    // union form without a cast.
-    const { authentication: _auth, ...connForOpen } = connection;
-    await conn.open(
-      connForOpen as SFTPConnectionConfig | FileDropConnectionConfig,
-    );
+    // Authentication is no longer embedded in the connection config, so the
+    // connection is the open() argument type directly (sftp | filedrop) -- no
+    // destructure or cast needed.
+    await conn.open(connection);
     opened = true;
 
     // If a signal fired while `conn.open()` was awaiting, the signal handler

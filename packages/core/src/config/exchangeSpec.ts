@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { LinkageTermsSchema } from "./linkageTerms.js";
-import { ConnectionConfigSchema } from "./connection.js";
+import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
 import { MetadataSchema } from "./metadata.js";
 import { SigningConfigSchema } from "./signing.js";
@@ -22,6 +22,15 @@ export const ExchangeSpecSchema = z.object({
   linkageTerms: LinkageTermsSchema,
   metadata: MetadataSchema.optional(),
   standardization: StandardizationSchema.optional(),
+  // Optional top-level authentication block: the partner shared-secret trust
+  // mechanism, channel-agnostic across sftp/filedrop/webrtc. A sibling of
+  // `signing` -- the two partner-trust mechanisms are deliberately kept separate
+  // (opposed lifetimes and trust models); see SECURITY_DESIGN.md. It mixes
+  // runtime-injected secret state (sharedSecret, expires, from .psilink.key,
+  // never written to YAML and warn-and-stripped if set there) with
+  // operator-settable policy fields. See connection.ts (Authentication) and
+  // EXCHANGE_SPEC.md.
+  authentication: AuthenticationSchema.optional(),
   // Optional signing block (receipt signing mode, this party's signing identity
   // file path, the pinned partner fingerprint, and the receipt output
   // location). Absent in exchanges that do not sign receipts; see signing.ts and

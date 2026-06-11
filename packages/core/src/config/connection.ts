@@ -151,8 +151,8 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
  */
 export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
-// Shared Zod schema for the `sharedSecret` field; reused by both Authentication
-// and WebRTCAuthentication so the regex and error message stay in sync.
+// Named const for the `sharedSecret` field schema so the regex and error
+// message live in one place.
 const sharedSecretSchema = z
   .string()
   .regex(
@@ -165,7 +165,9 @@ const sharedSecretSchema = z
 /**
  * Shared secret for mutual authentication via the X25519 key exchange. The
  * secret and its expiration are stored in `.psilink.key` and injected at
- * runtime; they never appear in `psilink.yaml`.
+ * runtime; they never appear in `psilink.yaml`. This is the type of the
+ * channel-agnostic top-level `authentication` block of an {@link ExchangeSpec}
+ * (a sibling of `signing`); see exchangeSpec.ts and EXCHANGE_SPEC.md.
  *
  * IMPORTANT: This type is the parse-time representation. `sharedSecret` is
  * optional because a configuration file parsed in isolation may not yet
@@ -177,7 +179,7 @@ const sharedSecretSchema = z
 export interface Authentication {
   /**
    * Shared secret; loaded from `.psilink.key` at runtime and injected
-   * into the connection config. Never written to `psilink.yaml`.
+   * into the `authentication` block. Never written to `psilink.yaml`.
    *
    * Must be a base64url-encoded 32-byte value (exactly 43 characters from
    * `[A-Za-z0-9_-]`, with the final character constrained to
@@ -200,26 +202,15 @@ export interface Authentication {
   expires?: string;
 }
 
-const AuthenticationSchema: z.ZodType<Authentication> = z.object({
-  sharedSecret: sharedSecretSchema,
-  expires: z.iso.datetime().optional(),
-});
-
 /**
- * WebRTC-specific authentication settings. Extends {@link Authentication} with
- * `role`, which is used to derive deterministic PeerJS peer IDs from the shared
- * token so both parties know each other's address without out-of-band
- * communication. Orthogonal to the PSI sender/receiver roles.
+ * Schema for the top-level `authentication` block, exported so
+ * {@link ExchangeSpecSchema} can embed it as a sibling of `signing`. Field-shape
+ * validation only; the injected fields (`sharedSecret`/`expires`) come from
+ * `.psilink.key` and are warn-and-stripped if set in YAML (see the CLI loader).
  */
-export interface WebRTCAuthentication extends Authentication {
-  /** `inviter` | `acceptor`; WebRTC only. */
-  role?: "inviter" | "acceptor";
-}
-
-const WebRTCAuthenticationSchema: z.ZodType<WebRTCAuthentication> = z.object({
+export const AuthenticationSchema: z.ZodType<Authentication> = z.object({
   sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
-  role: z.enum(["inviter", "acceptor"]).optional(),
 });
 
 // --- TURN and ICE (WebRTC only) ----------------------------------------------
@@ -488,7 +479,16 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
 export interface WebRTCConnectionConfig {
   channel: "webrtc";
   server: WebRTCServer;
-  authentication?: WebRTCAuthentication;
+  /**
+   * `inviter` | `acceptor`. Derives this party's deterministic PeerJS peer ID
+   * from the shared secret so both parties reach each other without an
+   * out-of-band address exchange. A peer-addressing/transport concern -- hence
+   * its home on the WebRTC connection config rather than the channel-agnostic
+   * top-level `authentication` block -- and orthogonal to the PSI
+   * sender/receiver roles. Currently schema-only: not yet consumed by transport
+   * logic (see the Web Exchange Rework / CLI WebRTC Transport items).
+   */
+  role?: "inviter" | "acceptor";
   /**
    * STUN servers for ICE candidate gathering; each entry is a `stun:` or
    * `stuns:` URI.
@@ -514,7 +514,6 @@ export interface WebRTCConnectionConfig {
 export interface SFTPConnectionConfig {
   channel: "sftp";
   server: SFTPServer;
-  authentication?: Authentication;
   /**
    * WebSocket-to-TCP proxy for browser clients. CLI clients omit this and
    * connect natively.
@@ -545,7 +544,6 @@ export interface FileDropConnectionConfig {
   channel: "filedrop";
   /** Absolute path to the shared directory (Unix or Windows). */
   path: string;
-  authentication?: Authentication;
   options?: FileSyncOptions;
   // No providerOptions: LocalFSClient has no underlying transport library to
   // pass opaque options to, unlike SSH2SFTPClientAdapter.
@@ -564,7 +562,7 @@ export type ConnectionConfig =
 const WebRTCConnectionConfigSchema = z.object({
   channel: z.literal("webrtc"),
   server: WebRTCServerSchema,
-  authentication: WebRTCAuthenticationSchema.optional(),
+  role: z.enum(["inviter", "acceptor"]).optional(),
   stun: z
     .array(
       z.string().regex(/^stuns?:/, "STUN URI must begin with stun: or stuns:"),
@@ -579,7 +577,6 @@ const WebRTCConnectionConfigSchema = z.object({
 const SFTPConnectionConfigSchema = z.object({
   channel: z.literal("sftp"),
   server: SFTPServerSchema,
-  authentication: AuthenticationSchema.optional(),
   proxy: SFTPProxySchema.optional(),
   options: FileSyncOptionsSchema.optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
@@ -597,7 +594,6 @@ const FileDropConnectionConfigSchema = z.object({
         p.startsWith("\\\\"), // Windows UNC (\\server\share)
       { message: "path must be an absolute path" },
     ),
-  authentication: AuthenticationSchema.optional(),
   options: FileSyncOptionsSchema.optional(),
 });
 
@@ -661,9 +657,9 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
  * Snake_case keys are converted to camelCase before validation, so JSON/YAML
  * from disk can be passed directly.
  *
- * Note: @-file references in credential fields (e.g. `sharedSecret`, `password`,
- * `privateKey`) are not resolved here. Apply `readAtSignFile` (or equivalent)
- * to those fields before calling this function.
+ * Note: @-file references in credential fields (e.g. `password`, `privateKey`)
+ * are not resolved here. Apply `readAtSignFile` (or equivalent) to those fields
+ * before calling this function.
  *
  * @throws {ZodError} if validation fails.
  */

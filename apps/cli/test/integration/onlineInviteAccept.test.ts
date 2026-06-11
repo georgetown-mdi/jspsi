@@ -307,11 +307,12 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
     expect((spec.connection as FileDropConnectionConfig).path).toBe(
       fileURLToPath(url),
     );
-    // The shared secret lives only in the key file. saveConfig persists the bare
-    // connection (no authentication), so assert the whole block is absent -- a
-    // check on `authentication?.sharedSecret` alone would pass vacuously whether
-    // the block was stripped or merely missing that one field.
-    expect(spec.connection.authentication).toBeUndefined();
+    // The shared secret lives only in the key file. saveConfig persists no
+    // authentication block (it strips the injected fields and prunes the empty
+    // container), so assert the whole top-level block is absent -- a check on
+    // `authentication?.sharedSecret` alone would pass vacuously whether the block
+    // was stripped or merely missing that one field.
+    expect(spec.authentication).toBeUndefined();
   }
 
   // -- The default-on audit record lands on disk for both sides. --

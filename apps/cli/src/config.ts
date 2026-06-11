@@ -456,8 +456,8 @@ export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
  * protection as the key file via {@link writeFileOwnerOnly}.
  *
  * The shared secret and its expiration live only in the key file and never belong
- * in the config; they are stripped from `connection.authentication` here even
- * if a caller leaves them populated, so the secret cannot be duplicated onto
+ * in the config; they are stripped from the top-level `authentication` block here
+ * even if a caller leaves them populated, so the secret cannot be duplicated onto
  * disk (and cannot go stale after token rotation). The caller's spec is not
  * mutated.
  *
@@ -466,15 +466,14 @@ export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
  */
 export function saveConfig(configPath: string, spec: ExchangeSpec): void {
   const sanitized = structuredClone(spec);
-  const auth = sanitized.connection.authentication;
+  const auth = sanitized.authentication;
   if (auth) {
     delete auth.sharedSecret;
     delete auth.expires;
     // Drop the container if those were its only keys, so the config carries no
-    // noisy empty `authentication: {}` block. WebRTC's `role` (the only other
-    // field) keeps it non-empty when present.
-    if (Object.keys(auth).length === 0)
-      delete sanitized.connection.authentication;
+    // noisy empty `authentication: {}` block. Operator-policy fields (e.g. a
+    // future token_max_age_days) keep it non-empty when present.
+    if (Object.keys(auth).length === 0) delete sanitized.authentication;
   }
   writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
 }
