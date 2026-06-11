@@ -8,6 +8,7 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  sanitizeErrorForDisplay,
   serializeCertificate,
   UsageError,
 } from "@psilink/core";
@@ -299,7 +300,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // top-level handler with its stack intact rather than being flattened to a
     // bare exit 69 with the cause lost.
     if (!(err instanceof UsageError)) throw err;
-    console.error(err.message);
+    console.error(sanitizeErrorForDisplay(err));
     process.exit(64);
   }
   logLibrary.setDefaultLevel(logLevel);
@@ -368,7 +369,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
     report(action, identityPath, identity, fingerprint);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit(err instanceof UsageError ? 64 : 69);
   }
 }

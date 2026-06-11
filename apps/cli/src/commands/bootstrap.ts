@@ -14,6 +14,7 @@ import {
   getDefaultStandardization,
   inferDateFormat,
   normalizeFiledropPath,
+  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -819,9 +820,7 @@ export async function runOrExit(
   try {
     await body();
   } catch (err) {
-    getLogger(loggerName).error(
-      err instanceof Error ? err.message : String(err),
-    );
+    getLogger(loggerName).error(sanitizeErrorForDisplay(err));
     process.exit(
       err instanceof UsageError
         ? 64

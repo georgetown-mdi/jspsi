@@ -235,6 +235,37 @@ test("runOrExit: a successful body does not exit", async () => {
   exit.mockRestore();
 });
 
+test("runOrExit surfaces a sanitized cause chain in the CLI failure output", async () => {
+  // A transport failure wraps the raw fs/ssh2 error as its cause, and the
+  // partner-chosen path in that cause can carry control/ANSI/newline bytes. The
+  // failure output must surface the cause (observability) with those bytes
+  // neutralized, never reaching the terminal raw.
+  // Spy before setLevel: loglevel binds console.error by reference when the
+  // logger's methods are (re)built, so the spy must be in place first.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  getLogger("cause-chain-render-test").setLevel("error");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const hostileCause = new Error(
+      "ENOENT: no such file or directory, open '/drop/\x1b[31mEVIL\nFAKE.json'",
+    );
+    await runOrExit("cause-chain-render-test", async () => {
+      throw new Error("transport failed", { cause: hostileCause });
+    });
+    const output = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("transport failed");
+    expect(output).toContain("caused by:");
+    expect(output).toContain("\\x1b[31mEVIL\\x0aFAKE.json");
+    expect(output).not.toContain("\x1b");
+    expect(exit).toHaveBeenCalledWith(69);
+  } finally {
+    errSpy.mockRestore();
+    exit.mockRestore();
+  }
+});
+
 // --- connectionFromEndpoint --------------------------------------------------
 
 test("connectionFromEndpoint: no endpoint yields a marked sftp placeholder", () => {
