@@ -2467,6 +2467,137 @@ test("synchronize() lock starter: TTL expiry with no joiner produces the bare [s
   );
 });
 
+// --- synchronize(): empty-id hello/joining sentinels are rejected in the
+// in-flight rendezvous scans (defense in depth; the entry guard already
+// rejected them at entry, these cover a mid-rendezvous injection) -------------
+
+test("synchronize() lock starter: a bare -joining.json injected mid-rendezvous does not trigger the joiner-recovery stall", async () => {
+  // A `-joining.json` (empty recovered id) appearing after entry must NOT be
+  // treated as a real joiner mid-arrival: the lock starter must keep polling and
+  // hit the bare TTL timeout, never the bounded joiner-recovery (joinerRecoveryMs)
+  // abort. Were the empty-id sentinel adopted, an injected file would force the
+  // ~30 s starter stall its joinerRecoveryMs path induces. joinerRecoveryMs (30)
+  // is far below the TTL (150) so a regression that adopted it would abort early
+  // with the distinct stuck-joiner message instead of the bare timeout asserted
+  // here.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    joinerRecoveryMs: 30,
+    timeToLiveMs: 150,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const bareJoining = "-joining.json";
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // entry: clean, this party is the starter
+    // After entry, only the empty-id sentinel beside our own hello. A real
+    // joiner never appears.
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: Date.now(), size: 0 },
+      { name: bareJoining, modifyTime: Date.now(), size: 0 },
+    ];
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  // The bare timeout, proving the empty-id sentinel never started the recovery
+  // window: the stuck-joiner path produces a different, distinct message.
+  expect((err as Error).message).toBe(
+    "[starter] synchronization has timed out",
+  );
+  expect((err as Error).message).not.toMatch(/recovery window/);
+  expect((err as Error).message).not.toMatch(/began arriving/);
+});
+
+test("synchronize() lock starter: a bare -hello.json injected mid-rendezvous is ignored and rendezvous completes with the real joiner", async () => {
+  // A `-hello.json` (empty recovered id) appearing after entry, alongside the
+  // real joiner's hello, must not be counted as a peer hello: the lock starter's
+  // otherFiles scan must see exactly the one real hello and complete the
+  // rendezvous, recovering the real (non-empty) peer id. Were the empty-id hello
+  // counted, otherFiles would hold two hellos and the >1 guard would abort with
+  // "more than one peer hello" -- a planted file derailing a legitimate exchange.
+  const joinerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 2_000,
+  });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const joinerHello = `${joinerId}-hello.json`;
+  // The joiner's hello body must read through the gate before the lock race.
+  files.set(`${conn.path}/${joinerHello}`, LOCK_HELLO_BODY);
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // entry: clean, this party is the starter
+    // After entry: our own hello, the real joiner's hello, and an injected bare
+    // `-hello.json`. Only the real joiner is a peer hello.
+    return [
+      { name: `${conn.id}-hello.json`, modifyTime: Date.now(), size: 0 },
+      { name: joinerHello, modifyTime: Date.now(), size: 0 },
+      { name: "-hello.json", modifyTime: Date.now(), size: 0 },
+    ];
+  };
+
+  await conn.synchronize();
+
+  // Completed against the real joiner; the empty-id hello was never adopted.
+  expect(conn.peerId).toBe(joinerId);
+});
+
+test("synchronize() lockless mode: a bare -hello.json injected mid-rendezvous is ignored and the barrier completes with the real peer", async () => {
+  // The lockless counterpart: a `-hello.json` (empty recovered id) appearing in
+  // the ack-handshake barrier alongside the real peer's hello must not be counted
+  // as a peer hello. The barrier must ack and complete against the real peer,
+  // never committing peerId="". Were the empty-id hello counted, the barrier's
+  // own >1 guard would abort with "more than one peer hello".
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const myId = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 2_000),
+    verbose: -1,
+    locklessRendezvous: true,
+  });
+  conn.id = myId;
+  conn.connected = true;
+  conn.path = "/shared";
+
+  const peerHello = `${peerId}-hello.json`;
+  const locklessHelloBody = Buffer.from(
+    JSON.stringify({ locklessRendezvous: true, retainFiles: false }),
+  );
+  files.set(`/shared/${peerHello}`, locklessHelloBody);
+  // The peer's ack of THIS party's hello: `${peerId}-${myId}-hello-ack.json`.
+  const peerAck = `${peerId}-${myId}-hello-ack.json`;
+
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1) return []; // entry: clean, write own hello and enter the barrier
+    // Barrier: our hello, the real peer hello, and an injected bare `-hello.json`.
+    const base = [
+      { name: `${myId}-hello.json`, modifyTime: Date.now(), size: 0 },
+      { name: peerHello, modifyTime: Date.now(), size: 0 },
+      { name: "-hello.json", modifyTime: Date.now(), size: 0 },
+    ];
+    // From the second barrier listing on, the peer's ack of our hello is visible,
+    // so the barrier completes (the first barrier pass writes our ack and loops).
+    if (listCallCount >= 3)
+      base.push({ name: peerAck, modifyTime: Date.now(), size: 0 });
+    return base;
+  };
+
+  await conn.synchronize();
+
+  // Completed against the real peer; the empty-id hello was never adopted.
+  expect(conn.peerId).toBe(peerId);
+});
+
 test("synchronize() lock starter: a peer hello alongside a foreign-id joining sentinel is a UsageError", async () => {
   // Three-party contamination: a legitimate peer hello (idB) and a joining
   // sentinel from a different id (idC) are visible together. A sentinel whose

@@ -234,6 +234,28 @@ const LOCK_SUFFIX = "-lock.json";
 // excludes it from the message scan (it is not all-digits).
 const JOINING_SUFFIX = "-joining.json";
 
+// Recovers the peer id from a `<id><suffix>` rendezvous control name (a hello or
+// a joining sentinel), returning undefined for any name that does not end with
+// `suffix` OR whose recovered id is empty (a bare `<suffix>`, e.g. `-hello.json`
+// or `-joining.json`). An empty recovered id is never a usable peer identity:
+// adopting it would commit rendezvous to peerId="", after which poll() treats
+// every "-"-prefixed file as a peer message and the lockless ack barrier waits
+// for an ack no honest peer writes -- a hang/abort an unauthenticated transport
+// would otherwise let any writer induce by planting a `-hello.json` mid-flight.
+// This is the single notion of "recovered peer id" shared by the entry guard
+// (isPeerHelloName) and every in-flight rendezvous scan, so the non-empty check
+// cannot be present at one slicing site while silently omitted at another (the
+// gap this hardens: the entry guard rejected an empty id, the in-flight scans
+// did not).
+const peerIdFromControlName = (
+  name: string,
+  suffix: string,
+): string | undefined => {
+  if (!name.endsWith(suffix)) return undefined;
+  const id = name.slice(0, -suffix.length);
+  return id.length > 0 ? id : undefined;
+};
+
 // Classifies a filename against the protocol filename grammar: true for any
 // protocol artifact (an in-flight temp write, a hello, a lock, a joining
 // sentinel, an ack marker, or a message whose terminal segment is a byte
@@ -1365,18 +1387,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // legitimately pre-exist as the protocol grows; the foreign-file snapshot
     // below (195255994) is a sibling tolerance mechanism for grammar-failing
     // names.
-    const isPeerHello = (name: string) => {
-      if (!name.endsWith(HELLO_SUFFIX)) return false;
-      const id = name.slice(0, -HELLO_SUFFIX.length);
-      // Reject an empty id (a bare "-hello.json"). It is not a usable peer hello:
-      // accepting it would commit rendezvous to peerId="", after which poll()
-      // scans every "-"-prefixed file as a peer message and the lockless ack
-      // barrier waits for an ack no honest peer writes. Classifying it as an
-      // unexpected protocol file instead (it still matches the grammar) rejects
-      // it at the no-flag guard and sweeps it under --sweep-exchange-files,
-      // rather than tolerating a planted bare hello as a phantom peer.
-      return id.length > 0 && id !== this.id;
-    };
+    // A peer hello is `<peerId>-hello.json` with a non-empty id that is not our
+    // own (isPeerHelloName). A bare `-hello.json` slices to an empty id and is
+    // therefore NOT a peer hello: it still matches the grammar
+    // (isProtocolGrammarName), so it falls into unexpectedProtocol below, is
+    // rejected at the no-flag guard, and is swept under --sweep-exchange-files,
+    // rather than being tolerated as a phantom peer. The in-flight rendezvous
+    // scans share the same predicate so a mid-flight injection is rejected too.
     const ignored = new Set<string>();
 
     // Sweep orphaned in-flight temp writes left by a prior crashed exchange.
@@ -1418,11 +1435,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
 
     // All three classifications exclude `ignored` (currently only orphaned
-    // temp-*.tmp). A temp name can never satisfy isPeerHello, so the guard is a
-    // no-op today, but keeping it symmetric with the two filters below avoids a
-    // latent trap if `ignored` ever gains a name that could pass isPeerHello.
+    // temp-*.tmp). A temp name can never satisfy isPeerHelloName, so the guard
+    // is a no-op today, but keeping it symmetric with the two filters below
+    // avoids a latent trap if `ignored` ever gains a name that could pass
+    // isPeerHelloName.
     let peerHellos = files.filter(
-      (file) => !ignored.has(file.name) && isPeerHello(file.name),
+      (file) => !ignored.has(file.name) && this.isPeerHelloName(file.name),
     );
     // Single classification (isProtocolGrammarName), two sides: a FOREIGN file
     // fails the protocol grammar; an unexpected PROTOCOL file matches it but is
@@ -1439,7 +1457,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const unexpectedProtocol = files.filter(
       (file) =>
         !ignored.has(file.name) &&
-        !isPeerHello(file.name) &&
+        !this.isPeerHelloName(file.name) &&
         isProtocolGrammarName(file.name),
     );
 
@@ -1795,10 +1813,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                   this.responsibleFiles.delete(fileName);
               });
 
-            const peerHellos = currentFiles.filter(
-              (file) =>
-                file.name !== `${this.id}${HELLO_SUFFIX}` &&
-                file.name.endsWith(HELLO_SUFFIX),
+            // isPeerHelloName excludes our own hello and -- the defense this
+            // adds -- a bare `-hello.json` (empty id) injected after entry,
+            // which the previous endsWith-only filter would have adopted as
+            // peerId="".
+            const peerHellos = currentFiles.filter((file) =>
+              this.isPeerHelloName(file.name),
             );
 
             if (peerHellos.length === 0) {
@@ -1948,10 +1968,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 this.responsibleFiles.delete(fileName);
             });
 
-          const otherFiles = currentFiles.filter(
-            (file) =>
-              file.name !== `${this.id}${HELLO_SUFFIX}` &&
-              file.name.endsWith(HELLO_SUFFIX),
+          // isPeerHelloName excludes our own hello and a bare `-hello.json`
+          // (empty id) injected after entry, which the previous endsWith-only
+          // filter would have sliced to peerId="" at the role-commit sites below.
+          const otherFiles = currentFiles.filter((file) =>
+            this.isPeerHelloName(file.name),
           );
           const theseFiles = currentFiles.filter(
             (file) => file.name === `${this.id}${HELLO_SUFFIX}`,
@@ -1964,13 +1985,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // -> its hello) sequence the lock joiner uses in place of a bare
           // delete-then-put. Its presence is the signal that distinguishes a
           // live-but-incomplete joiner from a crashed one, which a bare
-          // otherFiles.length === 0 cannot. (A self-named sentinel is excluded
-          // for symmetry with the hello filters, though the lock starter never
-          // writes one.)
-          const joiningFiles = currentFiles.filter(
-            (file) =>
-              file.name !== `${this.id}${JOINING_SUFFIX}` &&
-              file.name.endsWith(JOINING_SUFFIX),
+          // otherFiles.length === 0 cannot. isPeerJoiningName excludes a
+          // self-named sentinel (for symmetry with the hello filters, though the
+          // lock starter never writes one) and -- the defense this adds -- a bare
+          // `-joining.json` (empty id), so a planted empty-id sentinel does not
+          // start the joiner-recovery (joinerRecoveryMs) window below.
+          const joiningFiles = currentFiles.filter((file) =>
+            this.isPeerJoiningName(file.name),
           );
 
           if (otherFiles.length === 0) {
@@ -2421,8 +2442,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // here would lose that safety net.
         //
         // Both rendezvous modes have assigned this.peerId by this point.
-        // Reject prefix-at-dash id pairs before any message is sent; both
-        // parties evaluate this symmetrically.
+        // Reject an empty recovered id, then prefix-at-dash id pairs, before any
+        // message is sent; both parties evaluate these symmetrically. The hello
+        // scans above (isPeerHelloName) already exclude a bare `-hello.json`, so
+        // an empty this.peerId is unreachable for a correct scan -- this is
+        // defense in depth at the last gate before commit: a peerId="" slipping
+        // through would make poll() treat every "-"-prefixed file as a peer
+        // message and the lockless ack barrier wait on an ack no honest peer
+        // writes, so fail closed here rather than proceed.
+        if (this.peerId!.length === 0)
+          throw new UsageError(
+            "rendezvous recovered an empty peer id; a bare " +
+              `'${HELLO_SUFFIX}' is not a usable peer hello`,
+          );
         if (
           this.peerId!.startsWith(this.id + "-") ||
           this.id.startsWith(this.peerId! + "-")
@@ -2690,6 +2722,27 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       : "error";
   }
 
+  // True when `name` is a peer's hello (`<peerId>-hello.json`): it ends with
+  // HELLO_SUFFIX, recovers a non-empty id (peerIdFromControlName), and that id
+  // is not this party's own. The single definition of "a peer hello" shared by
+  // the synchronize() entry guard and the in-flight lock/lockless rendezvous
+  // scans, so "a valid peer hello" means the same thing at every site -- in
+  // particular a bare `-hello.json` (empty id) is never a peer hello, whether it
+  // is present at entry or injected mid-rendezvous.
+  private isPeerHelloName(name: string): boolean {
+    const id = peerIdFromControlName(name, HELLO_SUFFIX);
+    return id !== undefined && id !== this.id;
+  }
+
+  // True when `name` is a peer's joining sentinel (`<peerId>-joining.json`): the
+  // joining counterpart of isPeerHelloName. A bare `-joining.json` (empty id) is
+  // rejected, so it is never treated as a real joiner arrival and never starts
+  // the lock-path joiner-recovery (joinerRecoveryMs) window.
+  private isPeerJoiningName(name: string): boolean {
+    const id = peerIdFromControlName(name, JOINING_SUFFIX);
+    return id !== undefined && id !== this.id;
+  }
+
   // True when `name` is a file legitimately present during the message loop
   // (Phase 2), judged against the two known party ids and the filename grammar.
   // The recognized set is: an in-flight `temp-*.tmp` write; and any `.json`
@@ -2835,6 +2888,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
 
+    // Rejects an empty peerId too ("" is falsy): the peer message scan below
+    // keys on `${peerId}-`, so a committed peerId="" would match every
+    // "-"-prefixed file. synchronize()'s scans now never commit an empty id, so
+    // this only fires before synchronize() has run, but it also backstops that
+    // invariant rather than letting the scan run wild on an empty id.
     if (!this.peerId) throw new Error("not synchronized");
 
     const path = this.path;
