@@ -15,6 +15,8 @@ import {
   errorMessage,
   loadCSVFile,
   prepareForExchange,
+  sanitizeErrorForDisplay,
+  sanitizeForDisplay,
   serializeExchangeRecord,
   serializeOpeningData,
 } from "@psilink/core";
@@ -268,12 +270,19 @@ export function Exchange(config: ExchangeConfig) {
             title: "Results unavailable",
             message:
               "The linkage completed, but generating the results file failed: " +
-              errorMessage(error),
+              // Sanitized at the display boundary: this output error is local,
+              // but the alert is operator-facing, so escape it like any other.
+              // A single message (not the cause chain) keeps the sentence intact.
+              sanitizeForDisplay(errorMessage(error)),
           });
         } else {
           setErrorAlert({
             title: "Exchange failed",
-            message: errorMessage(error),
+            // A failed exchange can surface a raw transport error whose message
+            // or cause chain embeds partner-/server-controlled bytes (a hostile
+            // message-file path); route it through the display-boundary seam so
+            // the alert cannot render control/ANSI/deceptive-Unicode characters.
+            message: sanitizeErrorForDisplay(error),
           });
         }
       },
@@ -283,7 +292,15 @@ export function Exchange(config: ExchangeConfig) {
   return (
     <Stack>
       {errorAlert && (
-        <Alert color="red" title={errorAlert.title}>
+        // pre-line preserves the newline sanitizeErrorForDisplay puts before
+        // each "caused by:" link (browsers collapse it otherwise) so a
+        // multi-cause error shows one cause per line; the message is already
+        // escaped, so the only newlines present are this module's separators.
+        <Alert
+          color="red"
+          title={errorAlert.title}
+          style={{ whiteSpace: "pre-line" }}
+        >
           {errorAlert.message}
         </Alert>
       )}
