@@ -14,8 +14,14 @@ const schema: JSONSchemaType<Env> = {
   required: [],
   properties: {
     PEERJS_DEBUG_LEVEL: {
+      // Errors only (1), not warnings (2): PeerJS's warning-level logs
+      // interpolate remote peer ids into the browser console, and those ids are
+      // rendezvous addresses derived from the invitation secret -- the app keeps
+      // them out of its own default logs (see psi/rendezvous.ts), so the PeerJS
+      // logger must not reintroduce them. Raise via the PEERJS_DEBUG_LEVEL env
+      // var when diagnosing connection issues.
       type: "number",
-      default: 2,
+      default: 1,
     },
     LOG_LEVEL: {
       type: "string",
