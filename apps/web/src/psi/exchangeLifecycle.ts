@@ -281,16 +281,12 @@ export async function runExchangeLifecycle(
   conn.once("data", dropBrokerOnFirstFrame);
 
   try {
-    // Fixed order, load-bearing for the server's listener-first guarantee (F6):
-    // openPeerMessageConnection attaches the QueuedMessageConnection's inbound
-    // `data` listener synchronously in its constructor, and the server returns
-    // the still-unresolved psi, so `await psi` must stay AFTER the open or the
-    // responder would have no listener during the WASM load and drop the
-    // initiator's unprompted first frame (now the initiator's first handshake
-    // frame). The listener is in place by the time any frame flows, so it buffers
-    // the handshake too.
+    // Fixed order. openPeerMessageConnection attaches the QueuedMessageConnection's
+    // inbound `data` listener synchronously in its constructor (the server's
+    // listener-first guarantee, F6), so the initiator's unprompted first frame --
+    // now its first handshake frame -- is buffered rather than dropped no matter
+    // how long this side then takes to read it.
     mc = await openPeerMessageConnection(conn);
-    const psiLibrary = await psi;
     // Authenticate the peer before any PSI frame is sent: the X25519 key exchange
     // fails closed on a wrong secret or tampered/malformed frame, so an
     // unauthenticated peer never reaches runExchange. Its 32-byte session key is
@@ -298,7 +294,17 @@ export async function runExchangeLifecycle(
     // see authenticateExchange); deriving it is the act of authenticating. A trust
     // failure surfaces as a security-kind ConnectionError, which the catch below
     // routes to the distinct authentication-failure alert.
+    //
+    // This runs BEFORE `await psi`: the handshake needs no PSI library, and
+    // authenticating first keeps the responder's WASM load out of the handshake's
+    // critical path -- otherwise a load that approached the per-message kex
+    // timeout could time out the initiator's wait for the responder's reply -- and
+    // spends no WASM load on a peer that fails authentication.
     await authenticateExchange(mc, exchangeRole, sharedSecret);
+    // Resolves before runExchange: instant for the initiator (it loaded the
+    // library during acquire), the real WASM wait for the responder, overlapping
+    // the wait for the peer's first PSI frame.
+    const psiLibrary = await psi;
     const result = await runExchange(mc, exchangeRole, prepared, {
       psiLibrary,
       onStage: emitStage,

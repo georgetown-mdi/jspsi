@@ -112,9 +112,21 @@ describe("authenticateExchange", () => {
     await Promise.resolve();
     await connA.close();
 
-    await expect(responder).rejects.toSatisfy(
-      (err: unknown) =>
-        !(err instanceof ConnectionError && err.kind === "security"),
+    const err: unknown = await responder.then(
+      () => {
+        throw new Error("handshake should have rejected on the transport drop");
+      },
+      (reason: unknown) => reason,
     );
+    // Not re-tagged as a trust failure...
+    expect(err instanceof ConnectionError && err.kind === "security").toBe(
+      false,
+    );
+    // ...and the underlying transport ConnectionError is preserved in the cause
+    // chain (the kex timeout wraps it), proving the failure was passed through as
+    // a retryable transport drop, not swallowed or flattened to a generic Error.
+    const cause = (err as { cause?: unknown }).cause;
+    expect(cause).toBeInstanceOf(ConnectionError);
+    expect((cause as ConnectionError).kind).toBe("transport");
   });
 });

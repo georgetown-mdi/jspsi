@@ -38,16 +38,16 @@ import type {
  *
  * Failure handling fails closed. A handshake failure aborts the exchange before
  * any PSI frame is sent (the caller runs this strictly before `runExchange`).
- * Whether it is presented as a retryable transport drop or a non-retryable trust
- * failure hinges on the cause: a transport drop or a deliberate local close
- * (peer unreachable, timeout, abort-driven teardown) is re-thrown unchanged for
- * the caller's generic retry path, while every other handshake failure -- a
- * wrong secret, a tampered or malformed peer frame, an expired or malformed
- * credential -- is re-tagged as a `security`-kind {@link ConnectionError}. This
- * is the web path's first real trust boundary, so an unrecognized failure
- * defaults to the trust verdict rather than the retryable one. The caller's
- * error classifier routes a `security` kind to a distinct authentication-failure
- * alert instead of the generic "exchange failed" one.
+ * Whether it is presented as a non-retryable trust failure or some other
+ * exchange failure hinges on the cause: a trust failure -- a wrong secret, a
+ * tampered or malformed peer frame, an expired or malformed credential -- which
+ * the kex reports as a plain Error with no {@link ConnectionError} in its cause
+ * chain, is re-tagged as a `security`-kind `ConnectionError`; any
+ * connection-level fault (a transport drop, a deliberate close, the kex timeout,
+ * a local usage fault) carries a `ConnectionError` in its chain and is re-thrown
+ * unchanged so it keeps its own kind. The caller's error classifier routes a
+ * `security` kind to a distinct authentication-failure alert and everything else
+ * to the generic "exchange failed" one.
  *
  * @param mc            The open message connection (a `PeerMessageConnection`).
  * @param exchangeRole  This party's handshake role, the same role passed to
@@ -57,7 +57,7 @@ import type {
  *                      closed.
  * @returns The {@link AuthResult}; both peers derive the same `sessionKey`.
  * @throws {ConnectionError} of kind `"security"` on a trust failure; otherwise
- *         the original transport/closed failure, unchanged.
+ *         the original connection-level failure, unchanged.
  */
 export async function authenticateExchange(
   mc: MessageConnection,
@@ -72,32 +72,60 @@ export async function authenticateExchange(
       false,
     );
   } catch (error) {
-    if (isTransportOrClosed(error)) throw error;
-    throw new ConnectionError(errorMessage(error), "security", {
+    // The kex signals a trust failure (a wrong secret, a tampered or malformed
+    // frame, an expired or malformed credential) as a plain Error with no
+    // ConnectionError in its cause chain; every connection-level fault carries a
+    // ConnectionError somewhere in that chain -- a transport drop or deliberate
+    // close directly, the kex timeout as a transport-kind cause, a `usage` fault
+    // (e.g. a send after the connection closed) as itself. Pass the latter
+    // through unchanged so it keeps its own kind: a transport drop stays
+    // retryable, and a local `usage` fault is never mislabeled as a trust
+    // failure ("Could not verify your partner"). Re-tag only the former.
+    if (hasConnectionError(error)) throw error;
+    const wrapped = new ConnectionError(errorMessage(error), "security", {
       cause: error,
     });
+    // Preserve authenticateConnection's psilinkRecoveryHintEmitted tag across the
+    // re-wrap: a tagged credential error already carries specific recovery
+    // guidance, and the tag tells a higher-level handler not to add a second,
+    // generic advisory. Web never passes `expires` (so the tagged paths are
+    // unreachable today), but keeping the wrapper faithful to the contract guards
+    // a future consumer that does.
+    if (hasRecoveryHint(error))
+      (
+        wrapped as { psilinkRecoveryHintEmitted?: boolean }
+      ).psilinkRecoveryHintEmitted = true;
+    throw wrapped;
   }
 }
 
 /**
- * Whether a handshake failure is a transport drop or a deliberate local close
- * rather than a trust problem. Walks the `cause` chain (the kex timeout wraps a
- * `transport` {@link ConnectionError} as its cause, and an abort-driven teardown
- * surfaces a `closed` one) and matches either kind; a seen-set guards against a
- * pathological `cause` cycle. Everything else -- including a bare auth-failure
- * Error with no connection cause -- is treated as a trust failure by the caller.
+ * Whether a handshake failure carries a {@link ConnectionError} anywhere in its
+ * `cause` chain -- i.e. it is a connection-level fault (transport drop,
+ * deliberate close, the kex timeout that wraps a transport error, a local usage
+ * fault) rather than a trust problem. The kex reports a trust failure as a plain
+ * Error with no such cause, so a `false` here means the caller re-tags it as a
+ * security failure. A seen-set guards against a pathological `cause` cycle.
  */
-function isTransportOrClosed(error: unknown): boolean {
+function hasConnectionError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let cursor: unknown = error;
   while (typeof cursor === "object" && cursor !== null && !seen.has(cursor)) {
     seen.add(cursor);
-    if (
-      cursor instanceof ConnectionError &&
-      (cursor.kind === "transport" || cursor.kind === "closed")
-    )
-      return true;
+    if (cursor instanceof ConnectionError) return true;
     cursor = (cursor as { cause?: unknown }).cause;
   }
   return false;
+}
+
+/** Whether `error` carries authenticateConnection's `psilinkRecoveryHintEmitted`
+ * tag (set on its credential-validation and expiry errors, whose messages
+ * already include recovery instructions). */
+function hasRecoveryHint(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { psilinkRecoveryHintEmitted?: unknown })
+      .psilinkRecoveryHintEmitted === true
+  );
 }
