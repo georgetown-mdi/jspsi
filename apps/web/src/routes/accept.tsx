@@ -134,7 +134,11 @@ function Accept() {
               browser connects directly to your partner.
             </Text>
             <TextInput
-              value={confirmedName ?? acceptorName}
+              value={acceptorName}
+              // The handler is the controlled-input contract; once the field is
+              // disabled below it is simply inert (a disabled input fires no
+              // change), and Continue has already frozen the trimmed name, so the
+              // value that seeds the exchange cannot drift.
               onChange={(e) => setAcceptorName(e.target.value)}
               disabled={confirmedName !== undefined}
               withAsterisk
@@ -146,7 +150,11 @@ function Accept() {
             {confirmedName === undefined ? (
               <Button
                 disabled={!acceptorName.trim()}
-                onClick={() => setConfirmedName(acceptorName.trim())}
+                onClick={() => {
+                  const trimmed = acceptorName.trim();
+                  setAcceptorName(trimmed);
+                  setConfirmedName(trimmed);
+                }}
               >
                 Continue
               </Button>

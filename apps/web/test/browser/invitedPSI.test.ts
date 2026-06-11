@@ -142,13 +142,27 @@ beforeAll(async () => {
   });
   await peerOpened(inviterPeer);
 
-  // Listen for the acceptor's inbound connection before it dials.
+  // Listen for the acceptor's inbound connection before it dials. Settles once
+  // and detaches both listeners, so a late post-open peer error cannot reject
+  // after the promise has resolved (which would leak into the runner).
   const inviterConnPromise: Promise<DataConnection> = new Promise(
     (resolve, reject) => {
-      inviterPeer.on("connection", (conn) => {
-        conn.on("open", () => resolve(conn));
-      });
-      inviterPeer.on("error", reject);
+      let settled = false;
+      const settle = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        inviterPeer.off("connection", onConnection);
+        inviterPeer.off("error", onError);
+        action();
+      };
+      const onConnection = (conn: DataConnection) =>
+        conn.on("open", () => settle(() => resolve(conn)));
+      const onError = (err: unknown) =>
+        settle(() =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        );
+      inviterPeer.on("connection", onConnection);
+      inviterPeer.on("error", onError);
     },
   );
 
@@ -159,13 +173,28 @@ beforeAll(async () => {
     path: "/api/",
     port: addressInfo.port,
   });
-  const acceptorConn: DataConnection = await new Promise((resolve, reject) => {
-    acceptorPeer.on("open", () => {
-      const conn = acceptorPeer.connect(inviterId, { reliable: true });
-      conn.on("open", () => resolve(conn));
-    });
-    acceptorPeer.on("error", reject);
-  });
+  const acceptorConn: DataConnection = await new Promise<DataConnection>(
+    (resolve, reject) => {
+      let settled = false;
+      const settle = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        acceptorPeer.off("open", onOpen);
+        acceptorPeer.off("error", onError);
+        action();
+      };
+      const onOpen = () => {
+        const conn = acceptorPeer.connect(inviterId, { reliable: true });
+        conn.on("open", () => settle(() => resolve(conn)));
+      };
+      const onError = (err: unknown) =>
+        settle(() =>
+          reject(err instanceof Error ? err : new Error(String(err))),
+        );
+      acceptorPeer.on("open", onOpen);
+      acceptorPeer.on("error", onError);
+    },
+  );
 
   const psiLibrary = await (PSI() as Promise<PSILibrary>);
 

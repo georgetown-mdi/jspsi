@@ -163,9 +163,10 @@ export async function listenAsInviter(
     throw new Error("connecting to the signaling server was aborted");
   const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
   const loc = inviterLocationFromWindow();
-  log.info(
-    `listening as inviter on derived id ${inviterId} at ${loc.host}:${loc.port}`,
-  );
+  // The derived id is a rendezvous address that correlates exchanges, so keep it
+  // out of default (info) logs; surface it only at debug for connection triage.
+  log.info(`listening as inviter at ${loc.host}:${loc.port}`);
+  log.debug(`derived inviter peer id ${inviterId}`);
   const peer = makePeer(inviterId, buildPeerOptions(loc));
   try {
     await waitForPeerOpen(peer, { signal });
@@ -182,74 +183,19 @@ type DialAttempt =
   | { outcome: "open"; conn: DataConnection }
   | { outcome: "unavailable" };
 
-/**
- * One dial attempt: open a reliable channel to `inviterId`. Resolves `"open"`
- * with the opened channel, resolves `"unavailable"` on a non-fatal
- * `peer-unavailable` (the inviter has not registered its id yet; the peer
- * survives, so the caller may re-dial on the same peer), or rejects on any other
- * error, an abort, or the per-attempt open timeout. A settle-once guard detaches
- * every listener and closes the dead channel exactly once.
- */
-function attemptDial(
-  peer: Peer,
-  inviterId: string,
-  options: { openTimeoutMs: number; signal?: AbortSignal },
-): Promise<DialAttempt> {
-  const { openTimeoutMs, signal } = options;
-  return new Promise<DialAttempt>((resolve, reject) => {
-    const conn = peer.connect(inviterId, { reliable: true });
-    let settled = false;
-    const settle = (action: () => void) => {
-      if (settled) return;
-      settled = true;
-      conn.off("open", onOpen);
-      peer.off("error", onError);
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      action();
-    };
-    const onOpen = () => settle(() => resolve({ outcome: "open", conn }));
-    const onError = (err: unknown) => {
-      // `peer-unavailable` is a non-fatal PeerJS error: the dialed id is not
-      // registered, but this peer stays alive and can re-dial. Anything else is
-      // fatal to the dial.
-      if (
-        typeof err === "object" &&
-        err !== null &&
-        (err as { type?: unknown }).type === "peer-unavailable"
-      ) {
-        settle(() => {
-          conn.close();
-          resolve({ outcome: "unavailable" });
-        });
-      } else {
-        settle(() => {
-          conn.close();
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
-      }
-    };
-    const onAbort = () =>
-      settle(() => {
-        conn.close();
-        reject(new Error("dialing the inviter was aborted"));
-      });
-    const timer = setTimeout(
-      () =>
-        settle(() => {
-          conn.close();
-          reject(new Error("timed out opening a connection to the inviter"));
-        }),
-      openTimeoutMs,
-    );
-    conn.once("open", onOpen);
-    peer.once("error", onError);
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    signal?.addEventListener("abort", onAbort);
-  });
+/** Is `err` PeerJS's non-fatal `peer-unavailable`? The dialed id is not
+ * registered yet, but the dialing peer survives, so the caller may re-dial. */
+function isPeerUnavailable(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { type?: unknown }).type === "peer-unavailable"
+  );
+}
+
+/** Normalize a PeerJS error (often a bare `{ type }` object, not an Error). */
+function asError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 /** Resolve after `ms`, or reject promptly if `signal` aborts first. */
@@ -278,6 +224,12 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * DEFAULT_DIAL_ATTEMPT_TIMEOUT_MS}; the retry budget is the human-timescale
  * {@link DEFAULT_PEER_WAIT_TIMEOUT_MS}, the same ceiling the inviter's inbound
  * wait uses, so neither side hangs forever waiting on the other.
+ *
+ * A single peer-level `error` listener spans the whole loop -- every attempt and
+ * every backoff delay between them. A `peer-unavailable` resolves the in-flight
+ * attempt as a retry; any other peer error is fatal and rejects the dial. A
+ * per-attempt listener would leave the backoff windows uncovered, silently
+ * dropping a fatal broker error that fired between attempts.
  */
 async function dialInviterWithRetry(
   peer: Peer,
@@ -291,23 +243,92 @@ async function dialInviterWithRetry(
 ): Promise<DataConnection> {
   const { retryDelayMs, openTimeoutMs, totalTimeoutMs, signal } = options;
   const deadline = Date.now() + totalTimeoutMs;
-  for (;;) {
-    if (signal?.aborted) throw new Error("dialing the inviter was aborted");
-    const remaining = deadline - Date.now();
-    if (remaining <= 0)
-      throw new Error("timed out waiting for the inviter to come online");
-    const attempt = await attemptDial(peer, inviterId, {
+
+  // Routing hooks the in-flight attempt installs so the shared error listener
+  // can hand a peer error to it; both are cleared between attempts. A peer error
+  // arriving during a backoff (no attempt in flight) is instead recorded in
+  // `fatalError` and thrown at the next loop top -- so it can never fire into the
+  // void -- unless it is `peer-unavailable`, which is meaningless between dials.
+  let onUnavailable: (() => void) | undefined;
+  let onFatal: ((err: unknown) => void) | undefined;
+  let fatalError: unknown;
+  const onPeerError = (err: unknown) => {
+    if (isPeerUnavailable(err)) onUnavailable?.();
+    else if (onFatal) onFatal(err);
+    else fatalError ??= err;
+  };
+  peer.on("error", onPeerError);
+
+  // One dial attempt: open a reliable channel to `inviterId`. Resolves `"open"`
+  // with the channel, `"unavailable"` when the shared listener reports
+  // `peer-unavailable` (the peer survives, so the caller re-dials), or rejects on
+  // a fatal peer error, an abort, or the per-attempt open timeout. A settle-once
+  // guard detaches the channel listener and clears the routing hooks exactly once.
+  const runAttempt = (attemptTimeoutMs: number): Promise<DialAttempt> =>
+    new Promise<DialAttempt>((resolve, reject) => {
+      const conn = peer.connect(inviterId, { reliable: true });
+      let settled = false;
+      const settle = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        conn.off("open", onOpen);
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        onUnavailable = undefined;
+        onFatal = undefined;
+        action();
+      };
+      const onOpen = () => settle(() => resolve({ outcome: "open", conn }));
+      const onAbort = () =>
+        settle(() => {
+          conn.close();
+          reject(new Error("dialing the inviter was aborted"));
+        });
+      const timer = setTimeout(
+        () =>
+          settle(() => {
+            conn.close();
+            reject(new Error("timed out opening a connection to the inviter"));
+          }),
+        attemptTimeoutMs,
+      );
+      onUnavailable = () =>
+        settle(() => {
+          conn.close();
+          resolve({ outcome: "unavailable" });
+        });
+      onFatal = (err) =>
+        settle(() => {
+          conn.close();
+          reject(asError(err));
+        });
+      conn.once("open", onOpen);
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort);
+    });
+
+  try {
+    for (;;) {
+      if (signal?.aborted) throw new Error("dialing the inviter was aborted");
+      if (fatalError !== undefined) throw asError(fatalError);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0)
+        throw new Error("timed out waiting for the inviter to come online");
       // Clamp the per-attempt open timeout to the remaining budget so an attempt
       // started near the deadline cannot run up to openTimeoutMs past it: the
       // total budget is the hard ceiling, shared with the inviter's inbound wait.
-      openTimeoutMs: Math.min(openTimeoutMs, remaining),
-      signal,
-    });
-    if (attempt.outcome === "open") return attempt.conn;
-    if (Date.now() + retryDelayMs >= deadline)
-      throw new Error("timed out waiting for the inviter to come online");
-    log.info(`inviter ${inviterId} not yet listening; retrying`);
-    await delay(retryDelayMs, signal);
+      const attempt = await runAttempt(Math.min(openTimeoutMs, remaining));
+      if (attempt.outcome === "open") return attempt.conn;
+      if (Date.now() + retryDelayMs >= deadline)
+        throw new Error("timed out waiting for the inviter to come online");
+      log.info("inviter not yet listening; retrying");
+      await delay(retryDelayMs, signal);
+    }
+  } finally {
+    peer.off("error", onPeerError);
   }
 }
 
@@ -344,9 +365,10 @@ export async function dialAsAcceptor(
     deriveRendezvousPeerId(sharedSecret, "acceptor"),
   ]);
   const loc = acceptorLocationFromEndpoint(endpoint);
-  log.info(
-    `dialing inviter ${inviterId} as acceptor ${acceptorId} at ${loc.host}:${loc.port}`,
-  );
+  // Derived ids are rendezvous addresses that correlate exchanges; keep them out
+  // of default (info) logs and surface them only at debug for connection triage.
+  log.info(`dialing the inviter at ${loc.host}:${loc.port}`);
+  log.debug(`derived peer ids: inviter ${inviterId}, acceptor ${acceptorId}`);
   const peer = makePeer(acceptorId, buildPeerOptions(loc));
   try {
     await waitForPeerOpen(peer, { signal });

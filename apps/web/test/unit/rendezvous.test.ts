@@ -191,6 +191,36 @@ describe("dialAsAcceptor", () => {
     expect(fake.destroy).not.toHaveBeenCalled();
   });
 
+  test("rejects on a fatal error that arrives between retries", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const promise = dialAsAcceptor(generateSharedSecret(), endpoint, {
+      peerFactory: cap.factory,
+      retryDelayMs: 10,
+    });
+
+    await vi.waitFor(() =>
+      expect(fake.listenerCount("open")).toBeGreaterThan(0),
+    );
+    fake.emit("open", "acceptor");
+
+    // First attempt: the inviter has not registered yet -> peer-unavailable,
+    // then the loop enters its backoff with no attempt in flight.
+    await vi.waitFor(() => expect(fake.connect).toHaveBeenCalledTimes(1));
+    fake.emit("error", { type: "peer-unavailable" });
+    expect(fake.conns[0].close).toHaveBeenCalled();
+
+    // A fatal broker error during that backoff window must still reject the dial
+    // (a per-attempt listener would have dropped it) and must not start another
+    // attempt.
+    fake.emit("error", { type: "network", message: "broker dropped" });
+
+    await expect(promise).rejects.toThrow();
+    expect(fake.connect).toHaveBeenCalledTimes(1);
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+
   test("destroys the peer and rejects on a fatal dial error", async () => {
     stubWindow();
     const fake = new FakePeer();
