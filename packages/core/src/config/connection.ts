@@ -215,20 +215,53 @@ export interface Authentication {
   /**
    * Expiration for this token (ISO 8601 datetime). The exchange is aborted
    * before the key exchange if the current time is past this value.
-   * Invitation tokens default to 1 hour; rotation-generated tokens carry none.
+   * Invitation tokens default to 1 hour; rotation-generated tokens carry none
+   * unless {@link tokenMaxAgeDays} is set.
    */
   expires?: string;
+  /**
+   * Operator-policy: maximum age, in days, to stamp onto a rotated token. When
+   * set, a successful exchange records `expires` = (rotation time) +
+   * `tokenMaxAgeDays` days into `.psilink.key`, so a dormant partnership cannot
+   * hold a valid token indefinitely between exchanges; when omitted, rotated
+   * tokens carry no expiry (the default). Unlike `sharedSecret`/`expires` this
+   * is operator-authored in `psilink.yaml`, not key-file-injected. A positive
+   * integer, bounded above by {@link MAX_TOKEN_MAX_AGE_DAYS}; the expiry stamp is
+   * computed at rotation time (in the CLI), not at config-parse time.
+   */
+  tokenMaxAgeDays?: number;
 }
+
+/**
+ * Upper bound on {@link Authentication.tokenMaxAgeDays} (~100 years). Not a
+ * policy statement -- any realistic max-age is far smaller (the sibling
+ * invitation lifetime is capped at 1 year) -- but a sanity ceiling: it keeps the
+ * rotation-time stamp `now + tokenMaxAgeDays` days within the representable
+ * `Date` range (and a 4-digit ISO year), so a value large enough to overflow that
+ * range cannot reach the rotation write path and throw there, after a handshake
+ * the partner has already completed, with no clear cause.
+ */
+export const MAX_TOKEN_MAX_AGE_DAYS = 36500;
 
 /**
  * Schema for the top-level `authentication` block, exported so
  * {@link ExchangeSpecSchema} can embed it as a sibling of `signing`. Field-shape
  * validation only; the injected fields (`sharedSecret`/`expires`) come from
  * `.psilink.key` and are warn-and-stripped if set in YAML (see the CLI loader).
+ *
+ * `strictObject` (unlike the sibling spec blocks, which strip): a misspelled
+ * operator-policy key here is rejected at parse time rather than silently
+ * dropped. `tokenMaxAgeDays` is a security control, and a typo that strip would
+ * discard would silently disable max-age enforcement with no signal; failing
+ * closed forces the operator to fix the key before any exchange runs. The
+ * injected fields are removed by the loader's warn-and-strip before this schema
+ * sees them, so strictness never rejects a key-file value. See EXCHANGE_SPEC.md
+ * ("Authentication").
  */
-export const AuthenticationSchema: z.ZodType<Authentication> = z.object({
+export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
   sharedSecret: sharedSecretSchema,
   expires: z.iso.datetime().optional(),
+  tokenMaxAgeDays: z.int().positive().max(MAX_TOKEN_MAX_AGE_DAYS).optional(),
 });
 
 // --- TURN and ICE (WebRTC only) ----------------------------------------------

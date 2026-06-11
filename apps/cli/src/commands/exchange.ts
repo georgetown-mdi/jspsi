@@ -20,7 +20,13 @@ import {
   DEFAULT_CONFIG_PATH,
 } from "../config";
 import { expandTilde } from "../fileUtils";
-import { loadKeyFile, DEFAULT_KEY_PATH, type KeyFile } from "../keyFile";
+import {
+  loadKeyFile,
+  checkKeyFileExpiry,
+  DEFAULT_KEY_PATH,
+  type KeyFile,
+  type KeyFileExpiryStatus,
+} from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
@@ -312,11 +318,12 @@ const INJECTED_AUTH_FIELDS: Record<string, { forms: string[]; hint: string }> =
  * (`shared_secret`/`expires`) from a raw top-level `authentication` block, in
  * place. Their values come only from `.psilink.key`, so a value set in YAML is
  * ignored; warning rather than silently dropping lets the operator see why their
- * setting did nothing. Operator-policy fields (e.g. a future `token_max_age_days`)
- * are NOT touched -- they pass through to schema validation, which is the
- * authority on which policy fields are valid. Runs on the raw config before
- * `parseExchangeSpec` (which applies `camelizeKeys` then Zod), so it matches both
- * the snake_case and camelCase spelling of each injected field.
+ * setting did nothing. Operator-policy fields (e.g. `token_max_age_days`) are NOT
+ * touched -- they pass through to schema validation, which is the authority on
+ * which policy fields are valid (and, being strict, rejects an unrecognized one).
+ * Runs on the raw config before `parseExchangeSpec` (which applies `camelizeKeys`
+ * then Zod), so it matches both the snake_case and camelCase spelling of each
+ * injected field.
  *
  * @internal exported for testing
  */
@@ -468,12 +475,35 @@ export function loadConfig(options: ExchangeOptions): {
         ".psilink.key. See docs/CLI.md#offline-invitation and " +
         "docs/SECURITY_DESIGN.md#recurring-exchange-authentication.",
     );
+  // Hard stop on an already-expired token before any dataset prep, connection, or
+  // PAKE handshake. The `expires` in the key file is authoritative regardless of
+  // token_max_age_days -- it may be an invitation token's short lifetime or a
+  // max-age stamp from a prior rotation. authenticateConnection enforces the same
+  // condition pre-handshake, but surfacing it here exits earlier and with a
+  // re-invite-specific message. UsageError -> exit 64, like the malformed/missing
+  // key-file cases above. (The threshold-dependent "expiring soon" advisory is
+  // emitted later, in the handler, because it is conditional on the rotation
+  // outcome.)
+  if (checkKeyFileExpiry(keyData, Date.now()) === "expired") {
+    // keyData.expires is necessarily set when the status is "expired", but
+    // TypeScript does not narrow it across the call; the fallback keeps the
+    // message a definite string rather than risk rendering "undefined".
+    const expiredAt = keyData.expires ?? "(unknown)";
+    throw new UsageError(
+      `the shared secret in ${options.keyFile} expired at ${expiredAt} ` +
+        "and cannot be used; no exchange was attempted. Both parties must " +
+        "re-invite to establish a new shared secret: run 'psilink invite URL " +
+        "...' and 'psilink accept URL INVITATION' (the existing psilink.yaml is " +
+        "reused; only the key file is recreated). See " +
+        "docs/CLI.md#out-of-sync-tokens.",
+    );
+  }
   const authPersist: AuthPersist = {
-    // Operator-policy fields parsed from the YAML `authentication` block (none
-    // are defined yet; this admits a future field such as token_max_age_days
-    // end to end). The injected fields below come only from the key file and
-    // override any YAML value -- already stripped above, so this ordering is
-    // belt-and-suspenders.
+    // Operator-policy fields parsed from the YAML `authentication` block (today,
+    // token_max_age_days), carried end to end -- protocol.ts reads
+    // tokenMaxAgeDays here to stamp the rotated token's expiry. The injected
+    // fields below come only from the key file and override any YAML value --
+    // already stripped above, so this ordering is belt-and-suspenders.
     ...specAuth,
     sharedSecret: keyData.sharedSecret,
     expires: keyData.expires,
@@ -486,6 +516,115 @@ export function loadConfig(options: ExchangeOptions): {
     authentication: authPersist,
     ...exchangeDataSpec,
   };
+}
+
+// --- Token expiry advisory ---------------------------------------------------
+
+/**
+ * Divisor applied to `token_max_age_days` to derive the "expiring soon" warning
+ * threshold (days remaining): the advisory fires once a token is within
+ * `token_max_age_days / EXPIRY_WARN_THRESHOLD_DIVISOR` days of its expiry. Named
+ * so the policy can be tuned in one place.
+ */
+export const EXPIRY_WARN_THRESHOLD_DIVISOR = 3;
+
+/**
+ * The "expiring soon" warning threshold in days for a given max-age policy, or
+ * `undefined` when no policy is in force. Without a policy there is nothing to
+ * measure "soon" against, so {@link checkKeyFileExpiry} never reports
+ * "expiring-soon" and the advisory is suppressed.
+ *
+ * @internal exported for testing
+ */
+export function warnThresholdDaysForPolicy(
+  tokenMaxAgeDays: number | undefined,
+): number | undefined {
+  if (tokenMaxAgeDays === undefined) return undefined;
+  return tokenMaxAgeDays / EXPIRY_WARN_THRESHOLD_DIVISOR;
+}
+
+/**
+ * Whether to emit the "token expiring soon" advisory, given the token's expiry
+ * status at load time (`before`) and after the exchange attempt (`after`).
+ *
+ * Warn only when the token was expiring soon at load AND the exchange did not
+ * refresh it: a successful rotation under a max-age policy stamps a fresh
+ * `expires` farther out than the warning threshold, so `after` is "ok" and the
+ * advisory would contradict the "retry without re-inviting" guidance; a failed or
+ * absent rotation leaves the token unchanged (still "expiring-soon", or "expired"
+ * if time elapsed), so the operator is told.
+ *
+ * @internal exported for testing
+ */
+export function shouldWarnTokenExpiring(
+  before: KeyFileExpiryStatus,
+  after: KeyFileExpiryStatus,
+): boolean {
+  return before === "expiring-soon" && after !== "ok";
+}
+
+/**
+ * Build the token-expiry advisory message to emit after an exchange, or
+ * `undefined` to stay silent. Call only when the exchange attempt has finished
+ * (success or failure).
+ *
+ * `now` is the CURRENT time -- deliberately later than the load-time `now` that
+ * produced `expiryBefore`, so the re-check reflects time that elapsed during the
+ * exchange and can catch a token that lapsed mid-run; `warnThresholdDays` is the
+ * same value used at load.
+ *
+ * Re-reads the (possibly rotated) key file to decide: a successful rotation under
+ * a max-age policy stamped a fresh `expires` farther out, so the token is no
+ * longer expiring soon and the advisory would mislead. The message reports the
+ * on-disk expiry, not the value loaded before the exchange, and distinguishes a
+ * token that merely nears expiry from one that has already lapsed (which is
+ * directed straight to re-invitation). If the key file is absent on the re-read
+ * (deleted between rotation and now), the post-exchange state cannot be
+ * confirmed, so this stays silent rather than assert a cause. A genuine
+ * read/parse failure (the file existed and validated at load but became
+ * unreadable or corrupt during the exchange) is not swallowed here; it propagates
+ * to the caller, which decides how to treat it. The advisory is best-effort, so
+ * the handler logs such a failure at debug and continues rather than surfacing it
+ * as the exchange's outcome. The re-read suppresses the over-permissive-file
+ * warning already emitted at load.
+ *
+ * @throws if the key file exists but cannot be read or parsed on the re-read; the
+ *         sole caller (the exchange handler) catches this and logs it at debug.
+ * @internal exported for testing
+ */
+export function tokenExpiringAdvisory(
+  expiryBefore: KeyFileExpiryStatus,
+  keyFilePath: string,
+  now: number,
+  warnThresholdDays: number | undefined,
+): string | undefined {
+  if (expiryBefore !== "expiring-soon") return undefined;
+  // loadKeyFile returns undefined only for ENOENT (file gone); any other failure
+  // (EACCES, malformed JSON) throws and is left to propagate to the caller rather
+  // than being silently swallowed.
+  const reloaded = loadKeyFile(keyFilePath, { warnOnPermissive: false });
+  if (reloaded === undefined) return undefined;
+  const expiryAfter = checkKeyFileExpiry(reloaded, now, { warnThresholdDays });
+  if (!shouldWarnTokenExpiring(expiryBefore, expiryAfter)) return undefined;
+  // shouldWarnTokenExpiring is true only when expiryAfter is "expiring-soon" or
+  // "expired", both of which require `expires` to be set; the fallback keeps the
+  // message a definite string for the type checker.
+  const expiresShown = reloaded.expires ?? "(unknown)";
+  if (expiryAfter === "expired")
+    // The token lapsed during the exchange and was not refreshed. "Run before it
+    // expires" would be wrong (it already has), so direct straight to re-invite,
+    // matching the load-time hard-stop guidance.
+    return (
+      `the shared secret in ${keyFilePath} expired at ${expiresShown} during ` +
+      `this exchange and was not refreshed; both parties must re-invite to ` +
+      `establish a new shared secret. See docs/CLI.md#out-of-sync-tokens.`
+    );
+  return (
+    `the shared secret in ${keyFilePath} is expiring soon (expires ` +
+    `${expiresShown}) and was not refreshed by this exchange. Run a successful ` +
+    `exchange before it expires; once it lapses, both parties must re-invite. ` +
+    `See docs/CLI.md#out-of-sync-tokens.`
+  );
 }
 
 // --- Data preparation --------------------------------------------------------
@@ -567,6 +706,28 @@ export async function handler(argv: Arguments): Promise<void> {
   }
   const { connection, authentication, ...exchangeDataSpec } = configResult;
 
+  // Token expiry advisory baseline: was the token expiring soon at load time?
+  // This recheck uses a fresh clock just after loadConfig's hard stop, so in the
+  // (sub-millisecond) gap a token can tip from "expiring-soon" to "expired". That
+  // is handled, not guaranteed away: the advisory below is keyed on
+  // "expiring-soon" and self-skips on "expired", and runProtocol's pre-handshake
+  // assertSharedSecretReadyForHandshake aborts an expired token with the re-invite
+  // message before any handshake. The threshold comes from the max-age policy;
+  // without a policy it is undefined and the status is "ok" (never
+  // "expiring-soon"). Re-evaluated after the exchange to decide whether to warn
+  // (see shouldWarnTokenExpiring).
+  const warnThresholdDays = warnThresholdDaysForPolicy(
+    authentication.tokenMaxAgeDays,
+  );
+  const expiryBefore = checkKeyFileExpiry(
+    {
+      sharedSecret: authentication.sharedSecret,
+      expires: authentication.expires,
+    },
+    Date.now(),
+    { warnThresholdDays },
+  );
+
   announceRetainMode(connection, log);
 
   let identity: string;
@@ -594,6 +755,7 @@ export async function handler(argv: Arguments): Promise<void> {
     recordFile: options.recordFile,
   });
 
+  let exchangeError: unknown;
   try {
     await runProtocol(
       connection,
@@ -610,7 +772,44 @@ export async function handler(argv: Arguments): Promise<void> {
       { sweepExchangeFiles, forceRetainSweep },
     );
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(err instanceof UsageError ? 64 : 69);
+    // Capture rather than exit here so the expiry advisory below can run on the
+    // failure path too (the criterion is "expiring soon AND rotation did not
+    // refresh the token", which only a failed exchange leaves unsatisfied-by-
+    // refresh). The exit follows the advisory.
+    exchangeError = err;
+  }
+
+  // Emit the token-expiry advisory when the token was expiring soon at load and
+  // the exchange did not refresh it (a successful rotation stamps a fresh,
+  // farther-out expires, so the advisory would contradict runProtocol's "retry
+  // without re-inviting" guidance). The decision and message are built by
+  // tokenExpiringAdvisory, which re-reads the on-disk token.
+  let advisory: string | undefined;
+  try {
+    advisory = tokenExpiringAdvisory(
+      expiryBefore,
+      authentication.keyFilePath,
+      Date.now(),
+      warnThresholdDays,
+    );
+  } catch (err) {
+    // The advisory is best-effort. A re-read failure here (the file became
+    // unreadable or corrupt during the exchange; the load-time read had already
+    // validated it) is non-fatal -- record it at debug rather than let it mask
+    // the exchange's own outcome reported below.
+    log.debug(
+      "could not re-read the key file for the token-expiry advisory:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+  if (advisory !== undefined) log.warn(advisory);
+
+  if (exchangeError !== undefined) {
+    log.error(
+      exchangeError instanceof Error
+        ? exchangeError.message
+        : String(exchangeError),
+    );
+    process.exit(exchangeError instanceof UsageError ? 64 : 69);
   }
 }

@@ -151,3 +151,74 @@ test("rejects a malformed shared_secret in the top-level authentication block", 
   });
   expect(result.success).toBe(false);
 });
+
+// --- authentication.token_max_age_days (operator policy) ---------------------
+
+test("accepts a positive integer token_max_age_days and camelizes it", () => {
+  const result = parseExchangeSpec({
+    ...minimalSpec,
+    authentication: { token_max_age_days: 30 },
+  });
+  expect(result.authentication?.tokenMaxAgeDays).toBe(30);
+});
+
+test("leaves token_max_age_days undefined when omitted", () => {
+  const result = parseExchangeSpec({ ...minimalSpec, authentication: {} });
+  expect(result.authentication?.tokenMaxAgeDays).toBeUndefined();
+});
+
+test("rejects a non-positive token_max_age_days", () => {
+  for (const value of [0, -1]) {
+    const result = safeParseExchangeSpec({
+      ...minimalSpec,
+      authentication: { token_max_age_days: value },
+    });
+    expect(result.success).toBe(false);
+  }
+});
+
+test("rejects a non-integer token_max_age_days", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    authentication: { token_max_age_days: 1.5 },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("accepts token_max_age_days at the 36500-day maximum", () => {
+  const result = parseExchangeSpec({
+    ...minimalSpec,
+    authentication: { token_max_age_days: 36500 },
+  });
+  expect(result.authentication?.tokenMaxAgeDays).toBe(36500);
+});
+
+test("rejects a token_max_age_days above the maximum", () => {
+  // An upper bound keeps the rotation-time `now + N days` stamp inside the
+  // representable Date range; a value large enough to overflow it must not reach
+  // the rotation write path. Just past the ceiling and an overflow-scale value
+  // are both rejected at parse.
+  expect(
+    safeParseExchangeSpec({
+      ...minimalSpec,
+      authentication: { token_max_age_days: 36501 },
+    }).success,
+  ).toBe(false);
+  expect(
+    safeParseExchangeSpec({
+      ...minimalSpec,
+      authentication: { token_max_age_days: 100_000_000 },
+    }).success,
+  ).toBe(false);
+});
+
+test("rejects an unrecognized key in the authentication block (strict)", () => {
+  // The authentication block is strictObject: a misspelled policy key is rejected
+  // at parse time rather than silently dropped, so a typo cannot disable the
+  // max-age control with no signal to the operator.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    authentication: { token_max_age_dayss: 30 },
+  });
+  expect(result.success).toBe(false);
+});

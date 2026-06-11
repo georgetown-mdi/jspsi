@@ -7,10 +7,15 @@ import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import { getLogger } from "@psilink/core";
 import { saveKeyFile } from "../../src/keyFile";
+import { runProtocol } from "../../src/protocol";
 import {
   handler,
   loadConfig,
   warnAndStripInjectedAuthFields,
+  shouldWarnTokenExpiring,
+  tokenExpiringAdvisory,
+  warnThresholdDaysForPolicy,
+  EXPIRY_WARN_THRESHOLD_DIVISOR,
 } from "../../src/commands/exchange";
 
 const mockState = vi.hoisted(() => ({ warnings: [] as string[] }));
@@ -27,8 +32,19 @@ vi.mock("@psilink/core", async (importActual) => {
       warn: (msg: string, ...args: unknown[]) =>
         mockState.warnings.push([msg, ...args.map(String)].join(" ")),
     }),
+    // Stub prepareForExchange so the handler tests below reach the post-exchange
+    // advisory without the PSI stack or data-shape fragility. loadCSVFile stays
+    // real so it consumes the input stream (a mock would leave a dangling
+    // createReadStream whose async open races the afterEach cleanup). Only the
+    // handler tests exercise this path; loadConfig never calls it.
+    prepareForExchange: vi.fn().mockReturnValue({ warnings: [] }),
   };
 });
+
+// Mock runProtocol so the handler tests drive the exchange outcome (resolve =
+// success, reject = failed exchange) deterministically, without opening a real
+// connection. protocol.test.ts covers the real runProtocol.
+vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 
 // 43-char base64url tokens satisfying the sharedSecret format constraint.
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -263,15 +279,12 @@ test("expires set in the top-level authentication block does not override the ke
 });
 
 test("warnAndStripInjectedAuthFields admits an operator-policy field and warns on nothing", () => {
-  // An operator-policy field (a future token_max_age_days lands here) is NOT an
-  // injected field, so the loader must leave it untouched -- no strip, no warning
-  // -- and let schema validation decide its fate. Tested at the strip helper
-  // because no policy field exists in the schema yet for an end-to-end check:
-  // AuthenticationSchema is a plain z.object today, so it would strip this field
-  // at parse time, and this assertion covers only the loader's strip step, not
-  // the full loadConfig path. When the first policy field is added to
-  // AuthenticationSchema, add an end-to-end loadConfig test asserting it reaches
-  // result.authentication, rather than relying on this helper-level check.
+  // An operator-policy field (token_max_age_days) is NOT an injected field, so the
+  // loader must leave it untouched -- no strip, no warning -- and let schema
+  // validation decide its fate. This is a focused check on the loader's strip
+  // step; the end-to-end path (token_max_age_days reaching result.authentication,
+  // and a typo being rejected by the strict schema) is covered by the loadConfig
+  // tests below.
   const log = getLogger("test");
   const rawAuth: Record<string, unknown> = { token_max_age_days: 30 };
   warnAndStripInjectedAuthFields(rawAuth, configFile, log);
@@ -329,6 +342,160 @@ test("webrtc config throws a UsageError 'not yet supported'", () => {
   expect(() => loadConfig(baseOptions())).toThrow("not yet supported");
 });
 
+// --- token_max_age_days and load-time expiry ---------------------------------
+
+test("loadConfig surfaces token_max_age_days from the authentication block", () => {
+  // End-to-end: a policy field in psilink.yaml reaches result.authentication
+  // (camelized), where protocol.ts reads it to stamp the rotated token's expiry.
+  const config = {
+    ...minimalSFTPConfig,
+    authentication: { token_max_age_days: 30 },
+  };
+  fs.writeFileSync(configFile, YAML.stringify(config));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const result = loadConfig(baseOptions());
+  expect(result.authentication.tokenMaxAgeDays).toBe(30);
+});
+
+test("loadConfig rejects an unrecognized key in the authentication block", () => {
+  // The strict schema fails a misspelled policy key as invalid config (UsageError,
+  // exit 64) rather than silently dropping it and disabling the control.
+  const config = {
+    ...minimalSFTPConfig,
+    authentication: { token_max_age_dayss: 30 },
+  };
+  fs.writeFileSync(configFile, YAML.stringify(config));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow("not a valid exchange spec");
+});
+
+test("loadConfig hard-stops an expired token before any exchange", () => {
+  // (c) An `expires` in the past aborts at load time with a re-invite message,
+  // before any connection or key exchange. UsageError -> exit 64.
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2020-01-01T00:00:00.000Z",
+  });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "expired at 2020-01-01T00:00:00.000Z",
+  );
+});
+
+test("loadConfig accepts a not-yet-expired token", () => {
+  // A future expiry is not a load-time error; the expiring-soon advisory (if any)
+  // is decided later, in the handler.
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2099-01-01T00:00:00.000Z",
+  });
+  const result = loadConfig(baseOptions());
+  expect(result.authentication.expires).toBe("2099-01-01T00:00:00.000Z");
+});
+
+test("warnThresholdDaysForPolicy is token_max_age_days / 3, undefined without a policy", () => {
+  expect(EXPIRY_WARN_THRESHOLD_DIVISOR).toBe(3);
+  expect(warnThresholdDaysForPolicy(30)).toBe(10);
+  expect(warnThresholdDaysForPolicy(90)).toBe(30);
+  // A non-multiple of 3 yields a fractional threshold; the downstream millisecond
+  // comparison handles it, so no rounding is applied.
+  expect(warnThresholdDaysForPolicy(10)).toBeCloseTo(10 / 3);
+  // No policy in force -> no threshold, so checkKeyFileExpiry never reports
+  // "expiring-soon" and the advisory is suppressed.
+  expect(warnThresholdDaysForPolicy(undefined)).toBeUndefined();
+});
+
+test("shouldWarnTokenExpiring suppresses the advisory when rotation refreshed the token", () => {
+  // (d) Expiring soon at load, refreshed to "ok" by a successful rotation: the
+  // new token has a fresh, farther-out expiry, so the advisory would mislead.
+  expect(shouldWarnTokenExpiring("expiring-soon", "ok")).toBe(false);
+});
+
+test("shouldWarnTokenExpiring warns when rotation did not refresh the token", () => {
+  // (e) Expiring soon at load and still not refreshed after the exchange: warn.
+  expect(shouldWarnTokenExpiring("expiring-soon", "expiring-soon")).toBe(true);
+  // If time elapsed pushed an un-refreshed token to expired, still warn.
+  expect(shouldWarnTokenExpiring("expiring-soon", "expired")).toBe(true);
+});
+
+test("shouldWarnTokenExpiring never warns when the token was not expiring soon at load", () => {
+  expect(shouldWarnTokenExpiring("ok", "ok")).toBe(false);
+  expect(shouldWarnTokenExpiring("ok", "expiring-soon")).toBe(false);
+  expect(shouldWarnTokenExpiring("ok", "expired")).toBe(false);
+});
+
+// --- tokenExpiringAdvisory (handler re-read path) ----------------------------
+
+// A fixed clock so the expiry windows below are deterministic.
+const ADVISORY_NOW = Date.parse("2026-01-01T00:00:00.000Z");
+
+test("tokenExpiringAdvisory is silent when the token was not expiring soon at load", () => {
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(
+    tokenExpiringAdvisory("ok", keyFile, ADVISORY_NOW, 10),
+  ).toBeUndefined();
+});
+
+test("tokenExpiringAdvisory warns with the on-disk expiry when rotation did not refresh the token", () => {
+  // (e) Failed exchange: the on-disk token is unchanged and still expiring soon.
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2026-01-05T00:00:00.000Z",
+  });
+  const msg = tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10);
+  expect(msg).toContain("expiring soon");
+  expect(msg).toContain("2026-01-05T00:00:00.000Z");
+  // The reworded message no longer over-claims a failed-rotation cause.
+  expect(msg).not.toContain("did not complete a successful key rotation");
+});
+
+test("tokenExpiringAdvisory is silent when rotation refreshed the token", () => {
+  // (d) Successful rotation: the re-read token is now past the threshold (30 days
+  // out, threshold 10), so the advisory would mislead and is suppressed.
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2026-01-31T00:00:00.000Z",
+  });
+  expect(
+    tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
+  ).toBeUndefined();
+});
+
+test("tokenExpiringAdvisory reports a lapsed token as expired, directing to re-invite", () => {
+  // The token expired during the exchange (on-disk expires now in the past) and
+  // was not refreshed. The message must not say "run before it expires" -- it
+  // already has -- but direct to re-invitation.
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2025-12-31T00:00:00.000Z",
+  });
+  const msg = tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10);
+  expect(msg).toContain("expired at 2025-12-31T00:00:00.000Z");
+  expect(msg).toContain("re-invite");
+  expect(msg).not.toContain("Run a successful");
+});
+
+test("tokenExpiringAdvisory is silent when the key file is absent after the exchange", () => {
+  // The file was deleted between rotation and the re-read (ENOENT): the
+  // post-exchange state cannot be confirmed, so no advisory is emitted (and no
+  // false cause asserted). keyFile is never written here.
+  expect(
+    tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
+  ).toBeUndefined();
+});
+
+test("tokenExpiringAdvisory propagates a read/parse failure rather than swallowing it", () => {
+  // A corrupt key file on the re-read is not silently dropped: it throws so the
+  // caller can record it (the handler logs it at debug, non-fatally).
+  fs.writeFileSync(keyFile, "not-json");
+  expect(() =>
+    tokenExpiringAdvisory("expiring-soon", keyFile, ADVISORY_NOW, 10),
+  ).toThrow();
+});
+
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler: a repeated single-value flag exits 64 naming the flag", async () => {
@@ -382,6 +549,103 @@ test("handler: an unrecognized log-level exits 64, not the top-level dump", asyn
     expect(errSpy).toHaveBeenCalledWith("unrecognized log-level: bogus");
   } finally {
     errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
+// --- handler: token-expiry advisory emission (wiring) ------------------------
+// These drive the handler through to the post-exchange advisory block, with
+// runProtocol mocked to control the exchange outcome. They cover the wiring the
+// pure-helper unit tests cannot: that the handler captures the exchange error
+// rather than exiting immediately, calls the advisory builder, and routes its
+// result to log.warn -- on both the failure and success paths.
+
+test("handler warns when an expiring-soon token is not refreshed by a failed exchange", async () => {
+  // ~1 day of remaining lifetime; with token_max_age_days 30 the warn threshold is
+  // 10 days, so the token is expiring-soon at load. runProtocol rejects, so no
+  // rotation refreshes the key file and the advisory must fire before the exit.
+  const soon = new Date(Date.now() + 86_400_000).toISOString();
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      authentication: { token_max_age_days: 30 },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A, expires: soon });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockRejectedValueOnce(new Error("exchange failed"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:69");
+    expect(mockState.warnings.some((m) => m.includes("is expiring soon"))).toBe(
+      true,
+    );
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler suppresses the advisory when a successful exchange refreshes the token", async () => {
+  // Same expiring-soon token, but runProtocol resolves AND rotates -- the mock
+  // rewrites the key file with a fresh, farther-out expiry, as a real rotation
+  // would -- so the post-exchange re-read is no longer expiring soon and no
+  // advisory fires (and the handler returns without exiting).
+  const soon = new Date(Date.now() + 86_400_000).toISOString();
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      authentication: { token_max_age_days: 30 },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A, expires: soon });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockImplementationOnce(async () => {
+    saveKeyFile(keyFile, {
+      sharedSecret: TOKEN_B,
+      expires: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    });
+    return {};
+  });
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await handler({
+      _: [],
+      $0: "psilink",
+      input,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(mockState.warnings.some((m) => m.includes("is expiring soon"))).toBe(
+      false,
+    );
+    expect(exitSpy).not.toHaveBeenCalled();
+  } finally {
     exitSpy.mockRestore();
   }
 });

@@ -114,6 +114,17 @@ export async function deriveAeadKey(
 }
 
 /**
+ * Whether an ISO 8601 `expires` is at or before `now`. An unparseable value is
+ * treated as expired (fail closed): `new Date(bad) <= now` is `false`, so a
+ * malformed timestamp from a caller that bypassed key-file validation would
+ * otherwise slip past the expiry guards below as if it were still valid.
+ */
+function isExpired(expires: string, now: number): boolean {
+  const expiresMs = new Date(expires).getTime();
+  return Number.isNaN(expiresMs) || expiresMs <= now;
+}
+
+/**
  * Assert the locally-knowable pre-handshake preconditions on a shared secret:
  * it is present and well-formed (a base64url 32-byte value matching
  * {@link SHARED_SECRET_REGEX}) and, if `expires` is set, not already in the past.
@@ -164,7 +175,7 @@ export function assertSharedSecretReadyForHandshake(
     );
   }
 
-  if (expires !== undefined && new Date(expires) <= new Date()) {
+  if (expires !== undefined && isExpired(expires, Date.now())) {
     throw Object.assign(
       new Error(`shared secret expired at ${expires}; obtain a new invitation`),
       { psilinkRecoveryHintEmitted: true },
@@ -258,7 +269,7 @@ export async function authenticateConnection(
   // key-exchange round-trip. Each receive() is bounded by the 30 s handshake
   // timeout; the initiator does one receive (~30 s worst case), the responder
   // does two (~60 s worst case).
-  if (expires !== undefined && new Date(expires) <= new Date()) {
+  if (expires !== undefined && isExpired(expires, Date.now())) {
     throw Object.assign(
       new Error(
         `shared secret expired at ${expires} during the key-exchange ` +

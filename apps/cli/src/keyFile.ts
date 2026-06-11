@@ -32,8 +32,17 @@ const KeyFileSchema: z.ZodType<KeyFile> = z.object({
   expires: z.iso.datetime().optional(),
 });
 
-/** Load and parse a `.psilink.key` file; returns `undefined` if absent. */
-export function loadKeyFile(keyFilePath: string): KeyFile | undefined {
+/**
+ * Load and parse a `.psilink.key` file; returns `undefined` if absent.
+ *
+ * `warnOnPermissive` (default `true`) emits the over-permissive-file warning. Set
+ * it `false` only when re-reading a file already loaded (and warned about) this
+ * run -- e.g. the post-exchange expiry re-check -- so the warning is not doubled.
+ */
+export function loadKeyFile(
+  keyFilePath: string,
+  opts: { warnOnPermissive?: boolean } = {},
+): KeyFile | undefined {
   let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(keyFilePath, "utf8"));
@@ -42,8 +51,100 @@ export function loadKeyFile(keyFilePath: string): KeyFile | undefined {
     throw err;
   }
   const result = KeyFileSchema.parse(raw);
-  warnIfFileOverPermissive(keyFilePath, "shared secret");
+  if (opts.warnOnPermissive !== false)
+    warnIfFileOverPermissive(keyFilePath, "shared secret");
   return result;
+}
+
+/** Milliseconds in a day, for computing a rotated token's `expires`. */
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Build the `.psilink.key` contents to persist after a successful key exchange.
+ * When `tokenMaxAgeDays` is set, stamp `expires` = `now` + `tokenMaxAgeDays` days
+ * (ISO 8601) so a rotated token cannot outlive the operator's max-age policy;
+ * when omitted, the rotated token carries no `expires` (the unchanged default).
+ *
+ * `now` is a parameter rather than read internally so the stamp reflects the
+ * actual moment of rotation (where the caller invokes it) and the helper stays
+ * pure for testing.
+ */
+export function buildRotatedKeyFile(
+  rotatedSecret: string,
+  tokenMaxAgeDays: number | undefined,
+  now: number,
+): KeyFile {
+  if (tokenMaxAgeDays === undefined) return { sharedSecret: rotatedSecret };
+  // Belt-and-suspenders, mirroring saveKeyFile's runtime check below: the config
+  // schema already enforces a positive integer (z.int().positive()), but a
+  // library caller that bypasses parse could pass 0, a negative, or a float,
+  // stamping an expiry that is immediately expired or on a sub-day boundary.
+  // Reject it here so a broken expiry never reaches disk. UsageError -> CLI exit
+  // 64, classified as bad input.
+  if (!Number.isInteger(tokenMaxAgeDays) || tokenMaxAgeDays <= 0)
+    throw new UsageError(
+      "buildRotatedKeyFile: tokenMaxAgeDays must be a positive integer; got " +
+        String(tokenMaxAgeDays),
+    );
+  // Guard the date-range overflow too. A value large enough that now + N days
+  // leaves the representable Date range (or a 4-digit ISO year) would otherwise
+  // make toISOString() throw an opaque RangeError -- here, after a successful
+  // handshake the partner has already rotated against, with no clear cause and no
+  // recovery short of editing the config. The config schema bounds this at the
+  // front door (MAX_TOKEN_MAX_AGE_DAYS); this is the backstop for a caller that
+  // bypasses parse, failing as bad input (UsageError -> exit 64) before the
+  // broken expiry reaches disk, consistent with the positive-integer guard above.
+  const expires = new Date(now + tokenMaxAgeDays * MS_PER_DAY);
+  if (Number.isNaN(expires.getTime()) || expires.getUTCFullYear() > 9999)
+    throw new UsageError(
+      "buildRotatedKeyFile: tokenMaxAgeDays is too large; the computed expiry " +
+        "is outside the supported date range",
+    );
+  return {
+    sharedSecret: rotatedSecret,
+    expires: expires.toISOString(),
+  };
+}
+
+/** Result of {@link checkKeyFileExpiry}. */
+export type KeyFileExpiryStatus = "ok" | "expiring-soon" | "expired";
+
+/**
+ * Classify a key file's expiry against the current time. Pure -- a function of
+ * the key file and `now` only -- so it is straightforward to unit-test.
+ *
+ * - `"expired"`: `expires` is set and at or before `now`.
+ * - `"expiring-soon"`: `expires` is set, still in the future, and the remaining
+ *   time is at most `warnThresholdDays` days. Reachable only when a threshold is
+ *   supplied; without one, an unexpired token is always `"ok"`.
+ * - `"ok"`: no `expires`, `expires` far enough out, or no threshold given.
+ *
+ * `warnThresholdDays` is a key-file-agnostic input: the max-age policy
+ * (`tokenMaxAgeDays`) is a connection-config concern, so the caller computes the
+ * threshold and passes it here rather than this helper knowing the policy field.
+ * Absent threshold means the caller cannot determine "expiring soon" (no max-age
+ * policy is in force), so only the unconditional `"expired"` hard stop applies.
+ */
+export function checkKeyFileExpiry(
+  keyFile: KeyFile,
+  now: number,
+  opts: { warnThresholdDays?: number } = {},
+): KeyFileExpiryStatus {
+  if (keyFile.expires === undefined) return "ok";
+  const expiresMs = new Date(keyFile.expires).getTime();
+  // Fail closed on an unparseable timestamp. loadKeyFile validates `expires` as an
+  // ISO datetime, so this is unreachable through the CLI, but a direct caller that
+  // bypasses that validation must not have a malformed value classified as "ok"
+  // (NaN <= now is false, which would otherwise fall through). Treat it as expired
+  // so the hard stop, not a silent pass, is the default for a security control.
+  if (Number.isNaN(expiresMs) || expiresMs <= now) return "expired";
+  const { warnThresholdDays } = opts;
+  if (
+    warnThresholdDays !== undefined &&
+    expiresMs - now <= warnThresholdDays * MS_PER_DAY
+  )
+    return "expiring-soon";
+  return "ok";
 }
 
 /** Serialize and write a {@link KeyFile} to disk, owner-read-only. */
