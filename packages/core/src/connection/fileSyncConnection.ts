@@ -1105,7 +1105,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.abortController.signal,
           );
           if (envelope.retainFiles) {
-            signals.push(`peer hello ${hello.name} advertises retain_files=true`);
+            signals.push(
+              `peer hello ${hello.name} advertises retain_files=true`,
+            );
             break;
           }
         } catch (err) {
@@ -2446,8 +2448,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.responsibleFiles.delete(fileName);
       });
       return (
-        this.lastSentFile !== undefined &&
-        fileNames.includes(this.lastSentFile)
+        this.lastSentFile !== undefined && fileNames.includes(this.lastSentFile)
       );
     };
 
@@ -3071,9 +3072,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
             try {
               await this.client.delete(inPath);
-            } catch {
-              // First delete failed; retry once after a backoff. On abort
-              // (close() mid-poll) this.wait rejects here, unwinding past the
+            } catch (err: unknown) {
+              // A terminal UsageError -- the per-operation liveness/size bound,
+              // e.g. the stall deadline a withheld delete callback now trips -- is
+              // NOT a transient delete failure and must not be swallowed: re-reading
+              // and re-deleting the same file just re-hits the same stall, and the
+              // emit("data") below would deliver a message whose consume-delete
+              // never landed, so the file stays on disk and the next poll re-emits a
+              // duplicate. Rethrow it to poll()'s outer catch, which stops the poller
+              // and surfaces it -- the terminal-on-UsageError rule every other
+              // transport-call site here follows. A transient (non-UsageError)
+              // failure falls through to the retry-and-re-read path below.
+              if (err instanceof UsageError) throw err;
+              // First delete failed (transiently); retry once after a backoff. On
+              // abort (close() mid-poll) this.wait rejects here, unwinding past the
               // emit("data") below into poll()'s catch, where the !pollerActive
               // guard swallows it (see below). The second delete AND the emit
               // are both skipped, so the message is left undelivered for this
@@ -3084,6 +3096,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               try {
                 await this.client.delete(inPath);
               } catch (deleteErr: unknown) {
+                // Same terminal-on-UsageError rule for the second attempt: a stall
+                // is terminal, not a "manual cleanup may be required" transient.
+                if (deleteErr instanceof UsageError) throw deleteErr;
                 this.log.warn(
                   `[${this.role}] failed to delete ${messageFile.name}; ` +
                     "please notify the administrator that manual cleanup " +
@@ -3155,13 +3170,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       } else {
         // Non-TOCTOU failure: either a non-ENOENT error from any operation, or
         // any error where reachedGet is false (e.g., exists() or message
-        // parsing). Note: a delete() FAILURE cannot reach here -- delete() has
-        // its own inner try/catch (see above) that handles and swallows it. The
-        // one rejection the delete-retry block can now propagate is an abort
-        // (close() firing during its this.wait backoff), but that is a
-        // ConnectionClosedError caught by the !pollerActive guard at the top of
-        // this catch and never reaches this branch. All other cases are
-        // propagated immediately as hard failures.
+        // parsing). A delete() failure reaches here only when it is a terminal
+        // UsageError (the per-operation stall deadline): the inner delete
+        // try/catch rethrows a UsageError to this catch and swallows-and-retries
+        // only a transient (non-UsageError) failure. The other rejection the
+        // delete-retry block can propagate is an abort (close() firing during its
+        // this.wait backoff), but that is a ConnectionClosedError caught by the
+        // !pollerActive guard at the top of this catch and never reaches this
+        // branch. All other cases are propagated immediately as hard failures.
         this.consecutiveEnoentCount = 0;
         // A UsageError reaching this catch is terminal -- re-reading the same
         // bytes cannot help: a fully-synced message that fails to parse or

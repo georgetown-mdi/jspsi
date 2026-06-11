@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   SFTP_SLOW_OPERATION_WARNING_MS,
+  createBoundedPutSource,
   withSlowOperationWarning,
 } from "../../src/connection/sftpLivenessGuard";
 
@@ -141,5 +142,32 @@ describe("withSlowOperationWarning", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// createBoundedPutSource tears the source Readable down on every terminal path:
+// the idle-stall path destroys it (covered via the adapter), and complete()/fail()
+// must too -- ssh2-sftp-client does not destroy a provided stream src on a
+// write-stream error, so an undestroyed source would linger until GC.
+describe("createBoundedPutSource source teardown", () => {
+  test("destroys the source on fail()", () => {
+    const { source, result, fail } = createBoundedPutSource(
+      "/remote/x",
+      Buffer.from("payload"),
+    );
+    result.catch(() => {}); // the rejection is the point of fail(); absorb it
+    expect(source.destroyed).toBe(false);
+    fail(new Error("transient write failure"));
+    expect(source.destroyed).toBe(true);
+  });
+
+  test("destroys the source on complete()", () => {
+    const { source, result, complete } = createBoundedPutSource(
+      "/remote/x",
+      Buffer.from("payload"),
+    );
+    void result;
+    complete("uploaded");
+    expect(source.destroyed).toBe(true);
   });
 });
