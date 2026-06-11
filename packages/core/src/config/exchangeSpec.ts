@@ -35,7 +35,7 @@ export const ExchangeSpecSchema = z.object({
   // agreed-terms hash (unlike linkageTerms). Metadata only: it must carry no
   // protected, linkage-field, or payload value. Non-empty when present (an absent
   // pointer is the omitted key, not an empty string). See EXCHANGE_SPEC.md and
-  // PROTOCOL.md ("Self-attested record").
+  // EXCHANGE_RECORD.md.
   retentionDisposition: z.string().min(1).optional(),
 });
 
