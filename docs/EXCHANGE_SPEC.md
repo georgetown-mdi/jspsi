@@ -632,7 +632,7 @@ Unlike every other map in this spec, the keys here are **not** case-normalized: 
 Optional top-level block, a sibling of [`signing`](#signing). It holds the partner shared-secret trust mechanism and is channel-agnostic -- the same shape applies to every channel. It mixes two kinds of field:
 
 - **Runtime-injected secret state** (`shared_secret`, `expires`): loaded from the key file (`.psilink.key`) and added to the in-memory representation before the exchange runs. These never appear in `psilink.yaml` and must not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI emits a warning and ignores them; values from the key file always take precedence.
-- **Operator-policy fields**: settable in `psilink.yaml`. None are defined yet; the block is structured to admit them (for example, a future token-age limit) without further schema changes. Unlike the injected fields, an operator-policy field set in YAML is honored rather than stripped.
+- **Operator-policy fields**: settable in `psilink.yaml`. None are defined yet. The loader no longer strips this block wholesale, so adding one (for example, a future token-age limit) is a localized addition to the `authentication` schema rather than a loader change. Once a field is defined in the schema, setting it in YAML is honored; until then -- like any key the schema does not recognize -- it is dropped (see the strip note below).
 
 `shared_secret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
 
@@ -645,7 +645,7 @@ The shared secret is automatically rotated after each successful authentication 
 | `shared_secret` | string | never; loaded from `.psilink.key` | Shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
 | `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens. Do not set manually. |
 
-The loader strips only the injected fields (`shared_secret`/`expires`) from this block, warning when they are set; the value from the key file always wins. Any other key is left for schema validation: an operator-policy field is accepted, and an unrecognized key is silently dropped by the schema's default `strip` behavior (without a warning, as elsewhere in the spec).
+The loader strips only the injected fields (`shared_secret`/`expires`) from this block, warning when they are set; the value from the key file always wins. Any other key is left for schema validation: an operator-policy field defined in the schema is accepted, and a key the schema does not recognize is silently dropped by its default `strip` behavior (without a warning, as elsewhere in the spec).
 
 WebRTC peer addressing (the `inviter`/`acceptor` distinction) is configured separately, via [`connection.role`](#connectionrole); it is a transport concern, not a partner-trust one, and so is not part of this block.
 

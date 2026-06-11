@@ -283,21 +283,25 @@ function parseArgs(argv: Arguments): ExchangeArgs {
 // The runtime-injected authentication fields: their values come only from
 // `.psilink.key`, so an operator who sets them in the top-level `authentication`
 // block of psilink.yaml is warned and the value is stripped. Each canonical name
-// maps to the user-input spellings it can appear as before `camelizeKeys` runs
+// carries the user-input spellings it can appear as before `camelizeKeys` runs
 // (snake_case is the YAML convention; camelCase is accepted too), so neither
-// form slips through silently.
-const INJECTED_AUTH_FIELD_FORMS: Record<string, string[]> = {
-  sharedSecret: ["shared_secret", "sharedSecret"],
-  expires: ["expires"],
-};
-const INJECTED_AUTH_FIELD_HINT: Record<string, string> = {
-  sharedSecret:
-    "the shared secret is always loaded from the key file (any @-file " +
-    "reference in this field was also not resolved)",
-  expires:
-    "expiration is always loaded from the key file (any @-file reference " +
-    "in this field was also not resolved)",
-};
+// form slips through silently, alongside the hint shown when it is stripped.
+// Keeping forms and hint in one entry keeps them from drifting out of sync.
+const INJECTED_AUTH_FIELDS: Record<string, { forms: string[]; hint: string }> =
+  {
+    sharedSecret: {
+      forms: ["shared_secret", "sharedSecret"],
+      hint:
+        "the shared secret is always loaded from the key file (any @-file " +
+        "reference in this field was also not resolved)",
+    },
+    expires: {
+      forms: ["expires"],
+      hint:
+        "expiration is always loaded from the key file (any @-file reference " +
+        "in this field was also not resolved)",
+    },
+  };
 
 /**
  * Warn about and strip the runtime-injected authentication fields
@@ -317,18 +321,21 @@ export function warnAndStripInjectedAuthFields(
   configFile: string,
   log: ReturnType<typeof getLogger>,
 ): void {
-  const formToCanonical = new Map<string, string>();
-  for (const [canonical, forms] of Object.entries(INJECTED_AUTH_FIELD_FORMS))
-    for (const form of forms) formToCanonical.set(form, canonical);
+  // Map every accepted spelling straight to its hint, so matching a key both
+  // identifies it as injected and yields the message in one lookup (no second
+  // indexed access that could interpolate `undefined` if the tables drifted).
+  const formToHint = new Map<string, string>();
+  for (const { forms, hint } of Object.values(INJECTED_AUTH_FIELDS))
+    for (const form of forms) formToHint.set(form, hint);
 
   for (const key of Object.keys(rawAuth)) {
-    const canonical = formToCanonical.get(key);
+    const hint = formToHint.get(key);
     // An operator-policy field (or an unrecognized one): leave it for the schema
     // to accept or strip, the same treatment any other config key gets.
-    if (canonical === undefined) continue;
+    if (hint === undefined) continue;
     log.warn(
       `${configFile}: authentication.${key} is set and will be ignored; ` +
-        INJECTED_AUTH_FIELD_HINT[canonical],
+        hint,
     );
     delete rawAuth[key];
   }
