@@ -26,6 +26,7 @@ PSI-Link is a privacy-preserving record linkage (PPRL) tool that enables partner
 - [COMMUNICATION.md](COMMUNICATION.md) - channels, synchronization, error handling, and supporting services
 - [FILE_SYNC.md](FILE_SYNC.md) - file-sync transport state model: the directory-as-state-machine, filename taxonomy, enforcement sites, invariants, and exchange preconditions for the `sftp` and `filedrop` channels
 - [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - complete field-level reference for exchange specification files
+- [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - format specification for the self-attested exchange record: file shapes, commitment scheme, governance metadata, and privacy properties
 - [CLI.md](CLI.md) - CLI commands, configuration files, invitation strings, and recovery
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating supporting services and Docker deployment of the CLI
 - [RELEASES.md](RELEASES.md) - versioning policy, release checklist, and artifact publication

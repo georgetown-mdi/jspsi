@@ -7,6 +7,10 @@ import {
   validateCompatibility,
 } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
+import {
+  DISPLAY_TRUNCATION_MARKER,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "../src/utils/sanitizeForDisplay";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -194,6 +198,40 @@ test("parseLinkageTerms throws ZodError on invalid input", () => {
 test("safeParseLinkageTerms returns success: false on invalid input", () => {
   const result = safeParseLinkageTerms({ version: "not-semver" });
   expect(result.success).toBe(false);
+});
+
+test("a parse error does not echo a partner-supplied received value", () => {
+  // protocolSetup leaves the Zod parse-error message unsanitized because the
+  // issue codes reachable here (type mismatch, enum, semver/date format,
+  // too_small) report the expected type/options and the schema path, not the
+  // received value. Pin that: invalid fields carrying control/ANSI and
+  // bidi-override bytes must not surface raw in the error message.
+  const evil = "\x1b[31mEVIL\x1b[0m‮";
+  const result = safeParseLinkageTerms({
+    ...base,
+    algorithm: evil, // invalid enum
+    version: evil, // invalid semver
+  });
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.message).not.toContain("\x1b");
+    expect(result.error.message).not.toContain("‮");
+  }
+});
+
+test("an unknown partner key is stripped, not echoed (non-strict invariant)", () => {
+  // The one default Zod message that echoes a received value is unrecognized_keys
+  // ("Unrecognized key: \"<key>\""), raised only by a .strict() object. The
+  // linkage-terms schemas are non-strict z.object, so an unknown key -- even one
+  // whose NAME carries control bytes -- is stripped and parsing still succeeds;
+  // the raw key never reaches the (unsanitized) parse-error message. Adding
+  // .strict() to the schema would make this parse fail with the key echoed,
+  // failing this test and flagging that the parse-error path now needs sanitizing.
+  const result = safeParseLinkageTerms({
+    ...base,
+    "\x1b[2J\x1b[31mEVIL": 1,
+  });
+  expect(result.success).toBe(true);
 });
 
 // ─── version semver format ───────────────────────────────────────────────────
@@ -747,6 +785,98 @@ test("matching payload send/receive columns are compatible", () => {
     },
   );
   expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
+});
+
+// ─── validateCompatibility: partner-string sanitization ──────────────────────
+// A mismatch echoes a partner-supplied value into operator-facing output; these
+// pin that every such value is routed through sanitizeForDisplay (control/ANSI
+// and deceptive Unicode neutralized, over-long values truncated) while ordinary
+// values and the mismatch detection itself are unaffected.
+
+const withAgreement = (
+  terms: LinkageTerms,
+  reference: string,
+  purpose: string,
+): LinkageTerms => ({
+  ...terms,
+  legalAgreement: { reference, purpose, expirationDate: "2030-01-01" },
+});
+
+test("a partner reference with an ANSI/control sequence is neutralized", () => {
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, "MOU-\x1b[31m002\x1b[0m", "Care coordination"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement reference mismatch"),
+  );
+  expect(msg).toBeDefined();
+  // The raw ESC is gone (no terminal injection); it survives only as visible text.
+  expect(msg).not.toContain("\x1b");
+  expect(msg).toContain("\\x1b");
+  // The trusted local value is intact and the mismatch is still reported.
+  expect(msg).toContain('"MOU-001"');
+});
+
+test("a partner value with bidi-override / zero-width characters is neutralized", () => {
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, "MOU-001", "Care​ coordination‮EVIL"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement purpose mismatch"),
+  );
+  expect(msg).toBeDefined();
+  expect(msg).not.toContain("​");
+  expect(msg).not.toContain("‮");
+  expect(msg).toContain("\\u200b");
+  expect(msg).toContain("\\u202e");
+});
+
+test("an over-long partner value is truncated with the marker", () => {
+  const hostile = "B".repeat(DEFAULT_MAX_DISPLAY_LENGTH + 100);
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, hostile, "Care coordination"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement reference mismatch"),
+  );
+  expect(msg).toBeDefined();
+  expect(msg).not.toContain(hostile);
+  expect(msg).toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("an ordinary partner value passes through the error unchanged", () => {
+  const { errors } = validateCompatibility(
+    withAgreement(termsA, "MOU-001", "Care coordination"),
+    withAgreement(termsB, "MOU-9999", "Care coordination"),
+  );
+  const msg = errors.find((e) =>
+    e.includes("legal agreement reference mismatch"),
+  );
+  expect(msg).toBeDefined();
+  expect(msg).toContain('"MOU-9999"');
+});
+
+test("a partner payload column name with a control sequence is neutralized", () => {
+  const { errors } = validateCompatibility(
+    {
+      ...termsA,
+      payload: { send: [{ name: "case_id" }], receive: [{ name: "x" }] },
+    },
+    {
+      ...termsB,
+      payload: {
+        send: [{ name: "x" }],
+        receive: [{ name: "case_id\x1b[31m" }],
+      },
+    },
+  );
+  const msg = errors.find((e) => e.includes("payload mismatch"));
+  expect(msg).toBeDefined();
+  expect(msg).not.toContain("\x1b");
+  expect(msg).toContain("\\x1b");
 });
 
 // ─── deduplicate: no cross-party consistency check ───────────────────────────

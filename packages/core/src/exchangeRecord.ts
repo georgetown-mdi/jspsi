@@ -40,7 +40,7 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // work. A bare hash of a low-entropy result (e.g. an association table over
 // identifiers) would be brute-forceable by anyone holding the record, leaking the
 // intersection; commitments with fresh per-commitment randomness bind to the data
-// without revealing it. See docs/PROTOCOL.md ("Self-attested record") and
+// without revealing it. See docs/EXCHANGE_RECORD.md and
 // docs/CANONICAL_ENCODING.md. The deferred signing work reuses this module's
 // commitment scheme and on-disk format.
 
@@ -294,6 +294,17 @@ export interface ExchangeRecordGovernance {
  * names both parties and the disclosure in cleartext, retention and access
  * control are the holder's responsibility. This is a local audit artifact, not a
  * signed or non-repudiable receipt.
+ *
+ * Rendering note (forward-looking): this record stores partner-supplied free text
+ * -- `partnerIdentity`, `governance.legalAgreement.reference`/`purpose`, and the
+ * payload column names/descriptions -- byte-for-byte, as required for the
+ * byte-exact cross-party validation and the canonical encoding a record is hashed
+ * over. A party can place terminal control/ANSI sequences or deceptive Unicode
+ * (bidi-override, zero-width, homoglyph) in these fields. No viewer or exporter
+ * renders a record to a person today; when one is built, it MUST route each such
+ * field through `sanitizeForDisplay` (the helper `validateCompatibility` uses) at
+ * the display boundary -- never mutate the stored value, which must stay
+ * byte-exact.
  */
 export interface ExchangeRecord {
   /** Single recognized format version for v1; readers reject anything else. */
@@ -423,7 +434,7 @@ const retentionDispositionSchema = z.string().min(1);
 // timezone offsets by default, which holds the timestamp to a single canonical
 // form -- the signing phase signs over createdAt's canonical bytes, so one UTC
 // form avoids two records for the same instant differing only by offset. The
-// UTC-only requirement is documented in PROTOCOL.md. Reused at build time (see
+// UTC-only requirement is documented in EXCHANGE_RECORD.md. Reused at build time (see
 // buildExchangeRecord) so a malformed timestamp throws there rather than
 // producing a record the parser would later reject.
 const createdAtSchema = z.iso.datetime();

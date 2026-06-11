@@ -49,7 +49,7 @@ A semver string identifying the schema of the linkage aggreement. Two versions a
 *Required:* yes  
 *Consistency:* none
 
-A free-text string identifying the party holding these terms. It is self-asserted - a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the self-attested exchange record produced after every successful exchange (see [Self-attested record](PROTOCOL.md#self-attested-record)), where -- because that record is unsigned -- it is an unverified label. It is also included verbatim in the non-repudiation receipt (receipt assembly is a planned 1.0 feature and is not yet wired up; see [ROADMAP.md](ROADMAP.md)), where it carries evidentiary weight only under a certificate-backed signature; there it must exactly match the identity bound into the presenting party's certificate, so under that mode this otherwise-free-text field is effectively pinned to what the party's signing certificate carries (see [Signing](#signing) and [Signing identity and certificate pinning](PROTOCOL.md#signing-identity-and-certificate-pinning)). Under a session-derived receipt it remains an unverified label. Parties may format this however they wish; common contents include name, organization, and contact information.
+A free-text string identifying the party holding these terms. It is self-asserted - a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the self-attested exchange record produced after every successful exchange (see [Exchange record format](EXCHANGE_RECORD.md)), where -- because that record is unsigned -- it is an unverified label. It is also included verbatim in the non-repudiation receipt (receipt assembly is a planned 1.0 feature and is not yet wired up; see [ROADMAP.md](ROADMAP.md)), where it carries evidentiary weight only under a certificate-backed signature; there it must exactly match the identity bound into the presenting party's certificate, so under that mode this otherwise-free-text field is effectively pinned to what the party's signing certificate carries (see [Signing](#signing) and [Signing identity and certificate pinning](PROTOCOL.md#signing-identity-and-certificate-pinning)). Under a session-derived receipt it remains an unverified label. Parties may format this however they wish; common contents include name, organization, and contact information.
 
 ```yaml
 linkage_terms:
@@ -684,7 +684,7 @@ Under `certificate` mode a receipt is accepted only if its asserted [`linkage_te
 
 ## Retention and disposition
 
-Optional. A self-facing operator note for the [self-attested exchange record](PROTOCOL.md#self-attested-record): where this party files its copy of the result and under what retention schedule it is held or disposed of. It is purely local -- written into **this** party's record only, never swapped with the partner, cross-checked, or folded into the agreed-terms hash (unlike [linkage terms](#linkage-terms)) -- so the two parties' notes are independent and need not match. Metadata only: it must carry no protected, linkage-field, or payload value.
+Optional. A self-facing operator note for the [self-attested exchange record](EXCHANGE_RECORD.md): where this party files its copy of the result and under what retention schedule it is held or disposed of. It is purely local -- written into **this** party's record only, never swapped with the partner, cross-checked, or folded into the agreed-terms hash (unlike [linkage terms](#linkage-terms)) -- so the two parties' notes are independent and need not match. Metadata only: it must carry no protected, linkage-field, or payload value.
 
 ### `retention_disposition`
 
@@ -882,6 +882,7 @@ An end-to-end annotated specification covering every component is planned. It wi
 ## See also
 
 - [DESIGN.md](DESIGN.md) - overview of exchange specification purpose and its four components
+- [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested exchange record this specification's governance fields and `retention_disposition` pointer feed into
 - [PROTOCOL.md](PROTOCOL.md) - how linkage terms parameterize the PSI protocol
 - [COMMUNICATION.md](COMMUNICATION.md) - how `connection` fields map to channel infrastructure
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating the supporting services referenced in `connection` fields
