@@ -30,6 +30,35 @@ import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
 
 /**
+ * Operator guidance appended to the file-sync peer-silence timeout error.
+ *
+ * This is the sender-side residue of board item 195173462: when the peer dies
+ * mid-exchange -- the canonical case being its exchange directory going
+ * read-only so it can never write its next message or ack -- the receiver names
+ * its own cause locally (`asConnectionError`), but the remote sender only
+ * observes the inactivity deadline and would otherwise fail with a bare "peer
+ * went silent". A definitive cross-party cause signal is not built in this
+ * change: it cannot cover the headline mode (an unwritable directory is exactly
+ * what stops the peer from writing any marker) and is a protocol change in its
+ * own right. It is feasible for the writable-directory failure modes, though --
+ * an additive, post-handshake-authenticated cause file -- and is tracked as a
+ * follow-up; this guidance is the baseline beneath it, not a claimed ceiling. So
+ * the sender surfaces likely receiver-side causes and points at the peer's own
+ * logs, where the real cause was recorded, rather than overclaiming a specific
+ * one. The wording deliberately hedges ("may have") and notes the slow-peer
+ * case so the operator is not misdirected. See docs/FILE_SYNC.md
+ * ("Sender-side peer-silence attribution").
+ */
+export const PEER_SILENCE_GUIDANCE =
+  "The peer completed the rendezvous but has sent nothing since. The likely " +
+  "cause is on the peer's side: its process may have exited, or its exchange " +
+  "directory may have become unwritable (for example a read-only or full " +
+  "filesystem, or revoked permissions) -- and a peer that cannot write its " +
+  "next message also cannot record why, so this side cannot name the cause. " +
+  "Check the peer's own logs for the underlying error. If the peer is instead " +
+  "still working on a large dataset, raise the peer timeout (--peer-timeout).";
+
+/**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
  * the rotated shared secret is persisted after each successful key exchange.
  *
@@ -278,7 +307,14 @@ export async function runProtocol(
   // the same value bounds the file-sync rendezvous TTL inside conn.open().
   const peerBudgetMs =
     connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
-  const mc = fromEventConnection(conn, { inactivityTimeoutMs: peerBudgetMs });
+  // inactivityHint enriches the generic peer-silence error with file-sync
+  // operator guidance: the receiver names its own cause locally, but the sender
+  // only sees the inactivity timeout, so it points at the likely receiver-side
+  // causes and the peer's own logs (see PEER_SILENCE_GUIDANCE).
+  const mc = fromEventConnection(conn, {
+    inactivityTimeoutMs: peerBudgetMs,
+    inactivityHint: PEER_SILENCE_GUIDANCE,
+  });
 
   // SIGINT/SIGTERM handlers and the finally block share this closure so that
   // stop/cleanup/close run at most once regardless of which path gets there

@@ -301,6 +301,34 @@ test("fromEventConnection: a silent peer trips the inactivity deadline", async (
   await expect(connB.send("x")).rejects.toBeInstanceOf(ConnectionError);
 });
 
+test("fromEventConnection: a supplied inactivityHint is appended to the silence error", async () => {
+  const [, eventB] = makeEventConnections();
+  // A caller that knows the transport (the file-sync CLI) supplies guidance
+  // about likely causes; it is appended as a trailing sentence to the generic
+  // peer-silence diagnostic.
+  const connB = fromEventConnection(eventB, {
+    inactivityTimeoutMs: 20,
+    inactivityHint: "check the peer's own logs",
+  });
+  const err = await connB.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("gone silent");
+  expect((err as ConnectionError).message).toContain(
+    "check the peer's own logs",
+  );
+});
+
+test("fromEventConnection: the silence error carries no clause when no hint is supplied", async () => {
+  const [, eventB] = makeEventConnections();
+  // No hint: the bare diagnostic, unchanged. This pins that a transport which
+  // supplies none (e.g. WebRTC) is not given file-sync guidance.
+  const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 20 });
+  const err = await connB.receive().catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).message).toMatch(/gone silent$/);
+});
+
 test("fromEventConnection: a message before the deadline clears the timer", async () => {
   const [eventA, eventB] = makeEventConnections();
   const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 30 });

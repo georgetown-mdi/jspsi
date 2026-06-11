@@ -227,6 +227,13 @@ export class QueuedMessageConnection implements MessageConnection {
   private readonly waiters: Array<Waiter> = [];
   private readonly capacity: number;
   private readonly inactivityTimeoutMs: number | undefined;
+  // Transport-supplied clause appended to the peer-silence inactivity error.
+  // Kept here (rather than baked into the message) so the generic core layer
+  // stays transport-agnostic: a caller that knows the transport supplies
+  // guidance about likely causes (the file-sync CLI names probable
+  // receiver-side faults), while a caller that supplies none -- e.g. the WebRTC
+  // transport -- gets the bare diagnostic unchanged.
+  private readonly inactivityHint: string | undefined;
   private readonly hooks: TransportHooks;
   // Single source of truth for the terminal lifecycle; undefined means open.
   // Every transition into a terminal state runs transport teardown exactly
@@ -239,10 +246,15 @@ export class QueuedMessageConnection implements MessageConnection {
 
   constructor(
     connect: TransportConnect,
-    options?: { capacity?: number; inactivityTimeoutMs?: number },
+    options?: {
+      capacity?: number;
+      inactivityTimeoutMs?: number;
+      inactivityHint?: string;
+    },
   ) {
     this.capacity = options?.capacity ?? DEFAULT_CAPACITY;
     this.inactivityTimeoutMs = options?.inactivityTimeoutMs;
+    this.inactivityHint = options?.inactivityHint;
     this.hooks = connect({
       deliver: (message) => this.deliver(message),
       fail: (error) => this.fail(error),
@@ -272,7 +284,12 @@ export class QueuedMessageConnection implements MessageConnection {
       this.fail(
         new ConnectionError(
           `no message received within ${ms}ms; the peer appears to have ` +
-            "gone silent",
+            "gone silent" +
+            // Append the transport's guidance, if any, as a trailing sentence;
+            // a caller that supplies none gets the bare diagnostic unchanged.
+            (this.inactivityHint !== undefined
+              ? `. ${this.inactivityHint}`
+              : ""),
           "transport",
         ),
       );
@@ -457,10 +474,20 @@ export class QueuedMessageConnection implements MessageConnection {
  * deadline (default {@link DEFAULT_INACTIVITY_TIMEOUT_MS}, overridable via
  * `inactivityTimeoutMs`): if the peer sends nothing within the window the
  * connection fails as a `transport` error rather than hanging the exchange.
+ *
+ * `inactivityHint` is an optional transport-specific clause appended to that
+ * peer-silence error. The bridge is transport-agnostic, so it carries no
+ * guidance of its own; a caller that knows the transport (e.g. the file-sync
+ * CLI naming likely receiver-side causes) supplies one, and a caller that omits
+ * it gets the bare diagnostic.
  */
 export function fromEventConnection(
   conn: Connection,
-  options?: { capacity?: number; inactivityTimeoutMs?: number },
+  options?: {
+    capacity?: number;
+    inactivityTimeoutMs?: number;
+    inactivityHint?: string;
+  },
 ): MessageConnection {
   return new QueuedMessageConnection(
     (controls) => {
@@ -487,6 +514,7 @@ export function fromEventConnection(
       capacity: options?.capacity,
       inactivityTimeoutMs:
         options?.inactivityTimeoutMs ?? DEFAULT_INACTIVITY_TIMEOUT_MS,
+      inactivityHint: options?.inactivityHint,
     },
   );
 }
