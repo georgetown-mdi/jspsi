@@ -5,6 +5,46 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 
+// --- Untrusted-input bounds --------------------------------------------------
+
+// These terms travel inside an invitation token, which the decoder accepts from
+// a counterparty whose token passed only a transcription checksum -- a check
+// anyone can recompute over a crafted payload, not an authenticity guarantee
+// (see invitation.ts). So every partner-controlled free-text and array field
+// below carries a generous `.max()`: a ceiling no real configuration approaches,
+// purely to refuse a token padded to jank the recipient on decode/render. They
+// are defense-in-depth, not semantic limits, and are backed by the boundary cap
+// MAX_ENCODED_INVITATION_LENGTH in invitation.ts, which bounds the whole payload
+// before any field is parsed.
+
+/**
+ * Generous upper bound on a free-text identifier string: a linkage key, field,
+ * or element `name`, an element `field` reference, a transform `function` name,
+ * a payload column `name`, or a legal-agreement `reference`. A real identifier
+ * is a short label (tens of characters); 256 is far above any legitimate value
+ * yet refuses a megabyte-scale string.
+ */
+export const MAX_NAME_LENGTH = 256;
+
+/**
+ * Generous upper bound on a prose-like free-text field: a party `identity`, a
+ * legal-agreement `purpose`, or a payload column `description`. Larger than
+ * {@link MAX_NAME_LENGTH} because these legitimately hold a sentence or a
+ * name-plus-contact line rather than a single label; 1 KiB is still comfortably
+ * above any real value.
+ */
+export const MAX_TEXT_LENGTH = 1024;
+
+/**
+ * Generous upper bound on the COUNT of entries in the `linkageFields` and
+ * `linkageKeys` arrays. The default template ships ~14 keys / 5 fields and a
+ * hand-authored set is of the same order; 256 is more than any real
+ * configuration needs yet refuses a token padded with tens of thousands of
+ * entries to exhaust the recipient on decode/render. The `.min(1)` floor and the
+ * most-to-least-precise ordering of `linkageKeys` are unaffected.
+ */
+export const MAX_LINKAGE_ENTRIES = 256;
+
 // --- Output ------------------------------------------------------------------
 
 /**
@@ -122,7 +162,7 @@ const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
 
 // Shared fields for all linkage field variants.
 const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
-  name: z.string().min(1),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   constraints: constraints.optional(),
 });
 
@@ -237,7 +277,7 @@ export interface TransformStep {
 }
 
 const TransformStepSchema: z.ZodType<TransformStep> = z.object({
-  function: z.string().min(1),
+  function: z.string().min(1).max(MAX_NAME_LENGTH),
   params: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -270,8 +310,8 @@ export interface LinkageKeyElement {
 }
 
 const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
-  field: z.string().min(1),
-  name: z.string().optional(),
+  field: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: z.string().max(MAX_NAME_LENGTH).optional(),
   generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
   transform: z.array(TransformStepSchema).optional(),
 });
@@ -299,7 +339,7 @@ export interface LinkageKey {
 }
 
 const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   elements: z.array(LinkageKeyElementSchema).min(1),
   swap: z.tuple([z.string(), z.string()]).optional(),
 });
@@ -317,8 +357,8 @@ interface PayloadColumn {
 }
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  description: z.string().max(MAX_TEXT_LENGTH).optional(),
 });
 
 /**
@@ -370,8 +410,8 @@ export interface LegalAgreement {
 }
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
-  reference: z.string().min(1),
-  purpose: z.string().min(1),
+  reference: z.string().min(1).max(MAX_NAME_LENGTH),
+  purpose: z.string().min(1).max(MAX_TEXT_LENGTH),
   expirationDate: z.iso.date(),
 });
 
@@ -463,13 +503,13 @@ const LinkageTermsBaseSchema = z.object({
   version: z
     .string()
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
-  identity: z.string().min(1),
+  identity: z.string().min(1).max(MAX_TEXT_LENGTH),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   output: OutputSchema,
   deduplicate: z.boolean(),
-  linkageFields: z.array(LinkageFieldSchema).min(1),
-  linkageKeys: z.array(LinkageKeySchema).min(1),
+  linkageFields: z.array(LinkageFieldSchema).min(1).max(MAX_LINKAGE_ENTRIES),
+  linkageKeys: z.array(LinkageKeySchema).min(1).max(MAX_LINKAGE_ENTRIES),
   payload: PayloadSchema.optional(),
   legalAgreement: LegalAgreementSchema.optional(),
 });

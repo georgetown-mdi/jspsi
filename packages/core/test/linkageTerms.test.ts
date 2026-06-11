@@ -5,6 +5,9 @@ import {
   parseLinkageTerms,
   safeParseLinkageTerms,
   validateCompatibility,
+  MAX_NAME_LENGTH,
+  MAX_TEXT_LENGTH,
+  MAX_LINKAGE_ENTRIES,
 } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
@@ -914,4 +917,115 @@ test("both parties deduplicating is compatible when both expect output", () => {
     },
   );
   expect(errors).toHaveLength(0);
+});
+
+// ─── Untrusted-input bounds ──────────────────────────────────────────────────
+// These terms ride inside an invitation token whose only integrity check is a
+// transcription checksum anyone can recompute, so each partner-controlled
+// free-text and array field carries a generous `.max()`. The bounds are wide
+// enough that no real configuration hits them (asserted by the boundary-accept
+// cases) but still refuse a token padded to exhaust the recipient.
+
+test("accepts an identity at exactly the maximum length", () => {
+  expect(() =>
+    parseLinkageTerms({ ...base, identity: "x".repeat(MAX_TEXT_LENGTH) }),
+  ).not.toThrow();
+});
+
+test("rejects an identity longer than the maximum", () => {
+  expect(() =>
+    parseLinkageTerms({ ...base, identity: "x".repeat(MAX_TEXT_LENGTH + 1) }),
+  ).toThrow(ZodError);
+});
+
+test("accepts linkageKeys at exactly the maximum count", () => {
+  const linkageKeys = Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
+    name: `K${i}`,
+    elements: [{ field: "ssn" }],
+  }));
+  expect(() => parseLinkageTerms({ ...base, linkageKeys })).not.toThrow();
+});
+
+test("rejects more linkageKeys than the maximum count", () => {
+  const linkageKeys = Array.from(
+    { length: MAX_LINKAGE_ENTRIES + 1 },
+    (_, i) => ({ name: `K${i}`, elements: [{ field: "ssn" }] }),
+  );
+  expect(() => parseLinkageTerms({ ...base, linkageKeys })).toThrow(ZodError);
+});
+
+test("rejects more linkageFields than the maximum count", () => {
+  const linkageFields = Array.from(
+    { length: MAX_LINKAGE_ENTRIES + 1 },
+    (_, i) => ({ name: `f${i}`, type: "ssn" }),
+  );
+  expect(() => parseLinkageTerms({ ...base, linkageFields })).toThrow(ZodError);
+});
+
+test("rejects an over-long linkage key name", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageKeys: [
+        { name: "x".repeat(MAX_NAME_LENGTH + 1), elements: [{ field: "ssn" }] },
+      ],
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long linkage field name", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields: [{ name: "x".repeat(MAX_NAME_LENGTH + 1), type: "ssn" }],
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long payload column name", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: true, shareWithPartner: true },
+      payload: { send: [{ name: "x".repeat(MAX_NAME_LENGTH + 1) }] },
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long payload column description", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: true, shareWithPartner: true },
+      payload: {
+        send: [{ name: "col", description: "x".repeat(MAX_TEXT_LENGTH + 1) }],
+      },
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long legal agreement reference", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      legalAgreement: {
+        reference: "x".repeat(MAX_NAME_LENGTH + 1),
+        purpose: "Audit",
+        expirationDate: "2099-01-01",
+      },
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long legal agreement purpose", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      legalAgreement: {
+        reference: "MOU-1",
+        purpose: "x".repeat(MAX_TEXT_LENGTH + 1),
+        expirationDate: "2099-01-01",
+      },
+    }),
+  ).toThrow(ZodError);
 });

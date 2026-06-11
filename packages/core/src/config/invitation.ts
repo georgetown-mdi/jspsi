@@ -90,6 +90,23 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   return undefined;
 };
 
+/**
+ * Generous upper bound on a connection endpoint `host`. The host is
+ * partner-controlled (the inviter crafts the token), and for a WebRTC endpoint
+ * it is where the acceptor's own browser aims its PeerJS signaling WebSocket, so
+ * an unbounded value is a (low-severity) SSRF-shaped nuisance. A DNS FQDN is at
+ * most 253 characters and an IPv6 literal far shorter; 256 admits every real
+ * hostname or IP an inviter would legitimately emit while refusing a padded one.
+ *
+ * Length-only by design: a strict hostname/IP regex risks rejecting a legitimate
+ * but unusual locator (an IPv6 literal, an internal name, a punycode IDN), and
+ * the finding asks only for a length/format bound as cheap hardening. Applied to
+ * both the WebRTC and SFTP endpoint hosts -- the finding named the WebRTC host
+ * (the browser-SSRF vector), but the SFTP host is the identical
+ * partner-controlled locator field, so neither is left unbounded.
+ */
+export const MAX_ENDPOINT_HOST_LENGTH = 256;
+
 // Intentionally no z.ZodType<T> annotation on these members: z.discriminatedUnion
 // requires a concrete ZodObject, and the annotation would widen them to
 // ZodType<T> and break the union (same rationale as connection.ts). Strict
@@ -98,7 +115,7 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
 const WebRTCEndpointSchema = z.strictObject(
   {
     channel: z.literal("webrtc"),
-    host: z.string().min(1),
+    host: z.string().min(1).max(MAX_ENDPOINT_HOST_LENGTH),
     // A reachable rendezvous port is 1-65535. Port 0 means "let the OS assign
     // an ephemeral port" and can never be an address an acceptor connects to,
     // so the endpoint is deliberately stricter here than connection.ts (which
@@ -114,7 +131,7 @@ const WebRTCEndpointSchema = z.strictObject(
 const SFTPEndpointSchema = z.strictObject(
   {
     channel: z.literal("sftp"),
-    host: z.string().min(1),
+    host: z.string().min(1).max(MAX_ENDPOINT_HOST_LENGTH),
     // >= 1: a locator must name a reachable port; see the WebRTCEndpointSchema
     // port note (0 is an OS-assigned ephemeral port, never a connect target).
     port: z.int().min(1).max(65535).optional(),
@@ -242,6 +259,22 @@ function fromBase64Url(str: string): Uint8Array<ArrayBuffer> {
 const CHECKSUM_CHARS = 6;
 
 /**
+ * Generous upper bound on the length of an encoded invitation string accepted by
+ * {@link decodeInvitation}, enforced at the decode boundary BEFORE the string is
+ * base64-decoded, hashed, JSON-parsed, or schema-validated. The 4-byte checksum
+ * detects transcription errors only -- anyone can recompute it over a crafted
+ * payload (see {@link decodeInvitation}) -- so it is no barrier to an oversized
+ * token; this cap is. A maximal real invitation (full linkage terms, an
+ * endpoint, an expiry) encodes to a few KiB, and the web flow's URL-length limit
+ * caps it besides; 64 KiB is an order of magnitude above any legitimate token
+ * yet refuses the multi-megabyte payload a checksum-valid token could otherwise
+ * carry. This is the single boundary that transitively bounds every untrusted
+ * field, so no per-field check has to do oversized-input work; the per-field
+ * `.max()` bounds in linkageTerms.ts are defense-in-depth atop it.
+ */
+export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
+
+/**
  * Serializes an {@link InvitationToken} as a base64url string with a
  * 4-byte truncated-SHA-256 checksum appended for transcription-error
  * detection. The checksum provides no security guarantee; the key exchange handles
@@ -296,6 +329,16 @@ export async function encodeInvitation(
 export async function decodeInvitation(
   encoded: string,
 ): Promise<InvitationToken> {
+  // Refuse an oversized payload at the boundary, before any base64-decode, hash,
+  // or schema work. The checksum gates none of this (it is a transcription-error
+  // detector with no security guarantee), so this cap is the only thing that
+  // stops a checksum-valid multi-megabyte token; see MAX_ENCODED_INVITATION_LENGTH.
+  if (encoded.length > MAX_ENCODED_INVITATION_LENGTH) {
+    throw new Error(
+      "invitation string exceeds the maximum length of " +
+        `${MAX_ENCODED_INVITATION_LENGTH} characters`,
+    );
+  }
   if (encoded.length <= CHECKSUM_CHARS) {
     throw new Error("invitation string is too short");
   }
