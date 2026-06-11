@@ -123,9 +123,14 @@ export function InvitationTab() {
             }}
             children={({ state, handleChange, handleBlur }) => (
               <TextInput
-                defaultValue={state.value}
+                value={state.value}
                 onChange={(e) => handleChange(e.target.value)}
                 onBlur={handleBlur}
+                error={
+                  state.meta.errors.length > 0
+                    ? state.meta.errors.join(", ")
+                    : undefined
+                }
                 withAsterisk
                 required
                 label="Your name"

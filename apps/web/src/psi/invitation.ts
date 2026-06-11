@@ -7,11 +7,13 @@ import {
 import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
 
 /**
- * Path the self-hosted PeerJS signaling server is mounted at. Kept in sync with
- * `apps/web/src/peerServer.ts` (`CreatePeerServerWSOnly(..., { path: "/api" })`)
- * and the PeerJS client in `psi/client.ts`, which dials the same path.
+ * Path a PeerJS client dials this app's signaling server at. Matches the working
+ * dialer in `psi/client.ts` (`path: "/api/"`), which the server -- mounted at
+ * `/api` by `apps/web/src/peerServer.ts` -- accepts. The acceptor reads this off
+ * the endpoint and dials it the same way a client does, so it must carry the
+ * client's dial path (trailing slash included), not the server's mount path.
  */
-const PEERJS_SIGNALING_PATH = "/api";
+const PEERJS_SIGNALING_PATH = "/api/";
 
 /**
  * Route the deep-link targets: the acceptor's accept/reject consent screen. The
@@ -71,7 +73,10 @@ export function webrtcEndpointFromLocation(loc: {
     host,
     path: PEERJS_SIGNALING_PATH,
   };
-  const port = loc.port === "" ? Number.NaN : Number.parseInt(loc.port, 10);
+  // Number() rather than parseInt: a non-numeric port like "8080abc" becomes NaN
+  // and is dropped instead of being truncated to 8080, and an empty default-port
+  // location becomes 0, which the `>= 1` guard rejects -- so the port is omitted.
+  const port = Number(loc.port);
   if (Number.isInteger(port) && port >= 1 && port <= 65535)
     endpoint.port = port;
   return endpoint;

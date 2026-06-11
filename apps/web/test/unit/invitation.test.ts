@@ -43,7 +43,7 @@ describe("generateInvitation", () => {
       channel: "webrtc",
       host: "example.org",
       port: 8443,
-      path: "/api",
+      path: "/api/",
     });
   });
 
@@ -108,14 +108,14 @@ describe("webrtcEndpointFromLocation", () => {
       channel: "webrtc",
       host: "127.0.0.1",
       port: 3000,
-      path: "/api",
+      path: "/api/",
     });
   });
 
   test("omits the port for a default-port (empty) location", () => {
     expect(
       webrtcEndpointFromLocation({ hostname: "example.org", port: "" }),
-    ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api" });
+    ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api/" });
   });
 
   test("drops an out-of-range port rather than encoding a meaningless locator", () => {
@@ -123,7 +123,15 @@ describe("webrtcEndpointFromLocation", () => {
     // target; the endpoint schema rejects it, so it is not encoded.
     expect(
       webrtcEndpointFromLocation({ hostname: "example.org", port: "0" }),
-    ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api" });
+    ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api/" });
+  });
+
+  test("drops a non-numeric port rather than truncating it", () => {
+    // Number() yields NaN for "8080abc" (parseInt would truncate to 8080), so a
+    // malformed port is omitted, not silently encoded as a wrong locator.
+    expect(
+      webrtcEndpointFromLocation({ hostname: "example.org", port: "8080abc" }),
+    ).toStrictEqual({ channel: "webrtc", host: "example.org", path: "/api/" });
   });
 });
 
