@@ -905,6 +905,43 @@ describe("bounded put (idle window)", () => {
     }
   });
 
+  test("stall destroys the source, rejecting the underlying put() onto the no-op fail with no unhandled rejection", async () => {
+    // The other stall mocks never settle, so they skip the production ordering:
+    // on the idle-stall path the source is destroyed WITH an error, ssh2-sftp-client's
+    // rdr.on('error') then rejects its put() promise, and that rejection lands on
+    // the adapter's no-op `fail` (the source already settled `result`). This mock
+    // mirrors that rdr.on('error') so the ordering is exercised: `result` must still
+    // carry the typed terminal error, and the put() rejection must be handled (a
+    // missing handler would surface as an unhandled rejection vitest fails on).
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation((source: Readable) => {
+          // Mirror ssh2-sftp-client _put: reject when the piped source errors
+          // (a destroy-with-error included). Never consumes the source, so the
+          // idle window fires and drives the destroy.
+          return new Promise<string>((_resolve, reject) => {
+            source.on("error", (err) => reject(err));
+          });
+        }),
+      };
+      const writing = adapter.put(Buffer.from("x"), "/remote/out.bin");
+      const captured = writing.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("made no upload progress");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("does not stall a slow but progressing upload (window resets on each chunk)", async () => {
     // The idle bound must not penalize a legitimately large, slow upload: each
     // chunk consumed resets the window, so an upload whose chunk gaps stay under
