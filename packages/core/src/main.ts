@@ -13,9 +13,10 @@ export {
   setLogPrefixer,
 } from "./utils/logger";
 export { retryPromise, withTimeout } from "./utils/promise";
-// @internal: shared with the CLI config writer so read/write skip identical
-// subtrees; not a stable public API (see the declaration's JSDoc).
-export { OPAQUE_VALUE_KEYS } from "./utils/camelizeKeys";
+// @internal: the CLI config writer (saveConfig) delegates to this snakeize
+// direction so the read and write paths share one recurse-and-skip traversal;
+// not a stable public API (see the declaration's JSDoc).
+export { snakeizeKeys } from "./utils/camelizeKeys";
 export {
   canonicalString,
   canonicalBytes,
