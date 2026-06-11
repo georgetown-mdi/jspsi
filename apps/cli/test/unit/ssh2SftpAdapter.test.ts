@@ -931,6 +931,47 @@ describe("bounded put (idle window)", () => {
     await adapter.put(payload, "/remote/exact.bin");
     expect(Buffer.concat(received).equals(payload)).toBe(true);
   });
+
+  test("stops retrying when a fatal session error lands between put attempts", async () => {
+    // Mirrors the rename() between-attempts case. The first attempt fails with a
+    // retryable (non-stall) error while a fatal protocol error lands in the
+    // inter-attempt window. The next attempt's dead-session re-check must reject
+    // promptly with the terminal stalled error -- without it, that attempt would
+    // issue put() on the dead channel and wait out the full idle window before the
+    // typed (non-retryable) error ended the retry. The re-check makes it prompt.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      let calls = 0;
+      const put = vi.fn().mockImplementation(() => {
+        calls += 1;
+        // A fatal protocol error lands in the inter-attempt window (as the guarded
+        // wrapper 'error' listener would set it), but this attempt still rejects
+        // with the retryable transient failure the server already returned.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (adapter as any).fatalSftpError = new Error("Malformed DATA packet");
+        return Promise.reject(new Error("transient write failure"));
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { put };
+      const writing = adapter.put(Buffer.from("x"), "/remote/out.json");
+      const captured = writing.catch((e: unknown) => e);
+      // Advance past the 100 ms retry delay; the second attempt's re-check runs and
+      // rejects at once, with no need for the 60 s idle window.
+      await vi.advanceTimersByTimeAsync(200);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("Malformed DATA packet");
+      // Only the first attempt reached the server; the second short-circuited.
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // --- bounded list ------------------------------------------------------------

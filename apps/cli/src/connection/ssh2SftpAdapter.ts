@@ -621,9 +621,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     dest: string,
     options?: PutOptions,
   ): Promise<unknown> {
-    const dead = this.deadSessionError("file write", dest);
-    if (dead) return Promise.reject(dead);
     if (!Buffer.isBuffer(src)) {
+      const dead = this.deadSessionError("file write", dest);
+      if (dead) return Promise.reject(dead);
       // string (a local file path) and ReadableStream are permitted by the
       // transport-agnostic FileTransportClient.put signature but never produced by
       // this app: every FileSyncConnection put() call site builds a Buffer. They
@@ -655,6 +655,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.warnIfSlow(
       retryPromise(
         () => {
+          // Re-check the dead-session guard before EVERY attempt, not only at
+          // method entry -- mirroring rename(). A fatal SFTP protocol error can
+          // land between attempts (the guarded wrapper 'error' listener sets it)
+          // and leave no in-flight request for cleanupRequests to fail; without
+          // this re-check the next attempt would issue put() on the dead channel,
+          // whose write stream never opens, so the source is never pulled and the
+          // idle window would run its full bound before the typed terminal error
+          // (which is not retryable) ended the retry. Re-checking turns that wait
+          // into the prompt failure rename() already gives.
+          const dead = this.deadSessionError("file write", dest);
+          if (dead) return Promise.reject(dead);
           // Fresh source + idle window per attempt: the source is single-use, but
           // it is rebuilt from the retained Buffer on each retry, so the broad
           // retry behavior is preserved. The over-window stall is owned by the
@@ -702,7 +713,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         path,
         "delete",
       ),
-      "delete",
+      "file delete",
       path,
     );
   }
@@ -781,7 +792,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         (error) =>
           (error as Ssh2SftpError | null | undefined)?.code === SSH_FX_FAILURE,
       ),
-      "rename",
+      "file rename",
       `${fromPath} to ${toPath}`,
     );
   }
