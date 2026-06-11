@@ -46,3 +46,13 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+
+  # GitHub Actions used by the workflows in .github/workflows. Every action is
+  # tag-pinned (e.g. actions/checkout@v6), so this tracks those tags for new
+  # releases and security advisories.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
