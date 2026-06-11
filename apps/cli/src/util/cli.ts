@@ -1,5 +1,32 @@
 import fs from "node:fs";
 import logLibrary from "loglevel";
+import type { Arguments } from "yargs";
+
+import { UsageError } from "@psilink/core";
+
+/**
+ * Read a single-value CLI option from parsed yargs `Arguments`, rejecting a flag
+ * that was given more than once. yargs collects a repeated option into an array
+ * (e.g. `--accept-timeout 60 --accept-timeout 120` -> `[60, 120]`); for a
+ * single-value (string or number) option that is a usage error, so throw a
+ * {@link UsageError} -- which the command error boundaries map to exit 64 --
+ * naming the flag, before the array can reach arithmetic, a comparison, or a
+ * string method (`.toLowerCase()`, `.trim()`) as if it were a scalar. Guarding at
+ * the read means a newly added single-value option inherits the rejection by
+ * using this accessor rather than each bare `argv[name]` cast re-implementing it.
+ *
+ * Returns the value unchanged for the caller to cast to the option's declared
+ * type (`undefined` when the flag was absent). `type: "count"` and
+ * `type: "boolean"` options are not read through here: a repeat is valid for them
+ * (yargs accumulates a count and takes last-one-wins / negation for a boolean),
+ * so they keep their plain `argv[name]` cast.
+ */
+export function singleValue(argv: Arguments, name: string): unknown {
+  const value = argv[name];
+  if (Array.isArray(value))
+    throw new UsageError(`--${name} may be given only once`);
+  return value;
+}
 
 /** Mapping from log-level name to loglevel numeric constant. */
 export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {

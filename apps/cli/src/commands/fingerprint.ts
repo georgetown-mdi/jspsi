@@ -20,7 +20,7 @@ import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../signingIdentityFile";
-import { LOG_LEVELS } from "../util/cli";
+import { LOG_LEVELS, singleValue } from "../util/cli";
 
 // `psilink fingerprint` is the front door to the signing identity. Generation is
 // LAZY and anchored here, not at exchange time: a party must display its
@@ -278,24 +278,48 @@ function report(
 }
 
 export async function handler(argv: Arguments): Promise<void> {
-  const rawLogLevel = (
-    (argv["log-level"] as string | undefined) || "info"
-  ).toLowerCase();
-  const logLevel = LOG_LEVELS[rawLogLevel];
-  if (logLevel === undefined) {
-    console.error(`unrecognized log-level: ${argv["log-level"]}`);
+  // This command resolves and applies the log level before the logger exists, so
+  // a bad --log-level is reported on stderr and exited 64 here rather than
+  // through the logger-based catch below. Both usage errors -- a repeated flag
+  // (singleValue, the same shared accessor and message as every other command)
+  // and an unrecognized value -- are UsageErrors handled in one place.
+  let logLevel: logLibrary.LogLevelNumbers;
+  try {
+    const rawLogLevel = (
+      (singleValue(argv, "log-level") as string | undefined) || "info"
+    ).toLowerCase();
+    const resolved = LOG_LEVELS[rawLogLevel];
+    if (resolved === undefined)
+      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+    logLevel = resolved;
+  } catch (err) {
+    // Mirror the pre-logger parse guard in exchange.ts / zeroSetup.ts: a usage
+    // error (a repeated --log-level or an unrecognized value) is reported on
+    // stderr and exited 64 here; any other (unexpected) error propagates to the
+    // top-level handler with its stack intact rather than being flattened to a
+    // bare exit 69 with the cause lost.
+    if (!(err instanceof UsageError)) throw err;
+    console.error(err.message);
     process.exit(64);
   }
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("fingerprint");
 
-  const identityArg = argv["identity"] as string | undefined;
-  const identityFileArg = argv["identity-file"] as string | undefined;
-  const configFileArg = argv["config-file"] as string | undefined;
-  const force = argv["force"] as boolean;
-  const exportCertificate = argv["export-certificate"] as string | undefined;
-
   try {
+    // Read the single-value flags through singleValue inside the try so a
+    // repeated flag raises a UsageError mapped to exit 64 by the catch below.
+    // `force` is a boolean (last-one-wins on repeat), so it keeps a plain cast.
+    const identityArg = singleValue(argv, "identity") as string | undefined;
+    const identityFileArg = singleValue(argv, "identity-file") as
+      | string
+      | undefined;
+    const configFileArg = singleValue(argv, "config-file") as
+      | string
+      | undefined;
+    const force = argv["force"] as boolean;
+    const exportCertificate = singleValue(argv, "export-certificate") as
+      | string
+      | undefined;
     const hints = readConfigHints(configFileArg, configFileArg !== undefined);
     const identityPath = expandTilde(
       identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath(),

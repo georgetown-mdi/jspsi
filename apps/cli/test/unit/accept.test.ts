@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, expect, test, vi } from "vitest";
+import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import {
   encodeInvitation,
@@ -20,6 +21,7 @@ import {
   decodeAndValidateInvitation,
   describeDecodeError,
   displayInvitation,
+  handler as acceptHandler,
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
@@ -510,5 +512,37 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
     expect(joined).toContain("\\u202e");
   } finally {
     infoSpy.mockRestore();
+  }
+});
+
+// --- handler: repeated single-value flag -------------------------------------
+
+test("handler: a repeated single-value flag is rejected (exit 64) via runOrExit", async () => {
+  // accept has no command-specific single-value flags; it reads them all through
+  // parseCommonBootstrapArgs inside runOrExit. A repeated common flag (here
+  // --server-port) is therefore rejected with a clean usage error before
+  // resolveAcceptPositionals/validateAccept run. runOrExit logs the message via
+  // getLogger("accept").error; spying that method is robust because the guard
+  // throws inside parseCommonBootstrapArgs, before setDefaultLevel could rebind
+  // the logger's methods.
+  const logErr = vi
+    .spyOn(getLogger("accept"), "error")
+    .mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", "INVITATION", "input.csv"],
+      "server-port": [2222, 2223],
+    } as unknown as Arguments);
+    // Assert before restoring the spies: mockRestore clears the recorded calls.
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(logErr).toHaveBeenCalledWith("--server-port may be given only once");
+  } finally {
+    logErr.mockRestore();
+    exit.mockRestore();
   }
 });

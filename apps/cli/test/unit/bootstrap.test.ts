@@ -190,6 +190,38 @@ test("parseCommonBootstrapArgs: an unrecognized log-level is a usage error", () 
   ).toThrow(UsageError);
 });
 
+test("parseCommonBootstrapArgs: a repeated number flag is a usage error naming the flag", () => {
+  // yargs collects `--server-port 2222 --server-port 2223` into an array; the
+  // shared singleValue accessor rejects it before the array reaches the
+  // connection overrides as if it were a scalar port.
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "server-port": [2222, 2223],
+    } as unknown as Arguments),
+  ).toThrow(UsageError);
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "server-port": [2222, 2223],
+    } as unknown as Arguments),
+  ).toThrow("--server-port may be given only once");
+});
+
+test("parseCommonBootstrapArgs: a repeated string flag is a usage error naming the flag", () => {
+  // A repeated --log-level reaches .toLowerCase(); rejecting the array first
+  // avoids the raw TypeError that would otherwise surface as a confusing exit 69.
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "log-level": ["info", "debug"],
+    } as unknown as Arguments),
+  ).toThrow("--log-level may be given only once");
+});
+
 test("runOrExit: a successful body does not exit", async () => {
   const exit = vi
     .spyOn(process, "exit")
