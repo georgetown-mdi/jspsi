@@ -40,10 +40,12 @@ import type { BuiltExchangeRecord } from "./exchangeRecord.js";
 /**
  * The subset of an exchange specification that governs data preparation.
  * Connection-agnostic, so both the CLI and the web application can pass their
- * respective config objects (only the shared fields are consumed).
+ * respective config objects (only the shared fields are consumed). The
+ * `connection` and `authentication` blocks are excluded: both are connection /
+ * partner-trust concerns, not data-preparation inputs.
  */
 export type ExchangeDataSpec = Prettify<
-  Omit<ExchangeSpec, "connection" | "linkageTerms"> &
+  Omit<ExchangeSpec, "connection" | "authentication" | "linkageTerms"> &
     Partial<Pick<ExchangeSpec, "linkageTerms">>
 >;
 

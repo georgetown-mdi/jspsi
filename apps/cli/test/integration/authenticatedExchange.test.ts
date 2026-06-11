@@ -16,11 +16,7 @@ import {
 import { prepareForExchange, SHARED_SECRET_REGEX } from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
 
-import {
-  runProtocol,
-  type AuthPersist,
-  type ProtocolConnectionConfig,
-} from "../../src/protocol";
+import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { ensureServerDir, sftpPort } from "../container/env";
 
@@ -72,11 +68,11 @@ function preparedFor(identity: string, rows: Array<Record<string, string>>) {
   return prepareForExchange(spec, identity, rows, ["first_name"]);
 }
 
-// A connection-config factory: given a party's authentication value (a persisted
-// shared secret, or null for the unauthenticated baseline) it produces a fully
-// typed ProtocolConnectionConfig. Written per channel at the call site so the
-// discriminated union narrows correctly.
-type ConfigFactory = (auth: AuthPersist | null) => ProtocolConnectionConfig;
+// A connection-config factory producing a fully typed ProtocolConnectionConfig.
+// Authentication is no longer part of the connection; it is passed to runProtocol
+// on its own parameter at the call site. Written per channel so the discriminated
+// union narrows correctly.
+type ConfigFactory = () => ProtocolConnectionConfig;
 
 // writeOutput closes its write stream without awaiting 'finish', so the file may
 // lag a tick behind runProtocol resolving. Poll until it is present and stable.
@@ -97,9 +93,9 @@ async function readWhenReady(file: string): Promise<string> {
   }
 }
 
-// The unauthenticated baseline (authentication: null): same data and roles, no
-// handshake and no AEAD. Returns the receiver's output -- the reference PSI
-// result the authenticated runs must reproduce.
+// The unauthenticated baseline (auth: null): same data and roles, no handshake
+// and no AEAD. Returns the receiver's output -- the reference PSI result the
+// authenticated runs must reproduce.
 async function runBaseline(
   work: string,
   makeConfig: ConfigFactory,
@@ -108,14 +104,16 @@ async function runBaseline(
   const outS = path.join(work, "baseline-sender-out.csv");
   await Promise.all([
     runProtocol(
-      makeConfig(null),
+      makeConfig(),
+      null,
       preparedFor("Receiver", RECEIVER_ROWS),
       outR,
       -1,
       "baseline-receiver",
     ),
     runProtocol(
-      makeConfig(null),
+      makeConfig(),
+      null,
       preparedFor("Sender", SENDER_ROWS),
       outS,
       -1,
@@ -150,14 +148,16 @@ async function runAuthenticatedPair(
 
   await Promise.all([
     runProtocol(
-      makeConfig({ sharedSecret: secret, keyFilePath: keyR }),
+      makeConfig(),
+      { sharedSecret: secret, keyFilePath: keyR },
       preparedFor("Receiver", RECEIVER_ROWS),
       outR,
       -1,
       `${tag}-receiver`,
     ),
     runProtocol(
-      makeConfig({ sharedSecret: secret, keyFilePath: keyS }),
+      makeConfig(),
+      { sharedSecret: secret, keyFilePath: keyS },
       preparedFor("Sender", SENDER_ROWS),
       outS,
       -1,
@@ -197,11 +197,10 @@ afterEach(() => {
 test("filedrop: authenticated recurring exchange matches the unauthenticated PSI result and rotates the secret", async () => {
   const filedrop =
     (dropDir: string): ConfigFactory =>
-    (auth) => ({
+    () => ({
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
-      authentication: auth,
     });
 
   // Baseline over its own drop directory.
@@ -267,7 +266,7 @@ describe("sftp", () => {
   async function sftpForPhase(tag: string): Promise<ConfigFactory> {
     await ensureServerDir(path.join(SFTP_LOCAL_ROOT, tag));
     const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
-    return (auth) => ({
+    return () => ({
       channel: "sftp",
       server: {
         host: "localhost",
@@ -277,7 +276,6 @@ describe("sftp", () => {
         path: serverPath,
       },
       options: { pollIntervalMs: 50 },
-      authentication: auth,
     });
   }
 

@@ -255,10 +255,10 @@ test("saveConfig strips sharedSecret/expires and does not mutate the caller's sp
       connection: {
         channel: "sftp",
         server: { host: "h" },
-        authentication: {
-          sharedSecret: token,
-          expires: "2028-01-01T00:00:00.000Z",
-        },
+      },
+      authentication: {
+        sharedSecret: token,
+        expires: "2028-01-01T00:00:00.000Z",
       },
       linkageTerms: getDefaultLinkageTerms("Agency A"),
     } as unknown as ExchangeSpec;
@@ -271,10 +271,8 @@ test("saveConfig strips sharedSecret/expires and does not mutate the caller's sp
     // The now-empty authentication container is pruned, not left as `{}`.
     expect(raw).not.toContain("authentication");
     // The strip runs on a clone; the caller's spec is untouched.
-    expect(spec.connection.authentication?.sharedSecret).toBe(token);
-    expect(spec.connection.authentication?.expires).toBe(
-      "2028-01-01T00:00:00.000Z",
-    );
+    expect(spec.authentication?.sharedSecret).toBe(token);
+    expect(spec.authentication?.expires).toBe("2028-01-01T00:00:00.000Z");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -365,31 +363,32 @@ test("saveConfig round-trips webrtc provider_options verbatim", () => {
   }
 });
 
-test("saveConfig keeps authentication when role remains after stripping (WebRTC)", () => {
+test("saveConfig preserves WebRTC connection.role and prunes the authentication block", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {
     const configPath = path.join(dir, "psilink.yaml");
     const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    // WebRTC is the only channel where authentication survives the strip: role
-    // is a valid field, so the container is kept rather than pruned to `{}`.
+    // role now lives on the WebRTC connection config, not under authentication.
+    // saveConfig touches only the top-level authentication block, so role is
+    // preserved while the authentication block (key material only) is pruned.
     const spec = {
       connection: {
         channel: "webrtc",
         server: { host: "api.peerjs.com" },
-        authentication: {
-          role: "inviter",
-          sharedSecret: token,
-          expires: "2028-01-01T00:00:00.000Z",
-        },
+        role: "inviter",
+      },
+      authentication: {
+        sharedSecret: token,
+        expires: "2028-01-01T00:00:00.000Z",
       },
       linkageTerms: getDefaultLinkageTerms("Agency A"),
     } as unknown as ExchangeSpec;
     saveConfig(configPath, spec);
     const raw = fs.readFileSync(configPath, "utf8");
-    // role survives and keeps the authentication container alive ...
-    expect(raw).toContain("authentication:");
+    // connection.role survives (a connection field, never stripped) ...
     expect(raw).toContain("role: inviter");
-    // ... while the key material is still stripped.
+    // ... while the authentication block, holding only key material, is pruned.
+    expect(raw).not.toContain("authentication");
     expect(raw).not.toContain("shared_secret");
     expect(raw).not.toContain(token);
     expect(raw).not.toContain("expires");

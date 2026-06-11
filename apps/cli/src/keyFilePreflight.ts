@@ -41,9 +41,7 @@ export function preflightKeyFilePath(
   // otherwise become "  ." for dirname and " ./key  " for the file name,
   // producing a confusing on-disk artifact rather than the intended file.
   if (typeof keyFilePath !== "string" || keyFilePath.trim().length === 0)
-    throw new Error(
-      "connection.authentication must include a non-empty keyFilePath",
-    );
+    throw new Error("authentication must include a non-empty keyFilePath");
   const kfp = keyFilePath.trim();
   // Pre-validate the key path itself: it is fine as a regular file or a
   // symlink, and rejected only if it already exists as a directory or other

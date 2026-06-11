@@ -30,12 +30,6 @@ import {
   type ProtocolConnectionConfig,
 } from "../protocol";
 
-// Defined here rather than in protocol.ts: it is only needed as the return
-// type of loadConfig and does not belong to the protocol layer's public API.
-type AuthenticatedConnectionConfig = ProtocolConnectionConfig & {
-  authentication: AuthPersist;
-};
-
 export function builder(cmd: Argv): Argv {
   return cmd
     .usage("Usage: $0 exchange [options] INPUT_FILE [OUTPUT_FILE]")
@@ -286,10 +280,72 @@ function parseArgs(argv: Arguments): ExchangeArgs {
 
 // --- Config loading ----------------------------------------------------------
 
+// The runtime-injected authentication fields: their values come only from
+// `.psilink.key`, so an operator who sets them in the top-level `authentication`
+// block of psilink.yaml is warned and the value is stripped. Each canonical name
+// carries the user-input spellings it can appear as before `camelizeKeys` runs
+// (snake_case is the YAML convention; camelCase is accepted too), so neither
+// form slips through silently, alongside the hint shown when it is stripped.
+// Keeping forms and hint in one entry keeps them from drifting out of sync.
+const INJECTED_AUTH_FIELDS: Record<string, { forms: string[]; hint: string }> =
+  {
+    sharedSecret: {
+      forms: ["shared_secret", "sharedSecret"],
+      hint:
+        "the shared secret is always loaded from the key file (any @-file " +
+        "reference in this field was also not resolved)",
+    },
+    expires: {
+      forms: ["expires"],
+      hint:
+        "expiration is always loaded from the key file (any @-file reference " +
+        "in this field was also not resolved)",
+    },
+  };
+
+/**
+ * Warn about and strip the runtime-injected authentication fields
+ * (`shared_secret`/`expires`) from a raw top-level `authentication` block, in
+ * place. Their values come only from `.psilink.key`, so a value set in YAML is
+ * ignored; warning rather than silently dropping lets the operator see why their
+ * setting did nothing. Operator-policy fields (e.g. a future `token_max_age_days`)
+ * are NOT touched -- they pass through to schema validation, which is the
+ * authority on which policy fields are valid. Runs on the raw config before
+ * `parseExchangeSpec` (which applies `camelizeKeys` then Zod), so it matches both
+ * the snake_case and camelCase spelling of each injected field.
+ *
+ * @internal exported for testing
+ */
+export function warnAndStripInjectedAuthFields(
+  rawAuth: Record<string, unknown>,
+  configFile: string,
+  log: ReturnType<typeof getLogger>,
+): void {
+  // Map every accepted spelling straight to its hint, so matching a key both
+  // identifies it as injected and yields the message in one lookup (no second
+  // indexed access that could interpolate `undefined` if the tables drifted).
+  const formToHint = new Map<string, string>();
+  for (const { forms, hint } of Object.values(INJECTED_AUTH_FIELDS))
+    for (const form of forms) formToHint.set(form, hint);
+
+  for (const key of Object.keys(rawAuth)) {
+    const hint = formToHint.get(key);
+    // An operator-policy field (or an unrecognized one): leave it for the schema
+    // to accept or strip, the same treatment any other config key gets.
+    if (hint === undefined) continue;
+    log.warn(
+      `${configFile}: authentication.${key} is set and will be ignored; ` +
+        hint,
+    );
+    delete rawAuth[key];
+  }
+}
+
 /** @internal exported for testing */
-export function loadConfig(
-  options: ExchangeOptions,
-): { connection: AuthenticatedConnectionConfig } & ExchangeDataSpec {
+export function loadConfig(options: ExchangeOptions): {
+  connection: ProtocolConnectionConfig;
+  authentication: AuthPersist;
+} & ExchangeDataSpec {
   const log = getLogger("exchange");
 
   let rawConfig: unknown;
@@ -313,77 +369,17 @@ export function loadConfig(
     );
   }
 
-  // Warn about and strip auth fields the CLI always ignores. This runs before
-  // parseExchangeSpec (which applies Zod validation and `camelizeKeys`), so
-  // we see raw user-input keys: a single canonical name may appear as either
-  // its snake_case form (the YAML convention) or its camelCase form (if the
-  // user wrote camelCase directly). Both forms must be listed for each
-  // canonical name or one would slip through silently.
-  //
-  // The named keys get specific guidance; any other field under
-  // `authentication` (e.g. typos like `expires_at` or `shared_secre`) gets a
-  // generic warning so the user sees the silent drop rather than wondering
-  // why their setting did nothing.
-  //
-  // CANONICAL_TO_USER_FORMS centralizes the dual-form mapping so a future
-  // field cannot be added to only one of the two lookups.
-  const CANONICAL_TO_USER_FORMS: Record<string, string[]> = {
-    sharedSecret: ["shared_secret", "sharedSecret"],
-    expires: ["expires"],
-    role: ["role"],
-  };
-  const CANONICAL_TO_HINT: Record<string, string> = {
-    sharedSecret:
-      "the shared secret is always loaded from the key file (any @-file " +
-      "reference in this field was also not resolved)",
-    expires:
-      "expiration is always loaded from the key file (any @-file reference " +
-      "in this field was also not resolved)",
-    role: "this field is only valid for the WebRTC channel",
-  };
-  const KEY_SPECIFIC_HINT: Record<string, string> = Object.fromEntries(
-    Object.entries(CANONICAL_TO_USER_FORMS).flatMap(([canonical, forms]) =>
-      forms.map((form) => [form, CANONICAL_TO_HINT[canonical]]),
-    ),
-  );
-  const rawConn = (rawConfig as Record<string, unknown>)?.["connection"];
-  if (typeof rawConn === "object" && rawConn !== null) {
-    // `role` is a valid WebRTC field; only the sftp/filedrop channels treat
-    // it as ignored. Detect the channel from the raw config before Zod parses
-    // and normalizes it so we do not strip a field WebRTC will need.
-    const isWebRTC =
-      (rawConn as Record<string, unknown>)["channel"] === "webrtc";
-    const canonicalIgnored = isWebRTC
-      ? ["sharedSecret", "expires"]
-      : ["sharedSecret", "expires", "role"];
-    const ignoredKeys = canonicalIgnored.flatMap(
-      (canonical) => CANONICAL_TO_USER_FORMS[canonical],
+  // Warn about and strip the runtime-injected fields from the top-level
+  // `authentication` block (their values come only from the key file). Operator-
+  // policy fields under the same block are left for schema validation. Runs on
+  // the raw config before parseExchangeSpec applies camelizeKeys + Zod.
+  const rawAuth = (rawConfig as Record<string, unknown>)?.["authentication"];
+  if (typeof rawAuth === "object" && rawAuth !== null)
+    warnAndStripInjectedAuthFields(
+      rawAuth as Record<string, unknown>,
+      options.configFile,
+      log,
     );
-    const rawAuth = (rawConn as Record<string, unknown>)?.["authentication"];
-    if (typeof rawAuth === "object" && rawAuth !== null) {
-      const a = rawAuth as Record<string, unknown>;
-      for (const key of Object.keys(a)) {
-        // On the webrtc channel, `role` is a valid field: leave it intact so
-        // Zod parses it normally and the strip-and-warn message does not
-        // contradict the actual channel.
-        if (isWebRTC && key === "role") continue;
-        if (ignoredKeys.includes(key)) {
-          log.warn(
-            `${options.configFile}: connection.authentication.${key} is set ` +
-              `and will be ignored; ${KEY_SPECIFIC_HINT[key]}`,
-          );
-        } else {
-          log.warn(
-            `${options.configFile}: connection.authentication.${key} is not ` +
-              "a recognized field and will be silently dropped; valid keys " +
-              "are loaded from the key file or apply only to the WebRTC " +
-              "channel (see EXCHANGE_SPEC.md#connectionauthentication)",
-          );
-        }
-        delete a[key];
-      }
-    }
-  }
 
   let parsedSpec: ReturnType<typeof parseExchangeSpec>;
   try {
@@ -396,7 +392,11 @@ export function loadConfig(
         (err instanceof Error ? err.message : String(err)),
     );
   }
-  const { connection: baseConn, ...exchangeDataSpec } = parsedSpec;
+  const {
+    connection: baseConn,
+    authentication: specAuth,
+    ...exchangeDataSpec
+  } = parsedSpec;
   log.info("loaded exchange spec from", options.configFile);
 
   const connection = applyConnectionOverrides(baseConn, {
@@ -465,20 +465,21 @@ export function loadConfig(
         "docs/SECURITY_DESIGN.md#recurring-exchange-authentication.",
     );
   const authPersist: AuthPersist = {
+    // Operator-policy fields parsed from the YAML `authentication` block (none
+    // are defined yet; this admits a future field such as token_max_age_days
+    // end to end). The injected fields below come only from the key file and
+    // override any YAML value -- already stripped above, so this ordering is
+    // belt-and-suspenders.
+    ...specAuth,
     sharedSecret: keyData.sharedSecret,
     expires: keyData.expires,
     keyFilePath: options.keyFile,
   };
-  // Spread + cast: `connection` is `ConnectionConfig` (which includes the
-  // webrtc channel), so TypeScript cannot verify that the spread result fits
-  // `AuthenticatedConnectionConfig` (constrained to sftp and filedrop). The
-  // double cast through `unknown` is intentional; the channel guard above
-  // ensures only sftp/filedrop configs reach this point.
+  // The channel guard above throws on any non-sftp/filedrop channel, so the
+  // discriminated union narrows `connection` to ProtocolConnectionConfig here.
   return {
-    connection: {
-      ...connection,
-      authentication: authPersist,
-    } as unknown as AuthenticatedConnectionConfig,
+    connection,
+    authentication: authPersist,
     ...exchangeDataSpec,
   };
 }
@@ -560,7 +561,7 @@ export async function handler(argv: Arguments): Promise<void> {
         : 69,
     );
   }
-  const { connection, ...exchangeDataSpec } = configResult;
+  const { connection, authentication, ...exchangeDataSpec } = configResult;
 
   announceRetainMode(connection, log);
 
@@ -592,6 +593,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     await runProtocol(
       connection,
+      authentication,
       prepared,
       output,
       verbosity,

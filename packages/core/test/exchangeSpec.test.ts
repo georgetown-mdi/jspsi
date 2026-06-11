@@ -100,11 +100,54 @@ test("parses snake_case top-level keys from disk", () => {
     connection: {
       channel: "webrtc",
       server: { host: "api.peerjs.com" },
-      authentication: { role: "inviter" },
+      role: "inviter",
     },
   });
   expect(result.linkageTerms.output.expectsOutput).toBe(false);
   expect(result.linkageTerms.linkageFields[0].type).toBe("ssn");
   if (result.connection.channel !== "webrtc") return;
-  expect(result.connection.authentication?.role).toBe("inviter");
+  expect(result.connection.role).toBe("inviter");
+});
+
+test("parses a top-level authentication block as a sibling of connection", () => {
+  // authentication is a top-level ExchangeSpec block (channel-agnostic), not a
+  // connection field. Its shared_secret is snake_case on disk and camelized.
+  const SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const result = parseExchangeSpec({
+    linkage_terms: {
+      version: "1.0.0",
+      identity: "Test Party",
+      date: "2025-01-01",
+      algorithm: "psi",
+      output: { expects_output: false, share_with_partner: false },
+      deduplicate: false,
+      linkage_fields: [{ name: "ssn", type: "ssn" }],
+      linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+    },
+    connection: { channel: "filedrop", path: "/mnt/share/drop" },
+    authentication: {
+      shared_secret: SECRET,
+      expires: "2027-01-01T00:00:00Z",
+    },
+  });
+  expect(result.authentication?.sharedSecret).toBe(SECRET);
+  expect(result.authentication?.expires).toBe("2027-01-01T00:00:00Z");
+});
+
+test("rejects a malformed shared_secret in the top-level authentication block", () => {
+  const result = safeParseExchangeSpec({
+    linkage_terms: {
+      version: "1.0.0",
+      identity: "Test Party",
+      date: "2025-01-01",
+      algorithm: "psi",
+      output: { expects_output: false, share_with_partner: false },
+      deduplicate: false,
+      linkage_fields: [{ name: "ssn", type: "ssn" }],
+      linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+    },
+    connection: { channel: "filedrop", path: "/mnt/share/drop" },
+    authentication: { shared_secret: "too-short" },
+  });
+  expect(result.success).toBe(false);
 });

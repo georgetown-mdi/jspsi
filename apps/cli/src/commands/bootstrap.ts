@@ -43,7 +43,7 @@ import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
-import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
+import { runProtocol, type AuthPersist } from "../protocol";
 import { channelFromURL } from "./zeroSetup";
 import type { RecordOutput } from "../recordFile";
 
@@ -595,17 +595,13 @@ export async function runOnlineBootstrap(params: {
   reuseExistingConfig?: boolean;
 }): Promise<{ configWriteError?: unknown }> {
   // `connection` is already narrowed to the channels runProtocol supports
-  // (RunnableConnectionConfig), so this cast only adds the `authentication`
-  // field; it bridges the spread of a discriminated union to the union target,
-  // not a channel-safety hole.
-  const connWithAuth: ProtocolConnectionConfig = {
-    ...params.connection,
-    authentication: {
-      sharedSecret: params.sharedSecret,
-      expires: params.expires,
-      keyFilePath: params.keyPath,
-    },
-  } as ProtocolConnectionConfig;
+  // (RunnableConnectionConfig); authentication is passed to runProtocol on its
+  // own parameter rather than embedded in the connection config.
+  const auth: AuthPersist = {
+    sharedSecret: params.sharedSecret,
+    expires: params.expires,
+    keyFilePath: params.keyPath,
+  };
 
   // Set inside the hook once saveConfig returns, so the catch below can tell a
   // "config is on disk, retry without re-inviting" recovery from a run where the
@@ -621,7 +617,8 @@ export async function runOnlineBootstrap(params: {
   let keyPersisted = false;
   try {
     const { onAuthenticatedError } = await runProtocol(
-      connWithAuth,
+      params.connection,
+      auth,
       params.prepared,
       params.output,
       params.verbosity,

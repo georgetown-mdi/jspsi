@@ -298,7 +298,7 @@ linkage_terms:
 
 ## Connection
 
-Specifies the communication channel, server addresses, and authentication material.
+Specifies the communication channel and server addresses. The partner shared secret is configured separately, in the top-level [`authentication`](#authentication) block; for WebRTC, the inviter/acceptor peer-addressing role is [`connection.role`](#connectionrole).
 
 ### `connection.channel`
 
@@ -410,37 +410,22 @@ connection:
         bearer: "@provision.key"
 ```
 
-### `connection.authentication`
+### `connection.role`
 
-*Type:* object  
-*Required:* no (see note below) 
-*Applies to:* `webrtc`, `sftp`, `filedrop`
+*Type:* string (`inviter` | `acceptor`)  
+*Required:* no  
+*Applies to:* `webrtc`
 
-Authentication settings for the exchange. What belongs in `psilink.yaml` depends on the channel:
+Identifies this party as the inviter or acceptor. Used to derive deterministic PeerJS peer IDs from the shared secret so both parties reach each other without an out-of-band address exchange. This is a peer-addressing concern specific to the WebRTC transport -- which is why it lives on the connection config rather than in the channel-agnostic top-level [`authentication`](#authentication) block -- and is orthogonal to the PSI protocol roles, which are determined by [`linkage_terms.output`](#linkage_termsoutput). For `sftp` and `filedrop` this field is not part of the schema and is silently dropped.
 
-- **`webrtc`**: set `role` to identify the inviter and acceptor.
-- **`sftp` and `filedrop`**: no fields are user-settable here.
-
-The shared secret and its expiration are loaded from a key file and added to the in-memory representation before the exchange runs; they never appear in `psilink.yaml` and should not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI will emit a warning and ignore them; values from the key file always take precedence.
-
-`sharedSecret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
-
-Taken together, this implies that `connection.authentication` is never required in a configuration file. It is required for in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
-
-The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; persistent shared secrets carry none.
-
-| Field | Type | In `psilink.yaml` | Description |
-|-------|------|-------------------|-------------|
-| `shared_secret` | string | never; loaded from `.psilink.key` | Shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
-| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens. Do not set manually. |
-| `role` | enum | WebRTC only | `inviter` \| `acceptor`; used to derive deterministic PeerJS peer IDs from the shared token so both parties know each other's address without out-of-band communication. Orthogonal to the PSI protocol roles, which are determined by `linkage_terms.output`. For `sftp` and `filedrop` this field is not part of the schema; the CLI emits a warning and strips it before validation. |
-
-Any other key under `connection.authentication` is also stripped before validation. The CLI emits a warning naming the field. The Zod schema itself silently strips unknown keys (its default `strip` behavior), so a library consumer that bypasses the CLI's pre-validation pass will not see a warning for unknown fields - they are dropped without comment.
+The partner shared secret itself is configured separately, in the top-level [`authentication`](#authentication) block.
 
 ```yaml
 connection:
-  authentication:
-    role: inviter
+  channel: webrtc
+  server:
+    host: api.peerjs.com
+  role: inviter
 ```
 
 ### `connection.stun`
@@ -635,6 +620,36 @@ The receiver only reads files whose on-disk size matches the declared byte count
 An opaque key-value map passed verbatim to the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
 
 Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`).
+
+---
+
+## Authentication
+
+*Type:* object  
+*Required:* no (see note below)  
+*Applies to:* all channels (`webrtc`, `sftp`, `filedrop`)
+
+Optional top-level block, a sibling of [`signing`](#signing). It holds the partner shared-secret trust mechanism and is channel-agnostic -- the same shape applies to every channel. It mixes two kinds of field:
+
+- **Runtime-injected secret state** (`shared_secret`, `expires`): loaded from the key file (`.psilink.key`) and added to the in-memory representation before the exchange runs. These never appear in `psilink.yaml` and must not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI emits a warning and ignores them; values from the key file always take precedence.
+- **Operator-policy fields**: settable in `psilink.yaml`. None are defined yet. The loader no longer strips this block wholesale, so adding one (for example, a future token-age limit) is a localized addition to the `authentication` schema rather than a loader change. Once a field is defined in the schema, setting it in YAML is honored; until then -- like any key the schema does not recognize -- it is dropped (see the strip note below).
+
+`shared_secret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
+
+Taken together, the `authentication` block is never required in a configuration file -- its only fields today are key-file-injected. It is required for the in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
+
+The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; persistent shared secrets carry none.
+
+| Field | Type | In `psilink.yaml` | Description |
+|-------|------|-------------------|-------------|
+| `shared_secret` | string | never; loaded from `.psilink.key` | Shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
+| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens. Do not set manually. |
+
+The loader strips only the injected fields (`shared_secret`/`expires`) from this block, warning when they are set; the value from the key file always wins. Any other key is left for schema validation: an operator-policy field defined in the schema is accepted, and a key the schema does not recognize is silently dropped by its default `strip` behavior (without a warning, as elsewhere in the spec). Unknown keys are stripped rather than rejected because this block is operator-authored local configuration, not a partner-supplied token: the secret value itself is protected separately by the warn-and-strip above, and an unrecognized key here is a typo with no trust consequence, the same as anywhere else in this spec. (Partner-controlled inputs, such as the invitation locator, are validated strictly instead -- there an extra key could smuggle a value past the allowlist.)
+
+WebRTC peer addressing (the `inviter`/`acceptor` distinction) is configured separately, via [`connection.role`](#connectionrole); it is a transport concern, not a partner-trust one, and so is not part of this block.
+
+Why `authentication` and `signing` are two separate blocks (rather than one trust block) is explained in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-exchange-authentication).
 
 ---
 
