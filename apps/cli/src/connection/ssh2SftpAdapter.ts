@@ -627,17 +627,23 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // string (a local file path) and ReadableStream are permitted by the
       // transport-agnostic FileTransportClient.put signature but never produced by
       // this app: every FileSyncConnection put() call site builds a Buffer. They
-      // carry no per-op idle window -- it needs a re-runnable source for the retry,
-      // which a one-shot stream cannot give, and a string would mean re-opening a
-      // local file the library is the right place to handle -- so they stay bounded
-      // by the whole-exchange budget, exactly as before. A stream/string src has no
-      // cheap size, so the slow-op warning falls back to elapsed-only.
+      // carry no per-op idle window -- it needs a re-runnable source, which a
+      // one-shot stream cannot give. Retry safety differs by type: a string is
+      // re-runnable (ssh2-sftp-client opens a fresh fs.createReadStream per
+      // attempt), but a provided ReadableStream is one-shot -- a failed attempt
+      // half-drains it, so a retry would re-pipe an already-consumed stream and
+      // silently upload nothing. So retry only a string; a stream gets a single
+      // attempt. Both stay bounded only by the whole-exchange budget (no per-op
+      // idle window). A stream/string src has no cheap size, so the slow-op warning
+      // falls back to elapsed-only.
+      const retries =
+        typeof src === "string" ? (this.options!.retries ?? 5) : 0;
       return this.warnIfSlow(
         retryPromise(
           () => this.client.put(src, dest, { writeStreamOptions: options }),
-          // `??` not `||` so an explicit retries: 0 disables the retry rather than
-          // being coerced to the default of 5.
-          this.options!.retries ?? 5,
+          // `??` not `||` (in the string case) so an explicit retries: 0 disables
+          // the retry rather than being coerced to the default of 5.
+          retries,
           100,
         ),
         "file write",
@@ -728,6 +734,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // never call back -- hanging the whole teardown. Short-circuiting here returns
     // at once. (delete() above rejects instead: its callers want the error
     // surfaced, whereas safeDelete's must never see one.)
+    //
+    // Unlike delete()/rename()/exists(), safeDelete deliberately carries NO per-op
+    // wall-clock deadline. It runs only on the best-effort cleanup path, and its
+    // never-reject contract is what a per-op deadline would fight: a withheld
+    // delete callback that is NOT preceded by a fatal protocol error (so the
+    // short-circuit above does not fire) is bounded instead by the whole-exchange
+    // budget, which the consumer applies to safeDelete through a never-reject
+    // variant (`withTransportBudgetVoid` in FileSyncConnection) that swallows the
+    // budget's stall rather than surfacing it. So a hostile server can stall this
+    // cleanup delete to the coarse whole-exchange budget, not the 60 s per-op
+    // bound -- an accepted teardown-path coarseness, the same trade the local-
+    // filesystem adapter makes for every op. A tighter per-op bound here would
+    // have to swallow its own deadline error to keep the contract; it is a
+    // possible follow-up, not a gap left silent.
     if (this.fatalSftpError !== undefined) return Promise.resolve();
     return retryPromise(
       () =>

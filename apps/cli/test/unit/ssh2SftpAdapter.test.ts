@@ -972,6 +972,59 @@ describe("bounded put (idle window)", () => {
       vi.useRealTimers();
     }
   });
+
+  test("does not retry a one-shot ReadableStream put (single attempt)", async () => {
+    // A provided stream is one-shot: a failed attempt half-drains it, so retrying
+    // would re-pipe an already-consumed stream and silently upload nothing. The
+    // non-Buffer branch must therefore attempt a stream exactly once, never retry.
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).options = {}; // retries falls back to the default of 5
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn() };
+    let calls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      put: vi.fn().mockImplementation(() => {
+        calls += 1;
+        return Promise.reject(new Error("transient write failure"));
+      }),
+    };
+    const stream = Readable.from([Buffer.from("x")]);
+    await expect(adapter.put(stream, "/remote/out.json")).rejects.toThrow(
+      "transient write failure",
+    );
+    expect(calls).toBe(1);
+  });
+
+  test("retries a string-path put (re-runnable source) on transient failure", async () => {
+    // A string src is re-runnable -- ssh2-sftp-client opens a fresh read stream per
+    // attempt -- so the retry is preserved for it (only the one-shot stream loses it).
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = { retries: 2 };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      let calls = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation(() => {
+          calls += 1;
+          if (calls < 3) return Promise.reject(new Error("transient"));
+          return Promise.resolve("uploaded");
+        }),
+      };
+      const writing = adapter.put("/local/file.bin", "/remote/out.json");
+      // Advance past the two 100 ms retry delays; the third attempt succeeds.
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(writing).resolves.toBe("uploaded");
+      expect(calls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // --- bounded list ------------------------------------------------------------

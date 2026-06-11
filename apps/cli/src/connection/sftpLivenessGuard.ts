@@ -179,8 +179,6 @@ export interface BoundedPutSource {
    * promise settles.
    */
   result: Promise<unknown>;
-  /** Bytes of the payload produced (pulled) so far; the cheap progress signal. */
-  bytesSent: () => number;
   /**
    * Mark the underlying `put()` resolved; resolves `result` with its value unless
    * the idle window already fired (then a no-op).
@@ -227,7 +225,6 @@ export function createBoundedPutSource(
 ): BoundedPutSource {
   let settled = false;
   let offset = 0;
-  let bytesSent = 0;
   let resolveResult!: (value: unknown) => void;
   let rejectResult!: (err: unknown) => void;
   const result = new Promise<unknown>((resolve, reject) => {
@@ -290,7 +287,6 @@ export function createBoundedPutSource(
       const end = Math.min(offset + chunkBytes, payload.length);
       const chunk = payload.subarray(offset, end); // view, no copy
       offset = end;
-      bytesSent += chunk.length;
       // This chunk is pulled under the write stream's ack-driven backpressure, so a
       // withheld ack stops read() being called; reset the idle window on each
       // produced chunk so a slow-but-progressing upload never trips it while a
@@ -313,7 +309,6 @@ export function createBoundedPutSource(
   return {
     source,
     result,
-    bytesSent: () => bytesSent,
     complete: (value: unknown) => {
       if (settled) return;
       settled = true;
