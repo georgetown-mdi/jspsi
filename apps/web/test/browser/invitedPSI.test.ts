@@ -182,9 +182,17 @@ beforeAll(async () => {
         }
       });
 
-      eventSource.addEventListener("error", (ev: Event) => {
+      eventSource.addEventListener("error", () => {
+        // An EventSource "error" Event carries no enumerable detail
+        // (JSON.stringify yields "{}"), so name the endpoint that failed
+        // instead -- otherwise this surfaces as an opaque message.
         eventSource.close();
-        reject(new Error("EventSource connection error:" + JSON.stringify(ev)));
+        reject(
+          new Error(
+            "EventSource error while waiting for the invited peer id at " +
+              `${hostString}/api/psi/${session.uuid}/wait`,
+          ),
+        );
       });
     });
   })();
