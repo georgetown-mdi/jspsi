@@ -8,6 +8,7 @@ import {
   StandardizedKeyIterable,
 } from "./standardization.js";
 import { inferDateFormat } from "./utils/date.js";
+import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import { PSIParticipant } from "./participant.js";
 import {
   exchangeTerms,
@@ -136,9 +137,12 @@ export function prepareForExchange(
     exchangeDataSpec.standardization ??
     getDefaultStandardization(metadata, linkageTerms, { dateInputFormat });
 
+  // Sanitize the key names for display: on the accept side these come from the
+  // partner's invitation (charset-unconstrained), and the operator already
+  // reviewed the same escaped form when agreeing to the terms (displayInvitation).
   log.info(
     "will link using keys:",
-    linkageTerms.linkageKeys.map((k) => k.name).join(", "),
+    linkageTerms.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", "),
   );
 
   const dataset = buildStandardizedDataset(

@@ -9,6 +9,7 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
+  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
@@ -664,7 +665,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // stderr and exited 64 here. Any other (unexpected) failure propagates to the
     // top-level handler unchanged rather than being reclassified.
     if (err instanceof UsageError) {
-      console.error(err.message);
+      console.error(sanitizeErrorForDisplay(err));
       process.exit(64);
     }
     throw err;
@@ -685,7 +686,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit(64);
   }
 
@@ -693,7 +694,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     configResult = loadConfig(options);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     // A malformed or missing config/key file is a usage error (exit 64); the
     // ENOENT arm keeps the missing-config case, which is tagged rather than a
     // UsageError. Anything else (e.g. an unsupported channel) stays exit 69.
@@ -746,7 +747,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     prepared = await prepareDataset(exchangeDataSpec, identity, input);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit((err as { exitCode?: number }).exitCode ?? 69);
   }
 
@@ -805,11 +806,7 @@ export async function handler(argv: Arguments): Promise<void> {
   if (advisory !== undefined) log.warn(advisory);
 
   if (exchangeError !== undefined) {
-    log.error(
-      exchangeError instanceof Error
-        ? exchangeError.message
-        : String(exchangeError),
-    );
+    log.error(sanitizeErrorForDisplay(exchangeError));
     process.exit(exchangeError instanceof UsageError ? 64 : 69);
   }
 }

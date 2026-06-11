@@ -30,6 +30,10 @@ export {
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "./utils/sanitizeForDisplay";
 export type { SanitizeForDisplayOptions } from "./utils/sanitizeForDisplay";
+export {
+  sanitizeErrorForDisplay,
+  MAX_ERROR_CAUSE_DEPTH,
+} from "./utils/sanitizeErrorForDisplay";
 
 export * from "./config/standardization";
 export * from "./config/connection";

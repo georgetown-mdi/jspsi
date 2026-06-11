@@ -1198,6 +1198,82 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
   }
 });
 
+test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", async () => {
+  // The in-flight error is swallowed on the signal path (the process exits on
+  // the signal), so this log is the only place its cause surfaces. A hostile
+  // cause -- a partner-chosen message-file path carrying control/ANSI bytes --
+  // must be neutralized here, and the chain surfaced, like the per-command
+  // catches.
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+
+  let rejectA!: (err: Error) => void;
+  let rejectB!: (err: Error) => void;
+  vi.mocked(runExchange)
+    .mockImplementationOnce(
+      () =>
+        new Promise<never>((_, reject) => {
+          rejectA = reject;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<never>((_, reject) => {
+          rejectB = reject;
+        }),
+    );
+
+  const pA = runProtocol(
+    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    null,
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+  );
+  const pB = runProtocol(
+    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    null,
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+  );
+
+  try {
+    await vi.waitFor(
+      () =>
+        expect(vi.mocked(runExchange).mock.calls.length).toBeGreaterThanOrEqual(
+          2,
+        ),
+      { timeout: 10_000 },
+    );
+    process.emit("SIGINT");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
+      timeout: 5_000,
+    });
+
+    const hostile = () =>
+      new Error("transport failed", {
+        cause: new Error(
+          "ENOENT: no such file or directory, open '/drop/\x1b[31mEVIL\nFAKE.json'",
+        ),
+      });
+    rejectA(hostile());
+    rejectB(hostile());
+
+    await Promise.allSettled([pA, pB]);
+
+    const inFlight = mockState.errors.find(
+      (m) => m.includes("SIGINT") && m.includes("caused by:"),
+    );
+    expect(inFlight).toBeDefined();
+    expect(inFlight).toContain("\\x1b[31mEVIL\\x0aFAKE.json");
+    expect(inFlight).not.toContain("\x1b");
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
 test("SIGINT handler exits with code 130", async () => {
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 

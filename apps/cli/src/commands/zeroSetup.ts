@@ -8,6 +8,7 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
+  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -592,7 +593,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // stderr and exited 64 here. Any other (unexpected) failure propagates to the
     // top-level handler unchanged rather than being reclassified.
     if (err instanceof UsageError) {
-      console.error(err.message);
+      console.error(sanitizeErrorForDisplay(err));
       process.exit(64);
     }
     throw err;
@@ -612,7 +613,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit(64);
   }
 
@@ -627,7 +628,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     resolved = resolvePositionals(positionals);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit(64);
   }
 
@@ -686,7 +687,7 @@ export async function handler(argv: Arguments): Promise<void> {
         keyPath: options.keyFile,
       });
     } catch (err) {
-      log.error(err instanceof Error ? err.message : String(err));
+      log.error(sanitizeErrorForDisplay(err));
       process.exit(64);
     }
   } else {
@@ -708,7 +709,7 @@ export async function handler(argv: Arguments): Promise<void> {
     const identity = options.identity ?? userInfo().username;
     prepared = await prepareDataset(identity, input);
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     // A bad URL scheme or unsupported channel is a usage error (exit 64);
     // prepareDataset failures carry their own exitCode; otherwise exit 69.
     process.exit(
@@ -756,7 +757,7 @@ export async function handler(argv: Arguments): Promise<void> {
       { sweepExchangeFiles, forceRetainSweep },
     );
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit(err instanceof UsageError ? 64 : 69);
   }
 
@@ -780,7 +781,7 @@ export async function handler(argv: Arguments): Promise<void> {
       log,
     });
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(sanitizeErrorForDisplay(err));
     process.exit(err instanceof UsageError ? 64 : 69);
   }
 }

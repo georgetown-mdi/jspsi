@@ -12,6 +12,7 @@ import {
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
   sanitizeForDisplay,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import type {
   Authentication,
@@ -874,7 +875,7 @@ export async function runProtocol(
     if (signalReceived !== undefined) {
       log.error(
         `error in flight when ${signalReceived} arrived: ` +
-          (err instanceof Error ? err.message : String(err)),
+          sanitizeErrorForDisplay(err),
       );
       // The run was cut short by a signal and the process is exiting; the
       // caller guards against an absent bootstrap result. Preserve
