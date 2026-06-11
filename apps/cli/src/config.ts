@@ -471,8 +471,8 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
     delete auth.sharedSecret;
     delete auth.expires;
     // Drop the container if those were its only keys, so the config carries no
-    // noisy empty `authentication: {}` block. Operator-policy fields (e.g. a
-    // future token_max_age_days) keep it non-empty when present.
+    // noisy empty `authentication: {}` block. Operator-policy fields (e.g.
+    // token_max_age_days) keep it non-empty when present.
     if (Object.keys(auth).length === 0) delete sanitized.authentication;
   }
   writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));

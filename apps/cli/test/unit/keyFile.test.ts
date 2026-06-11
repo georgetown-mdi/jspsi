@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { UsageError } from "@psilink/core";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import {
+  buildRotatedKeyFile,
+  checkKeyFileExpiry,
+  loadKeyFile,
+  saveKeyFile,
+} from "../../src/keyFile";
 
 // 43-char base64url token satisfying the sharedSecret format constraint.
 const TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -106,4 +111,94 @@ test("saveKeyFile rejects a malformed sharedSecret before writing to disk", () =
   );
   // No file should have been written.
   expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+// --- buildRotatedKeyFile -----------------------------------------------------
+
+// A fixed clock so the computed `expires` can be asserted exactly rather than
+// within a tolerance (the production caller passes Date.now()).
+const FIXED_NOW = Date.parse("2026-01-01T00:00:00.000Z");
+
+test("buildRotatedKeyFile stamps expires = now + tokenMaxAgeDays days when set", () => {
+  const result = buildRotatedKeyFile(TOKEN, 30, FIXED_NOW);
+  expect(result.sharedSecret).toBe(TOKEN);
+  // 2026-01-01 + 30 days = 2026-01-31 (January has 31 days).
+  expect(result.expires).toBe("2026-01-31T00:00:00.000Z");
+});
+
+test("buildRotatedKeyFile omits expires when tokenMaxAgeDays is undefined", () => {
+  const result = buildRotatedKeyFile(TOKEN, undefined, FIXED_NOW);
+  expect(result.sharedSecret).toBe(TOKEN);
+  expect(result.expires).toBeUndefined();
+});
+
+test("buildRotatedKeyFile uses the exact 86_400_000 ms-per-day formula", () => {
+  const result = buildRotatedKeyFile(TOKEN, 1, FIXED_NOW);
+  expect(Date.parse(result.expires as string) - FIXED_NOW).toBe(86_400_000);
+});
+
+// --- checkKeyFileExpiry ------------------------------------------------------
+
+test("checkKeyFileExpiry returns ok when there is no expires", () => {
+  expect(checkKeyFileExpiry({ sharedSecret: TOKEN }, FIXED_NOW)).toBe("ok");
+});
+
+test("checkKeyFileExpiry returns expired when expires is at or before now", () => {
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2025-12-31T23:59:59.000Z" },
+      FIXED_NOW,
+    ),
+  ).toBe("expired");
+  // Exactly now counts as expired.
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: new Date(FIXED_NOW).toISOString() },
+      FIXED_NOW,
+    ),
+  ).toBe("expired");
+});
+
+test("checkKeyFileExpiry returns ok for a future token when no threshold is given", () => {
+  // Without a threshold (no max-age policy in force) an unexpired token is ok,
+  // never expiring-soon; only the unconditional expired stop applies.
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2026-01-02T00:00:00.000Z" },
+      FIXED_NOW,
+    ),
+  ).toBe("ok");
+});
+
+test("checkKeyFileExpiry returns expiring-soon within the threshold window", () => {
+  // 5 days remaining, threshold 10 days -> expiring soon.
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2026-01-06T00:00:00.000Z" },
+      FIXED_NOW,
+      { warnThresholdDays: 10 },
+    ),
+  ).toBe("expiring-soon");
+});
+
+test("checkKeyFileExpiry returns ok beyond the threshold window", () => {
+  // 20 days remaining, threshold 10 days -> ok.
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2026-01-21T00:00:00.000Z" },
+      FIXED_NOW,
+      { warnThresholdDays: 10 },
+    ),
+  ).toBe("ok");
+});
+
+test("checkKeyFileExpiry returns expired even when a threshold is given", () => {
+  // The expired hard stop takes precedence over the expiring-soon window.
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "2025-06-01T00:00:00.000Z" },
+      FIXED_NOW,
+      { warnThresholdDays: 10 },
+    ),
+  ).toBe("expired");
 });

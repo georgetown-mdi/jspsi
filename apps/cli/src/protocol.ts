@@ -22,7 +22,7 @@ import type {
 
 import { LocalFSClient } from "./connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
-import { saveKeyFile } from "./keyFile";
+import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
@@ -579,7 +579,15 @@ export async function runProtocol(
         // state (tokenRotated=false) or both post-save state (tokenRotated
         // =true). Maintain this invariant: do not insert awaits between
         // saveKeyFile and the assignment.
-        saveKeyFile(keyFilePath, { sharedSecret: rotatedSecret });
+        //
+        // buildRotatedKeyFile stamps `expires` = now + tokenMaxAgeDays days when
+        // the operator set a max-age policy, and omits it otherwise. The stamp is
+        // computed here, at the moment of rotation, so it reflects the real
+        // rotation time rather than config-parse time.
+        saveKeyFile(
+          keyFilePath,
+          buildRotatedKeyFile(rotatedSecret, auth.tokenMaxAgeDays, Date.now()),
+        );
         tokenRotated = true;
       } catch (err) {
         // "may already hold": both parties independently derive rotatedSecret from

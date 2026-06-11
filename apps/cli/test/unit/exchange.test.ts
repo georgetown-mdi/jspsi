@@ -11,6 +11,9 @@ import {
   handler,
   loadConfig,
   warnAndStripInjectedAuthFields,
+  shouldWarnTokenExpiring,
+  warnThresholdDaysForPolicy,
+  EXPIRY_WARN_THRESHOLD_DIVISOR,
 } from "../../src/commands/exchange";
 
 const mockState = vi.hoisted(() => ({ warnings: [] as string[] }));
@@ -263,15 +266,12 @@ test("expires set in the top-level authentication block does not override the ke
 });
 
 test("warnAndStripInjectedAuthFields admits an operator-policy field and warns on nothing", () => {
-  // An operator-policy field (a future token_max_age_days lands here) is NOT an
-  // injected field, so the loader must leave it untouched -- no strip, no warning
-  // -- and let schema validation decide its fate. Tested at the strip helper
-  // because no policy field exists in the schema yet for an end-to-end check:
-  // AuthenticationSchema is a plain z.object today, so it would strip this field
-  // at parse time, and this assertion covers only the loader's strip step, not
-  // the full loadConfig path. When the first policy field is added to
-  // AuthenticationSchema, add an end-to-end loadConfig test asserting it reaches
-  // result.authentication, rather than relying on this helper-level check.
+  // An operator-policy field (token_max_age_days) is NOT an injected field, so the
+  // loader must leave it untouched -- no strip, no warning -- and let schema
+  // validation decide its fate. This is a focused check on the loader's strip
+  // step; the end-to-end path (token_max_age_days reaching result.authentication,
+  // and a typo being rejected by the strict schema) is covered by the loadConfig
+  // tests below.
   const log = getLogger("test");
   const rawAuth: Record<string, unknown> = { token_max_age_days: 30 };
   warnAndStripInjectedAuthFields(rawAuth, configFile, log);
@@ -327,6 +327,88 @@ test("webrtc config throws a UsageError 'not yet supported'", () => {
   // An unsupported channel is invalid caller config (exit 64), not exit 69.
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("not yet supported");
+});
+
+// --- token_max_age_days and load-time expiry ---------------------------------
+
+test("loadConfig surfaces token_max_age_days from the authentication block", () => {
+  // End-to-end: a policy field in psilink.yaml reaches result.authentication
+  // (camelized), where protocol.ts reads it to stamp the rotated token's expiry.
+  const config = {
+    ...minimalSFTPConfig,
+    authentication: { token_max_age_days: 30 },
+  };
+  fs.writeFileSync(configFile, YAML.stringify(config));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const result = loadConfig(baseOptions());
+  expect(result.authentication.tokenMaxAgeDays).toBe(30);
+});
+
+test("loadConfig rejects an unrecognized key in the authentication block", () => {
+  // The strict schema fails a misspelled policy key as invalid config (UsageError,
+  // exit 64) rather than silently dropping it and disabling the control.
+  const config = {
+    ...minimalSFTPConfig,
+    authentication: { token_max_age_dayss: 30 },
+  };
+  fs.writeFileSync(configFile, YAML.stringify(config));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow("not a valid exchange spec");
+});
+
+test("loadConfig hard-stops an expired token before any exchange", () => {
+  // (c) An `expires` in the past aborts at load time with a re-invite message,
+  // before any connection or key exchange. UsageError -> exit 64.
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2020-01-01T00:00:00.000Z",
+  });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "expired at 2020-01-01T00:00:00.000Z",
+  );
+});
+
+test("loadConfig accepts a not-yet-expired token", () => {
+  // A future expiry is not a load-time error; the expiring-soon advisory (if any)
+  // is decided later, in the handler.
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: "2099-01-01T00:00:00.000Z",
+  });
+  const result = loadConfig(baseOptions());
+  expect(result.authentication.expires).toBe("2099-01-01T00:00:00.000Z");
+});
+
+test("warnThresholdDaysForPolicy is token_max_age_days / 3, undefined without a policy", () => {
+  expect(EXPIRY_WARN_THRESHOLD_DIVISOR).toBe(3);
+  expect(warnThresholdDaysForPolicy(30)).toBe(10);
+  expect(warnThresholdDaysForPolicy(90)).toBe(30);
+  // No policy in force -> no threshold, so checkKeyFileExpiry never reports
+  // "expiring-soon" and the advisory is suppressed.
+  expect(warnThresholdDaysForPolicy(undefined)).toBeUndefined();
+});
+
+test("shouldWarnTokenExpiring suppresses the advisory when rotation refreshed the token", () => {
+  // (d) Expiring soon at load, refreshed to "ok" by a successful rotation: the
+  // new token has a fresh, farther-out expiry, so the advisory would mislead.
+  expect(shouldWarnTokenExpiring("expiring-soon", "ok")).toBe(false);
+});
+
+test("shouldWarnTokenExpiring warns when rotation did not refresh the token", () => {
+  // (e) Expiring soon at load and still not refreshed after the exchange: warn.
+  expect(shouldWarnTokenExpiring("expiring-soon", "expiring-soon")).toBe(true);
+  // If time elapsed pushed an un-refreshed token to expired, still warn.
+  expect(shouldWarnTokenExpiring("expiring-soon", "expired")).toBe(true);
+});
+
+test("shouldWarnTokenExpiring never warns when the token was not expiring soon at load", () => {
+  expect(shouldWarnTokenExpiring("ok", "ok")).toBe(false);
+  expect(shouldWarnTokenExpiring("ok", "expiring-soon")).toBe(false);
+  expect(shouldWarnTokenExpiring("ok", "expired")).toBe(false);
 });
 
 // --- handler: repeated single-value flag -------------------------------------

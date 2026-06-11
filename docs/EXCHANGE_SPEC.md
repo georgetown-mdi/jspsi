@@ -632,24 +632,44 @@ Unlike every other map in this spec, the keys here are **not** case-normalized: 
 Optional top-level block, a sibling of [`signing`](#signing). It holds the partner shared-secret trust mechanism and is channel-agnostic -- the same shape applies to every channel. It mixes two kinds of field:
 
 - **Runtime-injected secret state** (`shared_secret`, `expires`): loaded from the key file (`.psilink.key`) and added to the in-memory representation before the exchange runs. These never appear in `psilink.yaml` and must not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI emits a warning and ignores them; values from the key file always take precedence.
-- **Operator-policy fields**: settable in `psilink.yaml`. None are defined yet. The loader no longer strips this block wholesale, so adding one (for example, a future token-age limit) is a localized addition to the `authentication` schema rather than a loader change. Once a field is defined in the schema, setting it in YAML is honored; until then -- like any key the schema does not recognize -- it is dropped (see the strip note below).
+- **Operator-policy fields**: settable in `psilink.yaml`. `token_max_age_days` is the first (see the field table below). The loader leaves these for schema validation; the schema honors a recognized policy field and rejects an unrecognized key (see the unknown-key note below).
 
 `shared_secret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
 
 Taken together, the `authentication` block is never required in a configuration file -- its only fields today are key-file-injected. It is required for the in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
 
-The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; persistent shared secrets carry none.
+The shared secret is automatically rotated after each successful authentication handshake: both parties independently derive the replacement from the key-exchange session key using HKDF, so no extra round-trip is required. The CLI persists the new secret automatically; library consumers of `authenticateConnection` are responsible for persisting `rotatedSecret` from the returned `AuthResult` to their own storage. If the exchange fails before a successful handshake, the existing secret remains valid. If the handshake succeeds but the data exchange subsequently fails, both parties already hold the rotated secret and can retry without re-inviting. If the handshake succeeds but the new secret cannot be persisted (e.g., a disk-write error), both parties may be out of sync: the partner may already hold the rotated secret, making the old secret invalid. In that case both parties must re-invite. Invitation tokens carry a default expiration of 1 hour; rotation-generated shared secrets carry none by default, unless [`token_max_age_days`](#authenticationtoken_max_age_days) is set, in which case each rotation stamps an expiration that many days out.
 
 | Field | Type | In `psilink.yaml` | Description |
 |-------|------|-------------------|-------------|
 | `shared_secret` | string | never; loaded from `.psilink.key` | Shared secret; a base64url-encoded 32-byte value (43 characters). Do not set manually. |
-| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens. Do not set manually. |
+| `expires` | string (ISO 8601) | never; loaded from `.psilink.key` | Expiration of `shared_secret`; absent for persistent tokens unless `token_max_age_days` stamped one at rotation. Do not set manually. |
+| `token_max_age_days` | integer (positive) | yes (operator policy) | Maximum age, in days, to stamp onto a rotated token. See [`authentication.token_max_age_days`](#authenticationtoken_max_age_days). |
 
-The loader strips only the injected fields (`shared_secret`/`expires`) from this block, warning when they are set; the value from the key file always wins. Any other key is left for schema validation: an operator-policy field defined in the schema is accepted, and a key the schema does not recognize is silently dropped by its default `strip` behavior (without a warning, as elsewhere in the spec). Unknown keys are stripped rather than rejected because this block is operator-authored local configuration, not a partner-supplied token: the secret value itself is protected separately by the warn-and-strip above, and an unrecognized key here is a typo with no trust consequence, the same as anywhere else in this spec. (Partner-controlled inputs, such as the invitation locator, are validated strictly instead -- there an extra key could smuggle a value past the allowlist.)
+The loader strips only the injected fields (`shared_secret`/`expires`) from this block, warning when they are set; the value from the key file always wins. Any other key is left for schema validation, and -- unlike the sibling spec blocks, which strip unrecognized keys -- the `authentication` schema is **strict**: an unrecognized key (for example a misspelled `token_max_age_dayss`) is rejected at config-parse time with a user-facing error, and no exchange runs until it is corrected. This block alone is validated strictly because it alone holds an operator security *policy*: `token_max_age_days` is a max-age enforcement control, and a typo that `strip` would silently discard would disable the control with no signal to the operator. Failing closed forces the typo to be fixed before any exchange runs. (The injected secret value is protected separately by the warn-and-strip above; the strictness here is about surfacing a typo in a policy key, not about trust in the secret. Partner-controlled inputs, such as the invitation locator, are validated strictly for a different reason -- there an extra key could smuggle a value past the allowlist.)
 
 WebRTC peer addressing (the `inviter`/`acceptor` distinction) is configured separately, via [`connection.role`](#connectionrole); it is a transport concern, not a partner-trust one, and so is not part of this block.
 
 Why `authentication` and `signing` are two separate blocks (rather than one trust block) is explained in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-exchange-authentication).
+
+### `authentication.token_max_age_days`
+
+*Type:* integer (positive)  
+*Required:* no
+
+An operator-policy field, not key-file-injected. Rotation tokens written after each successful exchange carry no expiration by default, on the assumption that active partnerships exchange frequently. A dormant partnership (a monthly cadence, a holiday gap) could otherwise hold a valid token indefinitely. When `token_max_age_days` is set, a successful exchange stamps `expires` = (the moment of rotation) + `token_max_age_days` days into the rotated `.psilink.key`, bounding a token's age independently of exchange frequency. When it is omitted, rotated tokens carry no expiry (the unchanged default).
+
+The stamp is enforced at the next `psilink exchange`, which reads the token's `expires` at load time:
+
+- If `expires` is in the past, the CLI aborts before opening any connection or attempting the key exchange, with an error naming the expired time and directing both parties to re-invite.
+- If the token is within `token_max_age_days / 3` days of expiry, the CLI emits a warning before the exchange. The warning is suppressed when that exchange succeeds (rotation stamps a fresh, farther-out `expires`); it is shown only when no successful rotation refreshed the token, where it is actionable.
+
+`expires` enforcement is independent of `token_max_age_days`: a token whose `expires` is already set -- whether by this policy or by an invitation's bounded lifetime -- is honored even if the field is later unset. Setting or changing `token_max_age_days` affects only tokens stamped by subsequent rotations.
+
+```yaml
+authentication:
+  token_max_age_days: 30
+```
 
 ---
 
