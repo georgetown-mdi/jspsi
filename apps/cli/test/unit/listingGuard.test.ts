@@ -36,6 +36,21 @@ describe("directoryTooLargeError", () => {
     expect(err.message).toContain("/drop");
     expect(err.message).toContain("8192");
   });
+
+  // dirPath is operator-configured (not partner-controlled), but it is routed
+  // through sanitizeForDisplay anyway so every listingGuard builder treats its
+  // interpolated path uniformly. Mirrors the sanitizeForDisplay categories.
+  test("escapes control/ANSI characters in the directory path", () => {
+    const err = directoryTooLargeError("/drop/\x1b[31mEVIL", 8192);
+    expect(err.message).not.toContain("\x1b");
+    expect(err.message).toContain("\\x1b");
+  });
+
+  test("neutralizes deceptive Unicode (bidi-override) in the directory path", () => {
+    const err = directoryTooLargeError("/drop/dir‮EVIL", 8192);
+    expect(err.message).not.toContain("‮");
+    expect(err.message).toContain("\\u202e");
+  });
 });
 
 describe("filenameTooLongError", () => {

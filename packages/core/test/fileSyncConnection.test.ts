@@ -6395,6 +6395,114 @@ test("poll(): an unrecognized file mid-loop is a terminal UsageError under the d
   );
 });
 
+// The foreign/unexpected-file handler is the highest-priority live injection
+// vector: a foreign filename passes every existing guard (length, count,
+// protocol grammar) and was interpolated raw into the terminal error. These pin
+// that its partner-controlled name is now routed through sanitizeForDisplay,
+// mirroring the sanitizeForDisplay categories. Driven through the default error
+// policy, the same path the ordinary-name test above exercises.
+async function pollForeignFileError(
+  hostileName: string,
+): Promise<Error> {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.peerId = "peer-test";
+  files.set(`/test/${hostileName}`, Buffer.from("x"));
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  return errors[0] as Error;
+}
+
+test("poll(): the unexpected-file error escapes control/ANSI in a foreign filename", async () => {
+  const err = await pollForeignFileError("\x1b[2J\x1b[31mEVIL.json");
+  // The raw ESC that drives the sequence never reaches the operator's terminal;
+  // it survives only as the inert escaped text.
+  expect(err.message).not.toContain("\x1b");
+  expect(err.message).toContain("\\x1b");
+});
+
+test("poll(): the unexpected-file error escapes a newline in a foreign filename", async () => {
+  const err = await pollForeignFileError("ok.json\nFAKE: all clear");
+  expect(err.message).not.toContain("\n");
+  expect(err.message).toContain("\\x0a");
+});
+
+test("poll(): the unexpected-file error neutralizes deceptive Unicode in a foreign filename", async () => {
+  // A bidi override (RLO), a zero-width char, and a Cyrillic homoglyph -- all
+  // invisible or misleading rendered raw, all escaped here.
+  const err = await pollForeignFileError("a‮b​cаd.json");
+  expect(err.message).not.toContain("‮");
+  expect(err.message).not.toContain("​");
+  expect(err.message).not.toContain("а");
+  expect(err.message).toContain("\\u202e");
+  expect(err.message).toContain("\\u200b");
+  expect(err.message).toContain("\\u0430");
+});
+
+test("poll(): the unexpected-file error passes an ordinary printable filename through unchanged", async () => {
+  const err = await pollForeignFileError("conflicted-copy.json");
+  expect(err.message).toContain("conflicted-copy.json");
+});
+
+test("poll(): a peer-derived peerId with control/ANSI is escaped in a terminal error", async () => {
+  // The duplicate-message guard names the peer id but no filename, so it
+  // isolates peerId neutralization. The id is sliced from a hello filename
+  // prefix at rendezvous, so it carries the partner's bytes.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const hostilePeerId = "peer\x1b[31m";
+  conn.peerId = hostilePeerId;
+  // Two delete-mode peer messages (distinct byte-count terminals) trip the
+  // "more than one message file from <peerId>" terminal UsageError.
+  files.set(`/test/${hostilePeerId}-5.json`, Buffer.from("12345"));
+  files.set(`/test/${hostilePeerId}-6.json`, Buffer.from("123456"));
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  const message = (errors[0] as Error).message;
+  // The peer id is the only hostile content in this message (the path is the
+  // ASCII /test), so a clean message proves peerId is routed through sanitize.
+  expect(message).toContain("more than one message file");
+  expect(message).not.toContain("\x1b");
+  expect(message).toContain("\\x1b");
+});
+
 test("poll(): an unrecognized file mid-loop warns once per name under the warn policy", async () => {
   let listCount = 0;
   const errors: unknown[] = [];

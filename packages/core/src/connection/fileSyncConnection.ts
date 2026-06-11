@@ -3,6 +3,7 @@ import { default as EventEmitter } from "eventemitter3";
 import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
+import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -361,13 +362,15 @@ async function readControlFileWithGate(
     const result = schema.safeParse(parsed);
     if (!result.success) {
       throw new UsageError(
-        `control file at ${filePath} has a malformed payload: ` +
-          result.error.message,
+        `control file at ${sanitizeForDisplay(filePath)} has a malformed ` +
+          `payload: ${result.error.message}`,
       );
     }
     return result.data;
   } while (Date.now() <= timeToLive.getTime());
-  throw new Error(`timed out waiting for ${filePath} to fully sync`);
+  throw new Error(
+    `timed out waiting for ${sanitizeForDisplay(filePath)} to fully sync`,
+  );
 }
 
 interface Events {
@@ -841,7 +844,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
     const responsibleFilesString =
       this.responsibleFiles.size > 0
-        ? `: ${[...this.responsibleFiles].join(", ")}`
+        ? `: ${[...this.responsibleFiles]
+            .map((name) => sanitizeForDisplay(name))
+            .join(", ")}`
         : "";
     this.log.debug(
       `[${this.role}] cleaning up ${this.responsibleFiles.size} file(s)` +
@@ -1075,7 +1080,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       isRetainMessageAck(file.name),
     );
     if (messageAck)
-      signals.push(`a retain-mode message ack (${messageAck.name})`);
+      signals.push(
+        `a retain-mode message ack (${sanitizeForDisplay(messageAck.name)})`,
+      );
 
     // Read peer hello bodies only when no cheaper signal has decided it already:
     // the hello read is the load-bearing check but the only one that costs a
@@ -1106,7 +1113,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           );
           if (envelope.retainFiles) {
             signals.push(
-              `peer hello ${hello.name} advertises retain_files=true`,
+              `peer hello ${sanitizeForDisplay(hello.name)} advertises ` +
+                `retain_files=true`,
             );
             break;
           }
@@ -1181,7 +1189,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.log.info(
       `[${this.id}] sweeping ${toDelete.length} protocol file(s) at ` +
         `${this.path} (--sweep-exchange-files): ` +
-        `${toDelete.map((f) => f.name).join(", ")}`,
+        `${toDelete.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
     );
     // allSettled, not all: await every delete before reporting, so a single
     // rejection does not leave the others running unobserved while synchronize()
@@ -1194,7 +1202,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
     const failures = results.flatMap((result, i) =>
       result.status === "rejected"
-        ? [`${toDelete[i].name} (${errMessage(result.reason)})`]
+        ? [`${sanitizeForDisplay(toDelete[i].name)} (${errMessage(result.reason)})`]
         : [],
     );
     if (failures.length > 0)
@@ -1286,7 +1294,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const fileNames = files.map((file) => file.name);
     this.log.trace(
       `[${this.role}] found ${files.length} file(s)` +
-        `${files.length > 0 ? `: ${fileNames.join(", ")}` : ""}`,
+        `${
+          files.length > 0
+            ? `: ${fileNames.map((n) => sanitizeForDisplay(n)).join(", ")}`
+            : ""
+        }`,
     );
     if (!this.options.retainFiles)
       this.responsibleFiles.forEach((fileName) => {
@@ -1365,7 +1377,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.info(
         `[${this.id}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
           "file(s) left by a prior crashed exchange: " +
-          `${orphanedTempFiles.map((f) => f.name).join(", ")}`,
+          `${orphanedTempFiles
+            .map((f) => sanitizeForDisplay(f.name))
+            .join(", ")}`,
       );
       await Promise.all(
         orphanedTempFiles.map((file) =>
@@ -1411,7 +1425,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.info(
         `[${this.id}] tolerating ${foreignFiles.length} foreign file(s) ` +
           `present at entry in ${this.path}: ` +
-          `${foreignFiles.map((f) => f.name).join(", ")}`,
+          `${foreignFiles.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
       );
 
     if (this.options.sweepExchangeFiles) {
@@ -1432,7 +1446,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `path ${this.path} must be empty except for a single peer hello at ` +
             "the start of the protocol, but contains " +
             `${unexpectedProtocol.length} unexpected protocol file(s): ` +
-            `${unexpectedProtocol.map((f) => f.name).join(", ")}. A pre-existing ` +
+            `${unexpectedProtocol
+              .map((f) => sanitizeForDisplay(f.name))
+              .join(", ")}. A pre-existing ` +
             "lock file (-lock.json), ack marker (-ack.json), joining sentinel " +
             "(-joining.json), message, or self-hello usually means a previous " +
             "exchange was terminated by SIGKILL/OOM/power loss before its " +
@@ -1449,7 +1465,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (peerHellos.length > 1)
         throw new UsageError(
           `path ${this.path} contains ${peerHellos.length} peer hello files ` +
-            `(${peerHellos.map((f) => f.name).join(", ")}); only one peer may ` +
+            `(${peerHellos.map((f) => sanitizeForDisplay(f.name)).join(", ")}); ` +
+            `only one peer may ` +
             "share a rendezvous directory -- are there other sessions using " +
             "this path?",
         );
@@ -1477,7 +1494,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       this.log.debug(
         `[joiner] arriving via ${this.id}${JOINING_SUFFIX} sentinel, ` +
-          `deleting discovered ${otherFile.name}`,
+          `deleting discovered ${sanitizeForDisplay(otherFile.name)}`,
       );
 
       // I5: read the peer hello body through the partial-sync gate before
@@ -1681,9 +1698,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         if (!this.options.retainFiles) this.responsibleFiles.delete(helloName);
         this.resetSessionState();
         throw new Error(
-          `peer id '${peerId}' and this party's id '${this.id}' share a ` +
-            "prefix at a '-' boundary; ids must not be prefix-extensions " +
-            "of each other (e.g. 'site' / 'site-2')",
+          `peer id '${sanitizeForDisplay(peerId)}' and this party's id ` +
+            `'${this.id}' share a prefix at a '-' boundary; ids must not be ` +
+            "prefix-extensions of each other (e.g. 'site' / 'site-2')",
         );
       }
       this.handshakeRole = "initiator";
@@ -1806,7 +1823,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // a body.
               const peerHelloStem = peerHello.name.slice(0, -".json".length);
               this.log.debug(
-                `[${this.role}] writing handshake ack for ${peerHello.name}`,
+                `[${this.role}] writing handshake ack for ` +
+                  `${sanitizeForDisplay(peerHello.name)}`,
               );
               const ackName = await this.writeAck(this.path!, peerHelloStem);
               ackPath = `${this.path}/${ackName}`;
@@ -1844,7 +1862,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             if (!hasPeerAck) {
               this.log.trace(
-                `[${this.role}] waiting for peer ack ${peerAckName}`,
+                `[${this.role}] waiting for peer ack ` +
+                  `${sanitizeForDisplay(peerAckName)}`,
               );
               await this.wait(this.options.pollingFrequency);
               continue;
@@ -1860,7 +1879,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.peerId = peerId;
 
             this.log.debug(
-              `[${this.role}] lockless rendezvous complete with ${peerId}`,
+              `[${this.role}] lockless rendezvous complete with ` +
+                `${sanitizeForDisplay(peerId)}`,
             );
 
             // Do NOT clear responsibleFiles: hello and ack remain so
@@ -1964,7 +1984,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 joiningSeenName = joiningName;
                 this.log.debug(
                   `[${this.role}] peer is mid-arrival ` +
-                    `(${joiningName}); awaiting completion`,
+                    `(${sanitizeForDisplay(joiningName)}); awaiting completion`,
                 );
               } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
                 // The window is a lower bound, not exact: the check runs once
@@ -1980,7 +2000,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 // entry fast-path and never enters this loop -- even though
                 // `this.role` is not committed until rendezvous succeeds.
                 throw new Error(
-                  `[starter] peer began arriving (${joiningName}) but did ` +
+                  `[starter] peer began arriving ` +
+                    `(${sanitizeForDisplay(joiningName)}) but did ` +
                     "not complete within the recovery window; it appears to " +
                     "have failed after announcing its arrival but before " +
                     "publishing its hello. Retry the exchange.",
@@ -2026,7 +2047,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           );
           if (foreignSentinel) {
             throw new UsageError(
-              `joining sentinel ${foreignSentinel.name} in ${this.path} ` +
+              `joining sentinel ${sanitizeForDisplay(foreignSentinel.name)} ` +
+                `in ${this.path} ` +
                 "matches no peer hello - are there other sessions using " +
                 "this path?",
             );
@@ -2128,7 +2150,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               this.handshakeRole === "initiator" ? "joiner" : "starter";
             this.peerId = otherId;
 
-            this.log.debug(`[${this.role}] parsed ${lockFile.name}`);
+            this.log.debug(
+              `[${this.role}] parsed ${sanitizeForDisplay(lockFile.name)}`,
+            );
 
             await this.client.safeDelete(`${this.path}/${lockFile.name}`);
             await this.client.safeDelete(`${this.path}/${otherFile.name}`);
@@ -2187,7 +2211,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
             this.log.debug(
-              `[${this.role}] detected ${otherFile.name}; deleting it`,
+              `[${this.role}] detected ${sanitizeForDisplay(otherFile.name)}; ` +
+                `deleting it`,
             );
 
             await this.client.safeDelete(otherPath);
@@ -2243,7 +2268,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               `${arrivedFirst ? this.peerId : this.id}${LOCK_SUFFIX}`;
             lockPath = `${this.path}/${lockName}`;
 
-            this.log.debug(`[${this.role}] attempting to create ${lockName}`);
+            this.log.debug(
+              `[${this.role}] attempting to create ` +
+                `${sanitizeForDisplay(lockName)}`,
+            );
 
             // Pre-emptively track lockName in delete mode: if createExclusive
             // only partially succeeds (file created on server but handle-close
@@ -2257,7 +2285,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             try {
               await this.client.createExclusive(lockPath);
               this.log.debug(
-                `[${this.role}] created lock file ${lockName}; waiting for ` +
+                `[${this.role}] created lock file ` +
+                  `${sanitizeForDisplay(lockName)}; waiting for ` +
                   "peer to finalize handshake",
               );
 
@@ -2344,7 +2373,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // degrades gracefully to the bare timeout below if they ever diverged.
         if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
           throw new Error(
-            `[starter] peer began arriving (${joiningSeenName}) but the ` +
+            `[starter] peer began arriving ` +
+              `(${sanitizeForDisplay(joiningSeenName)}) but the ` +
               "exchange timed out before it completed; it appears to have " +
               "failed after announcing its arrival but before publishing its " +
               "hello. Retry the exchange.",
@@ -2370,7 +2400,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           this.id.startsWith(this.peerId! + "-")
         )
           throw new UsageError(
-            `peer id '${this.peerId}' and this party's id '${this.id}' share ` +
+            `peer id '${sanitizeForDisplay(this.peerId!)}' and this party's ` +
+              `id '${this.id}' share ` +
               "a prefix at a '-' boundary; ids must not be prefix-extensions " +
               "of each other (e.g. 'site' / 'site-2')",
           );
@@ -2472,7 +2503,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.lastSentFile!.slice(0, -".json".length),
           );
           this.log.debug(
-            `[${this.role}] waiting for ack ${expectedAck} from ${this.peerId}`,
+            `[${this.role}] waiting for ack ${sanitizeForDisplay(expectedAck)} ` +
+              `from ${sanitizeForDisplay(this.peerId!)}`,
           );
           // Check for the ack before the deadline, so an ack already on disk is
           // honored even if the TTL elapsed in the same instant. This is the
@@ -2484,7 +2516,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             if (await ackForLastSentPresent(expectedAck)) break;
             if (Date.now() > this.options.timeToLive!.getTime()) {
               throw new UsageError(
-                `timed out waiting for ack ${expectedAck} from ${this.peerId}`,
+                `timed out waiting for ack ${sanitizeForDisplay(expectedAck)} ` +
+                  `from ${sanitizeForDisplay(this.peerId!)}`,
               );
             }
             await this.wait(this.options.pollingFrequency);
@@ -2743,7 +2776,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (policy === "error")
       throw new UsageError(
         `unexpected file(s) appeared in ${path} during the exchange: ` +
-          `${names.join(", ")}. The directory must be dedicated to a single ` +
+          `${names.map((n) => sanitizeForDisplay(n)).join(", ")}. The ` +
+          `directory must be dedicated to a single ` +
           'exchange between exactly two parties (see EXCHANGE_SPEC.md "Directory ' +
           'exclusivity"); a foreign file usually means another process or ' +
           "session is writing to this path, or a sync tool produced a conflict " +
@@ -2758,7 +2792,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (this.warnedUnexpectedFiles.has(name)) continue;
       this.warnedUnexpectedFiles.add(name);
       this.log.warn(
-        `[${this.role}] unexpected file ${name} in ${path} during the ` +
+        `[${this.role}] unexpected file ${sanitizeForDisplay(name)} in ` +
+          `${path} during the ` +
           "exchange; continuing (unexpected_files: warn). If this directory is " +
           "dedicated to the exchange, this may be a conflict copy, a partial " +
           "download, or another session sharing the path.",
@@ -2779,7 +2814,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     let reachedGet = false;
     try {
-      this.log.trace(`[${this.role}] polling for message from ${peerId}`);
+      this.log.trace(
+        `[${this.role}] polling for message from ` +
+          `${sanitizeForDisplay(peerId)}`,
+      );
       // Detect via a pattern scan rather than an exact-name exists(): the
       // message filename now encodes a per-message byte count (and optionally
       // a timestamp and counter), so the receiver cannot predict the exact
@@ -2846,7 +2884,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 // handleUnexpectedFiles. The message flags the possibility
                 // rather than listing them.
                 throw new UsageError(
-                  `message file ${name} from ${peerId} in ${path} has a ` +
+                  `message file ${sanitizeForDisplay(name)} from ` +
+                    `${sanitizeForDisplay(peerId)} in ${path} has a ` +
                     "byte-count terminal segment but no parseable NNN segment; " +
                     "a correctly configured retain-mode peer cannot produce " +
                     "this name, so the file is corrupt or does not belong to " +
@@ -2897,13 +2936,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // directory reuse, not necessarily a separate session.
           throw new UsageError(
             `more than one message file with NNN=${this.recvSeq} from ` +
-              `${peerId} in ${path} - possible duplicate-NNN or directory reuse`,
+              `${sanitizeForDisplay(peerId)} in ${path} - possible ` +
+              `duplicate-NNN or directory reuse`,
           );
         }
         // Delete mode keeps at most one outstanding message per direction (I9),
         // so two peer messages means a concurrent session or a protocol bug.
         throw new UsageError(
-          `more than one message file from ${peerId} in ${path} - are there ` +
+          `more than one message file from ${sanitizeForDisplay(peerId)} in ` +
+            `${path} - are there ` +
             "other sessions using this path?",
         );
       }
@@ -2928,7 +2969,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           messageFile.size > MAX_FRAME_SIZE_BYTES
         ) {
           throw new FrameSizeExceededError(
-            `message file ${messageFile.name} from ${peerId} in ${path} ` +
+            `message file ${sanitizeForDisplay(messageFile.name)} from ` +
+              `${sanitizeForDisplay(peerId)} in ${path} ` +
               `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
               `exceeding the maximum inbound frame size of ` +
               `${MAX_FRAME_SIZE_BYTES} bytes; refusing to read it into memory`,
@@ -2941,12 +2983,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // than reading a truncated message. For a direct transport (SFTP),
           // the atomic rename means the size already matches on the first poll.
           this.log.trace(
-            `[${this.role}] ${messageFile.name} is ${messageFile.size}/` +
+            `[${this.role}] ${sanitizeForDisplay(messageFile.name)} is ` +
+              `${messageFile.size}/` +
               `${declaredSize} bytes; waiting for full sync`,
           );
         } else {
           const inPath = `${path}/${messageFile.name}`;
-          this.log.debug(`[${this.role}] getting message ${messageFile.name}`);
+          this.log.debug(
+            `[${this.role}] getting message ` +
+              `${sanitizeForDisplay(messageFile.name)}`,
+          );
 
           reachedGet = true;
           const message = await this.client.get(inPath, {
@@ -2972,14 +3018,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               parsed = JSON.parse(message.toString());
             } catch (parseErr: unknown) {
               throw new UsageError(
-                `message file ${messageFile.name} from ${peerId} is fully ` +
+                `message file ${sanitizeForDisplay(messageFile.name)} from ` +
+                  `${sanitizeForDisplay(peerId)} is fully ` +
                   `synced but is not valid JSON: ${errMessage(parseErr)}`,
               );
             }
             const result = Message.safeParse(parsed);
             if (!result.success)
               throw new UsageError(
-                `message file ${messageFile.name} from ${peerId} is fully ` +
+                `message file ${sanitizeForDisplay(messageFile.name)} from ` +
+                  `${sanitizeForDisplay(peerId)} is fully ` +
                   `synced but failed schema validation: ${result.error.message}`,
               );
             return result.data;
@@ -3038,7 +3086,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               );
               this.lastAckedNNN = msgNNN;
               this.log.debug(
-                `[${this.role}] wrote ack ${ackName} for seq=${validatedMessage.seq}`,
+                `[${this.role}] wrote ack ${sanitizeForDisplay(ackName)} for ` +
+                  `seq=${validatedMessage.seq}`,
               );
             }
 
@@ -3068,7 +3117,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             );
 
             this.log.debug(
-              `[${this.role}] deleting message ${messageFile.name}`,
+              `[${this.role}] deleting message ` +
+                `${sanitizeForDisplay(messageFile.name)}`,
             );
             try {
               await this.client.delete(inPath);
@@ -3100,7 +3150,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 // is terminal, not a "manual cleanup may be required" transient.
                 if (deleteErr instanceof UsageError) throw deleteErr;
                 this.log.warn(
-                  `[${this.role}] failed to delete ${messageFile.name}; ` +
+                  `[${this.role}] failed to delete ` +
+                    `${sanitizeForDisplay(messageFile.name)}; ` +
                     "please notify the administrator that manual cleanup " +
                     `may be required: ${errMessage(deleteErr)}`,
                 );
@@ -3159,8 +3210,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           );
         } else {
           this.log.warn(
-            `[${this.role}] message from ${peerId} disappeared between list ` +
-              "and get; " +
+            `[${this.role}] message from ${sanitizeForDisplay(peerId)} ` +
+              "disappeared between list and get; " +
               (this.options.retainFiles
                 ? "unexpected in retain mode (files are never deleted) -- " +
                   "possible external interference; retrying"

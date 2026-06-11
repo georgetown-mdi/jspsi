@@ -1,6 +1,6 @@
 import { Writable } from "node:stream";
 
-import { FrameSizeExceededError } from "@psilink/core";
+import { FrameSizeExceededError, sanitizeForDisplay } from "@psilink/core";
 
 import {
   SFTP_STALL_DEADLINE_MS,
@@ -31,6 +31,11 @@ import {
  * Construct the canonical typed, terminal error for an over-cap inbound file.
  * Pass `observedBytes` when the exact size is known up front (LocalFSClient's
  * fstat); omit it on the streaming path, where only "crossed the cap" is known.
+ *
+ * `path` is routed through {@link sanitizeForDisplay} before interpolation: on a
+ * `get()` it carries the peer-supplied filename, so a hostile server could
+ * otherwise smuggle control/ANSI or deceptive-Unicode characters into the
+ * operator's terminal through this diagnostic.
  */
 export function frameSizeExceededError(
   path: string,
@@ -43,7 +48,8 @@ export function frameSizeExceededError(
       : `is ${observedBytes} bytes, exceeding the maximum frame size of ` +
         `${maxBytes} bytes`;
   return new FrameSizeExceededError(
-    `inbound file ${path} ${detail}; refusing to read it into memory`,
+    `inbound file ${sanitizeForDisplay(path)} ${detail}; refusing to read it ` +
+      `into memory`,
   );
 }
 
