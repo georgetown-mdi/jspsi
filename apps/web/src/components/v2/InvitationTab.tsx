@@ -125,7 +125,17 @@ export function InvitationTab() {
         );
       } catch (e) {
         setInvitation(undefined);
-        setError(e instanceof Error ? e.message : String(e));
+        // generateInvitation only fails on internal, non-user-actionable errors
+        // (a schema ZodError, an SSR misuse). Show a fixed message rather than
+        // the raw error: a raw ZodError dump is unhelpful to the user, and not
+        // echoing error internals into a secret-bearing flow keeps a future Zod
+        // version that embeds a failing field's value out of the UI. Log only
+        // the error type for diagnosis -- never the value-bearing error itself.
+        console.error(
+          "invitation generation failed:",
+          e instanceof Error ? e.name : typeof e,
+        );
+        setError("Could not generate the invitation. Please try again.");
       }
     },
   });
