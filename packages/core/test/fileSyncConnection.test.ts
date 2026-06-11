@@ -5958,7 +5958,11 @@ const entryPreconditionKinds: Array<{
   // shape (198451188): it fails the grammar, so it is snapshotted and tolerated
   // like any other foreign file rather than swept. It proceeds past the guard
   // (then times out waiting for a peer), exactly as notes.txt does below.
-  { kind: "foreign temp file", present: ["temp-export.tmp"], outcome: "proceed" },
+  {
+    kind: "foreign temp file",
+    present: ["temp-export.tmp"],
+    outcome: "proceed",
+  },
   // A foreign (non-protocol) file is snapshotted and tolerated at entry
   // (195255994): names that FAIL the protocol grammar are not rejected, so it
   // proceeds past the guard (then times out waiting for a peer in this setup).
@@ -6210,6 +6214,49 @@ test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID
   expect(snapshot.has("temp-export.tmp")).toBe(true);
 });
 
+test("synchronize() does NOT sweep a foreign temp whose stem is an UPPERCASE v4 UUID", async () => {
+  // 198451188: the uuid package's validate() carries the /i flag, so an
+  // uppercase-but-syntactically-valid v4 stem would pass a bare validate(); but
+  // uuidv4() only ever emits lowercase, so the protocol's own temp is always
+  // lowercase. A foreign temp-<UPPERCASE-v4>.tmp must therefore be treated as
+  // foreign (not swept), closing the residual case-collision data-loss window.
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + 60),
+    verbose: -1,
+  });
+  conn.id = "00000000-0000-4000-8000-000000000001";
+  conn.connected = true;
+  conn.path = "/test";
+
+  // A valid v4 UUID in uppercase -- accepted by a case-insensitive validate(),
+  // rejected by the lowercase-only protocol-temp match.
+  const foreignTempPath = "/test/temp-953D0248-D2F0-46F2-94DC-5082EED218F9.tmp";
+  files.set(foreignTempPath, Buffer.from("unrelated"));
+
+  const safeDeleted: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    safeDeleted.push(p);
+    return origSafeDelete(p);
+  };
+
+  const err = await conn.synchronize().catch((e: unknown) => e);
+
+  // Proceeded past the guard, tolerating the uppercase-stem foreign temp.
+  expect(err).not.toBeInstanceOf(UsageError);
+  // The foreign temp survived: never swept, still on disk...
+  expect(safeDeleted).not.toContain(foreignTempPath);
+  expect(files.has(foreignTempPath)).toBe(true);
+  // ...and recorded in the entry snapshot so the loop tolerates it.
+  const snapshot = (conn as unknown as { foreignFileSnapshot: Set<string> })
+    .foreignFileSnapshot;
+  expect(snapshot.has("temp-953D0248-D2F0-46F2-94DC-5082EED218F9.tmp")).toBe(
+    true,
+  );
+});
+
 test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID temp-*.tmp as foreign", async () => {
   // 198451188: isRecognizedLoopFile narrows its temp branch to the protocol's
   // own temp-<uuidv4()>.tmp shape. A real protocol temp appearing mid-loop is
@@ -6252,9 +6299,9 @@ test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID t
   });
   expect(errors).toHaveLength(0);
   // The protocol temp is recognized -- never warned.
-  expect(
-    logs.filter((l) => l.message.includes("temp-77777777")),
-  ).toHaveLength(0);
+  expect(logs.filter((l) => l.message.includes("temp-77777777"))).toHaveLength(
+    0,
+  );
   // The foreign temp is warned exactly once.
   expect(
     logs.filter((l) => l.message.includes("temp-export.tmp")),

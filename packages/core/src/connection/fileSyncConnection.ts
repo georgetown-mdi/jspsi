@@ -273,6 +273,14 @@ const peerIdFromControlName = (
 const isProtocolTempName = (name: string): boolean => {
   if (!name.startsWith("temp-") || !name.endsWith(".tmp")) return false;
   const stem = name.slice("temp-".length, -".tmp".length);
+  // Match ONLY the canonical lowercase form uuidv4() emits. The uuid package's
+  // validate() carries the /i flag, so without this guard a foreign
+  // temp-<UPPERCASE-but-valid-v4>.tmp would be accepted and swept -- a residual
+  // slice of the very namespace-collision data loss this narrowing removes.
+  // uuidv4() (uuid v14) always emits lowercase, so this rejects no name our own
+  // send()/writeAck() writes. toLowerCase() is locale-independent for a UUID's
+  // ASCII hex/hyphen, so there is no Turkish-I hazard.
+  if (stem !== stem.toLowerCase()) return false;
   return uuidValidate(stem) && uuidVersion(stem) === 4;
 };
 
