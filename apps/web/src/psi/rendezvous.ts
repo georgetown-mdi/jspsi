@@ -156,13 +156,14 @@ export async function listenAsInviter(
 ): Promise<Peer> {
   const makePeer = options?.peerFactory ?? defaultPeerFactory;
   const signal = options?.signal;
-  // Short-circuit before any broker contact if the caller has already aborted
-  // (e.g. the component unmounted before this ran): no peer is constructed, so
-  // no derived id is ever registered with the broker.
-  if (signal?.aborted)
-    throw new Error("connecting to the signaling server was aborted");
   const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
   const loc = inviterLocationFromWindow();
+  // Short-circuit before any broker contact -- placed after the (fast) async
+  // derivation above so an abort that lands during it is caught here too -- so
+  // when the caller has already aborted (e.g. the component unmounted before this
+  // ran) no peer is constructed and no derived id is registered with the broker.
+  if (signal?.aborted)
+    throw new Error("connecting to the signaling server was aborted");
   // The derived id is a rendezvous address that correlates exchanges, so keep it
   // out of default (info) logs; surface it only at debug for connection triage.
   log.info(`listening as inviter at ${loc.host}:${loc.port}`);
@@ -272,6 +273,7 @@ async function dialInviterWithRetry(
         if (settled) return;
         settled = true;
         conn.off("open", onOpen);
+        conn.off("error", onConnError);
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         onUnavailable = undefined;
@@ -279,6 +281,15 @@ async function dialInviterWithRetry(
         action();
       };
       const onOpen = () => settle(() => resolve({ outcome: "open", conn }));
+      // A channel-level error is fatal to this attempt -- the same disposition as
+      // any non-`peer-unavailable` error. PeerJS usually re-emits channel errors
+      // on the parent peer (where `onPeerError` catches them), but a conn-only
+      // error would otherwise hang the attempt until the open timeout.
+      const onConnError = (err: unknown) =>
+        settle(() => {
+          conn.close();
+          reject(asError(err));
+        });
       const onAbort = () =>
         settle(() => {
           conn.close();
@@ -303,6 +314,7 @@ async function dialInviterWithRetry(
           reject(asError(err));
         });
       conn.once("open", onOpen);
+      conn.once("error", onConnError);
       if (signal?.aborted) {
         onAbort();
         return;

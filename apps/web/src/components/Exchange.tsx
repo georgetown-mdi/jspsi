@@ -143,6 +143,12 @@ export function Exchange(config: ExchangeConfig) {
   }, [outputs]);
 
   const handleSubmit = () => {
+    // Guard against re-entry: once an exchange is in flight its AbortController is
+    // stored here, and starting a second would orphan the first's signal and race
+    // two lifecycles on shared state. The FileSelect button is also disabled via
+    // `submitted`, but this makes the one-exchange-per-mount invariant explicit -- a
+    // fresh exchange comes from a fresh mount (Exchange is keyed by the secret).
+    if (abortRef.current) return;
     setSubmitted(true);
     setErrorAlert(undefined);
 

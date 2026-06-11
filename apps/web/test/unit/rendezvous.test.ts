@@ -241,6 +241,28 @@ describe("dialAsAcceptor", () => {
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });
 
+  test("destroys the peer and rejects on a channel-level error", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const promise = dialAsAcceptor(generateSharedSecret(), endpoint, {
+      peerFactory: cap.factory,
+    });
+
+    await vi.waitFor(() =>
+      expect(fake.listenerCount("open")).toBeGreaterThan(0),
+    );
+    fake.emit("open", "acceptor");
+    await vi.waitFor(() => expect(fake.connect).toHaveBeenCalled());
+
+    // The channel itself errors without the peer re-emitting it: the attempt must
+    // fail fast rather than hang until the open timeout.
+    fake.conns[0].emit("error", new Error("channel failed"));
+
+    await expect(promise).rejects.toThrow("channel failed");
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+
   test("aborts the dial via the signal and destroys the peer", async () => {
     stubWindow();
     const controller = new AbortController();

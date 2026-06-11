@@ -156,7 +156,7 @@ beforeAll(async () => {
         action();
       };
       const onConnection = (conn: DataConnection) =>
-        conn.on("open", () => settle(() => resolve(conn)));
+        conn.once("open", () => settle(() => resolve(conn)));
       const onError = (err: unknown) =>
         settle(() =>
           reject(err instanceof Error ? err : new Error(String(err))),
@@ -185,7 +185,7 @@ beforeAll(async () => {
       };
       const onOpen = () => {
         const conn = acceptorPeer.connect(inviterId, { reliable: true });
-        conn.on("open", () => settle(() => resolve(conn)));
+        conn.once("open", () => settle(() => resolve(conn)));
       };
       const onError = (err: unknown) =>
         settle(() =>

@@ -38,6 +38,8 @@ export async function prepareAcceptedInvitation(
 ): Promise<AcceptableInvitation> {
   const token = await decodeInvitation(encoded);
 
+  // `<=` fails closed at the boundary: a token whose expiry equals `now` is
+  // treated as already expired, never as valid for one last instant.
   if (token.expires !== undefined && new Date(token.expires) <= now) {
     throw new Error(
       "This invitation has expired. Ask your partner to send a new one.",
