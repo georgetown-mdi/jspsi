@@ -1,4 +1,5 @@
 import { getLogger } from "./utils/logger.js";
+import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import type {
   Standardization,
   StandardizationStep,
@@ -749,7 +750,7 @@ export function buildKeyStrings(
 
   if (result.size > KEY_STRING_WARN_THRESHOLD) {
     logger.warn(
-      `row ${index}, key "${key.name}": cross-product produced ` +
+      `row ${index}, key "${sanitizeForDisplay(key.name)}": cross-product produced ` +
         `${result.size} key strings (>${KEY_STRING_WARN_THRESHOLD}); fan-out ` +
         "in dual-party-output exchanges may degrade privacy guarantees",
     );
