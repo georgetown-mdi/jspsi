@@ -1,10 +1,22 @@
 import { describe, expect, test } from "vitest";
 
-import { ConnectionError, createMessagePipe } from "@psilink/core";
+import { ConnectionError, createMessagePipe, runKex } from "@psilink/core";
 
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 
 import type { MessageConnection } from "@psilink/core";
+
+/** A MessageConnection whose `send` resolves and whose `receive` rejects with
+ * `error`. As the initiator, the handshake sends its first frame then awaits a
+ * reply, so this surfaces `error` from the kex's receive -- the seam by which a
+ * peer-driven frame failure reaches the classifier. */
+function rejectingReceiveMc(error: unknown): MessageConnection {
+  return {
+    send: () => Promise.resolve(),
+    receive: () => Promise.reject(error),
+    close: () => Promise.resolve(),
+  };
+}
 
 // A 32-byte value, base64url-encoded, always satisfies SHARED_SECRET_REGEX (43
 // chars, the final one drawn from the 4-bit-aligned set), so any fill byte gives
@@ -128,5 +140,61 @@ describe("authenticateExchange", () => {
     const cause = (err as { cause?: unknown }).cause;
     expect(cause).toBeInstanceOf(ConnectionError);
     expect((cause as ConnectionError).kind).toBe("transport");
+  });
+
+  test("a protocol violation (peer out of turn) is re-tagged as a security trust failure", async () => {
+    // A peer flooding/misordering frames during the handshake overflows the
+    // inbound buffer, surfacing a `protocol` ConnectionError. That is never
+    // benign mid-handshake, so it must be a non-retryable trust failure, not the
+    // retryable transport bucket.
+    const mc = rejectingReceiveMc(
+      new ConnectionError("the peer is sending out of turn", "protocol"),
+    );
+
+    await expect(
+      authenticateExchange(mc, "initiator", SECRET_A),
+    ).rejects.toMatchObject({ name: "ConnectionError", kind: "security" });
+  });
+
+  test("a local usage fault is passed through unchanged, not re-tagged as security", async () => {
+    // A `usage`-kind fault (e.g. a send on an already-closed connection) is a
+    // local programming fault, not the peer's doing, so it is passed through
+    // unchanged rather than mislabeled "Could not verify your partner".
+    const usageError = new ConnectionError("send after close", "usage");
+    const mc = rejectingReceiveMc(usageError);
+
+    const err: unknown = await authenticateExchange(
+      mc,
+      "initiator",
+      SECRET_A,
+    ).then(
+      () => {
+        throw new Error("handshake should have rejected on the usage fault");
+      },
+      (reason: unknown) => reason,
+    );
+    // The exact instance is re-thrown -- not wrapped, not re-tagged as security.
+    expect(err).toBe(usageError);
+  });
+
+  test("rejects when the peer negotiates encryption the web path does not apply", async () => {
+    const [connA, connB] = createMessagePipe();
+    // The peer (responder) requests the application AEAD; the web initiator
+    // passes false, so the negotiated decision is true -- which the web path does
+    // not yet apply. Running the exchange in cleartext while the peer wraps would
+    // silently diverge, so the handshake must fail loudly instead.
+    const psk = new Uint8Array(Buffer.from(SECRET_A, "base64url"));
+    const [initiator] = await Promise.allSettled([
+      authenticateExchange(connA, "initiator", SECRET_A),
+      runKex(connB, "responder", psk, true),
+    ]);
+
+    expect(initiator.status).toBe("rejected");
+    if (initiator.status !== "rejected") return;
+    expect(initiator.reason).toBeInstanceOf(ConnectionError);
+    expect((initiator.reason as ConnectionError).kind).toBe("usage");
+    expect((initiator.reason as ConnectionError).message).toMatch(
+      /encryption/i,
+    );
   });
 });

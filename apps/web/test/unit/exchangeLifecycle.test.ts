@@ -416,6 +416,38 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
+  test("abort during the handshake closes the connection, teardown runs once, no alert, no exchange", async () => {
+    const { mc, close } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    // The handshake parks on a receive that the teardown close() will reject,
+    // mirroring how a deliberate teardown unwinds an in-flight key exchange. This
+    // exercises an abort landing in the newly-inserted handshake step (before
+    // runExchange), the one interleaving the other abort tests do not cover.
+    mockedAuthenticate.mockImplementation(
+      async (c) => (await c.receive()) as AuthResult,
+    );
+    const controller = new AbortController();
+    const { acquired, peer } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    const run = runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: controller.signal,
+      ...s,
+    });
+    await tick(); // reach the parked receive inside the handshake
+    controller.abort();
+    await run;
+
+    expect(close).toHaveBeenCalledTimes(1); // teardown-exclusive effect, once
+    expect(peer.disconnect).toHaveBeenCalled();
+    expect(mockedRunExchange).not.toHaveBeenCalled(); // never reached the exchange
+    expect(s.onError).not.toHaveBeenCalled(); // abort is silent
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
   test("abort during a wait settles silently and tears down nothing it never held", async () => {
     const controller = new AbortController();
     // acquire models a wait that settles (rejects) when the owner's signal aborts.
