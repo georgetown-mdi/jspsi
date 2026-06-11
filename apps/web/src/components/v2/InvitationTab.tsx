@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ActionIcon,
@@ -21,10 +21,14 @@ import { generateInvitation } from "@psi/invitation";
 
 import type { GeneratedInvitation, InvitationLocation } from "@psi/invitation";
 
-/** This page's location, in the shape {@link generateInvitation} consumes. Read
- * only inside the submit handler (client-side), never during render, so it is
- * safe under SSR. */
+/** This page's location, in the shape {@link generateInvitation} consumes. It
+ * reads `window`, so it must be called from a client-side path; it throws rather
+ * than return a wrong value if ever reached during SSR, since there is no
+ * sensible server-side location. The sole caller is the submit handler, an event
+ * that cannot fire during render. */
 function invitationLocation(): InvitationLocation {
+  if (typeof window === "undefined")
+    throw new Error("invitationLocation must be called in the browser");
   return {
     origin: window.location.origin,
     hostname: window.location.hostname,
@@ -32,10 +36,13 @@ function invitationLocation(): InvitationLocation {
   };
 }
 
-/** A labelled, copy-to-clipboard view of one shareable artifact. Its `navigator`
- * read is guarded with `typeof navigator`, so it is SSR-safe on its own; it is
- * additionally only rendered behind the `invitation` state guard at its call site
- * (`invitation` starts `undefined`), so it does not run during SSR regardless. */
+/** A labelled, copy-to-clipboard view of one shareable artifact. It is only ever
+ * rendered on the client -- behind the `invitation` state guard at its call site,
+ * which starts `undefined` and is set only in an event handler, so CopyRow is
+ * absent from the server render and never participates in hydration. The
+ * `typeof navigator` check is defence-in-depth (and hides the button on
+ * non-secure origins, where `navigator.clipboard` is undefined), not the SSR
+ * safety mechanism -- that is the call-site guard. */
 function CopyRow({
   label,
   description,
@@ -62,11 +69,21 @@ function CopyRow({
           typeof navigator !== "undefined" && navigator.clipboard ? (
             <CopyButton value={value} timeout={1000}>
               {({ copied, copy }) => (
-                <Tooltip label={copied ? "Copied" : "Copy to clipboard"}>
+                <Tooltip
+                  label={copied ? "Copied" : "Copy to clipboard"}
+                  // Open on keyboard focus too, not hover only, so keyboard
+                  // users get the same affordance.
+                  events={{ hover: true, focus: true, touch: true }}
+                >
                   <ActionIcon
                     onClick={copy}
                     variant={copied ? "light" : "filled"}
-                    aria-label={`Copy ${label.toLowerCase()}`}
+                    // Name reflects the copied state so a screen reader
+                    // announces the success (the icon/tooltip change alone is
+                    // not conveyed to assistive tech).
+                    aria-label={
+                      copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
+                    }
                   >
                     {copied ? <IconCheck size={18} /> : <IconCopy size={18} />}
                   </ActionIcon>
@@ -83,6 +100,14 @@ function CopyRow({
 export function InvitationTab() {
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
   const [error, setError] = useState<string>();
+
+  // Move focus to the result heading once an invitation is generated, so a
+  // screen-reader / keyboard user is taken to the output rather than left on the
+  // button with the new region announced only if they happen to explore for it.
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (invitation) resultHeadingRef.current?.focus();
+  }, [invitation]);
 
   const form = useForm({
     defaultValues: { inviterName: "" },
@@ -128,15 +153,22 @@ export function InvitationTab() {
                 onChange={(e) => handleChange(e.target.value)}
                 onBlur={handleBlur}
                 error={
-                  // Only after the field is blurred, so the "required" message
-                  // does not flash on every keystroke while the user is still
-                  // typing (isTouched flips on the first change; isBlurred does
-                  // not). A cold submit with an empty name is caught by the
-                  // native `required` attribute's own bubble instead.
-                  state.meta.isBlurred && state.meta.errors.length > 0
+                  // Show the required-name error once the user has left the
+                  // field (isBlurred) or attempted a submit (submissionAttempts)
+                  // -- not on every keystroke while typing. The submit case
+                  // matters for a whitespace-only name: it passes the native
+                  // `required` check (non-empty) but fails this validator, so
+                  // without the submit guard the error would never appear and
+                  // the click would do nothing visible.
+                  (state.meta.isBlurred || form.state.submissionAttempts > 0) &&
+                  state.meta.errors.length > 0
                     ? state.meta.errors.join(", ")
                     : undefined
                 }
+                // Announce the error when it appears (Mantine's error node is
+                // otherwise a silent <p>); the input already gets aria-invalid
+                // and aria-describedby automatically.
+                errorProps={{ role: "alert" }}
                 withAsterisk
                 required
                 label="Your name"
@@ -145,21 +177,32 @@ export function InvitationTab() {
               />
             )}
           />
-          <Button type="submit">
-            {invitation ? "Generate a new invitation" : "Generate invitation"}
-          </Button>
+          <form.Subscribe selector={(s) => s.isSubmitting}>
+            {(isSubmitting) => (
+              <Button
+                type="submit"
+                loading={isSubmitting}
+                disabled={isSubmitting}
+              >
+                {invitation
+                  ? "Generate a new invitation"
+                  : "Generate invitation"}
+              </Button>
+            )}
+          </form.Subscribe>
+          {error && (
+            <Alert color="red" title="Could not generate invitation">
+              {error}
+            </Alert>
+          )}
         </Stack>
       </form>
 
-      {error && (
-        <Alert color="red" title="Could not generate invitation" mt="md">
-          {error}
-        </Alert>
-      )}
-
       {invitation && (
         <Stack mt="md">
-          <Title order={3}>Share this invitation</Title>
+          <Title order={3} ref={resultHeadingRef} tabIndex={-1}>
+            Share this invitation
+          </Title>
           <Text size="sm" c="dimmed">
             Send one of these to your partner over a trusted channel (for
             example, secure email). It carries a one-time secret, so treat it as
