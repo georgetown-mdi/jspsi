@@ -113,8 +113,18 @@ test("applyEncryption surfaces own-OR-peer through authenticateConnection across
   for (const [reqInit, reqResp, expected] of combos) {
     const [a, b] = createMessagePipe();
     const [resA, resB] = await Promise.all([
-      authenticateConnection(a, { sharedSecret: TOKEN_A }, "initiator", reqInit),
-      authenticateConnection(b, { sharedSecret: TOKEN_A }, "responder", reqResp),
+      authenticateConnection(
+        a,
+        { sharedSecret: TOKEN_A },
+        "initiator",
+        reqInit,
+      ),
+      authenticateConnection(
+        b,
+        { sharedSecret: TOKEN_A },
+        "responder",
+        reqResp,
+      ),
     ]);
     expect(resA.applyEncryption).toBe(expected);
     expect(resB.applyEncryption).toBe(expected);

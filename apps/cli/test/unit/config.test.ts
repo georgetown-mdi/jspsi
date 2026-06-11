@@ -642,7 +642,11 @@ test("loadConfigLinkageSource round-trips an explicit standardization block", ()
     const configPath = path.join(dir, "psilink.yaml");
     const terms = getDefaultLinkageTerms("Agency A");
     const standardization = [
-      { output: "ssn", input: "tax_id", steps: [{ function: "trim_whitespace" }] },
+      {
+        output: "ssn",
+        input: "tax_id",
+        steps: [{ function: "trim_whitespace" }],
+      },
     ];
     saveConfig(configPath, {
       connection: { channel: "filedrop", path: "/mnt/share" },
@@ -666,7 +670,9 @@ test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
       "connection:\n  channel: filedrop\n  path: /x\n",
     );
     expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow("no linkage_terms");
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "no linkage_terms",
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

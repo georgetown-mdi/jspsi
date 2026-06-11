@@ -7,11 +7,21 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import logLibrary from "loglevel";
 import YAML from "yaml";
-import { getLogger, parseExchangeSpec, SHARED_SECRET_REGEX } from "@psilink/core";
+import {
+  getLogger,
+  parseExchangeSpec,
+  SHARED_SECRET_REGEX,
+} from "@psilink/core";
 import type { FileDropConnectionConfig } from "@psilink/core";
 
-import { resolveInvitePositionals, validateInvite } from "../../src/commands/invite";
-import { resolveAcceptPositionals, validateAccept } from "../../src/commands/accept";
+import {
+  resolveInvitePositionals,
+  validateInvite,
+} from "../../src/commands/invite";
+import {
+  resolveAcceptPositionals,
+  validateAccept,
+} from "../../src/commands/accept";
 import {
   runOnlineBootstrap,
   type CommonBootstrapOptions,
@@ -100,7 +110,10 @@ function testOptions(label: string): CommonBootstrapOptions {
 // genuine stall (or an unexpected row count) is diagnosable rather than blamed on
 // an empty file. Stricter than the sibling authenticatedExchange test's
 // stability-only poll because here the exact output shape is known up front.
-async function readStableOutput(file: string, dataRows: number): Promise<string> {
+async function readStableOutput(
+  file: string,
+  dataRows: number,
+): Promise<string> {
   const expectedLines = 1 + dataRows;
   const deadline = Date.now() + 5_000;
   let last = "";
@@ -166,7 +179,11 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
 
   // Invite validation mints the invitation and builds the inviter's connection
   // from the URL (the online wiring's no-network half).
-  const inviteResolved = resolveInvitePositionals([url, inviteInput, inviteOut]);
+  const inviteResolved = resolveInvitePositionals([
+    url,
+    inviteInput,
+    inviteOut,
+  ]);
   const inviteReady = await validateInvite({
     resolved: inviteResolved,
     options: inviteOptions,
@@ -306,8 +323,16 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   // then serialized to disk through the CLI's default. Assert both files exist and
   // the record round-trips as JSON naming this exchange's participants.
   for (const party of [
-    { recordFile: inviteOptions.recordFile!, local: "invite", partner: "accept" },
-    { recordFile: acceptOptions.recordFile!, local: "accept", partner: "invite" },
+    {
+      recordFile: inviteOptions.recordFile!,
+      local: "invite",
+      partner: "accept",
+    },
+    {
+      recordFile: acceptOptions.recordFile!,
+      local: "accept",
+      partner: "invite",
+    },
   ]) {
     expect(fs.existsSync(party.recordFile)).toBe(true);
     expect(fs.existsSync(openingPathFor(party.recordFile))).toBe(true);
