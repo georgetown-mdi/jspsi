@@ -6481,6 +6481,7 @@ async function pollForeignFileError(
       ),
     ),
   ]);
+  conn.stop();
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   return errors[0] as Error;
