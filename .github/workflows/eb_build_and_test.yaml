@@ -4,12 +4,32 @@ name: Build and Test for Elastic Beanstalk
 # https://blog.danskingdom.com/Multiple-ways-to-setup-your-CI-CD-pipelines-in-GitHub-Actions/#approach-5-deploy-workflow-includes-build-workflow-and-uses-template-for-deployments-include-approach-with-reusable-workflows
 
 on:
-  # PR validation only. Deploys build through eb_deploy.yaml's workflow_call, so
-  # there is no standalone push trigger here: one would double-run on a feature
-  # branch that already has an open PR (push event + PR synchronize), and on dev,
-  # which eb_deploy also builds.
+  # PR validation only, scoped by path to web/core-affecting changes. Deploys
+  # build through eb_deploy.yaml's workflow_call, so there is no standalone push
+  # trigger here -- it would double-run with the pull_request event on a feature
+  # branch that already has an open PR. If this job becomes a required status
+  # check, configure branch protection so a path-skipped run does not block an
+  # unrelated PR -- a skipped required check otherwise stays pending.
   pull_request:
     branches: [main, staging]
+    paths:
+      - "lib/**"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - "apps/web/deploy/aws_eb/**"
+      - "apps/web/public/**"
+      - "apps/web/server/**"
+      - "apps/web/src/**"
+      - "apps/web/nitro.config.ts"
+      - "apps/web/package.json"
+      - "apps/web/postcss.config.cjs"
+      - "apps/web/tsconfig.json"
+      - "apps/web/vite.config.ts"
+      - "packages/core/src/**"
+      - "packages/core/package.json"
+      - "packages/core/rollup.config.ts"
+      - "packages/core/tsconfig.json"
+      - ".github/workflows/eb_build_and_test.yaml"
 
   workflow_call:
     outputs:

@@ -1,8 +1,10 @@
 name: Deploy to Elastic Beanstalk
 
 on:
+  # No dev entry: there is no Elastic Beanstalk environment for dev yet, so a
+  # dev push must not trigger a deploy.
   push:
-    branches: [main, staging, dev]
+    branches: [main, staging]
     paths:
       - "lib/**"
       - "package-lock.json"
