@@ -132,7 +132,12 @@ export function checkKeyFileExpiry(
 ): KeyFileExpiryStatus {
   if (keyFile.expires === undefined) return "ok";
   const expiresMs = new Date(keyFile.expires).getTime();
-  if (expiresMs <= now) return "expired";
+  // Fail closed on an unparseable timestamp. loadKeyFile validates `expires` as an
+  // ISO datetime, so this is unreachable through the CLI, but a direct caller that
+  // bypasses that validation must not have a malformed value classified as "ok"
+  // (NaN <= now is false, which would otherwise fall through). Treat it as expired
+  // so the hard stop, not a silent pass, is the default for a security control.
+  if (Number.isNaN(expiresMs) || expiresMs <= now) return "expired";
   const { warnThresholdDays } = opts;
   if (
     warnThresholdDays !== undefined &&

@@ -794,6 +794,57 @@ test("both key files hold the same rotated token after a successful exchange", a
   expect(loadedB?.expires).toBeUndefined();
 });
 
+test("a token_max_age_days policy stamps expires onto both rotated key files", async () => {
+  // The no-policy test above locks in the absent-expiry default; this exercises
+  // the other half of the rotation write path -- that auth.tokenMaxAgeDays is
+  // threaded through runProtocol into buildRotatedKeyFile and a stamped expiry
+  // actually lands on disk. Without this, a regression that dropped the argument
+  // would still pass every test.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  const outputA = path.join(tmpDir, "out-a.csv");
+  const outputB = path.join(tmpDir, "out-b.csv");
+
+  const before = Date.now();
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { sharedSecret: TOKEN_A, keyFilePath: keyFileA, tokenMaxAgeDays: 30 },
+      minimalPrepared,
+      outputA,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { sharedSecret: TOKEN_A, keyFilePath: keyFileB, tokenMaxAgeDays: 30 },
+      minimalPrepared,
+      outputB,
+      -1,
+      "test-b",
+    ),
+  ]);
+  const after = Date.now();
+
+  const loadedA = loadKeyFile(keyFileA);
+  const loadedB = loadKeyFile(keyFileB);
+
+  // Both rotated tokens carry a stamped expiry of ~now + 30 days, where "now" is
+  // the rotation moment somewhere between `before` and `after`.
+  expect(loadedA?.expires).toBeDefined();
+  expect(loadedB?.expires).toBeDefined();
+  const THIRTY_DAYS_MS = 30 * 86_400_000;
+  const expiresA = Date.parse(loadedA?.expires ?? "");
+  const expiresB = Date.parse(loadedB?.expires ?? "");
+  expect(expiresA).toBeGreaterThanOrEqual(before + THIRTY_DAYS_MS);
+  expect(expiresA).toBeLessThanOrEqual(after + THIRTY_DAYS_MS);
+  expect(expiresB).toBeGreaterThanOrEqual(before + THIRTY_DAYS_MS);
+  expect(expiresB).toBeLessThanOrEqual(after + THIRTY_DAYS_MS);
+});
+
 // --- Signal and error handler recovery paths ---------------------------------
 //
 // SIGINT/SIGTERM tests mock process.exit so the handlers can run to completion

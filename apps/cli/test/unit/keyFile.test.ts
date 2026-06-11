@@ -218,6 +218,17 @@ test("checkKeyFileExpiry returns ok beyond the threshold window", () => {
   ).toBe("ok");
 });
 
+test("checkKeyFileExpiry treats an unparseable expires as expired (fail closed)", () => {
+  // Defense-in-depth for a caller bypassing loadKeyFile's ISO-datetime validation:
+  // a malformed timestamp must not be classified as "ok" (NaN <= now is false).
+  expect(
+    checkKeyFileExpiry(
+      { sharedSecret: TOKEN, expires: "not-a-date" },
+      FIXED_NOW,
+    ),
+  ).toBe("expired");
+});
+
 test("checkKeyFileExpiry returns expired even when a threshold is given", () => {
   // The expired hard stop takes precedence over the expiring-soon window.
   expect(
