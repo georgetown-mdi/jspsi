@@ -1,0 +1,18 @@
+{
+  // Typecheck-only config for tests and tooling configs. The main tsconfig.json
+  // is a composite project that emits declarations to dist, so it deliberately
+  // includes only `src` -- test files there would be emitted into the published
+  // package. This config checks the full surface (src + test + the rollup/vitest
+  // configs) with no emit: `tsc -p tsconfig.test.json`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "rollup.config.ts",
+    "vitest.config.ts"
+  ]
+}

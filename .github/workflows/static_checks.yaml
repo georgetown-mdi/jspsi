@@ -1,0 +1,44 @@
+name: Static Checks
+
+# Repo-wide typecheck, lint, and format gate for every pull request. Kept
+# separate from the build/test workflows (cli_build_and_test.yaml,
+# eb_build_and_test.yaml), which are path-scoped to one app and run the heavier
+# unit/integration suites. These checks span the whole monorepo -- a type error
+# in a test file, an eslint violation, or prettier drift can land in any
+# workspace -- so this workflow is intentionally NOT path-filtered.
+#
+# `npm run typecheck` runs each workspace's noEmit tsconfig, including the
+# tsconfig.test.json files that cover test sources (the build/composite configs
+# exclude test/ so test code never reaches the emitted dist). It resolves
+# @psilink/core from the built package, so packages/core is built first.
+
+on:
+  pull_request:
+    branches: [main, staging]
+
+# Least privilege: these checks only need to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  static-checks:
+    name: Typecheck, Lint, Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      # Built first so the CLI and web typechecks can resolve @psilink/core's
+      # declarations from its dist (the same way the apps consume it).
+      - name: Build core
+        run: npm run build -w packages/core
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run formatcheck

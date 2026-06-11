@@ -1,11 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": [
-    "src/**/*.ts",
-    "test/**/*.ts",
-    "rollup.config.ts",
-    "vitest.config.ts"
-  ],
+  // Emit surface only. Tests and tooling configs are typechecked via
+  // tsconfig.test.json so this composite project never emits test/*.js or
+  // vitest.config.* into dist.
+  "include": ["src/**/*.ts"],
   "compilerOptions": {
     "target": "es2022",
     "module": "esnext",

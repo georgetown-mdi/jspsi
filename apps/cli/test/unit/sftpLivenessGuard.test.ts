@@ -204,7 +204,11 @@ describe("createBoundedPutSource source teardown", () => {
 // sanitizeForDisplay categories.
 describe("transportOperationStalledError", () => {
   test("is a typed, terminal (TransportOperationStalledError) error", () => {
-    const err = transportOperationStalledError("file read", "/p/x.json", "idle");
+    const err = transportOperationStalledError(
+      "file read",
+      "/p/x.json",
+      "idle",
+    );
     expect(err).toBeInstanceOf(TransportOperationStalledError);
   });
 

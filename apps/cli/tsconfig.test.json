@@ -1,0 +1,19 @@
+{
+  // Typecheck-only config for the test suite. The main tsconfig.json scopes its
+  // `include` to `src` (so test files never reach the emitted dist or the
+  // declaration graph consumers depend on), which means nothing typechecks
+  // test/ -- the bundler emits, and vitest transpiles with esbuild without type
+  // checking. This config closes that gap: `tsc -p tsconfig.test.json` checks
+  // src + test together with no emit. (`@psilink/core` resolves via node_modules
+  // like it does at test runtime, so build core first.)
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    // Tests run on Node (vitest), not the ES2020 downlevel emit target the base
+    // config uses; check them against the ES2022 lib they actually run under
+    // (matches packages/core) so e.g. Error.cause is in scope.
+    "target": "es2022"
+  },
+  "include": ["src", "test"]
+}

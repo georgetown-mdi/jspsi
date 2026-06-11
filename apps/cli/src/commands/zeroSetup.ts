@@ -213,6 +213,8 @@ interface ZeroSetupArgs {
   // schema.
   sweepExchangeFiles: boolean;
   forceRetainSweep: boolean;
+  // CLI-only audit-record controls, consumed by the handler (resolveRecordOutput)
+  // and likewise excluded from ZeroSetupOptions: createConnection never reads them.
   record: boolean;
   recordFile?: string;
   logLevel: logLibrary.LogLevelNumbers;
@@ -226,6 +228,8 @@ type ZeroSetupOptions = Omit<
   | "verbosity"
   | "sweepExchangeFiles"
   | "forceRetainSweep"
+  | "record"
+  | "recordFile"
 >;
 
 function parseArgs(argv: Arguments): ZeroSetupArgs {
