@@ -3,7 +3,14 @@
 
 import { describe, expect, test } from "vitest";
 
-import { buildExchangeRecord, verifyRecordCommitments } from "@psilink/core";
+import {
+  buildExchangeRecord,
+  parseExchangeRecord,
+  parseOpeningData,
+  serializeExchangeRecord,
+  serializeOpeningData,
+  verifyRecordCommitments,
+} from "@psilink/core";
 
 import vectorsRaw from "../../../../packages/core/test/vectors/exchange-record-vectors.json?raw";
 
@@ -67,6 +74,61 @@ describe("exchange record in the browser", () => {
       );
       expect(record).toEqual(vector.record);
       expect(opening).toEqual(vector.opening);
+
+      const { allValid } = await verifyRecordCommitments(record, opening);
+      expect(allValid).toBe(true);
+    },
+  );
+});
+
+// The acceptance-criteria coverage for "bring the exchange record to the web
+// app": the two facets the vector replay above does not exercise on its own --
+// the serialize -> parse round-trip of a record the web app produces, and an
+// explicit web <-> CLI cross-verification -- both run here in the real browser
+// runtime so they prove the WEB build's behavior, not Node's.
+describe("web-produced record: round-trip and cross-verification", () => {
+  // A record the web app produces survives the on-disk/download form. Built with
+  // real CSPRNG randomness (no injected `randomness`) so it is a genuine web
+  // record rather than a vector replay, then serialized, parsed back, and its
+  // commitments re-verified through that boundary -- the serialize -> parse
+  // round-trip the acceptance criteria call for. Iterating the vector inputs runs
+  // it across every governance/commitment shape (with and without an association
+  // table, legal agreement, or retention pointer).
+  test.each(vectors)(
+    "$name: a web-built record round-trips through serialize -> parse and re-verifies",
+    async (vector) => {
+      const { record, opening } = await buildExchangeRecord(vector.inputs);
+      const parsedRecord = parseExchangeRecord(
+        JSON.parse(serializeExchangeRecord(record)),
+      );
+      const parsedOpening = parseOpeningData(
+        JSON.parse(serializeOpeningData(opening)),
+      );
+      expect(parsedRecord).toEqual(record);
+      expect(parsedOpening).toEqual(opening);
+
+      const { allValid } = await verifyRecordCommitments(
+        parsedRecord,
+        parsedOpening,
+      );
+      expect(allValid).toBe(true);
+    },
+  );
+
+  // Cross-verification across runtimes. The checked-in vectors are the CLI/Node
+  // side of the contract -- the Node suite in
+  // packages/core/test/exchangeRecord.test.ts builds and verifies them -- so
+  // parsing a vector's record/opening here and verifying its commitments proves
+  // the web build verifies a CLI-produced record. The reverse direction (the CLI
+  // verifies a web-produced record) follows from byte-identity: the vector-replay
+  // suite above asserts the web build reproduces this exact record and opening,
+  // and the Node suite verifies that same pair, so the CLI verifies the
+  // byte-identical web record.
+  test.each(vectors)(
+    "$name: the web build verifies a CLI-produced record",
+    async (vector) => {
+      const record = parseExchangeRecord(vector.record);
+      const opening = parseOpeningData(vector.opening);
 
       const { allValid } = await verifyRecordCommitments(record, opening);
       expect(allValid).toBe(true);
