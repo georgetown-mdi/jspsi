@@ -41,7 +41,7 @@ import {
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
-import { resolveAtSignRefs } from "../util/atSignRefs";
+import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type AuthPersist } from "../protocol";
 import { channelFromURL } from "./zeroSetup";
@@ -600,6 +600,18 @@ export async function runOnlineBootstrap(params: {
     keyFilePath: params.keyPath,
   };
 
+  // Resolve `@path` credential refs for the live connection only. params.connection
+  // keeps the `@path` so the saveConfig in the hook below persists the reference,
+  // not the secret -- the @path is re-resolved at the next `psilink exchange`'s
+  // config load. A missing or unreadable referenced file is a UsageError (exit
+  // 64) surfaced here, before the connection is opened. The cast restores the
+  // RunnableConnectionConfig narrowing the resolver widens to ConnectionConfig;
+  // it is safe because the resolver preserves the channel (it only reads the SFTP
+  // credential fields).
+  const liveConnection = resolveConnectionCredentials(
+    params.connection,
+  ) as RunnableConnectionConfig;
+
   // Set inside the hook once saveConfig returns, so the catch below can tell a
   // "config is on disk, retry without re-inviting" recovery from a run where the
   // config write never succeeded (hook threw, or handshake never reached it).
@@ -614,7 +626,7 @@ export async function runOnlineBootstrap(params: {
   let keyPersisted = false;
   try {
     const { onAuthenticatedError } = await runProtocol(
-      params.connection,
+      liveConnection,
       auth,
       params.prepared,
       params.output,
@@ -986,12 +998,14 @@ export function parseCommonBootstrapArgs(
     identity: singleValue(argv, "identity") as string | undefined,
     serverPort: singleValue(argv, "server-port") as number | undefined,
     serverUsername: singleValue(argv, "server-username") as string | undefined,
-    serverPassword: resolveAtSignRefs(
-      singleValue(argv, "server-password") as string | undefined,
-    ) as string | undefined,
-    serverPrivateKey: resolveAtSignRefs(
-      singleValue(argv, "server-private-key") as string | undefined,
-    ) as string | undefined,
+    // Credential values are carried through verbatim; an `@path` ref is read only
+    // at the live-use boundary (resolveConnectionCredentials in
+    // runOnlineBootstrap), so a persisted config keeps the `@path`, not the
+    // resolved secret.
+    serverPassword: singleValue(argv, "server-password") as string | undefined,
+    serverPrivateKey: singleValue(argv, "server-private-key") as
+      | string
+      | undefined,
     connectionTimeout: singleValue(argv, "connection-timeout") as
       | number
       | undefined,
