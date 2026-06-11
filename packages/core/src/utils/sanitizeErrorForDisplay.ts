@@ -12,8 +12,13 @@ export const MAX_ERROR_CAUSE_DEPTH = 8;
 
 /**
  * Separator placed between an error's message and each chained `cause` message.
- * Plain ASCII (the leading newline included) so the separator itself can never
- * reintroduce a control character into the assembled output.
+ * The leading newline is the one control character in the assembled output, and
+ * it is deliberate: a fixed formatting byte this module emits (so each cause
+ * renders on its own line in a terminal), never partner-controlled input. Every
+ * byte that comes from an error message is escaped by {@link sanitizeForDisplay}
+ * before it is joined, so no partner-controlled control character can ride in
+ * alongside this one. Consumers that render to HTML must opt into preserving the
+ * newline (e.g. `white-space: pre-line`); browsers collapse it otherwise.
  */
 const CAUSE_SEPARATOR = "\ncaused by: ";
 
@@ -39,8 +44,9 @@ const CAUSE_SEPARATOR = "\ncaused by: ";
  *   `.cause`, never `.stack` or any other property, so no stack frame or
  *   credential-bearing field is ever rendered;
  * - it is cycle-safe (a chain that revisits a link stops) and depth-bounded (at
- *   most {@link MAX_ERROR_CAUSE_DEPTH} links), so a malformed or hostile chain
- *   cannot loop or flood;
+ *   most {@link MAX_ERROR_CAUSE_DEPTH} links, each capped by
+ *   {@link sanitizeForDisplay}), so a malformed or hostile chain cannot loop or
+ *   flood -- the whole output is bounded without a separate total-length cap;
  * - it suppresses a link whose raw message repeats the link before it -- the
  *   common case, since `asConnectionError` sets a wrapper's message to its
  *   cause's message -- so the same text is not printed twice.
