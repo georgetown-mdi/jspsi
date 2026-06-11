@@ -4,28 +4,12 @@ name: Build and Test for Elastic Beanstalk
 # https://blog.danskingdom.com/Multiple-ways-to-setup-your-CI-CD-pipelines-in-GitHub-Actions/#approach-5-deploy-workflow-includes-build-workflow-and-uses-template-for-deployments-include-approach-with-reusable-workflows
 
 on:
+  # PR validation only. Deploys build through eb_deploy.yaml's workflow_call, so
+  # there is no standalone push trigger here: one would double-run on a feature
+  # branch that already has an open PR (push event + PR synchronize), and on dev,
+  # which eb_deploy also builds.
   pull_request:
     branches: [main, staging]
-
-  push:
-    branches-ignore: [main, staging]
-    paths:
-      - "lib/**"
-      - "package-lock.json"
-      - "tsconfig.base.json"
-      - "apps/web/deploy/aws_eb/**"
-      - "apps/web/public/**"
-      - "apps/web/server/**"
-      - "apps/web/src/**"
-      - "apps/web/nitro.config.ts"
-      - "apps/web/package.json"
-      - "apps/web/postcss.config.cjs"
-      - "apps/web/tsconfig.json"
-      - "apps/web/vite.config.ts"
-      - "packages/core/src/**"
-      - "packages/core/package.json"
-      - "packages/core/rollup.config.ts"
-      - "packages/core/tsconfig.json"
 
   workflow_call:
     outputs:
@@ -48,21 +32,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-      - name: Get npm cache directory
-        id: npm-cache-dir
-        shell: bash
-        run: echo "dir=$(npm config get cache)" >> ${GITHUB_OUTPUT}
-      - uses: actions/cache@v4
-        id: npm-cache # use this to check for `cache-hit` ==> if: steps.npm-cache.outputs.cache-hit != 'true'
-        with:
-          path: ${{steps.npm-cache-dir.outputs.dir}}
-          key: ${{runner.os}}-node-${{hashFiles('**/package-lock.json')}}
-          restore-keys: |
-            ${{runner.os}}-node-
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
       - name: Build server
-        run: |
-          npm i . -w packages/core -w apps/web
-          npm run -w packages/core -w apps/web build
+        run: npm run -w packages/core -w apps/web build
       - name: Run tests
         run: |
           npm run -w packages/core test

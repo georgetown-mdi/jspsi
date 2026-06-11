@@ -16,6 +16,11 @@ on:
   pull_request:
     branches: [main, staging]
 
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 # Least privilege: these checks only need to read the repo.
 permissions:
   contents: read
