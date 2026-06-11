@@ -1025,6 +1025,42 @@ describe("bounded put (idle window)", () => {
       vi.useRealTimers();
     }
   });
+
+  test("stops retrying a string-path put when a fatal session error lands between attempts", async () => {
+    // The non-Buffer (string) branch re-checks the dead-session guard before each
+    // attempt, mirroring the Buffer branch: a fatal error in the inter-attempt
+    // window short-circuits the next attempt with the terminal stalled error
+    // instead of issuing put() on the dead channel.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      let calls = 0;
+      const put = vi.fn().mockImplementation(() => {
+        calls += 1;
+        // A fatal protocol error lands in the inter-attempt window; this attempt
+        // still rejects with the retryable transient failure the server returned.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (adapter as any).fatalSftpError = new Error("Malformed DATA packet");
+        return Promise.reject(new Error("transient write failure"));
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { put };
+      const writing = adapter.put("/local/file.bin", "/remote/out.json");
+      const captured = writing.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(200);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("Malformed DATA packet");
+      // Only the first attempt reached the server; the second short-circuited.
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // --- bounded list ------------------------------------------------------------

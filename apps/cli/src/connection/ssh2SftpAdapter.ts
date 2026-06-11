@@ -622,8 +622,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     options?: PutOptions,
   ): Promise<unknown> {
     if (!Buffer.isBuffer(src)) {
-      const dead = this.deadSessionError("file write", dest);
-      if (dead) return Promise.reject(dead);
       // string (a local file path) and ReadableStream are permitted by the
       // transport-agnostic FileTransportClient.put signature but never produced by
       // this app: every FileSyncConnection put() call site builds a Buffer. They
@@ -640,11 +638,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         typeof src === "string" ? (this.options!.retries ?? 5) : 0;
       return this.warnIfSlow(
         retryPromise(
-          () => this.client.put(src, dest, { writeStreamOptions: options }),
+          () => {
+            // Re-check the dead-session guard before every attempt, as the Buffer
+            // branch does: a fatal SFTP error landing between string-src retries
+            // would otherwise issue put() on the dead channel, whose buffered
+            // request never calls back, and ride the whole-exchange budget. (For a
+            // single-attempt stream this is just the method-entry check.)
+            const dead = this.deadSessionError("file write", dest);
+            if (dead) return Promise.reject(dead);
+            return this.client.put(src, dest, { writeStreamOptions: options });
+          },
           // `??` not `||` (in the string case) so an explicit retries: 0 disables
           // the retry rather than being coerced to the default of 5.
           retries,
           100,
+          // Terminate on the dead-session typed error rather than retrying it --
+          // the only TransportOperationStalledError this branch can see, since it
+          // has no idle window; mirrors the Buffer branch's predicate.
+          (error) => !(error instanceof TransportOperationStalledError),
         ),
         "file write",
         dest,

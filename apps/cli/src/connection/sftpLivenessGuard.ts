@@ -314,12 +314,22 @@ export function createBoundedPutSource(
       settled = true;
       clearTimeout(idleTimer);
       resolveResult(value);
+      // Tear the source down on every terminal path, as the idle-stall path
+      // already does. On a clean completion the source has already reached EOF and
+      // auto-destroyed, so this is an idempotent no-op; on fail() it was left
+      // mid-stream -- ssh2-sftp-client destroys a string/file source on a
+      // write-stream error but NOT a provided stream like this one -- so destroying
+      // it here releases its stream-internal state and pipe linkage rather than
+      // leaving it to GC. destroy() is idempotent and bare (emits no 'error'), so
+      // it is safe after either settlement.
+      source.destroy();
     },
     fail: (err: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(idleTimer);
       rejectResult(err);
+      source.destroy();
     },
   };
 }
