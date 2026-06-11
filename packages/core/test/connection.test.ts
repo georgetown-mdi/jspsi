@@ -2,6 +2,8 @@ import { ZodError } from "zod";
 import { expect, test } from "vitest";
 
 import {
+  SHARED_SECRET_REGEX,
+  generateSharedSecret,
   parseConnectionConfig,
   safeParseConnectionConfig,
 } from "../src/config/connection";
@@ -637,4 +639,19 @@ test("unexpected_files is accepted on filedrop", () => {
     options: { unexpectedFiles: "ignore" },
   });
   expect(result.success).toBe(true);
+});
+
+// --- generateSharedSecret ----------------------------------------------------
+
+test("generateSharedSecret always matches SHARED_SECRET_REGEX", () => {
+  // Many draws: the final-character constraint (43 base64url chars, last in
+  // [AEIMQUYcgkosw048]) holds only because 32 bytes leave 2 zero padding bits, so
+  // a regression to a different byte length would fail this for some random draw.
+  for (let i = 0; i < 100; i++) {
+    expect(generateSharedSecret()).toMatch(SHARED_SECRET_REGEX);
+  }
+});
+
+test("generateSharedSecret is non-deterministic across calls", () => {
+  expect(generateSharedSecret()).not.toBe(generateSharedSecret());
 });
