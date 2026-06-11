@@ -35,6 +35,39 @@ describe("frameSizeExceededError", () => {
     );
     expect(err.message).not.toMatch(/is \d+ bytes/);
   });
+
+  // The path carries the peer-supplied filename on a get(); a hostile server
+  // must not be able to drive the operator's terminal through it. Mirrors the
+  // sanitizeForDisplay categories.
+  test("an ordinary path passes through unchanged", () => {
+    const err = frameSizeExceededError("/drop/peer-7-42.json", 100, 250);
+    expect(err.message).toContain("/drop/peer-7-42.json");
+  });
+
+  test("escapes control/ANSI characters in the path", () => {
+    const err = frameSizeExceededError("/drop/\x1b[2J\x1b[31mEVIL.json", 100);
+    expect(err.message).not.toContain("\x1b");
+    expect(err.message).toContain("\\x1b");
+  });
+
+  test("escapes a newline so the path cannot spoof a log line", () => {
+    const err = frameSizeExceededError("/drop/ok.json\nFAKE: clear", 100);
+    expect(err.message).not.toContain("\n");
+    expect(err.message).toContain("\\x0a");
+  });
+
+  test("neutralizes deceptive Unicode (bidi-override) in the path", () => {
+    const err = frameSizeExceededError("/drop/file‮EVIL.json", 100);
+    expect(err.message).not.toContain("‮");
+    expect(err.message).toContain("\\u202e");
+  });
+
+  test("neutralizes a homoglyph / confusable in the path", () => {
+    // U+0430 (Cyrillic small a) renders identically to ASCII "a".
+    const err = frameSizeExceededError("/drop/cаfe.json", 100);
+    expect(err.message).not.toContain("а");
+    expect(err.message).toContain("\\u0430");
+  });
 });
 
 describe("createCappedSink", () => {

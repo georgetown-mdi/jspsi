@@ -1,6 +1,9 @@
 import { Readable } from "node:stream";
 
-import { TransportOperationStalledError } from "@psilink/core";
+import {
+  TransportOperationStalledError,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 /**
  * Liveness enforcement primitives shared by the SFTP adapter's server-driven
@@ -80,6 +83,13 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * the read (e.g. `"directory listing"`, `"file read"`, `"exclusive create"`) and
  * `detail` states how it stalled, so the one error type carries an
  * operation-specific message.
+ *
+ * `path` is routed through {@link sanitizeForDisplay} before interpolation:
+ * read/write/delete operation paths carry a peer-supplied filename, so a hostile
+ * server could otherwise inject control/ANSI or deceptive-Unicode characters into
+ * the operator's terminal through this diagnostic. (The operator-configured
+ * rendezvous dirPath the listing-stall builders pass is not partner-controlled,
+ * but routing every caller through the same escape keeps the treatment uniform.)
  */
 export function transportOperationStalledError(
   operation: string,
@@ -87,8 +97,8 @@ export function transportOperationStalledError(
   detail: string,
 ): TransportOperationStalledError {
   return new TransportOperationStalledError(
-    `SFTP ${operation} of ${path} stalled: ${detail}; refusing to wait on the ` +
-      `server further`,
+    `SFTP ${operation} of ${sanitizeForDisplay(path)} stalled: ${detail}; ` +
+      `refusing to wait on the server further`,
   );
 }
 
@@ -395,8 +405,11 @@ export function withSlowOperationWarning<T>(
     // exactly on schedule.
     const elapsedMs = Date.now() - start;
     const observed = options.progress?.(elapsedMs);
+    // The path can carry a peer-supplied filename (a get/put of a partner file),
+    // so escape it before it reaches the operator's terminal.
     options.log.warn(
-      `SFTP ${options.operation} of ${options.path} is still running after ` +
+      `SFTP ${options.operation} of ${sanitizeForDisplay(options.path)} is ` +
+        `still running after ` +
         `${elapsedMs} ms${observed ? ` (${observed})` : ""}; this may be a ` +
         "slow transfer or an unresponsive server",
     );

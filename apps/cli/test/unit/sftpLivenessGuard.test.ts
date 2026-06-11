@@ -1,8 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 
+import { TransportOperationStalledError } from "@psilink/core";
+
 import {
   SFTP_SLOW_OPERATION_WARNING_MS,
   createBoundedPutSource,
+  transportOperationStalledError,
   withSlowOperationWarning,
 } from "../../src/connection/sftpLivenessGuard";
 
@@ -143,6 +146,28 @@ describe("withSlowOperationWarning", () => {
       vi.useRealTimers();
     }
   });
+
+  test("escapes a control/ANSI sequence in the partner-supplied path", async () => {
+    // The path can carry a peer-supplied filename (a get/put of a partner file);
+    // a hostile server must not reach the operator's terminal through it.
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      const op = new Promise<string>(() => {});
+      void withSlowOperationWarning(op, {
+        operation: "file read",
+        path: "/dir/\x1b[31mEVIL.json",
+        log: { warn },
+        thresholdMs: 1_000,
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      const message = warn.mock.calls[0][0] as string;
+      expect(message).not.toContain("\x1b");
+      expect(message).toContain("\\x1b");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // createBoundedPutSource tears the source Readable down on every terminal path:
@@ -169,5 +194,67 @@ describe("createBoundedPutSource source teardown", () => {
     void result;
     complete("uploaded");
     expect(source.destroyed).toBe(true);
+  });
+});
+
+// The stalled-operation builder is the shared seam every per-operation liveness
+// bound routes through -- the capped get/put stalls, the listing stalls, and the
+// adapter's dead-session error. Its `path` carries a peer-supplied filename on a
+// read/write/delete op, so it is escaped at this one point. Mirrors the
+// sanitizeForDisplay categories.
+describe("transportOperationStalledError", () => {
+  test("is a typed, terminal (TransportOperationStalledError) error", () => {
+    const err = transportOperationStalledError("file read", "/p/x.json", "idle");
+    expect(err).toBeInstanceOf(TransportOperationStalledError);
+  });
+
+  test("an ordinary path passes through unchanged", () => {
+    const err = transportOperationStalledError(
+      "file read",
+      "/drop/peer-7-42.json",
+      "received no data",
+    );
+    expect(err.message).toContain("/drop/peer-7-42.json");
+  });
+
+  test("escapes control/ANSI characters in the path", () => {
+    const err = transportOperationStalledError(
+      "file read",
+      "/drop/\x1b[2J\x1b[31mEVIL.json",
+      "received no data",
+    );
+    expect(err.message).not.toContain("\x1b");
+    expect(err.message).toContain("\\x1b");
+  });
+
+  test("escapes a newline so the path cannot spoof a log line", () => {
+    const err = transportOperationStalledError(
+      "file write",
+      "/drop/ok.json\nFAKE: clear",
+      "no progress",
+    );
+    expect(err.message).not.toContain("\n");
+    expect(err.message).toContain("\\x0a");
+  });
+
+  test("neutralizes deceptive Unicode (bidi-override) in the path", () => {
+    const err = transportOperationStalledError(
+      "file read",
+      "/drop/file‮EVIL.json",
+      "received no data",
+    );
+    expect(err.message).not.toContain("‮");
+    expect(err.message).toContain("\\u202e");
+  });
+
+  test("neutralizes a homoglyph / confusable in the path", () => {
+    // U+0430 (Cyrillic small a) renders identically to ASCII "a".
+    const err = transportOperationStalledError(
+      "file read",
+      "/drop/cаfe.json",
+      "received no data",
+    );
+    expect(err.message).not.toContain("а");
+    expect(err.message).toContain("\\u0430");
   });
 });

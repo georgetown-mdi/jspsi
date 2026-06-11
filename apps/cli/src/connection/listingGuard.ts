@@ -80,15 +80,22 @@ export const MAX_FILENAME_LENGTH = 255;
 
 /**
  * Construct the typed, terminal error for a directory whose entry count exceeds
- * {@link MAX_DIRECTORY_ENTRIES}.
+ * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the operator-configured rendezvous
+ * path (not partner-controlled), but it is routed through
+ * {@link sanitizeForDisplay} anyway so it is escaped uniformly with the path the
+ * listing-stall builders below carry (both go through the same display escape via
+ * the shared `transportOperationStalledError` for those, and directly here). The
+ * partner-controlled value on this surface -- the offending filename -- is
+ * escaped by {@link filenameTooLongError}.
  */
 export function directoryTooLargeError(
   dirPath: string,
   max: number,
 ): DirectoryListingBoundsError {
   return new DirectoryListingBoundsError(
-    `directory ${dirPath} contains more than ${max} entries; refusing to ` +
-      `enumerate it to avoid an unbounded memory allocation`,
+    `directory ${sanitizeForDisplay(dirPath)} contains more than ${max} ` +
+      `entries; refusing to enumerate it to avoid an unbounded memory ` +
+      `allocation`,
   );
 }
 
