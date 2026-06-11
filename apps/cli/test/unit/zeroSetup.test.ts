@@ -7,10 +7,12 @@ import {
   type MockInstance,
 } from "vitest";
 import fs from "node:fs";
+import type { Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 import {
   channelFromURL,
   createConnection,
+  handler,
   resolvePositionals,
 } from "../../src/commands/zeroSetup";
 
@@ -185,4 +187,33 @@ test("createConnection sftp never produces a config with authentication set", ()
   expect(
     (result as unknown as Record<string, unknown>).authentication,
   ).toBeUndefined();
+});
+
+// --- handler: repeated single-value flag -------------------------------------
+
+test("handler: a repeated single-value flag exits 64 naming the flag", async () => {
+  // parseArgs reads every option before the logger exists; a repeated flag
+  // (here --server-port, a number) raises a UsageError that the handler reports
+  // on stderr and maps to exit 64, rather than letting the array reach the
+  // connection overrides as if it were a scalar port.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        "server-port": [2222, 2223],
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith("--server-port may be given only once");
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
 });

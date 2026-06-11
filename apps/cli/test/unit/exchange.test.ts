@@ -2,10 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Arguments } from "yargs";
 import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import { saveKeyFile } from "../../src/keyFile";
-import { loadConfig } from "../../src/commands/exchange";
+import { handler, loadConfig } from "../../src/commands/exchange";
 
 const mockState = vi.hoisted(() => ({ warnings: [] as string[] }));
 
@@ -340,4 +341,34 @@ test("webrtc config throws a UsageError 'not yet supported'", () => {
   // An unsupported channel is invalid caller config (exit 64), not exit 69.
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("not yet supported");
+});
+
+// --- handler: repeated single-value flag -------------------------------------
+
+test("handler: a repeated single-value flag exits 64 naming the flag", async () => {
+  // parseArgs reads every option before the logger exists; a repeated flag
+  // (here --server-port, a number) raises a UsageError that the handler reports
+  // on stderr and maps to exit 64, rather than letting the array reach the
+  // connection overrides as if it were a scalar port.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input: "x.csv",
+        "server-port": [2222, 2223],
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith("--server-port may be given only once");
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
 });

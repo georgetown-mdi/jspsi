@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, expect, test, vi } from "vitest";
+import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import {
   decodeInvitation,
@@ -14,6 +15,7 @@ import {
 import type { LinkageTerms, Standardization } from "@psilink/core";
 
 import {
+  handler as inviteHandler,
   onlineWaitInvalidationNotice,
   resolveInvitePositionals,
   validateInvite,
@@ -546,4 +548,48 @@ test("validateInvite: online warns when --expires-in is shorter than --accept-ti
     ),
   ).toBe(true);
   warnSpy.mockRestore();
+});
+
+// --- handler: repeated single-value flag -------------------------------------
+
+test("handler: a repeated --accept-timeout is rejected (exit 64) before validation runs", async () => {
+  // The concrete instance `psilink invite --accept-timeout 60 --accept-timeout
+  // 120`: the handler reads accept-timeout via singleValue before
+  // resolveInvitePositionals/validateInvite, so the repeat fails with a clean
+  // usage error (exit 64) instead of reaching the `acceptTimeout <= 0` /
+  // `acceptTimeout > lifetimeSeconds` comparisons in validateInvite with an array
+  // operand. A valid input file is present, so without the guard validateInvite
+  // would mint and print the token and write both files; the guard means none of
+  // that happens -- which is exactly what the assertions below check.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-dup-"));
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+    const configFile = path.join(dir, "psilink.yaml");
+    const keyFile = path.join(dir, ".psilink.key");
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "accept-timeout": [60, 120],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    // Assert before restoring the spies: mockRestore clears the recorded calls.
+    expect(exit).toHaveBeenCalledWith(64);
+    // No invitation token reached stdout and neither file was written, so
+    // validateInvite (and the commit that follows it) never ran.
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

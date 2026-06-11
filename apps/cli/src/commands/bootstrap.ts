@@ -42,7 +42,7 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import { LOG_LEVELS, validateInputFile } from "../util/cli";
+import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { channelFromURL } from "./zeroSetup";
 import type { RecordOutput } from "../recordFile";
@@ -974,36 +974,47 @@ export function parseCommonBootstrapArgs(
   argv: Arguments,
 ): CommonBootstrapOptions {
   const rawLogLevel = (
-    (argv["log-level"] as string | undefined) || "info"
+    (singleValue(argv, "log-level") as string | undefined) || "info"
   ).toLowerCase();
   const logLevel = LOG_LEVELS[rawLogLevel];
   if (logLevel === undefined)
     throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
 
+  // Each single-value (string/number) option is read through singleValue so a
+  // repeated flag is rejected with a clean usage error before its array value
+  // reaches a cast that lies about the type. The boolean and count options
+  // (lockless-rendezvous, timestamp-in-filename, retain-files, record, verbose)
+  // keep their plain casts: a repeat is valid for them.
   return {
     configFile:
-      (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
-    keyFile: (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
-    identity: argv["identity"] as string | undefined,
-    serverPort: argv["server-port"] as number | undefined,
-    serverUsername: argv["server-username"] as string | undefined,
+      (singleValue(argv, "config-file") as string | undefined) ??
+      DEFAULT_CONFIG_PATH,
+    keyFile:
+      (singleValue(argv, "key-file") as string | undefined) ?? DEFAULT_KEY_PATH,
+    identity: singleValue(argv, "identity") as string | undefined,
+    serverPort: singleValue(argv, "server-port") as number | undefined,
+    serverUsername: singleValue(argv, "server-username") as string | undefined,
     serverPassword: resolveAtSignRefs(
-      argv["server-password"] as string | undefined,
+      singleValue(argv, "server-password") as string | undefined,
     ) as string | undefined,
     serverPrivateKey: resolveAtSignRefs(
-      argv["server-private-key"] as string | undefined,
+      singleValue(argv, "server-private-key") as string | undefined,
     ) as string | undefined,
-    connectionTimeout: argv["connection-timeout"] as number | undefined,
-    peerTimeout: argv["peer-timeout"] as number | undefined,
-    maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
+    connectionTimeout: singleValue(argv, "connection-timeout") as
+      | number
+      | undefined,
+    peerTimeout: singleValue(argv, "peer-timeout") as number | undefined,
+    maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
+      | number
+      | undefined,
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
-    peerId: argv["peer-id"] as string | undefined,
+    peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
-    recordFile: argv["record-file"] as string | undefined,
+    recordFile: singleValue(argv, "record-file") as string | undefined,
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };

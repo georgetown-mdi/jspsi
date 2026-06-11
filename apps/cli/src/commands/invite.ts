@@ -14,6 +14,7 @@ import { loadConfigLinkageSource } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { parseDuration } from "../util/duration";
+import { singleValue } from "../util/cli";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   addCommonBootstrapOptions,
@@ -404,16 +405,15 @@ export async function handler(argv: Arguments): Promise<void> {
     const options = parseCommonBootstrapArgs(argv);
     logLibrary.setDefaultLevel(options.logLevel);
     const log = getLogger("invite");
+    // singleValue rejects a repeated single-value flag with a clean usage error
+    // (exit 64) before the array can flow into a numeric comparison
+    // (accept-timeout, in validateInvite) or the string-typed parseDuration
+    // (expires-in, which would otherwise throw a raw TypeError on .trim() and
+    // surface as a confusing exit 69).
     const acceptTimeout =
-      (argv["accept-timeout"] as number | undefined) ??
+      (singleValue(argv, "accept-timeout") as number | undefined) ??
       DEFAULT_ACCEPT_TIMEOUT_SECONDS;
-    // yargs collects a repeated flag into an array; reject that cleanly rather
-    // than letting an array reach the string-typed parseDuration (which would
-    // throw a raw TypeError on .trim() and surface as a confusing exit 69).
-    const expiresInArg = argv["expires-in"];
-    if (Array.isArray(expiresInArg))
-      throw new UsageError("--expires-in may be given only once");
-    const expiresIn = expiresInArg as string | undefined;
+    const expiresIn = singleValue(argv, "expires-in") as string | undefined;
     const positionals = (argv["args"] as Array<string> | undefined) ?? [];
     const resolved = resolveInvitePositionals(positionals);
     const ready = await validateInvite({

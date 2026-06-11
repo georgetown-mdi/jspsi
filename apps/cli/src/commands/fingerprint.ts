@@ -20,7 +20,7 @@ import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../signingIdentityFile";
-import { LOG_LEVELS } from "../util/cli";
+import { LOG_LEVELS, singleValue } from "../util/cli";
 
 // `psilink fingerprint` is the front door to the signing identity. Generation is
 // LAZY and anchored here, not at exchange time: a party must display its
@@ -278,6 +278,14 @@ function report(
 }
 
 export async function handler(argv: Arguments): Promise<void> {
+  // This command resolves and applies the log level before the logger exists, so
+  // a bad --log-level is reported on stderr and exited here rather than through
+  // the logger-based catch below. A repeated flag (yargs arrays it) is the same
+  // class of usage error as an unrecognized value: exit 64 naming the flag.
+  if (Array.isArray(argv["log-level"])) {
+    console.error("--log-level may be given only once");
+    process.exit(64);
+  }
   const rawLogLevel = (
     (argv["log-level"] as string | undefined) || "info"
   ).toLowerCase();
@@ -289,13 +297,21 @@ export async function handler(argv: Arguments): Promise<void> {
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("fingerprint");
 
-  const identityArg = argv["identity"] as string | undefined;
-  const identityFileArg = argv["identity-file"] as string | undefined;
-  const configFileArg = argv["config-file"] as string | undefined;
-  const force = argv["force"] as boolean;
-  const exportCertificate = argv["export-certificate"] as string | undefined;
-
   try {
+    // Read the single-value flags through singleValue inside the try so a
+    // repeated flag raises a UsageError mapped to exit 64 by the catch below.
+    // `force` is a boolean (last-one-wins on repeat), so it keeps a plain cast.
+    const identityArg = singleValue(argv, "identity") as string | undefined;
+    const identityFileArg = singleValue(argv, "identity-file") as
+      | string
+      | undefined;
+    const configFileArg = singleValue(argv, "config-file") as
+      | string
+      | undefined;
+    const force = argv["force"] as boolean;
+    const exportCertificate = singleValue(argv, "export-certificate") as
+      | string
+      | undefined;
     const hints = readConfigHints(configFileArg, configFileArg !== undefined);
     const identityPath = expandTilde(
       identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath(),

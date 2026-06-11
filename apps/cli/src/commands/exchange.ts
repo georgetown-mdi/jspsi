@@ -23,7 +23,7 @@ import { expandTilde } from "../fileUtils";
 import { loadKeyFile, DEFAULT_KEY_PATH, type KeyFile } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import { LOG_LEVELS, validateInputFile } from "../util/cli";
+import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import {
   runProtocol,
   type AuthPersist,
@@ -220,12 +220,17 @@ type ExchangeOptions = Omit<
 
 function parseArgs(argv: Arguments): ExchangeArgs {
   const rawLogLevel = (
-    (argv["log-level"] as string | undefined) || "info"
+    (singleValue(argv, "log-level") as string | undefined) || "info"
   ).toLowerCase();
   const logLevel = LOG_LEVELS[rawLogLevel];
   if (logLevel === undefined)
     throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
 
+  // Each single-value (string/number) option is read through singleValue so a
+  // repeated flag is rejected with a clean usage error (mapped to exit 64 in the
+  // handler) before its array value reaches a cast that lies about the type. The
+  // boolean/count options keep their plain casts: a repeat is valid for them.
+  // `input`/`output` are positionals, not repeatable flags, so they stay plain.
   return {
     // Local filesystem paths accept a leading `~`; server-private-key /
     // -password are NOT paths here (resolveAtSignRefs already turned any @file
@@ -233,25 +238,30 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     input: expandTilde(argv["input"] as string),
     output: expandTilde(argv["output"] as string | undefined),
     configFile: expandTilde(
-      (argv["config-file"] as string | undefined) ?? DEFAULT_CONFIG_PATH,
+      (singleValue(argv, "config-file") as string | undefined) ??
+        DEFAULT_CONFIG_PATH,
     ),
     keyFile: expandTilde(
-      (argv["key-file"] as string | undefined) ?? DEFAULT_KEY_PATH,
+      (singleValue(argv, "key-file") as string | undefined) ?? DEFAULT_KEY_PATH,
     ),
-    identity: argv["identity"] as string | undefined,
-    serverPort: argv["server-port"] as number | undefined,
-    serverUsername: argv["server-username"] as string | undefined,
+    identity: singleValue(argv, "identity") as string | undefined,
+    serverPort: singleValue(argv, "server-port") as number | undefined,
+    serverUsername: singleValue(argv, "server-username") as string | undefined,
     serverPassword: resolveAtSignRefs(
-      argv["server-password"] as string | undefined,
+      singleValue(argv, "server-password") as string | undefined,
     ) as string | undefined,
     serverPrivateKey: resolveAtSignRefs(
-      argv["server-private-key"] as string | undefined,
+      singleValue(argv, "server-private-key") as string | undefined,
     ) as string | undefined,
-    connectionTimeout: argv["connection-timeout"] as number | undefined,
-    peerTimeout: argv["peer-timeout"] as number | undefined,
-    maxReconnectAttempts: argv["max-reconnect-attempts"] as number | undefined,
+    connectionTimeout: singleValue(argv, "connection-timeout") as
+      | number
+      | undefined,
+    peerTimeout: singleValue(argv, "peer-timeout") as number | undefined,
+    maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
+      | number
+      | undefined,
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
-    peerId: argv["peer-id"] as string | undefined,
+    peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
     // CLI-only, never persisted: resolve to a definite boolean here since there
@@ -263,7 +273,9 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
-    recordFile: expandTilde(argv["record-file"] as string | undefined),
+    recordFile: expandTilde(
+      singleValue(argv, "record-file") as string | undefined,
+    ),
     logLevel,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
@@ -495,6 +507,21 @@ async function prepareDataset(
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
+  let parsed: ExchangeArgs;
+  try {
+    parsed = parseArgs(argv);
+  } catch (err) {
+    // parseArgs resolves the log level and reads every option, so it runs before
+    // the logger exists. A repeated single-value flag (singleValue) raises a
+    // UsageError; report it on stderr and exit 64. Any other failure (e.g. an
+    // unrecognized log-level, a plain Error) is left to the existing top-level
+    // handling rather than being reclassified here.
+    if (err instanceof UsageError) {
+      console.error(err.message);
+      process.exit(64);
+    }
+    throw err;
+  }
   const {
     input,
     output,
@@ -503,7 +530,7 @@ export async function handler(argv: Arguments): Promise<void> {
     sweepExchangeFiles,
     forceRetainSweep,
     ...options
-  } = parseArgs(argv);
+  } = parsed;
 
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("exchange");

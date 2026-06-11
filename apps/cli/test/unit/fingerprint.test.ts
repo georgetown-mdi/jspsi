@@ -308,6 +308,59 @@ test("handler refuses to export the certificate over the identity file itself", 
   expect(loadSigningIdentity(idPath).privateKey).toBeDefined();
 });
 
+// --- handler: repeated single-value flag -------------------------------------
+
+test("handler rejects a repeated single-value flag with a usage error (exit 64)", async () => {
+  // A repeated --identity (a string flag) is read through singleValue inside the
+  // command's try block, so the UsageError it raises is mapped to exit 64 by the
+  // existing catch -- the same exit code as the unrecognized-value usage errors.
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir); // hermetic: no ambient psilink.yaml is consulted
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        identity: ["Party A", "Party B"],
+        "log-level": "silent",
+        force: false,
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+  } finally {
+    process.chdir(cwd);
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler rejects a repeated --log-level (exit 64) naming the flag", async () => {
+  // --log-level is resolved before the logger exists, so its repeat guard reports
+  // on stderr and exits 64 directly rather than through the logger-based catch.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        "log-level": ["info", "debug"],
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith("--log-level may be given only once");
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
 // --- readConfigHints ---------------------------------------------------------
 
 test("readConfigHints returns empty when the default config is absent", () => {
