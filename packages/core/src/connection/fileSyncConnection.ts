@@ -646,7 +646,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (this.bufferedError !== undefined) {
         this.log.warn(
           `[${this.role}] superseding earlier buffered error: ` +
-            errMessage(this.bufferedError),
+            // The buffered error can be a raw transport error whose message
+            // embeds a partner-controlled path (both the SFTP and filedrop
+            // adapters concatenate the operation path into their error text), so
+            // escape it before it reaches the operator's log.
+            sanitizeForDisplay(errMessage(this.bufferedError)),
         );
         if (
           incoming instanceof Error &&
@@ -979,7 +983,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         await this.cleanup();
       } catch (err: unknown) {
         this.log.debug(
-          `[${this.role}] cleanup during close: ${errMessage(err)}`,
+          // cleanup() deletes responsibleFiles (lock/ack names embed the
+          // peerId), so a delete error's message can carry partner bytes via the
+          // path; escape it.
+          `[${this.role}] cleanup during close: ` +
+            `${sanitizeForDisplay(errMessage(err))}`,
         );
       }
     }
@@ -1216,7 +1224,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     );
     const failures = results.flatMap((result, i) =>
       result.status === "rejected"
-        ? [`${sanitizeForDisplay(toDelete[i].name)} (${errMessage(result.reason)})`]
+        ? // The delete error's message re-embeds the same partner-controlled
+          // filename via the operation path, so escape it too -- otherwise it
+          // re-introduces the bytes the name sanitize on this line removed.
+          [
+            `${sanitizeForDisplay(toDelete[i].name)} ` +
+              `(${sanitizeForDisplay(errMessage(result.reason))})`,
+          ]
         : [],
     );
     if (failures.length > 0)
@@ -3178,7 +3192,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                   `[${this.role}] failed to delete ` +
                     `${sanitizeForDisplay(messageFile.name)}; ` +
                     "please notify the administrator that manual cleanup " +
-                    `may be required: ${errMessage(deleteErr)}`,
+                    // The delete error's message re-embeds the peer filename via
+                    // the operation path; escape it like the name above it.
+                    `may be required: ${sanitizeForDisplay(errMessage(deleteErr))}`,
                 );
               }
             }

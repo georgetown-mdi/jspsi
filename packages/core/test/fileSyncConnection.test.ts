@@ -240,6 +240,26 @@ test("only the most recent buffered error is retained", () => {
   expect((conn.takeBufferedError() as Error).message).toBe("second");
 });
 
+test("the superseding-buffered-error warn escapes control/ANSI bytes in the prior error", async () => {
+  // The buffered error can be a raw transport error whose message embeds a
+  // partner-controlled path (both adapters concatenate the operation path into
+  // their error text), so the "superseding earlier buffered error" warn that
+  // re-logs it must escape those bytes rather than echo them to the operator.
+  const { client } = makeMockClient();
+  const [, logs] = await withCapturedLogs(async () => {
+    const conn = new FileSyncConnection(client, { verbose: -1 });
+    // First unhandled error is buffered; the second triggers the warn naming it.
+    conn.emit("error", new Error("transport failed on \x1b[31mEVIL"));
+    conn.emit("error", new Error("a later, superseding failure"));
+  });
+  const warn = logs.find((l) =>
+    l.message.includes("superseding earlier buffered error"),
+  );
+  expect(warn).toBeDefined();
+  expect(warn!.message).not.toContain("\x1b");
+  expect(warn!.message).toContain("\\x1b");
+});
+
 test("re-emitting the same buffered error does not create a self-referential cause cycle", () => {
   // Regression guard: when an unhandled error is buffered and then the same
   // Error reference is emitted again, the cause-chain branch must NOT assign
