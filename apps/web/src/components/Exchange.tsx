@@ -251,6 +251,7 @@ export function Exchange(config: ExchangeConfig) {
     void runExchangeLifecycle({
       acquire,
       exchangeRole: role === "inviter" ? "responder" : "initiator",
+      sharedSecret: config.sharedSecret,
       signal: controller.signal,
       generateOutput,
       onStages: setStages,
@@ -269,6 +270,22 @@ export function Exchange(config: ExchangeConfig) {
             message:
               "The linkage completed, but generating the results file failed: " +
               errorMessage(error),
+          });
+        } else if (category === "security") {
+          // The authenticated key exchange failed closed: this connection could
+          // not be confirmed as the invited partner. Unlike a transport drop this
+          // is not retryable -- a silent retry would re-run into the same wrong
+          // secret, or into a peer that is tampering -- so the user is steered to
+          // a fresh invitation rather than a re-run.
+          setErrorAlert({
+            title: "Could not verify your partner",
+            message:
+              "The secure handshake failed, so this connection could not be " +
+              "confirmed as your invited partner. This happens when the other " +
+              "party used a different invitation link, or if the connection was " +
+              "tampered with. Do not retry; start over with a fresh invitation. (" +
+              errorMessage(error) +
+              ")",
           });
         } else {
           setErrorAlert({
