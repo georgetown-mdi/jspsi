@@ -234,7 +234,10 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   ).toLowerCase();
   const logLevel = LOG_LEVELS[rawLogLevel];
   if (logLevel === undefined)
-    throw new Error(`unrecognized log-level: ${argv["log-level"]}`);
+    // Invalid caller input (exit 64), the same classification the shared
+    // parseCommonBootstrapArgs gives an unrecognized log-level, so the handler's
+    // wrapper maps it to a clean usage error rather than a raw top-level dump.
+    throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
 
   // Each single-value (string/number) option is read through singleValue so a
   // repeated flag is rejected with a clean usage error (mapped to exit 64 in the
@@ -580,10 +583,10 @@ export async function handler(argv: Arguments): Promise<void> {
     parsed = parseArgs(argv);
   } catch (err) {
     // parseArgs resolves the log level and reads every option, so it runs before
-    // the logger exists. A repeated single-value flag (singleValue) raises a
-    // UsageError; report it on stderr and exit 64. Any other failure (e.g. an
-    // unrecognized log-level, a plain Error) is left to the existing top-level
-    // handling rather than being reclassified here.
+    // the logger exists. Its usage errors -- a repeated single-value flag
+    // (singleValue) or an unrecognized log-level -- are UsageErrors, reported on
+    // stderr and exited 64 here. Any other (unexpected) failure propagates to the
+    // top-level handler unchanged rather than being reclassified.
     if (err instanceof UsageError) {
       console.error(err.message);
       process.exit(64);

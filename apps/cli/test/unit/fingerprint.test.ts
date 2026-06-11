@@ -361,6 +361,30 @@ test("handler rejects a repeated --log-level (exit 64) naming the flag", async (
   }
 });
 
+test("handler rejects an unrecognized --log-level (exit 64) with the same idiom", async () => {
+  // The repeat guard and the unrecognized-value check share one pre-logger
+  // UsageError path, so a typo'd log-level still exits 64 on stderr.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        "log-level": "bogus",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith("unrecognized log-level: bogus");
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
 // --- readConfigHints ---------------------------------------------------------
 
 test("readConfigHints returns empty when the default config is absent", () => {

@@ -217,3 +217,29 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
     exitSpy.mockRestore();
   }
 });
+
+test("handler: an unrecognized log-level exits 64, not the top-level dump", async () => {
+  // An unrecognized log-level is invalid caller input (exit 64), the same
+  // classification the shared parseCommonBootstrapArgs gives invite/accept, so
+  // the typo gets a clean usage error rather than escaping to the noisy
+  // top-level handler.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        "log-level": "bogus",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith("unrecognized log-level: bogus");
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});

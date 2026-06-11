@@ -279,20 +279,22 @@ function report(
 
 export async function handler(argv: Arguments): Promise<void> {
   // This command resolves and applies the log level before the logger exists, so
-  // a bad --log-level is reported on stderr and exited here rather than through
-  // the logger-based catch below. A repeated flag (yargs arrays it) is the same
-  // class of usage error as an unrecognized value: exit 64 naming the flag.
-  if (Array.isArray(argv["log-level"])) {
-    console.error("--log-level may be given only once");
-    process.exit(64);
-  }
-  const rawLogLevel = (
-    (argv["log-level"] as string | undefined) || "info"
-  ).toLowerCase();
-  const logLevel = LOG_LEVELS[rawLogLevel];
-  if (logLevel === undefined) {
-    console.error(`unrecognized log-level: ${argv["log-level"]}`);
-    process.exit(64);
+  // a bad --log-level is reported on stderr and exited 64 here rather than
+  // through the logger-based catch below. Both usage errors -- a repeated flag
+  // (singleValue, the same shared accessor and message as every other command)
+  // and an unrecognized value -- are UsageErrors handled in one place.
+  let logLevel: logLibrary.LogLevelNumbers;
+  try {
+    const rawLogLevel = (
+      (singleValue(argv, "log-level") as string | undefined) || "info"
+    ).toLowerCase();
+    const resolved = LOG_LEVELS[rawLogLevel];
+    if (resolved === undefined)
+      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+    logLevel = resolved;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(err instanceof UsageError ? 64 : 69);
   }
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("fingerprint");
