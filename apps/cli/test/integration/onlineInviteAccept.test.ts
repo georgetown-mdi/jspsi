@@ -410,15 +410,20 @@ async function runOnlineRoundTrip(params: {
   }
 }
 
-// Assert that a failed online run left NO config and NO key file at the paths the
-// run was configured to write. This is the security-relevant invariant the
-// failure-path tests turn on: a rejected invitation or handshake must not leave a
-// half-provisioned recurring-exchange setup on disk. The record/opening files are
-// written only after a successful exchange, so their absence is implied; the
-// config and key are the two artifacts a failure could plausibly orphan.
+// Assert that a failed online run left NO artifact at any path the run was
+// configured to write. This is the security-relevant invariant the failure-path
+// tests turn on: a rejected invitation or handshake must not leave a
+// half-provisioned recurring-exchange setup on disk. The config and key are the
+// artifacts a failure could most plausibly orphan; the audit record and its
+// private opening are written only after a successful exchange, so asserting them
+// absent pins that a failure writes no audit either -- vacuously true on the
+// accept-side rejections (validateAccept writes nothing), but a real check on the
+// mismatch test, where a live handshake aborts with recording enabled.
 function expectNoPersistedFiles(options: CommonBootstrapOptions): void {
   expect(fs.existsSync(options.configFile)).toBe(false);
   expect(fs.existsSync(options.keyFile)).toBe(false);
+  expect(fs.existsSync(options.recordFile!)).toBe(false);
+  expect(fs.existsSync(openingPathFor(options.recordFile!))).toBe(false);
 }
 
 // --- Happy path: filedrop -----------------------------------------------------
@@ -560,6 +565,12 @@ test("filedrop: a tampered invitation is rejected at accept validation, persisti
     }),
   ).rejects.toThrow(/invalid invitation/i);
   expectNoPersistedFiles(acceptOptions);
+  // Tampering is an in-transit corruption only the acceptor sees, so this is an
+  // accept-side rejection -- but the inviter still ran validateInvite to mint the
+  // (valid) invitation, which is the no-commit phase. Assert it persisted nothing
+  // either, so a future change that made minting write a file would not slip past
+  // this scenario.
+  expectNoPersistedFiles(inviteOptions);
 }, 30_000);
 
 test("filedrop: a shared-secret mismatch aborts the handshake, persisting no config or key on either side", async () => {
@@ -611,6 +622,12 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   expect(wrongSecret).not.toBe(minted);
   expect(wrongSecret).toMatch(SHARED_SECRET_REGEX);
 
+  // Both sides enable recording (recordOutput) and pass an output path, exactly as
+  // the happy path does, so the no-write assertions below are exercised against a
+  // run that WOULD write an audit record and an output table on success: a failed
+  // handshake must still produce neither. Both artifacts are written only after the
+  // exchange completes (writeOutput / writeExchangeRecord), which an aborted
+  // handshake never reaches, so this pins that nothing partial leaks on failure.
   const [inviteOutcome, acceptOutcome] = await Promise.allSettled([
     runOnlineBootstrap({
       connection: inviteReady.connection,
@@ -623,6 +640,10 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
       output: inviteReady.output,
       verbosity: 0,
       loggerName: "invite",
+      recordOutput: resolveRecordOutput({
+        enabled: inviteOptions.record,
+        recordFile: inviteOptions.recordFile,
+      }),
     }),
     runOnlineBootstrap({
       connection: acceptReady.connection,
@@ -635,6 +656,10 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
       output: acceptReady.output,
       verbosity: 0,
       loggerName: "accept",
+      recordOutput: resolveRecordOutput({
+        enabled: acceptOptions.record,
+        recordFile: acceptOptions.recordFile,
+      }),
       reuseExistingConfig: acceptReady.reuseExistingConfig,
     }),
   ]);
@@ -658,6 +683,11 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   }
   expectNoPersistedFiles(inviteOptions);
   expectNoPersistedFiles(acceptOptions);
+  // The output table is written only after the exchange runs, so an aborted
+  // handshake leaves neither side's output file behind (the output path is not in
+  // CommonBootstrapOptions, so it is checked here rather than in the helper).
+  expect(fs.existsSync(inviteOut)).toBe(false);
+  expect(fs.existsSync(acceptOut)).toBe(false);
 }, 60_000);
 
 // --- Happy path: sftp ---------------------------------------------------------
