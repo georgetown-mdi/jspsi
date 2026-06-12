@@ -1,3 +1,5 @@
+import { ConnectionError } from "./connection/messageConnection";
+
 /**
  * Thrown by {@link FileSyncConnection} when the caller has supplied an
  * invalid configuration or attempted an operation that violates usage
@@ -183,5 +185,48 @@ export class ConnectionClosedError extends Error {
   constructor(message = "connection closed during wait") {
     super(message);
     this.name = "ConnectionClosedError";
+  }
+}
+
+/**
+ * Thrown on the waiting side when the peer leaves an authenticated abort marker
+ * (`<peerId>-abort.json`) whose token verifies against this party's
+ * locally-derived peer abort token. It is a definitive, key-authenticated signal
+ * that the peer terminated the exchange -- not an inactivity timeout or a slow
+ * dataset -- so the waiting party fails fast instead of waiting out its full
+ * peer-inactivity budget and then printing the generic peer-silence hedge.
+ *
+ * It extends {@link ConnectionError} with kind `"transport"` deliberately. The
+ * error crosses two {@link asConnectionError} seams on its way to
+ * `runProtocol`'s catch -- the `fromEventConnection` bridge's `onError` and the
+ * `EncryptedMessageConnection` decorator's `receive` catch -- each of which
+ * passes an existing `ConnectionError` through unchanged but wraps anything else
+ * as `{ cause }`. As a `ConnectionError("transport")` it survives both intact and
+ * arrives top-level, so the catch's echo gate (which must not write a marker in
+ * response to a `PeerAbortError`, or the waiting party would reflect one back)
+ * recognizes it, and the CLI's `instanceof UsageError` check classifies it exit
+ * 69 (the exchange failed because the peer died), not the 64 reserved for local
+ * misconfiguration.
+ *
+ * It carries no partner-controlled bytes: the marker token never decodes to
+ * display text and the message is fixed, so the display-boundary sanitizer is
+ * only belt-and-suspenders here. `psilinkRecoveryHintEmitted` is set so the
+ * CLI's hint-walker suppresses its generic "retry without re-inviting" advisory,
+ * which would otherwise contradict the definitive peer-abort message. (This
+ * reuses the CLI-recovery convention that `auth.ts` already sets on core errors.)
+ */
+export class PeerAbortError extends ConnectionError {
+  readonly psilinkRecoveryHintEmitted = true;
+
+  constructor(options?: ErrorOptions) {
+    super(
+      "the peer authentically signaled that it aborted the exchange; this is " +
+        "a definitive peer-side termination, not an inactivity timeout or a " +
+        "slow dataset. Contact your partner, who holds the specific error " +
+        "locally.",
+      "transport",
+      options,
+    );
+    this.name = "PeerAbortError";
   }
 }

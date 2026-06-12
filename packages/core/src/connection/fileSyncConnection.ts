@@ -8,6 +8,7 @@ import {
 
 import { getLoggerForVerbosity } from "../utils/logger";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
+import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -19,6 +20,7 @@ import {
   ConnectionClosedError,
   FrameSizeExceededError,
   TransportOperationStalledError,
+  PeerAbortError,
 } from "../errors";
 import {
   HelloEnvelopeSchema,
@@ -238,6 +240,40 @@ const LOCK_SUFFIX = "-lock.json";
 // excludes it from the message scan (it is not all-digits).
 const JOINING_SUFFIX = "-joining.json";
 
+// Suffix of the authenticated cross-party abort marker (`<writerId>-abort.json`).
+// The terminal segment before `.json` is the type word `abort`, which is not
+// all-digits, so parseMessageByteCount returns undefined and the marker can
+// never be mis-consumed as a message -- an additive-grammar correctness
+// invariant. Named for parity with HELLO_SUFFIX/LOCK_SUFFIX/JOINING_SUFFIX.
+const ABORT_SUFFIX = "-abort.json";
+
+// Hard cap on the abort marker read. The envelope is ~80 bytes; 1 KiB is
+// generous slack. Deliberately NOT MAX_FRAME_SIZE_BYTES (~512 MB): the
+// recognizer is unconditional and the admin controls the bytes, and the marker
+// is re-read every poll cycle, so a large cap on an admin-plantable file would
+// be an availability vector. Both the pre-get() listed-size refusal and the
+// bounded get() use this.
+const ABORT_MARKER_MAX_BYTES = 1024;
+
+// Short per-operation budget (put + rename) for the abort marker write. The
+// marker write must NOT inherit boundTransport's fresh-peerTimeoutMs (default 1
+// hour) budget: a faulted write -- the sick-directory case the marker exists for
+// -- would otherwise hang teardown. The SFTP adapter self-bounds reads at ~60 s,
+// but the local-FS/filedrop adapter has no per-op bound, so the marker write
+// rides the 1h wrap there unless given its own short bound. A few seconds is
+// generous for an ~80-byte control file on a healthy transport and fast-fails a
+// sick one.
+const ABORT_MARKER_WRITE_BUDGET_MS = 5000;
+
+// Backstop grace bounding how long close() waits for the abort decision to
+// resolve before tearing down anyway. Modeled on withTransportBudgetVoid:
+// unref'd and resolve-on-timeout, so it neither hangs close() nor holds a
+// failing process open. Sized >= the marker-write budget so a marker write that
+// is legitimately in flight is never cut short by the grace elapsing. Reached
+// only on a path that neither writes nor seals the decision (a future-proofing
+// backstop); the live paths resolve the decision well within it.
+const ABORT_DECISION_GRACE_MS = ABORT_MARKER_WRITE_BUDGET_MS;
+
 // Recovers the peer id from a `<id><suffix>` rendezvous control name (a hello or
 // a joining sentinel), returning undefined for any name that does not end with
 // `suffix` OR whose recovered id is empty (a bare `<suffix>`, e.g. `-hello.json`
@@ -284,11 +320,34 @@ const isProtocolTempName = (name: string): boolean => {
   return uuidValidate(stem) && uuidVersion(stem) === 4;
 };
 
+// Grammar-level abort-marker recognizer: any `<id>-abort.json` by suffix, under
+// ANY id. Used by the entry guard's isProtocolGrammarName so a leftover abort
+// marker classifies as a protocol file -- handled by the recognize-and-sweep --
+// rather than failing the directory-clean check as a foreign file. Deliberately
+// broader than isExpectedAbortName; every name isExpectedAbortName accepts also
+// satisfies this (subset invariant, pinned by a unit test).
+export const isAbortMarkerName = (name: string): boolean =>
+  name.endsWith(ABORT_SUFFIX);
+
+// Exact-name abort-marker recognizer: true only for this party's or the peer's
+// marker. Used by the poll loop's isRecognizedLoopFile so the two expected
+// markers are tolerated (recognized, not unexpected) while a foreign
+// `<other>-abort.json` an admin might plant still hits the unexpected-files
+// policy -- exact-name keeps the unexpected-files exemption from silencing a
+// planted foreign marker.
+export const isExpectedAbortName = (
+  name: string,
+  selfId: string,
+  peerId: string,
+): boolean =>
+  name === `${selfId}${ABORT_SUFFIX}` || name === `${peerId}${ABORT_SUFFIX}`;
+
 // Classifies a filename against the protocol filename grammar: true for any
 // protocol artifact (an in-flight temp write, a hello, a lock, a joining
-// sentinel, an ack marker, or a message whose terminal segment is a byte
-// count), false for a "foreign" name that fails the grammar (a conflict copy, a
-// partial download, an unrelated file). This is the single inverse of "foreign"
+// sentinel, an ack marker, an abort marker, or a message whose terminal segment
+// is a byte count), false for a "foreign" name that fails the grammar (a
+// conflict copy, a partial download, an unrelated file). This is the single
+// inverse of "foreign"
 // the entry guard and the foreign-file snapshot share, so a name cannot be both
 // snapshotted-as-foreign and a recognized protocol file -- which would silently
 // reintroduce the (rejected) reading where I0 tolerates message-shaped files at
@@ -304,6 +363,10 @@ const isProtocolGrammarName = (name: string): boolean => {
     name.endsWith(HELLO_SUFFIX) ||
     name.endsWith(LOCK_SUFFIX) ||
     name.endsWith(JOINING_SUFFIX) ||
+    // Any -abort.json counts (isAbortMarkerName), under any id: a leftover abort
+    // marker is a protocol file, so the entry guard's recognize-and-sweep can
+    // handle it rather than the directory-clean check rejecting it as foreign.
+    isAbortMarkerName(name) ||
     // Any -ack.json counts, deliberately broad: a foreign name that happens to
     // end -ack.json is conservatively treated as a protocol file (rejected at
     // the no-flag guard, swept under the flag) rather than tolerated as foreign.
@@ -579,6 +642,18 @@ export interface FileTransportClient {
   exists: (remotePath: string) => Promise<boolean>;
 }
 
+// Everything writeAbortMarker() needs, captured by armAbort() post-handshake so
+// the write never reads this.path (which close() nulls during teardown). The
+// client is the raw, unwrapped transport: the marker write is short-bounded by
+// withTransportBudget directly (see ABORT_MARKER_WRITE_BUDGET_MS) rather than
+// riding boundTransport's 1h per-op budget.
+interface AbortWriteInputs {
+  path: string;
+  finalName: string;
+  body: string;
+  client: FileTransportClient;
+}
+
 /**
  * File-based rendezvous and message-passing connection. Implements the
  * `-hello.json`/`-lock.json` handshake (or the lockless ack-handshake barrier) and
@@ -648,12 +723,50 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // supersede the first as the proximate cause.
   private bufferedError: unknown;
 
+  // The raw, unwrapped transport (this.client is its boundTransport wrap). Held
+  // so the abort marker write can be short-bounded directly (see
+  // writeAbortMarker / ABORT_MARKER_WRITE_BUDGET_MS) instead of inheriting the
+  // 1h per-op budget the wrap applies. It is the same underlying transport as
+  // this.client, so what protects the marker write from client.end() killing it
+  // is the await-before-end() ordering in close(), not this separate reference.
+  private rawClient: FileTransportClient;
+
+  // Authenticated cross-party abort state, armed by armAbort() post-handshake
+  // (the only point with a session key) and cleared with the handshake identity
+  // it derives from (clearAbortState, at close() and the rendezvous recovery
+  // sites). The two tokens are role-derived, hence identity-scoped; they are NOT
+  // reset in resetSessionState (which resets only per-session message counters).
+  private selfAbortToken: Uint8Array<ArrayBuffer> | undefined;
+  private peerAbortToken: Uint8Array<ArrayBuffer> | undefined;
+  // Captured write inputs (immunizes the write against close()'s path/config
+  // nulling) and write idempotency/memoization.
+  private abortWriteInputs: AbortWriteInputs | undefined;
+  private abortMarkerWritten = false;
+  private pendingAbortWrite: Promise<void> | undefined;
+  // Abort-decision one-shot: resolves to "write" (writeAbortMarker pre-empts a
+  // later seal) or "seal" (no marker coming). close() parks on it before
+  // tearing down so a fault-path marker write riding the shared transport
+  // completes before client.end() destroys it. abortDecisionResolved is the
+  // gate the idempotent second/third close() reads to re-enter as a no-op.
+  private abortDecision: Promise<"write" | "seal"> | undefined;
+  private resolveAbortDecision: ((d: "write" | "seal") => void) | undefined;
+  private abortDecisionResolved = false;
+
+  // True once armAbort() has run (derived, not stored): only an armed connection
+  // writes or verifies abort markers. Read by the orchestrator's catch gate and
+  // by close()/poll().
+  get abortArmed(): boolean {
+    return this.selfAbortToken !== undefined;
+  }
+
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
-    // Wrap the injected transport so every data-plane await is backstopped by the
-    // peer-inactivity budget (see boundTransport). The wrap reads the budget
-    // lazily per call, so wrapping here -- before open() populates this.config --
-    // is safe: no budget is read until a transport call is actually made.
+    // Retain the raw transport for the short-bounded abort marker write, then
+    // wrap it so every data-plane await is backstopped by the peer-inactivity
+    // budget (see boundTransport). The wrap reads the budget lazily per call, so
+    // wrapping here -- before open() populates this.config -- is safe: no budget
+    // is read until a transport call is actually made.
+    this.rawClient = client;
     this.client = this.boundTransport(client);
     // No peerId validation here: Options is an internal type, not the public
     // FileSyncOptions. The validation boundary is FileSyncOptionsSchema
@@ -930,6 +1043,151 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   }
 
   /**
+   * Arms the authenticated cross-party abort marker, called by the orchestrator
+   * once post-handshake with the two derived per-direction tokens (self = the
+   * token written into `<myId>-abort.json` on a fault; peer = the token a
+   * `<peerId>-abort.json` is verified against). Captures everything the marker
+   * write needs NOW -- the directory path and a precomputed envelope body -- so
+   * the write never reads `this.path` (which close() nulls during teardown), and
+   * initializes the write-vs-seal decision one-shot the teardown sequencing
+   * parks on. Must be called after open() so a path is available; if it is not,
+   * the write degrades to a no-op rather than throwing.
+   */
+  armAbort(
+    selfToken: Uint8Array<ArrayBuffer>,
+    peerToken: Uint8Array<ArrayBuffer>,
+  ): void {
+    this.selfAbortToken = selfToken;
+    this.peerAbortToken = peerToken;
+    this.abortMarkerWritten = false;
+    this.abortDecisionResolved = false;
+    this.pendingAbortWrite = undefined;
+    this.abortDecision = new Promise<"write" | "seal">((resolve) => {
+      this.resolveAbortDecision = resolve;
+    });
+    this.abortWriteInputs =
+      this.path === undefined
+        ? undefined
+        : {
+            path: this.path,
+            finalName: `${this.id}${ABORT_SUFFIX}`,
+            // The on-disk envelope: { version, token }. `version` is spelled out
+            // to match the full-word control-body convention (locklessRendezvous
+            // / retainFiles). ~80 bytes serialized.
+            body: JSON.stringify({
+              version: 1,
+              token: toBase64Url(selfToken),
+            }),
+            client: this.rawClient,
+          };
+  }
+
+  // Resolve the abort decision exactly once. The first caller wins: a catch-path
+  // writeAbortMarker() ("write") pre-empts the doCleanup seal ("seal"), and vice
+  // versa. abortDecisionResolved latches so the parked close() unblocks and the
+  // idempotent later close() re-enters as a no-op.
+  private resolveAbortDecisionOnce(decision: "write" | "seal"): void {
+    if (this.abortDecisionResolved) return;
+    this.abortDecisionResolved = true;
+    this.resolveAbortDecision?.(decision);
+  }
+
+  /**
+   * Triggered by the orchestrator's catch on a terminal organic fault (directory
+   * still writable). Resolves the abort decision to "write" (pre-empting a later
+   * sealAbort) and memoizes the bounded marker write, returning the same promise
+   * to every caller -- the parked close() and the catch both await it. Idempotent
+   * and best-effort: a faulted write simply leaves no marker, and the peer falls
+   * back to the existing peer-silence hedge. Rejection is absorbed by both
+   * awaiters (close() must stay non-throwing).
+   */
+  writeAbortMarker(): Promise<void> {
+    this.resolveAbortDecisionOnce("write");
+    if (this.pendingAbortWrite === undefined)
+      this.pendingAbortWrite = this.runAbortMarkerWrite();
+    return this.pendingAbortWrite;
+  }
+
+  // The actual temp-then-rename write (atomic appearance), short-bounded on BOTH
+  // ops so a sick directory cannot hang teardown. The marker is not tracked in
+  // responsibleFiles, so this party's own cleanup() never sweeps it and it
+  // persists for the peer to read. On timeout/failure the budget rejects and the
+  // op is abandoned; the leftover temp-*.tmp is swept by a later run's
+  // orphaned-temp sweep.
+  private async runAbortMarkerWrite(): Promise<void> {
+    const inputs = this.abortWriteInputs;
+    if (inputs === undefined || this.abortMarkerWritten) return;
+    const tempPath = `${inputs.path}/temp-${uuidv4()}.tmp`;
+    const finalPath = `${inputs.path}/${inputs.finalName}`;
+    await withTransportBudget(
+      inputs.client.put(inputs.body, tempPath, {
+        flags: "w",
+        encoding: "utf-8",
+      }),
+      ABORT_MARKER_WRITE_BUDGET_MS,
+      () =>
+        transportBudgetExceededError(
+          `abort marker write to ${tempPath}`,
+          ABORT_MARKER_WRITE_BUDGET_MS,
+        ),
+    );
+    await withTransportBudget(
+      inputs.client.rename(tempPath, finalPath),
+      ABORT_MARKER_WRITE_BUDGET_MS,
+      () =>
+        transportBudgetExceededError(
+          `abort marker rename to ${finalPath}`,
+          ABORT_MARKER_WRITE_BUDGET_MS,
+        ),
+    );
+    this.abortMarkerWritten = true;
+    this.log.debug(`[${this.role}] wrote abort marker ${inputs.finalName}`);
+  }
+
+  /**
+   * Declares "no marker coming" -- called at the top of the orchestrator's
+   * doCleanup on every terminal path. A no-op once a writeAbortMarker() has
+   * pre-empted it. This is the single chokepoint that frees a parked close() on
+   * the clean-completion, signal, and echo paths so teardown does not block on
+   * the backstop grace. Pure synchronous one-shot; safe on an unarmed connection
+   * (it just latches the resolution that the skipped close() gate never reads).
+   */
+  sealAbort(): void {
+    this.resolveAbortDecisionOnce("seal");
+  }
+
+  // Bounds close()'s wait for the abort decision. Resolves with the decision if
+  // it lands first, or "timeout" once the unref'd backstop grace elapses. The
+  // local `decision` reference is captured so a concurrent clearAbortState
+  // nulling this.abortDecision cannot strand this wait.
+  private awaitAbortDecisionOrGrace(): Promise<"write" | "seal" | "timeout"> {
+    const decision =
+      this.abortDecision ?? Promise.resolve<"write" | "seal">("seal");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const grace = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), ABORT_DECISION_GRACE_MS);
+      timer.unref();
+    });
+    return Promise.race([decision.finally(() => clearTimeout(timer)), grace]);
+  }
+
+  // Clears the identity-scoped abort state, mirroring the peerId/handshakeRole
+  // clears: the tokens are role-derived, so they live and die with the handshake
+  // identity. Belt-and-suspenders -- the session-keyed token is the real
+  // cross-session barrier -- so the exact placement (close() and the two
+  // rendezvous recovery sites) is tidiness, not security.
+  private clearAbortState(): void {
+    this.selfAbortToken = undefined;
+    this.peerAbortToken = undefined;
+    this.abortWriteInputs = undefined;
+    this.abortMarkerWritten = false;
+    this.pendingAbortWrite = undefined;
+    this.abortDecision = undefined;
+    this.resolveAbortDecision = undefined;
+    this.abortDecisionResolved = false;
+  }
+
+  /**
    * Tears the connection down in full: stops the poll loop, sweeps the files
    * this side is responsible for, then ends the underlying client. Ordering is
    * load-bearing - the poller must stop before the client is ended (or its next
@@ -946,6 +1204,29 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * connection that was never opened.
    */
   async close() {
+    // Abort-marker decision gate, FIRST -- before stop()/the drain/client.end()
+    // and before identity/token fields are cleared. On a connection-originated
+    // fault the bridge fire-and-forgets this close() BEFORE the error reaches the
+    // orchestrator's catch, so a marker write issued from the catch would race
+    // its own teardown. If armed and the decision is still unresolved, wait for
+    // whichever of {the decision resolving, the backstop grace} comes first; on
+    // "write", await the bounded marker write (rejection-safe -- close() must
+    // stay non-throwing). The await MUST precede client.end(): the marker write
+    // rides the same underlying transport, so an earlier end() would kill an
+    // in-flight write -- the captured abortWriteInputs immunize only against the
+    // path/config nulling, not against end(). Gated on abortArmed &&
+    // decision-unresolved so the idempotent second/third close() from doCleanup
+    // re-enters as a clean no-op. This delays teardown only in the fault window
+    // (process already failing); the clean/echo/signal paths seal the decision in
+    // doCleanup before this runs, so they proceed without the grace delay.
+    if (this.abortArmed && !this.abortDecisionResolved) {
+      const decision = await this.awaitAbortDecisionOrGrace();
+      if (decision === "write" && this.pendingAbortWrite !== undefined)
+        await this.pendingAbortWrite.catch(() => {
+          /* best-effort; teardown proceeds regardless of write outcome */
+        });
+    }
+
     this.stop();
 
     // Cancel any in-flight wait (a rendezvous/send sleep parked between polls)
@@ -1064,6 +1345,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
     this.path = undefined;
     this.config = undefined;
+    // Clear the role-derived abort tokens with the handshake identity they
+    // derive from. close() does not clear peerId/handshakeRole today, so this is
+    // a new line, not an addition to an existing clear. resetSessionState resets
+    // only per-session message counters, so the abort fields are cleared here
+    // (and at the two rendezvous recovery sites), NOT there.
+    this.clearAbortState();
     this.resetSessionState();
   }
 
@@ -1477,6 +1764,54 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     let peerHellos = files.filter(
       (file) => !ignored.has(file.name) && this.isPeerHelloName(file.name),
     );
+
+    // Recognize-and-sweep leftover authenticated abort markers, mirroring the
+    // orphaned-temp sweep above (safeDelete + add to `ignored` so the name never
+    // reaches the directory-clean check). Every authenticated terminal failure
+    // leaves a `<writerId>-abort.json` -- it must persist for the peer to read --
+    // so a subsequent exchange reusing the directory would otherwise find it and
+    // reject "directory not clean", turning a transient failure into a blocked
+    // directory. Exact-name only: this party's own id, plus any peer id evidenced
+    // by a peer hello present at entry (the sole notion of peer identity here --
+    // peerId is committed later, in the rendezvous below). A foreign
+    // `<other>-abort.json` with no matching hello is therefore NOT swept -- it
+    // stays an ordinary unexpected protocol file under the normal policy.
+    //
+    // Delete mode only. In retain mode the directory is a durable audit
+    // transcript, so auto-sweeping a marker beside it would reintroduce the
+    // destruction the retain guard prevents; a retain-mode leftover instead falls
+    // through to the unexpectedProtocol guard (exit-64 refusal on the no-flag
+    // path) and to sweepProtocolFiles' existing --force-retain-sweep gate under
+    // --sweep-exchange-files. Reusing that gate rather than a parallel retain
+    // check keeps the two from drifting.
+    if (!this.options.retainFiles) {
+      const expectedAbortIds = new Set<string>([this.id]);
+      for (const hello of peerHellos) {
+        const pid = peerIdFromControlName(hello.name, HELLO_SUFFIX);
+        if (pid !== undefined) expectedAbortIds.add(pid);
+      }
+      const leftoverAbortFiles = files.filter((file) => {
+        if (ignored.has(file.name)) return false;
+        const id = peerIdFromControlName(file.name, ABORT_SUFFIX);
+        return id !== undefined && expectedAbortIds.has(id);
+      });
+      if (leftoverAbortFiles.length > 0) {
+        this.log.info(
+          `[${this.id}] sweeping ${leftoverAbortFiles.length} leftover abort ` +
+            "marker(s) from a prior failed exchange: " +
+            `${leftoverAbortFiles
+              .map((f) => sanitizeForDisplay(f.name))
+              .join(", ")}`,
+        );
+        await Promise.all(
+          leftoverAbortFiles.map((file) =>
+            this.client.safeDelete(`${this.path}/${file.name}`),
+          ),
+        );
+        leftoverAbortFiles.forEach((file) => ignored.add(file.name));
+      }
+    }
+
     // Single classification (isProtocolGrammarName), two sides: a FOREIGN file
     // fails the protocol grammar; an unexpected PROTOCOL file matches it but is
     // not the one tolerated peer hello. A name therefore cannot be both
@@ -1689,6 +2024,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
+        // Clear any armed abort state with the identity it derives from. A no-op
+        // today (arming is post-handshake, after rendezvous), kept for parity
+        // with the close() clear and to stay correct if arming ever moves.
+        this.clearAbortState();
         this.resetSessionState();
         throw mismatch;
       }
@@ -2524,6 +2863,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
+        // Clear any armed abort state with the identity it derives from. A no-op
+        // today (arming is post-handshake, after rendezvous), kept for parity
+        // with the close() clear and to stay correct if arming ever moves.
+        this.clearAbortState();
         this.resetSessionState();
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
@@ -2825,6 +3168,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // foreign temp-*.tmp with a non-UUID stem is not a loop file and falls to
     // the foreign-file policy, the same as any other foreign name.
     if (isProtocolTempName(name)) return true;
+    // The two expected abort markers (this party's and the peer's) are
+    // recognized by exact name, unconditionally -- so a not-yet-armed reader
+    // still recognizes an abort-named file (it cannot trip the unexpected-files
+    // policy on one) even though it does not verify it. A foreign
+    // `<other>-abort.json` is not exact-name and falls through to the policy.
+    if (isExpectedAbortName(name, this.id, peerId)) return true;
     if (!name.endsWith(".json")) return false;
     const ownPrefixed = name.startsWith(`${this.id}-`);
     if (!ownPrefixed && !name.startsWith(`${peerId}-`)) return false;
@@ -2917,6 +3266,64 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "dedicated to the exchange, this may be a conflict copy, a partial " +
           "download, or another session sharing the path.",
       );
+    }
+  }
+
+  // Reads and verifies a present `<peerId>-abort.json` against the
+  // locally-derived peer abort token. Returns true ONLY on an authenticated
+  // match (the caller then fast-fails with a PeerAbortError); every other
+  // outcome -- absent, oversized, unreadable, malformed, wrong version, decode
+  // failure, or non-match -- returns false so the loop keeps polling and
+  // eventually falls back to the peer-silence hedge. Self-contained and
+  // non-throwing: the admin controls these bytes, so a read failure must never
+  // surface as anything but "ignore".
+  private async verifyPeerAbortMarker(
+    allFiles: Array<FileInfo>,
+    path: string,
+    peerId: string,
+  ): Promise<boolean> {
+    const peerToken = this.peerAbortToken;
+    if (peerToken === undefined) return false;
+    const markerName = `${peerId}${ABORT_SUFFIX}`;
+    const listed = allFiles.find((file) => file.name === markerName);
+    if (listed === undefined) return false;
+    // Pre-get() listed-size refusal: never get() a file the listing already
+    // reports as over the cap, mirroring the message path's pre-get size gate.
+    // The marker is re-read every cycle, so a large read here would be the
+    // availability vector ABORT_MARKER_MAX_BYTES exists to bound.
+    if (listed.size > ABORT_MARKER_MAX_BYTES) {
+      this.log.debug(
+        `[${this.role}] ignoring oversized abort marker ` +
+          `${sanitizeForDisplay(markerName)} (${listed.size} bytes)`,
+      );
+      return false;
+    }
+    try {
+      // Bounded get() with the small cap (NOT MAX_FRAME_SIZE_BYTES, which the
+      // message path uses) as the hard backstop against a server under-reporting
+      // the listed size above.
+      const raw = await this.client.get(`${path}/${markerName}`, {
+        encoding: "utf-8",
+        maxBytes: ABORT_MARKER_MAX_BYTES,
+      });
+      const parsed = JSON.parse(raw.toString()) as unknown;
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        (parsed as { version?: unknown }).version !== 1 ||
+        typeof (parsed as { token?: unknown }).token !== "string"
+      )
+        return false;
+      const decoded = fromBase64Url((parsed as { token: string }).token);
+      // Constant-time, length-mismatch-safe: a wrong-length decode returns false
+      // without a separate length check.
+      return bytesEqual(decoded, peerToken);
+    } catch {
+      // Oversize (a server that under-reported the size), JSON/parse failure,
+      // base64url decode failure, or a transient read error: ignore and keep
+      // polling. Re-reading the tiny file each cycle lets a delayed atomic write
+      // (or a torn read on a sync-mediated transport) self-heal on a later cycle.
+      return false;
     }
   }
 
@@ -3049,6 +3456,23 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // through, `ignore` is a no-op. Malformed protocol files (the unparseable-
       // NNN case above) are handled separately and unconditionally.
       if (unexpected.length > 0) this.handleUnexpectedFiles(unexpected, path);
+
+      // Authenticated cross-party abort detection, after the scan and the
+      // unexpected-files policy. A present-and-verified <peerId>-abort.json is a
+      // definitive peer-abort signal, so fast-fail with a PeerAbortError rather
+      // than riding to the peer-silence timeout. Clearing pollerActive and
+      // returning BEFORE any further emit keeps the PeerAbortError the top-level
+      // error the orchestrator's catch sees (and the finally below then does not
+      // reschedule). An absent or unverified marker falls through and keeps
+      // polling -- honest absence stays the hedge.
+      if (
+        this.abortArmed &&
+        (await this.verifyPeerAbortMarker(allFiles, path, peerId))
+      ) {
+        this.pollerActive = false;
+        this.emit("error", new PeerAbortError());
+        return;
+      }
 
       if (messages.length > 1) {
         // Two messages selected at once is a terminal protocol violation in

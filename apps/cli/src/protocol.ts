@@ -11,6 +11,8 @@ import {
   buildOutputTable,
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
+  deriveAbortToken,
+  PeerAbortError,
   sanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -36,17 +38,19 @@ import { writeOutput } from "./util/cli";
  * read-only so it can never write its next message or ack -- the receiver names
  * its own cause locally (`asConnectionError`), but the remote sender only
  * observes the inactivity deadline and would otherwise fail with a bare "peer
- * went silent". A definitive cross-party cause signal is not built in this
- * change: it cannot cover the headline mode (an unwritable directory is exactly
- * what stops the peer from writing any marker) and is a protocol change in its
- * own right. It is feasible for the writable-directory failure modes, though --
- * an additive, post-handshake-authenticated cause file -- and is tracked as a
- * follow-up; this guidance is the baseline beneath it, not a claimed ceiling. So
- * the sender surfaces likely receiver-side causes and points at the peer's own
- * logs, where the real cause was recorded, rather than overclaiming a specific
- * one. The wording deliberately hedges ("may have") and notes the slow-peer
- * case so the operator is not misdirected. See docs/FILE_SYNC.md
- * ("Sender-side peer-silence attribution").
+ * went silent". The authenticated cross-party abort marker
+ * (`<id>-abort.json`, armed below post-handshake) now upgrades this hedge to a
+ * definitive {@link PeerAbortError} for the failure modes where the failing
+ * party's directory is still writable. It cannot cover the headline mode (an
+ * unwritable directory is exactly what stops the peer from writing any marker)
+ * or a hard kill, and a best-effort write can be lost, so this guidance remains
+ * the floor whenever no valid marker is present -- absence stays strictly
+ * uninformative. The marker carries no cause, so this text still surfaces the
+ * likely receiver-side causes and points at the peer's own logs, where the real
+ * cause was recorded, rather than overclaiming a specific one. The wording
+ * deliberately hedges ("may have") and notes the slow-peer case so the operator
+ * is not misdirected. See docs/FILE_SYNC.md ("Sender-side peer-silence
+ * attribution").
  */
 export const PEER_SILENCE_GUIDANCE =
   "The peer completed the rendezvous but has sent nothing since. The likely " +
@@ -341,6 +345,15 @@ export async function runProtocol(
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
+    // Seal the abort decision before the first layer-close drives the real
+    // conn.close() cascade (secure.close() -> mc.close() -> conn.close()). On the
+    // clean-completion, signal, and echo paths no writeAbortMarker() ran, so
+    // without this seal conn.close() would park on its backstop grace and block
+    // teardown for the full grace window. A catch-path writeAbortMarker() (if it
+    // ran) already pre-empted this, making the seal a no-op. It is a pure
+    // synchronous one-shot with no transport dependency, so hoisting it to the
+    // top is safe; it is also a no-op on the unauthenticated path (never armed).
+    conn.sealAbort();
     if (started) log.info("stopping polling");
     if (opened) log.info("closing connection");
     // When the AEAD decorator was built (encryption negotiated), close it: its
@@ -706,6 +719,22 @@ export async function runProtocol(
           `interrupted by ${signalReceived} during channel encryption setup`,
         );
       }
+
+      // Arm the authenticated cross-party abort marker now that the session key
+      // is in hand (this is the only path that holds one). Derive this party's
+      // token -- written into <myId>-abort.json on a terminal organic fault so a
+      // waiting peer fails fast instead of waiting out its full peer-timeout --
+      // and the peer's, which an incoming <peerId>-abort.json is verified
+      // against. The poller (started above) reads the armed tokens fresh each
+      // cycle; no marker exists during the unarmed handshake window, so that gap
+      // is benign. Placed after the signal guard so an interrupt during setup
+      // bails before arming.
+      const peerRole = role === "initiator" ? "responder" : "initiator";
+      const [selfAbortToken, peerAbortToken] = await Promise.all([
+        deriveAbortToken(sessionKey, role),
+        deriveAbortToken(sessionKey, peerRole),
+      ]);
+      conn.armAbort(selfAbortToken, peerAbortToken);
     }
 
     const stageLabels = Object.fromEntries(
@@ -821,6 +850,26 @@ export async function runProtocol(
       }
       return false;
     };
+    // Walks the `cause` chain for a PeerAbortError (mirroring isHintTagged), so
+    // the echo gate below still recognizes one even behind a future wrap. The
+    // load-bearing barrier is actually the sticky first-error latch in the bridge
+    // and AEAD layers (a later admin-induced error cannot supersede the
+    // PeerAbortError that reaches here); this cause-walk is cheap insurance.
+    const errIsPeerAbort = (e: unknown): boolean => {
+      const seen = new Set<unknown>();
+      let cursor: unknown = e;
+      while (
+        typeof cursor === "object" &&
+        cursor !== null &&
+        !seen.has(cursor)
+      ) {
+        seen.add(cursor);
+        if (cursor instanceof PeerAbortError) return true;
+        cursor = (cursor as { cause?: unknown }).cause;
+      }
+      return false;
+    };
+
     const hintAlreadyEmitted = isHintTagged(err);
     if (!hintAlreadyEmitted) {
       if (tokenRotated && onAuthenticatedError === undefined) {
@@ -872,6 +921,27 @@ export async function runProtocol(
     // process is exiting on the signal regardless. (Was previously `warn`,
     // which was suppressed by `--log-level=error` and could hide a genuine
     // protocol failure that happened to coincide with shutdown.)
+    // Authenticated cross-party abort marker: on a terminal organic fault with
+    // the directory still writable, leave a signal so a waiting peer fails fast
+    // instead of waiting out its full peer-timeout and then hedging. Gated to
+    // fire only on a genuine fault: not on a signal interrupt (Ctrl-C stays
+    // clean), and not on a PeerAbortError (the waiting party must not echo a
+    // marker back). The await resolves the connection's abort decision to
+    // "write", which a teardown close() parked on that decision then awaits, so
+    // the marker lands before the shared transport is ended. Best-effort -- a
+    // failed write leaves no marker and the peer falls back to the hedge -- and
+    // placed before the signalReceived early-return so a fault that coincides
+    // with a signal still defers to the signal (the gate's own check skips it).
+    if (
+      conn.abortArmed &&
+      signalReceived === undefined &&
+      !errIsPeerAbort(err)
+    ) {
+      await conn.writeAbortMarker().catch(() => {
+        /* best-effort; teardown proceeds regardless of write outcome */
+      });
+    }
+
     if (signalReceived !== undefined) {
       log.error(
         `error in flight when ${signalReceived} arrived: ` +

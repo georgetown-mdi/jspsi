@@ -57,8 +57,10 @@ export {
   assertSharedSecretReadyForHandshake,
   deriveAeadKey,
   AEAD_CONTEXTS,
+  deriveAbortToken,
+  ABORT_TOKEN_ROLES,
 } from "./auth";
-export type { AuthResult, AeadContext } from "./auth";
+export type { AuthResult, AeadContext, AbortTokenRole } from "./auth";
 export { runKex } from "./kex";
 export type { KexResult } from "./kex";
 export { deriveRendezvousPeerId, RENDEZVOUS_ROLES } from "./rendezvous";
