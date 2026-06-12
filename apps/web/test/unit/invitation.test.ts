@@ -5,6 +5,7 @@ import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
 import {
   ACCEPT_ROUTE_PATH,
   INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
   deepLinkFor,
   generateInvitation,
   webrtcEndpointFromLocation,
@@ -166,10 +167,15 @@ describe("generateInvitation expiry", () => {
     expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
   });
 
-  test("rejects a non-positive lifetimeSeconds at entry, before encoding", async () => {
+  test("rejects a non-positive (or non-finite) lifetimeSeconds at entry, before encoding", async () => {
     // Caught here with a clear cause rather than at encodeInvitation's
     // future-expiry backstop.
-    for (const lifetimeSeconds of [0, -1, Number.NaN]) {
+    for (const lifetimeSeconds of [
+      0,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]) {
       await expect(
         generateInvitation({
           inviterName: "County Health Dept",
@@ -178,6 +184,40 @@ describe("generateInvitation expiry", () => {
         }),
       ).rejects.toThrow(/positive number of seconds/i);
     }
+  });
+
+  test("the maximum lifetime is one year, matching the CLI's hard ceiling", () => {
+    // docs/SECURITY_DESIGN.md states the override may go "up to a maximum of one
+    // year"; this pins the web ceiling to it (and to the CLI's constant).
+    expect(MAX_INVITATION_LIFETIME_SECONDS).toBe(365 * 24 * 60 * 60);
+  });
+
+  test("rejects a lifetimeSeconds past the one-year ceiling, before encoding", async () => {
+    // The seam must not be able to mint an effectively-permanent token, so a
+    // value past the ceiling is rejected up front with the bound's own cause.
+    await expect(
+      generateInvitation({
+        inviterName: "County Health Dept",
+        location,
+        lifetimeSeconds: MAX_INVITATION_LIFETIME_SECONDS + 1,
+      }),
+    ).rejects.toThrow(/must not exceed/i);
+  });
+
+  test("accepts a lifetimeSeconds exactly at the ceiling", async () => {
+    // The bound is inclusive: one year to the second is allowed.
+    const before = Date.now();
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+      lifetimeSeconds: MAX_INVITATION_LIFETIME_SECONDS,
+    });
+    const after = Date.now();
+
+    const expiresMs = await expiresMsOf(encoded);
+    const lifetimeMs = MAX_INVITATION_LIFETIME_SECONDS * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + lifetimeMs);
+    expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
   });
 
   test("the minted token is honored by the acceptor before expiry and rejected at it", async () => {

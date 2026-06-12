@@ -28,6 +28,18 @@ const PEERJS_SIGNALING_PATH = "/api/";
 export const INVITATION_LIFETIME_SECONDS = 60 * 60;
 
 /**
+ * Upper bound on a selected invitation lifetime: one year, matching the CLI's
+ * `MAX_INVITATION_LIFETIME_SECONDS` (apps/cli/src/commands/invite.ts) and the
+ * hard one-year ceiling docs/SECURITY_DESIGN.md states. The ceiling exists so an
+ * erroneous override cannot make the setup secret effectively permanent and
+ * defeat the bounded-lifetime property -- a security invariant, not just a UX
+ * limit, so it is enforced for the web inviter too rather than left to whatever
+ * range a future lifetime selector happens to offer. Local copy for the same
+ * reason as {@link INVITATION_LIFETIME_SECONDS}.
+ */
+export const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
+
+/**
  * Route the deep-link targets: the acceptor's accept/reject consent screen. The
  * route itself -- decode, linkage-terms review, and the derived-id rendezvous --
  * is built by the web rendezvous task (item 196035727); this module only
@@ -136,10 +148,12 @@ export async function generateInvitation(params: {
   location: InvitationLocation;
   /**
    * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
-   * (one hour). The web app has no lifetime-selection UI yet, so production
+   * (one hour) and must be in the range `(0, {@link MAX_INVITATION_LIFETIME_SECONDS}]`
+   * (up to one year). The web app has no lifetime-selection UI yet, so production
    * callers omit it and take the default; the parameter is the seam a future
    * selector (the configuration-GUI roadmap item) overrides through without
-   * reshaping this entry point.
+   * reshaping this entry point, and the bounds are enforced here so that seam
+   * cannot mint an unbounded token.
    */
   lifetimeSeconds?: number;
 }): Promise<GeneratedInvitation> {
@@ -149,15 +163,21 @@ export async function generateInvitation(params: {
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
   } = params;
 
-  // Reject a non-positive (or non-finite) lifetime here, where the cause is
-  // clear, rather than letting it fall through to encodeInvitation's "expires
-  // must be in the future" backstop -- which would fire on the wrong-looking
-  // reason, and only when `now + lifetimeSeconds` happens to land at or before
-  // the current instant. Mirrors the CLI's up-front rejection of a non-positive
-  // --expires-in (validateInvite in apps/cli/src/commands/invite.ts).
+  // Bound the selected lifetime up front, where the cause is clear, rather than
+  // leaving it to encodeInvitation's "expires must be in the future" backstop
+  // (which catches only a non-positive net lifetime, and reports the wrong-looking
+  // reason). Mirrors the CLI's two up-front rejections in validateInvite
+  // (apps/cli/src/commands/invite.ts): a non-positive lifetime, and one past the
+  // one-year ceiling. The ceiling is the security invariant that keeps the seam
+  // from minting an effectively-permanent token; see MAX_INVITATION_LIFETIME_SECONDS.
   if (!Number.isFinite(lifetimeSeconds) || lifetimeSeconds <= 0)
     throw new Error(
       "invitation lifetimeSeconds must be a positive number of seconds",
+    );
+  if (lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS)
+    throw new Error(
+      "invitation lifetimeSeconds must not exceed " +
+        `${MAX_INVITATION_LIFETIME_SECONDS} seconds (one year)`,
     );
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
