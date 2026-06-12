@@ -207,16 +207,29 @@ function findDefaultRecord(dir: string): string {
 }
 
 // Assert the asserted party's default-on artifacts: the record and its private
-// opening exist, and the record round-trips as JSON naming this exchange's
-// participants. Contents beyond that are covered by the record unit tests; this
-// confirms only that the handler wired a record for the right exchange.
+// opening exist, are written owner-only, and the record round-trips as JSON
+// naming this exchange's participants. Contents beyond that are covered by the
+// record unit tests; this confirms only that the handler wired a record for the
+// right exchange.
 function expectDefaultRecord(
   dir: string,
   local: string,
   partner: string,
 ): void {
   const recordFile = findDefaultRecord(dir);
-  expect(fs.existsSync(openingPathFor(recordFile))).toBe(true);
+  const openingFile = openingPathFor(recordFile);
+  expect(fs.existsSync(openingFile)).toBe(true);
+  // Both files are written through the command handler's default record path and
+  // must be owner-only (0600): the opening holds the matched data in plaintext
+  // and the record discloses the exchange's participants and terms in cleartext.
+  // Pin it end to end here so a mode-widening regression in that write path is
+  // caught at the command layer, not just in the recordFile unit tests. POSIX
+  // only: writeFileOwnerOnly uses ACLs on Windows, where mode bits do not
+  // reflect it -- the same guard the sibling onlineInviteAccept test uses.
+  if (process.platform !== "win32") {
+    expect(fs.statSync(recordFile).mode & 0o077).toBe(0);
+    expect(fs.statSync(openingFile).mode & 0o077).toBe(0);
+  }
   const record = JSON.parse(fs.readFileSync(recordFile, "utf8")) as {
     version?: unknown;
     localIdentity?: unknown;
