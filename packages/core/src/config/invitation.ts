@@ -372,7 +372,8 @@ export async function encodeInvitation(
  * (Node.js 19+ / all modern browsers).
  *
  * Does not check whether the token has expired; callers are responsible
- * for comparing `token.expires` against the current time.
+ * for comparing `token.expires` against the current time (see
+ * {@link isInvitationExpired}).
  *
  * @throws {Error} if the string exceeds {@link MAX_ENCODED_INVITATION_LENGTH}
  *   (checked at the boundary before any other work), is too short to carry a
@@ -413,4 +414,29 @@ export async function decodeInvitation(
     throw new Error("invitation payload is not valid JSON");
   }
   return InvitationTokenSchema.parse(raw);
+}
+
+/**
+ * Whether an invitation must be rejected on expiry grounds at `now`:
+ * `true` when `expires` is present and at or before `now`, OR present but
+ * unparseable; `false` when `expires` is absent (an unbounded token) or is a
+ * valid instant still in the future.
+ *
+ * Fails closed on the boundary and on a malformed value: an `expires` equal to
+ * `now` is already expired (never valid for one last instant), and an
+ * unparseable `expires` (a `Date` of `NaN`, which `<=` would otherwise treat as
+ * not-expired) is rejected rather than honored. The malformed case is defense in
+ * depth: {@link decodeInvitation}'s schema already rejects a non-ISO `expires`,
+ * so a token reaching here through decode never carries one -- but every acceptor
+ * fails closed on its own, not only by relying on that upstream gate. Shared by
+ * the CLI and web acceptors so both enforce identical semantics.
+ */
+export function isInvitationExpired(
+  expires: string | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (expires === undefined) return false;
+  const expiresMs = new Date(expires).getTime();
+  if (Number.isNaN(expiresMs)) return true;
+  return expiresMs <= now.getTime();
 }

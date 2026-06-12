@@ -8,6 +8,7 @@ import YAML from "yaml";
 import {
   getLogger,
   decodeInvitation,
+  isInvitationExpired,
   parseExchangeSpec,
   sanitizeForDisplay,
   UsageError,
@@ -164,7 +165,7 @@ export async function decodeAndValidateInvitation(
     );
   }
 
-  if (token.expires !== undefined && new Date(token.expires) <= new Date())
+  if (isInvitationExpired(token.expires))
     throw new UsageError(
       `invitation expired at ${token.expires}; ask your partner for a new ` +
         "invitation",
