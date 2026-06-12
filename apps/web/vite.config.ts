@@ -87,6 +87,11 @@ export default defineConfig((_configEnv) => {
               instances: [{ browser: "chromium" }],
             },
           },
+          // Component browser tests import app sources that use the `@`-prefixed
+          // aliases (e.g. `@components/*`, `@psi/*`); like the unit project, the
+          // browser project must resolve them since the inline projects do not
+          // inherit the root `resolve`.
+          resolve: { alias: srcAliases },
         },
       ],
     },
