@@ -27,7 +27,7 @@ connection:
     password: "@sftp.key"
 ```
 
-Fields that support this convention are marked "`@`-file recommended" in their descriptions. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
+Only the fields marked "`@`-file recommended" in their descriptions, together with the opaque `connection.provider_options` map, support this convention. Any other field is not treated as an `@`-file reference: a free-text field such as `linkage_terms.identity` or `retention_disposition`, or a local-path field such as `signing.identity_file`, keeps a leading `@` as a literal character rather than reading it as a file path.
 
 ---
 

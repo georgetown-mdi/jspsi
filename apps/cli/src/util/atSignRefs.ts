@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import type { ConnectionConfig } from "@psilink/core";
+import type { ConnectionConfig, ExchangeSpec, HttpAuth } from "@psilink/core";
 import { UsageError } from "@psilink/core";
 
 import { expandTilde } from "../fileUtils";
@@ -33,8 +33,17 @@ export function resolveAtSignRef(value: string): string {
 
 /**
  * Recursively resolve every `@path` string in a JSON-like value, reading each
- * referenced file in place. Applied to a raw config at load and to the
- * invitation argument, where every `@`-eligible field must be resolved.
+ * referenced file in place.
+ *
+ * Use this only where every contained string is genuinely `@`-eligible: a
+ * single field-scoped scalar (the `invite`/`accept` invitation argument, a
+ * `--server-password` / `--server-private-key` flag value) or an explicitly
+ * opaque subtree (`connection.providerOptions`, whose values are passed verbatim
+ * to the transport library and may each be an `@`-ref). It must NOT be applied
+ * to a whole exchange spec: that resolves free-text fields such as
+ * `linkageTerms.identity` and `retentionDisposition`, where a leading `@` is a
+ * literal character -- use {@link resolveExchangeSpecRefs} for a loaded config
+ * (see docs/EXCHANGE_SPEC.md "File references").
  *
  * Credential preservation at persistence sites does NOT use this: it uses
  * {@link resolveConnectionCredentials} so the original `@path` survives to disk
@@ -54,20 +63,113 @@ export function resolveAtSignRefs(obj: unknown): unknown {
 }
 
 /**
+ * Resolve `@path` references in the credential and opaque-options fields of a
+ * parsed {@link ExchangeSpec}, returning a clone with those values read from
+ * their referenced files. This is the load-time resolver the CLI applies to a
+ * configuration file before connecting.
+ *
+ * Resolution is scoped to the fields the file-reference convention supports --
+ * those documented "`@`-file recommended" in docs/EXCHANGE_SPEC.md, all of which
+ * live under `connection`: the SFTP `server.password` / `server.privateKey`, the
+ * HTTP-auth `bearer` / `password` on every provisioning endpoint
+ * (`server.provision`, `proxy`, `iceProvision`), each WebRTC `turn[].credential`,
+ * and the opaque `providerOptions` map. Every other field is left verbatim, so a
+ * free-text value with a literal leading `@` (`linkageTerms.identity`,
+ * `retentionDisposition`, ...) is carried through unread rather than exfiltrating
+ * a local file into the self-attested exchange record. A local-path field such as
+ * `signing.identityFile` is likewise left alone: its consumer opens that path, so
+ * resolving it to the file's contents would corrupt it. This replaces a former
+ * blanket recursion over the whole config that contradicted the documented
+ * exemption.
+ *
+ * A missing or unreadable referenced file is a {@link UsageError} (exit 64); the
+ * caller runs this outside the schema-parse try/catch so the error propagates
+ * naming the reference rather than being re-wrapped as an invalid-spec error. The
+ * input is not mutated.
+ */
+export function resolveExchangeSpecRefs(spec: ExchangeSpec): ExchangeSpec {
+  return { ...spec, connection: resolveConnectionAtSignRefs(spec.connection) };
+}
+
+/** Resolve `@path` refs in the supported fields of one parsed connection. */
+function resolveConnectionAtSignRefs(
+  connection: ConnectionConfig,
+): ConnectionConfig {
+  const resolved = structuredClone(connection);
+  switch (resolved.channel) {
+    case "sftp":
+      resolved.server.password = resolveOptionalAtSignRef(
+        resolved.server.password,
+      );
+      resolved.server.privateKey = resolveOptionalAtSignRef(
+        resolved.server.privateKey,
+      );
+      resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
+      resolveHttpAuthAtSignRefs(resolved.proxy?.auth);
+      resolveProviderOptionsAtSignRefs(resolved);
+      break;
+    case "webrtc":
+      // A WebRTC server carries no password/privateKey -- only the provisioning
+      // endpoints' HTTP auth, the TURN credentials, and providerOptions.
+      resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
+      resolveHttpAuthAtSignRefs(resolved.iceProvision?.auth);
+      if (resolved.turn !== undefined)
+        for (const turn of resolved.turn)
+          turn.credential = resolveAtSignRef(turn.credential);
+      resolveProviderOptionsAtSignRefs(resolved);
+      break;
+    case "filedrop":
+      // A filedrop connection has no credential or opaque-options fields.
+      break;
+  }
+  return resolved;
+}
+
+/** Resolve an optional `@path` field; `undefined` passes through unchanged. */
+function resolveOptionalAtSignRef(
+  value: string | undefined,
+): string | undefined {
+  return value === undefined ? value : resolveAtSignRef(value);
+}
+
+/** Resolve the two `@`-eligible fields of an HTTP-auth block in place. */
+function resolveHttpAuthAtSignRefs(auth: HttpAuth | undefined): void {
+  if (auth === undefined) return;
+  auth.bearer = resolveOptionalAtSignRef(auth.bearer);
+  auth.password = resolveOptionalAtSignRef(auth.password);
+}
+
+/**
+ * Resolve `@path` refs inside the opaque `providerOptions` map in place. Its
+ * values are passed verbatim to the transport library and the docs mark the whole
+ * map `@`-file capable, so every contained string is `@`-eligible -- the one
+ * place the recursive walk is still correct.
+ */
+function resolveProviderOptionsAtSignRefs(connection: {
+  providerOptions?: Record<string, unknown>;
+}): void {
+  if (connection.providerOptions !== undefined)
+    connection.providerOptions = resolveAtSignRefs(
+      connection.providerOptions,
+    ) as Record<string, unknown>;
+}
+
+/**
  * Resolve `@path` credential references on a connection for live use, returning
  * a clone with the SFTP `server.password` / `server.privateKey` fields read from
  * their referenced files. The input is NOT mutated, so a caller can connect with
  * the resolved clone while persisting the original -- whose `@path` is still in
  * place -- keeping the secret out of `psilink.yaml`. The preserved `@path` is
- * re-resolved (by {@link resolveAtSignRefs}) at the next exchange's config load.
+ * re-resolved (by {@link resolveExchangeSpecRefs}) at the next exchange's config
+ * load.
  *
  * Only those two fields are resolved: they are the sole credential a CLI flag
  * (`--server-password` / `--server-private-key`) or a connection URL can set on
  * the persistence paths (`--save`, `invite`/`accept`). Other `@`-eligible fields
  * (HTTP `bearer`, `turn.credential`, `providerOptions`, ...) are reachable only
- * from a hand-authored config, which {@link resolveAtSignRefs} resolves at load;
- * a future credential flag that persists must be added here. Non-SFTP channels
- * carry no such credential and pass through unchanged.
+ * from a hand-authored config, which {@link resolveExchangeSpecRefs} resolves at
+ * load; a future credential flag that persists must be added here. Non-SFTP
+ * channels carry no such credential and pass through unchanged.
  */
 export function resolveConnectionCredentials(
   connection: ConnectionConfig,
