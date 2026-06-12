@@ -24,7 +24,7 @@ Deploying a standalone peer-coordination server — for example, as a serverless
 
 PSI-Link does not include or require any particular SFTP server. In practice almost all deployments reuse an existing service: `sshd` on a standard Linux host, with a per-exchange directory whose Unix permissions restrict access to the two partner accounts, is sufficient. The two parties should agree out-of-band on the directory path and on which accounts have access; nothing more is required of the server beyond that.
 
-For local development and integration testing, the project's test suite brings up an SFTP container via Docker Compose; the configuration is in [apps/cli/test/container/compose.yaml](../apps/cli/test/container/compose.yaml). That setup is intended for testing the CLI's transport behavior against a known-good server and is not a production reference.
+For local development and integration testing, the project's test suite stands up its own SFTP server (an in-process `ssh2.Server` by default, or a native OpenSSH `sshd` child process). That setup is intended for testing the CLI's transport behavior against a known-good server and is not a production reference.
 
 ## Docker deployment
 

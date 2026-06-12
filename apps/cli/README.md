@@ -52,56 +52,22 @@ docker image rm -f vdorie/psi-link:latest
 docker build -t vdorie/psi-link:latest .
 ```
 
-## Testing container
-
-This runs an SFTP server on localhost that can be used for testing. After starting it, you can connect via `sftp://usera:usera@localhost:2222/psi` and `sftp://userb:userb@localhost:2222/psi` (2222 is the default port; a worktree set up by `make-worktree` gets its own port -- see `apps/cli/test/container/.env`). Files are "transfered" in `apps/cli/test/container/sftp/srv`.
-
-### If on Mac OS or other ARM
-
-No extra step is needed. `atmoz/sftp` publishes `linux/amd64` only, and the compose file pins that image by digest, so on an ARM machine (Apple Silicon) Docker runs it under emulation automatically. Expect a harmless `platform (linux/amd64) does not match ... host platform (linux/arm64)` warning.
-
-### Regular usage
-
-Do once:
-
-```sh
-sh apps/cli/test/container/setup.sh
-```
-
-Do every time:
-
-```sh
-npm run test:container:up -w apps/cli
-```
-
-To stop:
-
-```sh
-npm run test:container:down -w apps/cli
-```
-
-These wrap `docker compose` with the right `--env-file` and run from the
-checkout root; prefer them over a raw `docker compose` call, which skips the env
-file and so ignores this checkout's project name and port.
-
-Connection examples:
-
-```sh
-run dev -w apps/cli -- \
-  sftp://usera:usera@localhost:2222/psi \
-  test_data/fake_data_1.csv \
-  usera_output.csv
-```
-
-```sh
-run dev -w apps/cli -- \
-  sftp://userb:userb@localhost:2222/psi \
-  test_data/fake_data_2.csv \
-  userb_output.csv
-```
-
 ## Running tests
+
+Unit tests:
 
 ```sh
 npm test -w apps/cli
 ```
+
+The integration suite drives the real SFTP adapter against an SFTP server it
+stands up itself -- in-process by default (an `ssh2.Server` on an ephemeral
+loopback port), or a native OpenSSH `sshd` with `PSILINK_SFTP_BACKEND=native`.
+It is self-managing (a vitest `globalSetup` starts the server before the suite
+and stops it after):
+
+```sh
+npm run test:integration -w apps/cli
+```
+
+See [CONTRIBUTING.md](../../CONTRIBUTING.md#integration-tests) for details.

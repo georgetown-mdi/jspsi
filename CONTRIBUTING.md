@@ -20,7 +20,7 @@ PSI-Link is organized as an npm workspaces monorepo.
 ## Prerequisites
 
 - **Node.js** 26 or later (npm 10 or later is included)
-- **Docker** for CLI integration tests and building the container image
+- **Docker** for building the container image
 
 The OpenMined PSI WebAssembly module is vendored at `lib/openmined-psi.js-2.0.6.tgz`. No Emscripten or native toolchain is required to work against it.
 
@@ -33,7 +33,7 @@ npm install
 npm run build -w packages/core   # core must be built before the apps
 ```
 
-No additional environment variables are required for local development. SFTP integration tests read connection parameters from environment variables; see `apps/cli/test/integration/` for the expected names.
+No additional environment variables are required for local development or the tests. The CLI SFTP integration suite starts its own server; set `PSILINK_SFTP_BACKEND=native` to run it against a native OpenSSH `sshd` instead of the in-process default (see Integration tests below).
 
 ## Building
 
@@ -56,35 +56,26 @@ npx vitest run path/to/file.test.ts   # single file
 
 Must pass before a PR merges to `main` or `staging`.
 
-CLI (requires Docker; spins up a local SFTP server, image `atmoz/sftp`). The
-container is managed automatically -- `test:integration` brings it up before the
-suite and tears it down after (a vitest `globalSetup` on the integration
-project), generating the host keys, storage dir, and `.env` (all gitignored) on
-first run if they are absent. No manual steps are required:
+CLI. The suite stands up an SFTP server and drives the real SFTP adapter
+against it over a loopback socket. It is self-managing -- a vitest `globalSetup`
+on the integration project starts the server before the suite and stops it
+after -- so no manual steps are required:
 
 ```sh
-npm run test:integration -w apps/cli    # auto-manages the SFTP container
+npm run test:integration -w apps/cli
 ```
 
-For a faster inner loop you can keep a warm container running across many runs:
-`test:integration` detects an already-running container, reuses it, and leaves
-it up rather than tearing it down.
+By default the server runs in-process (an `ssh2.Server` on an ephemeral
+loopback port serving a temporary directory), so each run -- and each worktree
+-- is isolated with no shared port or state. Set `PSILINK_SFTP_BACKEND=native`
+to run the same suite against a native OpenSSH `sshd` spawned as an
+unprivileged child, exercising the adapter against a real server:
 
 ```sh
-npm run test:container:up   -w apps/cli    # start (and keep) the SFTP server
-npm run test:integration    -w apps/cli    # reuses the running container
-npm run test:container:down -w apps/cli    # stop it when done
+PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli
 ```
 
-The `:up`/`:down` scripts and the `globalSetup` both wrap `docker compose` with
-the `--env-file` and run from the checkout root, so the container always picks
-up that checkout's `COMPOSE_PROJECT_NAME` and `SFTP_PORT` (default 2222) --
-never run the raw `docker compose` command, which would skip the env file and
-default the Compose project name to the directory (`container`), colliding on
-the port. The `make-worktree` command gives each worktree a unique project and a
-free port, so checkouts can run the container concurrently.
-
-Web (dev server managed automatically -- same pattern as the CLI container):
+Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
 ```sh
 npm run test:integration -w apps/web    # auto-starts, waits for, and stops the dev server

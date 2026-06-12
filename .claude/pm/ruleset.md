@@ -118,7 +118,7 @@ Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
 - Build, packaging, and release tooling (`Dockerfile`, `CHANGELOG.md`, `docs/RELEASES.md`, release signing -- `cosign.pub`, `allowed_signers`).
 - Repo hygiene: contribution flow, security policy, license/notice files (`CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`).
 - Dependency upgrades that are not user-visible.
-- Integration test infrastructure (e.g. `apps/cli/test/container/`).
+- Integration test infrastructure (e.g. `apps/cli/test/sftpServer/`).
 - Internal developer tooling (lint config, formatter config, scripts).
 
 **Edge cases:**
