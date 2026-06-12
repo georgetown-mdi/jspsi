@@ -113,6 +113,12 @@ Generating an invitation requires either a pre-existing configuration file or an
 
 If only an `INPUT_FILE` is given, the inferred linkage terms, metadata, and data standardizations are written to a configuration file. The user is notified that they must fill in the connection block of the configuration file in order to conduct exchanges.
 
+### Abandoning a pending offline invitation
+
+To withdraw a pending offline invitation before its nominal `expires`, delete the key file it wrote (`.psilink.key` at the default path, or the `--key-file` path). The offline key exchange completes only when the inviting party still holds the pending shared secret, so removing the inviter's copy invalidates the invitation: the secret carried in the invitation string you forwarded can no longer authenticate a handshake against you, and the partner's copy is inert on its own without a live inviter to exchange with. Delete only the key file -- any configuration file (`psilink.yaml`) is left in place, so abandoning a pending invitation never disturbs a recurring exchange the same configuration still serves. The `invite` command prints this reminder, naming the key file, when it generates an offline invitation.
+
+This is distinct from recovering a lost, reset, or compromised key (see [Recovery](#recovery)): it is the supported way to deliberately retract an invitation you have changed your mind about, not a response to exposure. Taking no action also closes the window -- the invitation lapses on its own at the `expires` shown when it was generated -- but deleting the key file closes it immediately rather than waiting out the lifetime.
+
 ## Offline acceptance
 
 ```sh
