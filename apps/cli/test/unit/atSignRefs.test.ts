@@ -65,6 +65,13 @@ test("a missing @file reference is a UsageError naming the reference", () => {
   expect(() => resolveAtSignRef(missing)).toThrow(missing);
 });
 
+test("an empty (or whitespace-only) @file reference is a UsageError", () => {
+  const ref = `@${path.join(dir, "blank")}`;
+  fs.writeFileSync(path.join(dir, "blank"), "   \n");
+  expect(() => resolveAtSignRef(ref)).toThrow(UsageError);
+  expect(() => resolveAtSignRef(ref)).toThrow(ref);
+});
+
 // --- resolveConnectionCredentials --------------------------------------------
 
 function sftpConn(
@@ -289,6 +296,21 @@ test("resolveExchangeSpecRefs surfaces a missing @path credential file as a Usag
     connection: {
       channel: "sftp",
       server: { host: "h", password: `@${path.join(dir, "gone")}` },
+    },
+  });
+  expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);
+});
+
+test("resolveExchangeSpecRefs rejects an @path turn credential that resolves to an empty file", () => {
+  // Resolution runs after parse, so turn.credential's min(1) validated the
+  // non-empty "@path" literal; the empty-file guard catches the "" the file
+  // resolves to rather than letting it reach TURN auth.
+  const ref = atFile("empty-cred", "\n");
+  const spec = parseSpec({
+    connection: {
+      channel: "webrtc",
+      server: { host: "peer" },
+      turn: [{ url: "turn:relay:3478", username: "u", credential: ref }],
     },
   });
   expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);

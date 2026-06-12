@@ -16,19 +16,32 @@ import { expandTilde } from "../fileUtils";
  * naming the reference so the user can locate it. This is the failure a saved
  * config's preserved `@path` produces when the file is gone at the next
  * exchange's config load, before any network activity (see docs/CLI.md
- * "Configuration").
+ * "Configuration"). An empty (or whitespace-only) referenced file is the same
+ * class of error: an `@`-file names a file holding a credential or key, and an
+ * empty one holds none.
  */
 export function resolveAtSignRef(value: string): string {
   if (!value.startsWith("@")) return value;
   const refPath = expandTilde(value.slice(1));
+  let content: string;
   try {
-    return fs.readFileSync(refPath, "utf8").trim();
+    content = fs.readFileSync(refPath, "utf8").trim();
   } catch (err) {
     throw new UsageError(
       `cannot read the @-file reference ${value}: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
+  // Reject an empty result here rather than letting "" pass to a schema that
+  // already accepted the non-empty @path string (resolution now runs after
+  // parse, so e.g. turn.credential's min(1) has validated the literal "@path",
+  // not the file contents) and surface only later as an opaque network-layer
+  // auth failure with no reference to the offending field.
+  if (content === "")
+    throw new UsageError(
+      `the @-file reference ${value} resolved to an empty file`,
+    );
+  return content;
 }
 
 /**
