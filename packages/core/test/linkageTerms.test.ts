@@ -954,12 +954,50 @@ test("rejects more linkageKeys than the maximum count", () => {
   expect(() => parseLinkageTerms({ ...base, linkageKeys })).toThrow(ZodError);
 });
 
+test("accepts linkageFields at exactly the maximum count", () => {
+  const linkageFields = Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
+    name: `f${i}`,
+    type: "ssn",
+  }));
+  expect(() => parseLinkageTerms({ ...base, linkageFields })).not.toThrow();
+});
+
 test("rejects more linkageFields than the maximum count", () => {
   const linkageFields = Array.from(
     { length: MAX_LINKAGE_ENTRIES + 1 },
     (_, i) => ({ name: `f${i}`, type: "ssn" }),
   );
   expect(() => parseLinkageTerms({ ...base, linkageFields })).toThrow(ZodError);
+});
+
+test("rejects an over-long constraint exclude value", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields: [
+        {
+          name: "ssn",
+          type: "ssn",
+          constraints: { exclude: ["x".repeat(MAX_TEXT_LENGTH + 1)] },
+        },
+      ],
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long linkage key swap reference", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [{ field: "ssn" }, { field: "ssn4" }],
+          swap: ["ssn", "x".repeat(MAX_NAME_LENGTH + 1)],
+        },
+      ],
+    }),
+  ).toThrow(ZodError);
 });
 
 test("rejects an over-long linkage key name", () => {

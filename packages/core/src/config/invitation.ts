@@ -323,7 +323,9 @@ export async function encodeInvitation(
  * Does not check whether the token has expired; callers are responsible
  * for comparing `token.expires` against the current time.
  *
- * @throws {Error} on checksum mismatch or invalid base64url.
+ * @throws {Error} if the string exceeds {@link MAX_ENCODED_INVITATION_LENGTH}
+ *   (checked at the boundary before any other work), is too short to carry a
+ *   checksum, fails the checksum, or is invalid base64url.
  * @throws {ZodError} on schema validation failure.
  */
 export async function decodeInvitation(

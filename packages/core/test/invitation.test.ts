@@ -493,6 +493,18 @@ test("rejects a token with more linkageKeys than the maximum count", async () =>
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 
+test("rejects a token with more linkageFields than the maximum count", async () => {
+  const linkageFields = Array.from(
+    { length: MAX_LINKAGE_ENTRIES + 1 },
+    (_, i) => ({ name: `f${i}`, type: "ssn" as const }),
+  );
+  const encoded = await encodeRaw({
+    ...baseToken,
+    linkageTerms: { ...baseTerms, linkageFields },
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
 test("rejects a token whose linkage key name exceeds the maximum length", async () => {
   const encoded = await encodeRaw({
     ...baseToken,

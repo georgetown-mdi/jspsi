@@ -10,28 +10,34 @@ import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 // These terms travel inside an invitation token, which the decoder accepts from
 // a counterparty whose token passed only a transcription checksum -- a check
 // anyone can recompute over a crafted payload, not an authenticity guarantee
-// (see invitation.ts). So every partner-controlled free-text and array field
-// below carries a generous `.max()`: a ceiling no real configuration approaches,
-// purely to refuse a token padded to jank the recipient on decode/render. They
-// are defense-in-depth, not semantic limits, and are backed by the boundary cap
-// MAX_ENCODED_INVITATION_LENGTH in invitation.ts, which bounds the whole payload
-// before any field is parsed.
+// (see invitation.ts). The rule below: every partner-controlled free-text string
+// carries a generous length `.max()`, and the two top-level arrays
+// (`linkageFields` and `linkageKeys`) carry a count `.max()`. Deeper collection
+// counts -- the per-element `transform` steps, each constraint's `exclude` list,
+// and the `transform` `params` record (whose values are `z.unknown()` and so have
+// no clean content bound) -- are left to the boundary cap
+// MAX_ENCODED_INVITATION_LENGTH in invitation.ts rather than a per-field count:
+// their legitimate sizes vary (a denylist can hold hundreds of values), so an
+// invented count risks rejecting a real config, and the boundary cap already
+// bounds the whole payload before any field is parsed. The bounds are
+// defense-in-depth, not semantic limits.
 
 /**
  * Generous upper bound on a free-text identifier string: a linkage key, field,
- * or element `name`, an element `field` reference, a transform `function` name,
- * a payload column `name`, or a legal-agreement `reference`. A real identifier
- * is a short label (tens of characters); 256 is far above any legitimate value
- * yet refuses a megabyte-scale string.
+ * or element `name`, an element `field` reference, an element-`swap` reference, a
+ * transform `function` name, a payload column `name`, or a legal-agreement
+ * `reference`. A real identifier is a short label (tens of characters); 256 is
+ * far above any legitimate value yet refuses a megabyte-scale string.
  */
 export const MAX_NAME_LENGTH = 256;
 
 /**
- * Generous upper bound on a prose-like free-text field: a party `identity`, a
- * legal-agreement `purpose`, or a payload column `description`. Larger than
- * {@link MAX_NAME_LENGTH} because these legitimately hold a sentence or a
- * name-plus-contact line rather than a single label; 1 KiB is still comfortably
- * above any real value.
+ * Generous upper bound on a prose-like or data-value free-text field: a party
+ * `identity`, a legal-agreement `purpose`, a payload column `description`, or a
+ * constraint `exclude` value (which can be a full email address, ~254
+ * characters). Larger than {@link MAX_NAME_LENGTH} because these legitimately
+ * hold a sentence, a name-plus-contact line, or a long data value rather than a
+ * single label; 1 KiB is still comfortably above any real value.
  */
 export const MAX_TEXT_LENGTH = 1024;
 
@@ -116,7 +122,7 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
     )
     .optional(),
   affixesAllowed: z.boolean().optional(),
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /** Constraints on date-of-birth fields. */
@@ -129,7 +135,7 @@ interface DateConstraints {
 
 const DateConstraintsSchema: z.ZodType<DateConstraints> = z.object({
   validOnly: z.boolean().optional(),
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /** Constraints on SSN and SSN-last-4 fields. */
@@ -147,7 +153,7 @@ interface SSNConstraints {
 
 const SSNConstraintsSchema: z.ZodType<SSNConstraints> = z.object({
   validOnly: z.boolean().optional(),
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /** Constraints applicable to any semantic type. */
@@ -157,7 +163,7 @@ interface AnyConstraints {
 }
 
 const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 // Shared fields for all linkage field variants.
@@ -341,7 +347,9 @@ export interface LinkageKey {
 const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
   name: z.string().min(1).max(MAX_NAME_LENGTH),
   elements: z.array(LinkageKeyElementSchema).min(1),
-  swap: z.tuple([z.string(), z.string()]).optional(),
+  swap: z
+    .tuple([z.string().max(MAX_NAME_LENGTH), z.string().max(MAX_NAME_LENGTH)])
+    .optional(),
 });
 
 // --- Payload -----------------------------------------------------------------
