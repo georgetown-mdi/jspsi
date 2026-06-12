@@ -150,7 +150,7 @@ export async function generateInvitation(params: {
   // from minting an effectively-permanent token; see MAX_INVITATION_LIFETIME_SECONDS.
   if (!Number.isFinite(lifetimeSeconds) || lifetimeSeconds <= 0)
     throw new Error(
-      "invitation lifetimeSeconds must be a positive number of seconds",
+      "invitation lifetimeSeconds must be a finite, positive number of seconds",
     );
   if (lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS)
     throw new Error(
