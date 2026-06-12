@@ -127,6 +127,16 @@ test("connectionFromURL: decodes percent-encoded credentials", () => {
   expect(conn.server.password).toBe("p w");
 });
 
+test("connectionFromURL: decodes a percent-encoded host", () => {
+  // sftp:// is a non-special scheme, so the WHATWG parser keeps the host opaque
+  // and percent-encoded (an internationalized domain becomes UTF-8 escapes);
+  // ssh2 needs the literal host, so it is decoded like the other components.
+  const conn = connectionFromURL(new URL("sftp://my%20server/drop"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.host).toBe("my server");
+});
+
 test("connectionFromURL: a malformed percent-escape is a redacted usage error", () => {
   // A lone `%` makes decodeURIComponent throw a URIError; it must surface as a
   // UsageError, not an unhandled error.

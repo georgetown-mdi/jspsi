@@ -413,7 +413,7 @@ export function createConnection(
   const base: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: server.hostname,
+      host: decodeUrlComponent(server.hostname, server),
       port: server.port ? Number(server.port) : undefined,
       username: server.username
         ? decodeUrlComponent(server.username, server)

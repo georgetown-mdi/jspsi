@@ -112,10 +112,12 @@ export function redactUrlCredentials(url: URL): string {
 }
 
 /**
- * Decode a percent-encoded URL component (path, username, or password) to the
- * literal value the SFTP layer expects. The WHATWG `URL` parser keeps these
- * components percent-encoded, but ssh2/ssh2-sftp-client consume them verbatim,
- * so every URL-to-config builder must decode before storing -- otherwise a path
+ * Decode a percent-encoded URL component (host, path, username, or password) to
+ * the literal value the SFTP layer expects. The WHATWG `URL` parser keeps these
+ * components percent-encoded -- including an `sftp://` host, which is parsed as
+ * an opaque host whose non-ASCII (e.g. an internationalized domain) becomes
+ * UTF-8 escapes -- but ssh2/ssh2-sftp-client consume them verbatim, so every
+ * URL-to-config builder must decode before storing -- otherwise a path
  * `/my%20drop` opens a directory literally named `my%20drop` and a password
  * `p%20w` is sent to SSH as the literal string `p%20w`. A malformed escape (e.g.
  * a lone `%`) makes `decodeURIComponent` throw a `URIError`; surface it as a
@@ -184,7 +186,7 @@ export function connectionFromURL(
   const base: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: url.hostname,
+      host: decodeUrlComponent(url.hostname, url),
       port: url.port ? Number(url.port) : undefined,
       username: url.username
         ? decodeUrlComponent(url.username, url)

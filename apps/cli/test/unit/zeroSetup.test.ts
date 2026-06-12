@@ -222,6 +222,14 @@ test("createConnection sftp: decodes percent-encoded credentials", () => {
   expect(result.server.password).toBe("p w");
 });
 
+test("createConnection sftp: decodes a percent-encoded host", () => {
+  const result = createConnection(
+    new URL("sftp://my%20server/drop"),
+    baseOptions,
+  ) as SFTPConnectionConfig;
+  expect(result.server.host).toBe("my server");
+});
+
 test("createConnection sftp: a bare-host URL leaves the path unset", () => {
   // Matches connectionFromURL: a trailing "/" must not be pinned as the remote
   // path; the server's default working directory is used instead.
