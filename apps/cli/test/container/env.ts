@@ -1,15 +1,18 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 // The SFTP container's host port can be overridden per checkout via
 // test/container/.env (COMPOSE_PROJECT_NAME, SFTP_PORT) so multiple worktrees
 // can run the container concurrently without colliding on the default 2222. The
 // make-worktree command writes that file with a free port; the SFTP_PORT env
-// var takes precedence when set (e.g. CI). Resolved relative to cwd, which is
-// the cli package root when the integration tests run, matching the other
-// relative paths in those tests.
-const ENV_FILE = "test/container/.env";
+// var takes precedence when set (e.g. CI). Resolved relative to this module
+// (import.meta.url) rather than the process cwd, so a single integration file
+// run from any directory still finds it -- matching the file-relative SFTP root
+// resolution in the sibling integration tests.
+const ENV_FILE = fileURLToPath(new URL("./.env", import.meta.url));
 
+/** @internal exported for testing */
 export function sftpPort(): number {
   if (process.env.SFTP_PORT) return Number(process.env.SFTP_PORT);
   try {
@@ -34,6 +37,7 @@ export function sftpPort(): number {
 // CI runner enforces it. 0777 lets any uid operate; the protocol only creates,
 // reads, renames, and deletes whole files (never modifies another uid's file in
 // place), so directory-level write permission is sufficient.
+/** @internal exported for testing */
 export async function ensureServerDir(dir: string): Promise<void> {
   await fsp.mkdir(dir, { recursive: true });
   await fsp.chmod(dir, 0o777);
