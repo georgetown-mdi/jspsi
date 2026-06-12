@@ -23,10 +23,13 @@ COPY --from=builder /build/apps/cli/package.json .
 COPY --from=builder /build/lib lib
 COPY --from=builder /build/packages/core/package.json lib/core/
 RUN \
-  sed -i -e 's|file:\.\./\.\./lib/openmined-psi.js-2.0.6.tgz|file:../openmined-psi.js-2.0.6.tgz|' lib/core/package.json
+  sed -i -e 's|file:\.\./\.\./lib/|file:../|' lib/core/package.json
 COPY --from=builder /build/packages/core/dist lib/core/dist/
 RUN \
-  sed -i -e 's|file:\.\./\.\./packages/core|file:./lib/core|' package.json
+  sed -i \
+    -e 's|file:\.\./\.\./packages/core|file:./lib/core|' \
+    -e 's|file:\.\./\.\./lib/|file:./lib/|' \
+    package.json
 RUN --mount=type=cache,target=/root/.npm \
   npm install --omit=dev
 
