@@ -29,7 +29,7 @@ import {
   type KeyFileExpiryStatus,
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
-import { resolveAtSignRefs } from "../util/atSignRefs";
+import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import {
   runProtocol,
@@ -397,17 +397,9 @@ export function loadConfig(options: ExchangeOptions): {
       log,
     );
 
-  // Resolve @-file references before schema validation, and outside the parse
-  // try/catch below: a missing or unreadable referenced file (including a
-  // preserved @path credential whose file has since moved) is already a
-  // UsageError naming the reference (exit 64), so it must propagate as-is rather
-  // than be re-wrapped as an "invalid exchange spec", which would mislabel a
-  // credential-access failure as a schema error.
-  const resolvedConfig = resolveAtSignRefs(rawConfig);
-
   let parsedSpec: ReturnType<typeof parseExchangeSpec>;
   try {
-    parsedSpec = parseExchangeSpec(resolvedConfig);
+    parsedSpec = parseExchangeSpec(rawConfig);
   } catch (err) {
     // Well-formed YAML that fails schema validation is still invalid caller
     // configuration (exit 64), not a transport failure.
@@ -416,11 +408,23 @@ export function loadConfig(options: ExchangeOptions): {
         (err instanceof Error ? err.message : String(err)),
     );
   }
+
+  // Resolve @-file references in the supported credential/opaque fields after
+  // schema validation, and outside the parse try/catch above: a missing or
+  // unreadable referenced file (including a preserved @path credential whose file
+  // has since moved) is a UsageError naming the reference (exit 64), so it must
+  // propagate as-is rather than be re-wrapped as an "invalid exchange spec",
+  // which would mislabel a credential-access failure as a schema error. The
+  // literal @path strings validate cleanly as the fields' string values, so
+  // resolving after the parse loses no validation. Scoped to the documented
+  // @-file fields (all under `connection`); a free-text field such as
+  // linkageTerms.identity or retentionDisposition keeps a literal leading `@`.
+  const resolvedSpec = resolveExchangeSpecRefs(parsedSpec);
   const {
     connection: baseConn,
     authentication: specAuth,
     ...exchangeDataSpec
-  } = parsedSpec;
+  } = resolvedSpec;
   log.info("loaded exchange spec from", options.configFile);
 
   const connection = applyConnectionOverrides(baseConn, {

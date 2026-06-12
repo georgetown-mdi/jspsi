@@ -27,7 +27,7 @@ connection:
     password: "@sftp.key"
 ```
 
-Fields that support this convention are marked "`@`-file recommended" in their descriptions. It does not apply to free-text or structured fields such as `linkage_terms.identity`, where `@` may appear as a literal character.
+Only the fields marked "`@`-file recommended" in their descriptions, together with the opaque `connection.provider_options` map, support this convention. Any other field is not treated as an `@`-file reference: a free-text field such as `linkage_terms.identity` or `retention_disposition`, or a local-path field such as `signing.identity_file`, keeps a leading `@` as a literal character rather than reading it as a file path.
 
 ---
 
@@ -351,7 +351,7 @@ SFTP requires at most one primary authentication method alongside `username`. `p
 |-------|------|-------------|
 | `password` | string | Password authentication; `@`-file recommended |
 | `private_key` | string | Path to SSH private key; `@`-file recommended |
-| `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key` |
+| `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key`; `@`-file recommended |
 | `certificate` | string | Path to SSH certificate; only valid with `private_key`; enables certificate-based authentication |
 | `host_key_fingerprint` | string | Optional expected server host key fingerprint for host verification |
 | `known_hosts` | string | Optional path to a `known_hosts` file; alternative to `host_key_fingerprint` |
@@ -488,7 +488,7 @@ connection:
     host: nts.twilio.com
     path: /v1/credentials/ice
     auth:
-      username: "@/run/secrets/twilio_sid"
+      username: your-twilio-account-sid
       password: "@/run/secrets/twilio.key"
 ```
 
