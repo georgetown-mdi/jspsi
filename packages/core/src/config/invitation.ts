@@ -107,6 +107,16 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
  */
 export const MAX_ENDPOINT_HOST_LENGTH = 256;
 
+/**
+ * Generous upper bound on a connection endpoint `path` -- the WebRTC signaling
+ * URL path, the SFTP remote working directory, or the file-drop directory, all
+ * partner-controlled. Anchored to POSIX `PATH_MAX` (4096): a filesystem path
+ * cannot exceed it and a signaling URL path is far shorter, so 4096 admits any
+ * real locator path while still refusing a padded one. Defense-in-depth beside
+ * {@link MAX_ENDPOINT_HOST_LENGTH}, backed by {@link MAX_ENCODED_INVITATION_LENGTH}.
+ */
+export const MAX_ENDPOINT_PATH_LENGTH = 4096;
+
 // Intentionally no z.ZodType<T> annotation on these members: z.discriminatedUnion
 // requires a concrete ZodObject, and the annotation would widen them to
 // ZodType<T> and break the union (same rationale as connection.ts). Strict
@@ -123,7 +133,7 @@ const WebRTCEndpointSchema = z.strictObject(
     port: z.int().min(1).max(65535).optional(),
     // Non-empty when present: an empty path is a meaningless locator (a blank
     // signaling path), so omit the field rather than send "".
-    path: z.string().min(1).optional(),
+    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
   },
   { error: endpointKeyError },
 );
@@ -137,7 +147,7 @@ const SFTPEndpointSchema = z.strictObject(
     port: z.int().min(1).max(65535).optional(),
     // Non-empty when present: an empty remote working directory is meaningless;
     // omit the field instead of sending "".
-    path: z.string().min(1).optional(),
+    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     // No `username` (or other identity/auth field) by design: those are not
     // part of a public locator. Like credentials, the acceptor configures the
     // SSH identity in the credential portion of its own connection block, so an
@@ -159,7 +169,7 @@ const SFTPEndpointSchema = z.strictObject(
 const FileDropEndpointSchema = z.strictObject(
   {
     channel: z.literal("filedrop"),
-    path: z.string().min(1),
+    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH),
   },
   { error: endpointKeyError },
 );
@@ -268,9 +278,11 @@ const CHECKSUM_CHARS = 6;
  * endpoint, an expiry) encodes to a few KiB, and the web flow's URL-length limit
  * caps it besides; 64 KiB is an order of magnitude above any legitimate token
  * yet refuses the multi-megabyte payload a checksum-valid token could otherwise
- * carry. This is the single boundary that transitively bounds every untrusted
- * field, so no per-field check has to do oversized-input work; the per-field
+ * carry. This is the boundary that transitively bounds every untrusted field at
+ * decode, so no per-field check has to do oversized-input work; the per-field
  * `.max()` bounds in linkageTerms.ts are defense-in-depth atop it.
+ * {@link encodeInvitation} enforces the same cap on its output, so psilink never
+ * produces a token it could not itself decode.
  */
 export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
 
@@ -283,7 +295,9 @@ export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
  * Uses `btoa`/`atob` and `globalThis.crypto.subtle.digest`
  * (Node.js 19+ / all modern browsers).
  *
- * @throws {Error} if `expires` is set to a time that is not in the future.
+ * @throws {Error} if `expires` is set to a time that is not in the future, or if
+ *   the encoded token exceeds {@link MAX_ENCODED_INVITATION_LENGTH} (a token that
+ *   could not be decoded; fires only on a programming error, not a real config).
  * @throws {ZodError} if the token fails schema validation.
  */
 export async function encodeInvitation(
@@ -309,7 +323,20 @@ export async function encodeInvitation(
   const body = toBase64Url(bytes);
   const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   const checksum = toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
-  return body + checksum;
+  const encoded = body + checksum;
+  // Symmetric with decodeInvitation's boundary cap: fields all within their
+  // per-field bounds can still, in aggregate, encode past
+  // MAX_ENCODED_INVITATION_LENGTH, and the far end would then reject the token at
+  // its decode boundary. Refuse to produce it here so the failure surfaces on the
+  // inviter's own side with a clear cause rather than at the partner's decode. In
+  // practice this fires only on a programming error, never a real config.
+  if (encoded.length > MAX_ENCODED_INVITATION_LENGTH) {
+    throw new Error(
+      "encoded invitation exceeds the maximum length of " +
+        `${MAX_ENCODED_INVITATION_LENGTH} characters`,
+    );
+  }
+  return encoded;
 }
 
 /**

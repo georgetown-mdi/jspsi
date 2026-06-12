@@ -6,6 +6,7 @@ import {
   decodeInvitation,
   MAX_ENCODED_INVITATION_LENGTH,
   MAX_ENDPOINT_HOST_LENGTH,
+  MAX_ENDPOINT_PATH_LENGTH,
 } from "../src/config/invitation";
 import type {
   ConnectionEndpoint,
@@ -531,6 +532,59 @@ test.each(["webrtc", "sftp"])(
     await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
   },
 );
+
+test.each([
+  {
+    channel: "webrtc",
+    endpoint: {
+      channel: "webrtc",
+      host: "h",
+      path: "p".repeat(MAX_ENDPOINT_PATH_LENGTH + 1),
+    },
+  },
+  {
+    channel: "sftp",
+    endpoint: {
+      channel: "sftp",
+      host: "h",
+      path: "p".repeat(MAX_ENDPOINT_PATH_LENGTH + 1),
+    },
+  },
+  {
+    channel: "filedrop",
+    endpoint: {
+      channel: "filedrop",
+      path: "p".repeat(MAX_ENDPOINT_PATH_LENGTH + 1),
+    },
+  },
+])(
+  "rejects a $channel endpoint whose path exceeds the maximum length",
+  async ({ endpoint }) => {
+    const encoded = await encodeRaw({
+      ...baseToken,
+      connectionEndpoint: endpoint,
+    });
+    await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+  },
+);
+
+test("encodeInvitation rejects a token whose encoded output exceeds the maximum length", async () => {
+  // Every field is within its per-field bound, but an unbounded exclude list
+  // (bounded only by the encoded-length cap) inflates the token past the cap in
+  // aggregate. encodeInvitation must refuse to produce a token it could not
+  // decode, failing on the inviter's side rather than at the partner's decode.
+  const exclude = Array.from({ length: 80 }, () => "x".repeat(MAX_TEXT_LENGTH));
+  const token: InvitationToken = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageFields: [
+        { name: "ssn", type: "ssn" as const, constraints: { exclude } },
+      ],
+    },
+  };
+  await expect(encodeInvitation(token)).rejects.toThrow(/maximum length/);
+});
 
 test("decodes a large but legitimate invitation at the upper end of real size", async () => {
   // A maximal real token -- a long identity, several fields, many keys, a
