@@ -586,6 +586,20 @@ test("encodeInvitation rejects a token whose encoded output exceeds the maximum 
   await expect(encodeInvitation(token)).rejects.toThrow(/maximum length/);
 });
 
+test("round-trips an endpoint host and path at exactly the maximum length", async () => {
+  // Pins the accept side of the endpoint bounds: a too-tight host or path cap
+  // would fail this, which the over-long rejection tests above cannot catch.
+  const endpoint = {
+    channel: "webrtc" as const,
+    host: "h".repeat(MAX_ENDPOINT_HOST_LENGTH),
+    path: "/" + "p".repeat(MAX_ENDPOINT_PATH_LENGTH - 1),
+  };
+  const decoded = await decodeInvitation(
+    await encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
+  );
+  expect(decoded.connectionEndpoint).toEqual(endpoint);
+});
+
 test("decodes a large but legitimate invitation at the upper end of real size", async () => {
   // A maximal real token -- a long identity, several fields, many keys, a
   // payload, a legal agreement, and an endpoint, every value within its bound --

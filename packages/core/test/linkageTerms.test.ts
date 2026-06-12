@@ -1000,6 +1000,58 @@ test("rejects an over-long linkage key swap reference", () => {
   ).toThrow(ZodError);
 });
 
+test("rejects an over-long allowedCharacters constraint", () => {
+  // A run of one character is a valid (if redundant) regex character class, so it
+  // passes the class-validity refine and the rejection is the length bound alone.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields: [
+        {
+          name: "firstName",
+          type: "firstName",
+          constraints: { allowedCharacters: "a".repeat(MAX_NAME_LENGTH + 1) },
+        },
+      ],
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long transform params key", () => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "substring",
+                  params: { ["k".repeat(MAX_NAME_LENGTH + 1)]: 1 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  ).toThrow(ZodError);
+});
+
+test("rejects an over-long version string", () => {
+  // Matches the semver regex (all digits, then `.0.0`) so the rejection is the
+  // length bound, not the format check.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      version: "1".repeat(MAX_NAME_LENGTH + 1) + ".0.0",
+    }),
+  ).toThrow(ZodError);
+});
+
 test("rejects an over-long linkage key name", () => {
   expect(() =>
     parseLinkageTerms({

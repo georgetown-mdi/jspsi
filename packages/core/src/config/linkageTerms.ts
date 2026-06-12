@@ -12,22 +12,24 @@ import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 // anyone can recompute over a crafted payload, not an authenticity guarantee
 // (see invitation.ts). The rule below: every partner-controlled free-text string
 // carries a generous length `.max()`, and the two top-level arrays
-// (`linkageFields` and `linkageKeys`) carry a count `.max()`. Deeper collection
-// counts -- the per-element `transform` steps, each constraint's `exclude` list,
-// and the `transform` `params` record (whose values are `z.unknown()` and so have
-// no clean content bound) -- are left to the boundary cap
-// MAX_ENCODED_INVITATION_LENGTH in invitation.ts rather than a per-field count:
-// their legitimate sizes vary (a denylist can hold hundreds of values), so an
-// invented count risks rejecting a real config, and the boundary cap already
-// bounds the whole payload before any field is parsed. The bounds are
-// defense-in-depth, not semantic limits.
+// (`linkageFields` and `linkageKeys`) carry a count `.max()`. What is left to the
+// boundary cap MAX_ENCODED_INVITATION_LENGTH in invitation.ts rather than a
+// per-field bound is the deeper collection COUNTS -- per-element `transform`
+// steps, each constraint's `exclude` list, the `payload` send/receive arrays, and
+// the `transform` `params` record's entries -- and the `params` value content
+// (typed `z.unknown()`, with no clean content bound). Their legitimate sizes vary
+// (a denylist can hold hundreds of values), so an invented count risks rejecting
+// a real config, and the boundary cap already bounds the whole payload before any
+// field is parsed. The bounds are defense-in-depth, not semantic limits.
 
 /**
- * Generous upper bound on a free-text identifier string: a linkage key, field,
- * or element `name`, an element `field` reference, an element-`swap` reference, a
- * transform `function` name, a payload column `name`, or a legal-agreement
- * `reference`. A real identifier is a short label (tens of characters); 256 is
- * far above any legitimate value yet refuses a megabyte-scale string.
+ * Generous upper bound on a short partner-controlled string -- the identifier-
+ * and spec-like fields: a linkage key, field, or element `name`, an element
+ * `field` reference, an element-`swap` reference, a transform `function` name and
+ * its `params` keys, a payload column `name`, a legal-agreement `reference`, the
+ * `version` string, and a name-constraint `allowedCharacters` class. A real value
+ * is a short label (tens of characters); 256 is far above any legitimate one yet
+ * refuses a megabyte-scale string.
  */
 export const MAX_NAME_LENGTH = 256;
 
@@ -106,9 +108,12 @@ interface NameConstraints {
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // Validated as a regex character class so consuming code can safely
   // interpolate it into new RegExp(`[${allowedCharacters}]`) without injection
-  // risk. Note the brackets that get added.
+  // risk. Note the brackets that get added. The `.max()` precedes the refine so
+  // an oversized value is rejected on length before a large partner-controlled
+  // string is compiled into a RegExp here; a real character class is short.
   allowedCharacters: z
     .string()
+    .max(MAX_NAME_LENGTH)
     .refine(
       (val) => {
         try {
@@ -284,7 +289,11 @@ export interface TransformStep {
 
 const TransformStepSchema: z.ZodType<TransformStep> = z.object({
   function: z.string().min(1).max(MAX_NAME_LENGTH),
-  params: z.record(z.string(), z.unknown()).optional(),
+  // The record's KEYS are partner-controlled strings (parameter names), so they
+  // are length-bounded like every other free-text string; the VALUE content is
+  // `z.unknown()` with no clean per-field bound and the entry COUNT is left to
+  // the boundary cap (see the bounds-section note above).
+  params: z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()).optional(),
 });
 
 /**
@@ -510,6 +519,7 @@ export interface LinkageTerms {
 const LinkageTermsBaseSchema = z.object({
   version: z
     .string()
+    .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
   identity: z.string().min(1).max(MAX_TEXT_LENGTH),
   date: z.iso.date(),
