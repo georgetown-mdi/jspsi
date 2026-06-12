@@ -261,6 +261,7 @@ export function InvitePanel() {
             role="inviter"
             partyName={session.inviterName}
             sharedSecret={session.invitation.sharedSecret}
+            expires={session.invitation.expires}
           />
         </Stack>
       )}

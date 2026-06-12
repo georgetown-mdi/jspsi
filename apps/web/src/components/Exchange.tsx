@@ -45,14 +45,23 @@ import type {
  * Configuration for one side of a derived-id WebRTC exchange. The inviter (PSI
  * responder) listens on its derived peer id; the acceptor (PSI initiator) dials
  * the inviter's derived id read off the invitation endpoint. Both derive their
- * ids from the same `sharedSecret`.
+ * ids from the same `sharedSecret`. `expires` is the invitation's bounded
+ * lifetime (ISO 8601), threaded into the authenticated key exchange's expiry
+ * guards; it is optional because the {@link InvitationToken} marks `expires`
+ * optional, though every web-generated invitation now carries one.
  */
 export type ExchangeConfig =
-  | { role: "inviter"; partyName: string; sharedSecret: string }
+  | {
+      role: "inviter";
+      partyName: string;
+      sharedSecret: string;
+      expires?: string;
+    }
   | {
       role: "acceptor";
       partyName: string;
       sharedSecret: string;
+      expires?: string;
       endpoint: WebRTCEndpoint;
     };
 
@@ -254,6 +263,7 @@ export function Exchange(config: ExchangeConfig) {
       acquire,
       exchangeRole: role === "inviter" ? "responder" : "initiator",
       sharedSecret: config.sharedSecret,
+      expires: config.expires,
       signal: controller.signal,
       generateOutput,
       onStages: setStages,

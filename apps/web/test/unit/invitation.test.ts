@@ -65,6 +65,21 @@ describe("generateInvitation", () => {
     expect(sharedSecret).toBe(token.sharedSecret);
   });
 
+  test("returns the embedded expires so the inviter can arm the handshake expiry guards", async () => {
+    const { encoded, expires } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+    });
+
+    // The returned expires is exactly the bounded value inside the encoded
+    // token, surfaced (not re-decoded) so the inviter threads it into the
+    // authenticated key exchange alongside the secret. Always present: every
+    // generated invitation is bounded.
+    const token = await decodeInvitation(encoded);
+    expect(expires).toBeDefined();
+    expect(expires).toBe(token.expires);
+  });
+
   test("two successive generations yield different secrets (so different derived ids)", async () => {
     const inviterName = "County Health Dept";
     const first = await generateInvitation({ inviterName, location });

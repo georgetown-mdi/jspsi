@@ -71,6 +71,15 @@ const NON_TRUST_KINDS: ReadonlySet<ConnectionErrorKind> = new Set([
  * @param sharedSecret  The invitation's shared secret, base64url-encoded; both
  *                      peers must hold the same value or the handshake fails
  *                      closed.
+ * @param expires       The invitation's `expires` (ISO 8601), if it carries one.
+ *                      Threaded into the auth parameters so core's pre- and
+ *                      post-handshake expiry guards evaluate it: an invitation
+ *                      already past `expires` fails closed before any frame is
+ *                      sent, and one that expires during the round-trip fails
+ *                      closed after the handshake completes -- both surfacing as
+ *                      the `security` trust failure, before any PSI frame. Omit
+ *                      (or pass `undefined`) for an unbounded credential, leaving
+ *                      both guards no-op (the `expires !== undefined` gate).
  * @returns The {@link AuthResult}; both peers derive the same `sessionKey`.
  * @throws {ConnectionError} of kind `"security"` on a trust failure; of kind
  *         `"usage"` if the peer negotiates encryption the web path does not yet
@@ -80,12 +89,13 @@ export async function authenticateExchange(
   mc: MessageConnection,
   exchangeRole: HandshakeRole,
   sharedSecret: string,
+  expires?: string,
 ): Promise<AuthResult> {
   let result: AuthResult;
   try {
     result = await authenticateConnection(
       mc,
-      { sharedSecret },
+      { sharedSecret, expires },
       exchangeRole,
       false,
     );
@@ -107,9 +117,10 @@ export async function authenticateExchange(
     // Preserve authenticateConnection's psilinkRecoveryHintEmitted tag across the
     // re-wrap: a tagged credential error already carries specific recovery
     // guidance, and the tag tells a higher-level handler not to add a second,
-    // generic advisory. Web never passes `expires` (so the tagged paths are
-    // unreachable today), but keeping the wrapper faithful to the contract guards
-    // a future consumer that does.
+    // generic advisory. The web path now threads the invitation's `expires`, so
+    // the expiry-tagged pre- and post-handshake errors (alongside the
+    // malformed-secret one) are reachable here; preserving the tag keeps the
+    // re-wrap faithful to that contract.
     if (hasRecoveryHint(error))
       (
         wrapped as { psilinkRecoveryHintEmitted?: boolean }

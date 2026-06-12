@@ -63,6 +63,14 @@ export interface GeneratedInvitation {
    * the browser and is never sent to a backend.
    */
   sharedSecret: string;
+  /**
+   * The token's bounded expiry (ISO 8601), surfaced beside `sharedSecret` so the
+   * inviter can thread it into the authenticated key exchange's expiry guards
+   * (its `expires !== undefined` gate then arms the in-handshake check). It is
+   * the value already inside `encoded`. Always set: {@link generateInvitation}
+   * mints a bounded lifetime onto every invitation.
+   */
+  expires: string;
 }
 
 /**
@@ -178,5 +186,6 @@ export async function generateInvitation(params: {
     encoded,
     deepLink: deepLinkFor(location.origin, encoded),
     sharedSecret,
+    expires,
   };
 }

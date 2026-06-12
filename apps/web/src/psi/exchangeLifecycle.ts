@@ -135,6 +135,12 @@ export interface RunExchangeLifecycleOptions {
    * must hold the same value; a mismatch fails the handshake closed and never
    * reaches the PSI exchange. */
   sharedSecret: string;
+  /** The invitation's `expires` (ISO 8601), if it carries one, threaded
+   * alongside `sharedSecret` into the authenticated key exchange so core's pre-
+   * and post-handshake expiry guards evaluate it -- an invitation that lapses
+   * before or during the handshake fails closed before any PSI frame. Undefined
+   * for an unbounded credential, leaving the guards no-op. */
+  expires?: string;
   signal: AbortSignal;
   generateOutput: GenerateOutput;
   onStages: (stages: Array<StageDefinition>) => void;
@@ -179,6 +185,7 @@ export async function runExchangeLifecycle(
     acquire,
     exchangeRole,
     sharedSecret,
+    expires,
     signal,
     generateOutput,
     onStages,
@@ -300,7 +307,7 @@ export async function runExchangeLifecycle(
     // critical path -- otherwise a load that approached the per-message kex
     // timeout could time out the initiator's wait for the responder's reply -- and
     // spends no WASM load on a peer that fails authentication.
-    await authenticateExchange(mc, exchangeRole, sharedSecret);
+    await authenticateExchange(mc, exchangeRole, sharedSecret, expires);
     // Resolves before runExchange: instant for the initiator (it loaded the
     // library during acquire), the real WASM wait for the responder, overlapping
     // the wait for the peer's first PSI frame.
