@@ -115,21 +115,33 @@ describe("generateInvitation", () => {
 });
 
 describe("generateInvitation expiry", () => {
+  /**
+   * Read the token's `expires` as epoch ms, asserting it is present. The
+   * generator measures the lifetime from its own `Date.now()` (not an injected
+   * clock -- encodeInvitation re-checks `expires` against the live clock, so a
+   * second injectable clock could not be honored), so callers bracket the call
+   * with their own before/after window rather than assert an exact instant.
+   */
+  async function expiresMsOf(encoded: string): Promise<number> {
+    const token = await decodeInvitation(encoded);
+    expect(token.expires).toBeDefined();
+    return new Date(token.expires ?? "").getTime();
+  }
+
   test("mints a non-empty `expires`, one hour (the default) ahead of generation", async () => {
-    const now = new Date();
+    const before = Date.now();
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
       location,
-      now,
     });
+    const after = Date.now();
 
-    const token = await decodeInvitation(encoded);
-    // Non-empty, and exactly the default lifetime ahead of the supplied instant.
-    expect(token.expires).toBe(
-      new Date(
-        now.getTime() + INVITATION_LIFETIME_SECONDS * 1000,
-      ).toISOString(),
-    );
+    // The generation instant lies in [before, after], so the default-lifetime
+    // expiry lies in that window shifted forward by one hour.
+    const expiresMs = await expiresMsOf(encoded);
+    const lifetimeMs = INVITATION_LIFETIME_SECONDS * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + lifetimeMs);
+    expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
   });
 
   test("the default lifetime is one hour, matching the CLI and the docs", () => {
@@ -139,33 +151,45 @@ describe("generateInvitation expiry", () => {
   });
 
   test("an explicit lifetimeSeconds sets `expires` to that many seconds ahead", async () => {
-    const now = new Date();
     const lifetimeSeconds = 30 * 60;
+    const before = Date.now();
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
       location,
       lifetimeSeconds,
-      now,
     });
+    const after = Date.now();
 
-    const token = await decodeInvitation(encoded);
-    expect(token.expires).toBe(
-      new Date(now.getTime() + lifetimeSeconds * 1000).toISOString(),
-    );
+    const expiresMs = await expiresMsOf(encoded);
+    const lifetimeMs = lifetimeSeconds * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + lifetimeMs);
+    expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
+  });
+
+  test("rejects a non-positive lifetimeSeconds at entry, before encoding", async () => {
+    // Caught here with a clear cause rather than at encodeInvitation's
+    // future-expiry backstop.
+    for (const lifetimeSeconds of [0, -1, Number.NaN]) {
+      await expect(
+        generateInvitation({
+          inviterName: "County Health Dept",
+          location,
+          lifetimeSeconds,
+        }),
+      ).rejects.toThrow(/positive number of seconds/i);
+    }
   });
 
   test("the minted token is honored by the acceptor before expiry and rejected at it", async () => {
     // The two sides must agree on the same `expires` semantics: the inviter sets
     // the bound here, and prepareAcceptedInvitation (the acceptor) enforces it.
-    const now = new Date();
-    const lifetimeSeconds = INVITATION_LIFETIME_SECONDS;
+    // Read the actual minted expiry rather than recompute it, since the generator
+    // measures from its own clock.
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
       location,
-      lifetimeSeconds,
-      now,
     });
-    const expiresAt = new Date(now.getTime() + lifetimeSeconds * 1000);
+    const expiresAt = new Date(await expiresMsOf(encoded));
 
     // A second before expiry: the acceptor proceeds to the WebRTC endpoint.
     await expect(

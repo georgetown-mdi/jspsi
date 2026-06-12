@@ -142,27 +142,30 @@ export async function generateInvitation(params: {
    * reshaping this entry point.
    */
   lifetimeSeconds?: number;
-  /**
-   * The instant the lifetime is measured from; the minted `expires` is
-   * `now + lifetimeSeconds`. Injectable for deterministic tests (mirroring
-   * `prepareAcceptedInvitation`'s `now`), defaulting to the current time.
-   */
-  now?: Date;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
     location,
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
-    now = new Date(),
   } = params;
 
+  // Reject a non-positive (or non-finite) lifetime here, where the cause is
+  // clear, rather than letting it fall through to encodeInvitation's "expires
+  // must be in the future" backstop -- which would fire on the wrong-looking
+  // reason, and only when `now + lifetimeSeconds` happens to land at or before
+  // the current instant. Mirrors the CLI's up-front rejection of a non-positive
+  // --expires-in (validateInvite in apps/cli/src/commands/invite.ts).
+  if (!Number.isFinite(lifetimeSeconds) || lifetimeSeconds <= 0)
+    throw new Error(
+      "invitation lifetimeSeconds must be a positive number of seconds",
+    );
+
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
-  // indefinitely. The CLI mints `expires` the same way (expiresFromNow in
-  // apps/cli/src/commands/bootstrap.ts); encodeInvitation rejects a non-future
-  // `expires` as a backstop, so a non-positive lifetime is caught at encode.
-  const expires = new Date(
-    now.getTime() + lifetimeSeconds * 1000,
-  ).toISOString();
+  // indefinitely. Measured from the current instant, so the lifetime clock starts
+  // when the token is minted; the CLI mints `expires` the same way (expiresFromNow
+  // in apps/cli/src/commands/bootstrap.ts). encodeInvitation re-checks the result
+  // is in the future as a backstop.
+  const expires = new Date(Date.now() + lifetimeSeconds * 1000).toISOString();
   const sharedSecret = generateSharedSecret();
   const token: InvitationToken = {
     version: "1",
