@@ -1,6 +1,11 @@
 import { decodeInvitation, isInvitationExpired } from "@psilink/core";
 
-import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
+import type {
+  ExchangeDataSpec,
+  InvitationToken,
+  LinkageTerms,
+  WebRTCEndpoint,
+} from "@psilink/core";
 
 /** A decoded invitation that has passed every locally-checkable precondition for
  * acceptance: valid format/checksum (via `decodeInvitation`), not expired, and
@@ -54,4 +59,33 @@ export async function prepareAcceptedInvitation(
   }
 
   return { token, endpoint };
+}
+
+/**
+ * Build the data-preparation spec a web acceptor runs against its own CSV. It
+ * adopts the inviter's `linkageTerms` (decoded from the invitation and shown on
+ * the consent screen) verbatim, so the PSI run is governed by the terms the
+ * acceptor reviewed and consented to rather than a default inferred from the
+ * acceptor's own columns -- but it substitutes the acceptor's identity for the
+ * inviter's, so the inviter's `identity` does not leak into the acceptor's
+ * prepared terms. Mirrors the CLI acceptor's
+ * `{ ...token.linkageTerms, identity: myIdentity }` (`apps/cli/src/commands/accept.ts`).
+ *
+ * Only `linkageTerms` is supplied: {@link prepareForExchange} resolves metadata,
+ * standardization, and payloads independently and still infers them from the
+ * acceptor's CSV, so the acceptor's column shape keeps driving those while the
+ * inviter's keys govern linkage. A `standardization` spec is deliberately not
+ * supplied -- that path runs `validateStandardizationAgainstTerms`; leaving
+ * standardization to CSV inference (which derives from these same adopted terms)
+ * does not trip it.
+ *
+ * @param linkageTerms  The inviter's linkage terms from the decoded token.
+ * @param acceptorName  The accepting party's name, recorded as the prepared
+ *                      terms' identity.
+ */
+export function acceptorExchangeDataSpec(
+  linkageTerms: LinkageTerms,
+  acceptorName: string,
+): ExchangeDataSpec {
+  return { linkageTerms: { ...linkageTerms, identity: acceptorName } };
 }
