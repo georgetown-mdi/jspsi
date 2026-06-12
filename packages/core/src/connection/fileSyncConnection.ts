@@ -1188,6 +1188,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // identity. Belt-and-suspenders -- the session-keyed token is the real
   // cross-session barrier -- so the exact placement (close() and the two
   // rendezvous recovery sites) is tidiness, not security.
+  //
+  // abortDecisionResolved is reset to false (its unarmed/initial value, the same
+  // value armAbort sets). This is safe even though false is also the close() gate's
+  // re-entry condition because every reader gates on abortArmed FIRST, and clearing
+  // selfAbortToken here makes abortArmed false -- so the cleared, unarmed state never
+  // re-enters the gate regardless of abortDecisionResolved. Any future reader of
+  // abortDecisionResolved must preserve that ordering (check abortArmed first).
   private clearAbortState(): void {
     this.selfAbortToken = undefined;
     this.peerAbortToken = undefined;
@@ -1230,7 +1237,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // in-flight write -- the captured abortWriteInputs immunize only against the
     // path/config nulling, not against end(). Gated on abortArmed &&
     // decision-unresolved so the idempotent second/third close() from doCleanup
-    // re-enters as a clean no-op. This delays teardown only in the fault window
+    // re-enters as a clean no-op. That no-op cannot race the write even though it
+    // skips this await: the orchestrator's catch awaits writeAbortMarker() to
+    // completion BEFORE its finally runs doCleanup (which seals, then re-closes),
+    // so by the time the second close reaches client.end() the write has already
+    // settled -- there is no in-flight write left for it to truncate. This delays teardown only in the fault window
     // (process already failing); the clean/echo/signal paths seal the decision in
     // doCleanup before this runs, so they proceed without the grace delay.
     if (this.abortArmed && !this.abortDecisionResolved) {
@@ -1798,6 +1809,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // path) and to sweepProtocolFiles' existing --force-retain-sweep gate under
     // --sweep-exchange-files. Reusing that gate rather than a parallel retain
     // check keeps the two from drifting.
+    //
+    // Best-effort, exactly like the orphaned-temp sweep: safeDelete swallows a
+    // transport-level delete failure and the `ignored` add is unconditional, so a
+    // marker that fails to delete is left on disk and entry proceeds past it
+    // rather than aborting on a transient hiccup. A persisted leftover is benign
+    // and self-healing -- the next exchange's entry re-runs this sweep -- and it
+    // cannot forge a PeerAbortError in a later session: verifyPeerAbortMarker
+    // authenticates the marker's token against that session's HKDF-derived peer
+    // token, which a stale marker from a prior session's key cannot satisfy.
     if (!this.options.retainFiles) {
       const expectedAbortIds = new Set<string>([this.id]);
       for (const hello of peerHellos) {
