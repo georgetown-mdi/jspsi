@@ -16,6 +16,7 @@ import type { LinkageTerms, Standardization } from "@psilink/core";
 
 import {
   handler as inviteHandler,
+  offlineAbandonNotice,
   onlineWaitInvalidationNotice,
   resolveInvitePositionals,
   validateInvite,
@@ -150,6 +151,22 @@ test("onlineWaitInvalidationNotice: states the invitation is void on cancel/time
   // The consequence and the recovery: the invitation is unusable; re-invite.
   expect(notice).toContain("can no longer be accepted");
   expect(notice).toContain("psilink invite");
+});
+
+// --- offlineAbandonNotice ----------------------------------------------------
+
+test("offlineAbandonNotice: names the key file as the early-abandonment path and spares the config", () => {
+  const keyPath = "/tmp/agency-a/.psilink.key";
+  const notice = offlineAbandonNotice(keyPath);
+  // The actionable path -- delete this specific key file -- is named verbatim.
+  expect(notice).toContain(keyPath);
+  expect(notice).toContain("delete the key file");
+  // The consequence: the abandoned invitation cannot complete a handshake.
+  expect(notice).toContain("can no longer complete a handshake");
+  // The config-safety promise (acceptance criterion: abandonment leaves an
+  // existing recurring exchange's configuration intact) is stated.
+  expect(notice).toContain("only the key file");
+  expect(notice).toContain("configuration");
 });
 
 // --- pre-existing config/key on the online path ------------------------------

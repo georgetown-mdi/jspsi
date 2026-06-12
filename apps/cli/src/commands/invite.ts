@@ -480,6 +480,7 @@ export async function handler(argv: Arguments): Promise<void> {
           `wrote the key file to ${keyPath} (the invitation expires at ` +
           `${ready.expires}). Keep the key file private.`,
       );
+      log.info(offlineAbandonNotice(keyPath));
       log.info(
         `ensure the connection block in ${ready.configPath} is filled in ` +
           "before running 'psilink exchange'.",
@@ -499,6 +500,7 @@ export async function handler(argv: Arguments): Promise<void> {
       `wrote config to ${configPath} and key file to ${keyPath} (the ` +
         `invitation expires at ${ready.expires}). Keep the key file private.`,
     );
+    log.info(offlineAbandonNotice(keyPath));
     log.info(
       `fill in the connection block in ${configPath} before running ` +
         "'psilink exchange'.",
@@ -538,6 +540,32 @@ export function onlineWaitInvalidationNotice(
     `(${acceptTimeoutSeconds}s) is reached before your partner accepts, the ` +
     "invitation can no longer be accepted -- run 'psilink invite' again to " +
     "issue a fresh one."
+  );
+}
+
+/**
+ * The hint logged after an offline invitation is written, naming the early
+ * abandonment path. Unlike the online flow (whose pending secret lives only in
+ * the inviter's memory during the wait and is discarded on exit), the offline
+ * flow persists the pending shared secret to the key file at `keyPath`. Deleting
+ * that file invalidates the invitation before its nominal `expires`: the offline
+ * key exchange cannot complete unless the inviting party still holds the pending
+ * shared secret, so once the file is gone the secret carried in the forwarded
+ * invitation can no longer authenticate a handshake against the inviter. The
+ * hint directs the user to delete only the key file, never the configuration, so
+ * abandoning a pending invitation leaves intact any configuration a recurring
+ * exchange still serves. This is the offline counterpart to
+ * {@link onlineWaitInvalidationNotice} and the user-facing half of the
+ * abandonment affordance documented in docs/CLI.md ("Offline invitation").
+ *
+ * @internal exported for testing
+ */
+export function offlineAbandonNotice(keyPath: string): string {
+  return (
+    "To withdraw this invitation before it expires, delete the key file " +
+    `(${keyPath}); without it the invitation can no longer complete a ` +
+    "handshake. Delete only the key file -- leaving any configuration file in " +
+    "place keeps an existing recurring exchange undisturbed."
   );
 }
 
