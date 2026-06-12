@@ -10,9 +10,9 @@ import type { SftpServerHandle, SftpTestServer } from "./types";
 
 const execFileAsync = promisify(execFile);
 
-// Where the system OpenSSH server and its key tool live. internal-sftp is built
-// into sshd, so no separate binary is needed. macOS and the Ubuntu CI runners
-// ship sshd at /usr/sbin/sshd; the development container installs openssh-server.
+// Where the system OpenSSH server lives. internal-sftp is built into sshd, so no
+// separate binary is needed. macOS and the Ubuntu CI runners ship sshd at
+// /usr/sbin/sshd; elsewhere it comes from the openssh-server package.
 const SSHD_CANDIDATES = ["/usr/sbin/sshd", "/usr/local/sbin/sshd"];
 
 const READY_TIMEOUT_MS = 20_000;

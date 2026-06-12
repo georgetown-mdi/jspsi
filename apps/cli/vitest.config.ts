@@ -21,11 +21,12 @@ export default defineConfig({
           // chdir in one file could corrupt a concurrently-running sibling's cwd.
           // Forks gives each file its own process, the isolation safety needs.
           pool: "forks",
-          // Brings the SFTP test container up before the suite and tears it
-          // down after, so `npm run test:integration` needs no manual
-          // test:container:up / :down. Scoped to this project, so the unit
-          // project (and the default `test` script) never requires Docker.
-          globalSetup: ["./test/container/globalSetup.ts"],
+          // Starts the SFTP test server (the in-process backend by default, or
+          // the native sshd backend when PSILINK_SFTP_BACKEND=native) before the
+          // suite and stops it after, handing the conformance tests its
+          // connection details and served directory. Scoped to this project, so
+          // the unit project (and the default `test` script) starts no server.
+          globalSetup: ["./test/sftpServer/globalSetup.ts"],
         },
       },
     ],

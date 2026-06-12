@@ -2,7 +2,6 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   afterAll,
@@ -18,7 +17,12 @@ import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
-import { ensureServerDir, sftpPort } from "../container/env";
+import {
+  localPath,
+  remotePath,
+  serverAuth,
+  sftpServer,
+} from "../sftpServer/testContext";
 
 // Net-new coverage: the full authenticated CLI path -- X25519 handshake +
 // per-direction AEAD -- driven end to end over both real transports. The other
@@ -30,7 +34,7 @@ import { ensureServerDir, sftpPort } from "../container/env";
 // to the linkage outcome; plus that the shared secret rotates and the rotated
 // value drives the next ("recurring") exchange.
 
-const SFTP_PORT = sftpPort();
+const srv = sftpServer();
 
 // 32 zero bytes as base64url (43 chars): a valid shared secret for the first
 // exchange. Subsequent exchanges use the rotated value read back from the key
@@ -241,38 +245,31 @@ test("filedrop: authenticated recurring exchange matches the unauthenticated PSI
 // alone; file-scoped beforeAll/afterAll would otherwise also bracket the
 // filedrop test above, which has no business with the SFTP root.
 describe("sftp", () => {
-  // compose.yaml mounts apps/cli/test/container/sftp/srv/ as /home/{user}/psi,
-  // so srv/authexchange is served at /psi/authexchange over SFTP. Both parties
-  // are SFTP clients of the same path -- the realistic recurring-exchange
-  // topology.
-  //
-  // Each phase (baseline -> run1 -> run2) runs in its own subdir under this
-  // root, derived from its run tag, so the hello/lock rendezvous namespace is
-  // never shared across phases: both parties within a phase share a subdir (so
-  // they rendezvous), and distinct phases get distinct subdirs (so they cannot
-  // cross-contaminate). Isolation is therefore structural and does not depend on
-  // deleting files between phases. The root is resolved relative to this test
-  // file (via import.meta.url) so it is independent of vitest's cwd, and stays
-  // distinct from the sibling integration files' server subdirs (sftpConnection
-  // -> sftp, mixedConnection -> mixed).
-  const SFTP_LOCAL_ROOT = fileURLToPath(
-    new URL("../container/sftp/srv/authexchange", import.meta.url),
-  );
-  const SFTP_PATH_ROOT = "/psi/authexchange";
+  // Both parties are SFTP clients of the same served path -- the realistic
+  // recurring-exchange topology. Each phase (baseline -> run1 -> run2) runs in
+  // its own subdir under this root, derived from its run tag, so the hello/lock
+  // rendezvous namespace is never shared across phases: both parties within a
+  // phase share a subdir (so they rendezvous), and distinct phases get distinct
+  // subdirs (so they cannot cross-contaminate). Isolation is therefore
+  // structural and does not depend on deleting files between phases. The root is
+  // the test server's `authexchange` namespace, kept distinct from the sibling
+  // integration files' namespaces (sftpConnection -> sftp, mixedConnection ->
+  // mixed).
+  const SFTP_LOCAL_ROOT = localPath(srv, "authexchange");
+  const SFTP_PATH_ROOT = remotePath(srv, "authexchange");
 
   // A config factory bound to a per-phase server subdir. Creates the host
-  // directory the container serves so the SFTP path exists before either party
+  // directory the server serves so the SFTP path exists before either party
   // connects (the connection does not create remote directories).
   async function sftpForPhase(tag: string): Promise<ConfigFactory> {
-    await ensureServerDir(path.join(SFTP_LOCAL_ROOT, tag));
+    await fsp.mkdir(path.join(SFTP_LOCAL_ROOT, tag), { recursive: true });
     const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
     return () => ({
       channel: "sftp",
       server: {
-        host: "localhost",
-        port: SFTP_PORT,
-        username: "usera",
-        password: "usera",
+        host: srv.host,
+        port: srv.port,
+        ...serverAuth(srv.usera),
         path: serverPath,
       },
       options: { pollIntervalMs: 50 },
