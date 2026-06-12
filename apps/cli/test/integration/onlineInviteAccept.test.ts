@@ -16,7 +16,6 @@ import {
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
-  generateSharedSecret,
   getLogger,
   parseExchangeSpec,
   SHARED_SECRET_REGEX,
@@ -471,7 +470,12 @@ test("filedrop: an expired invitation aborts the accept and the inviter's handsh
   const inviteReady = await validateInvite({
     resolved: resolveInvitePositionals([url, inviteInput]),
     options: inviteOptions,
-    acceptTimeout: PEER_TIMEOUT_SECONDS,
+    // A short accept timeout, not PEER_TIMEOUT_SECONDS: the inviter is rejected by
+    // the pre-handshake guard before any connection opens, so this never elapses
+    // on the happy path -- but if that guard ever regressed and the inviter reached
+    // the peerless rendezvous, this bounds the stall to a fast, clean failure (a
+    // non-/expired/ rejection well within the test timeout) rather than racing it.
+    acceptTimeout: 5,
     expiresIn: "1s",
     log,
   });
@@ -596,10 +600,16 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   // minted, so both pass the pre-handshake format/expiry guard and actually meet
   // at the rendezvous, but the NNpsk0 key confirmation fails: the initiator
   // rejects the responder's tag and sends an abort, the responder receives it, and
-  // both throw the generic authentication failure. A fresh random secret cannot
-  // collide with the inviter's, so the mismatch is guaranteed.
-  const wrongSecret = generateSharedSecret();
-  expect(wrongSecret).not.toBe(inviteReady.sharedSecret);
+  // both throw the generic authentication failure. Derive the wrong secret by
+  // flipping the inviter's first character -- a free base64url position, since
+  // SHARED_SECRET_REGEX constrains only the final one -- so the mismatch is
+  // structural (a guaranteed-different yet still well-formed 32-byte secret) rather
+  // than the probabilistic "two random secrets happened to differ", and it is
+  // well-formed enough to reach the handshake instead of tripping the format guard.
+  const minted = inviteReady.sharedSecret;
+  const wrongSecret = (minted[0] === "A" ? "B" : "A") + minted.slice(1);
+  expect(wrongSecret).not.toBe(minted);
+  expect(wrongSecret).toMatch(SHARED_SECRET_REGEX);
 
   const [inviteOutcome, acceptOutcome] = await Promise.allSettled([
     runOnlineBootstrap({
@@ -630,9 +640,22 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   ]);
 
   // The handshake aborts on both sides: neither saves the rotated key, so neither
-  // fires the config-writing hook. No key, no config, on either side.
-  expect(inviteOutcome.status).toBe("rejected");
-  expect(acceptOutcome.status).toBe("rejected");
+  // fires the config-writing hook. No key, no config, on either side. Pin each
+  // rejection to a key-exchange-layer failure rather than accepting any rejection,
+  // so a spurious transport/connection error or a pre-handshake-guard rejection
+  // cannot pass for the mismatch under test. The initiator throws the generic "key
+  // exchange authentication failed" on the bad confirm tag; the responder throws
+  // the same after receiving the abort, or "key exchange handshake timed out" if
+  // the best-effort abort write is lost -- both share the "key exchange" prefix.
+  for (const outcome of [inviteOutcome, acceptOutcome]) {
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") continue;
+    const message =
+      outcome.reason instanceof Error
+        ? outcome.reason.message
+        : String(outcome.reason);
+    expect(message).toMatch(/key exchange/i);
+  }
   expectNoPersistedFiles(inviteOptions);
   expectNoPersistedFiles(acceptOptions);
 }, 60_000);
