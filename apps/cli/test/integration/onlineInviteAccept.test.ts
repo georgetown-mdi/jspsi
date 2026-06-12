@@ -4,7 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { afterEach, beforeEach, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
@@ -12,7 +20,11 @@ import {
   parseExchangeSpec,
   SHARED_SECRET_REGEX,
 } from "@psilink/core";
-import type { FileDropConnectionConfig } from "@psilink/core";
+import type {
+  ExchangeSpec,
+  FileDropConnectionConfig,
+  SFTPConnectionConfig,
+} from "@psilink/core";
 
 import {
   resolveInvitePositionals,
@@ -28,16 +40,17 @@ import {
 } from "../../src/commands/bootstrap";
 import { loadKeyFile } from "../../src/keyFile";
 import { openingPathFor, resolveRecordOutput } from "../../src/recordFile";
+import { ensureServerDir, sftpPort } from "../container/env";
 
 // Net-new coverage: the ONLINE invite + accept wiring, end to end, with both
 // sides on their real online code path (a live authenticated handshake, not the
 // offline path). The sibling authenticatedExchange.test.ts drives runProtocol
 // directly; this file drives one level up -- validateInvite/validateAccept ->
-// runOnlineBootstrap -- so the assertions cover exactly the untested delta the
-// task names: building the connection from a URL (connectionFromURL), threading
-// the shared secret from the minted invitation through the handshake on both
-// sides, and the saveConfig-after-runProtocol persistence (the onAuthenticated
-// hook) actually firing for both invite and accept.
+// runOnlineBootstrap -- so the assertions cover exactly the untested delta:
+// building the connection from a URL (connectionFromURL), threading the shared
+// secret from the minted invitation through the handshake on both sides, and the
+// saveConfig-after-runProtocol persistence (the onAuthenticated hook) actually
+// firing for both invite and accept.
 //
 // Why this seam and not the yargs handlers: invite/accept's handlers wrap their
 // whole body in runOrExit (which calls process.exit on any thrown error) and
@@ -47,11 +60,25 @@ import { openingPathFor, resolveRecordOutput } from "../../src/recordFile";
 // accept.ts handler), minus only the stdout token print, the confirm prompt, and
 // the closing log line -- none of which are the online wiring under test.
 //
-// Transport (the task's open question): filedrop, matching the filedrop arm the
-// sibling authenticatedExchange integration test already uses. It is materially
-// simpler than SFTP for this wiring -- a file:// URL over a local directory, no
-// per-phase server subdir or container path to manage -- and still runs under the
-// self-managing CLI integration project unchanged.
+// This file covers two concerns over that one seam:
+//   1. The happy-path round trip, run over BOTH transports for parity --
+//      `filedrop` (a file:// URL over a local directory) and `sftp` (a real
+//      atmoz/sftp container). The shared runOnlineRoundTrip helper makes the two
+//      genuinely mirror each other: the assertions are identical and only the URL
+//      and the persisted connection-block shape differ. The sftp run is the only
+//      place credential and server-path threading through connectionFromURL is
+//      exercised end to end (the filedrop transport carries neither).
+//   2. The end-to-end failure paths -- an EXPIRED invitation, a TAMPERED one, and
+//      a shared-secret MISMATCH -- each asserting the security-relevant invariant
+//      that a rejected exchange persists NO config file and NO key file on the
+//      affected side(s). Unit coverage of decodeAndValidateInvitation /
+//      authenticateConnection already exists; these assert the no-write guarantee
+//      at the integration level, where the real validate/handshake code decides
+//      whether anything reaches disk.
+//
+// CLI integration tests are Docker-backed and self-managing via a vitest
+// globalSetup (see CLAUDE.local.md); run with `npm run test:integration -w
+// apps/cli`. Do not manage the container by hand.
 
 let work: string;
 
@@ -74,12 +101,12 @@ const log = getLogger("online-integ-test");
 log.setLevel("silent");
 
 // Bound each side's transport wait -- the inviter via acceptTimeout, the acceptor
-// via options.peerTimeout -- well under the 60s vitest test timeout below, so a
+// via options.peerTimeout -- well under the per-test vitest timeouts below, so a
 // genuine stall fails fast with a clean peer-timeout error instead of racing the
 // framework's kill. This matters because core's default peer timeout is one hour
 // (DEFAULT_PEER_TIMEOUT_MS), which would otherwise leave a hung acceptor waiting
-// far past the test timeout. The happy path completes in a few seconds, so the
-// value is pure safety margin, not a tuning knob.
+// far past the test timeout. Both the happy path and the mismatch handshake
+// resolve in a few seconds, so the value is pure safety margin, not a tuning knob.
 const PEER_TIMEOUT_SECONDS = 30;
 
 // Minimal options with config/key/record at fresh paths under the work dir, so
@@ -140,37 +167,53 @@ async function readStableOutput(
   }
 }
 
-test("filedrop: online invite + accept round-trip authenticates, finds the intersection, rotates the token, and persists both configs and audit records", async () => {
-  // Both parties meet at the same file-drop directory; the URL is what each would
-  // pass on the command line (psilink invite/accept <URL> ...).
-  const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
-  const url = pathToFileURL(dropDir).href;
+// The de-symmetrized inputs the happy-path round trip uses on both transports.
+// Each side carries a non-matching row -- the inviter's Dave (row 2), the
+// acceptor's Zoe (row 0) -- so the output proves the PSI filters on both sides
+// rather than echoing every record. The two non-matchers sit at deliberately
+// different positions so the shared records land at different local indices on
+// each side (Bob at invite row 0 / accept row 1; Carol at invite row 1 / accept
+// row 2). That makes the association table asymmetric, so the assertions below
+// pin the actual local->partner mapping, not merely which rows matched: a bug
+// that swapped or mis-keyed the partner index would change the pairs.
+// Intersection: Bob, Carol.
+const INVITE_CSV =
+  "first_name,last_name,date_of_birth\n" +
+  "Bob,Jones,1990-01-02\n" +
+  "Carol,Lee,1985-07-16\n" +
+  "Dave,Kim,1978-11-30\n";
+const ACCEPT_CSV =
+  "first_name,last_name,date_of_birth\n" +
+  "Zoe,Adams,2001-03-03\n" +
+  "Bob,Jones,1990-01-02\n" +
+  "Carol,Lee,1985-07-16\n";
 
-  // Each side carries a non-matching row -- the inviter's Dave (row 2), the
-  // acceptor's Zoe (row 0) -- so the output proves the PSI filters on both sides
-  // rather than echoing every record. The two non-matchers sit at deliberately
-  // different positions so the shared records land at different local indices on
-  // each side (Bob at invite row 0 / accept row 1; Carol at invite row 1 / accept
-  // row 2). That makes the association table asymmetric, so the assertions below
-  // pin the actual local->partner mapping, not merely which rows matched: a bug
-  // that swapped or mis-keyed the partner index would change the pairs.
-  // Intersection: Bob, Carol.
+/**
+ * The full happy-path online invite + accept round trip over one transport,
+ * with all the assertions that prove the exchange authenticated, found the
+ * intersection, rotated the token, and persisted both configs and audit
+ * records. Everything here is transport-agnostic; the two transport-specific
+ * inputs are passed in:
+ *
+ * - `url`: the server URL each party would put on the command line (the
+ *   filedrop `file://` directory or the sftp `sftp://...` server path).
+ * - `assertPersistedConnection`: checks the connection block each side persisted,
+ *   which differs per transport (filedrop persists a `path`; sftp persists a
+ *   `server` block, including the credentials and path threaded from the URL).
+ *
+ * The shared-secret-stripped check (`spec.authentication` undefined) is asserted
+ * here because it must hold identically on every transport.
+ */
+async function runOnlineRoundTrip(params: {
+  url: string;
+  assertPersistedConnection: (spec: ExchangeSpec) => void;
+}): Promise<void> {
+  const { url, assertPersistedConnection } = params;
+
   const inviteInput = path.join(work, "invite-input.csv");
-  fs.writeFileSync(
-    inviteInput,
-    "first_name,last_name,date_of_birth\n" +
-      "Bob,Jones,1990-01-02\n" +
-      "Carol,Lee,1985-07-16\n" +
-      "Dave,Kim,1978-11-30\n",
-  );
+  fs.writeFileSync(inviteInput, INVITE_CSV);
   const acceptInput = path.join(work, "accept-input.csv");
-  fs.writeFileSync(
-    acceptInput,
-    "first_name,last_name,date_of_birth\n" +
-      "Zoe,Adams,2001-03-03\n" +
-      "Bob,Jones,1990-01-02\n" +
-      "Carol,Lee,1985-07-16\n",
-  );
+  fs.writeFileSync(acceptInput, ACCEPT_CSV);
 
   const inviteOptions = testOptions("invite");
   const acceptOptions = testOptions("accept");
@@ -212,7 +255,7 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   expect(acceptReady.reuseExistingConfig).toBe(false);
 
   // Run both online wirings concurrently: the live authenticated handshake over
-  // the shared file drop, then the PSI exchange, then the saveConfig hook. This
+  // the shared rendezvous, then the PSI exchange, then the saveConfig hook. This
   // is the invite.ts / accept.ts handler tail verbatim.
   const [inviteResult, acceptResult] = await Promise.all([
     runOnlineBootstrap({
@@ -303,10 +346,8 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   for (const cfg of [inviteOptions.configFile, acceptOptions.configFile]) {
     expect(fs.existsSync(cfg)).toBe(true);
     const spec = parseExchangeSpec(YAML.parse(fs.readFileSync(cfg, "utf8")));
-    expect(spec.connection.channel).toBe("filedrop");
-    expect((spec.connection as FileDropConnectionConfig).path).toBe(
-      fileURLToPath(url),
-    );
+    // The connection block is the one transport-specific persisted shape.
+    assertPersistedConnection(spec);
     // The shared secret lives only in the key file. saveConfig persists no
     // authentication block (it strips the injected fields and prunes the empty
     // container), so assert the whole top-level block is absent -- a check on
@@ -351,9 +392,8 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
   // The key files hold the rotated shared secret, a config may hold inline SFTP
   // credentials, and the opening file holds the matched data in plaintext -- all
   // are written via writeFileOwnerOnly / saveKeyFile precisely so group/other
-  // cannot read them. Assert that end to end here (this is the only test that
-  // produces all four real artifacts at once) so a regression that widened any of
-  // their modes is caught, not just one that changed their contents. POSIX-only:
+  // cannot read them. Assert that end to end here so a regression that widened any
+  // of their modes is caught, not just one that changed their contents. POSIX-only:
   // writeFileOwnerOnly uses ACLs on Windows, where the mode bits do not reflect it.
   if (process.platform !== "win32") {
     const ownerOnly = [
@@ -368,4 +408,345 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
     ];
     for (const f of ownerOnly) expect(fs.statSync(f).mode & 0o077).toBe(0);
   }
+}
+
+// Assert that a failed online run left NO artifact at any path the run was
+// configured to write. This is the security-relevant invariant the failure-path
+// tests turn on: a rejected invitation or handshake must not leave a
+// half-provisioned recurring-exchange setup on disk. The config and key are the
+// artifacts a failure could most plausibly orphan; the audit record and its
+// private opening are written only after a successful exchange, so asserting them
+// absent pins that a failure writes no audit either -- vacuously true on the
+// accept-side rejections (validateAccept writes nothing), but a real check on the
+// mismatch test, where a live handshake aborts with recording enabled.
+function expectNoPersistedFiles(options: CommonBootstrapOptions): void {
+  expect(fs.existsSync(options.configFile)).toBe(false);
+  expect(fs.existsSync(options.keyFile)).toBe(false);
+  expect(fs.existsSync(options.recordFile!)).toBe(false);
+  expect(fs.existsSync(openingPathFor(options.recordFile!))).toBe(false);
+}
+
+// --- Happy path: filedrop -----------------------------------------------------
+
+test("filedrop: online invite + accept round-trip authenticates, finds the intersection, rotates the token, and persists both configs and audit records", async () => {
+  // Both parties meet at the same file-drop directory; the URL is what each would
+  // pass on the command line (psilink invite/accept <URL> ...).
+  const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
+  const url = pathToFileURL(dropDir).href;
+
+  await runOnlineRoundTrip({
+    url,
+    assertPersistedConnection: (spec) => {
+      expect(spec.connection.channel).toBe("filedrop");
+      expect((spec.connection as FileDropConnectionConfig).path).toBe(
+        fileURLToPath(url),
+      );
+    },
+  });
 }, 60_000);
+
+// --- Failure paths: filedrop --------------------------------------------------
+//
+// The security-relevant invariant across all three is expectNoPersistedFiles: a
+// rejected invitation or handshake writes neither a config nor a key file. These
+// drive the real online code path (validateInvite/validateAccept ->
+// runOnlineBootstrap) and assert the observable no-write outcome rather than
+// reaching into internals. filedrop is enough for the no-write guarantee: it is
+// decided by validate-time rejection and by the handshake, neither of which is
+// transport-specific, so a real container buys nothing here.
+
+test("filedrop: an expired invitation aborts the accept and the inviter's handshake, persisting no config or key on either side", async () => {
+  const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
+  const url = pathToFileURL(dropDir).href;
+  const inviteInput = path.join(work, "invite-input.csv");
+  fs.writeFileSync(inviteInput, INVITE_CSV);
+  const acceptInput = path.join(work, "accept-input.csv");
+  fs.writeFileSync(acceptInput, ACCEPT_CSV);
+
+  const inviteOptions = testOptions("invite");
+  const acceptOptions = testOptions("accept");
+
+  // Mint a real invitation with a 1-second lifetime, then let it lapse. encodeInvitation
+  // refuses to mint an already-past expiry (an inviter never issues a dead token),
+  // so a real elapse -- not a hand-forged past timestamp -- is how an expired
+  // invitation actually arises: it was valid when issued and went stale before the
+  // partner accepted. The wait is wall-clock relative to the mint, so it is
+  // deterministic regardless of machine speed.
+  const inviteReady = await validateInvite({
+    resolved: resolveInvitePositionals([url, inviteInput]),
+    options: inviteOptions,
+    // A short accept timeout, not PEER_TIMEOUT_SECONDS: the inviter is rejected by
+    // the pre-handshake guard before any connection opens, so this never elapses
+    // on the happy path -- but if that guard ever regressed and the inviter reached
+    // the peerless rendezvous, this bounds the stall to a fast, clean failure (a
+    // non-/expired/ rejection well within the test timeout) rather than racing it.
+    acceptTimeout: 5,
+    expiresIn: "1s",
+    log,
+  });
+  expect(inviteReady.mode).toBe("online");
+  if (inviteReady.mode !== "online") return;
+  const expiresMs = new Date(inviteReady.expires).getTime();
+  await new Promise<void>((r) =>
+    setTimeout(r, Math.max(0, expiresMs - Date.now()) + 200),
+  );
+
+  // Accept side: decodeAndValidateInvitation rejects the expired token before any
+  // connection, prompt, or write -- the accept aborts at validation.
+  await expect(
+    validateAccept({
+      resolved: resolveAcceptPositionals([
+        url,
+        inviteReady.invitation,
+        acceptInput,
+      ]),
+      options: acceptOptions,
+      log,
+    }),
+  ).rejects.toThrow(/expired/i);
+  expectNoPersistedFiles(acceptOptions);
+
+  // Invite side observes the same early invalidation: runOnlineBootstrap's
+  // pre-handshake guard (assertSharedSecretReadyForHandshake) rejects the past
+  // `expires` before opening any connection, so the inviter never reaches the key
+  // save or the config-writing hook.
+  await expect(
+    runOnlineBootstrap({
+      connection: inviteReady.connection,
+      dataSpec: inviteReady.dataSpec,
+      prepared: inviteReady.prepared,
+      sharedSecret: inviteReady.sharedSecret,
+      expires: inviteReady.expires,
+      keyPath: inviteOptions.keyFile,
+      configPath: inviteOptions.configFile,
+      output: inviteReady.output,
+      verbosity: 0,
+      loggerName: "invite",
+    }),
+  ).rejects.toThrow(/expired/i);
+  expectNoPersistedFiles(inviteOptions);
+}, 30_000);
+
+test("filedrop: a tampered invitation is rejected at accept validation, persisting no config or key", async () => {
+  const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
+  const url = pathToFileURL(dropDir).href;
+  const inviteInput = path.join(work, "invite-input.csv");
+  fs.writeFileSync(inviteInput, INVITE_CSV);
+  const acceptInput = path.join(work, "accept-input.csv");
+  fs.writeFileSync(acceptInput, ACCEPT_CSV);
+
+  const inviteOptions = testOptions("invite");
+  const acceptOptions = testOptions("accept");
+
+  // Mint a genuine invitation, then corrupt one character in its body (before the
+  // trailing 6-char checksum). Both characters are valid base64url, so the string
+  // still decodes -- but the recomputed checksum no longer matches the stored one,
+  // so decodeInvitation rejects it. This models in-transit corruption of an
+  // otherwise valid invitation, the case the checksum exists to catch.
+  const inviteReady = await validateInvite({
+    resolved: resolveInvitePositionals([url, inviteInput]),
+    options: inviteOptions,
+    acceptTimeout: PEER_TIMEOUT_SECONDS,
+    log,
+  });
+  expect(inviteReady.mode).toBe("online");
+  if (inviteReady.mode !== "online") return;
+  const valid = inviteReady.invitation;
+  const i = Math.floor(valid.length / 2);
+  const tampered =
+    valid.slice(0, i) + (valid[i] === "A" ? "B" : "A") + valid.slice(i + 1);
+  expect(tampered).not.toBe(valid);
+
+  await expect(
+    validateAccept({
+      resolved: resolveAcceptPositionals([url, tampered, acceptInput]),
+      options: acceptOptions,
+      log,
+    }),
+  ).rejects.toThrow(/invalid invitation/i);
+  expectNoPersistedFiles(acceptOptions);
+  // Tampering is an in-transit corruption only the acceptor sees, so this is an
+  // accept-side rejection -- but the inviter still ran validateInvite to mint the
+  // (valid) invitation, which is the no-commit phase. Assert it persisted nothing
+  // either, so a future change that made minting write a file would not slip past
+  // this scenario.
+  expectNoPersistedFiles(inviteOptions);
+}, 30_000);
+
+test("filedrop: a shared-secret mismatch aborts the handshake, persisting no config or key on either side", async () => {
+  const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
+  const url = pathToFileURL(dropDir).href;
+  const inviteInput = path.join(work, "invite-input.csv");
+  fs.writeFileSync(inviteInput, INVITE_CSV);
+  const acceptInput = path.join(work, "accept-input.csv");
+  fs.writeFileSync(acceptInput, ACCEPT_CSV);
+
+  const inviteOptions = testOptions("invite");
+  const acceptOptions = testOptions("accept");
+  const inviteOut = path.join(work, "invite-out.csv");
+  const acceptOut = path.join(work, "accept-out.csv");
+
+  const inviteReady = await validateInvite({
+    resolved: resolveInvitePositionals([url, inviteInput, inviteOut]),
+    options: inviteOptions,
+    acceptTimeout: PEER_TIMEOUT_SECONDS,
+    log,
+  });
+  expect(inviteReady.mode).toBe("online");
+  if (inviteReady.mode !== "online") return;
+  const acceptReady = await validateAccept({
+    resolved: resolveAcceptPositionals([
+      url,
+      inviteReady.invitation,
+      acceptInput,
+      acceptOut,
+    ]),
+    options: acceptOptions,
+    log,
+  });
+  expect(acceptReady.mode).toBe("online");
+  if (acceptReady.mode !== "online") return;
+
+  // The acceptor runs with a different (but well-formed) secret than the inviter
+  // minted, so both pass the pre-handshake format/expiry guard and actually meet
+  // at the rendezvous, but the NNpsk0 key confirmation fails: the initiator
+  // rejects the responder's tag and sends an abort, the responder receives it, and
+  // both throw the generic authentication failure. Derive the wrong secret by
+  // flipping the inviter's first character -- a free base64url position, since
+  // SHARED_SECRET_REGEX constrains only the final one -- so the mismatch is
+  // structural (a guaranteed-different yet still well-formed 32-byte secret) rather
+  // than the probabilistic "two random secrets happened to differ", and it is
+  // well-formed enough to reach the handshake instead of tripping the format guard.
+  const minted = inviteReady.sharedSecret;
+  const wrongSecret = (minted[0] === "A" ? "B" : "A") + minted.slice(1);
+  expect(wrongSecret).not.toBe(minted);
+  expect(wrongSecret).toMatch(SHARED_SECRET_REGEX);
+
+  // Both sides enable recording (recordOutput) and pass an output path, exactly as
+  // the happy path does, so the no-write assertions below are exercised against a
+  // run that WOULD write an audit record and an output table on success: a failed
+  // handshake must still produce neither. Both artifacts are written only after the
+  // exchange completes (writeOutput / writeExchangeRecord), which an aborted
+  // handshake never reaches, so this pins that nothing partial leaks on failure.
+  const [inviteOutcome, acceptOutcome] = await Promise.allSettled([
+    runOnlineBootstrap({
+      connection: inviteReady.connection,
+      dataSpec: inviteReady.dataSpec,
+      prepared: inviteReady.prepared,
+      sharedSecret: inviteReady.sharedSecret,
+      expires: inviteReady.expires,
+      keyPath: inviteOptions.keyFile,
+      configPath: inviteOptions.configFile,
+      output: inviteReady.output,
+      verbosity: 0,
+      loggerName: "invite",
+      recordOutput: resolveRecordOutput({
+        enabled: inviteOptions.record,
+        recordFile: inviteOptions.recordFile,
+      }),
+    }),
+    runOnlineBootstrap({
+      connection: acceptReady.connection,
+      dataSpec: acceptReady.dataSpec,
+      prepared: acceptReady.prepared,
+      sharedSecret: wrongSecret,
+      expires: acceptReady.token.expires,
+      keyPath: acceptOptions.keyFile,
+      configPath: acceptOptions.configFile,
+      output: acceptReady.output,
+      verbosity: 0,
+      loggerName: "accept",
+      recordOutput: resolveRecordOutput({
+        enabled: acceptOptions.record,
+        recordFile: acceptOptions.recordFile,
+      }),
+      reuseExistingConfig: acceptReady.reuseExistingConfig,
+    }),
+  ]);
+
+  // The handshake aborts on both sides: neither saves the rotated key, so neither
+  // fires the config-writing hook. No key, no config, on either side. Pin each
+  // rejection to a key-exchange-layer failure rather than accepting any rejection,
+  // so a spurious transport/connection error or a pre-handshake-guard rejection
+  // cannot pass for the mismatch under test. The initiator throws the generic "key
+  // exchange authentication failed" on the bad confirm tag; the responder throws
+  // the same after receiving the abort, or "key exchange handshake timed out" if
+  // the best-effort abort write is lost -- both share the "key exchange" prefix.
+  for (const outcome of [inviteOutcome, acceptOutcome]) {
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") continue;
+    const message =
+      outcome.reason instanceof Error
+        ? outcome.reason.message
+        : String(outcome.reason);
+    expect(message).toMatch(/key exchange/i);
+  }
+  expectNoPersistedFiles(inviteOptions);
+  expectNoPersistedFiles(acceptOptions);
+  // The output table is written only after the exchange runs, so an aborted
+  // handshake leaves neither side's output file behind (the output path is not in
+  // CommonBootstrapOptions, so it is checked here rather than in the helper).
+  expect(fs.existsSync(inviteOut)).toBe(false);
+  expect(fs.existsSync(acceptOut)).toBe(false);
+}, 60_000);
+
+// --- Happy path: sftp ---------------------------------------------------------
+
+// Grouped so the rendezvous-root lifecycle hooks below scope to the SFTP test
+// alone; file-scoped beforeAll/afterAll would otherwise also bracket the filedrop
+// tests above, which have no business with the SFTP root.
+describe("sftp", () => {
+  const SFTP_PORT = sftpPort();
+
+  // compose.yaml mounts apps/cli/test/container/sftp/srv/ as /home/{user}/psi, so
+  // srv/onlineinvite is served at /psi/onlineinvite over SFTP. Both parties are
+  // SFTP clients of the same path -- the realistic recurring-exchange topology.
+  // The root is resolved relative to this test file (via import.meta.url) so it is
+  // independent of vitest's cwd, and the `onlineinvite` name keeps it distinct from
+  // the sibling integration files' server subdirs (authexchange, sftp, mixed).
+  const SFTP_LOCAL_ROOT = fileURLToPath(
+    new URL("../container/sftp/srv/onlineinvite", import.meta.url),
+  );
+  const SFTP_PATH_ROOT = "/psi/onlineinvite";
+
+  // Start from a clean root so stale files from a previously crashed run cannot
+  // leak in; afterAll leaves the mounted dir tidy.
+  beforeAll(async () => {
+    await fsp.rm(SFTP_LOCAL_ROOT, { recursive: true, force: true });
+    await fsp.mkdir(SFTP_LOCAL_ROOT, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await fsp.rm(SFTP_LOCAL_ROOT, { recursive: true, force: true });
+  });
+
+  test("sftp: online invite + accept round-trip over the real server mirrors the filedrop result and threads credentials and the server path through the URL", async () => {
+    const tag = "roundtrip";
+    // Create the host directory the container serves so the SFTP path exists
+    // before either party connects (the connection does not create remote dirs).
+    await ensureServerDir(path.join(SFTP_LOCAL_ROOT, tag));
+    const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
+    // The inline usera:usera credentials and the server path are exactly what
+    // connectionFromURL must parse and thread into the live SFTP connection and
+    // the persisted config -- the net-new wiring the filedrop transport never
+    // touches.
+    const url = `sftp://usera:usera@localhost:${SFTP_PORT}${serverPath}`;
+
+    await runOnlineRoundTrip({
+      url,
+      assertPersistedConnection: (spec) => {
+        expect(spec.connection.channel).toBe("sftp");
+        const server = (spec.connection as SFTPConnectionConfig).server;
+        // host/port/path/credentials were all carried from the URL through
+        // connectionFromURL into the persisted config (saveConfig keeps inline
+        // connection credentials, protected at 0600, and strips only the shared
+        // secret).
+        expect(server.host).toBe("localhost");
+        expect(server.port).toBe(SFTP_PORT);
+        expect(server.path).toBe(serverPath);
+        expect(server.username).toBe("usera");
+        expect(server.password).toBe("usera");
+      },
+    });
+  }, 90_000);
+});
