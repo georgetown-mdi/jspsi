@@ -4,7 +4,7 @@ import { Container, Paper, Title } from "@mantine/core";
 
 import { createFileRoute } from "@tanstack/react-router";
 
-import { errorMessage } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
@@ -55,8 +55,12 @@ function Accept() {
         if (!controller.signal.aborted)
           setDecode({ status: "ready", invitation });
       } catch (err) {
+        // The error parses a partner-supplied token, so its message or cause
+        // chain can embed partner-controlled bytes (control/ANSI/deceptive
+        // Unicode); route it through the display-boundary seam before it reaches
+        // the alert, as the exchange's own failure alert does.
         if (!controller.signal.aborted)
-          setDecode({ status: "error", message: errorMessage(err) });
+          setDecode({ status: "error", message: sanitizeErrorForDisplay(err) });
       }
     })();
     return () => controller.abort();
@@ -79,7 +83,9 @@ function Accept() {
     // themselves.
     const name = commitAcceptance({ consented, name: acceptorName });
     if (name === undefined) return;
-    setAcceptorName(name);
+    // Only confirmedName seeds the exchange; the acceptorName field unmounts with
+    // the consent controls on the next render, so writing the trimmed value back
+    // to it would be unobservable.
     setConfirmedName(name);
   };
 

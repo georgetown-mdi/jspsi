@@ -65,8 +65,12 @@ export function InvitationTerms({
 
         <Term label="Records are matched on">
           <List size="sm" withPadding>
-            {summary.linkageKeyNames.map((name) => (
-              <List.Item key={name}>{name}</List.Item>
+            {/* Keyed by index, not the name: the schema enforces uniqueness on
+                the raw key names, but two that differ only in characters
+                sanitizeForDisplay escapes would collide as React keys. The list
+                is static, so the index is a stable key. */}
+            {summary.linkageKeyNames.map((name, index) => (
+              <List.Item key={index}>{name}</List.Item>
             ))}
           </List>
         </Term>
