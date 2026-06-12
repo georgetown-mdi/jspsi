@@ -4,6 +4,7 @@ import { default as EventEmitter } from "eventemitter3";
 
 import { ConnectionError, runExchange } from "@psilink/core";
 
+import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 import { runExchangeLifecycle } from "../../src/psi/exchangeLifecycle.js";
 
@@ -16,17 +17,23 @@ import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
 import type {
+  AuthResult,
   ExchangeResult,
   MessageConnection,
   PreparedExchange,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-// runExchange and the open-handshake are the two heavy operations the owner runs
-// uniformly; mock them so the contract (teardown, abort, error classification,
-// first-frame disconnect) is observable without a real peer or WASM library.
+// runExchange, the open-handshake, and the authenticated key exchange are the
+// heavy operations the owner runs uniformly; mock them so the contract
+// (teardown, abort, error classification, first-frame disconnect, the handshake
+// gating runExchange) is observable without a real peer, WASM library, or
+// crypto round-trip.
 vi.mock("../../src/psi/peerMessageConnection.js", () => ({
   openPeerMessageConnection: vi.fn(),
+}));
+vi.mock("../../src/psi/authenticateExchange.js", () => ({
+  authenticateExchange: vi.fn(),
 }));
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -34,7 +41,12 @@ vi.mock("@psilink/core", async (importOriginal) => {
 });
 
 const mockedOpen = vi.mocked(openPeerMessageConnection);
+const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedRunExchange = vi.mocked(runExchange);
+
+/** A placeholder invitation secret; the handshake is mocked, so its value is
+ * never validated -- only that it is threaded through to authenticateExchange. */
+const SHARED_SECRET = "test-shared-secret";
 
 /** Flush pending microtasks (and any queued macrotask) so the owner advances. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -92,8 +104,12 @@ function makeResources(overrides?: { peer?: FakePeer; conn?: FakeConn }) {
   return { acquired, peer, conn };
 }
 
+// The per-test option bundle that does not vary: the React seams plus the
+// invitation secret. Spread into every runExchangeLifecycle call alongside the
+// per-test acquire/exchangeRole/signal.
 function seams() {
   return {
+    sharedSecret: SHARED_SECRET,
     onStages: vi.fn(),
     onStage: vi.fn(),
     onResult: vi.fn(),
@@ -118,7 +134,14 @@ afterEach(() => {
 
 describe("runExchangeLifecycle", () => {
   beforeEach(() => {
-    // Default happy mocks; individual tests override as needed.
+    // Default happy mocks; individual tests override as needed. The handshake
+    // resolves (its 32-byte session key is unused by the lifecycle today), so the
+    // owner advances to runExchange exactly as before the handshake existed.
+    mockedAuthenticate.mockResolvedValue({
+      sessionKey: new Uint8Array(32),
+      rotatedSecret: "rotated",
+      applyEncryption: false,
+    } satisfies AuthResult);
     mockedRunExchange.mockResolvedValue({} as ExchangeResult);
   });
 
@@ -184,6 +207,89 @@ describe("runExchangeLifecycle", () => {
       error: expect.any(Error),
     });
     expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  test("authenticates the peer at the mc seam before runExchange", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    // The handshake ran with the exchange role and the invitation secret, over
+    // the opened connection, and strictly before the PSI exchange.
+    expect(mockedAuthenticate).toHaveBeenCalledWith(
+      mc,
+      "responder",
+      SHARED_SECRET,
+    );
+    expect(mockedAuthenticate.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedRunExchange.mock.invocationCallOrder[0],
+    );
+  });
+
+  test("a handshake trust failure is category 'security' and never runs the exchange", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    // The kex fails closed on a wrong secret/tamper: authenticateExchange re-tags
+    // it as a security-kind ConnectionError.
+    const trustFailure = new ConnectionError(
+      "key exchange authentication failed",
+      "security",
+    );
+    mockedAuthenticate.mockRejectedValue(trustFailure);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "security",
+      error: trustFailure,
+    });
+    // The trust boundary holds: no PSI frame is sent after a failed handshake.
+    expect(mockedRunExchange).not.toHaveBeenCalled();
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  test("a handshake transport drop stays the retryable category 'exchange'", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    // A transport-kind failure (peer unreachable / timeout) is passed through by
+    // authenticateExchange unchanged, so it is the generic retryable category, not
+    // the non-retryable security one.
+    mockedAuthenticate.mockRejectedValue(
+      new ConnectionError("peer connection closed", "transport"),
+    );
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "exchange",
+      error: expect.any(ConnectionError),
+    });
+    expect(mockedRunExchange).not.toHaveBeenCalled();
   });
 
   test("a generateOutput failure is category 'output' (the exchange succeeded)", async () => {
@@ -306,6 +412,38 @@ describe("runExchangeLifecycle", () => {
 
     expect(close).toHaveBeenCalledTimes(1); // teardown-exclusive effect, once
     expect(peer.disconnect).toHaveBeenCalled();
+    expect(s.onError).not.toHaveBeenCalled(); // abort is silent
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  test("abort during the handshake closes the connection, teardown runs once, no alert, no exchange", async () => {
+    const { mc, close } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    // The handshake parks on a receive that the teardown close() will reject,
+    // mirroring how a deliberate teardown unwinds an in-flight key exchange. This
+    // exercises an abort landing in the newly-inserted handshake step (before
+    // runExchange), the one interleaving the other abort tests do not cover.
+    mockedAuthenticate.mockImplementation(
+      async (c) => (await c.receive()) as AuthResult,
+    );
+    const controller = new AbortController();
+    const { acquired, peer } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    const run = runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: controller.signal,
+      ...s,
+    });
+    await tick(); // reach the parked receive inside the handshake
+    controller.abort();
+    await run;
+
+    expect(close).toHaveBeenCalledTimes(1); // teardown-exclusive effect, once
+    expect(peer.disconnect).toHaveBeenCalled();
+    expect(mockedRunExchange).not.toHaveBeenCalled(); // never reached the exchange
     expect(s.onError).not.toHaveBeenCalled(); // abort is silent
     expect(s.onResult).not.toHaveBeenCalled();
   });

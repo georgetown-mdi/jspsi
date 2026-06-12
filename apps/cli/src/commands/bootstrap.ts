@@ -41,9 +41,13 @@ import {
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
-import { resolveAtSignRefs } from "../util/atSignRefs";
+import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type AuthPersist } from "../protocol";
+import {
+  decodeUrlComponent,
+  redactUrlCredentials,
+} from "../util/connectionUrl";
 import { channelFromURL } from "./zeroSetup";
 import type { RecordOutput } from "../recordFile";
 
@@ -96,22 +100,6 @@ export function looksLikeUrl(value: string): boolean {
 }
 
 /**
- * Render a URL as a string with any embedded credentials (the userinfo
- * component) removed, for echoing in a user-facing hint. `URL.href` preserves an
- * embedded password, which must never reach the terminal, logs, or shell
- * history; the partner supplies their own credentials, so the username is
- * dropped too and only the locator remains.
- *
- * @internal exported for testing
- */
-export function redactUrlCredentials(url: URL): string {
-  const safe = new URL(url.href);
-  safe.username = "";
-  safe.password = "";
-  return safe.href;
-}
-
-/**
  * Build a connection config from a server URL, for the online invite/accept
  * paths. Mirrors the zero-setup mapping but is constrained to the channels the
  * CLI can actually run: a `webrtc` (ws/wss) URL or an unsupported scheme is a
@@ -161,14 +149,21 @@ export function connectionFromURL(
   const base: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: url.hostname,
+      host: decodeUrlComponent(url.hostname, url),
       port: url.port ? Number(url.port) : undefined,
-      username: url.username || undefined,
-      password: url.password || undefined,
+      username: url.username
+        ? decodeUrlComponent(url.username, url)
+        : undefined,
+      password: url.password
+        ? decodeUrlComponent(url.password, url)
+        : undefined,
       // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
       // unset so the server's default working directory is used, rather than
       // pinning it to the filesystem root.
-      path: url.pathname && url.pathname !== "/" ? url.pathname : undefined,
+      path:
+        url.pathname && url.pathname !== "/"
+          ? decodeUrlComponent(url.pathname, url)
+          : undefined,
     },
   };
   return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;
@@ -600,6 +595,18 @@ export async function runOnlineBootstrap(params: {
     keyFilePath: params.keyPath,
   };
 
+  // Resolve `@path` credential refs for the live connection only. params.connection
+  // keeps the `@path` so the saveConfig in the hook below persists the reference,
+  // not the secret -- the @path is re-resolved at the next `psilink exchange`'s
+  // config load. A missing or unreadable referenced file is a UsageError (exit
+  // 64) surfaced here, before the connection is opened. The cast restores the
+  // RunnableConnectionConfig narrowing the resolver widens to ConnectionConfig;
+  // it is safe because the resolver preserves the channel (it only reads the SFTP
+  // credential fields).
+  const liveConnection = resolveConnectionCredentials(
+    params.connection,
+  ) as RunnableConnectionConfig;
+
   // Set inside the hook once saveConfig returns, so the catch below can tell a
   // "config is on disk, retry without re-inviting" recovery from a run where the
   // config write never succeeded (hook threw, or handshake never reached it).
@@ -614,7 +621,7 @@ export async function runOnlineBootstrap(params: {
   let keyPersisted = false;
   try {
     const { onAuthenticatedError } = await runProtocol(
-      params.connection,
+      liveConnection,
       auth,
       params.prepared,
       params.output,
@@ -986,12 +993,14 @@ export function parseCommonBootstrapArgs(
     identity: singleValue(argv, "identity") as string | undefined,
     serverPort: singleValue(argv, "server-port") as number | undefined,
     serverUsername: singleValue(argv, "server-username") as string | undefined,
-    serverPassword: resolveAtSignRefs(
-      singleValue(argv, "server-password") as string | undefined,
-    ) as string | undefined,
-    serverPrivateKey: resolveAtSignRefs(
-      singleValue(argv, "server-private-key") as string | undefined,
-    ) as string | undefined,
+    // Credential values are carried through verbatim; an `@path` ref is read only
+    // at the live-use boundary (resolveConnectionCredentials in
+    // runOnlineBootstrap), so a persisted config keeps the `@path`, not the
+    // resolved secret.
+    serverPassword: singleValue(argv, "server-password") as string | undefined,
+    serverPrivateKey: singleValue(argv, "server-private-key") as
+      | string
+      | undefined,
     connectionTimeout: singleValue(argv, "connection-timeout") as
       | number
       | undefined,

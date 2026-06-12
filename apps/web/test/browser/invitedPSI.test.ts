@@ -13,6 +13,7 @@ import {
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
+import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 
 import { sortAssociationTable } from "../utils/associationTable.js";
@@ -216,7 +217,12 @@ beforeAll(async () => {
   const serverMc = await openPeerMessageConnection(inviterConn);
   const clientMc = await openPeerMessageConnection(acceptorConn);
 
+  // Mirror the production lifecycle: authenticate the peer over the real data
+  // channel (the X25519 handshake the inviter/acceptor derive from the same
+  // shared secret) before any PSI frame. This is the end-to-end check that the
+  // key-exchange messages round-trip over PeerJS and that both ends agree.
   const runServerPSI = async () => {
+    await authenticateExchange(serverMc, "responder", sharedSecret);
     const { associationTable } = await runExchange(
       serverMc,
       "responder",
@@ -227,6 +233,7 @@ beforeAll(async () => {
   };
 
   const runClientPSI = async () => {
+    await authenticateExchange(clientMc, "initiator", sharedSecret);
     const { associationTable } = await runExchange(
       clientMc,
       "initiator",

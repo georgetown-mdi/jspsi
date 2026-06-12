@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import YAML from "yaml";
 import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
 import type { ExchangeSpec, PreparedExchange } from "@psilink/core";
 
@@ -75,6 +76,37 @@ test("both-saved: writes config and key, and reports the shared secret", () => {
   expect(messages.some((m) => m.includes("established a shared secret"))).toBe(
     true,
   );
+});
+
+test("save persists an @path credential as the reference, never the secret contents", () => {
+  // End-to-end at-rest check for the --save path: a connection whose password is
+  // an @path reference is persisted verbatim, so the referenced file's contents
+  // (the secret) never land in psilink.yaml. Read the value back through the YAML
+  // parser rather than as a raw substring -- a long quoted scalar may line-wrap.
+  const { log } = capture();
+  const pwFile = path.join(dir, "pw");
+  fs.writeFileSync(pwFile, "s3cret\n");
+  const spec = buildSaveSpec(
+    {
+      channel: "sftp",
+      server: { host: "h", username: "u", password: `@${pwFile}` },
+    },
+    {
+      linkageTerms: getDefaultLinkageTerms("Test Party"),
+      metadata: [],
+    } as unknown as PreparedExchange,
+  );
+  finalizeBootstrap({
+    save: true,
+    bootstrap: { partnerSaveIntent: true, sharedSecret: SECRET },
+    spec,
+    configFile,
+    keyFile,
+    log,
+  });
+  const written = fs.readFileSync(configFile, "utf8");
+  expect(written).not.toContain("s3cret");
+  expect(YAML.parse(written).connection.server.password).toBe(`@${pwFile}`);
 });
 
 // --- only this party saved ---------------------------------------------------

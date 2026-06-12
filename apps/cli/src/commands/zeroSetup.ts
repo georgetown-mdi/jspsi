@@ -30,10 +30,11 @@ import {
 import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
-import { resolveAtSignRefs } from "../util/atSignRefs";
+import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
+import { decodeUrlComponent } from "../util/connectionUrl";
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -253,9 +254,12 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   return {
     positionals: argv._,
     save: (argv["save"] as boolean | undefined) ?? false,
-    // Local filesystem paths accept a leading `~`; server-private-key /
-    // -password are NOT paths here (resolveAtSignRefs already turned any @file
-    // ref into its contents), so they must not be tilde-expanded.
+    // Local filesystem paths accept a leading `~`; server-password /
+    // -private-key are credential values, not paths to tilde-expand here. An
+    // `@path` credential ref is carried through verbatim (not resolved at parse
+    // time) and read only at the live-use boundary (resolveConnectionCredentials
+    // in the handler), so a persisted config keeps the `@path` rather than the
+    // resolved secret.
     configFile: expandTilde(
       (singleValue(argv, "config-file") as string | undefined) ??
         DEFAULT_CONFIG_PATH,
@@ -266,12 +270,10 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     identity: singleValue(argv, "identity") as string | undefined,
     serverPort: singleValue(argv, "server-port") as number | undefined,
     serverUsername: singleValue(argv, "server-username") as string | undefined,
-    serverPassword: resolveAtSignRefs(
-      singleValue(argv, "server-password") as string | undefined,
-    ) as string | undefined,
-    serverPrivateKey: resolveAtSignRefs(
-      singleValue(argv, "server-private-key") as string | undefined,
-    ) as string | undefined,
+    serverPassword: singleValue(argv, "server-password") as string | undefined,
+    serverPrivateKey: singleValue(argv, "server-private-key") as
+      | string
+      | undefined,
     connectionTimeout: singleValue(argv, "connection-timeout") as
       | number
       | undefined,
@@ -411,11 +413,21 @@ export function createConnection(
   const base: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: server.hostname,
+      host: decodeUrlComponent(server.hostname, server),
       port: server.port ? Number(server.port) : undefined,
-      username: server.username || undefined,
-      password: server.password || undefined,
-      path: server.pathname || undefined,
+      username: server.username
+        ? decodeUrlComponent(server.username, server)
+        : undefined,
+      password: server.password
+        ? decodeUrlComponent(server.password, server)
+        : undefined,
+      // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
+      // unset, matching connectionFromURL so both URL-to-config builders agree
+      // on the same input rather than this twin pinning the filesystem root.
+      path:
+        server.pathname && server.pathname !== "/"
+          ? decodeUrlComponent(server.pathname, server)
+          : undefined,
     },
   };
 
@@ -703,9 +715,15 @@ export async function handler(argv: Arguments): Promise<void> {
   }
 
   let connection: ConnectionConfig;
+  let liveConnection: ConnectionConfig;
   let prepared: PreparedExchange;
   try {
     connection = createConnection(server, options);
+    // `connection` keeps any `@path` credential ref so finalizeBootstrap's save
+    // persists the reference, not the secret; `liveConnection` resolves it for
+    // the exchange itself. A missing or unreadable `@path` file is a UsageError
+    // here (exit 64), before any network activity.
+    liveConnection = resolveConnectionCredentials(connection);
     const identity = options.identity ?? userInfo().username;
     prepared = await prepareDataset(identity, input);
   } catch (err) {
@@ -723,7 +741,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
   let runResult: Awaited<ReturnType<typeof runProtocol>>;
   try {
-    // Cast: `connection` is `ConnectionConfig` (which includes the webrtc
+    // Cast: `liveConnection` is `ConnectionConfig` (which includes the webrtc
     // channel), so TypeScript cannot verify it fits `ProtocolConnectionConfig`
     // (constrained to sftp and filedrop). The double cast through `unknown` is
     // intentional; the channel guard inside `runProtocol` rejects unsupported
@@ -731,7 +749,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // auth: null is the explicit opt-out that tells runProtocol to proceed
     // without authentication and without a warning.
     runResult = await runProtocol(
-      connection as unknown as ProtocolConnectionConfig,
+      liveConnection as unknown as ProtocolConnectionConfig,
       null,
       prepared,
       output,
