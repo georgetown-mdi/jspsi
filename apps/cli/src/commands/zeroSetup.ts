@@ -34,6 +34,7 @@ import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
+import { decodeUrlComponent } from "../util/connectionUrl";
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -412,11 +413,21 @@ export function createConnection(
   const base: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: server.hostname,
+      host: decodeUrlComponent(server.hostname, server),
       port: server.port ? Number(server.port) : undefined,
-      username: server.username || undefined,
-      password: server.password || undefined,
-      path: server.pathname || undefined,
+      username: server.username
+        ? decodeUrlComponent(server.username, server)
+        : undefined,
+      password: server.password
+        ? decodeUrlComponent(server.password, server)
+        : undefined,
+      // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
+      // unset, matching connectionFromURL so both URL-to-config builders agree
+      // on the same input rather than this twin pinning the filesystem root.
+      path:
+        server.pathname && server.pathname !== "/"
+          ? decodeUrlComponent(server.pathname, server)
+          : undefined,
     },
   };
 

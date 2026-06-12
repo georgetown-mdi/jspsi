@@ -22,12 +22,12 @@ import {
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
-  redactUrlCredentials,
   runOnlineBootstrap,
   runOrExit,
   unsatisfiedLinkageFields,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
+import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
 
 // runOnlineBootstrap's config-persistence tests below drive its wiring without
@@ -108,6 +108,100 @@ test("connectionFromURL: an sftp URL with no host is a usage error", () => {
   expect(() => connectionFromURL(new URL("sftp:///drop"), {})).toThrow(
     /must include a host/,
   );
+});
+
+test("connectionFromURL: decodes a percent-encoded path", () => {
+  const conn = connectionFromURL(new URL("sftp://host/my%20drop"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  // The live SFTP layer opens the path literally, so it must be stored decoded:
+  // "/my drop", not the raw "/my%20drop" the URL parser keeps.
+  expect(conn.server.path).toBe("/my drop");
+});
+
+test("connectionFromURL: decodes percent-encoded credentials", () => {
+  const conn = connectionFromURL(new URL("sftp://us%20er:p%20w@host/drop"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.username).toBe("us er");
+  expect(conn.server.password).toBe("p w");
+});
+
+test("connectionFromURL: decodes a percent-encoded host", () => {
+  // sftp:// is a non-special scheme, so the WHATWG parser keeps the host opaque
+  // and percent-encoded (an internationalized domain becomes UTF-8 escapes);
+  // ssh2 needs the literal host, so it is decoded like the other components.
+  const conn = connectionFromURL(new URL("sftp://my%20server/drop"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.host).toBe("my server");
+});
+
+test("connectionFromURL: an encoded slash in the path decodes to a separator", () => {
+  // decodeURIComponent turns %2F into "/"; for an SFTP remote path that is the
+  // intended literal separator (a POSIX filename cannot contain a slash), and it
+  // keeps the builder and the live connection seeing the same path.
+  const conn = connectionFromURL(new URL("sftp://host/drop%2Fsub"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.path).toBe("/drop/sub");
+});
+
+test("connectionFromURL: a traversal-shaped path is decoded literally, not rejected here", () => {
+  // Encoded dot-dot segments joined by an encoded slash (%2e%2e%2f) survive the
+  // WHATWG parser's double-dot collapsing (which only fires on literal "/") and
+  // decode to a literal "..". The builder decodes faithfully and does NOT
+  // special-case traversal: the path reaches the live SFTP connection exactly as
+  // a hand-authored psilink.yaml with the same path would, keeping the builder,
+  // the on-disk config, and the connection in agreement. Any traversal defense
+  // belongs at the connection layer so it covers every config source, not just
+  // URLs -- deliberately out of scope here. This test pins that decision.
+  const conn = connectionFromURL(new URL("sftp://host/%2e%2e%2fetc"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.path).toBe("/../etc");
+});
+
+test("connectionFromURL: a malformed percent-escape is a redacted usage error", () => {
+  // A lone `%` makes decodeURIComponent throw a URIError; it must surface as a
+  // UsageError, not an unhandled error.
+  expect(() => connectionFromURL(new URL("sftp://host/bad%"), {})).toThrow(
+    UsageError,
+  );
+  // When the malformed component is the password, the message must route through
+  // redactUrlCredentials so the secret is never echoed.
+  let message = "";
+  try {
+    connectionFromURL(new URL("sftp://user:secret%@host/drop"), {});
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toMatch(/malformed percent-encoding/);
+  expect(message).not.toContain("secret");
+});
+
+test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL", () => {
+  // A pre-existing config holds decoded values (a hand-authored psilink.yaml, or
+  // a config the decoded builder saved earlier); the accept URL carries the same
+  // drop percent-encoded. Because the builder decodes, the reconcile compares
+  // decoded-vs-decoded and reports a clean match -- no false conflict, and
+  // nothing the one-time live exchange (which uses this same target) contradicts.
+  const target = connectionFromURL(
+    new URL("sftp://us%20er:p%20w@my%20server/my%20drop"),
+    {},
+  );
+  const existing: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "my server",
+      path: "/my drop",
+      username: "us er",
+      password: "p w",
+    },
+  };
+  const { conflicts, warnings } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 // --- redactUrlCredentials ----------------------------------------------------

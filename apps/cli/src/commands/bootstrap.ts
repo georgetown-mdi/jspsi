@@ -44,6 +44,10 @@ import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type AuthPersist } from "../protocol";
+import {
+  decodeUrlComponent,
+  redactUrlCredentials,
+} from "../util/connectionUrl";
 import { channelFromURL } from "./zeroSetup";
 import type { RecordOutput } from "../recordFile";
 
@@ -96,22 +100,6 @@ export function looksLikeUrl(value: string): boolean {
 }
 
 /**
- * Render a URL as a string with any embedded credentials (the userinfo
- * component) removed, for echoing in a user-facing hint. `URL.href` preserves an
- * embedded password, which must never reach the terminal, logs, or shell
- * history; the partner supplies their own credentials, so the username is
- * dropped too and only the locator remains.
- *
- * @internal exported for testing
- */
-export function redactUrlCredentials(url: URL): string {
-  const safe = new URL(url.href);
-  safe.username = "";
-  safe.password = "";
-  return safe.href;
-}
-
-/**
  * Build a connection config from a server URL, for the online invite/accept
  * paths. Mirrors the zero-setup mapping but is constrained to the channels the
  * CLI can actually run: a `webrtc` (ws/wss) URL or an unsupported scheme is a
@@ -161,14 +149,21 @@ export function connectionFromURL(
   const base: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: url.hostname,
+      host: decodeUrlComponent(url.hostname, url),
       port: url.port ? Number(url.port) : undefined,
-      username: url.username || undefined,
-      password: url.password || undefined,
+      username: url.username
+        ? decodeUrlComponent(url.username, url)
+        : undefined,
+      password: url.password
+        ? decodeUrlComponent(url.password, url)
+        : undefined,
       // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
       // unset so the server's default working directory is used, rather than
       // pinning it to the filesystem root.
-      path: url.pathname && url.pathname !== "/" ? url.pathname : undefined,
+      path:
+        url.pathname && url.pathname !== "/"
+          ? decodeUrlComponent(url.pathname, url)
+          : undefined,
     },
   };
   return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;
