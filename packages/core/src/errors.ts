@@ -211,9 +211,9 @@ export class ConnectionClosedError extends Error {
  * as `{ cause }`. As a `ConnectionError("transport")` it survives both intact and
  * arrives top-level, so the catch's echo gate (which must not write a marker in
  * response to a `PeerAbortError`, or the waiting party would reflect one back)
- * recognizes it, and the CLI's `instanceof UsageError` check classifies it exit
- * 69 (the exchange failed because the peer died), not the 64 reserved for local
- * misconfiguration.
+ * recognizes it, and -- because it is NOT a {@link UsageError} -- the CLI's
+ * `instanceof UsageError ? 64 : 69` exit-code check yields 69 (the exchange
+ * failed because the peer died), not the 64 reserved for local misconfiguration.
  *
  * It carries no partner-controlled bytes: the marker token never decodes to
  * display text and the message is fixed, so the display-boundary sanitizer is
