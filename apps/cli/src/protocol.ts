@@ -943,6 +943,20 @@ export async function runProtocol(
     // failed write leaves no marker and the peer falls back to the hedge -- and
     // placed before the signalReceived early-return so a fault that coincides
     // with a signal still defers to the signal (the gate's own check skips it).
+    //
+    // Deliberately fires for EVERY terminal post-arm fault, not only "pure"
+    // transport faults: a post-arm UsageError (an over-cap inbound frame, a
+    // hostile directory, a stalled server, a duplicate/malformed message) is just
+    // as terminal and non-retryable, and a peer is waiting on it, so it benefits
+    // from the same fast-fail. Those UsageErrors are peer- or environment-induced,
+    // not local misconfiguration -- the config-shaped UsageErrors (token expiry,
+    // bilateral mode mismatch, not-clean directory) are all detected pre-arm and
+    // so never reach here armed. The marker carries no cause, so signalling on a
+    // UsageError discloses nothing the peer's own view of the teardown would not;
+    // the local party still sees its specific error and exits 64, while the peer
+    // sees the cause-free "peer aborted" and exits 69. The pre-arm/post-arm line
+    // is principled, not incidental: only post-arm does a session key (to
+    // authenticate the marker) and a waiting post-handshake peer both exist.
     if (
       conn.abortArmed &&
       signalReceived === undefined &&
