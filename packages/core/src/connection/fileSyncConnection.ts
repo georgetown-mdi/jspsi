@@ -673,7 +673,13 @@ export interface FileTransportClient {
 interface AbortWriteInputs {
   path: string;
   finalName: string;
-  body: string;
+  // A Buffer, NOT a string: FileTransportClient.put treats a string src as a
+  // local file PATH to copy from (ssh2-sftp-client semantics; LocalFSClient
+  // rejects it outright), so every body this codebase writes -- hellos via
+  // serializeEnvelope, messages via Buffer.from(JSON...), the zero-length ack --
+  // is a Buffer. The marker body must follow suit or the write throws (and, being
+  // best-effort, is silently swallowed, leaving no marker).
+  body: Buffer;
   client: FileTransportClient;
 }
 
@@ -1096,11 +1102,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             finalName: `${this.id}${ABORT_SUFFIX}`,
             // The on-disk envelope: { version, token }. `version` is spelled out
             // to match the full-word control-body convention (locklessRendezvous
-            // / retainFiles). ~80 bytes serialized.
-            body: JSON.stringify({
-              version: 1,
-              token: toBase64Url(selfToken),
-            }),
+            // / retainFiles). ~80 bytes serialized. Buffer-wrapped (see
+            // AbortWriteInputs.body) so put() writes the bytes rather than
+            // treating the string as a source path.
+            body: Buffer.from(
+              JSON.stringify({
+                version: 1,
+                token: toBase64Url(selfToken),
+              }),
+              "utf-8",
+            ),
             client: this.rawClient,
           };
   }

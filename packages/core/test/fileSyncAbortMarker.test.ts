@@ -86,12 +86,17 @@ function makeAbortTestClient(opts?: {
       // The transport was ended while this write was in flight: a real
       // (SFTP/filedrop) transport would have destroyed the channel.
       if (ended) throw new Error(`${dest}: transport ended mid-write`);
-      // The abort marker body is a utf-8 string (like the hello write); the real
-      // adapters encode it. Mirror that here so the mock is faithful.
-      files.set(
-        dest,
-        typeof src === "string" ? Buffer.from(src) : (src as Buffer),
-      );
+      // Match the real adapter contract: put() takes a Buffer (or stream) body,
+      // never a string -- LocalFSClient throws on a string src and
+      // ssh2-sftp-client treats a string as a local file PATH to copy from. The
+      // mock must reject a string too, or it silently masks a marker-body
+      // regression that would be swallowed by the best-effort write in production.
+      if (typeof src === "string")
+        throw new Error(
+          `${dest}: put expects a Buffer body, not a string (real adapters ` +
+            `reject or misread a string src)`,
+        );
+      files.set(dest, src as Buffer);
       ops.push(`put-done:${baseName(dest)}`);
     },
     delete: async (path: string) => {
