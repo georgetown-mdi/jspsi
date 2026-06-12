@@ -114,6 +114,14 @@ let exitSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cmd-record-"));
   originalCwd = process.cwd();
+  // Run from the work dir so the asserted party's default record
+  // (`./psilink-record-*.json`, resolved against cwd) lands here and is cleaned
+  // up with it, while still passing no --record-file. Done here, not inline in
+  // each test, so the chdir is paired one-to-one with its afterEach restore and
+  // not interleaved with the test body. (cwd is process-global, so these tests
+  // are not safe to run concurrently within the file -- which the project's
+  // file-isolated, sequential-within-file runner does not do.)
+  process.chdir(work);
   // The handlers call process.exit on any failure (bad config, a stalled or
   // mismatched exchange); trap it so such a failure rejects the awaiting
   // parseAsync -- and thus fails the test with the exit code -- instead of
@@ -147,6 +155,21 @@ async function runCli(argv: string[]): Promise<void> {
     .parseAsync();
 }
 
+// Run both parties concurrently and wait for BOTH to settle (allSettled, not
+// Promise.all). On a failure this matters: Promise.all would reject the instant
+// one party threw and let the test body unwind -- and afterEach delete the work
+// dir and restore the exit spy -- while the other handler kept running in the
+// background, racing those teardown steps and turning its eventual process.exit
+// into an unhandled rejection (or, post-restore, a real worker-killing exit).
+// allSettled holds the test until neither handler is still running (each side is
+// bounded by --peer-timeout), then a rejection is rethrown so the test fails with
+// the handler's own error rather than an opaque background warning.
+async function runBoth(argvA: string[], argvB: string[]): Promise<void> {
+  const results = await Promise.allSettled([runCli(argvA), runCli(argvB)]);
+  const rejected = results.find((r) => r.status === "rejected");
+  if (rejected?.status === "rejected") throw rejected.reason;
+}
+
 // Locate the single default-path record the asserted party wrote in `dir`. The
 // default basename is shared by the record (`<base>-<stamp>.json`) and its
 // opening (`<base>-<stamp>.opening.json`), so exclude the opening to find the
@@ -160,7 +183,15 @@ function findDefaultRecord(dir: string): string {
         name.endsWith(".json") &&
         !name.endsWith(".opening.json"),
     );
-  expect(matches).toHaveLength(1);
+  // Explicit guard rather than `expect(...).toHaveLength(1)` then `matches[0]`:
+  // the throw is what makes the subsequent index access safe, so state it
+  // outright (and name what was actually found) instead of leaning on the
+  // assertion library's throw-on-failure as the implicit guard.
+  if (matches.length !== 1)
+    throw new Error(
+      `expected exactly one default record in ${dir}, found ${matches.length}` +
+        (matches.length > 0 ? `: ${matches.join(", ")}` : ""),
+    );
   return path.join(dir, matches[0]);
 }
 
@@ -219,13 +250,11 @@ test("exchange: a default-flag run writes the default audit record and opening f
   saveKeyFile(keyA, { sharedSecret: INITIAL_SECRET });
   saveKeyFile(keyB, { sharedSecret: INITIAL_SECRET });
 
-  // Run from the work dir so party A's default record (`./psilink-record-*.json`)
-  // lands here and is cleaned up with it, while still passing no --record-file.
-  process.chdir(work);
-  await Promise.all([
-    // Asserted party: NO record-related flags, so `--record` defaults to true and
-    // the record goes to the default path.
-    runCli([
+  // Asserted party runs with NO record-related flags, so `--record` defaults to
+  // true and the record goes to the default path; the peer runs the same command
+  // with --no-record so only the asserted party records.
+  await runBoth(
+    [
       "exchange",
       inputA,
       outA,
@@ -239,9 +268,8 @@ test("exchange: a default-flag run writes the default audit record and opening f
       String(PEER_TIMEOUT_SECONDS),
       "--log-level",
       "silent",
-    ]),
-    // Peer: same command, but --no-record so only the asserted party records.
-    runCli([
+    ],
+    [
       "exchange",
       inputB,
       outB,
@@ -256,11 +284,11 @@ test("exchange: a default-flag run writes the default audit record and opening f
       String(PEER_TIMEOUT_SECONDS),
       "--log-level",
       "silent",
-    ]),
-  ]);
+    ],
+  );
 
   expectDefaultRecord(work, "party-a", "party-b");
-}, 60_000);
+}, 90_000);
 
 // --- zero-setup ---------------------------------------------------------------
 
@@ -277,11 +305,10 @@ describe("zero-setup", () => {
 
     // Zero-setup needs no config or key: both parties meet at the same file://
     // URL with terms inferred from their inputs. No --save, so nothing is
-    // provisioned -- the only artifact is party A's default audit record.
-    process.chdir(work);
-    await Promise.all([
-      // Asserted party: NO record-related flags (and no --save).
-      runCli([
+    // provisioned -- the only artifact is the asserted party's default audit
+    // record. The peer runs --no-record so only the asserted party records.
+    await runBoth(
+      [
         url,
         inputA,
         outA,
@@ -291,9 +318,8 @@ describe("zero-setup", () => {
         String(PEER_TIMEOUT_SECONDS),
         "--log-level",
         "silent",
-      ]),
-      // Peer: --no-record so only the asserted party records.
-      runCli([
+      ],
+      [
         url,
         inputB,
         outB,
@@ -304,9 +330,9 @@ describe("zero-setup", () => {
         String(PEER_TIMEOUT_SECONDS),
         "--log-level",
         "silent",
-      ]),
-    ]);
+      ],
+    );
 
     expectDefaultRecord(work, "party-a", "party-b");
-  }, 60_000);
+  }, 90_000);
 });
