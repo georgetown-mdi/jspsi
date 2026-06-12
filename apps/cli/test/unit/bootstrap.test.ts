@@ -147,6 +147,21 @@ test("connectionFromURL: an encoded slash in the path decodes to a separator", (
   expect(conn.server.path).toBe("/drop/sub");
 });
 
+test("connectionFromURL: a traversal-shaped path is decoded literally, not rejected here", () => {
+  // Encoded dot-dot segments joined by an encoded slash (%2e%2e%2f) survive the
+  // WHATWG parser's double-dot collapsing (which only fires on literal "/") and
+  // decode to a literal "..". The builder decodes faithfully and does NOT
+  // special-case traversal: the path reaches the live SFTP connection exactly as
+  // a hand-authored psilink.yaml with the same path would, keeping the builder,
+  // the on-disk config, and the connection in agreement. Any traversal defense
+  // belongs at the connection layer so it covers every config source, not just
+  // URLs -- deliberately out of scope here. This test pins that decision.
+  const conn = connectionFromURL(new URL("sftp://host/%2e%2e%2fetc"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.path).toBe("/../etc");
+});
+
 test("connectionFromURL: a malformed percent-escape is a redacted usage error", () => {
   // A lone `%` makes decodeURIComponent throw a URIError; it must surface as a
   // UsageError, not an unhandled error.
