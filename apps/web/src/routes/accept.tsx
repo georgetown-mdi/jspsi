@@ -33,8 +33,6 @@ function Accept() {
   const [confirmedName, setConfirmedName] = useState<string>();
 
   useEffect(() => {
-    // Abort on unmount so a resolving decode does not setState after teardown.
-    const controller = new AbortController();
     // The token is the URL fragment minus the leading "#".
     const encoded = window.location.hash.replace(/^#/, "");
     if (!encoded) {
@@ -46,6 +44,8 @@ function Accept() {
       });
       return;
     }
+    // Abort on unmount so a resolving decode does not setState after teardown.
+    const controller = new AbortController();
     // Decode, check expiry, and require a WebRTC endpoint BEFORE any connect: the
     // exchange UI (which dials) renders only after consent on the "ready" branch,
     // so an expired or malformed invitation can never reach a rendezvous.

@@ -231,8 +231,10 @@ describe("accept screen: the consent gate", () => {
     expect(html).toContain(CONSENT_LABEL);
     expect(html).toContain(ACCEPT_BUTTON);
     // Without consent the affirmative action is disabled, so the exchange cannot
-    // be started.
-    expect(html).toMatch(/<button[^>]*disabled/);
+    // be started. Match the real `disabled` HTML attribute (whitespace-led, then
+    // `=`/`>`), not Mantine's `data-disabled`, so the assertion tracks the
+    // button's actual disabled state rather than a data attribute.
+    expect(html).toMatch(/<button[^>]*\sdisabled[=>]/);
   });
 
   test("enables the consent action once consented and named", () => {
@@ -242,7 +244,7 @@ describe("accept screen: the consent gate", () => {
       acceptorName: "Dana",
     });
     expect(html).toContain(ACCEPT_BUTTON);
-    expect(html).not.toMatch(/<button[^>]*disabled/);
+    expect(html).not.toMatch(/<button[^>]*\sdisabled[=>]/);
   });
 
   test("the exchange replaces the consent controls only once it is supplied", () => {
