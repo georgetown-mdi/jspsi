@@ -244,24 +244,44 @@ describe("authenticateExchange", () => {
   test("a secret that expires during the round-trip fails closed post-handshake as security", async () => {
     // Drive the post-handshake branch by faking only Date: start the clock just
     // before `expires`, run both ends over an in-memory pipe (real timers, so the
-    // handshake still completes), then advance past `expires` in a microtask
-    // while the round-trip is in flight. The post-handshake checks -- run only
-    // after both runKex calls resolve -- then see the secret as expired. (Mirrors
-    // the CLI's authenticateConnection round-trip test.)
+    // handshake still completes), and advance past `expires` while the round-trip
+    // is in flight. The post-handshake checks -- run only after each end's runKex
+    // resolves -- then see the secret as expired.
+    //
+    // The advance is synchronous, between starting the handshakes and awaiting
+    // them, rather than scheduled on a microtask tick. authenticateConnection's
+    // pre-handshake expiry check runs in its synchronous prologue (before its
+    // first await, and before any frame is delivered -- pipe deliveries are queued
+    // microtasks that only run during the await below), so by the time both
+    // authenticateExchange calls have returned their promises, both pre-checks
+    // have already passed at the pre-advance clock. Advancing here is therefore
+    // strictly after both pre-checks and strictly before both post-checks,
+    // independent of how many microtasks the kex spans -- whereas a single
+    // `Promise.resolve()` tick is not a reliable barrier and could land the
+    // advance after the post-check, silently passing on the wrong branch.
     const expires = "2030-01-01T00:00:00.000Z";
     vi.useFakeTimers({
       toFake: ["Date"],
       now: new Date("2029-12-31T23:59:59.000Z"),
     });
     const [connA, connB] = createMessagePipe();
-    const settled = Promise.allSettled([
-      authenticateExchange(connA, "initiator", SECRET_A, expires),
-      authenticateExchange(connB, "responder", SECRET_A, expires),
-    ]);
-    await Promise.resolve().then(() =>
-      vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
+    const pInitiator = authenticateExchange(
+      connA,
+      "initiator",
+      SECRET_A,
+      expires,
     );
-    const [initiator, responder] = await settled;
+    const pResponder = authenticateExchange(
+      connB,
+      "responder",
+      SECRET_A,
+      expires,
+    );
+    vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
+    const [initiator, responder] = await Promise.allSettled([
+      pInitiator,
+      pResponder,
+    ]);
 
     expect(initiator.status).toBe("rejected");
     expect(responder.status).toBe("rejected");
