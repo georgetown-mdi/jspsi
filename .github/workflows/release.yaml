@@ -24,10 +24,10 @@ jobs:
       # adapter couples to (unit tests run against mocks). The dedicated CLI
       # workflow (cli_build_and_test.yaml) runs this suite on pull requests as
       # the merge gate; here it is the ship-gate backstop, since publish needs
-      # this job. The suite is self-managing: a vitest globalSetup brings up and
-      # tears down its own atmoz/sftp container (generating host keys/.env on
-      # first run), and ubuntu-latest ships Docker Compose, so no extra setup
-      # step is needed.
+      # this job. The suite is self-managing: a vitest globalSetup starts the
+      # SFTP test server before the suite and stops it after, so no extra setup
+      # step is needed. The ship gate runs the in-process backend; the native
+      # sshd leg runs in the pull-request workflow.
       - name: Integration tests (CLI)
         run: npm run test:integration -w apps/cli
 
