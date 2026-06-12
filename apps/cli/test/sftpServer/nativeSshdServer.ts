@@ -17,6 +17,11 @@ const SSHD_CANDIDATES = ["/usr/sbin/sshd", "/usr/local/sbin/sshd"];
 
 const READY_TIMEOUT_MS = 20_000;
 const READY_PROBE_INTERVAL_MS = 100;
+// The per-probe socket timeout, kept well above the poll interval: on a loaded
+// CI runner the TCP handshake alone can consume the whole interval, so reusing
+// READY_PROBE_INTERVAL_MS as the socket timeout would leave no headroom for the
+// banner to arrive and report a false not-ready, burning a start attempt.
+const READY_PROBE_TIMEOUT_MS = 2_000;
 const START_ATTEMPTS = 3;
 
 async function resolveSshd(): Promise<string> {
@@ -114,110 +119,121 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
   const workDir = await fsp.mkdtemp(
     path.join(os.tmpdir(), "psilink-sftp-sshd-"),
   );
-  const backingDir = path.join(workDir, "srv");
-  await fsp.mkdir(backingDir, { recursive: true });
+  // Everything below creates files (keys, config) under workDir; on any failure
+  // before a server is handed back, the catch removes the dir so the generated
+  // private keys are not left on disk.
+  try {
+    const backingDir = path.join(workDir, "srv");
+    await fsp.mkdir(backingDir, { recursive: true });
 
-  const hostKeyPath = path.join(workDir, "ssh_host_ed25519_key");
-  const useraKeyPath = path.join(workDir, "usera_id_ed25519");
-  const userbKeyPath = path.join(workDir, "userb_id_ed25519");
-  await Promise.all([
-    keygen(hostKeyPath),
-    keygen(useraKeyPath),
-    keygen(userbKeyPath),
-  ]);
+    const hostKeyPath = path.join(workDir, "ssh_host_ed25519_key");
+    const useraKeyPath = path.join(workDir, "usera_id_ed25519");
+    const userbKeyPath = path.join(workDir, "userb_id_ed25519");
+    await Promise.all([
+      keygen(hostKeyPath),
+      keygen(useraKeyPath),
+      keygen(userbKeyPath),
+    ]);
 
-  const [useraPriv, userbPriv, useraPub, userbPub] = await Promise.all([
-    fsp.readFile(useraKeyPath, "utf8"),
-    fsp.readFile(userbKeyPath, "utf8"),
-    fsp.readFile(`${useraKeyPath}.pub`, "utf8"),
-    fsp.readFile(`${userbKeyPath}.pub`, "utf8"),
-  ]);
+    const [useraPriv, userbPriv, useraPub, userbPub] = await Promise.all([
+      fsp.readFile(useraKeyPath, "utf8"),
+      fsp.readFile(userbKeyPath, "utf8"),
+      fsp.readFile(`${useraKeyPath}.pub`, "utf8"),
+      fsp.readFile(`${userbKeyPath}.pub`, "utf8"),
+    ]);
 
-  const authorizedKeysPath = path.join(workDir, "authorized_keys");
-  await fsp.writeFile(authorizedKeysPath, `${useraPub}${userbPub}`, {
-    mode: 0o600,
-  });
-
-  // StrictModes off so sshd accepts key files under a world-readable temp dir;
-  // internal-sftp without ChrootDirectory (root-owned components are
-  // unattainable unprivileged) serves backingDir at its real absolute path.
-  const configBody = [
-    "ListenAddress 127.0.0.1",
-    `HostKey ${hostKeyPath}`,
-    "LogLevel ERROR",
-    "UsePAM no",
-    "PasswordAuthentication no",
-    "KbdInteractiveAuthentication no",
-    "PubkeyAuthentication yes",
-    `AuthorizedKeysFile ${authorizedKeysPath}`,
-    "Subsystem sftp internal-sftp",
-    "StrictModes no",
-    `AllowUsers ${osUser}`,
-    "",
-  ].join("\n");
-
-  const handle: SftpServerHandle = {
-    host: "127.0.0.1",
-    port: 0,
-    backingDir,
-    remoteRoot: backingDir,
-    usera: { username: osUser, privateKey: useraPriv },
-    userb: { username: osUser, privateKey: userbPriv },
-  };
-
-  let attempt: NativeAttempt | undefined;
-  let lastError = "";
-  for (let i = 0; i < START_ATTEMPTS; i += 1) {
-    const port = await freePort();
-    const configPath = path.join(workDir, `sshd_config_${port}`);
-    await fsp.writeFile(configPath, `Port ${port}\n${configBody}`);
-
-    const stderr = { value: "" };
-    // -D keeps sshd in the foreground (so the child is the server, not a daemon
-    // it forks off); -e logs to stderr, captured for diagnostics.
-    const child = spawn(sshd, ["-D", "-e", "-f", configPath], {
-      stdio: ["ignore", "ignore", "pipe"],
+    const authorizedKeysPath = path.join(workDir, "authorized_keys");
+    await fsp.writeFile(authorizedKeysPath, `${useraPub}${userbPub}`, {
+      mode: 0o600,
     });
-    child.stderr?.on("data", (chunk) => (stderr.value += String(chunk)));
 
-    const exited = { value: false };
-    child.once("exit", () => (exited.value = true));
+    // StrictModes off so sshd accepts key files under a world-readable temp dir;
+    // internal-sftp without ChrootDirectory (root-owned components are
+    // unattainable unprivileged) serves backingDir at its real absolute path.
+    const configBody = [
+      "ListenAddress 127.0.0.1",
+      `HostKey ${hostKeyPath}`,
+      "LogLevel ERROR",
+      "UsePAM no",
+      "PasswordAuthentication no",
+      "KbdInteractiveAuthentication no",
+      "PubkeyAuthentication yes",
+      `AuthorizedKeysFile ${authorizedKeysPath}`,
+      "Subsystem sftp internal-sftp",
+      // The adapter only ever opens the SFTP subsystem; ForceCommand pins every
+      // session to internal-sftp so an authenticated connection cannot open a shell
+      // or run an arbitrary command as the OS user.
+      "ForceCommand internal-sftp",
+      "StrictModes no",
+      `AllowUsers ${osUser}`,
+      "",
+    ].join("\n");
 
-    const ready = await waitForPortOrExit(port, exited);
-    if (ready) {
-      handle.port = port;
-      attempt = { child, stderr };
-      break;
+    const handle: SftpServerHandle = {
+      host: "127.0.0.1",
+      port: 0,
+      backingDir,
+      remoteRoot: backingDir,
+      usera: { username: osUser, privateKey: useraPriv },
+      userb: { username: osUser, privateKey: userbPriv },
+    };
+
+    let attempt: NativeAttempt | undefined;
+    let lastError = "";
+    for (let i = 0; i < START_ATTEMPTS; i += 1) {
+      const port = await freePort();
+      const configPath = path.join(workDir, `sshd_config_${port}`);
+      await fsp.writeFile(configPath, `Port ${port}\n${configBody}`);
+
+      const stderr = { value: "" };
+      // -D keeps sshd in the foreground (so the child is the server, not a daemon
+      // it forks off); -e logs to stderr, captured for diagnostics.
+      const child = spawn(sshd, ["-D", "-e", "-f", configPath], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      child.stderr?.on("data", (chunk) => (stderr.value += String(chunk)));
+
+      const exited = { value: false };
+      child.once("exit", () => (exited.value = true));
+
+      const ready = await waitForPortOrExit(port, exited);
+      if (ready) {
+        handle.port = port;
+        attempt = { child, stderr };
+        break;
+      }
+
+      child.kill("SIGKILL");
+      lastError = stderr.value.trim();
     }
 
-    child.kill("SIGKILL");
-    lastError = stderr.value.trim();
-  }
+    if (!attempt) {
+      throw new Error(
+        `Native sshd did not accept connections within ` +
+          `${READY_TIMEOUT_MS / 1000}s over ${START_ATTEMPTS} attempts.` +
+          (lastError ? `\nLast sshd stderr:\n${lastError}` : ""),
+      );
+    }
 
-  if (!attempt) {
+    const { child } = attempt;
+    return {
+      handle,
+      async stop() {
+        await new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null)
+            return resolve();
+          child.once("exit", () => resolve());
+          child.kill("SIGTERM");
+          // Hard stop if it ignores SIGTERM.
+          setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+        });
+        await fsp.rm(workDir, { recursive: true, force: true });
+      },
+    };
+  } catch (err) {
     await fsp.rm(workDir, { recursive: true, force: true });
-    throw new Error(
-      `Native sshd did not accept connections within ` +
-        `${READY_TIMEOUT_MS / 1000}s over ${START_ATTEMPTS} attempts.` +
-        (lastError ? `\nLast sshd stderr:\n${lastError}` : ""),
-    );
+    throw err;
   }
-
-  const { child } = attempt;
-  return {
-    handle,
-    async stop() {
-      await new Promise<void>((resolve) => {
-        if (child.exitCode !== null || child.signalCode !== null)
-          return resolve();
-        child.once("exit", () => resolve());
-        child.kill("SIGTERM");
-        // Hard stop if it ignores SIGTERM.
-        setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
-      });
-      await fsp.rm(workDir, { recursive: true, force: true });
-    },
-  };
 }
 
 // Resolve true once the port accepts, false if sshd exits first or the deadline
@@ -229,7 +245,7 @@ async function waitForPortOrExit(
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (exited.value) return false;
-    if (await sshBannerReady(port, READY_PROBE_INTERVAL_MS)) return true;
+    if (await sshBannerReady(port, READY_PROBE_TIMEOUT_MS)) return true;
     await new Promise((r) => setTimeout(r, READY_PROBE_INTERVAL_MS));
   }
   return false;

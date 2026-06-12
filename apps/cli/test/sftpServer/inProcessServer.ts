@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import ssh2 from "ssh2";
-import type { Attributes, SFTPWrapper } from "ssh2";
+import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 
 import type {
   InProcessSftpServer,
@@ -137,7 +137,19 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     userb: publicKeyOf(parties.userb.key),
   };
 
+  // Track live connections so stop() can force them closed: server.close() only
+  // fires its callback once every connection has ended, so a still-connected
+  // adapter at teardown would otherwise hang the runner indefinitely.
+  const clients = new Set<Connection>();
+
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
+    clients.add(client);
+    // A peer reset (the adversarial tests deliberately abort mid-stream) surfaces
+    // as an 'error' on the connection; without a listener it would crash the test
+    // process. There is nothing to recover here -- the connection is going away.
+    client.on("error", () => {});
+    client.on("close", () => clients.delete(client));
+
     client.on("authentication", (ctx) => {
       const party =
         ctx.username === "usera"
@@ -187,10 +199,23 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     });
   });
 
-  const port = await new Promise<number>((resolve) => {
-    server.listen(0, "127.0.0.1", function (this: typeof server) {
+  const port = await new Promise<number>((resolve, reject) => {
+    // Before the server is listening a 'listen' failure (e.g. the loopback port
+    // races away) arrives as an 'error' event; surface it as a rejected start
+    // rather than an uncaught crash.
+    const onStartupError = (err: Error): void => reject(err);
+    server.once("error", onStartupError);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", onStartupError);
+      // Past startup, swallow server-level errors so a late socket fault cannot
+      // crash the test process; the connection-level handler covers per-client.
+      server.on("error", () => {});
       const address = server.address();
-      resolve(typeof address === "object" && address ? address.port : 0);
+      if (typeof address !== "object" || !address) {
+        reject(new Error("in-process SFTP server reported no listen address"));
+        return;
+      }
+      resolve(address.port);
     });
   });
 
@@ -215,7 +240,24 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     handle,
     inject,
     async stop() {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // Force any still-open connection closed so server.close()'s callback can
+      // fire, then bound the wait so a connection that refuses to end cannot hang
+      // teardown forever.
+      for (const client of clients) {
+        try {
+          client.end();
+        } catch {
+          // already torn down
+        }
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 2_000);
+        timer.unref();
+        server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
       await fsp.rm(backingDir, { recursive: true, force: true });
     },
   };
@@ -266,12 +308,16 @@ function attachSftpHandlers(
     handleBuf.length === 4 ? handles.get(handleBuf.readUInt32BE(0)) : undefined;
 
   // Confine a client-supplied path to the backing dir: strip the virtual /psi
-  // root, then resolve the remainder under backingDir.
+  // root, then resolve the remainder under backingDir with chroot semantics --
+  // normalizing as an absolute path within the served root collapses any `..`
+  // segments against the root, so a path like `/psi/../../etc/passwd` can never
+  // escape backingDir (plain path.join would let it resolve outside).
   const resolve = (p: string): string => {
     const rel = p
       .replace(new RegExp(`^${REMOTE_ROOT}/?`), "")
       .replace(/^\/+/, "");
-    return path.join(backingDir, rel);
+    const confined = path.posix.normalize(`/${rel}`).replace(/^\/+/, "");
+    return path.join(backingDir, confined);
   };
 
   const injectRaw = (packet: Buffer): void => {
@@ -362,7 +408,16 @@ function attachSftpHandlers(
     if (inject.withholdOn === "OPENDIR") return;
     const dirPath = resolve(p);
     fs.readdir(dirPath, (err, names) => {
-      if (err) return sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+      // ENOENT is a missing path; anything else (notably ENOTDIR when a file is
+      // opened as a directory) is a generic failure, matching OpenSSH and the
+      // OPEN handler's own dispatch rather than masking it as NO_SUCH_FILE.
+      if (err)
+        return sftp.status(
+          reqid,
+          err.code === "ENOENT"
+            ? STATUS_CODE.NO_SUCH_FILE
+            : STATUS_CODE.FAILURE,
+        );
       sftp.handle(reqid, newHandle({ type: "dir", names, pos: 0, dirPath }));
     });
   });
@@ -393,7 +448,10 @@ function attachSftpHandlers(
     const slice = h.names.slice(h.pos, h.pos + batchSize);
     h.pos += slice.length;
     const entries = slice.map((name) => {
-      let st: { size: number };
+      // Carry the full stat shape attrsFromStat reads -- a `{ size: number }`
+      // annotation would narrow mode/atime/mtime away and force every entry to
+      // report Date.now() instead of its real timestamps.
+      let st: { size: number; mode?: number; atime?: Date; mtime?: Date };
       try {
         st = fs.statSync(path.join(h.dirPath, name));
       } catch {
@@ -408,15 +466,20 @@ function attachSftpHandlers(
     sftp.name(reqid, entries);
   });
 
-  const onStat = (reqid: number, p: string) => {
-    if (inject.withholdOn === "STAT") return;
-    fs.stat(resolve(p), (err, st) => {
-      if (err) return sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
-      sftp.attrs(reqid, attrsFromStat(st));
-    });
-  };
-  sftp.on("STAT", onStat);
-  sftp.on("LSTAT", onStat);
+  // STAT follows symlinks; LSTAT must not (SFTP spec). No symlinks exist in the
+  // backing dir today, but keeping the contract honest avoids a future test that
+  // plants one silently getting dereferenced.
+  const onStat =
+    (op: "STAT" | "LSTAT", statFn: typeof fs.stat) =>
+    (reqid: number, p: string) => {
+      if (inject.withholdOn === op) return;
+      statFn(resolve(p), (err, st) => {
+        if (err) return sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+        sftp.attrs(reqid, attrsFromStat(st));
+      });
+    };
+  sftp.on("STAT", onStat("STAT", fs.stat));
+  sftp.on("LSTAT", onStat("LSTAT", fs.lstat));
 
   sftp.on("REMOVE", (reqid: number, p: string) => {
     if (inject.withholdOn === "REMOVE") return;
