@@ -92,8 +92,18 @@ export class LocalFSClient implements FileTransportClient {
       // A TimeoutError means the mount did not answer within the budget; a
       // retry cannot un-stick it and would only stack another stalled worker,
       // so it is terminal. Every other (fast) error is the transient the retry
-      // budget exists for.
-      (err) => !(err instanceof TimeoutError),
+      // budget exists for. The brand-on-name fallback keeps a timeout terminal
+      // even if @psilink/core were ever loaded as two copies in one process (a
+      // future dual-package split), where instanceof across the copies would
+      // silently fail and otherwise re-enable the very worker-stacking retry
+      // this guards against. No non-timeout error this path sees carries that
+      // name (the wrapped access failure below is a fresh Error), so the
+      // fallback cannot make a transient error wrongly terminal.
+      (err) =>
+        !(
+          err instanceof TimeoutError ||
+          (err instanceof Error && err.name === "TimeoutError")
+        ),
     );
   }
 
