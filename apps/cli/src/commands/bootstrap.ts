@@ -112,6 +112,29 @@ export function redactUrlCredentials(url: URL): string {
 }
 
 /**
+ * Decode a percent-encoded URL component (path, username, or password) to the
+ * literal value the SFTP layer expects. The WHATWG `URL` parser keeps these
+ * components percent-encoded, but ssh2/ssh2-sftp-client consume them verbatim,
+ * so every URL-to-config builder must decode before storing -- otherwise a path
+ * `/my%20drop` opens a directory literally named `my%20drop` and a password
+ * `p%20w` is sent to SSH as the literal string `p%20w`. A malformed escape (e.g.
+ * a lone `%`) makes `decodeURIComponent` throw a `URIError`; surface it as a
+ * `UsageError`, routed through `redactUrlCredentials` since the offending
+ * component may be the password and must not be echoed.
+ *
+ * @internal exported for testing
+ */
+export function decodeUrlComponent(value: string, url: URL): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new UsageError(
+      `malformed percent-encoding in URL: ${redactUrlCredentials(url)}`,
+    );
+  }
+}
+
+/**
  * Build a connection config from a server URL, for the online invite/accept
  * paths. Mirrors the zero-setup mapping but is constrained to the channels the
  * CLI can actually run: a `webrtc` (ws/wss) URL or an unsupported scheme is a
@@ -163,12 +186,19 @@ export function connectionFromURL(
     server: {
       host: url.hostname,
       port: url.port ? Number(url.port) : undefined,
-      username: url.username || undefined,
-      password: url.password || undefined,
+      username: url.username
+        ? decodeUrlComponent(url.username, url)
+        : undefined,
+      password: url.password
+        ? decodeUrlComponent(url.password, url)
+        : undefined,
       // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
       // unset so the server's default working directory is used, rather than
       // pinning it to the filesystem root.
-      path: url.pathname && url.pathname !== "/" ? url.pathname : undefined,
+      path:
+        url.pathname && url.pathname !== "/"
+          ? decodeUrlComponent(url.pathname, url)
+          : undefined,
     },
   };
   return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;

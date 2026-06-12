@@ -110,6 +110,65 @@ test("connectionFromURL: an sftp URL with no host is a usage error", () => {
   );
 });
 
+test("connectionFromURL: decodes a percent-encoded path", () => {
+  const conn = connectionFromURL(new URL("sftp://host/my%20drop"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  // The live SFTP layer opens the path literally, so it must be stored decoded:
+  // "/my drop", not the raw "/my%20drop" the URL parser keeps.
+  expect(conn.server.path).toBe("/my drop");
+});
+
+test("connectionFromURL: decodes percent-encoded credentials", () => {
+  const conn = connectionFromURL(new URL("sftp://us%20er:p%20w@host/drop"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.username).toBe("us er");
+  expect(conn.server.password).toBe("p w");
+});
+
+test("connectionFromURL: a malformed percent-escape is a redacted usage error", () => {
+  // A lone `%` makes decodeURIComponent throw a URIError; it must surface as a
+  // UsageError, not an unhandled error.
+  expect(() => connectionFromURL(new URL("sftp://host/bad%"), {})).toThrow(
+    UsageError,
+  );
+  // When the malformed component is the password, the message must route through
+  // redactUrlCredentials so the secret is never echoed.
+  let message = "";
+  try {
+    connectionFromURL(new URL("sftp://user:secret%@host/drop"), {});
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toMatch(/malformed percent-encoding/);
+  expect(message).not.toContain("secret");
+});
+
+test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL", () => {
+  // A pre-existing config holds decoded values (a hand-authored psilink.yaml, or
+  // a config the decoded builder saved earlier); the accept URL carries the same
+  // drop percent-encoded. Because the builder decodes, the reconcile compares
+  // decoded-vs-decoded and reports a clean match -- no false conflict, and
+  // nothing the one-time live exchange (which uses this same target) contradicts.
+  const target = connectionFromURL(
+    new URL("sftp://us%20er:p%20w@host/my%20drop"),
+    {},
+  );
+  const existing: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "host",
+      path: "/my drop",
+      username: "us er",
+      password: "p w",
+    },
+  };
+  const { conflicts, warnings } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
 // --- redactUrlCredentials ----------------------------------------------------
 
 test("redactUrlCredentials: strips an embedded password and username", () => {
