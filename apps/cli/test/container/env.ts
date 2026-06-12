@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 // resolution in the sibling integration tests.
 const ENV_FILE = fileURLToPath(new URL("./.env", import.meta.url));
 
+/** @internal exported for testing */
 export function sftpPort(): number {
   if (process.env.SFTP_PORT) return Number(process.env.SFTP_PORT);
   try {
@@ -36,6 +37,7 @@ export function sftpPort(): number {
 // CI runner enforces it. 0777 lets any uid operate; the protocol only creates,
 // reads, renames, and deletes whole files (never modifies another uid's file in
 // place), so directory-level write permission is sufficient.
+/** @internal exported for testing */
 export async function ensureServerDir(dir: string): Promise<void> {
   await fsp.mkdir(dir, { recursive: true });
   await fsp.chmod(dir, 0o777);
