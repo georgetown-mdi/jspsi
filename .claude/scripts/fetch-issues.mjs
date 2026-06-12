@@ -43,7 +43,7 @@ import { fetchItems, toNumericId } from "./lib/projectItems.mjs";
 // board's primary triage axes, so they lead.
 const LEAD_FIELDS = ["Status", "Epic", "Implementation Order"];
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   // Leading option flags, in any order: --json, --out-dir DIR.
   let asJson = false;
@@ -80,7 +80,7 @@ function main() {
     process.exit(2);
   }
 
-  const items = fetchItems(projectNumber, numericIds);
+  const items = await fetchItems(projectNumber, numericIds);
 
   if (asJson) {
     // Compact, not pretty-printed: --json feeds programmatic/agent consumers,
@@ -132,4 +132,7 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});

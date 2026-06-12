@@ -27,7 +27,7 @@
 
 import { fetchAllItems } from "./lib/projectItems.mjs";
 
-function main() {
+async function main() {
   // A whole-board dump is routinely piped to `head`/`grep`, which closes the
   // read end early; exit quietly on the resulting EPIPE instead of crashing.
   process.stdout.on("error", (err) => {
@@ -67,7 +67,7 @@ function main() {
   }
 
   const wanted = new Set(statuses);
-  const items = fetchAllItems(projectNumber)
+  const items = (await fetchAllItems(projectNumber))
     .map((item) => ({
       id: item.id,
       nodeId: item.nodeId,
@@ -104,4 +104,7 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});

@@ -39,7 +39,7 @@ function byOrder(a, b) {
   return oa - ob;
 }
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   let asJson = false;
   let i = 0;
@@ -59,7 +59,7 @@ function main() {
   }
 
   const wanted = epicName.toLowerCase();
-  const matches = fetchAllItems(projectNumber)
+  const matches = (await fetchAllItems(projectNumber))
     .filter((item) => (item.fields.Epic ?? "").toLowerCase() === wanted)
     .map((item) => ({
       id: item.id,
@@ -91,4 +91,7 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});

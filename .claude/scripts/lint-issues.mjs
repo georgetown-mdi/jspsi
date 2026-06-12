@@ -183,7 +183,7 @@ function checkOpenQuestions(body) {
 
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   const strict = argv.includes("--strict");
   const positional = argv.filter((a) => a !== "--strict");
@@ -203,7 +203,7 @@ function main() {
     process.exit(2);
   }
 
-  const items = fetchItems(projectNumber, numericIds);
+  const items = await fetchItems(projectNumber, numericIds);
   const inSet = new Set(numericIds.map(String));
 
   // First pass: collect every distinct referenced 9-digit ID across all bodies
@@ -221,7 +221,10 @@ function main() {
   // ones in the set are known-good by construction.
   const resolved = new Map(); // string id -> { type, title } | null (unresolved)
   if (outsideSetIds.length > 0) {
-    for (const r of fetchItems(projectNumber, outsideSetIds.map(Number))) {
+    for (const r of await fetchItems(
+      projectNumber,
+      outsideSetIds.map(Number),
+    )) {
       resolved.set(
         String(r.id),
         r.type === "missing" ? null : { type: r.type, title: r.title },
@@ -324,4 +327,7 @@ function main() {
   if (strict && totalErrors > 0) process.exit(1);
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});

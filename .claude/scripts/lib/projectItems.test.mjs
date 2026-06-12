@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fetchAllItems,
+  githubToken,
   numericIdFromNodeId,
   PAGE_SIZE,
   pvtiNodeId,
@@ -64,7 +65,7 @@ function pagedRunQuery(nodes, pageSize) {
 }
 
 describe("fetchAllItems pagination", () => {
-  it("returns every item across more than one page (past the default page size)", () => {
+  it("returns every item across more than one page (past the default page size)", async () => {
     const total = PAGE_SIZE + 50; // 150: forces a second page beyond the 100 cap
     const nodes = Array.from({ length: total }, (_, idx) =>
       fakeNode(9, 100000000 + idx, {
@@ -75,7 +76,7 @@ describe("fetchAllItems pagination", () => {
       }),
     );
 
-    const result = fetchAllItems(9, {
+    const result = await fetchAllItems(9, {
       runQuery: pagedRunQuery(nodes, PAGE_SIZE),
     });
 
@@ -96,7 +97,7 @@ describe("fetchAllItems pagination", () => {
     });
   });
 
-  it("stops after a single page when the board fits in one", () => {
+  it("stops after a single page when the board fits in one", async () => {
     const nodes = [
       fakeNode(10, 199240250, {
         status: "Todo",
@@ -105,7 +106,7 @@ describe("fetchAllItems pagination", () => {
         title: "Only item",
       }),
     ];
-    const result = fetchAllItems(10, {
+    const result = await fetchAllItems(10, {
       runQuery: pagedRunQuery(nodes, PAGE_SIZE),
     });
     expect(result).toHaveLength(1);
@@ -127,5 +128,41 @@ describe("toNumericId", () => {
 
   it("returns NaN for an unparseable numeric argument (so Number.isInteger rejects it)", () => {
     expect(toNumericId("not-a-number")).toBeNaN();
+  });
+});
+
+describe("githubToken", () => {
+  it("prefers GH_TOKEN, then GITHUB_TOKEN, then the stored credential", () => {
+    const stored = () => "stored-token";
+    expect(
+      githubToken({
+        env: { GH_TOKEN: "gh-token", GITHUB_TOKEN: "github-token" },
+        readStoredToken: stored,
+      }),
+    ).toBe("gh-token");
+    expect(
+      githubToken({
+        env: { GITHUB_TOKEN: "github-token" },
+        readStoredToken: stored,
+      }),
+    ).toBe("github-token");
+    // gh auth token prints a trailing newline; it must be trimmed off.
+    expect(
+      githubToken({ env: {}, readStoredToken: () => "stored-token\n" }),
+    ).toBe("stored-token");
+  });
+
+  it("throws (rather than returning empty) when no token is available", () => {
+    expect(() =>
+      githubToken({
+        env: {},
+        readStoredToken: () => {
+          throw new Error("gh: not logged in");
+        },
+      }),
+    ).toThrow(/no GitHub token/);
+    expect(() => githubToken({ env: {}, readStoredToken: () => "" })).toThrow(
+      /no GitHub token/,
+    );
   });
 });

@@ -22,12 +22,95 @@ export const PROJECT_PREFIXES = {
 /** Owner login for both psilink project boards. */
 export const OWNER = "georgetown-mdi";
 
-/** Run gh with the given argv and return stdout as a string. */
+const GRAPHQL_ENDPOINT = "https://api.github.com/graphql";
+// GitHub rejects API requests without a User-Agent; identify these scripts.
+const USER_AGENT = "psilink-board-scripts";
+
+/**
+ * Run gh with the given argv and return stdout as a string. Network calls go
+ * through `graphql` (Node fetch) now, not gh -- gh (a Go binary) verifies TLS
+ * via the macOS `trustd` Mach service, which the command sandbox blocks, so its
+ * network subcommands fail in-sandbox. gh is kept only for `gh auth token`,
+ * which is network-free (it just reads stored credentials) and so works in-sandbox.
+ */
 export function gh(args) {
   return execFileSync("gh", args, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   });
+}
+
+/**
+ * Resolve a GitHub token without a network round-trip, in precedence order:
+ * `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token` (which reads the stored
+ * credential). Env-first matches gh's own precedence and is friendlier to CI /
+ * headless. The token is returned for use only as a bearer header -- never log
+ * it. Exported with injectable `env` / `readStoredToken` for tests; production
+ * callers pass no argument.
+ * @internal
+ */
+export function githubToken({
+  env = process.env,
+  readStoredToken = () => gh(["auth", "token"]),
+} = {}) {
+  const fromEnv = env.GH_TOKEN || env.GITHUB_TOKEN;
+  if (fromEnv) return fromEnv.trim();
+  let stored;
+  try {
+    stored = readStoredToken().trim();
+  } catch {
+    stored = "";
+  }
+  if (!stored) {
+    throw new Error(
+      "no GitHub token: set GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`",
+    );
+  }
+  return stored;
+}
+
+/**
+ * POST a GraphQL query or mutation to the GitHub API over Node `fetch`, returning
+ * the parsed `{ data, errors }` body. Using Node rather than `gh api graphql`
+ * lets these scripts run inside the command sandbox: Node verifies TLS against
+ * its own bundled CA store instead of the sandbox-blocked `trustd`. (The sandbox
+ * also forces egress through an injected HTTPS proxy that Node's fetch ignores by
+ * default; running with NODE_USE_ENV_PROXY=1 in the environment -- e.g. via
+ * Claude Code's local settings -- makes fetch honor it.)
+ *
+ * A response is returned whenever it carries `data` -- even an HTTP 200 that also
+ * has `errors`, which is how GraphQL reports a partial result (e.g. one NOT_FOUND
+ * node in a batch). This preserves the "one bad ID does not sink the whole fetch"
+ * behavior that `fetchItems` relies on. A response with no usable `data` (auth
+ * failure, rate limit, malformed body) throws. `variables` is omitted from the
+ * request body when not given.
+ */
+export async function graphql(query, variables) {
+  const res = await fetch(GRAPHQL_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${githubToken()}`,
+      "Content-Type": "application/json",
+      "User-Agent": USER_AGENT,
+    },
+    body: JSON.stringify(variables ? { query, variables } : { query }),
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `GitHub GraphQL returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
+  if (body.data == null) {
+    const detail = body.errors
+      ? JSON.stringify(body.errors)
+      : text.slice(0, 300);
+    throw new Error(`GitHub GraphQL error (HTTP ${res.status}): ${detail}`);
+  }
+  return body;
 }
 
 /** Derive an item's PVTI_ global node ID from its project number and numeric ID. */
@@ -126,7 +209,7 @@ export function extractFields(fieldValues) {
  * the aliased multi-fetch has one implementation. The id/type/title/body/url
  * properties are stable; fields was added later and is purely additive.
  */
-export function fetchItems(projectNumber, numericIds) {
+export async function fetchItems(projectNumber, numericIds) {
   const fields =
     "... on ProjectV2Item { databaseId " +
     FIELD_VALUES_FRAGMENT +
@@ -141,17 +224,10 @@ export function fetchItems(projectNumber, numericIds) {
     .join("\n");
   const query = `{ ${aliases} }`;
 
-  // gh exits non-zero if any aliased node is NOT_FOUND, but still prints the
-  // JSON body (data for the found nodes, errors for the missing ones). Recover
-  // it so one bad ID in a batch does not sink the whole fetch.
-  let raw;
-  try {
-    raw = gh(["api", "graphql", "-f", `query=${query}`]);
-  } catch (e) {
-    if (!e.stdout) throw e;
-    raw = e.stdout;
-  }
-  const data = JSON.parse(raw).data;
+  // GraphQL returns HTTP 200 with both `data` (the found nodes) and `errors`
+  // (NOT_FOUND for the missing ones), so one bad ID in a batch does not sink the
+  // whole fetch -- the missing aliases simply come back as null nodes below.
+  const data = (await graphql(query)).data;
 
   return numericIds.map((id, i) => {
     const node = data[`i${i}`];
@@ -183,12 +259,12 @@ export function fetchItems(projectNumber, numericIds) {
 export const PAGE_SIZE = 100;
 
 /**
- * Default GraphQL runner for fetchAllItems: run the query through gh and return
+ * Default GraphQL runner for fetchAllItems: run the query via fetch and return
  * its `data`. Split out as the injection point so tests can drive fetchAllItems
  * with synthetic pages instead of a live board.
  */
-function runQueryViaGh(query) {
-  return JSON.parse(gh(["api", "graphql", "-f", `query=${query}`])).data;
+async function runQueryViaFetch(query) {
+  return (await graphql(query)).data;
 }
 
 /**
@@ -200,11 +276,11 @@ function runQueryViaGh(query) {
  * false, so no item is dropped however large the board grows -- the silent
  * truncation a single `gh project item-list --limit N` would cause is impossible
  * here. Shared by list-epic.mjs (filter to one Epic) and list-issues.mjs (whole
- * board). `runQuery(query) -> data` is injectable for tests; it defaults to gh.
+ * board). `runQuery(query) -> data` is injectable for tests; it defaults to fetch.
  */
-export function fetchAllItems(
+export async function fetchAllItems(
   projectNumber,
-  { runQuery = runQueryViaGh } = {},
+  { runQuery = runQueryViaFetch } = {},
 ) {
   const nodes = [];
   let cursor = null;
@@ -214,7 +290,7 @@ export function fetchAllItems(
     // to escape. Omit `after` entirely on the first page.
     const after = cursor === null ? "" : `, after: "${cursor}"`;
     const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { items(first: ${PAGE_SIZE}${after}) { pageInfo { hasNextPage endCursor } nodes { id ${FIELD_VALUES_FRAGMENT} content { __typename ... on DraftIssue { title } ... on Issue { title } } } } } } }`;
-    const data = runQuery(query);
+    const data = await runQuery(query);
     const project = data?.organization?.projectV2;
     if (!project) {
       throw new Error(
