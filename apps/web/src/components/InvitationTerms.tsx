@@ -120,7 +120,13 @@ export function InvitationTerms({
 
       {summary.expires !== undefined && (
         <Text size="xs" c="dimmed">
-          This invitation expires {new Date(summary.expires).toLocaleString()}
+          {/* Label the time zone: the expiry is one instant, but inviter and
+              acceptor may be in different zones, so a bare local wall-clock time
+              would read as a different deadline on each end. */}
+          This invitation expires{" "}
+          {new Date(summary.expires).toLocaleString(undefined, {
+            timeZoneName: "short",
+          })}
         </Text>
       )}
     </Stack>

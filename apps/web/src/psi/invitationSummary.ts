@@ -39,12 +39,15 @@ export interface InvitationPayloadSummary {
 
 /**
  * A display-ready, injection-safe view of the inviter's linkage terms, derived
- * from a decoded {@link InvitationToken}. Every partner-controlled free-text
- * value (the self-asserted identity, linkage-key names, legal-agreement text,
- * payload column names) is passed through {@link sanitizeForDisplay} here, at
- * the one boundary, so renderers can show these fields without each re-deriving
- * the escaping -- React's JSX escaping covers HTML metacharacters but not the
- * control, bidi, zero-width, or homoglyph characters this neutralizes.
+ * from a decoded {@link InvitationToken}. Every partner-controlled value (the
+ * self-asserted identity, linkage-key names, legal-agreement text, payload
+ * column names, and the schema-validated date fields) is passed through
+ * {@link sanitizeForDisplay} here, at the one boundary, so renderers can show
+ * these fields without each re-deriving the escaping -- React's JSX escaping
+ * covers HTML metacharacters but not the control, bidi, zero-width, or homoglyph
+ * characters this neutralizes. The dates cannot carry such characters today (the
+ * `z.iso` schemas reject them), but routing them through the same boundary keeps
+ * the contract uniform rather than depending on that validation staying in place.
  */
 export interface InvitationSummary {
   /** The inviter's self-asserted identity, sanitized for display. */
@@ -97,7 +100,7 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     summary.legalAgreement = {
       reference: sanitizeForDisplay(terms.legalAgreement.reference),
       purpose: sanitizeForDisplay(terms.legalAgreement.purpose),
-      expirationDate: terms.legalAgreement.expirationDate,
+      expirationDate: sanitizeForDisplay(terms.legalAgreement.expirationDate),
     };
   }
 
@@ -110,7 +113,8 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     };
   }
 
-  if (token.expires !== undefined) summary.expires = token.expires;
+  if (token.expires !== undefined)
+    summary.expires = sanitizeForDisplay(token.expires);
 
   return summary;
 }
