@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { retryPromise, withTimeout } from "@psilink/core";
+import { retryPromise, withTimeout, TimeoutError } from "@psilink/core";
 import type {
   FileInfo,
   FileTransportClient,
@@ -31,9 +31,14 @@ import {
 export class LocalFSClient implements FileTransportClient {
   /**
    * Verifies read/write access to the directory specified by `options.path`.
-   * Retries up to `options.maxReconnectAttempts` times (default: 3) with a
-   * hard-coded 1-second delay between attempts, and enforces
-   * `options.connectTimeoutMs` (default: 30s) per attempt.
+   * Enforces `options.connectTimeoutMs` (default: 30s) per attempt. A fast
+   * transient failure (e.g. the share or its permissions still settling) is
+   * retried up to `options.maxReconnectAttempts` times (default: 3) with a
+   * hard-coded 1-second delay; a per-attempt TIMEOUT is terminal and is NOT
+   * retried, because the abandoned `fs.access` keeps its thread-pool worker
+   * until the OS releases the syscall and a retry cannot un-stick it -- so
+   * retrying would only strand a second stalled worker. This bounds concurrent
+   * stalled workers to one.
    */
   async connect(options: Record<string, unknown>): Promise<void> {
     const dirPath = options["path"];
@@ -49,15 +54,25 @@ export class LocalFSClient implements FileTransportClient {
     if (maxReconnects < 0)
       throw new Error("maxReconnectAttempts must be non-negative");
 
-    // fs.access on a stalled NFS/CIFS hard mount blocks a libuv thread
-    // pool worker, not the event loop, so setTimeout fires normally and
-    // this race genuinely enforces the timeout rather than waiting for the
-    // OS-level retry window (which can be several minutes).
-    // Known limitation: when the timeout fires, the abandoned fs.access()
-    // promise continues running in the background until the OS releases
-    // the thread. The proper fix — threading an AbortSignal through
-    // FileTransportClient.connect so LocalFSClient can pass it to
-    // fs.access — is an open task.
+    // fs.access on a stalled NFS/CIFS hard mount blocks a libuv thread-pool
+    // worker, not the event loop, so setTimeout fires normally and this race
+    // enforces the per-attempt deadline rather than waiting out the OS-level
+    // retry window (which can be several minutes).
+    //
+    // A timed-out attempt is TERMINAL -- the shouldRetry predicate below stops
+    // the retry loop on a TimeoutError. The abandoned fs.access keeps its
+    // thread-pool worker until the OS releases the syscall, and nothing
+    // in-process can cancel an already-dispatched blocking syscall: fs.access
+    // does not honor an AbortSignal, and libuv's uv_cancel only drops
+    // still-queued work, never work a worker is already executing. So retrying
+    // a hang cannot succeed where the first attempt timed out and would only
+    // strand a second stalled worker (and, across maxReconnects, more), risking
+    // exhaustion of the default 4-thread pool. Retries are therefore reserved
+    // for a mount that ANSWERS with a fast transient error (EACCES/ENOENT while
+    // a share or its permissions are still settling); connectTimeoutMs is the
+    // per-attempt wait budget, raised for a legitimately slow mount. This
+    // bounds concurrent stalled workers to one and fails a dead mount in ~one
+    // timeout window instead of maxReconnects of them.
     await retryPromise(
       () =>
         withTimeout(
@@ -74,6 +89,11 @@ export class LocalFSClient implements FileTransportClient {
         ),
       maxReconnects,
       1_000,
+      // A TimeoutError means the mount did not answer within the budget; a
+      // retry cannot un-stick it and would only stack another stalled worker,
+      // so it is terminal. Every other (fast) error is the transient the retry
+      // budget exists for.
+      (err) => !(err instanceof TimeoutError),
     );
   }
 
