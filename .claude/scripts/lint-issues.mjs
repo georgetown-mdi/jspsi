@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 //
-// Lint GitHub Projects v2 draft-issue bodies by their numeric item IDs (the
-// `?itemId=N` value from the project web UI URL). Companion to fetch-issues.mjs
-// and edit-issue.mjs.
+// Lint GitHub Projects v2 draft-issue bodies, addressed by their numeric item ID
+// (the `?itemId=N` value from the project web UI URL) or, equivalently, their
+// `PVTI_...` global node ID -- the two forms mix freely, matching fetch-issues.mjs
+// and edit-issue.mjs. Companion to fetch-issues.mjs and edit-issue.mjs.
 //
 // Draft bodies are written and revised by humans and language models that do not
 // share a stable address space: an LLM may cite an opaque GraphQL node ID it
@@ -13,7 +14,7 @@
 // trusts them.
 //
 // Usage:
-//   node lint-issues.mjs <project-number> <itemId> [itemId...] [--strict]
+//   node lint-issues.mjs <project-number> <itemId|PVTI_...> [more...] [--strict]
 //
 // Default exit is 0. With --strict, exit non-zero if any error-severity finding
 // exists, so the linter can gate a workflow.
@@ -21,7 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchItems } from "./lib/projectItems.mjs";
+import { fetchItems, toNumericId } from "./lib/projectItems.mjs";
 
 // Repo root: line-anchor staleness is checked against files here. This file
 // lives at <root>/.claude/scripts/lint-issues.mjs, so the working tree root is
@@ -182,25 +183,30 @@ function checkOpenQuestions(body) {
 
 const SEVERITY_RANK = { error: 0, warning: 1, info: 2 };
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   const strict = argv.includes("--strict");
   const positional = argv.filter((a) => a !== "--strict");
 
   const projectNumber = Number(positional[0]);
-  const numericIds = positional.slice(1).map(Number);
+  // Each item argument is a numeric ID or a PVTI_ node ID; resolve both to
+  // numeric (rejecting a node ID from another project) so a node ID lints the
+  // same item as its numeric form.
+  const numericIds = positional
+    .slice(1)
+    .map((arg) => toNumericId(arg, projectNumber));
   if (
     !Number.isInteger(projectNumber) ||
     numericIds.length === 0 ||
     numericIds.some((n) => !Number.isInteger(n))
   ) {
     process.stderr.write(
-      "Usage: node lint-issues.mjs <project-number> <itemId> [itemId...] [--strict]\n",
+      "Usage: node lint-issues.mjs <project-number> <itemId|PVTI_...> [more...] [--strict]\n",
     );
     process.exit(2);
   }
 
-  const items = fetchItems(projectNumber, numericIds);
+  const items = await fetchItems(projectNumber, numericIds);
   const inSet = new Set(numericIds.map(String));
 
   // First pass: collect every distinct referenced 9-digit ID across all bodies
@@ -218,7 +224,10 @@ function main() {
   // ones in the set are known-good by construction.
   const resolved = new Map(); // string id -> { type, title } | null (unresolved)
   if (outsideSetIds.length > 0) {
-    for (const r of fetchItems(projectNumber, outsideSetIds.map(Number))) {
+    for (const r of await fetchItems(
+      projectNumber,
+      outsideSetIds.map(Number),
+    )) {
       resolved.set(
         String(r.id),
         r.type === "missing" ? null : { type: r.type, title: r.title },
@@ -321,4 +330,7 @@ function main() {
   if (strict && totalErrors > 0) process.exit(1);
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});

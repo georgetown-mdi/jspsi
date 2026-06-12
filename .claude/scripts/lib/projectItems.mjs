@@ -22,12 +22,97 @@ export const PROJECT_PREFIXES = {
 /** Owner login for both psilink project boards. */
 export const OWNER = "georgetown-mdi";
 
-/** Run gh with the given argv and return stdout as a string. */
+const GRAPHQL_ENDPOINT = "https://api.github.com/graphql";
+// GitHub rejects API requests without a User-Agent; identify these scripts.
+const USER_AGENT = "psilink-board-scripts";
+
+/**
+ * Run gh with the given argv and return stdout as a string. Network calls go
+ * through `graphql` (Node fetch) now, not gh -- gh (a Go binary) verifies TLS
+ * via the macOS `trustd` Mach service, which the command sandbox blocks, so its
+ * network subcommands fail in-sandbox. gh is kept only for `gh auth token`,
+ * which is network-free (it just reads stored credentials) and so works in-sandbox.
+ */
 export function gh(args) {
   return execFileSync("gh", args, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   });
+}
+
+/**
+ * Resolve a GitHub token without a network round-trip, in precedence order:
+ * `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token` (which reads the stored
+ * credential). Env-first matches gh's own precedence and is friendlier to CI /
+ * headless. The token is returned for use only as a bearer header -- never log
+ * it. Exported with injectable `env` / `readStoredToken` for tests; production
+ * callers pass no argument.
+ * @internal
+ */
+export function githubToken({
+  env = process.env,
+  readStoredToken = () => gh(["auth", "token"]),
+} = {}) {
+  // Trim before the truthiness test so a whitespace-only env var falls through
+  // to the stored credential instead of yielding an empty bearer token.
+  const fromEnv = (env.GH_TOKEN || env.GITHUB_TOKEN || "").trim();
+  if (fromEnv) return fromEnv;
+  let stored;
+  try {
+    stored = readStoredToken().trim();
+  } catch {
+    stored = "";
+  }
+  if (!stored) {
+    throw new Error(
+      "no GitHub token: set GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`",
+    );
+  }
+  return stored;
+}
+
+/**
+ * POST a GraphQL query or mutation to the GitHub API over Node `fetch`, returning
+ * the parsed `{ data, errors }` body. Using Node rather than `gh api graphql`
+ * lets these scripts run inside the command sandbox: Node verifies TLS against
+ * its own bundled CA store instead of the sandbox-blocked `trustd`. (The sandbox
+ * also forces egress through an injected HTTPS proxy that Node's fetch ignores by
+ * default; running with NODE_USE_ENV_PROXY=1 in the environment -- e.g. via
+ * Claude Code's local settings -- makes fetch honor it.)
+ *
+ * A response is returned whenever it carries `data` -- even an HTTP 200 that also
+ * has `errors`, which is how GraphQL reports a partial result (e.g. one NOT_FOUND
+ * node in a batch). This preserves the "one bad ID does not sink the whole fetch"
+ * behavior that `fetchItems` relies on. A response with no usable `data` (auth
+ * failure, rate limit, malformed body) throws. `variables` is omitted from the
+ * request body when not given.
+ */
+export async function graphql(query, variables) {
+  const res = await fetch(GRAPHQL_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${githubToken()}`,
+      "Content-Type": "application/json",
+      "User-Agent": USER_AGENT,
+    },
+    body: JSON.stringify(variables ? { query, variables } : { query }),
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `GitHub GraphQL returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
+  if (body.data == null) {
+    const detail = body.errors
+      ? JSON.stringify(body.errors)
+      : text.slice(0, 300);
+    throw new Error(`GitHub GraphQL error (HTTP ${res.status}): ${detail}`);
+  }
+  return body;
 }
 
 /** Derive an item's PVTI_ global node ID from its project number and numeric ID. */
@@ -53,8 +138,13 @@ export function pvtiNodeId(projectNumber, numericId) {
  * bytes) must match a known PROJECT_PREFIXES entry, which both validates the ID
  * shape and guards against a node ID from some other project sneaking through.
  * numericIdFromNodeId(pvtiNodeId(p, n)) === n holds for every known p.
+ *
+ * A node ID encodes its own project. When `expectedProject` is given (and is a
+ * known project), the decoded project must equal it -- otherwise the numeric ID
+ * would be re-encoded under a different project's prefix and silently address
+ * the wrong item; reject the mismatch instead.
  */
-export function numericIdFromNodeId(nodeId) {
+export function numericIdFromNodeId(nodeId, expectedProject) {
   if (typeof nodeId !== "string" || !nodeId.startsWith("PVTI_")) {
     throw new Error(`not a PVTI_ node id: ${nodeId}`);
   }
@@ -63,13 +153,39 @@ export function numericIdFromNodeId(nodeId) {
     throw new Error(`PVTI_ node id too short to decode: ${nodeId}`);
   }
   const prefixHex = buf.subarray(0, -4).toString("hex");
-  const known = Object.values(PROJECT_PREFIXES).includes(prefixHex);
-  if (!known) {
+  const ownerProject = Object.keys(PROJECT_PREFIXES).find(
+    (p) => PROJECT_PREFIXES[p] === prefixHex,
+  );
+  if (ownerProject === undefined) {
     throw new Error(
       `PVTI_ node id "${nodeId}" has prefix ${prefixHex}, not a known project; known: ${Object.values(PROJECT_PREFIXES).join(", ")}`,
     );
   }
+  if (
+    expectedProject !== undefined &&
+    PROJECT_PREFIXES[expectedProject] !== undefined &&
+    Number(ownerProject) !== Number(expectedProject)
+  ) {
+    throw new Error(
+      `node id ${nodeId} is on project ${ownerProject}, not the requested project ${expectedProject}`,
+    );
+  }
   return buf.readUInt32BE(buf.length - 4);
+}
+
+/**
+ * Resolve one item argument to its numeric ID. A `PVTI_...` value is decoded via
+ * numericIdFromNodeId; anything else is parsed as a base-10 integer. Returns NaN
+ * for an unparseable numeric argument so a caller's Number.isInteger check still
+ * rejects it. A malformed PVTI_ id throws (a clearer signal than NaN). Shared so
+ * fetch-issues.mjs, lint-issues.mjs, and edit-issue.mjs accept the two id forms
+ * identically. Pass `expectedProject` (the project number the caller was given)
+ * so a node ID from a different board is rejected rather than silently remapped.
+ */
+export function toNumericId(arg, expectedProject) {
+  return arg.startsWith("PVTI_")
+    ? numericIdFromNodeId(arg, expectedProject)
+    : Number(arg);
 }
 
 /**
@@ -106,6 +222,49 @@ export function extractFields(fieldValues) {
 }
 
 /**
+ * Build the `ProjectV2FieldValue` input for updateProjectV2ItemFieldValue (the
+ * write-side counterpart to extractFields), picking the typed key from the
+ * field's `dataType`: a single-select resolves the option ID by name;
+ * text/number/date map straight through (number as a JS number, since the
+ * GraphQL field is a Float). `field` is { name, dataType, options? } as returned
+ * by the project field introspection in edit-issue.mjs. Throws on an unknown
+ * option, a non-numeric value for a NUMBER field, or an unsupported dataType.
+ */
+export function fieldValueInput(field, value) {
+  switch (field.dataType) {
+    case "SINGLE_SELECT": {
+      const option = (field.options ?? []).find(
+        (o) => o.name.toLowerCase() === value.toLowerCase(),
+      );
+      if (!option) {
+        const names = (field.options ?? []).map((o) => o.name).join(", ");
+        throw new Error(
+          `option "${value}" not valid for "${field.name}"; choices: ${names}`,
+        );
+      }
+      return { singleSelectOptionId: option.id };
+    }
+    case "TEXT":
+      return { text: value };
+    case "NUMBER": {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        throw new Error(
+          `field "${field.name}" is a number field but value "${value}" is not numeric`,
+        );
+      }
+      return { number };
+    }
+    case "DATE":
+      return { date: value };
+    default:
+      throw new Error(
+        `field "${field.name}" has unsupported type ${field.dataType}; extend the field-value handling to support it`,
+      );
+  }
+}
+
+/**
  * Fetch the given numeric item IDs from one project in a single GraphQL call.
  * Returns one entry per requested ID, in order, as
  * { id, type, title, body, url, fields }, where fields is the { name -> value }
@@ -115,7 +274,7 @@ export function extractFields(fieldValues) {
  * the aliased multi-fetch has one implementation. The id/type/title/body/url
  * properties are stable; fields was added later and is purely additive.
  */
-export function fetchItems(projectNumber, numericIds) {
+export async function fetchItems(projectNumber, numericIds) {
   const fields =
     "... on ProjectV2Item { databaseId " +
     FIELD_VALUES_FRAGMENT +
@@ -130,17 +289,10 @@ export function fetchItems(projectNumber, numericIds) {
     .join("\n");
   const query = `{ ${aliases} }`;
 
-  // gh exits non-zero if any aliased node is NOT_FOUND, but still prints the
-  // JSON body (data for the found nodes, errors for the missing ones). Recover
-  // it so one bad ID in a batch does not sink the whole fetch.
-  let raw;
-  try {
-    raw = gh(["api", "graphql", "-f", `query=${query}`]);
-  } catch (e) {
-    if (!e.stdout) throw e;
-    raw = e.stdout;
-  }
-  const data = JSON.parse(raw).data;
+  // GraphQL returns HTTP 200 with both `data` (the found nodes) and `errors`
+  // (NOT_FOUND for the missing ones), so one bad ID in a batch does not sink the
+  // whole fetch -- the missing aliases simply come back as null nodes below.
+  const data = (await graphql(query)).data;
 
   return numericIds.map((id, i) => {
     const node = data[`i${i}`];
@@ -164,4 +316,60 @@ export function fetchItems(projectNumber, numericIds) {
       fields: extractFields(node.fieldValues),
     };
   });
+}
+
+// GitHub's projectV2 items connection caps `first` at 100, so this is also the
+// per-page size: fetchAllItems pages through the connection 100 at a time rather
+// than relying on a single page covering the whole board.
+export const PAGE_SIZE = 100;
+
+/**
+ * Default GraphQL runner for fetchAllItems: run the query via fetch and return
+ * its `data`. Split out as the injection point so tests can drive fetchAllItems
+ * with synthetic pages instead of a live board.
+ */
+async function runQueryViaFetch(query) {
+  return (await graphql(query)).data;
+}
+
+/**
+ * Fetch every item of a project with its field values and node IDs, returning
+ * [{ id, nodeId, title, fields }] where id is the numeric item ID, nodeId is the
+ * `PVTI_` global node ID, and fields is the { name -> value } map (see
+ * extractFields, which surfaces Status / Epic / Implementation Order among
+ * others). Pages through the items connection with a cursor until hasNextPage is
+ * false, so no item is dropped however large the board grows -- the silent
+ * truncation a single `gh project item-list --limit N` would cause is impossible
+ * here. Shared by list-epic.mjs (filter to one Epic) and list-issues.mjs (whole
+ * board). `runQuery(query) -> data` is injectable for tests; it defaults to fetch.
+ */
+export async function fetchAllItems(
+  projectNumber,
+  { runQuery = runQueryViaFetch } = {},
+) {
+  const nodes = [];
+  let cursor = null;
+  do {
+    // Inline the cursor into the query the same way the other args are inlined;
+    // GitHub's endCursor is an opaque base64 token with no quote/backslash chars
+    // to escape. Omit `after` entirely on the first page.
+    const after = cursor === null ? "" : `, after: "${cursor}"`;
+    const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { items(first: ${PAGE_SIZE}${after}) { pageInfo { hasNextPage endCursor } nodes { id ${FIELD_VALUES_FRAGMENT} content { __typename ... on DraftIssue { title } ... on Issue { title } } } } } } }`;
+    const data = await runQuery(query);
+    const project = data?.organization?.projectV2;
+    if (!project) {
+      throw new Error(
+        `project ${projectNumber} not found under owner ${OWNER}`,
+      );
+    }
+    const conn = project.items;
+    nodes.push(...conn.nodes);
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+  } while (cursor !== null);
+  return nodes.map((node) => ({
+    id: numericIdFromNodeId(node.id),
+    nodeId: node.id,
+    title: node.content?.title ?? null,
+    fields: extractFields(node.fieldValues),
+  }));
 }

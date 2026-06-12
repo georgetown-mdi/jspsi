@@ -15,8 +15,8 @@
 // number of IDs, returning only those items, with no scan-and-filter.
 //
 // Each item argument may be EITHER a numeric ID (the `?itemId=N` value) OR a
-// `PVTI_...` global node ID as printed by `gh project item-list` -- the latter
-// is decoded back to its numeric ID, so a listed item can be looked up without
+// `PVTI_...` global node ID as printed by `list-issues.mjs` -- the latter is
+// decoded back to its numeric ID, so a listed item can be looked up without
 // hand-decoding the node ID. The two forms mix freely in one invocation.
 //
 // Usage:
@@ -33,26 +33,17 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // fetchItems lives in lib/projectItems.mjs so lint-issues.mjs can reuse the same
-// aliased multi-fetch for resolving cross-references. numericIdFromNodeId lets a
-// PVTI_ node ID argument be accepted alongside the numeric form.
-import { fetchItems, numericIdFromNodeId } from "./lib/projectItems.mjs";
+// aliased multi-fetch for resolving cross-references. toNumericId (which decodes
+// a PVTI_ node ID via numericIdFromNodeId) lets a PVTI_ argument be accepted
+// alongside the numeric form, and is shared so the sibling scripts agree on it.
+import { fetchItems, toNumericId } from "./lib/projectItems.mjs";
 
 // Fields surfaced first, in this order, in human-readable output; any other
 // populated field is printed afterward in encounter order. These three are the
 // board's primary triage axes, so they lead.
 const LEAD_FIELDS = ["Status", "Epic", "Implementation Order"];
 
-/**
- * Resolve one item argument to its numeric ID. A `PVTI_...` value is decoded via
- * numericIdFromNodeId; anything else is parsed as a base-10 integer. Returns NaN
- * for an unparseable numeric argument so the caller's Number.isInteger check
- * still rejects it. A malformed PVTI_ id throws (a clearer signal than NaN).
- */
-function toNumericId(arg) {
-  return arg.startsWith("PVTI_") ? numericIdFromNodeId(arg) : Number(arg);
-}
-
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   // Leading option flags, in any order: --json, --out-dir DIR.
   let asJson = false;
@@ -76,8 +67,11 @@ function main() {
   const rest = argv.slice(i);
 
   const projectNumber = Number(rest[0]);
-  // Each argument is a numeric ID or a PVTI_ node ID; resolve both to numeric.
-  const numericIds = rest.slice(1).map(toNumericId);
+  // Each argument is a numeric ID or a PVTI_ node ID; resolve both to numeric,
+  // rejecting a node ID that belongs to a different project than requested.
+  const numericIds = rest
+    .slice(1)
+    .map((arg) => toNumericId(arg, projectNumber));
   if (
     !Number.isInteger(projectNumber) ||
     numericIds.length === 0 ||
@@ -89,7 +83,7 @@ function main() {
     process.exit(2);
   }
 
-  const items = fetchItems(projectNumber, numericIds);
+  const items = await fetchItems(projectNumber, numericIds);
 
   if (asJson) {
     // Compact, not pretty-printed: --json feeds programmatic/agent consumers,
@@ -141,4 +135,7 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});

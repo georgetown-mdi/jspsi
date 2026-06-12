@@ -11,9 +11,10 @@
 // node IDs or look up option IDs by hand.
 //
 // The <itemId> may be EITHER a numeric ID (the `?itemId=N` value) OR a
-// `PVTI_...` global node ID as printed by `gh project item-list`; the node ID is
+// `PVTI_...` global node ID as printed by `list-issues.mjs`; the node ID is
 // decoded back to its numeric ID, so a listed item can be edited without
-// hand-decoding it.
+// hand-decoding it. A node ID from a different board than <project-number> is
+// rejected rather than silently remapped.
 //
 // Usage:
 //   node edit-issue.mjs <project-number> <itemId|PVTI_...> [edits...]
@@ -42,21 +43,21 @@
 import { readFileSync } from "node:fs";
 import {
   fetchItems,
-  gh,
-  numericIdFromNodeId,
+  fieldValueInput,
+  graphql,
   OWNER,
   pvtiNodeId,
+  toNumericId,
 } from "./lib/projectItems.mjs";
 
 /** Parse argv into { projectNumber, numericId, title?, body?, fields: [{name, value}] }. */
 function parseArgs(argv) {
   const projectNumber = Number(argv[0]);
   // The item argument is a numeric ID or a PVTI_ node ID; resolve both to
-  // numeric. A malformed PVTI_ id throws (a clearer signal than the NaN below).
+  // numeric, passing the project so a node ID from another board is rejected.
+  // A malformed/mismatched PVTI_ id throws (a clearer signal than the NaN below).
   const itemArg = argv[1] ?? "";
-  const numericId = itemArg.startsWith("PVTI_")
-    ? numericIdFromNodeId(itemArg)
-    : Number(itemArg);
+  const numericId = toNumericId(itemArg, projectNumber);
   if (!Number.isInteger(projectNumber) || !Number.isInteger(numericId)) {
     usage();
   }
@@ -128,10 +129,9 @@ function usage(msg) {
  * Resolve a draft item's DI_ content node ID from its PVTI_ item ID. Title/body
  * edits target the DraftIssue content object, not the project item.
  */
-function draftContentId(pvti) {
+async function draftContentId(pvti) {
   const query = `{ node(id: "${pvti}") { ... on ProjectV2Item { content { __typename ... on DraftIssue { id } } } } }`;
-  const content = JSON.parse(gh(["api", "graphql", "-f", `query=${query}`]))
-    .data.node?.content;
+  const content = (await graphql(query)).data.node?.content;
   if (!content || content.__typename !== "DraftIssue") {
     throw new Error(
       `item is not a draft issue (content type ${content?.__typename ?? "unknown"}); title/body editing is only supported for drafts`,
@@ -206,69 +206,69 @@ function printBodyDiff(label, oldText, newText) {
     process.stdout.write(`  ${oldLines[i]}\n`);
 }
 
-/** Find a field (case-insensitive) in the project's field list. */
-function findField(projectNumber, name) {
-  const fields = JSON.parse(
-    gh([
-      "project",
-      "field-list",
-      String(projectNumber),
-      "--owner",
-      OWNER,
-      "--format",
-      "json",
-    ]),
-  ).fields;
+/**
+ * Fetch a project's node ID and its field list in one GraphQL call, returning
+ * { projectId, fields } where each field carries { id, name, dataType,
+ * options? }. `dataType` (TEXT / NUMBER / DATE / SINGLE_SELECT / ...) is the
+ * precise field kind; the old `gh project field-list` porcelain collapsed text,
+ * number, and date all to one type, forcing a value-shape guess at write time.
+ * Replaces both `gh project view` (project id) and `gh project field-list`.
+ */
+async function projectMeta(projectNumber) {
+  const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { id fields(first: 50) { nodes { __typename ... on ProjectV2FieldCommon { id name dataType } ... on ProjectV2SingleSelectField { options { id name } } } } } } }`;
+  const project = (await graphql(query)).data?.organization?.projectV2;
+  if (!project) {
+    throw new Error(`project ${projectNumber} not found under owner ${OWNER}`);
+  }
+  return { projectId: project.id, fields: project.fields.nodes };
+}
+
+/** Find a field (case-insensitive) in a fetched field list. */
+function findField(fields, name) {
   const field = fields.find((f) => f.name.toLowerCase() === name.toLowerCase());
   if (!field) {
     const names = fields.map((f) => f.name).join(", ");
-    throw new Error(
-      `field "${name}" not found on project ${projectNumber}; available: ${names}`,
-    );
+    throw new Error(`field "${name}" not found; available: ${names}`);
   }
   return field;
 }
 
-/** Build the gh item-edit args that set one field value, resolving option IDs as needed. */
-function fieldEditArgs(field, value, itemId, projectId) {
-  const base = [
-    "--id",
-    itemId,
-    "--project-id",
-    projectId,
-    "--field-id",
-    field.id,
-  ];
-  switch (field.type) {
-    case "ProjectV2SingleSelectField": {
-      const option = field.options.find(
-        (o) => o.name.toLowerCase() === value.toLowerCase(),
-      );
-      if (!option) {
-        const names = field.options.map((o) => o.name).join(", ");
-        throw new Error(
-          `option "${value}" not valid for "${field.name}"; choices: ${names}`,
-        );
-      }
-      return [...base, "--single-select-option-id", option.id];
-    }
-    case "ProjectV2Field":
-      // Plain field: text, number, or date. gh picks the column by which flag
-      // is set, but the API does not tell us which of the three this field is,
-      // so we infer from the value's shape. Caveat: an all-digit or YYYY-MM-DD
-      // value bound for a *text* field is misrouted to --number / --date. No
-      // board field in use hits this; revisit if a text field needs such a value.
-      if (/^\d+$/.test(value)) return [...base, "--number", value];
-      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return [...base, "--date", value];
-      return [...base, "--text", value];
-    default:
-      throw new Error(
-        `field "${field.name}" has unsupported type ${field.type}; extend edit-issue.mjs to handle it`,
-      );
+/** Set one project-item field value via a GraphQL mutation. */
+async function setItemFieldValue(projectId, itemId, fieldId, value) {
+  const mutation = `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) { updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value }) { projectV2Item { id } } }`;
+  const res = await graphql(mutation, { projectId, itemId, fieldId, value });
+  if (res.errors) {
+    throw new Error(`failed to set field: ${JSON.stringify(res.errors)}`);
   }
 }
 
-function main() {
+/**
+ * Set a draft issue's title and/or body via a GraphQL mutation. Only the keys
+ * present in `edits` are sent: an omitted field is left untouched, whereas an
+ * explicit null would clear it.
+ */
+async function setDraftFields(draftId, edits) {
+  const varDecls = ["$draftId: ID!"];
+  const inputParts = ["draftIssueId: $draftId"];
+  const variables = { draftId };
+  if (edits.title !== undefined) {
+    varDecls.push("$title: String!");
+    inputParts.push("title: $title");
+    variables.title = edits.title;
+  }
+  if (edits.body !== undefined) {
+    varDecls.push("$body: String!");
+    inputParts.push("body: $body");
+    variables.body = edits.body;
+  }
+  const mutation = `mutation(${varDecls.join(", ")}) { updateProjectV2DraftIssue(input: { ${inputParts.join(", ")} }) { draftIssue { id } } }`;
+  const res = await graphql(mutation, variables);
+  if (res.errors) {
+    throw new Error(`failed to update draft: ${JSON.stringify(res.errors)}`);
+  }
+}
+
+async function main() {
   // A long diff is often piped to head/less; exit quietly when the reader closes
   // the pipe rather than crashing with an EPIPE stack trace.
   process.stdout.on("error", (err) => {
@@ -292,7 +292,7 @@ function main() {
   if (args.title !== undefined || args.body !== undefined) {
     // Fetch current values once: needed for no-op detection, --diff, and the
     // post-push verification re-fetch below.
-    const before = fetchItems(args.projectNumber, [args.numericId])[0];
+    const before = (await fetchItems(args.projectNumber, [args.numericId]))[0];
     if (before.type === "missing") {
       throw new Error(
         `item ${args.numericId} not found on project ${args.projectNumber}`,
@@ -325,16 +325,18 @@ function main() {
       if (args.dryRun) {
         process.stdout.write(`dry-run: would set ${changed.join(", ")}\n`);
       } else {
-        const edit = ["project", "item-edit", "--id", draftContentId(itemId)];
-        if (wantTitle) edit.push("--title", args.title);
-        if (wantBody) edit.push("--body", args.body);
-        gh(edit);
+        await setDraftFields(await draftContentId(itemId), {
+          ...(wantTitle ? { title: args.title } : {}),
+          ...(wantBody ? { body: args.body } : {}),
+        });
         process.stdout.write(`set ${changed.join(", ")}\n`);
 
         // Verify: re-fetch and assert the store matches what we sent. Tolerates
         // trailing-newline-only differences GitHub may introduce (see
         // equalsStored); anything else is a real failure.
-        const after = fetchItems(args.projectNumber, [args.numericId])[0];
+        const after = (
+          await fetchItems(args.projectNumber, [args.numericId])
+        )[0];
         if (wantTitle && !equalsStored(args.title, after.title ?? "")) {
           throw new Error(
             "post-push verify failed: stored title differs from sent title",
@@ -350,32 +352,26 @@ function main() {
     }
   }
 
-  // Field edits each need the project node ID; resolve it once if any are requested.
+  // Field edits each need the project node ID and the field list; fetch both
+  // once if any are requested.
   if (args.fields.length > 0) {
-    const projectId = JSON.parse(
-      gh([
-        "project",
-        "view",
-        String(args.projectNumber),
-        "--owner",
-        OWNER,
-        "--format",
-        "json",
-      ]),
-    ).id;
+    const { projectId, fields } = await projectMeta(args.projectNumber);
     for (const { name, value } of args.fields) {
-      const field = findField(args.projectNumber, name);
-      // Resolve (and validate) the field/option names even in a dry run, so a
+      const field = findField(fields, name);
+      // Resolve (and validate) the field/option name even in a dry run, so a
       // bad field or option name is reported without making any edit.
-      const editArgs = fieldEditArgs(field, value, itemId, projectId);
+      const valueInput = fieldValueInput(field, value);
       if (args.dryRun) {
         process.stdout.write(`dry-run: would set ${field.name} = ${value}\n`);
       } else {
-        gh(["project", "item-edit", ...editArgs]);
+        await setItemFieldValue(projectId, itemId, field.id, valueInput);
         process.stdout.write(`set ${field.name} = ${value}\n`);
       }
     }
   }
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`${err.message ?? err}\n`);
+  process.exit(1);
+});
