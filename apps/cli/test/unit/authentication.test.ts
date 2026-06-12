@@ -316,10 +316,22 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
 // drive the post-handshake branch (auth.ts) by faking only Date: start the
 // clock just before `expires`, kick off both sides over an in-memory pipe (no
 // real-timer coupling, so the handshake still completes), then advance the
-// clock past `expires` in a microtask while the round-trip is in flight. The
-// post-handshake checks -- which run only after both runKex calls resolve --
-// then see the secret as expired. (Ported from the deleted pake.test.ts, which
-// covered the equivalent SPAKE2 branch before the X25519 cutover.)
+// clock past `expires` while the round-trip is in flight, so the post-handshake
+// checks -- which run only after both runKex calls resolve -- see the secret as
+// expired. (Ported from the deleted pake.test.ts, which covered the equivalent
+// SPAKE2 branch before the X25519 cutover.)
+//
+// The advance is synchronous, between starting the two authenticateConnection
+// promises and awaiting them, not scheduled on a microtask tick. The
+// pre-handshake expiry check runs in authenticateConnection's synchronous
+// prologue (before its first await, and before any frame is delivered -- pipe
+// deliveries are queued microtasks that only run during the await), so by the
+// time both calls have returned their promises both pre-checks have already
+// passed at the pre-advance clock. Advancing here is therefore strictly after
+// both pre-checks and strictly before both post-checks, independent of how many
+// microtasks the kex spans -- whereas a single Promise.resolve() tick is not a
+// reliable barrier and could land the advance after the post-check, silently
+// resolving fulfilled on the wrong branch.
 
 test("authentication throws when the shared secret expires during the key-exchange round-trip", async () => {
   const expires = "2030-01-01T00:00:00.000Z";
@@ -328,25 +340,23 @@ test("authentication throws when the shared secret expires during the key-exchan
     now: new Date("2029-12-31T23:59:59.000Z"),
   });
   const [a, b] = createMessagePipe();
-  const authPromise = Promise.allSettled([
-    authenticateConnection(
-      a,
-      { sharedSecret: TOKEN_A, expires },
-      "initiator",
-      true,
-    ),
-    authenticateConnection(
-      b,
-      { sharedSecret: TOKEN_A, expires },
-      "responder",
-      true,
-    ),
-  ]);
-  // Advance past expires while the round-trip is still in flight.
-  await Promise.resolve().then(() =>
-    vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
+  const pA = authenticateConnection(
+    a,
+    { sharedSecret: TOKEN_A, expires },
+    "initiator",
+    true,
   );
-  const [resultA, resultB] = await authPromise;
+  const pB = authenticateConnection(
+    b,
+    { sharedSecret: TOKEN_A, expires },
+    "responder",
+    true,
+  );
+  // Advance past expires while the round-trip is in flight: strictly after both
+  // synchronous pre-handshake checks (already run, above) and before both
+  // post-handshake checks. See the block comment above for why this is reliable.
+  vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
   expect(resultB.status).toBe("rejected");
   expect((resultA as PromiseRejectedResult).reason.message).toContain(
@@ -364,24 +374,22 @@ test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintE
     now: new Date("2029-12-31T23:59:59.000Z"),
   });
   const [a, b] = createMessagePipe();
-  const authPromise = Promise.allSettled([
-    authenticateConnection(
-      a,
-      { sharedSecret: TOKEN_A, expires },
-      "initiator",
-      true,
-    ),
-    authenticateConnection(
-      b,
-      { sharedSecret: TOKEN_A, expires },
-      "responder",
-      true,
-    ),
-  ]);
-  await Promise.resolve().then(() =>
-    vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z")),
+  const pA = authenticateConnection(
+    a,
+    { sharedSecret: TOKEN_A, expires },
+    "initiator",
+    true,
   );
-  const [resultA, resultB] = await authPromise;
+  const pB = authenticateConnection(
+    b,
+    { sharedSecret: TOKEN_A, expires },
+    "responder",
+    true,
+  );
+  // Advance past expires while the round-trip is in flight (see the block
+  // comment above for why a synchronous advance here is a reliable barrier).
+  vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
   expect(resultB.status).toBe("rejected");
   // Tagged so the CLI surfaces a re-invite hint instead of the generic
