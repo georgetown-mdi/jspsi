@@ -1,5 +1,6 @@
-import { getLogger, runExchange } from "@psilink/core";
+import { ConnectionError, getLogger, runExchange } from "@psilink/core";
 
+import { authenticateExchange } from "./authenticateExchange";
 import { openPeerMessageConnection } from "./peerMessageConnection";
 
 import type { DataConnection } from "peerjs";
@@ -26,10 +27,30 @@ export interface StageDefinition {
 /** Which half of the lifecycle a failure came from, so the UI can choose its
  * alert: an `"exchange"` failure (acquire/open/run) invites a re-run, whereas an
  * `"output"` failure means the privacy-sensitive exchange already succeeded and
- * only local results-file generation failed - the user must not re-run it. This
- * is an owner-local discriminant, deliberately not {@link ConnectionError} kind:
- * an output-generation failure is not a connection error. */
-export type ExchangeErrorCategory = "exchange" | "output";
+ * only local results-file generation failed - the user must not re-run it. A
+ * `"security"` failure is the trust-boundary subset of an exchange failure: the
+ * authenticated key exchange (or, once it is wrapped, the AEAD layer) reported a
+ * wrong secret, tamper, or replay, so the user must NOT silently re-run it -- it
+ * is surfaced as an authentication failure rather than a retryable transport
+ * drop. It is the one category keyed off {@link ConnectionError} kind
+ * (`"security"`); `"exchange"` and `"output"` are owner-local discriminants (an
+ * output-generation failure is not a connection error). */
+export type ExchangeErrorCategory = "exchange" | "output" | "security";
+
+/** Maps a lifecycle failure to the alert {@link ExchangeErrorCategory} the UI
+ * shows. A `security`-kind {@link ConnectionError} -- the authenticated key
+ * exchange failing closed on a wrong secret/tamper/replay -- is a trust failure
+ * the user must not silently retry; every other exchange-phase failure is the
+ * retryable generic `"exchange"`. (An `"output"` failure is classified at its own
+ * call site, since the exchange already succeeded there.) Keying off the
+ * connection-error kind rather than the handshake step means a future
+ * `EncryptedMessageConnection` surfacing a `security` failure mid-exchange is
+ * routed the same way for free. */
+function classifyExchangeFailure(error: unknown): ExchangeErrorCategory {
+  return error instanceof ConnectionError && error.kind === "security"
+    ? "security"
+    : "exchange";
+}
 
 /** The live resources an {@link Acquire} hands the owner on success. */
 export interface AcquiredExchange {
@@ -106,8 +127,14 @@ export type GenerateOutput = (
 export interface RunExchangeLifecycleOptions {
   acquire: Acquire;
   /** This party's PSI handshake role: the web client is the `"initiator"`, the
-   * web server the `"responder"`. */
+   * web server the `"responder"`. The same role drives the pre-exchange
+   * authenticated key exchange. */
   exchangeRole: "initiator" | "responder";
+  /** The invitation's shared secret (base64url), fed to the authenticated key
+   * exchange the owner runs at the `mc` seam before `runExchange`. Both peers
+   * must hold the same value; a mismatch fails the handshake closed and never
+   * reaches the PSI exchange. */
+  sharedSecret: string;
   signal: AbortSignal;
   generateOutput: GenerateOutput;
   onStages: (stages: Array<StageDefinition>) => void;
@@ -131,8 +158,11 @@ export interface RunExchangeLifecycleOptions {
  *   unmount-abort), the effect runs once. A teardown-only failure is logged and
  *   surfaces no alert - the results are available and it is not user-actionable.
  * - **The exchange-vs-output distinction survives** (F2). A failure from
- *   acquire/open/run is `"exchange"`; a `generateOutput` throw (the exchange
- *   already succeeded) is `"output"`; a teardown-only throw raises neither.
+ *   acquire/open/run is `"exchange"`, except a trust failure from the
+ *   authenticated key exchange (a `security`-kind {@link ConnectionError}), which
+ *   is `"security"` so the UI shows an authentication failure rather than a
+ *   retryable transport drop; a `generateOutput` throw (the exchange already
+ *   succeeded) is `"output"`; a teardown-only throw raises neither.
  * - **The broker socket drops on the first inbound frame** (F4), while the data
  *   channel stays open for the exchange. Best-effort: a throw in that listener
  *   cannot fail the exchange.
@@ -148,6 +178,7 @@ export async function runExchangeLifecycle(
   const {
     acquire,
     exchangeRole,
+    sharedSecret,
     signal,
     generateOutput,
     onStages,
@@ -250,13 +281,29 @@ export async function runExchangeLifecycle(
   conn.once("data", dropBrokerOnFirstFrame);
 
   try {
-    // Fixed order, load-bearing for the server's listener-first guarantee (F6):
-    // openPeerMessageConnection attaches the QueuedMessageConnection's inbound
-    // `data` listener synchronously in its constructor, and the server returns
-    // the still-unresolved psi, so `await psi` must stay AFTER the open or the
-    // responder would have no listener during the WASM load and drop the
-    // initiator's unprompted first frame.
+    // Fixed order. openPeerMessageConnection attaches the QueuedMessageConnection's
+    // inbound `data` listener synchronously in its constructor (the server's
+    // listener-first guarantee, F6), so the initiator's unprompted first frame --
+    // now its first handshake frame -- is buffered rather than dropped no matter
+    // how long this side then takes to read it.
     mc = await openPeerMessageConnection(conn);
+    // Authenticate the peer before any PSI frame is sent: the X25519 key exchange
+    // fails closed on a wrong secret or tampered/malformed frame, so an
+    // unauthenticated peer never reaches runExchange. Its 32-byte session key is
+    // discarded here (web is single-use and, under DTLS, declines the AEAD wrap --
+    // see authenticateExchange); deriving it is the act of authenticating. A trust
+    // failure surfaces as a security-kind ConnectionError, which the catch below
+    // routes to the distinct authentication-failure alert.
+    //
+    // This runs BEFORE `await psi`: the handshake needs no PSI library, and
+    // authenticating first keeps the responder's WASM load out of the handshake's
+    // critical path -- otherwise a load that approached the per-message kex
+    // timeout could time out the initiator's wait for the responder's reply -- and
+    // spends no WASM load on a peer that fails authentication.
+    await authenticateExchange(mc, exchangeRole, sharedSecret);
+    // Resolves before runExchange: instant for the initiator (it loaded the
+    // library during acquire), the real WASM wait for the responder, overlapping
+    // the wait for the peer's first PSI frame.
     const psiLibrary = await psi;
     const result = await runExchange(mc, exchangeRole, prepared, {
       psiLibrary,
@@ -274,7 +321,7 @@ export async function runExchangeLifecycle(
     }
     emitResult(outputs);
   } catch (error) {
-    emitError({ category: "exchange", error });
+    emitError({ category: classifyExchangeFailure(error), error });
   } finally {
     signal.removeEventListener("abort", onAbort);
     await teardown();
