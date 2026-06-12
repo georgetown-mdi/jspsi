@@ -1,11 +1,22 @@
 import { ZodError } from "zod";
 import { expect, test } from "vitest";
 
-import { encodeInvitation, decodeInvitation } from "../src/config/invitation";
+import {
+  encodeInvitation,
+  decodeInvitation,
+  MAX_ENCODED_INVITATION_LENGTH,
+  MAX_ENDPOINT_HOST_LENGTH,
+  MAX_ENDPOINT_PATH_LENGTH,
+} from "../src/config/invitation";
 import type {
   ConnectionEndpoint,
   InvitationToken,
 } from "../src/config/invitation";
+import {
+  MAX_NAME_LENGTH,
+  MAX_TEXT_LENGTH,
+  MAX_LINKAGE_ENTRIES,
+} from "../src/config/linkageTerms";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
 // InvitationTokenSchema now enforces that shape, so test tokens carry a real
@@ -437,4 +448,210 @@ test("strips an unknown top-level field rather than embedding it", async () => {
   } as unknown as InvitationToken);
   const clean = await encodeInvitation(baseToken);
   expect(withExtra).toBe(clean);
+});
+
+// --- Untrusted-input bounds --------------------------------------------------
+
+// The decoder accepts attacker-influenceable fields from a token whose only
+// integrity check is a transcription checksum anyone can recompute, so each
+// bound is exercised at the decode boundary -- the path both apps/cli and
+// apps/web share. encodeRaw crafts a valid-checksum string that violates a bound
+// (encodeInvitation could not, since it validates first).
+
+test("rejects an encoded string longer than the maximum, before parsing", async () => {
+  // A string over the cap is refused at the boundary before any base64-decode,
+  // hash, or schema work. It is not even valid base64url, so a length-cap
+  // rejection (rather than a downstream parse error) proves the early exit.
+  const tooLong = "A".repeat(MAX_ENCODED_INVITATION_LENGTH + 1);
+  await expect(decodeInvitation(tooLong)).rejects.toThrow(/maximum length/);
+});
+
+test("admits an encoded string at exactly the maximum length", async () => {
+  // At exactly the cap the length gate passes and decode proceeds; this all-'A'
+  // string then fails the checksum, NOT the length check, pinning the bound as
+  // `>` rather than `>=`.
+  const atMax = "A".repeat(MAX_ENCODED_INVITATION_LENGTH);
+  await expect(decodeInvitation(atMax)).rejects.toThrow(/checksum/);
+});
+
+test("rejects a token whose identity exceeds the maximum length", async () => {
+  const encoded = await encodeRaw({
+    ...baseToken,
+    linkageTerms: { ...baseTerms, identity: "x".repeat(MAX_TEXT_LENGTH + 1) },
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test("rejects a token with more linkageKeys than the maximum count", async () => {
+  const linkageKeys = Array.from(
+    { length: MAX_LINKAGE_ENTRIES + 1 },
+    (_, i) => ({ name: `K${i}`, elements: [{ field: "ssn" }] }),
+  );
+  const encoded = await encodeRaw({
+    ...baseToken,
+    linkageTerms: { ...baseTerms, linkageKeys },
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test("rejects a token with more linkageFields than the maximum count", async () => {
+  const linkageFields = Array.from(
+    { length: MAX_LINKAGE_ENTRIES + 1 },
+    (_, i) => ({ name: `f${i}`, type: "ssn" as const }),
+  );
+  const encoded = await encodeRaw({
+    ...baseToken,
+    linkageTerms: { ...baseTerms, linkageFields },
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test("rejects a token whose linkage key name exceeds the maximum length", async () => {
+  const encoded = await encodeRaw({
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        { name: "x".repeat(MAX_NAME_LENGTH + 1), elements: [{ field: "ssn" }] },
+      ],
+    },
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test.each(["webrtc", "sftp"])(
+  "rejects a %s endpoint whose host exceeds the maximum length",
+  async (channel) => {
+    const encoded = await encodeRaw({
+      ...baseToken,
+      connectionEndpoint: {
+        channel,
+        host: "h".repeat(MAX_ENDPOINT_HOST_LENGTH + 1),
+      },
+    });
+    await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+  },
+);
+
+test.each([
+  {
+    channel: "webrtc",
+    endpoint: {
+      channel: "webrtc",
+      host: "h",
+      path: "p".repeat(MAX_ENDPOINT_PATH_LENGTH + 1),
+    },
+  },
+  {
+    channel: "sftp",
+    endpoint: {
+      channel: "sftp",
+      host: "h",
+      path: "p".repeat(MAX_ENDPOINT_PATH_LENGTH + 1),
+    },
+  },
+  {
+    channel: "filedrop",
+    endpoint: {
+      channel: "filedrop",
+      path: "p".repeat(MAX_ENDPOINT_PATH_LENGTH + 1),
+    },
+  },
+])(
+  "rejects a $channel endpoint whose path exceeds the maximum length",
+  async ({ endpoint }) => {
+    const encoded = await encodeRaw({
+      ...baseToken,
+      connectionEndpoint: endpoint,
+    });
+    await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+  },
+);
+
+test("encodeInvitation rejects a token whose encoded output exceeds the maximum length", async () => {
+  // Every field is within its per-field bound, but an unbounded exclude list
+  // (bounded only by the encoded-length cap) inflates the token past the cap in
+  // aggregate. encodeInvitation must refuse to produce a token it could not
+  // decode, failing on the inviter's side rather than at the partner's decode.
+  const exclude = Array.from({ length: 80 }, () => "x".repeat(MAX_TEXT_LENGTH));
+  const token: InvitationToken = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageFields: [
+        { name: "ssn", type: "ssn" as const, constraints: { exclude } },
+      ],
+    },
+  };
+  await expect(encodeInvitation(token)).rejects.toThrow(/maximum length/);
+});
+
+test("round-trips an endpoint host and path at exactly the maximum length", async () => {
+  // Pins the accept side of the endpoint bounds: a too-tight host or path cap
+  // would fail this, which the over-long rejection tests above cannot catch.
+  const endpoint = {
+    channel: "webrtc" as const,
+    host: "h".repeat(MAX_ENDPOINT_HOST_LENGTH),
+    path: "/" + "p".repeat(MAX_ENDPOINT_PATH_LENGTH - 1),
+  };
+  const decoded = await decodeInvitation(
+    await encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
+  );
+  expect(decoded.connectionEndpoint).toEqual(endpoint);
+});
+
+test("decodes a large but legitimate invitation at the upper end of real size", async () => {
+  // A maximal real token -- a long identity, several fields, many keys, a
+  // payload, a legal agreement, and an endpoint, every value within its bound --
+  // must round-trip unchanged, proving the caps clear any real invitation.
+  const linkageFields = [
+    { name: "ssn", type: "ssn" as const },
+    { name: "ssn4", type: "ssn4" as const },
+    { name: "firstName", type: "firstName" as const },
+    { name: "lastName", type: "lastName" as const },
+    { name: "dateOfBirth", type: "dateOfBirth" as const },
+    { name: "phone", type: "phoneNumber" as const },
+    { name: "email", type: "emailAddress" as const },
+  ];
+  const linkageKeys = Array.from({ length: 30 }, (_, i) => ({
+    name: `Key ${i}`,
+    elements: [
+      { field: "ssn" },
+      { field: "lastName" },
+      { field: "dateOfBirth" },
+    ],
+  }));
+  const token: InvitationToken = {
+    version: "1",
+    sharedSecret: VALID_SECRET,
+    linkageTerms: {
+      version: "1.0.0",
+      identity: "A".repeat(MAX_TEXT_LENGTH),
+      date: "2025-01-01",
+      algorithm: "psi",
+      output: { expectsOutput: true, shareWithPartner: true },
+      deduplicate: false,
+      linkageFields,
+      linkageKeys,
+      payload: {
+        send: [{ name: "score", description: "x".repeat(MAX_TEXT_LENGTH) }],
+        receive: [{ name: "match" }],
+      },
+      legalAgreement: {
+        reference: "x".repeat(MAX_NAME_LENGTH),
+        purpose: "x".repeat(MAX_TEXT_LENGTH),
+        expirationDate: "2099-01-01",
+      },
+    },
+    connectionEndpoint: {
+      channel: "webrtc",
+      host: "h".repeat(MAX_ENDPOINT_HOST_LENGTH),
+      port: 9000,
+      path: "/psilink",
+    },
+  };
+  const decoded = await decodeInvitation(await encodeInvitation(token));
+  expect(decoded.linkageTerms.linkageKeys).toHaveLength(30);
+  expect(decoded.linkageTerms.identity).toHaveLength(MAX_TEXT_LENGTH);
+  expect(decoded.connectionEndpoint).toEqual(token.connectionEndpoint);
 });

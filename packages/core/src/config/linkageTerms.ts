@@ -5,6 +5,54 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 
+// --- Untrusted-input bounds --------------------------------------------------
+
+// These terms travel inside an invitation token, which the decoder accepts from
+// a counterparty whose token passed only a transcription checksum -- a check
+// anyone can recompute over a crafted payload, not an authenticity guarantee
+// (see invitation.ts). The rule below: every partner-controlled free-text string
+// carries a generous length `.max()`, and the two top-level arrays
+// (`linkageFields` and `linkageKeys`) carry a count `.max()`. What is left to the
+// boundary cap MAX_ENCODED_INVITATION_LENGTH in invitation.ts rather than a
+// per-field bound is the deeper collection COUNTS -- per-element `transform`
+// steps, each constraint's `exclude` list, the `payload` send/receive arrays, and
+// the `transform` `params` record's entries -- and the `params` value content
+// (typed `z.unknown()`, with no clean content bound). Their legitimate sizes vary
+// (a denylist can hold hundreds of values), so an invented count risks rejecting
+// a real config, and the boundary cap already bounds the whole payload before any
+// field is parsed. The bounds are defense-in-depth, not semantic limits.
+
+/**
+ * Generous upper bound on a short partner-controlled string -- the identifier-
+ * and spec-like fields: a linkage key, field, or element `name`, an element
+ * `field` reference, an element-`swap` reference, a transform `function` name and
+ * its `params` keys, a payload column `name`, a legal-agreement `reference`, the
+ * `version` string, and a name-constraint `allowedCharacters` class. A real value
+ * is a short label (tens of characters); 256 is far above any legitimate one yet
+ * refuses a megabyte-scale string.
+ */
+export const MAX_NAME_LENGTH = 256;
+
+/**
+ * Generous upper bound on a prose-like or data-value free-text field: a party
+ * `identity`, a legal-agreement `purpose`, a payload column `description`, or a
+ * constraint `exclude` value (which can be a full email address, ~254
+ * characters). Larger than {@link MAX_NAME_LENGTH} because these legitimately
+ * hold a sentence, a name-plus-contact line, or a long data value rather than a
+ * single label; 1 KiB is still comfortably above any real value.
+ */
+export const MAX_TEXT_LENGTH = 1024;
+
+/**
+ * Generous upper bound on the COUNT of entries in the `linkageFields` and
+ * `linkageKeys` arrays. The default template ships ~14 keys / 5 fields and a
+ * hand-authored set is of the same order; 256 is more than any real
+ * configuration needs yet refuses a token padded with tens of thousands of
+ * entries to exhaust the recipient on decode/render. The `.min(1)` floor and the
+ * most-to-least-precise ordering of `linkageKeys` are unaffected.
+ */
+export const MAX_LINKAGE_ENTRIES = 256;
+
 // --- Output ------------------------------------------------------------------
 
 /**
@@ -60,9 +108,12 @@ interface NameConstraints {
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // Validated as a regex character class so consuming code can safely
   // interpolate it into new RegExp(`[${allowedCharacters}]`) without injection
-  // risk. Note the brackets that get added.
+  // risk. Note the brackets that get added. The `.max()` precedes the refine so
+  // an oversized value is rejected on length before a large partner-controlled
+  // string is compiled into a RegExp here; a real character class is short.
   allowedCharacters: z
     .string()
+    .max(MAX_NAME_LENGTH)
     .refine(
       (val) => {
         try {
@@ -76,7 +127,7 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
     )
     .optional(),
   affixesAllowed: z.boolean().optional(),
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /** Constraints on date-of-birth fields. */
@@ -89,7 +140,7 @@ interface DateConstraints {
 
 const DateConstraintsSchema: z.ZodType<DateConstraints> = z.object({
   validOnly: z.boolean().optional(),
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /** Constraints on SSN and SSN-last-4 fields. */
@@ -107,7 +158,7 @@ interface SSNConstraints {
 
 const SSNConstraintsSchema: z.ZodType<SSNConstraints> = z.object({
   validOnly: z.boolean().optional(),
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /** Constraints applicable to any semantic type. */
@@ -117,12 +168,12 @@ interface AnyConstraints {
 }
 
 const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
-  exclude: z.array(z.string()).optional(),
+  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 // Shared fields for all linkage field variants.
 const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
-  name: z.string().min(1),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   constraints: constraints.optional(),
 });
 
@@ -237,8 +288,12 @@ export interface TransformStep {
 }
 
 const TransformStepSchema: z.ZodType<TransformStep> = z.object({
-  function: z.string().min(1),
-  params: z.record(z.string(), z.unknown()).optional(),
+  function: z.string().min(1).max(MAX_NAME_LENGTH),
+  // The record's KEYS are partner-controlled strings (parameter names), so they
+  // are length-bounded like every other free-text string; the VALUE content is
+  // `z.unknown()` with no clean per-field bound and the entry COUNT is left to
+  // the boundary cap (see the bounds-section note above).
+  params: z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()).optional(),
 });
 
 /**
@@ -270,8 +325,8 @@ export interface LinkageKeyElement {
 }
 
 const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
-  field: z.string().min(1),
-  name: z.string().optional(),
+  field: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: z.string().max(MAX_NAME_LENGTH).optional(),
   generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
   transform: z.array(TransformStepSchema).optional(),
 });
@@ -299,9 +354,11 @@ export interface LinkageKey {
 }
 
 const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   elements: z.array(LinkageKeyElementSchema).min(1),
-  swap: z.tuple([z.string(), z.string()]).optional(),
+  swap: z
+    .tuple([z.string().max(MAX_NAME_LENGTH), z.string().max(MAX_NAME_LENGTH)])
+    .optional(),
 });
 
 // --- Payload -----------------------------------------------------------------
@@ -317,8 +374,8 @@ interface PayloadColumn {
 }
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  description: z.string().max(MAX_TEXT_LENGTH).optional(),
 });
 
 /**
@@ -370,8 +427,8 @@ export interface LegalAgreement {
 }
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
-  reference: z.string().min(1),
-  purpose: z.string().min(1),
+  reference: z.string().min(1).max(MAX_NAME_LENGTH),
+  purpose: z.string().min(1).max(MAX_TEXT_LENGTH),
   expirationDate: z.iso.date(),
 });
 
@@ -462,14 +519,15 @@ export interface LinkageTerms {
 const LinkageTermsBaseSchema = z.object({
   version: z
     .string()
+    .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
-  identity: z.string().min(1),
+  identity: z.string().min(1).max(MAX_TEXT_LENGTH),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   output: OutputSchema,
   deduplicate: z.boolean(),
-  linkageFields: z.array(LinkageFieldSchema).min(1),
-  linkageKeys: z.array(LinkageKeySchema).min(1),
+  linkageFields: z.array(LinkageFieldSchema).min(1).max(MAX_LINKAGE_ENTRIES),
+  linkageKeys: z.array(LinkageKeySchema).min(1).max(MAX_LINKAGE_ENTRIES),
   payload: PayloadSchema.optional(),
   legalAgreement: LegalAgreementSchema.optional(),
 });
