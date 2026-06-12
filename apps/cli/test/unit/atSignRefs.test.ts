@@ -189,6 +189,22 @@ test("resolveExchangeSpecRefs expands a leading ~ in an @path private key", () =
   expect(conn.server.privateKey).toBe("KEYDATA");
 });
 
+test("resolveExchangeSpecRefs resolves an @path private key passphrase (companion to the encrypted key)", () => {
+  const spec = parseSpec({
+    connection: {
+      channel: "sftp",
+      server: {
+        host: "h",
+        private_key: atFile("key", "KEYDATA\n"),
+        private_key_passphrase: atFile("phrase", "PHRASE\n"),
+      },
+    },
+  });
+  const conn = resolveExchangeSpecRefs(spec).connection as SFTPConnectionConfig;
+  expect(conn.server.privateKey).toBe("KEYDATA");
+  expect(conn.server.privateKeyPassphrase).toBe("PHRASE");
+});
+
 test("resolveExchangeSpecRefs resolves @path turn credentials and provision auth on a webrtc connection", () => {
   const spec = parseSpec({
     connection: {

@@ -83,9 +83,10 @@ export function resolveAtSignRefs(obj: unknown): unknown {
  *
  * Resolution is scoped to the fields the file-reference convention supports --
  * those documented "`@`-file recommended" in docs/EXCHANGE_SPEC.md, all of which
- * live under `connection`: the SFTP `server.password` / `server.privateKey`, the
- * HTTP-auth `bearer` / `password` on every provisioning endpoint
- * (`server.provision`, `proxy`, `iceProvision`), each WebRTC `turn[].credential`,
+ * live under `connection`: the SFTP `server.password`, `server.privateKey`, and
+ * `server.privateKeyPassphrase`, the HTTP-auth `bearer` / `password` on every
+ * provisioning endpoint (`server.provision`, `proxy`, `iceProvision`), each
+ * WebRTC `turn[].credential`,
  * and the opaque `providerOptions` map. Every other field is left verbatim, so a
  * free-text value with a literal leading `@` (`linkageTerms.identity`,
  * `retentionDisposition`, ...) is carried through unread rather than exfiltrating
@@ -116,6 +117,11 @@ function resolveConnectionAtSignRefs(
       );
       resolved.server.privateKey = resolveOptionalAtSignRef(
         resolved.server.privateKey,
+      );
+      // The passphrase decrypts an encrypted privateKey; it is a credential
+      // companion to it, read live by the SFTP adapter (ssh2 `passphrase`).
+      resolved.server.privateKeyPassphrase = resolveOptionalAtSignRef(
+        resolved.server.privateKeyPassphrase,
       );
       resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
       resolveHttpAuthAtSignRefs(resolved.proxy?.auth);

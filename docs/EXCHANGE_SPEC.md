@@ -351,7 +351,7 @@ SFTP requires at most one primary authentication method alongside `username`. `p
 |-------|------|-------------|
 | `password` | string | Password authentication; `@`-file recommended |
 | `private_key` | string | Path to SSH private key; `@`-file recommended |
-| `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key` |
+| `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key`; `@`-file recommended |
 | `certificate` | string | Path to SSH certificate; only valid with `private_key`; enables certificate-based authentication |
 | `host_key_fingerprint` | string | Optional expected server host key fingerprint for host verification |
 | `known_hosts` | string | Optional path to a `known_hosts` file; alternative to `host_key_fingerprint` |
@@ -488,7 +488,7 @@ connection:
     host: nts.twilio.com
     path: /v1/credentials/ice
     auth:
-      username: "@/run/secrets/twilio_sid"
+      username: your-twilio-account-sid
       password: "@/run/secrets/twilio.key"
 ```
 
