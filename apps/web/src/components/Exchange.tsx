@@ -22,6 +22,7 @@ import {
 } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "@psi/rendezvous";
+import { acceptorExchangeDataSpec } from "@psi/acceptInvitation";
 import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
@@ -36,7 +37,9 @@ import type {
   StageDefinition,
 } from "@psi/exchangeLifecycle";
 import type {
+  ExchangeDataSpec,
   ExchangeResult,
+  LinkageTerms,
   PreparedExchange,
   WebRTCEndpoint,
 } from "@psilink/core";
@@ -49,6 +52,12 @@ import type {
  * lifetime (ISO 8601), threaded into the authenticated key exchange's expiry
  * guards; it is optional because the {@link InvitationToken} marks `expires`
  * optional, though every web-generated invitation now carries one.
+ *
+ * The acceptor additionally carries the inviter's `linkageTerms` from the
+ * decoded invitation: it adopts those as the terms governing the run (the same
+ * terms the consent screen displayed), rather than inferring a default from its
+ * own CSV. The inviter is the source of the terms and infers its own from its
+ * CSV, so it carries none here.
  */
 export type ExchangeConfig =
   | {
@@ -63,6 +72,7 @@ export type ExchangeConfig =
       sharedSecret: string;
       expires?: string;
       endpoint: WebRTCEndpoint;
+      linkageTerms: LinkageTerms;
     };
 
 const preStages: Array<StageDefinition> = [
@@ -225,8 +235,18 @@ export function Exchange(config: ExchangeConfig) {
       void psi.catch(() => undefined);
       const csvResult = await loadCSVFile(files[0]);
       const rawRows = csvResult.data as Array<Record<string, string>>;
+      // The acceptor adopts the inviter's linkage terms (the same terms shown on
+      // the consent screen), so the run is governed by the terms the user
+      // consented to rather than a default inferred from the acceptor's CSV
+      // columns. The inviter is the source of the terms and infers its own from
+      // its CSV. Either party's metadata, standardization, and payloads still
+      // derive from its own CSV -- only the acceptor's linkage terms are adopted.
+      const dataSpec: ExchangeDataSpec =
+        config.role === "acceptor"
+          ? acceptorExchangeDataSpec(config.linkageTerms, partyName)
+          : {};
       const prepared = prepareForExchange(
-        {}, // no explicit spec; infer from input
+        dataSpec,
         partyName,
         rawRows,
         csvResult.meta.fields ?? [],

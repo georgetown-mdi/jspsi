@@ -99,6 +99,7 @@ export function AcceptInvitation() {
         sharedSecret={decode.invitation.token.sharedSecret}
         expires={decode.invitation.token.expires}
         endpoint={decode.invitation.endpoint}
+        linkageTerms={decode.invitation.token.linkageTerms}
       />
     ) : undefined;
 
