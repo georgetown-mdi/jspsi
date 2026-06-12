@@ -4,10 +4,12 @@ import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   ACCEPT_ROUTE_PATH,
+  INVITATION_LIFETIME_SECONDS,
   deepLinkFor,
   generateInvitation,
   webrtcEndpointFromLocation,
 } from "../../src/psi/invitation.js";
+import { prepareAcceptedInvitation } from "../../src/psi/acceptInvitation.js";
 
 import type { InvitationLocation } from "../../src/psi/invitation.js";
 
@@ -109,6 +111,72 @@ describe("generateInvitation", () => {
 
       expect(fetch).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("generateInvitation expiry", () => {
+  test("mints a non-empty `expires`, one hour (the default) ahead of generation", async () => {
+    const now = new Date();
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+      now,
+    });
+
+    const token = await decodeInvitation(encoded);
+    // Non-empty, and exactly the default lifetime ahead of the supplied instant.
+    expect(token.expires).toBe(
+      new Date(
+        now.getTime() + INVITATION_LIFETIME_SECONDS * 1000,
+      ).toISOString(),
+    );
+  });
+
+  test("the default lifetime is one hour, matching the CLI and the docs", () => {
+    // docs/SECURITY_DESIGN.md states a "default expiration window of 1 hour"; this
+    // pins the web default to it (and to the CLI's INVITATION_LIFETIME_SECONDS).
+    expect(INVITATION_LIFETIME_SECONDS).toBe(60 * 60);
+  });
+
+  test("an explicit lifetimeSeconds sets `expires` to that many seconds ahead", async () => {
+    const now = new Date();
+    const lifetimeSeconds = 30 * 60;
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+      lifetimeSeconds,
+      now,
+    });
+
+    const token = await decodeInvitation(encoded);
+    expect(token.expires).toBe(
+      new Date(now.getTime() + lifetimeSeconds * 1000).toISOString(),
+    );
+  });
+
+  test("the minted token is honored by the acceptor before expiry and rejected at it", async () => {
+    // The two sides must agree on the same `expires` semantics: the inviter sets
+    // the bound here, and prepareAcceptedInvitation (the acceptor) enforces it.
+    const now = new Date();
+    const lifetimeSeconds = INVITATION_LIFETIME_SECONDS;
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+      lifetimeSeconds,
+      now,
+    });
+    const expiresAt = new Date(now.getTime() + lifetimeSeconds * 1000);
+
+    // A second before expiry: the acceptor proceeds to the WebRTC endpoint.
+    await expect(
+      prepareAcceptedInvitation(encoded, new Date(expiresAt.getTime() - 1000)),
+    ).resolves.toMatchObject({ endpoint: { channel: "webrtc" } });
+
+    // At the expiry instant: the acceptor fails closed (its `<=` boundary), so a
+    // token accepted at or after `expires` is rejected.
+    await expect(prepareAcceptedInvitation(encoded, expiresAt)).rejects.toThrow(
+      /expired/i,
+    );
   });
 });
 

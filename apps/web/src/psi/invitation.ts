@@ -16,6 +16,18 @@ import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
 const PEERJS_SIGNALING_PATH = "/api/";
 
 /**
+ * Default invitation lifetime: one hour, the bound a web invitation takes when no
+ * lifetime is selected. Matches the CLI's default (`INVITATION_LIFETIME_SECONDS`
+ * in apps/cli/src/commands/invite.ts) and the "default expiration window of 1
+ * hour" docs/SECURITY_DESIGN.md states, so both inviters agree on the same bound
+ * and that claim holds for web-generated invitations. Held as a local constant
+ * rather than shared from core for the same reason the CLI keeps its own copy:
+ * the value is a policy default, not a cryptographic helper, and core's
+ * invitation module is a consumer here, not where web policy belongs.
+ */
+export const INVITATION_LIFETIME_SECONDS = 60 * 60;
+
+/**
  * Route the deep-link targets: the acceptor's accept/reject consent screen. The
  * route itself -- decode, linkage-terms review, and the derived-id rendezvous --
  * is built by the web rendezvous task (item 196035727); this module only
@@ -110,25 +122,53 @@ export function deepLinkFor(origin: string, encoded: string): string {
  * configuration-GUI roadmap item), so the defaults plus the inviter identity are
  * the real terms the acceptor reviews -- never empty or placeholder.
  *
+ * The token carries a bounded `expires` (default {@link INVITATION_LIFETIME_SECONDS},
+ * one hour) so an intercepted invitation has a finite misuse window. The acceptor
+ * enforces it (`prepareAcceptedInvitation` rejects a token whose `expires` is at
+ * or before the accept instant), and both sides read the same ISO-8601 `expires`,
+ * so the bound the inviter sets is the bound the acceptor honors.
+ *
  * Makes no network request: the encoded invitation is the rendezvous, so the
  * inviter never contacts a session backend (`/api/psi/*`).
  */
 export async function generateInvitation(params: {
   inviterName: string;
   location: InvitationLocation;
+  /**
+   * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
+   * (one hour). The web app has no lifetime-selection UI yet, so production
+   * callers omit it and take the default; the parameter is the seam a future
+   * selector (the configuration-GUI roadmap item) overrides through without
+   * reshaping this entry point.
+   */
+  lifetimeSeconds?: number;
+  /**
+   * The instant the lifetime is measured from; the minted `expires` is
+   * `now + lifetimeSeconds`. Injectable for deterministic tests (mirroring
+   * `prepareAcceptedInvitation`'s `now`), defaulting to the current time.
+   */
+  now?: Date;
 }): Promise<GeneratedInvitation> {
-  const { inviterName, location } = params;
+  const {
+    inviterName,
+    location,
+    lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
+    now = new Date(),
+  } = params;
 
-  // No `expires` deliberately: unlike the CLI (which exposes --expires-in), the
-  // web app has no UI to choose a lifetime, and the acceptor that would enforce
-  // expiry is the paired rendezvous task (item 196035727), not yet built. A
-  // bounded default for web invitations is a deferred product decision, so the
-  // field is omitted rather than guessed at here.
+  // Bound the token's lifetime so an intercepted invitation cannot be accepted
+  // indefinitely. The CLI mints `expires` the same way (expiresFromNow in
+  // apps/cli/src/commands/bootstrap.ts); encodeInvitation rejects a non-future
+  // `expires` as a backstop, so a non-positive lifetime is caught at encode.
+  const expires = new Date(
+    now.getTime() + lifetimeSeconds * 1000,
+  ).toISOString();
   const sharedSecret = generateSharedSecret();
   const token: InvitationToken = {
     version: "1",
     linkageTerms: getDefaultLinkageTerms(inviterName),
     sharedSecret,
+    expires,
     connectionEndpoint: webrtcEndpointFromLocation(location),
   };
 
