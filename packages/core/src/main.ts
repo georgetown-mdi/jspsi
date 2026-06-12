@@ -12,7 +12,7 @@ export {
   getLoggerForVerbosity,
   setLogPrefixer,
 } from "./utils/logger";
-export { retryPromise, withTimeout } from "./utils/promise";
+export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
 // @internal: the CLI config writer (saveConfig) delegates to this snakeize
 // direction so the read and write paths share one recurse-and-skip traversal;
 // not a stable public API (see the declaration's JSDoc).

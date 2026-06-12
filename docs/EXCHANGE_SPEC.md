@@ -541,7 +541,7 @@ Channel-agnostic and channel-specific tuning parameters. A configuration warning
 |-------|------|---------|-------------|
 | `peer_timeout_ms` | integer | 3600000 | Milliseconds to wait for the partner at any single step before giving up, applied both to the initial rendezvous and to each message exchanged during the protocol; if the partner goes silent past this window the exchange fails with a transport error. The effective limit is the minimum of this and the remaining shared-secret lifetime. |
 | `server_connect_timeout_ms` | integer | 30000 | Milliseconds to wait during each connection attempt to the primary exchange server |
-| `max_reconnect_attempts` | integer | 3 | Maximum number of times to attempt reopening a dropped connection before giving up |
+| `max_reconnect_attempts` | integer | 3 | Maximum number of times to retry the initial connection after a fast transient failure (for example, while a share or its permissions are still settling), each attempt bounded by `server_connect_timeout_ms`. A timed-out attempt is terminal and is not retried, since a retry cannot recover an unresponsive server or mount; there is no reconnection after a connection drops mid-exchange. |
 
 #### SFTP and file-drop options
 

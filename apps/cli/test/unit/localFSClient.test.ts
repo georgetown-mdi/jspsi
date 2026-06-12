@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   DirectoryListingBoundsError,
   FrameSizeExceededError,
+  TimeoutError,
 } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
@@ -467,6 +468,38 @@ describe("connect retry and timeout", () => {
       const assertion = expect(p).rejects.toThrow("timed out");
       await vi.advanceTimersByTimeAsync(5_001);
       await assertion;
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("a connect timeout is terminal: it is not retried and strands no second fs.access", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    // Every attempt hangs, simulating a stalled hard mount. If a timeout were
+    // retried, `calls` would climb past one as the retry loop dispatched fresh
+    // probes -- each stranding another thread-pool worker. Bounding that
+    // accumulation is the whole point of treating a timeout as terminal.
+    const spy = vi.spyOn(fs, "access").mockImplementation(() => {
+      calls++;
+      return new Promise(() => {});
+    });
+
+    try {
+      const p = client.connect({
+        path: dir,
+        maxReconnectAttempts: 3,
+        connectTimeoutMs: 5_000,
+      });
+      // A TimeoutError (not a plain Error) is what the retry predicate keys on
+      // to stop, so assert the concrete type the production path now surfaces.
+      const assertion = expect(p).rejects.toBeInstanceOf(TimeoutError);
+      // Advance past the first timeout AND well past several 1s retry-delay
+      // windows: a terminal timeout must schedule no further attempt.
+      await vi.advanceTimersByTimeAsync(20_000);
+      await assertion;
+      expect(calls).toBe(1);
     } finally {
       spy.mockRestore();
       vi.useRealTimers();
