@@ -100,17 +100,19 @@ npm run test:integration -w apps/web    # reuses the running server
 # stop the dev server in the terminal when done (Ctrl-C)
 ```
 
-The browser suite -- cross-implementation byte-vector checks plus a live PSI
-exchange, run in real Chromium via Playwright -- self-manages the dev server the
-same way: it stands up the PeerJS coordination server the exchange needs, reuses
-a running `npm run dev`, and otherwise starts and stops its own.
+The browser suite -- cross-implementation byte-vector checks, a live PSI
+exchange, and React component tests such as the accept consent gate, run in real
+Chromium via Playwright -- self-manages the dev server the same way: it stands up
+the PeerJS coordination server the exchange needs, reuses a running `npm run
+dev`, and otherwise starts and stops its own.
 
 ```sh
 npm run test:browser -w apps/web    # auto-starts, waits for, and stops the dev server
 ```
 
-It is not part of CI; run it locally when changing the web PSI exchange or the
-cross-implementation vectors.
+It is not part of CI; run it locally when changing the web PSI exchange, the
+cross-implementation vectors, or a web UI component it covers (such as the accept
+consent gate).
 
 ## Code Conventions
 
