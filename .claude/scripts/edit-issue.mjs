@@ -11,9 +11,10 @@
 // node IDs or look up option IDs by hand.
 //
 // The <itemId> may be EITHER a numeric ID (the `?itemId=N` value) OR a
-// `PVTI_...` global node ID as printed by `gh project item-list`; the node ID is
+// `PVTI_...` global node ID as printed by `list-issues.mjs`; the node ID is
 // decoded back to its numeric ID, so a listed item can be edited without
-// hand-decoding it.
+// hand-decoding it. A node ID from a different board than <project-number> is
+// rejected rather than silently remapped.
 //
 // Usage:
 //   node edit-issue.mjs <project-number> <itemId|PVTI_...> [edits...]
@@ -42,21 +43,21 @@
 import { readFileSync } from "node:fs";
 import {
   fetchItems,
+  fieldValueInput,
   graphql,
-  numericIdFromNodeId,
   OWNER,
   pvtiNodeId,
+  toNumericId,
 } from "./lib/projectItems.mjs";
 
 /** Parse argv into { projectNumber, numericId, title?, body?, fields: [{name, value}] }. */
 function parseArgs(argv) {
   const projectNumber = Number(argv[0]);
   // The item argument is a numeric ID or a PVTI_ node ID; resolve both to
-  // numeric. A malformed PVTI_ id throws (a clearer signal than the NaN below).
+  // numeric, passing the project so a node ID from another board is rejected.
+  // A malformed/mismatched PVTI_ id throws (a clearer signal than the NaN below).
   const itemArg = argv[1] ?? "";
-  const numericId = itemArg.startsWith("PVTI_")
-    ? numericIdFromNodeId(itemArg)
-    : Number(itemArg);
+  const numericId = toNumericId(itemArg, projectNumber);
   if (!Number.isInteger(projectNumber) || !Number.isInteger(numericId)) {
     usage();
   }
@@ -230,47 +231,6 @@ function findField(fields, name) {
     throw new Error(`field "${name}" not found; available: ${names}`);
   }
   return field;
-}
-
-/**
- * Build the `ProjectV2FieldValue` input for updateProjectV2ItemFieldValue,
- * picking the typed key from the field's dataType: a single-select resolves the
- * option ID by name; text/number/date map straight through (number as a JS
- * number, since the GraphQL field is a Float). Knowing dataType up front removes
- * the old value-shape inference and its misrouting caveat.
- */
-function fieldValueInput(field, value) {
-  switch (field.dataType) {
-    case "SINGLE_SELECT": {
-      const option = (field.options ?? []).find(
-        (o) => o.name.toLowerCase() === value.toLowerCase(),
-      );
-      if (!option) {
-        const names = (field.options ?? []).map((o) => o.name).join(", ");
-        throw new Error(
-          `option "${value}" not valid for "${field.name}"; choices: ${names}`,
-        );
-      }
-      return { singleSelectOptionId: option.id };
-    }
-    case "TEXT":
-      return { text: value };
-    case "NUMBER": {
-      const number = Number(value);
-      if (!Number.isFinite(number)) {
-        throw new Error(
-          `field "${field.name}" is a number field but value "${value}" is not numeric`,
-        );
-      }
-      return { number };
-    }
-    case "DATE":
-      return { date: value };
-    default:
-      throw new Error(
-        `field "${field.name}" has unsupported type ${field.dataType}; extend edit-issue.mjs to handle it`,
-      );
-  }
 }
 
 /** Set one project-item field value via a GraphQL mutation. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fetchAllItems,
+  fieldValueInput,
   githubToken,
   numericIdFromNodeId,
   PAGE_SIZE,
@@ -129,6 +130,18 @@ describe("toNumericId", () => {
   it("returns NaN for an unparseable numeric argument (so Number.isInteger rejects it)", () => {
     expect(toNumericId("not-a-number")).toBeNaN();
   });
+
+  it("rejects a node id whose project disagrees with the requested project", () => {
+    // A board-10 node id passed with project 9 would otherwise decode and be
+    // re-encoded under board 9's prefix, silently addressing a different item.
+    const board10NodeId = pvtiNodeId(10, 199240250);
+    expect(() => toNumericId(board10NodeId, 9)).toThrow(
+      /not the requested project/,
+    );
+    expect(toNumericId(board10NodeId, 10)).toBe(199240250);
+    // With no expected project given, the cross-check is skipped (back-compat).
+    expect(toNumericId(board10NodeId)).toBe(199240250);
+  });
 });
 
 describe("githubToken", () => {
@@ -164,5 +177,61 @@ describe("githubToken", () => {
     expect(() => githubToken({ env: {}, readStoredToken: () => "" })).toThrow(
       /no GitHub token/,
     );
+  });
+
+  it("falls through a whitespace-only env var to the stored credential", () => {
+    expect(
+      githubToken({
+        env: { GH_TOKEN: "   " },
+        readStoredToken: () => "stored",
+      }),
+    ).toBe("stored");
+  });
+});
+
+describe("fieldValueInput", () => {
+  const status = {
+    name: "Status",
+    dataType: "SINGLE_SELECT",
+    options: [
+      { id: "opt_todo", name: "Todo" },
+      { id: "opt_done", name: "Done" },
+    ],
+  };
+
+  it("resolves a single-select option id by name, case-insensitively", () => {
+    expect(fieldValueInput(status, "todo")).toEqual({
+      singleSelectOptionId: "opt_todo",
+    });
+  });
+
+  it("throws on an unknown single-select option, listing the choices", () => {
+    expect(() => fieldValueInput(status, "Nope")).toThrow(/Todo, Done/);
+  });
+
+  it("maps text straight through and number to a JS number", () => {
+    expect(fieldValueInput({ name: "Epic", dataType: "TEXT" }, "Sync")).toEqual(
+      {
+        text: "Sync",
+      },
+    );
+    expect(fieldValueInput({ name: "Order", dataType: "NUMBER" }, "7")).toEqual(
+      { number: 7 },
+    );
+    expect(
+      fieldValueInput({ name: "Due", dataType: "DATE" }, "2026-01-02"),
+    ).toEqual({ date: "2026-01-02" });
+  });
+
+  it("throws on a non-numeric value for a number field", () => {
+    expect(() =>
+      fieldValueInput({ name: "Order", dataType: "NUMBER" }, "soon"),
+    ).toThrow(/not numeric/);
+  });
+
+  it("throws on an unsupported field type", () => {
+    expect(() =>
+      fieldValueInput({ name: "Sprint", dataType: "ITERATION" }, "x"),
+    ).toThrow(/unsupported type/);
   });
 });

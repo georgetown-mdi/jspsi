@@ -15,8 +15,8 @@
 // number of IDs, returning only those items, with no scan-and-filter.
 //
 // Each item argument may be EITHER a numeric ID (the `?itemId=N` value) OR a
-// `PVTI_...` global node ID as printed by `gh project item-list` -- the latter
-// is decoded back to its numeric ID, so a listed item can be looked up without
+// `PVTI_...` global node ID as printed by `list-issues.mjs` -- the latter is
+// decoded back to its numeric ID, so a listed item can be looked up without
 // hand-decoding the node ID. The two forms mix freely in one invocation.
 //
 // Usage:
@@ -67,8 +67,11 @@ async function main() {
   const rest = argv.slice(i);
 
   const projectNumber = Number(rest[0]);
-  // Each argument is a numeric ID or a PVTI_ node ID; resolve both to numeric.
-  const numericIds = rest.slice(1).map(toNumericId);
+  // Each argument is a numeric ID or a PVTI_ node ID; resolve both to numeric,
+  // rejecting a node ID that belongs to a different project than requested.
+  const numericIds = rest
+    .slice(1)
+    .map((arg) => toNumericId(arg, projectNumber));
   if (
     !Number.isInteger(projectNumber) ||
     numericIds.length === 0 ||

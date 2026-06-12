@@ -53,8 +53,10 @@ export function githubToken({
   env = process.env,
   readStoredToken = () => gh(["auth", "token"]),
 } = {}) {
-  const fromEnv = env.GH_TOKEN || env.GITHUB_TOKEN;
-  if (fromEnv) return fromEnv.trim();
+  // Trim before the truthiness test so a whitespace-only env var falls through
+  // to the stored credential instead of yielding an empty bearer token.
+  const fromEnv = (env.GH_TOKEN || env.GITHUB_TOKEN || "").trim();
+  if (fromEnv) return fromEnv;
   let stored;
   try {
     stored = readStoredToken().trim();
@@ -136,8 +138,13 @@ export function pvtiNodeId(projectNumber, numericId) {
  * bytes) must match a known PROJECT_PREFIXES entry, which both validates the ID
  * shape and guards against a node ID from some other project sneaking through.
  * numericIdFromNodeId(pvtiNodeId(p, n)) === n holds for every known p.
+ *
+ * A node ID encodes its own project. When `expectedProject` is given (and is a
+ * known project), the decoded project must equal it -- otherwise the numeric ID
+ * would be re-encoded under a different project's prefix and silently address
+ * the wrong item; reject the mismatch instead.
  */
-export function numericIdFromNodeId(nodeId) {
+export function numericIdFromNodeId(nodeId, expectedProject) {
   if (typeof nodeId !== "string" || !nodeId.startsWith("PVTI_")) {
     throw new Error(`not a PVTI_ node id: ${nodeId}`);
   }
@@ -146,10 +153,21 @@ export function numericIdFromNodeId(nodeId) {
     throw new Error(`PVTI_ node id too short to decode: ${nodeId}`);
   }
   const prefixHex = buf.subarray(0, -4).toString("hex");
-  const known = Object.values(PROJECT_PREFIXES).includes(prefixHex);
-  if (!known) {
+  const ownerProject = Object.keys(PROJECT_PREFIXES).find(
+    (p) => PROJECT_PREFIXES[p] === prefixHex,
+  );
+  if (ownerProject === undefined) {
     throw new Error(
       `PVTI_ node id "${nodeId}" has prefix ${prefixHex}, not a known project; known: ${Object.values(PROJECT_PREFIXES).join(", ")}`,
+    );
+  }
+  if (
+    expectedProject !== undefined &&
+    PROJECT_PREFIXES[expectedProject] !== undefined &&
+    Number(ownerProject) !== Number(expectedProject)
+  ) {
+    throw new Error(
+      `node id ${nodeId} is on project ${ownerProject}, not the requested project ${expectedProject}`,
     );
   }
   return buf.readUInt32BE(buf.length - 4);
@@ -160,10 +178,14 @@ export function numericIdFromNodeId(nodeId) {
  * numericIdFromNodeId; anything else is parsed as a base-10 integer. Returns NaN
  * for an unparseable numeric argument so a caller's Number.isInteger check still
  * rejects it. A malformed PVTI_ id throws (a clearer signal than NaN). Shared so
- * fetch-issues.mjs and lint-issues.mjs accept the two id forms identically.
+ * fetch-issues.mjs, lint-issues.mjs, and edit-issue.mjs accept the two id forms
+ * identically. Pass `expectedProject` (the project number the caller was given)
+ * so a node ID from a different board is rejected rather than silently remapped.
  */
-export function toNumericId(arg) {
-  return arg.startsWith("PVTI_") ? numericIdFromNodeId(arg) : Number(arg);
+export function toNumericId(arg, expectedProject) {
+  return arg.startsWith("PVTI_")
+    ? numericIdFromNodeId(arg, expectedProject)
+    : Number(arg);
 }
 
 /**
@@ -197,6 +219,49 @@ export function extractFields(fieldValues) {
     else if (typeof node.name === "string") out[name] = node.name;
   }
   return out;
+}
+
+/**
+ * Build the `ProjectV2FieldValue` input for updateProjectV2ItemFieldValue (the
+ * write-side counterpart to extractFields), picking the typed key from the
+ * field's `dataType`: a single-select resolves the option ID by name;
+ * text/number/date map straight through (number as a JS number, since the
+ * GraphQL field is a Float). `field` is { name, dataType, options? } as returned
+ * by the project field introspection in edit-issue.mjs. Throws on an unknown
+ * option, a non-numeric value for a NUMBER field, or an unsupported dataType.
+ */
+export function fieldValueInput(field, value) {
+  switch (field.dataType) {
+    case "SINGLE_SELECT": {
+      const option = (field.options ?? []).find(
+        (o) => o.name.toLowerCase() === value.toLowerCase(),
+      );
+      if (!option) {
+        const names = (field.options ?? []).map((o) => o.name).join(", ");
+        throw new Error(
+          `option "${value}" not valid for "${field.name}"; choices: ${names}`,
+        );
+      }
+      return { singleSelectOptionId: option.id };
+    }
+    case "TEXT":
+      return { text: value };
+    case "NUMBER": {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        throw new Error(
+          `field "${field.name}" is a number field but value "${value}" is not numeric`,
+        );
+      }
+      return { number };
+    }
+    case "DATE":
+      return { date: value };
+    default:
+      throw new Error(
+        `field "${field.name}" has unsupported type ${field.dataType}; extend the field-value handling to support it`,
+      );
+  }
 }
 
 /**

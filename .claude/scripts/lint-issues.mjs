@@ -190,8 +190,11 @@ async function main() {
 
   const projectNumber = Number(positional[0]);
   // Each item argument is a numeric ID or a PVTI_ node ID; resolve both to
-  // numeric so a node ID lints the same item as its numeric form.
-  const numericIds = positional.slice(1).map(toNumericId);
+  // numeric (rejecting a node ID from another project) so a node ID lints the
+  // same item as its numeric form.
+  const numericIds = positional
+    .slice(1)
+    .map((arg) => toNumericId(arg, projectNumber));
   if (
     !Number.isInteger(projectNumber) ||
     numericIds.length === 0 ||
