@@ -353,7 +353,10 @@ export async function runProtocol(
     // idempotent.
     if (secure !== undefined) {
       await secure.close().catch((err: unknown) => {
-        log.debug("secure.close() during cleanup:", err);
+        log.debug(
+          "secure.close() during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
       });
     }
     // mc.close() detaches the bridge's data/error listeners and then closes the
@@ -362,7 +365,7 @@ export async function runProtocol(
     // even when open() never ran, and a near no-op after secure.close() already
     // closed it via the same delegation).
     await mc.close().catch((err: unknown) => {
-      log.debug("mc.close() during cleanup:", err);
+      log.debug("mc.close() during cleanup:", sanitizeErrorForDisplay(err));
     });
     // If an earlier transport failure already terminated mc, its close()
     // returns immediately without re-closing conn (and the close it triggered
@@ -376,9 +379,12 @@ export async function runProtocol(
       // close() is idempotent and does not throw on an unopened instance, so
       // the else branch is only a defensive fallback for an unexpected error.
       if (opened) {
-        log.warn("failed to close connection during cleanup:", err);
+        log.warn(
+          "failed to close connection during cleanup:",
+          sanitizeErrorForDisplay(err),
+        );
       } else {
-        log.debug("conn.close() during cleanup:", err);
+        log.debug("conn.close() during cleanup:", sanitizeErrorForDisplay(err));
       }
     });
     process.off("SIGINT", onSigint);
@@ -429,7 +435,7 @@ export async function runProtocol(
       logRotationStateOnInterrupt("the exchange was interrupted");
       await doCleanup();
     } catch (cleanupErr: unknown) {
-      log.debug("onSigint cleanup threw:", cleanupErr);
+      log.debug("onSigint cleanup threw:", sanitizeErrorForDisplay(cleanupErr));
     } finally {
       // 128 + 2 (SIGINT): conventional exit code for a process interrupted
       // by SIGINT, distinguishable from a clean exit (0) or an error (69).
@@ -445,7 +451,10 @@ export async function runProtocol(
       logRotationStateOnInterrupt("the exchange was interrupted");
       await doCleanup();
     } catch (cleanupErr: unknown) {
-      log.debug("onSigterm cleanup threw:", cleanupErr);
+      log.debug(
+        "onSigterm cleanup threw:",
+        sanitizeErrorForDisplay(cleanupErr),
+      );
     } finally {
       // 128 + 15 (SIGTERM): conventional exit code for a process terminated by
       // SIGTERM, distinguishable from a clean exit (0) or an error exit (69).
@@ -474,11 +483,21 @@ export async function runProtocol(
 
   try {
     if (connection.channel === "filedrop") {
-      log.info("opening local path", connection.path);
+      log.info(
+        "opening local path",
+        // The filedrop path is partner-seeded on an offline-accept config (it
+        // comes from the invitation's filedrop endpoint, charset-unconstrained),
+        // so escape it before it reaches the operator's terminal -- the filedrop
+        // twin of the SFTP host below.
+        sanitizeForDisplay(connection.path),
+      );
     } else {
       log.info(
         "opening connection to",
-        connection.server.host,
+        // The SFTP host is partner-controlled on an offline-accept-seeded config
+        // (it comes from the invitation endpoint, charset-unconstrained), so
+        // escape it before it reaches the operator's terminal.
+        sanitizeForDisplay(connection.server.host),
         "with options",
         connection.options,
       );
@@ -502,7 +521,10 @@ export async function runProtocol(
       try {
         await conn.close();
       } catch (err) {
-        log.debug("post-open signal close failed:", err);
+        log.debug(
+          "post-open signal close failed:",
+          sanitizeErrorForDisplay(err),
+        );
       }
       throw new Error(
         `interrupted by ${signalReceived} during connection open`,
