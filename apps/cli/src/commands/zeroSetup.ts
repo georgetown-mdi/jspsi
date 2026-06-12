@@ -34,7 +34,7 @@ import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
-import { decodeUrlComponent } from "./bootstrap";
+import { decodeUrlComponent } from "../util/connectionUrl";
 
 export function builder(cmd: Argv): Argv {
   return cmd

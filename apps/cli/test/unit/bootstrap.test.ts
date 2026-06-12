@@ -22,12 +22,12 @@ import {
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
-  redactUrlCredentials,
   runOnlineBootstrap,
   runOrExit,
   unsatisfiedLinkageFields,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
+import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
 
 // runOnlineBootstrap's config-persistence tests below drive its wiring without
@@ -137,6 +137,16 @@ test("connectionFromURL: decodes a percent-encoded host", () => {
   expect(conn.server.host).toBe("my server");
 });
 
+test("connectionFromURL: an encoded slash in the path decodes to a separator", () => {
+  // decodeURIComponent turns %2F into "/"; for an SFTP remote path that is the
+  // intended literal separator (a POSIX filename cannot contain a slash), and it
+  // keeps the builder and the live connection seeing the same path.
+  const conn = connectionFromURL(new URL("sftp://host/drop%2Fsub"), {});
+  expect(conn.channel).toBe("sftp");
+  if (conn.channel !== "sftp") return;
+  expect(conn.server.path).toBe("/drop/sub");
+});
+
 test("connectionFromURL: a malformed percent-escape is a redacted usage error", () => {
   // A lone `%` makes decodeURIComponent throw a URIError; it must surface as a
   // UsageError, not an unhandled error.
@@ -162,13 +172,13 @@ test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL"
   // decoded-vs-decoded and reports a clean match -- no false conflict, and
   // nothing the one-time live exchange (which uses this same target) contradicts.
   const target = connectionFromURL(
-    new URL("sftp://us%20er:p%20w@host/my%20drop"),
+    new URL("sftp://us%20er:p%20w@my%20server/my%20drop"),
     {},
   );
   const existing: SFTPConnectionConfig = {
     channel: "sftp",
     server: {
-      host: "host",
+      host: "my server",
       path: "/my drop",
       username: "us er",
       password: "p w",

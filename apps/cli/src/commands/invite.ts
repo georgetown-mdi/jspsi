@@ -15,6 +15,7 @@ import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { parseDuration } from "../util/duration";
 import { singleValue } from "../util/cli";
+import { redactUrlCredentials } from "../util/connectionUrl";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   addCommonBootstrapOptions,
@@ -29,7 +30,6 @@ import {
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
-  redactUrlCredentials,
   prepareForOnlineExchange,
   runOnlineBootstrap,
   runOrExit,
