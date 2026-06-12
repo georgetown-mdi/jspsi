@@ -1,3 +1,10 @@
+// PeerAbortError (below) extends ConnectionError, so this leaf-ish error module
+// imports it from the connection layer. This is a one-way edge, not a cycle:
+// messageConnection.ts imports only `import type { Connection }` from ./types
+// (which imports only zod) and never imports errors.ts. ConnectionError stays in
+// messageConnection with the rest of the message-connection error taxonomy
+// (asConnectionError, the ConnectionErrorKind type); relocating it here would
+// only push the same edge the other way, splitting that taxonomy.
 import { ConnectionError } from "./connection/messageConnection";
 
 /**

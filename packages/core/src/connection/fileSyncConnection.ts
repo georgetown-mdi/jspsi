@@ -265,13 +265,19 @@ const ABORT_MARKER_MAX_BYTES = 1024;
 // sick one.
 const ABORT_MARKER_WRITE_BUDGET_MS = 5000;
 
-// Backstop grace bounding how long close() waits for the abort decision to
-// resolve before tearing down anyway. Modeled on withTransportBudgetVoid:
-// unref'd and resolve-on-timeout, so it neither hangs close() nor holds a
-// failing process open. Sized >= the marker-write budget so a marker write that
-// is legitimately in flight is never cut short by the grace elapsing. Reached
-// only on a path that neither writes nor seals the decision (a future-proofing
-// backstop); the live paths resolve the decision well within it.
+// Backstop grace bounding how long close() waits for the abort DECISION to
+// resolve (write vs seal) -- NOT a bound on the marker write. Modeled on
+// withTransportBudgetVoid: unref'd and resolve-on-timeout, so it neither hangs
+// close() nor holds a failing process open. The decision resolves sub-second in
+// practice (the orchestrator's catch calls writeAbortMarker(), or doCleanup
+// calls sealAbort(), the moment the fault propagates), so this only ever fires
+// on a future path that neither writes nor seals. Crucially, once the decision
+// is "write", close() awaits the bounded marker write in FULL and separately
+// (the grace timer is already cleared by then), so the grace can never truncate
+// an in-flight write whatever its value -- the two-op write is bounded by its
+// own per-op ABORT_MARKER_WRITE_BUDGET_MS, not by this. Reusing the write budget
+// as the magnitude is just a generous, already-justified bound for the
+// decision-resolution wait, not a coupling to the write duration.
 const ABORT_DECISION_GRACE_MS = ABORT_MARKER_WRITE_BUDGET_MS;
 
 // Recovers the peer id from a `<id><suffix>` rendezvous control name (a hello or
@@ -325,7 +331,13 @@ const isProtocolTempName = (name: string): boolean => {
 // marker classifies as a protocol file -- handled by the recognize-and-sweep --
 // rather than failing the directory-clean check as a foreign file. Deliberately
 // broader than isExpectedAbortName; every name isExpectedAbortName accepts also
-// satisfies this (subset invariant, pinned by a unit test).
+// satisfies this (subset invariant, pinned by a unit test). Like the sibling
+// suffix checks in isProtocolGrammarName (HELLO/LOCK/JOINING), this is a bare
+// endsWith with no minimum-prefix guard, so the empty-prefix form `-abort.json`
+// is also grammar-recognized. That form is not sweepable -- isExpectedAbortName
+// and the entry sweep both require a non-empty id -- so it fails closed as an
+// unexpected protocol file (exit 64), the same fate as a bare `-hello.json`, and
+// is never a usable identity any honest party writes.
 export const isAbortMarkerName = (name: string): boolean =>
   name.endsWith(ABORT_SUFFIX);
 
@@ -1210,8 +1222,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // orchestrator's catch, so a marker write issued from the catch would race
     // its own teardown. If armed and the decision is still unresolved, wait for
     // whichever of {the decision resolving, the backstop grace} comes first; on
-    // "write", await the bounded marker write (rejection-safe -- close() must
-    // stay non-throwing). The await MUST precede client.end(): the marker write
+    // "write", await the bounded marker write IN FULL (rejection-safe -- close()
+    // must stay non-throwing). The grace bounded only the wait for the decision
+    // above, never this write -- the write carries its own per-op budget (see
+    // ABORT_DECISION_GRACE_MS). The await MUST precede client.end(): the marker write
     // rides the same underlying transport, so an earlier end() would kill an
     // in-flight write -- the captured abortWriteInputs immunize only against the
     // path/config nulling, not against end(). Gated on abortArmed &&
@@ -3301,7 +3315,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     try {
       // Bounded get() with the small cap (NOT MAX_FRAME_SIZE_BYTES, which the
       // message path uses) as the hard backstop against a server under-reporting
-      // the listed size above.
+      // the listed size above. This rides this.client (the boundTransport
+      // poll-loop budget) deliberately, NOT the short rawClient budget the write
+      // uses: it is one read among the cycle's list() and message get(), all on
+      // that shared budget, and on SFTP the adapter self-bounds reads. The short
+      // rawClient budget is reserved for the teardown WRITE, which must fast-fail
+      // so a faulting process is not held open; a stalled read here only defers
+      // detection by one cycle (caught below -> false -> keep polling), and the
+      // list() that opens every cycle already gates on this same budget, so a
+      // tighter bound here would close nothing that list() does not already leave open.
       const raw = await this.client.get(`${path}/${markerName}`, {
         encoding: "utf-8",
         maxBytes: ABORT_MARKER_MAX_BYTES,
