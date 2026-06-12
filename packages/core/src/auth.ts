@@ -114,6 +114,59 @@ export async function deriveAeadKey(
 }
 
 /**
+ * The two abort-token roles, frozen for the same reason as {@link AEAD_CONTEXTS}:
+ * the readonly compile-time type also holds at runtime, so a plain-JS caller
+ * cannot widen the set the runtime guard below checks. One token is derived per
+ * role; the writer's own role names the token it writes, the peer's role names
+ * the token it verifies. Structurally identical to {@link HandshakeRole}.
+ */
+export const ABORT_TOKEN_ROLES = Object.freeze([
+  "initiator",
+  "responder",
+] as const);
+
+/** An abort-token role. One of the fixed {@link ABORT_TOKEN_ROLES}. */
+export type AbortTokenRole = (typeof ABORT_TOKEN_ROLES)[number];
+
+/**
+ * Derive a 32-byte per-direction abort token from the session key using HKDF.
+ *
+ * The token is the authentication for the cross-party abort marker
+ * (`<writerId>-abort.json`): only a party holding the fresh ephemeral session key
+ * can produce it, so the untrusted directory admin cannot forge an accepted
+ * marker, and a captured marker never validates in another session. The
+ * per-direction `role` binds the token to its writer's role, so a marker captured
+ * and renamed to the other party's name does not validate.
+ *
+ * **Domain separation.** HKDF `info` is not length-prefixed, so the label must be
+ * exact-string-distinct and prefix-free against every other label derived from
+ * the same IKM (the session key). The only other session-key labels are
+ * `psilink-aead-v1:{...}` and `psilink-shared-secret-rotation-v1`;
+ * `psilink-abort-token-v1:{initiator,responder}` diverges from both at `abort`
+ * vs `aead`/`shared` and is neither a prefix nor an extension of either. The
+ * frozen role set plus the `:` separator guarantee a non-empty role suffix,
+ * foreclosing a future bare-prefix label from extending into a collision.
+ *
+ * Mirrors {@link deriveAeadKey}: a frozen role tuple plus a runtime allowlist
+ * check that fails fast for an untyped (plain-JS or `as`-cast) caller rather than
+ * silently deriving a token the two parties may not agree on.
+ *
+ * @throws {Error} if `role` is not one of {@link ABORT_TOKEN_ROLES}.
+ */
+export async function deriveAbortToken(
+  sessionKey: Uint8Array<ArrayBuffer>,
+  role: AbortTokenRole,
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (!(ABORT_TOKEN_ROLES as readonly string[]).includes(role)) {
+    throw new Error(
+      `deriveAbortToken: unknown abort-token role ${JSON.stringify(role)}; ` +
+        `expected one of ${ABORT_TOKEN_ROLES.map((r) => JSON.stringify(r)).join(", ")}`,
+    );
+  }
+  return hkdfDerive(sessionKey, `psilink-abort-token-v1:${role}`, 32);
+}
+
+/**
  * Whether an ISO 8601 `expires` is at or before `now`. An unparseable value is
  * treated as expired (fail closed): `new Date(bad) <= now` is `false`, so a
  * malformed timestamp from a caller that bypassed key-file validation would

@@ -976,6 +976,98 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
   expect(conn.handshakeRole).toBe("initiator");
 });
 
+test("synchronize() recognize-and-sweeps leftover abort markers (own and peer) at entry in delete mode", async () => {
+  // Every authenticated terminal failure leaves a `<writerId>-abort.json`, so a
+  // directory reused for a later exchange would otherwise reject "directory not
+  // clean". The entry guard sweeps this party's own leftover marker and any
+  // peer marker whose id is evidenced by a peer hello present at entry.
+  const peerId = "00000000-0000-4000-8000-000000000001";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  const myId = conn.id;
+
+  const myHelloName = `${myId}-hello.json`;
+  const peerHelloName = `${peerId}-hello.json`;
+  const lockName = `${peerId}-${myId}-lock.json`;
+  const lockPath = `${conn.path}/${lockName}`;
+  const ownAbortPath = `${conn.path}/${myId}-abort.json`;
+  const peerAbortPath = `${conn.path}/${peerId}-abort.json`;
+
+  // Plant the leftover markers (their bodies are irrelevant -- the sweep deletes
+  // by name) and the peer hello body for the rendezvous read gate.
+  files.set(ownAbortPath, Buffer.from("{}"));
+  files.set(peerAbortPath, Buffer.from("{}"));
+  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
+
+  const mtime = Date.now();
+  let listCallCount = 0;
+  client.list = async () => {
+    listCallCount++;
+    if (listCallCount === 1)
+      // Entry snapshot: a peer hello (recovers peerId) plus both leftover
+      // markers. After the sweep, no unexpected protocol file remains.
+      return [
+        {
+          name: peerHelloName,
+          modifyTime: mtime,
+          size: LOCK_HELLO_BODY.length,
+        },
+        { name: `${myId}-abort.json`, modifyTime: mtime, size: 2 },
+        { name: `${peerId}-abort.json`, modifyTime: mtime, size: 2 },
+      ];
+    return [
+      { name: myHelloName, modifyTime: mtime, size: 0 },
+      { name: peerHelloName, modifyTime: mtime, size: LOCK_HELLO_BODY.length },
+    ];
+  };
+  // Lose the lock race so rendezvous completes (mirrors the EEXIST test above).
+  client.createExclusive = async (path) => {
+    files.set(lockPath, Buffer.alloc(0));
+    throw Object.assign(new Error(`${path}: file already exists`), {
+      code: "EEXIST",
+    });
+  };
+
+  await conn.synchronize();
+
+  // Both leftover markers were swept; rendezvous still completed.
+  expect(files.has(ownAbortPath)).toBe(false);
+  expect(files.has(peerAbortPath)).toBe(false);
+  expect(conn.peerId).toBe(peerId);
+});
+
+test("synchronize() does NOT sweep a leftover abort marker in retain mode; it surfaces as exit-64", async () => {
+  // In retain mode the directory is a durable audit transcript, so a leftover
+  // marker beside it must not be auto-swept (that would reintroduce the
+  // destruction the retain guard prevents). It falls through to the unexpected-
+  // protocol guard (a UsageError -> exit 64), which --force-retain-sweep clears.
+  const { client, files } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 5_000),
+    verbose: -1,
+  });
+  await conn.open({
+    channel: "filedrop",
+    path: "/test",
+    options: {
+      peerTimeoutMs: 50,
+      retainFiles: true,
+      locklessRendezvous: true,
+    },
+  });
+  const ownAbortPath = `/test/${conn.id}-abort.json`;
+  files.set(ownAbortPath, Buffer.from("{}"));
+  client.list = async () => [
+    { name: `${conn.id}-abort.json`, modifyTime: 0, size: 2 },
+  ];
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+  // The transcript-adjacent marker survives the refusal.
+  expect(files.has(ownAbortPath)).toBe(true);
+});
+
 test("synchronize() surfaces an over-cap peer hello as a terminal FrameSizeExceededError", async () => {
   // The rendezvous gate (readControlFileWithGate) must treat an over-cap hello
   // control file as terminal rather than retrying it until the deadline: a

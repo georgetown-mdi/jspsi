@@ -11,6 +11,11 @@ const mockState = vi.hoisted(() => ({
   // Captured log output from the mock getLogger returned to runProtocol.
   warnings: [] as string[],
   errors: [] as string[],
+  // Two-party barrier counter for the abort-marker echo tests: each party
+  // increments on entering the (mocked) runExchange, and the mock waits for both
+  // before injecting its fault, so the first party to fail cannot tear down files
+  // the second still needs to finish its own handshake.
+  runExchangeEntries: 0,
 }));
 
 // Keep FileSyncConnection and authenticateConnection real so the key exchange runs over a
@@ -80,6 +85,8 @@ import {
   parseExchangeRecord,
   parseOpeningData,
   runExchange,
+  PeerAbortError,
+  ConnectionError,
 } from "@psilink/core";
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
 import {
@@ -105,6 +112,7 @@ beforeEach(() => {
   mockState.dropDir = dropDir;
   mockState.warnings.length = 0;
   mockState.errors.length = 0;
+  mockState.runExchangeEntries = 0;
   fs.mkdirSync(dropDir);
 });
 
@@ -843,6 +851,117 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
   expect(expiresA).toBeLessThanOrEqual(after + THIRTY_DAYS_MS);
   expect(expiresB).toBeGreaterThanOrEqual(before + THIRTY_DAYS_MS);
   expect(expiresB).toBeLessThanOrEqual(after + THIRTY_DAYS_MS);
+});
+
+// --- Abort-marker echo suppression via runProtocol ---------------------------
+//
+// These pin the orchestrator-side gate that DECIDES whether to write an abort
+// marker -- `conn.abortArmed && signalReceived === undefined && !errIsPeerAbort(err)`
+// in runProtocol's catch. The core test (fileSyncAbortMarker.test.ts) exercises
+// the connection's seal-vs-write machinery by calling sealAbort()/writeAbortMarker()
+// directly; nothing else drives the protocol-level gate, so a regression that
+// dropped the `!errIsPeerAbort` term (making two peers reflect markers at each
+// other) or the `abortArmed` term would pass the rest of the suite. Both tests run
+// a REAL two-party handshake to the armed state (only runExchange is mocked), then
+// inject the fault by throwing from runExchange -- which lands in the same catch a
+// real mid-exchange fault would, but deterministically. The injection keys on the
+// rendezvous-assigned ROLE, not the party, so the outcome is independent of who
+// wins the rendezvous. A barrier in the mock holds both parties past the handshake
+// before either fails, so the first teardown cannot strand the other's handshake.
+
+// Holds the calling party inside the mocked runExchange until BOTH parties have
+// arrived (both are armed and past the handshake), bounded so a lone arrival does
+// not hang. See mockState.runExchangeEntries.
+async function awaitBothArmed(): Promise<void> {
+  mockState.runExchangeEntries++;
+  const deadline = Date.now() + 2_000;
+  while (mockState.runExchangeEntries < 2 && Date.now() < deadline)
+    await new Promise<void>((r) => setTimeout(r, 1));
+}
+
+function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
+  return runProtocol(
+    {
+      channel: "filedrop",
+      path: dropDir,
+      // Bound peerTimeoutMs: when a party fails it tears down without consuming a
+      // trailing handshake frame the peer may have left, so the peer's teardown
+      // drain would otherwise wait a full (default, very long) peerTimeoutMs.
+      options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+    },
+    { sharedSecret: TOKEN_A, keyFilePath },
+    minimalPrepared,
+    undefined,
+    -1,
+    name,
+  ) as unknown as Promise<unknown>;
+}
+
+test("runProtocol suppresses its own abort marker on a PeerAbortError but writes one for a generic transport fault", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  // Exactly one role raises a PeerAbortError (as if it had READ the peer's marker)
+  // and the other a generic transport fault, no matter who arrives first.
+  vi.mocked(runExchange).mockImplementation((async (
+    _conn: unknown,
+    role: unknown,
+  ) => {
+    await awaitBothArmed();
+    if (role === "initiator") throw new PeerAbortError();
+    throw new ConnectionError("simulated transport fault", "transport");
+  }) as never);
+
+  const [resultA, resultB] = await Promise.allSettled([
+    runAbortParty(keyFileA, "test-a"),
+    runAbortParty(keyFileB, "test-b"),
+  ]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  // Both parties must have reached the armed state and entered runExchange, or
+  // "exactly one marker" could read green for the wrong reason -- a party that
+  // failed the handshake before arming also writes no marker, which would mimic
+  // echo suppression without exercising the gate. Asserting both arrived makes
+  // the count a genuine suppression signal.
+  expect(mockState.runExchangeEntries).toBe(2);
+
+  // Echo suppressed: the PeerAbort side wrote nothing, so only the generic-fault
+  // side's marker remains. (If the gate dropped `!errIsPeerAbort`, this would be 2.)
+  expect(
+    fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
+  ).toHaveLength(1);
+});
+
+test("runProtocol writes an abort marker on each side when both fail with a generic transport fault", async () => {
+  // The control for the suppression test: with no PeerAbortError in play, both
+  // armed parties take the write branch and two distinct markers result. This
+  // proves the harness CAN produce two markers, so the "exactly one" above is a
+  // genuine suppression signal rather than an artifact of only one side writing.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  vi.mocked(runExchange).mockImplementation((async () => {
+    await awaitBothArmed();
+    throw new ConnectionError("simulated transport fault", "transport");
+  }) as never);
+
+  const results = await Promise.allSettled([
+    runAbortParty(keyFileA, "test-a"),
+    runAbortParty(keyFileB, "test-b"),
+  ]);
+  expect(results.every((r) => r.status === "rejected")).toBe(true);
+  // Both parties reached the armed state and entered runExchange (see the
+  // suppression test): without this, a one-sided handshake failure could leave
+  // fewer markers and still read green.
+  expect(mockState.runExchangeEntries).toBe(2);
+
+  expect(
+    fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
+  ).toHaveLength(2);
 });
 
 // --- Signal and error handler recovery paths ---------------------------------
