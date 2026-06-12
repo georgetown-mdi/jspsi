@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
 
-import { deriveAbortToken, ABORT_TOKEN_ROLES } from "../src/auth";
+import {
+  deriveAbortToken,
+  ABORT_TOKEN_ROLES,
+  deriveAeadKey,
+  AEAD_CONTEXTS,
+} from "../src/auth";
 import {
   isAbortMarkerName,
   isExpectedAbortName,
@@ -33,16 +38,21 @@ test("deriveAbortToken yields distinct tokens per session key (no cross-session 
   expect(bytesEqual(a, b)).toBe(false);
 });
 
-test("deriveAbortToken differs from a hypothetical AEAD label (domain separation)", async () => {
-  // The abort label and the AEAD label share the session-key IKM; their outputs
-  // must not collide. We cannot import the private label, but a sanity check that
-  // both roles diverge from each other already exercises the per-suffix split;
-  // here we additionally assert the two roles are each non-zero, full-length
-  // PRF outputs rather than a constant.
+test("deriveAbortToken outputs never collide with the AEAD key from the same session key (domain separation)", async () => {
+  // Both derivations take the session key as IKM; only their HKDF labels
+  // ("psilink-abort-token-v1:<role>" vs "psilink-aead-v1:<context>") separate
+  // them. If those labels ever collided, an abort token could substitute for an
+  // AEAD key (or vice versa). Cross every abort role against every AEAD context
+  // from one session key and assert no output coincides -- a real falsifier for a
+  // label collision, not merely the per-role divergence checked above.
   for (const role of ABORT_TOKEN_ROLES) {
-    const t = await deriveAbortToken(sessionKeyA, role);
-    expect(t).toHaveLength(32);
-    expect(t.every((b) => b === 0)).toBe(false);
+    const abortToken = await deriveAbortToken(sessionKeyA, role);
+    expect(abortToken).toHaveLength(32);
+    expect(abortToken.every((b) => b === 0)).toBe(false);
+    for (const context of AEAD_CONTEXTS) {
+      const aeadKey = await deriveAeadKey(sessionKeyA, context);
+      expect(bytesEqual(abortToken, aeadKey)).toBe(false);
+    }
   }
 });
 

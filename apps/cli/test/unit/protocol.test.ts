@@ -920,6 +920,12 @@ test("runProtocol suppresses its own abort marker on a PeerAbortError but writes
   ]);
   expect(resultA.status).toBe("rejected");
   expect(resultB.status).toBe("rejected");
+  // Both parties must have reached the armed state and entered runExchange, or
+  // "exactly one marker" could read green for the wrong reason -- a party that
+  // failed the handshake before arming also writes no marker, which would mimic
+  // echo suppression without exercising the gate. Asserting both arrived makes
+  // the count a genuine suppression signal.
+  expect(mockState.runExchangeEntries).toBe(2);
 
   // Echo suppressed: the PeerAbort side wrote nothing, so only the generic-fault
   // side's marker remains. (If the gate dropped `!errIsPeerAbort`, this would be 2.)
@@ -948,6 +954,10 @@ test("runProtocol writes an abort marker on each side when both fail with a gene
     runAbortParty(keyFileB, "test-b"),
   ]);
   expect(results.every((r) => r.status === "rejected")).toBe(true);
+  // Both parties reached the armed state and entered runExchange (see the
+  // suppression test): without this, a one-sided handshake failure could leave
+  // fewer markers and still read green.
+  expect(mockState.runExchangeEntries).toBe(2);
 
   expect(
     fs.readdirSync(dropDir).filter((f) => f.endsWith("-abort.json")),
