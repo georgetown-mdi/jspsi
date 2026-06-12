@@ -130,16 +130,20 @@ Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
 
 ## Checking for duplicates
 
-Before filing, list titles on the chosen project and skim for an existing task
-that already covers the work:
+Before filing, list every item on the chosen project and skim for an existing
+task that already covers the work:
 
 ```sh
-gh project item-list <PROJECT_NUMBER> --owner georgetown-mdi --format json --limit 100 \
-  --jq '[.items[] | {id, title, status}]'
+node .claude/scripts/list-issues.mjs <PROJECT_NUMBER>
 ```
 
-Always project the fields with `--jq`. If the request straddles both boards,
-check both.
+This pages through the whole board with no silent truncation -- one line per
+item with its numeric id, node id, status, Implementation Order, Epic, and
+title. A raw `gh project item-list --limit N` would instead cap at N and drop
+the rest without warning (board 9 already exceeds one 100-item page), and its
+JSON omits the numeric id and the custom fields. Add `--json` for a
+machine-readable array, or `--status Todo --status "In Progress"` to skip Done
+items. If the request straddles both boards, check both.
 When a specific item is referenced by its numeric ID (the `?itemId=N` value from
 the URL), fetch just that item with `node .claude/scripts/fetch-issues.mjs
 <PROJECT_NUMBER> <itemId>` instead of pulling the whole list.
@@ -189,13 +193,12 @@ Board 9 carries two custom fields board 10 does not: `Epic` (free text) and
 into an existing epic if one clearly fits. Do not invent a new epic, and do not
 do any of this on board 10.
 
-Discover the candidate epics from the same `item-list` call you already run for
-the duplicate check -- just project `epic` and take the distinct non-null
-values, no extra round-trip:
+Discover the candidate epics from the same `list-issues.mjs` call you already run
+for the duplicate check -- its Epic column already carries them, so take the
+distinct non-empty values, no extra round-trip:
 
 ```sh
-gh project item-list 9 --owner georgetown-mdi --format json --limit 100 \
-  --jq '[.items[] | {id, title, status, epic}]'
+node .claude/scripts/list-issues.mjs --json 9   # the `epic` field on each item
 ```
 
 If one fits, create the draft with `--format json` to capture the new item's id

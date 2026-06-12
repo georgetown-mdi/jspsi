@@ -73,6 +73,17 @@ export function numericIdFromNodeId(nodeId) {
 }
 
 /**
+ * Resolve one item argument to its numeric ID. A `PVTI_...` value is decoded via
+ * numericIdFromNodeId; anything else is parsed as a base-10 integer. Returns NaN
+ * for an unparseable numeric argument so a caller's Number.isInteger check still
+ * rejects it. A malformed PVTI_ id throws (a clearer signal than NaN). Shared so
+ * fetch-issues.mjs and lint-issues.mjs accept the two id forms identically.
+ */
+export function toNumericId(arg) {
+  return arg.startsWith("PVTI_") ? numericIdFromNodeId(arg) : Number(arg);
+}
+
+/**
  * GraphQL selection for an item's project-field values. Covers the value types
  * the boards use -- text, number, and single-select -- each carrying its field
  * name via the ProjectV2FieldCommon interface. Shared so fetchItems (read by
@@ -164,4 +175,60 @@ export function fetchItems(projectNumber, numericIds) {
       fields: extractFields(node.fieldValues),
     };
   });
+}
+
+// GitHub's projectV2 items connection caps `first` at 100, so this is also the
+// per-page size: fetchAllItems pages through the connection 100 at a time rather
+// than relying on a single page covering the whole board.
+export const PAGE_SIZE = 100;
+
+/**
+ * Default GraphQL runner for fetchAllItems: run the query through gh and return
+ * its `data`. Split out as the injection point so tests can drive fetchAllItems
+ * with synthetic pages instead of a live board.
+ */
+function runQueryViaGh(query) {
+  return JSON.parse(gh(["api", "graphql", "-f", `query=${query}`])).data;
+}
+
+/**
+ * Fetch every item of a project with its field values and node IDs, returning
+ * [{ id, nodeId, title, fields }] where id is the numeric item ID, nodeId is the
+ * `PVTI_` global node ID, and fields is the { name -> value } map (see
+ * extractFields, which surfaces Status / Epic / Implementation Order among
+ * others). Pages through the items connection with a cursor until hasNextPage is
+ * false, so no item is dropped however large the board grows -- the silent
+ * truncation a single `gh project item-list --limit N` would cause is impossible
+ * here. Shared by list-epic.mjs (filter to one Epic) and list-issues.mjs (whole
+ * board). `runQuery(query) -> data` is injectable for tests; it defaults to gh.
+ */
+export function fetchAllItems(
+  projectNumber,
+  { runQuery = runQueryViaGh } = {},
+) {
+  const nodes = [];
+  let cursor = null;
+  do {
+    // Inline the cursor into the query the same way the other args are inlined;
+    // GitHub's endCursor is an opaque base64 token with no quote/backslash chars
+    // to escape. Omit `after` entirely on the first page.
+    const after = cursor === null ? "" : `, after: "${cursor}"`;
+    const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { items(first: ${PAGE_SIZE}${after}) { pageInfo { hasNextPage endCursor } nodes { id ${FIELD_VALUES_FRAGMENT} content { __typename ... on DraftIssue { title } ... on Issue { title } } } } } } }`;
+    const data = runQuery(query);
+    const project = data?.organization?.projectV2;
+    if (!project) {
+      throw new Error(
+        `project ${projectNumber} not found under owner ${OWNER}`,
+      );
+    }
+    const conn = project.items;
+    nodes.push(...conn.nodes);
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+  } while (cursor !== null);
+  return nodes.map((node) => ({
+    id: numericIdFromNodeId(node.id),
+    nodeId: node.id,
+    title: node.content?.title ?? null,
+    fields: extractFields(node.fieldValues),
+  }));
 }

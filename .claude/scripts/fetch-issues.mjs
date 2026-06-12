@@ -33,24 +33,15 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // fetchItems lives in lib/projectItems.mjs so lint-issues.mjs can reuse the same
-// aliased multi-fetch for resolving cross-references. numericIdFromNodeId lets a
-// PVTI_ node ID argument be accepted alongside the numeric form.
-import { fetchItems, numericIdFromNodeId } from "./lib/projectItems.mjs";
+// aliased multi-fetch for resolving cross-references. toNumericId (which decodes
+// a PVTI_ node ID via numericIdFromNodeId) lets a PVTI_ argument be accepted
+// alongside the numeric form, and is shared so the sibling scripts agree on it.
+import { fetchItems, toNumericId } from "./lib/projectItems.mjs";
 
 // Fields surfaced first, in this order, in human-readable output; any other
 // populated field is printed afterward in encounter order. These three are the
 // board's primary triage axes, so they lead.
 const LEAD_FIELDS = ["Status", "Epic", "Implementation Order"];
-
-/**
- * Resolve one item argument to its numeric ID. A `PVTI_...` value is decoded via
- * numericIdFromNodeId; anything else is parsed as a base-10 integer. Returns NaN
- * for an unparseable numeric argument so the caller's Number.isInteger check
- * still rejects it. A malformed PVTI_ id throws (a clearer signal than NaN).
- */
-function toNumericId(arg) {
-  return arg.startsWith("PVTI_") ? numericIdFromNodeId(arg) : Number(arg);
-}
 
 function main() {
   const argv = process.argv.slice(2);

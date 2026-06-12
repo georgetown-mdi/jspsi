@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 //
-// Lint GitHub Projects v2 draft-issue bodies by their numeric item IDs (the
-// `?itemId=N` value from the project web UI URL). Companion to fetch-issues.mjs
-// and edit-issue.mjs.
+// Lint GitHub Projects v2 draft-issue bodies, addressed by their numeric item ID
+// (the `?itemId=N` value from the project web UI URL) or, equivalently, their
+// `PVTI_...` global node ID -- the two forms mix freely, matching fetch-issues.mjs
+// and edit-issue.mjs. Companion to fetch-issues.mjs and edit-issue.mjs.
 //
 // Draft bodies are written and revised by humans and language models that do not
 // share a stable address space: an LLM may cite an opaque GraphQL node ID it
@@ -13,7 +14,7 @@
 // trusts them.
 //
 // Usage:
-//   node lint-issues.mjs <project-number> <itemId> [itemId...] [--strict]
+//   node lint-issues.mjs <project-number> <itemId|PVTI_...> [more...] [--strict]
 //
 // Default exit is 0. With --strict, exit non-zero if any error-severity finding
 // exists, so the linter can gate a workflow.
@@ -21,7 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchItems } from "./lib/projectItems.mjs";
+import { fetchItems, toNumericId } from "./lib/projectItems.mjs";
 
 // Repo root: line-anchor staleness is checked against files here. This file
 // lives at <root>/.claude/scripts/lint-issues.mjs, so the working tree root is
@@ -188,14 +189,16 @@ function main() {
   const positional = argv.filter((a) => a !== "--strict");
 
   const projectNumber = Number(positional[0]);
-  const numericIds = positional.slice(1).map(Number);
+  // Each item argument is a numeric ID or a PVTI_ node ID; resolve both to
+  // numeric so a node ID lints the same item as its numeric form.
+  const numericIds = positional.slice(1).map(toNumericId);
   if (
     !Number.isInteger(projectNumber) ||
     numericIds.length === 0 ||
     numericIds.some((n) => !Number.isInteger(n))
   ) {
     process.stderr.write(
-      "Usage: node lint-issues.mjs <project-number> <itemId> [itemId...] [--strict]\n",
+      "Usage: node lint-issues.mjs <project-number> <itemId|PVTI_...> [more...] [--strict]\n",
     );
     process.exit(2);
   }

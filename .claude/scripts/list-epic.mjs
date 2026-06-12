@@ -23,54 +23,10 @@
 // { id, order, status, title } for programmatic consumers, consistent with
 // fetch-issues.mjs.
 
-import {
-  extractFields,
-  FIELD_VALUES_FRAGMENT,
-  gh,
-  numericIdFromNodeId,
-  OWNER,
-} from "./lib/projectItems.mjs";
-
-// GitHub's projectV2 items connection caps `first` at 100, so this is also the
-// per-page size: fetchAllItems pages through the connection 100 at a time rather
-// than relying on a single page covering the whole board.
-const PAGE_SIZE = 100;
-
-/**
- * Fetch all items of a project with their field values and node IDs, returning
- * [{ id, title, fields }] where id is the numeric item ID and fields is the
- * { name -> value } map (see extractFields). Pages through the items connection
- * with a cursor until hasNextPage is false, so no item is dropped however large
- * the board grows.
- */
-function fetchAllItems(projectNumber) {
-  const nodes = [];
-  let cursor = null;
-  do {
-    // Inline the cursor into the query the same way the other args are inlined;
-    // GitHub's endCursor is an opaque base64 token with no quote/backslash chars
-    // to escape. Omit `after` entirely on the first page.
-    const after = cursor === null ? "" : `, after: "${cursor}"`;
-    const query = `{ organization(login: "${OWNER}") { projectV2(number: ${projectNumber}) { items(first: ${PAGE_SIZE}${after}) { pageInfo { hasNextPage endCursor } nodes { id ${FIELD_VALUES_FRAGMENT} content { __typename ... on DraftIssue { title } ... on Issue { title } } } } } } }`;
-    const data = JSON.parse(
-      gh(["api", "graphql", "-f", `query=${query}`]),
-    ).data;
-    const project = data?.organization?.projectV2;
-    if (!project) {
-      throw new Error(
-        `project ${projectNumber} not found under owner ${OWNER}`,
-      );
-    }
-    const conn = project.items;
-    nodes.push(...conn.nodes);
-    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
-  } while (cursor !== null);
-  return nodes.map((node) => ({
-    id: numericIdFromNodeId(node.id),
-    title: node.content?.title ?? null,
-    fields: extractFields(node.fieldValues),
-  }));
-}
+// fetchAllItems (the paginated, field-rich whole-project fetch) lives in
+// lib/projectItems.mjs so list-issues.mjs shares the exact same pagination and
+// field extraction; this script is just that listing filtered to one Epic.
+import { fetchAllItems } from "./lib/projectItems.mjs";
 
 /**
  * Sort comparator: by Implementation Order ascending, with unset orders last.
