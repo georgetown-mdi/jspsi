@@ -50,8 +50,9 @@ export function InvitationTerms({
         Invitation from {summary.invitingParty}
       </Title>
       <Text size="sm" c="dimmed">
-        Review these linkage terms before you continue. Nothing is sent to your
-        partner until you consent below.
+        These are the terms your partner proposes for linking your records.
+        Review them before you continue; nothing is sent to your partner until
+        you consent below.
       </Text>
 
       <Stack gap="xs">
@@ -81,10 +82,11 @@ export function InvitationTerms({
 
         <Term label="Result sharing">
           <Text size="sm">
-            Inviter receives the result: {yesNo(summary.inviterReceivesOutput)}
+            Inviter expects to receive the result:{" "}
+            {yesNo(summary.inviterReceivesOutput)}
           </Text>
           <Text size="sm">
-            Inviter shares the result with you:{" "}
+            Inviter is willing to share the result with you:{" "}
             {yesNo(summary.inviterSharesResult)}
           </Text>
         </Term>

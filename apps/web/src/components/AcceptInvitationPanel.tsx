@@ -92,15 +92,16 @@ export function AcceptInvitationPanel({
           {exchange ?? (
             <Stack>
               <Text size="sm" c="dimmed">
-                To accept, confirm your consent, enter your name, and choose
-                your data file. Your browser connects directly to your partner.
+                To accept your partner's proposed terms, confirm your consent,
+                enter your name, and choose your data file. Your browser
+                connects directly to your partner.
               </Text>
               <Checkbox
                 checked={consented}
                 onChange={(event) =>
                   onConsentedChange(event.currentTarget.checked)
                 }
-                label="I have reviewed these linkage terms and consent to this exchange"
+                label="I have reviewed my partner's proposed terms and consent to this exchange"
               />
               <TextInput
                 value={acceptorName}

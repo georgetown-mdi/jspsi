@@ -112,8 +112,10 @@ function renderPanel(
   );
 }
 
-const CONSENT_LABEL =
-  "I have reviewed these linkage terms and consent to this exchange";
+// A distinctive, apostrophe-free fragment of the consent checkbox label (the
+// rendered markup HTML-escapes the apostrophe in "partner's", so match a span
+// without it); unique to the checkbox, absent from the error/exchange states.
+const CONSENT_LABEL = "proposed terms and consent to this exchange";
 const ACCEPT_BUTTON = "Accept and continue";
 
 describe("commitAcceptance (the consent gate)", () => {
