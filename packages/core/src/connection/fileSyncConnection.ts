@@ -268,16 +268,27 @@ const ABORT_MARKER_WRITE_BUDGET_MS = 5000;
 // Backstop grace bounding how long close() waits for the abort DECISION to
 // resolve (write vs seal) -- NOT a bound on the marker write. Modeled on
 // withTransportBudgetVoid: unref'd and resolve-on-timeout, so it neither hangs
-// close() nor holds a failing process open. The decision resolves sub-second in
-// practice (the orchestrator's catch calls writeAbortMarker(), or doCleanup
-// calls sealAbort(), the moment the fault propagates), so this only ever fires
-// on a future path that neither writes nor seals. Crucially, once the decision
-// is "write", close() awaits the bounded marker write in FULL and separately
-// (the grace timer is already cleared by then), so the grace can never truncate
-// an in-flight write whatever its value -- the two-op write is bounded by its
-// own per-op ABORT_MARKER_WRITE_BUDGET_MS, not by this. Reusing the write budget
-// as the magnitude is just a generous, already-justified bound for the
-// decision-resolution wait, not a coupling to the write duration.
+// close() nor holds a failing process open. Normally the decision resolves
+// sub-second: the orchestrator spends an exchange parked on receive(), so a
+// fault rejects that await and its catch runs writeAbortMarker() (or doCleanup
+// runs sealAbort()) right away, well inside the grace. The timeout is reached
+// only in the uncommon case where the orchestrator is busy with a long LOCAL
+// step (e.g. a large match) when the connection faults in the background, so it
+// does not observe the fault -- and thus does not resolve the decision -- within
+// the grace. That path is benign by construction, NOT a correctness gap: the
+// marker write is best-effort and every write op is bounded by
+// ABORT_MARKER_WRITE_BUDGET_MS, so however this close() interleaves with a late
+// catch (which may even find abortArmed already cleared and skip the write
+// entirely), the marker either lands or it does not, and a no-marker outcome
+// just degrades to the peer-silence hedge -- no interleaving corrupts state or
+// hangs. No finite grace can guarantee the catch always wins (a long-enough
+// local step beats any bound), and a longer grace only holds a failing process
+// open longer, so the bounded-grace-plus-best-effort-write trade is deliberate.
+// Once the decision IS "write", close() awaits the bounded write in FULL and
+// separately (the grace timer is already cleared by then), so the grace never
+// truncates an in-flight write whatever its value; reusing the write budget as
+// the magnitude is just a generous bound for the decision wait, not a coupling
+// to the write duration.
 const ABORT_DECISION_GRACE_MS = ABORT_MARKER_WRITE_BUDGET_MS;
 
 // Recovers the peer id from a `<id><suffix>` rendezvous control name (a hello or
@@ -1123,9 +1134,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // The actual temp-then-rename write (atomic appearance), short-bounded on BOTH
   // ops so a sick directory cannot hang teardown. The marker is not tracked in
   // responsibleFiles, so this party's own cleanup() never sweeps it and it
-  // persists for the peer to read. On timeout/failure the budget rejects and the
-  // op is abandoned; the leftover temp-*.tmp is swept by a later run's
-  // orphaned-temp sweep.
+  // persists for the peer to read. On timeout/failure (put succeeds but rename
+  // rejects) the budget rejects and the op is abandoned, leaving a temp-*.tmp.
+  // No safeDelete is attempted here: the next exchange's entry-time orphaned-temp
+  // sweep removes it (in BOTH modes -- that sweep is not retain-gated, since a
+  // temp is a failed in-flight write, never transcript), and that sweep runs at
+  // entry BEFORE any poll-loop unexpected-files policy, so the orphan never
+  // reaches the policy. Attempting a delete on the already-sick transport that
+  // just failed the rename would only add another bounded wait to teardown for no
+  // gain over the self-heal.
   private async runAbortMarkerWrite(): Promise<void> {
     const inputs = this.abortWriteInputs;
     if (inputs === undefined || this.abortMarkerWritten) return;
@@ -1241,9 +1258,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // skips this await: the orchestrator's catch awaits writeAbortMarker() to
     // completion BEFORE its finally runs doCleanup (which seals, then re-closes),
     // so by the time the second close reaches client.end() the write has already
-    // settled -- there is no in-flight write left for it to truncate. This delays teardown only in the fault window
-    // (process already failing); the clean/echo/signal paths seal the decision in
-    // doCleanup before this runs, so they proceed without the grace delay.
+    // settled -- there is no in-flight write left for it to truncate. This delays
+    // teardown only in the fault window (process already failing); the
+    // clean/echo/signal paths seal the decision in doCleanup before this runs, so
+    // they proceed without the grace delay.
     if (this.abortArmed && !this.abortDecisionResolved) {
       const decision = await this.awaitAbortDecisionOrGrace();
       if (decision === "write" && this.pendingAbortWrite !== undefined)
@@ -3507,6 +3525,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // error the orchestrator's catch sees (and the finally below then does not
       // reschedule). An absent or unverified marker falls through and keeps
       // polling -- honest absence stays the hedge.
+      //
+      // Re-read every cycle by design; a first-cycle non-match is deliberately
+      // NOT cached. A present-but-unverified <peerId>-abort.json is either a torn
+      // or delayed atomic write (which a later cycle reads complete) or a planted
+      // forgery (which the peer's genuine marker may later overwrite) -- caching
+      // the non-match would blind the loop to both and lose the fast-fail. The
+      // redundant read is bounded to ABORT_MARKER_MAX_BYTES (1 KiB) and refused
+      // pre-get when the listing already reports it over the cap, so the repeat
+      // I/O is negligible.
       if (
         this.abortArmed &&
         (await this.verifyPeerAbortMarker(allFiles, path, peerId))

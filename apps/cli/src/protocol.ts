@@ -729,6 +729,17 @@ export async function runProtocol(
       // cycle; no marker exists during the unarmed handshake window, so that gap
       // is benign. Placed after the signal guard so an interrupt during setup
       // bails before arming.
+      //
+      // Armed unconditionally, including retain mode (not gated on retainFiles).
+      // The fast-fail benefits a waiting peer in either mode, and the marker
+      // doubles as an audit record that the exchange was aborted. The connection's
+      // entry-time leftover-abort sweep is delete-mode only, so a retain-mode
+      // fault leaves the marker on disk -- but a retain fault ALREADY leaves a
+      // non-clean directory (the partial transcript persists; retain never
+      // auto-deletes), so the marker adds no incremental cleanup burden: the
+      // operator rotates or --force-retain-sweep clears the directory between
+      // retain exchanges regardless. Withholding the marker in retain mode would
+      // forfeit the peer fast-fail and the audit record for no cleanliness gain.
       const peerRole = role === "initiator" ? "responder" : "initiator";
       const [selfAbortToken, peerAbortToken] = await Promise.all([
         deriveAbortToken(sessionKey, role),
