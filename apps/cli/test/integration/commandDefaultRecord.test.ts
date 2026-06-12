@@ -47,9 +47,10 @@ import { DEFAULT_RECORD_BASENAME, openingPathFor } from "../../src/recordFile";
 // with the default record on; its peer is the same command with --no-record, so
 // exactly one default record lands and there is no path collision. The default
 // record path is `./psilink-record-<stamp>.json` relative to the process cwd, so
-// the test chdir's into its per-test work dir for the duration (restored in a
-// finally) -- this keeps the artifact inside the work dir that afterEach removes,
-// rather than littering the process cwd, while still passing no --record-file.
+// each test runs from its per-test work dir (chdir in beforeEach, restored in
+// afterEach) -- this keeps the artifact inside the work dir that afterEach
+// removes, rather than littering the process cwd, while still passing no
+// --record-file.
 //
 // filedrop only: the record-write wiring is transport-agnostic (the handler reads
 // the same `--record` default and calls the same runProtocol regardless of
@@ -109,7 +110,7 @@ const RECORD_VERSION = "psilink-exchange-record/v1";
 
 let work: string;
 let originalCwd: string;
-let exitSpy: ReturnType<typeof vi.spyOn>;
+let exitSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
   work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cmd-record-"));
@@ -133,7 +134,11 @@ beforeEach(() => {
 
 afterEach(() => {
   process.chdir(originalCwd);
-  exitSpy.mockRestore();
+  // Guarded: if beforeEach threw before assigning the spy, afterEach still runs,
+  // and an unconditional restore would throw a TypeError that masks the original
+  // failure.
+  exitSpy?.mockRestore();
+  exitSpy = undefined;
   try {
     if (work) fs.rmSync(work, { recursive: true, force: true });
   } catch {
@@ -162,12 +167,18 @@ async function runCli(argv: string[]): Promise<void> {
 // background, racing those teardown steps and turning its eventual process.exit
 // into an unhandled rejection (or, post-restore, a real worker-killing exit).
 // allSettled holds the test until neither handler is still running (each side is
-// bounded by --peer-timeout), then a rejection is rethrown so the test fails with
-// the handler's own error rather than an opaque background warning.
+// bounded by --peer-timeout), then any rejection is rethrown so the test fails
+// with the handler's own error rather than an opaque background warning. When
+// both sides fail the two errors are surfaced together (an AggregateError),
+// since a two-sided breakdown is exactly where the second cause matters.
 async function runBoth(argvA: string[], argvB: string[]): Promise<void> {
   const results = await Promise.allSettled([runCli(argvA), runCli(argvB)]);
-  const rejected = results.find((r) => r.status === "rejected");
-  if (rejected?.status === "rejected") throw rejected.reason;
+  const reasons = results
+    .filter((r) => r.status === "rejected")
+    .map((r) => (r as PromiseRejectedResult).reason);
+  if (reasons.length === 1) throw reasons[0];
+  if (reasons.length > 1)
+    throw new AggregateError(reasons, "both parties failed");
 }
 
 // Locate the single default-path record the asserted party wrote in `dir`. The
