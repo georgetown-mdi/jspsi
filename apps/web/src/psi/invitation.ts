@@ -1,4 +1,6 @@
 import {
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -14,30 +16,6 @@ import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
  * client's dial path (trailing slash included), not the server's mount path.
  */
 const PEERJS_SIGNALING_PATH = "/api/";
-
-/**
- * Default invitation lifetime: one hour, the bound a web invitation takes when no
- * lifetime is selected. Matches the CLI's default (`INVITATION_LIFETIME_SECONDS`
- * in apps/cli/src/commands/invite.ts) and the "default expiration window of 1
- * hour" docs/SECURITY_DESIGN.md states, so both inviters agree on the same bound
- * and that claim holds for web-generated invitations. Held as a local constant
- * rather than shared from core for the same reason the CLI keeps its own copy:
- * the value is a policy default, not a cryptographic helper, and core's
- * invitation module is a consumer here, not where web policy belongs.
- */
-export const INVITATION_LIFETIME_SECONDS = 60 * 60;
-
-/**
- * Upper bound on a selected invitation lifetime: one year, matching the CLI's
- * `MAX_INVITATION_LIFETIME_SECONDS` (apps/cli/src/commands/invite.ts) and the
- * hard one-year ceiling docs/SECURITY_DESIGN.md states. The ceiling exists so an
- * erroneous override cannot make the setup secret effectively permanent and
- * defeat the bounded-lifetime property -- a security invariant, not just a UX
- * limit, so it is enforced for the web inviter too rather than left to whatever
- * range a future lifetime selector happens to offer. Local copy for the same
- * reason as {@link INVITATION_LIFETIME_SECONDS}.
- */
-export const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
 
 /**
  * Route the deep-link targets: the acceptor's accept/reject consent screen. The

@@ -240,6 +240,30 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   connectionEndpoint: ConnectionEndpointSchema.optional(),
 });
 
+// --- Lifetime policy ---------------------------------------------------------
+
+/**
+ * Default invitation lifetime in seconds: one hour. An invitation minted with no
+ * explicit lifetime takes this bound, per the "default expiration window of 1
+ * hour" in docs/SECURITY_DESIGN.md. Both inviters -- the CLI's `psilink invite`
+ * and the web app -- reference this one value so their defaults cannot drift.
+ */
+export const INVITATION_LIFETIME_SECONDS = 60 * 60;
+
+/**
+ * Hard upper bound on an invitation lifetime in seconds: one year. The setup
+ * secret an invitation carries is short-lived by design, so a lifetime override
+ * is capped here -- a deliberately generous ceiling (recurring exchanges may run
+ * only monthly, and an invitation may need to outlast operational breakage before
+ * a re-invite), but a hard one, so an erroneous override cannot make the secret
+ * effectively permanent and defeat the bounded-lifetime property. See
+ * docs/SECURITY_DESIGN.md. Both inviters reference this one value; each rejects an
+ * over-ceiling lifetime up front, with a surface-specific error, before minting.
+ * This is a bound on the chosen lifetime at the call site, not a check inside
+ * {@link encodeInvitation} (which validates only that `expires` is in the future).
+ */
+export const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
+
 // --- Base64url helpers -------------------------------------------------------
 
 function toBase64Url(bytes: Uint8Array): string {

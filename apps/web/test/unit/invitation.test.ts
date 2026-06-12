@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
+  decodeInvitation,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 
 import {
   ACCEPT_ROUTE_PATH,
-  INVITATION_LIFETIME_SECONDS,
-  MAX_INVITATION_LIFETIME_SECONDS,
   deepLinkFor,
   generateInvitation,
   webrtcEndpointFromLocation,
@@ -145,12 +148,6 @@ describe("generateInvitation expiry", () => {
     expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
   });
 
-  test("the default lifetime is one hour, matching the CLI and the docs", () => {
-    // docs/SECURITY_DESIGN.md states a "default expiration window of 1 hour"; this
-    // pins the web default to it (and to the CLI's INVITATION_LIFETIME_SECONDS).
-    expect(INVITATION_LIFETIME_SECONDS).toBe(60 * 60);
-  });
-
   test("an explicit lifetimeSeconds sets `expires` to that many seconds ahead", async () => {
     const lifetimeSeconds = 30 * 60;
     const before = Date.now();
@@ -184,12 +181,6 @@ describe("generateInvitation expiry", () => {
         }),
       ).rejects.toThrow(/positive number of seconds/i);
     }
-  });
-
-  test("the maximum lifetime is one year, matching the CLI's hard ceiling", () => {
-    // docs/SECURITY_DESIGN.md states the override may go "up to a maximum of one
-    // year"; this pins the web ceiling to it (and to the CLI's constant).
-    expect(MAX_INVITATION_LIFETIME_SECONDS).toBe(365 * 24 * 60 * 60);
   });
 
   test("rejects a lifetimeSeconds past the one-year ceiling, before encoding", async () => {

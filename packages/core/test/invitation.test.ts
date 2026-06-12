@@ -4,6 +4,8 @@ import { expect, test } from "vitest";
 import {
   encodeInvitation,
   decodeInvitation,
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
   MAX_ENCODED_INVITATION_LENGTH,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
@@ -55,6 +57,17 @@ async function encodeRaw(obj: unknown): Promise<string> {
   const checksum = toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
   return body + checksum;
 }
+
+// --- Lifetime policy ---------------------------------------------------------
+
+test("invitation lifetime default is one hour and the ceiling is one year", () => {
+  // The single values both inviters (the CLI and the web app) share.
+  // docs/SECURITY_DESIGN.md states the default expiration window of 1 hour and
+  // the hard one-year maximum; pinning them here guards the documented policy
+  // against accidental change.
+  expect(INVITATION_LIFETIME_SECONDS).toBe(60 * 60);
+  expect(MAX_INVITATION_LIFETIME_SECONDS).toBe(365 * 24 * 60 * 60);
+});
 
 // --- Round-trip --------------------------------------------------------------
 
