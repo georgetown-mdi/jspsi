@@ -1,4 +1,6 @@
 import {
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -110,25 +112,64 @@ export function deepLinkFor(origin: string, encoded: string): string {
  * configuration-GUI roadmap item), so the defaults plus the inviter identity are
  * the real terms the acceptor reviews -- never empty or placeholder.
  *
+ * The token carries a bounded `expires` (default {@link INVITATION_LIFETIME_SECONDS},
+ * one hour) so an intercepted invitation has a finite misuse window. The acceptor
+ * enforces it (`prepareAcceptedInvitation` rejects a token whose `expires` is at
+ * or before the accept instant), and both sides read the same ISO-8601 `expires`,
+ * so the bound the inviter sets is the bound the acceptor honors.
+ *
  * Makes no network request: the encoded invitation is the rendezvous, so the
  * inviter never contacts a session backend (`/api/psi/*`).
  */
 export async function generateInvitation(params: {
   inviterName: string;
   location: InvitationLocation;
+  /**
+   * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
+   * (one hour) and must be in the range `(0, {@link MAX_INVITATION_LIFETIME_SECONDS}]`
+   * (up to one year). The web app has no lifetime-selection UI yet, so production
+   * callers omit it and take the default; the parameter is the seam a future
+   * selector (the configuration-GUI roadmap item) overrides through without
+   * reshaping this entry point, and the bounds are enforced here so that seam
+   * cannot mint an unbounded token.
+   */
+  lifetimeSeconds?: number;
 }): Promise<GeneratedInvitation> {
-  const { inviterName, location } = params;
+  const {
+    inviterName,
+    location,
+    lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
+  } = params;
 
-  // No `expires` deliberately: unlike the CLI (which exposes --expires-in), the
-  // web app has no UI to choose a lifetime, and the acceptor that would enforce
-  // expiry is the paired rendezvous task (item 196035727), not yet built. A
-  // bounded default for web invitations is a deferred product decision, so the
-  // field is omitted rather than guessed at here.
+  // Bound the selected lifetime up front, where the cause is clear, rather than
+  // leaving it to encodeInvitation's "expires must be in the future" backstop
+  // (which catches only a non-positive net lifetime, and reports the wrong-looking
+  // reason). Mirrors the CLI's two up-front rejections in validateInvite
+  // (apps/cli/src/commands/invite.ts): a non-positive lifetime, and one past the
+  // one-year ceiling. The ceiling is the security invariant that keeps the seam
+  // from minting an effectively-permanent token; see MAX_INVITATION_LIFETIME_SECONDS.
+  if (!Number.isFinite(lifetimeSeconds) || lifetimeSeconds <= 0)
+    throw new Error(
+      "invitation lifetimeSeconds must be a finite, positive number of seconds",
+    );
+  if (lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS)
+    throw new Error(
+      "invitation lifetimeSeconds must not exceed " +
+        `${MAX_INVITATION_LIFETIME_SECONDS} seconds (one year)`,
+    );
+
+  // Bound the token's lifetime so an intercepted invitation cannot be accepted
+  // indefinitely. Measured from the current instant, so the lifetime clock starts
+  // when the token is minted; the CLI mints `expires` the same way (expiresFromNow
+  // in apps/cli/src/commands/bootstrap.ts). encodeInvitation re-checks the result
+  // is in the future as a backstop.
+  const expires = new Date(Date.now() + lifetimeSeconds * 1000).toISOString();
   const sharedSecret = generateSharedSecret();
   const token: InvitationToken = {
     version: "1",
     linkageTerms: getDefaultLinkageTerms(inviterName),
     sharedSecret,
+    expires,
     connectionEndpoint: webrtcEndpointFromLocation(location),
   };
 

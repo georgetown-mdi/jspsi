@@ -4,6 +4,9 @@ import { expect, test } from "vitest";
 import {
   encodeInvitation,
   decodeInvitation,
+  isInvitationExpired,
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
   MAX_ENCODED_INVITATION_LENGTH,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
@@ -55,6 +58,48 @@ async function encodeRaw(obj: unknown): Promise<string> {
   const checksum = toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
   return body + checksum;
 }
+
+// --- Lifetime policy ---------------------------------------------------------
+
+test("invitation lifetime default is one hour and the ceiling is one year", () => {
+  // The single values both inviters (the CLI and the web app) share.
+  // docs/SECURITY_DESIGN.md states the default expiration window of 1 hour and
+  // the hard one-year maximum; pinning them here guards the documented policy
+  // against accidental change.
+  expect(INVITATION_LIFETIME_SECONDS).toBe(60 * 60);
+  expect(MAX_INVITATION_LIFETIME_SECONDS).toBe(365 * 24 * 60 * 60);
+});
+
+test("isInvitationExpired: absent expires is never expired (unbounded token)", () => {
+  expect(isInvitationExpired(undefined, new Date("2026-01-01T00:00:00Z"))).toBe(
+    false,
+  );
+});
+
+test("isInvitationExpired: a future expires is not expired", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  expect(isInvitationExpired("2026-01-01T01:00:00Z", now)).toBe(false);
+});
+
+test("isInvitationExpired: a past expires is expired", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  expect(isInvitationExpired("2025-12-31T23:59:59Z", now)).toBe(true);
+});
+
+test("isInvitationExpired: equal to now fails closed (expired at the boundary)", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  expect(isInvitationExpired("2026-01-01T00:00:00Z", now)).toBe(true);
+});
+
+test("isInvitationExpired: an unparseable expires fails closed (rejected)", () => {
+  // Defense in depth: decodeInvitation's schema already rejects a non-ISO
+  // `expires`, but the helper must not honor a token whose expiry is `NaN` (which
+  // a bare `<=` comparison would treat as not-expired).
+  const now = new Date("2026-01-01T00:00:00Z");
+  for (const bad of ["not-a-date", "", "2026-13-99T99:99:99Z"]) {
+    expect(isInvitationExpired(bad, now)).toBe(true);
+  }
+});
 
 // --- Round-trip --------------------------------------------------------------
 

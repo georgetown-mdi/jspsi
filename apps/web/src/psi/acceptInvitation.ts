@@ -1,4 +1,4 @@
-import { decodeInvitation } from "@psilink/core";
+import { decodeInvitation, isInvitationExpired } from "@psilink/core";
 
 import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
 
@@ -17,8 +17,9 @@ export interface AcceptableInvitation {
  * before any rendezvous or connection is attempted.
  *
  * `decodeInvitation` validates format and checksum but deliberately does not
- * check expiry, so this compares `token.expires` against `now` and rejects an
- * expired token here. It also requires a WebRTC `connectionEndpoint`: the web
+ * check expiry, so this calls {@link isInvitationExpired} (which fails closed at
+ * the boundary and on an unparseable `expires`) and rejects an expired token
+ * here. It also requires a WebRTC `connectionEndpoint`: the web
  * acceptor reaches the inviter only through the PeerJS signaling endpoint the
  * invitation carries, so a token without one (or carrying a different channel)
  * cannot be accepted in the browser. Because every failure throws, a caller that
@@ -38,9 +39,7 @@ export async function prepareAcceptedInvitation(
 ): Promise<AcceptableInvitation> {
   const token = await decodeInvitation(encoded);
 
-  // `<=` fails closed at the boundary: a token whose expiry equals `now` is
-  // treated as already expired, never as valid for one last instant.
-  if (token.expires !== undefined && new Date(token.expires) <= now) {
+  if (isInvitationExpired(token.expires, now)) {
     throw new Error(
       "This invitation has expired. Ask your partner to send a new one.",
     );

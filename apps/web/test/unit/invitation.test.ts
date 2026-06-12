@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
+  decodeInvitation,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 
 import {
   ACCEPT_ROUTE_PATH,
@@ -8,6 +13,7 @@ import {
   generateInvitation,
   webrtcEndpointFromLocation,
 } from "../../src/psi/invitation.js";
+import { prepareAcceptedInvitation } from "../../src/psi/acceptInvitation.js";
 
 import type { InvitationLocation } from "../../src/psi/invitation.js";
 
@@ -109,6 +115,123 @@ describe("generateInvitation", () => {
 
       expect(fetch).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("generateInvitation expiry", () => {
+  /**
+   * Read the token's `expires` as epoch ms, asserting it is present. The
+   * generator measures the lifetime from its own `Date.now()` (not an injected
+   * clock -- encodeInvitation re-checks `expires` against the live clock, so a
+   * second injectable clock could not be honored), so callers bracket the call
+   * with their own before/after window rather than assert an exact instant.
+   */
+  async function expiresMsOf(encoded: string): Promise<number> {
+    const token = await decodeInvitation(encoded);
+    expect(token.expires).toBeDefined();
+    return new Date(token.expires ?? "").getTime();
+  }
+
+  test("mints a non-empty `expires`, one hour (the default) ahead of generation", async () => {
+    const before = Date.now();
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+    });
+    const after = Date.now();
+
+    // The generation instant lies in [before, after], so the default-lifetime
+    // expiry lies in that window shifted forward by one hour.
+    const expiresMs = await expiresMsOf(encoded);
+    const lifetimeMs = INVITATION_LIFETIME_SECONDS * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + lifetimeMs);
+    expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
+  });
+
+  test("an explicit lifetimeSeconds sets `expires` to that many seconds ahead", async () => {
+    const lifetimeSeconds = 30 * 60;
+    const before = Date.now();
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+      lifetimeSeconds,
+    });
+    const after = Date.now();
+
+    const expiresMs = await expiresMsOf(encoded);
+    const lifetimeMs = lifetimeSeconds * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + lifetimeMs);
+    expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
+  });
+
+  test("rejects a non-positive (or non-finite) lifetimeSeconds at entry, before encoding", async () => {
+    // Caught here with a clear cause rather than at encodeInvitation's
+    // future-expiry backstop.
+    for (const lifetimeSeconds of [
+      0,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]) {
+      await expect(
+        generateInvitation({
+          inviterName: "County Health Dept",
+          location,
+          lifetimeSeconds,
+        }),
+      ).rejects.toThrow(/positive number of seconds/i);
+    }
+  });
+
+  test("rejects a lifetimeSeconds past the one-year ceiling, before encoding", async () => {
+    // The seam must not be able to mint an effectively-permanent token, so a
+    // value past the ceiling is rejected up front with the bound's own cause.
+    await expect(
+      generateInvitation({
+        inviterName: "County Health Dept",
+        location,
+        lifetimeSeconds: MAX_INVITATION_LIFETIME_SECONDS + 1,
+      }),
+    ).rejects.toThrow(/must not exceed/i);
+  });
+
+  test("accepts a lifetimeSeconds exactly at the ceiling", async () => {
+    // The bound is inclusive: one year to the second is allowed.
+    const before = Date.now();
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+      lifetimeSeconds: MAX_INVITATION_LIFETIME_SECONDS,
+    });
+    const after = Date.now();
+
+    const expiresMs = await expiresMsOf(encoded);
+    const lifetimeMs = MAX_INVITATION_LIFETIME_SECONDS * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + lifetimeMs);
+    expect(expiresMs).toBeLessThanOrEqual(after + lifetimeMs);
+  });
+
+  test("the minted token is honored by the acceptor before expiry and rejected at it", async () => {
+    // The two sides must agree on the same `expires` semantics: the inviter sets
+    // the bound here, and prepareAcceptedInvitation (the acceptor) enforces it.
+    // Read the actual minted expiry rather than recompute it, since the generator
+    // measures from its own clock.
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      location,
+    });
+    const expiresAt = new Date(await expiresMsOf(encoded));
+
+    // A second before expiry: the acceptor proceeds to the WebRTC endpoint.
+    await expect(
+      prepareAcceptedInvitation(encoded, new Date(expiresAt.getTime() - 1000)),
+    ).resolves.toMatchObject({ endpoint: { channel: "webrtc" } });
+
+    // At the expiry instant: the acceptor fails closed (its `<=` boundary), so a
+    // token accepted at or after `expires` is rejected.
+    await expect(prepareAcceptedInvitation(encoded, expiresAt)).rejects.toThrow(
+      /expired/i,
+    );
   });
 });
 

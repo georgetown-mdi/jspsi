@@ -2,7 +2,13 @@ import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
-import { getLogger, encodeInvitation, UsageError } from "@psilink/core";
+import {
+  getLogger,
+  encodeInvitation,
+  INVITATION_LIFETIME_SECONDS,
+  MAX_INVITATION_LIFETIME_SECONDS,
+  UsageError,
+} from "@psilink/core";
 import type {
   ConnectionConfig,
   ExchangeSpec,
@@ -39,21 +45,12 @@ import {
   type RunnableConnectionConfig,
 } from "./bootstrap";
 
-// Invitation tokens carry a 1-hour lifetime by default, per
-// docs/SECURITY_DESIGN.md. --expires-in overrides it (see the builder option).
-// Distinct from --accept-timeout, which bounds how long the inviter waits at
-// the rendezvous, not how long the token stays valid.
-const INVITATION_LIFETIME_SECONDS = 60 * 60;
-
-// Upper bound on an --expires-in override. The setup secret is short-lived by
-// design (docs/SECURITY_DESIGN.md), so its lifetime is bounded -- but the bound
-// is deliberately generous, not tight: exchanges often run only monthly, and an
-// agency may need the invitation to outlast several months of breakage before
-// re-inviting, against credential-rotation schedules that in practice are often
-// "never". A one-year ceiling accommodates that while still rejecting an absurd
-// value (a fat-fingered "999999d") that would make the secret effectively
-// permanent and defeat the bounded-lifetime property.
-const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
+// The invitation lifetime default and one-year ceiling are shared from
+// @psilink/core (INVITATION_LIFETIME_SECONDS, MAX_INVITATION_LIFETIME_SECONDS) so
+// the CLI and the web inviter cannot drift. The default lifetime is distinct from
+// --accept-timeout, which bounds how long the inviter waits at the rendezvous,
+// not how long the token stays valid; --expires-in overrides the default up to
+// the ceiling (see the builder option and validateInvite).
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(

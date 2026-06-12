@@ -240,6 +240,30 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   connectionEndpoint: ConnectionEndpointSchema.optional(),
 });
 
+// --- Lifetime policy ---------------------------------------------------------
+
+/**
+ * Default invitation lifetime in seconds: one hour. An invitation minted with no
+ * explicit lifetime takes this bound, per the "default expiration window of 1
+ * hour" in docs/SECURITY_DESIGN.md. Both inviters -- the CLI's `psilink invite`
+ * and the web app -- reference this one value so their defaults cannot drift.
+ */
+export const INVITATION_LIFETIME_SECONDS = 60 * 60;
+
+/**
+ * Hard upper bound on an invitation lifetime in seconds: one year. The setup
+ * secret an invitation carries is short-lived by design, so a lifetime override
+ * is capped here -- a deliberately generous ceiling (recurring exchanges may run
+ * only monthly, and an invitation may need to outlast operational breakage before
+ * a re-invite), but a hard one, so an erroneous override cannot make the secret
+ * effectively permanent and defeat the bounded-lifetime property. See
+ * docs/SECURITY_DESIGN.md. Both inviters reference this one value; each rejects an
+ * over-ceiling lifetime up front, with a surface-specific error, before minting.
+ * This is a bound on the chosen lifetime at the call site, not a check inside
+ * {@link encodeInvitation} (which validates only that `expires` is in the future).
+ */
+export const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
+
 // --- Base64url helpers -------------------------------------------------------
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -348,7 +372,8 @@ export async function encodeInvitation(
  * (Node.js 19+ / all modern browsers).
  *
  * Does not check whether the token has expired; callers are responsible
- * for comparing `token.expires` against the current time.
+ * for comparing `token.expires` against the current time (see
+ * {@link isInvitationExpired}).
  *
  * @throws {Error} if the string exceeds {@link MAX_ENCODED_INVITATION_LENGTH}
  *   (checked at the boundary before any other work), is too short to carry a
@@ -389,4 +414,29 @@ export async function decodeInvitation(
     throw new Error("invitation payload is not valid JSON");
   }
   return InvitationTokenSchema.parse(raw);
+}
+
+/**
+ * Whether an invitation must be rejected on expiry grounds at `now`:
+ * `true` when `expires` is present and at or before `now`, OR present but
+ * unparseable; `false` when `expires` is absent (an unbounded token) or is a
+ * valid instant still in the future.
+ *
+ * Fails closed on the boundary and on a malformed value: an `expires` equal to
+ * `now` is already expired (never valid for one last instant), and an
+ * unparseable `expires` (a `Date` of `NaN`, which `<=` would otherwise treat as
+ * not-expired) is rejected rather than honored. The malformed case is defense in
+ * depth: {@link decodeInvitation}'s schema already rejects a non-ISO `expires`,
+ * so a token reaching here through decode never carries one -- but every acceptor
+ * fails closed on its own, not only by relying on that upstream gate. Shared by
+ * the CLI and web acceptors so both enforce identical semantics.
+ */
+export function isInvitationExpired(
+  expires: string | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (expires === undefined) return false;
+  const expiresMs = new Date(expires).getTime();
+  if (Number.isNaN(expiresMs)) return true;
+  return expiresMs <= now.getTime();
 }
