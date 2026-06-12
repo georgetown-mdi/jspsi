@@ -97,6 +97,7 @@ export function AcceptInvitation() {
         role="acceptor"
         partyName={confirmedName}
         sharedSecret={decode.invitation.token.sharedSecret}
+        expires={decode.invitation.token.expires}
         endpoint={decode.invitation.endpoint}
       />
     ) : undefined;

@@ -48,6 +48,11 @@ const mockedRunExchange = vi.mocked(runExchange);
  * never validated -- only that it is threaded through to authenticateExchange. */
 const SHARED_SECRET = "test-shared-secret";
 
+/** A placeholder invitation `expires`; like the secret, the mocked handshake
+ * never parses it -- the lifecycle's contract is only that it forwards the value
+ * to authenticateExchange alongside the secret. */
+const EXPIRES = "2999-01-01T00:00:00.000Z";
+
 /** Flush pending microtasks (and any queued macrotask) so the owner advances. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -105,11 +110,12 @@ function makeResources(overrides?: { peer?: FakePeer; conn?: FakeConn }) {
 }
 
 // The per-test option bundle that does not vary: the React seams plus the
-// invitation secret. Spread into every runExchangeLifecycle call alongside the
-// per-test acquire/exchangeRole/signal.
+// invitation secret and its expiry. Spread into every runExchangeLifecycle call
+// alongside the per-test acquire/exchangeRole/signal.
 function seams() {
   return {
     sharedSecret: SHARED_SECRET,
+    expires: EXPIRES,
     onStages: vi.fn(),
     onStage: vi.fn(),
     onResult: vi.fn(),
@@ -223,12 +229,13 @@ describe("runExchangeLifecycle", () => {
       ...s,
     });
 
-    // The handshake ran with the exchange role and the invitation secret, over
-    // the opened connection, and strictly before the PSI exchange.
+    // The handshake ran with the exchange role, the invitation secret, and its
+    // expiry, over the opened connection, and strictly before the PSI exchange.
     expect(mockedAuthenticate).toHaveBeenCalledWith(
       mc,
       "responder",
       SHARED_SECRET,
+      EXPIRES,
     );
     expect(mockedAuthenticate.mock.invocationCallOrder[0]).toBeLessThan(
       mockedRunExchange.mock.invocationCallOrder[0],
