@@ -40,8 +40,8 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // work. A bare hash of a low-entropy result (e.g. an association table over
 // identifiers) would be brute-forceable by anyone holding the record, leaking the
 // intersection; commitments with fresh per-commitment randomness bind to the data
-// without revealing it. See docs/EXCHANGE_RECORD.md and
-// docs/CANONICAL_ENCODING.md. The deferred signing work reuses this module's
+// without revealing it. See docs/spec/EXCHANGE_RECORD.md and
+// docs/spec/CANONICAL_ENCODING.md. The deferred signing work reuses this module's
 // commitment scheme and on-disk format.
 
 // --- Versions ----------------------------------------------------------------
@@ -392,7 +392,7 @@ export interface OpeningData {
 // --- Schemas -----------------------------------------------------------------
 
 // Base64url without padding (the binary encoding used throughout receipts; see
-// docs/CANONICAL_ENCODING.md). Not length-locked: a reader verifies by
+// docs/spec/CANONICAL_ENCODING.md). Not length-locked: a reader verifies by
 // recomputing the commitment, so the exact byte length need not be pinned here.
 const base64UrlSchema = z
   .string()

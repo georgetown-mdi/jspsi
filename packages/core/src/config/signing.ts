@@ -2,7 +2,7 @@ import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 
 // Signing configuration for exchange receipts. Lives as an optional `signing`
-// block on the ExchangeSpec (psilink.yaml); see EXCHANGE_SPEC.md. It carries
+// block on the ExchangeSpec (psilink.yaml); see EXCHANGE_REFERENCE.md. It carries
 // only non-secret references: the path to this party's signing identity file
 // (the private key lives there, NOT here), the receipt signing mode, the pinned
 // partner certificate fingerprint (a public value exchanged out-of-band), and
@@ -33,7 +33,7 @@ export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /**
  * Receipt signing mode. Mirrors the two modes described in
- * docs/PROTOCOL.md#non-repudiation, plus an explicit `none`:
+ * docs/spec/PROTOCOL.md#non-repudiation, plus an explicit `none`:
  * - `none` -- no receipt is signed (only the unsigned self-attested record).
  * - `session-derived` -- a MAC under the shared session key; tamper-evident
  *   but not non-repudiation and not third-party verifiable.

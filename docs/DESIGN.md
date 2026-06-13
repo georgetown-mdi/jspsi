@@ -10,11 +10,11 @@ The goal of this project is to facilitate secure inter-agency data sharing of ad
 
 Running a PSI linkage protocol and using it operationally can be challenging for organizations with limited technical resources and requires deliberate attention to usability and deployment frictions. Within organizations it is often the case that a program officer would benefit from exchanging data and even has a signed data sharing agreement in hand, yet the exchange stalls while other stakeholders' requirements are satisfied: security teams may require that any new software undergo a formal audit, compliance officers need explicit assurance about what data is disclosed and to whom, and IT departments must vet software against their own technology requirements. In contrast, smaller organizations may have fewer procedural hurdles but they often lack the technical sophistication to perform regular data linking and sharing. In order to useful to these two audiences, the project is designed to first work locally in a browser without requiring additional software to be installed and restricting data to flow through trusted channels. For ease-of-use, browser-based solutions have have modern, user-centered interfaces. Users willing to install software can use a containerized, command line application to perform all the same functionality which is easily hardened and integrates with a variety of infrastructures.
 
-This document covers the project overview, architecture, exchange specification summary, and high-level user journey. It does not cover the PSI protocol details (see [PROTOCOL.md](PROTOCOL.md)), the threat model and authentication design (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), network communication and supporting services (see [COMMUNICATION.md](COMMUNICATION.md)), or the CLI command reference (see [CLI.md](CLI.md)). Intended readers are program officers, evaluators, and new contributors.
+This document covers the project overview, architecture, exchange specification summary, and high-level user journey. It does not cover the PSI protocol details (see [PROTOCOL.md](spec/PROTOCOL.md)), the threat model and authentication design (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), network communication and supporting services (see [COMMUNICATION.md](COMMUNICATION.md)), or the CLI command reference (see [CLI.md](CLI.md)). Intended readers are program officers, evaluators, and new contributors.
 
 # Exchange specification
 
-The parameters necessary to execute an exchange are written down into a JSON or YAML documents which are supplied to an application. The components of an exchange specification include: the linkage terms which describes what will be exchanged and how, connection information which describes where the exchange will take place, metadata that describes the fields and their roles, and data cleaning transformations which simply provide convenience for low-tech users. See [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) for the full reference covering all fields, types, constraints, and examples for each of these four components.
+The parameters necessary to execute an exchange are written down into a JSON or YAML documents which are supplied to an application. The components of an exchange specification include: the linkage terms which describes what will be exchanged and how, connection information which describes where the exchange will take place, metadata that describes the fields and their roles, and data cleaning transformations which simply provide convenience for low-tech users. See [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) for the full reference covering all fields, types, constraints, and examples for each of these four components.
 
 # Architecture
 
@@ -24,7 +24,7 @@ When adopting the software, program officers are likely to first conduct exchang
 
 ## Core library
 
-The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a [self-attested exchange record](EXCHANGE_RECORD.md) at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is part of the intended design but is deferred to a later release (see [ROADMAP.md](ROADMAP.md)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
+The core library includes the base PSI function, linkage term verification, input ingestion and cleaning, linkage key generation, and the execution of the linkage algorithms over PSI. The library also generates a [self-attested exchange record](spec/EXCHANGE_RECORD.md) at the end of each exchange -- a local, unsigned record of what was exchanged that a party can retain for its own disclosure records. Certificate-backed signing of that record into a third-party-verifiable receipt is part of the intended design but is deferred to a later release (see [ROADMAP.md](ROADMAP.md)). The various libraries that are run-time dependent, such as communication channels and cryptography, are abstracted over and need to be supplied by specific applications.
 
 ## Command line application
 
@@ -100,15 +100,15 @@ It may be beneficial to be able to build the web application as a desktop Electr
 
 ## See also
 
-- [PROTOCOL.md](PROTOCOL.md) - PSI and PSI-C algorithm details and post-linkage steps
+- [PROTOCOL.md](spec/PROTOCOL.md) - PSI and PSI-C algorithm details and post-linkage steps
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, and channel security
 - [COMMUNICATION.md](COMMUNICATION.md) - communication channels and supporting services
 - [CLI.md](CLI.md) - full CLI command reference and configuration guide
-- [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - complete exchange specification reference
+- [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - complete exchange specification reference
 - [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, data classification, and compliance considerations
 
 # License and disclaimer
 
 PSI-Link is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
 
-Agencies evaluating PSI-Link for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation — including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) — is intended to support those reviews, not to substitute for them.
+Agencies evaluating PSI-Link for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.

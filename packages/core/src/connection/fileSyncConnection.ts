@@ -110,7 +110,7 @@ const ackMarkerName = (writerId: string, originalName: string): string =>
 // poll loop treats it as terminal (stops rather than retrying into the same hang)
 // and the CLI classifies it exit-64 -- the same typed failure the CLI adapter's
 // per-operation read bounds raise, so a hang surfaces identically wherever it is
-// caught. See docs/SECURITY_DESIGN.md, "Channel security".
+// caught. See docs/spec/CHANNEL_SECURITY.md.
 //
 // `operation` is routed through sanitizeForDisplay: the target it names is a
 // transport path, and on a get/delete of a peer message file that path embeds
@@ -555,7 +555,7 @@ interface Options {
   // persisted". They reach this type only through the constructor's
   // Partial<Options> (the verbose/joinerRecoveryMs precedent), never from
   // config.options in open(). The CLI command layer threads them on a path
-  // separate from config construction (see docs/FILE_SYNC.md).
+  // separate from config construction (see docs/spec/FILE_SYNC.md).
   sweepExchangeFiles: boolean;
   // Escalation of sweepExchangeFiles: permits the sweep to wipe a directory that
   // shows a retain signal (a durable audit transcript). Meaningless without
@@ -709,7 +709,7 @@ interface AbortWriteInputs {
  * `readyTimeout` is intentionally excluded: psilink derives it from
  * `serverConnectTimeoutMs`, and the structured value must win. `algorithms` is
  * permitted but handled specially (see {@link FileSyncConnection.filterAlgorithms}),
- * filtered to its non-host-key sub-categories. See docs/EXCHANGE_SPEC.md
+ * filtered to its non-host-key sub-categories. See docs/EXCHANGE_REFERENCE.md
  * (`connection.provider_options`).
  */
 const SFTP_PROVIDER_OPTIONS_ALLOWLIST: ReadonlySet<string> = new Set([
@@ -931,7 +931,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   }
 
   // The whole-exchange liveness backstop (THE security control for the
-  // withheld-callback DoS; see docs/SECURITY_DESIGN.md "Channel security"). Wraps
+  // withheld-callback DoS; see docs/spec/CHANNEL_SECURITY.md). Wraps
   // the transport so every data-plane await is raced against the peer-inactivity
   // budget and cannot hang past it. It is the universal layer beneath the CLI
   // adapter's per-operation READ bounds: those fast-fail a stalled list()/get()/
@@ -3447,7 +3447,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         `unexpected file(s) appeared in ${path} during the exchange: ` +
           `${names.map((n) => sanitizeForDisplay(n)).join(", ")}. The ` +
           `directory must be dedicated to a single ` +
-          'exchange between exactly two parties (see EXCHANGE_SPEC.md "Directory ' +
+          'exchange between exactly two parties (see EXCHANGE_REFERENCE.md "Directory ' +
           'exclusivity"); a foreign file usually means another process or ' +
           "session is writing to this path, or a sync tool produced a conflict " +
           "copy or partial download. Remove the file, or set " +
@@ -3566,7 +3566,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // `-hello.json`/`-ack.json`/`-lock.json` control files have non-numeric
       // terminals and are recognized for the loop instead.
       //
-      // Enforcement site 3 (see docs/FILE_SYNC.md). The scan now classifies
+      // Enforcement site 3 (see docs/spec/FILE_SYNC.md). The scan now classifies
       // EVERY file in the listing, not only peer-prefixed ones: a file that is
       // neither a peer message nor recognized for the loop (both hellos, both
       // acks, the lock, both parties' messages and message-acks, our own
@@ -3719,7 +3719,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         const { file: messageFile, declaredSize } = messages[0];
 
         // Frame-size bound (the primary enforcement point; see
-        // docs/SECURITY_DESIGN.md, "Channel security"). Refuse before the
+        // docs/spec/CHANNEL_SECURITY.md). Refuse before the
         // sync-gate and before get() loads the body into memory: a hostile
         // server admin could otherwise write an arbitrarily large file and
         // exhaust memory. Checked against both the filename-declared count and

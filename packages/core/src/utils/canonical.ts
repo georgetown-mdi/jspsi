@@ -9,7 +9,7 @@ import { UsageError } from "../errors.js";
 // implementation, so that hashes and signatures over the bytes verify across
 // implementations. The full normative specification -- written so an auditor
 // can reproduce the bytes without reading this source -- lives in
-// docs/CANONICAL_ENCODING.md. This module is the project's single
+// docs/spec/CANONICAL_ENCODING.md. This module is the project's single
 // canonicalization primitive; nothing hashed, committed, or signed may use ad
 // hoc `JSON.stringify` or key-sorting instead.
 //
@@ -302,7 +302,7 @@ export function canonicalBytes(value: unknown): Uint8Array<ArrayBuffer> {
  * number format is unambiguous across implementations.
  *
  * `-0` is accepted (it is a safe integer) but canonical-encodes to `0` (see the
- * worked examples in docs/CANONICAL_ENCODING.md); do not rely on a sign on zero
+ * worked examples in docs/spec/CANONICAL_ENCODING.md); do not rely on a sign on zero
  * surviving encoding. See also {@link canonicalString}.
  */
 export const safeIntegerSchema: z.ZodType<number> = z

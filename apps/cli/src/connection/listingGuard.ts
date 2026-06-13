@@ -32,7 +32,7 @@ import { transportOperationStalledError } from "./sftpLivenessGuard";
  * counting every directory entry (file or otherwise -- the attacker controls the
  * entry count regardless of type), so an oversized directory is refused before
  * an array and per-entry metadata proportional to the attacker-chosen entry
- * count can be allocated. See docs/SECURITY_DESIGN.md, "Channel security".
+ * count can be allocated. See docs/spec/CHANNEL_SECURITY.md.
  *
  * Value: 8192. Derived from a memory envelope rather than chosen as a round
  * number. The worst-case bounded allocation when refusing is the entries
@@ -60,7 +60,7 @@ export const MAX_DIRECTORY_ENTRIES = 8192;
  * Maximum length, in characters, of a single directory entry's filename.
  * Enforced per entry at the transport `list()` layer in both adapters so an
  * adversary cannot exhaust memory with very long names. See
- * docs/SECURITY_DESIGN.md, "Channel security".
+ * docs/spec/CHANNEL_SECURITY.md.
  *
  * Value: 255, the POSIX `NAME_MAX` -- the maximum length of a single path
  * component that every mainstream filesystem accepts (ext4, XFS, APFS, and NTFS
@@ -131,7 +131,7 @@ export function filenameTooLongError(
  * batches advances neither {@link MAX_DIRECTORY_ENTRIES} (no entry accumulates)
  * nor {@link MAX_FILENAME_LENGTH} (no name to measure) and never signals
  * end-of-directory, so without this cap the batch loop recurses forever. See
- * docs/SECURITY_DESIGN.md, "Channel security".
+ * docs/spec/CHANNEL_SECURITY.md.
  *
  * Value: `2 * MAX_DIRECTORY_ENTRIES` (16,384). Derived from the size bounds, not
  * chosen as a round number, so the two move together. Every compliant non-EOF

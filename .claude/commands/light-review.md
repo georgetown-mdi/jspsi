@@ -16,7 +16,7 @@ Spawn every agent below with the Agent tool: the general-purpose subagent type, 
 - `<branch>`: the feature branch to review against `staging`. This is `$1`. If it is
   empty, ask for a branch name before doing anything else.
 - `[doc-file ...]`: optional paths to documentation relevant to these changes (e.g.
-  `docs/FILE_SYNC.md`). These are every token in `$ARGUMENTS` after the first; call this
+  `docs/spec/FILE_SYNC.md`). These are every token in `$ARGUMENTS` after the first; call this
   list DOCS. There may be none.
 
 ## Step 1 -- Empty guard (cheap)
@@ -56,8 +56,10 @@ another file only if a hunk cannot be judged without it.
 be a deliberate design decision, check whether these docs justify it before flagging it.]
 
 Review for: correctness bugs, logic errors, security issues, missing error handling at
-system boundaries, type-safety issues, API-contract violations, and anything else that
-looks wrong.
+system boundaries, type-safety issues, API-contract violations, documentation-tier
+placement (spec-level detail -- a constant value, byte/wire layout, an HKDF info string or other algorithm step, or
+"would only need revisiting if..." rationale -- written into a `docs/` overview doc rather
+than `docs/spec/`), and anything else that looks wrong.
 
 Return ONLY a JSON array, no other text. Each element:
 - "name": short title (5 words max)

@@ -29,12 +29,12 @@ export const ExchangeSpecSchema = z.object({
   // runtime-injected secret state (sharedSecret, expires, from .psilink.key,
   // never written to YAML and warn-and-stripped if set there) with
   // operator-settable policy fields. See connection.ts (Authentication) and
-  // EXCHANGE_SPEC.md.
+  // EXCHANGE_REFERENCE.md.
   authentication: AuthenticationSchema.optional(),
   // Optional signing block (receipt signing mode, this party's signing identity
   // file path, the pinned partner fingerprint, and the receipt output
   // location). Absent in exchanges that do not sign receipts; see signing.ts and
-  // EXCHANGE_SPEC.md.
+  // EXCHANGE_REFERENCE.md.
   signing: SigningConfigSchema.optional(),
   // Optional self-facing retention/disposition pointer for the self-attested
   // exchange record: a free-text operator note describing where this party files
@@ -43,7 +43,7 @@ export const ExchangeSpecSchema = z.object({
   // only, never swapped with the partner, cross-validated, or folded into the
   // agreed-terms hash (unlike linkageTerms). Metadata only: it must carry no
   // protected, linkage-field, or payload value. Non-empty when present (an absent
-  // pointer is the omitted key, not an empty string). See EXCHANGE_SPEC.md and
+  // pointer is the omitted key, not an empty string). See EXCHANGE_REFERENCE.md and
   // EXCHANGE_RECORD.md.
   retentionDisposition: z.string().min(1).optional(),
 });

@@ -13,7 +13,9 @@ the same logical object. That includes an independent third party -- an auditor
 running a different implementation, possibly in a different language -- who has
 only the receipt, the certificate, and this document.
 
-This document is the normative specification of that byte string. It is written
+The [Canonical encoding](../SECURITY_DESIGN.md#canonical-encoding) overview
+covers what this encoding is for and what it protects against; this document is
+its normative complement -- the specification of that byte string. It is written
 so the bytes can be reproduced without reading the PSI-Link source. Wherever a
 detail is delegated to an external standard, that standard is cited; nothing is
 left to an implementation's discretion.
@@ -191,7 +193,7 @@ keep this document free of raw non-ASCII and control bytes; their exact `value`,
 ## Test vectors
 
 A machine-readable set of test vectors is checked in at
-[`packages/core/test/vectors/canonical-vectors.json`](../packages/core/test/vectors/canonical-vectors.json).
+[`packages/core/test/vectors/canonical-vectors.json`](../../packages/core/test/vectors/canonical-vectors.json).
 It is a JSON object with a `vectors` array; each entry has:
 
 | Field | Meaning |
@@ -214,9 +216,9 @@ JSON `value`. Verify it from a `-0` literal in your own language; the Node suite
 does so directly.
 
 The PSI-Link test suite runs these vectors in both Node.js
-([`packages/core/test/canonical.test.ts`](../packages/core/test/canonical.test.ts))
+([`packages/core/test/canonical.test.ts`](../../packages/core/test/canonical.test.ts))
 and a real browser
-([`apps/web/test/browser/canonical.test.ts`](../apps/web/test/browser/canonical.test.ts)),
+([`apps/web/test/browser/canonical.test.ts`](../../apps/web/test/browser/canonical.test.ts)),
 asserting byte-identical output on both platforms.
 
 ## Implementation note (non-normative)
@@ -233,10 +235,12 @@ bytes; the normative definition is RFC 8785 over the value domain above.
 
 ## See also
 
+- [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#canonical-encoding) - the Canonical
+  encoding overview: what the encoding is for and what it protects against
 - [PROTOCOL.md](PROTOCOL.md#non-repudiation) - how receipts use these bytes
 - [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested record whose
   commitments and agreed-terms hash are computed over these bytes
-- [EXCHANGE_SPEC.md](EXCHANGE_SPEC.md) - the exchange specification whose
+- [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) - the exchange specification whose
   linkage terms are embedded, canonically encoded, in a receipt
 - [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) - JSON Canonicalization Scheme
 - [RFC 4648 section 5](https://www.rfc-editor.org/rfc/rfc4648#section-5) - base64url

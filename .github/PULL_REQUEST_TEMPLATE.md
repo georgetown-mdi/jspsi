@@ -52,7 +52,8 @@ New tests cover: <name the specific behaviors, as the acceptance criteria do>
 
 <!-- Pre-merge hygiene that keeps the rest of the repo consistent. Not testing. Check or mark n/a -- do not delete; a deliberate "n/a" is the signal you looked. -->
 
-- [ ] Ran `ls docs/` and checked each file for impact; updated affected pages or confirmed none needed
-  <!-- docs/ currently: CLI, COMMUNICATION, COMPLIANCE, DEPLOYMENT, DESIGN, EXCHANGE_SPEC, FILE_SYNC, PROTOCOL, README, RELEASES, ROADMAP, SECURITY_DESIGN; do not rely on these being the only documents -- enumerate the directory -->
+- [ ] Ran `ls docs/` and `ls docs/spec/`, checked each file for impact, and updated affected pages or confirmed none needed (enumerate both directories -- do not rely on a static list)
+- [ ] Any detail I added to a `docs/` overview is conceptual -- no constants, byte/wire layouts, algorithm steps, or deferred-decision rationale (those go in `docs/spec/`), or n/a
+  <!-- Tier litmus, kept in sync across this template, CONTRIBUTING.md, and docs/spec/README.md: If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or a "would only need revisiting if..." design rationale, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational. -->
 - [ ] `CHANGELOG.md` `[Unreleased]` updated, or n/a
 - [ ] Cryptographic code changed? Security review requested (see Dependency Policy), or n/a

@@ -15,7 +15,7 @@ PSI-Link is organized as an npm workspaces monorepo.
 | `packages/core/` | Shared library: PSI primitive, exchange orchestration, file-sync transport, config schemas |
 | `apps/cli/`      | Node.js CLI (`psilink`), built with Rollup, distributed as a Docker image                  |
 | `apps/web/`      | TanStack Start (React/SSR) web app with built-in PeerJS peer-coordination server           |
-| `docs/`          | Technical and operational documentation                                                    |
+| `docs/`          | Documentation, two tiers: `docs/` overview (conceptual/operational), `docs/spec/` technical |
 
 ## Prerequisites
 
@@ -127,6 +127,23 @@ npm run lint
 npm run format
 ```
 
+## Documentation
+
+PSI-Link documentation is two-tier:
+
+- `docs/` (overview) - conceptual and operational documents for program officers, security reviewers, compliance officers, IT staff, and contributors.
+- `docs/spec/` - the technical specification tier: wire formats, byte encodings, normative constant values, protocol internals, and implementation-level design, for implementors and auditors. See [`docs/spec/README.md`](docs/spec/README.md) for the index and routing guide.
+
+When behavior changes, update the matching tier:
+
+- User-configurable or operational behavior -> the relevant overview doc in `docs/`.
+- Wire format, protocol internals, or implementation-level spec -> the relevant `docs/spec/` file.
+- A change touching both tiers updates both.
+
+If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or a "would only need revisiting if..." design rationale, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational.
+
+Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
+
 ## Commit Messages
 
 - Imperative mood, present tense: "Fix key rotation after failed exchange", not "Fixed ..." or "Fixes ...".
@@ -139,7 +156,7 @@ npm run format
 2. Keep pull requests focused - one logical change per PR.
 3. Ensure all tests pass and lint is clean before marking the PR ready for review. Include this as a checklist in the PR.
 4. Changes to cryptographic code require explicit security review before merging (see Dependency Policy).
-5. Update `docs/` when behavior changes. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
+5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
 6. A maintainer will review and merge. Force-pushes to `main` are not permitted.
 
 ### Pull Request Description
@@ -157,9 +174,32 @@ PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencie
 
 **Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, key-agreement, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 
-**SFTP stack (`ssh2` / `ssh2-sftp-client`)** - the CLI's SFTP adapter (`apps/cli/src/connection/ssh2SftpAdapter.ts`) deliberately drives `ssh2` internals past the public `ssh2-sftp-client` API, so both packages are exact-pinned in `apps/cli/package.json`: every bump - including a security patch, which is then a deliberate edit rather than an `npm audit fix` that slips in unreviewed - must re-verify that coupling before it merges. Before raising either version, follow the upgrade checklist in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) ("Upgrading the SFTP stack"), which names the internal premises, the source files to re-read, and the contract-assertion test (run in CI by the CLI integration suite) that fails red on a lifecycle change.
+**SFTP stack (`ssh2` / `ssh2-sftp-client`)** - the CLI's SFTP adapter (`apps/cli/src/connection/ssh2SftpAdapter.ts`) deliberately drives `ssh2` internals past the public `ssh2-sftp-client` API, so both packages are exact-pinned in `apps/cli/package.json`: every bump - including a security patch, which is then a deliberate edit rather than an `npm audit fix` that slips in unreviewed - must re-verify that coupling before it merges. Before raising either version, follow the [Upgrading the SFTP stack](#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) checklist below, which names the internal premises, the source files to re-read, and the contract-assertion test (run in CI by the CLI integration suite) that fails red on a lifecycle change.
 
 Per-dependency licenses are recorded authoritatively in the CycloneDX SBOM attached to each release - every direct and transitive dependency with its license; see [docs/RELEASES.md](docs/RELEASES.md#software-bill-of-materials-sbom). Attributions for redistributed and vendored components are in the top-level [`NOTICE`](NOTICE).
+
+## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
+
+The channel-security bounds specified in [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md) reach past the public `ssh2-sftp-client` API and drive ssh2 internals directly (`apps/cli/src/connection/ssh2SftpAdapter.ts`), so they rest on premises about ssh2's internal behavior that an upgrade can silently break. Re-verify the following on any `ssh2` or `ssh2-sftp-client` version bump, before the bump merges.
+
+The internal assumptions the adapter relies on:
+
+- ssh2's `Client.sftp()` strips its own setup-time `'error'` listener (and the `'exit'`/`'close'` ones) from the `SFTPWrapper` before handing it back, so after a real connect the wrapper carries zero `'error'` listeners until the adapter attaches its own. The whole crash fix is sound only while this holds; if ssh2 retains its listener the adapter's "no one else guards the wrapper" reasoning is false.
+- ssh2 reports end-of-directory from the handle-based `readdir` as an `Error` whose `code` equals `STATUS_CODE.EOF` (numeric `1`), not as an empty success batch -- the EOF contract `list()`'s batch loop terminates on.
+- `STATUS_CODE.EOF === 1` and `OPEN_MODE.WRITE | CREAT | EXCL === 0x2A`, the numeric SFTP constants the adapter hard-codes (it does not import them: ssh2 exposes their runtime values only from the internal `lib/protocol/SFTP.js`, not from its package entry point, and `@types/ssh2` types them only as a compile-time `sftp` namespace). These are fixed SFTPv3 wire-protocol values, so they are extremely unlikely to renumber, but confirm them against `STATUS_CODE`/`OPEN_MODE` in the source below if the surrounding code moves.
+- `STATUS_CODE.FAILURE === 4` (`SSH_FX_FAILURE`), the third numeric SFTP constant the adapter hard-codes: `rename()` retries a transient server failure only on this status (the source still exists, so a re-issue is safe) and treats every other status as terminal, and `createExclusive` maps it to an `exists()`-disambiguated `EEXIST`. The premise is that ssh2-sftp-client surfaces a server `FAILURE` on its high-level `rename` as numeric `err.code === 4` -- it passes ssh2's raw status through `fmtError` onto `err.code`, the same `4` `createExclusive` reads from the raw `open` callback. If a future version remaps `rename`'s `err.code` to a non-numeric string (e.g. `ERR_GENERIC_CLIENT`) or renumbers `FAILURE`, the retry silently stops firing -- the transient-rename flake returns, with no correctness break; the `ssh2SftpAdapter` unit tests pin the numeric-`4` behavior.
+- ssh2-sftp-client stores the raw wrapper on `this.sftp`, assigned once in its `'ready'` handler and otherwise only cleared, with no auto-reconnect that swaps it after `connect()` resolves.
+- ssh2-sftp-client exposes the underlying ssh2 `Client` as `this.client`, and ssh2's `Client.setNoDelay(true)` toggles `TCP_NODELAY` on the live socket. `connect()` calls it once after the connection is established to disable Nagle's algorithm -- a per-round-trip latency optimization for the chatty rendezvous protocol (see board item 199674097). Unlike every other premise here this one carries no correctness weight: the call is guarded and non-fatal, so a future version that relocates the `Client` or drops `setNoDelay` makes the adapter log a warning and continue with Nagle enabled (slower, still correct) rather than fail.
+- A malformed reply to the in-flight request itself is bounded by the adapter's wall-clock deadline, not by `cleanupRequests`, because ssh2 has already deleted the request from `_requests` by the time `doFatalSFTPError` runs: the `NAME` and `DATA` response handlers delete it unconditionally before the parse/check that calls `doFatalSFTPError`, and the `HANDLE` handler deletes it inside its malformed branch (on a defined request id) immediately before that call. All three leave nothing for `cleanupRequests` to fail. If a future ssh2 instead deleted after the fatal path (or stopped deleting in the `HANDLE` malformed branch), `cleanupRequests` would begin failing in-flight requests too - which would change the mechanism but not break it (the deadline still bounds the operation). The deadline must stay regardless; the `liveness` fault-injection unit test below proves the current ordering.
+- ssh2-sftp-client's `put(src, dest)` pipes a non-Buffer `src` into the write stream (`_put`'s else-branch, `rdr.pipe(wtr)`), and that write stream consumes under ack-driven backpressure -- ssh2's `WriteStream._write` calls its stream callback (releasing the next pull) only after the server acknowledges the write. The `put` liveness idle window rests on both: the adapter hands `put` a Readable that streams the payload in `SFTP_PUT_PROGRESS_CHUNK_BYTES` (64 KiB) chunks and resets the window each time a chunk is pulled, so a withheld write ack stalls the pull and trips the window while a slow-but-progressing upload keeps resetting it. It rests further on ssh2's `SFTP.write` chaining a buffer larger than `_maxWriteLen` into multiple WRITE packets and firing the stream callback only after the *last* ack -- which is precisely *why* the source is chunked rather than handed over whole: a single whole-buffer write surfaces no progress until completion, making a large legitimate upload indistinguishable from a stall for its full duration. If a future version buffers a provided stream eagerly instead of piping it under backpressure, the window's progress signal would no longer track the server and the bound would need rework; if it merely acks per-sub-write incrementally, the chunking becomes redundant but harmless. This uses only the public stream interface (it does not drive the raw `SFTPWrapper`), so it adds no new internal coupling beyond these behavioral premises. The `ssh2SftpAdapter` unit tests pin the stall-fires and slow-but-progressing-does-not behaviors and byte-exact upload through the chunked source; the integration suite uploads real payloads through it.
+
+Dependency source files to re-read on an upgrade:
+
+- `node_modules/ssh2/lib/client.js`: `sftp()` and its inner `removeListeners()` / `onReady` -- confirm the setup-time `'error'` listener is still stripped before the wrapper is handed back.
+- `node_modules/ssh2/lib/protocol/SFTP.js`: `doFatalSFTPError` (still emits `'error'` on the wrapper, then destroys and calls `cleanupRequests`), the `NAME` and `DATA` handlers (still delete the in-flight request from `_requests` unconditionally before the parse/check that calls `doFatalSFTPError`) and the `HANDLE` handler (still deletes inside its malformed branch, on a defined request id, immediately before that call), so `cleanupRequests` does not fail a reply-to-self in-flight request in any of the three cases; `STATUS_CODE` and `OPEN_MODE` (still the values above), and the handle-path `readdir` EOF contract; and `WriteStream._write` / `SFTP.write` (the stream callback still fires only after the server acks, and an over-`_maxWriteLen` write still chains into multiple packets acked at the end -- the ack-driven backpressure and no-incremental-progress premises the `put` idle window's chunking rests on).
+- `node_modules/ssh2-sftp-client/src/index.js`: confirm the wrapper is still reached via `this.sftp` with the lifecycle above, that the underlying ssh2 `Client` is still held on `this.client` (the `setNoDelay` seam), that `rename` still passes the raw numeric status through `fmtError` onto `err.code` (so a server `SSH_FX_FAILURE` surfaces as `err.code === 4`, the premise the rename retry gates on), and that `_put` still pipes a non-Buffer `src` into the write stream (`rdr.pipe(wtr)`) rather than buffering it (the premise the `put` idle window's progress signal rests on).
+
+Then run `npm run test:integration -w apps/cli` against the new version. The contract-assertion tests in `apps/cli/test/integration/sftpConnection.test.ts` pin the zero-listener premise from both sides (a raw ssh2-sftp-client connect leaves zero `'error'` listeners on the wrapper; an adapter connect leaves exactly one), so a lifecycle change fails those tests red rather than regressing the crash guard silently.
 
 ## Export Control
 

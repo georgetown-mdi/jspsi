@@ -25,7 +25,7 @@ Open a [GitHub issue](https://github.com/georgetown-mdi/jspsi/issues). Please in
 Start with the documentation:
 
 - [docs/CLI.md](docs/CLI.md) for command-line usage, configuration files, and recovery procedures
-- [docs/EXCHANGE_SPEC.md](docs/EXCHANGE_SPEC.md) for the full configuration file reference
+- [docs/EXCHANGE_REFERENCE.md](docs/EXCHANGE_REFERENCE.md) for the full configuration file reference
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for operating supporting services
 - [README.md](README.md) for the Docker quickstart
 

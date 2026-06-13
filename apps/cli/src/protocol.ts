@@ -49,7 +49,7 @@ import { writeOutput } from "./util/cli";
  * likely receiver-side causes and points at the peer's own logs, where the real
  * cause was recorded, rather than overclaiming a specific one. The wording
  * deliberately hedges ("may have") and notes the slow-peer case so the operator
- * is not misdirected. See docs/FILE_SYNC.md ("Sender-side peer-silence
+ * is not misdirected. See docs/spec/FILE_SYNC.md ("Sender-side peer-silence
  * attribution").
  */
 export const PEER_SILENCE_GUIDANCE =

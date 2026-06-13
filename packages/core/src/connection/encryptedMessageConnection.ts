@@ -15,7 +15,7 @@ import type { HandshakeRole } from "../types";
 // already read the whole file and JSON-parsed it, so the dominant allocation
 // has happened -- this only rejects an over-cap envelope, it does not prevent
 // the read. The real bound is enforced at the transport read layer (see
-// MAX_FRAME_SIZE_BYTES and docs/SECURITY_DESIGN.md, "Channel security"). The
+// MAX_FRAME_SIZE_BYTES and docs/spec/CHANNEL_SECURITY.md). The
 // bound is the same single value: the `enc` string is a base64url substring of
 // the on-wire file, so it can never exceed the file-size cap. base64url is
 // ASCII, so the string length that z.string().max() measures (UTF-16 code
@@ -96,8 +96,7 @@ export const IV_SEQ_OFFSET = 4;
  * parties now run every agreed key and the premise holds unconditionally within
  * the implemented one-to-one / many-to-one cardinalities. Even when the skip
  * desynced the scripts a marker would not have fixed it - a protocol-layer
- * fault, not an absent-frame one. See docs/SECURITY_DESIGN.md, "Channel
- * security".
+ * fault, not an absent-frame one. See docs/spec/CHANNEL_SECURITY.md.
  *
  * This decorator is single-consumer: it assumes at most one send() and one
  * receive() in flight at a time, matching MessageConnection's lockstep usage
@@ -249,8 +248,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     // the encrypt or inner.send then fails, the wrapper latches terminal and no
     // later frame is ever sent, so a consumed-but-unsent counter value can only
     // truncate the tail - it never leaves a gap between two delivered frames for
-    // the receiver to mistake for an attack (see docs/SECURITY_DESIGN.md,
-    // "Channel security").
+    // the receiver to mistake for an attack (see docs/spec/CHANNEL_SECURITY.md).
     let plaintext: Uint8Array<ArrayBuffer>;
     if (data instanceof Uint8Array) {
       plaintext = new Uint8Array(1 + data.length) as Uint8Array<ArrayBuffer>;
@@ -438,7 +436,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     // an inner.send failure) latches the wrapper terminal, so no later frame is
     // ever sent - a skipped value can only truncate the tail, never leave a gap
     // between two delivered frames. Tail truncation is a separate, deferred
-    // concern (see docs/SECURITY_DESIGN.md, "Channel security").
+    // concern (see docs/spec/CHANNEL_SECURITY.md).
     if (seq > this.recvSeq + 1) {
       throw this.fail(
         new ConnectionError(

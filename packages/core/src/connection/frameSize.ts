@@ -8,7 +8,7 @@
  * (an adversary under the threat model in docs/SECURITY_DESIGN.md) could
  * otherwise mount by writing an arbitrarily large ciphertext file: without the
  * bound the read allocates a string and byte array proportional to the
- * attacker-chosen file size. See docs/SECURITY_DESIGN.md, "Channel security".
+ * attacker-chosen file size. See docs/spec/CHANNEL_SECURITY.md.
  *
  * Value: 536,870,888 bytes (~512 MiB), the exact value of Node's maximum string
  * length (`buffer.constants.MAX_STRING_LENGTH` on 64-bit). That length is the
@@ -34,7 +34,7 @@
  *
  * Headroom against the realistic worst-case legitimate frame: the largest PSI
  * frame is one party's full encrypted set sent as raw elliptic-curve points
- * (~64 bytes/element; see docs/PROTOCOL.md), base64url-expanded by 4/3 on the
+ * (~64 bytes/element; see docs/spec/PROTOCOL.md), base64url-expanded by 4/3 on the
  * wire. 512 MiB of wire text decodes to ~384 MiB raw -- on the order of 6
  * million elements -- which is already more than this single-frame JSON-text
  * transport can carry, since a larger set would itself exceed MAX_STRING_LENGTH

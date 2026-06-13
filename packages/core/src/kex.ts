@@ -27,7 +27,7 @@ import {
 // construction is modeled on NNpsk0 and pinned by the checked-in known-answer
 // vector (test/vectors/kex-vectors.json) rather than wire-compatible with
 // generic Noise. See docs/SECURITY_DESIGN.md ("Key-agreement design") and
-// docs/PROTOCOL.md ("X25519 authenticated key exchange").
+// docs/spec/PROTOCOL.md ("X25519 authenticated key exchange").
 
 // X25519 public keys and the pre-shared secret are fixed 32-byte values
 // (RFC 7748; the psk is psk0, which Noise mandates be 32 bytes).
@@ -476,7 +476,7 @@ export interface KexResult {
  *
  * The construction is Noise NNpsk0 over X25519 plus an explicit key
  * confirmation, following NIST SP 800-56A; the DH is a @noble/curves call, not
- * hand-rolled curve math. See the module header and docs/PROTOCOL.md.
+ * hand-rolled curve math. See the module header and docs/spec/PROTOCOL.md.
  *
  * `psk` is the raw 32-byte pre-shared secret. Callers holding a base64url token
  * decode it to bytes first (a wrong length is a caller error, thrown

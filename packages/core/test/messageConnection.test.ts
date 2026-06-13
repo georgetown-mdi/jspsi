@@ -363,7 +363,7 @@ test("createMessagePipe: receive has no inactivity deadline", async () => {
 
 // --- I8 contract: the production `data` consumer never throws synchronously ---
 //
-// docs/FILE_SYNC.md invariant I8 makes a non-throwing `data` consumer
+// docs/spec/FILE_SYNC.md invariant I8 makes a non-throwing `data` consumer
 // load-bearing for FileSyncConnection's retain-mode poll(): the emit("data",
 // ...) hand-off sits inside the try whose catch reprocesses the never-deleted
 // message, and recvSeq advances only after the emit returns. A consumer that
