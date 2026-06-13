@@ -26,7 +26,9 @@
     "clean": "rimraf dist",
     "dev": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\" -w",
     "pretest": "npm run build",
-    "test": "vitest run"
+    "test": "vitest run --project unit",
+    "test:unit": "vitest run --project unit",
+    "test:stress": "vitest run --project stress"
   },
   "files": [
     "dist"
