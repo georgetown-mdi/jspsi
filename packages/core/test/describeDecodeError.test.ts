@@ -20,6 +20,19 @@ describe("describeDecodeError", () => {
     expect(out).not.toBe((err as ZodError).message);
   });
 
+  test("collapses a real multi-issue ZodError to one line with an '(and N more)' suffix", () => {
+    // The synthetic-issue tests below pin the suffix logic; this pins the same
+    // collapse on a genuine multi-issue ZodError -- the readable one-liner this
+    // helper exists to produce in place of Zod's raw multi-line blob.
+    const err = z
+      .object({ a: z.string(), b: z.string() })
+      .safeParse({ a: 1, b: 2 }).error;
+    expect(err).toBeInstanceOf(ZodError);
+    const out = describeDecodeError(err);
+    expect(out).toMatch(/^a: .+ \(and 1 more\)$/);
+    expect(out).not.toContain("\n");
+  });
+
   test("renders a single-issue ZodError as exactly '<path>: <message>'", () => {
     expect(
       describeDecodeError({
