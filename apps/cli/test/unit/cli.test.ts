@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 
-import { singleValue } from "../../src/util/cli";
+import { durationFlagSeconds, singleValue } from "../../src/util/cli";
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
@@ -37,4 +37,49 @@ test("singleValue: a repeated flag (array) is a usage error naming the flag", ()
   expect(() =>
     singleValue(argv({ "log-level": ["info", "debug"] }), "log-level"),
   ).toThrow("--log-level may be given only once");
+});
+
+// --- durationFlagSeconds -----------------------------------------------------
+
+test("durationFlagSeconds: a valid duration is returned as whole seconds", () => {
+  // parseDurationFlag yields ms; the helper divides to the seconds the timeout
+  // flags' downstream consumers expect. The smallest unit is seconds, so the
+  // conversion is exact for every unit.
+  expect(
+    durationFlagSeconds(argv({ "peer-timeout": "30s" }), "peer-timeout"),
+  ).toBe(30);
+  expect(
+    durationFlagSeconds(
+      argv({ "connection-timeout": "2m" }),
+      "connection-timeout",
+    ),
+  ).toBe(120);
+});
+
+test("durationFlagSeconds: an absent flag is undefined", () => {
+  expect(durationFlagSeconds(argv({}), "peer-timeout")).toBeUndefined();
+});
+
+test("durationFlagSeconds: a bare integer is rejected naming the flag and suffixed value", () => {
+  expect(() =>
+    durationFlagSeconds(argv({ "peer-timeout": "30" }), "peer-timeout"),
+  ).toThrow(UsageError);
+  expect(() =>
+    durationFlagSeconds(argv({ "peer-timeout": "30" }), "peer-timeout"),
+  ).toThrow("30s");
+});
+
+test("durationFlagSeconds: a malformed value is a flag-named usage error", () => {
+  expect(() =>
+    durationFlagSeconds(argv({ "peer-timeout": "1w" }), "peer-timeout"),
+  ).toThrow("--peer-timeout");
+});
+
+test("durationFlagSeconds: a repeated flag is rejected before parsing", () => {
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": ["30s", "60s"] }),
+      "peer-timeout",
+    ),
+  ).toThrow("--peer-timeout may be given only once");
 });

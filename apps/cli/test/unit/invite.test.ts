@@ -610,3 +610,39 @@ test("handler: a repeated --accept-timeout is rejected (exit 64) before validati
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("handler: a bare-integer --accept-timeout is rejected (exit 64) before any side effect", async () => {
+  // `psilink invite --accept-timeout 60`: the value migrated to the duration
+  // syntax, so a bare number is no longer accepted. The handler parses it (via
+  // durationFlagSeconds) before resolveInvitePositionals/validateInvite, so the
+  // rejection fires before the offline commit would mint and print the token and
+  // write both files -- exactly the no-side-effect guarantee asserted below.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-bare-"));
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+    const configFile = path.join(dir, "psilink.yaml");
+    const keyFile = path.join(dir, ".psilink.key");
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "accept-timeout": "60",
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

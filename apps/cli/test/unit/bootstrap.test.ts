@@ -318,6 +318,47 @@ test("parseCommonBootstrapArgs: a repeated string flag is a usage error naming t
   ).toThrow("--log-level may be given only once");
 });
 
+test("parseCommonBootstrapArgs: human-readable timeouts parse to whole seconds", () => {
+  // The flags accept the shared duration syntax; the parsed value stays in the
+  // seconds the connection overrides (and core, after applyConnectionOverrides
+  // scales to ms) expect, so only the input form changed.
+  const parsed = parseCommonBootstrapArgs({
+    _: [],
+    $0: "psilink",
+    "connection-timeout": "2m",
+    "peer-timeout": "30s",
+  } as unknown as Arguments);
+  expect(parsed.connectionTimeout).toBe(120);
+  expect(parsed.peerTimeout).toBe(30);
+});
+
+test("parseCommonBootstrapArgs: a bare-integer timeout is rejected with the suffixed equivalent", () => {
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "peer-timeout": "30",
+    } as unknown as Arguments),
+  ).toThrow(UsageError);
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "peer-timeout": "30",
+    } as unknown as Arguments),
+  ).toThrow("30s");
+});
+
+test("parseCommonBootstrapArgs: a malformed timeout is a flag-named usage error", () => {
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "connection-timeout": "soon",
+    } as unknown as Arguments),
+  ).toThrow("--connection-timeout");
+});
+
 test("runOrExit: a successful body does not exit", async () => {
   const exit = vi
     .spyOn(process, "exit")
