@@ -1127,9 +1127,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (!SFTP_PROVIDER_OPTIONS_ALLOWLIST.has(key)) {
         this.log.warn(
           `[${this.role}] ignoring connection.providerOptions.` +
-            `${sanitizeForDisplay(key)}: not an allowed SFTP transport option ` +
-            `(psilink-managed and security-critical ssh2 options -- host, ` +
-            `credentials, host-key verification -- cannot be set here)`,
+            `${sanitizeForDisplay(key)}: not in the allowed set of SFTP ` +
+            `transport-tuning options. The connection target, credentials, ` +
+            `and host-key verification are set from connection.server and ` +
+            `cannot be overridden here; any other key is dropped as a ` +
+            `default-deny precaution.`,
         );
         continue;
       }

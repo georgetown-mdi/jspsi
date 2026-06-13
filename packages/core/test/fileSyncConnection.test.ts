@@ -487,14 +487,31 @@ test("providerOptions cannot override the psilink-managed readyTimeout", async (
   expect(opts["readyTimeout"]).toBe(30_000);
 });
 
+test("providerOptions cannot supply readyTimeout when the config omits a connect timeout", async () => {
+  // Symmetric to the case above: with no serverConnectTimeoutMs the allowlist
+  // drops a providerOptions readyTimeout rather than letting it populate the
+  // connect option, so the connection falls back to ssh2's own default.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { readyTimeout: 1 },
+  });
+  expect(opts["readyTimeout"]).toBeUndefined();
+});
+
 test("a benign providerOptions transport option still applies", async () => {
   const opts = await captureSftpConnectOptions({
     channel: "sftp",
     server: { host: "sftp.example.org" },
-    providerOptions: { keepaliveInterval: 5_000, keepaliveCountMax: 4 },
+    providerOptions: {
+      keepaliveInterval: 5_000,
+      keepaliveCountMax: 4,
+      strictVendor: false,
+    },
   });
   expect(opts["keepaliveInterval"]).toBe(5_000);
   expect(opts["keepaliveCountMax"]).toBe(4);
+  expect(opts["strictVendor"]).toBe(false);
 });
 
 test("providerOptions algorithms passes through but serverHostKey is stripped", async () => {
@@ -520,6 +537,28 @@ test("providerOptions algorithms with no allowed sub-keys is dropped entirely", 
   expect(opts["algorithms"]).toBeUndefined();
 });
 
+test("a dropped algorithms sub-key is logged with a warning", async () => {
+  const [, logs] = await withCapturedLogs(async () => {
+    await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: {
+        algorithms: {
+          cipher: ["aes256-gcm@openssh.com"],
+          serverHostKey: ["ssh-dss"],
+        },
+      },
+    });
+  });
+  expect(
+    logs.some(
+      (l) =>
+        l.level === "WARN" &&
+        l.message.includes("providerOptions.algorithms.serverHostKey"),
+    ),
+  ).toBe(true);
+});
+
 test("a dropped providerOptions key is logged with a warning", async () => {
   const [, logs] = await withCapturedLogs(async () => {
     await captureSftpConnectOptions({
@@ -533,7 +572,7 @@ test("a dropped providerOptions key is logged with a warning", async () => {
       (l) =>
         l.level === "WARN" &&
         l.message.includes("providerOptions.host") &&
-        l.message.includes("not an allowed SFTP transport option"),
+        l.message.includes("not in the allowed set of SFTP"),
     ),
   ).toBe(true);
 });
