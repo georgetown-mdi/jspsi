@@ -93,8 +93,10 @@ git push origin vX.Y.Z
 
 ### 8. Build and publish the container image
 
+Multi-platform `--push` needs a `docker-container`-driver buildx builder. Select it explicitly with `--builder` so it need not be your default; see the Docker Hub build instructions in `apps/cli/README.md` for creating `multiarch-builder`. Run from the repository root:
+
 ```sh
-docker buildx build \
+docker buildx build --builder multiarch-builder \
   --platform linux/amd64,linux/arm64 \
   --tag vdorie/psi-link:X.Y.Z \
   --tag vdorie/psi-link:X.Y \
