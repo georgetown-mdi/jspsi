@@ -537,6 +537,33 @@ test("providerOptions algorithms with no allowed sub-keys is dropped entirely", 
   expect(opts["algorithms"]).toBeUndefined();
 });
 
+test("providerOptions algorithms that is not an object of categories is dropped", async () => {
+  // A malformed algorithms value (here a bare string) is not an object of
+  // algorithm categories, so it is dropped rather than forwarded to ssh2.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { algorithms: "aes256-gcm@openssh.com" },
+  });
+  expect(opts["algorithms"]).toBeUndefined();
+});
+
+test("providerOptions algorithms accepts ssh2's append/prepend/remove object form", async () => {
+  // ssh2 allows each algorithms category to be either an array of names or an
+  // object with append/prepend/remove. An allowed sub-category is copied through
+  // verbatim, so the object form must survive intact (not be coerced or dropped).
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: {
+      algorithms: { cipher: { append: ["aes256-gcm@openssh.com"] } },
+    },
+  });
+  expect(opts["algorithms"]).toEqual({
+    cipher: { append: ["aes256-gcm@openssh.com"] },
+  });
+});
+
 test("a dropped algorithms sub-key is logged with a warning", async () => {
   const [, logs] = await withCapturedLogs(async () => {
     await captureSftpConnectOptions({

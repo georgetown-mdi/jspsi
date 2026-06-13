@@ -1112,11 +1112,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * afterward -- defense in depth atop the allowlist, which already excludes
    * every such field (the host-key-verification keys included).
    *
-   * Keys are matched case-sensitively against their canonical ssh2 spelling.
-   * That is sufficient: `ssh2-sftp-client` reads only the exact canonical keys
-   * (`host`, `hostVerifier`, ...), so a variant-cased key (`Host`) is inert at
-   * ssh2 regardless; matching the canonical spelling thus covers every key ssh2
-   * would actually act on, which is why providerOptions is left un-normalized.
+   * Matching is by exact key string and need not be exhaustive about ssh2's
+   * spellings, precisely because this is a default-deny allowlist: any key it
+   * does not name is dropped regardless of how ssh2 would have read it. That
+   * distinction matters -- ssh2 honors more than the canonical names (`hostname`
+   * is an alias for `host` and takes precedence over it; `user` is an alias for
+   * `username`) and treats keys case-sensitively, so a deny-list would have to
+   * enumerate every synonym and casing to be safe, whereas default-deny covers
+   * them all by construction. This is also why providerOptions can be left
+   * un-normalized.
    */
   private applyProviderOptions(
     connectOptions: Record<string, unknown>,
