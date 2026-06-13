@@ -12,8 +12,7 @@ Targeting is aspirational; the maintainers do not commit to a release date for a
 
 Work required before the 1.0 release.
 
-- `init`, `invite`, and `accept` CLI subcommands (stubbed today; see [CLI.md](CLI.md))
-- CLI path from a zero-setup exchange to a recurring exchange (the `--save` flag)
+- `init` CLI subcommand (stubbed today; see [CLI.md](CLI.md))
 - [Self-attested exchange record](spec/EXCHANGE_RECORD.md): readable governance metadata so the local record stands alone as a disclosure-log entry (e.g. a HIPAA accounting of disclosures or a FERPA disclosure record), plus parity in the web application
 - Web application feature parity with the CLI for the bootstrapping workflow
 - Web application GUI for configuring and executing exchanges

@@ -54,7 +54,7 @@ PSI-Link is software, not a service offering, and is not in scope for FedRAMP or
 
 ### FIPS 140
 
-The cryptographic primitives PSI-Link uses are NIST-approved algorithms (P-256, SHA-256, HMAC-SHA-256, HKDF, AES-GCM), but **the cryptographic modules in use are not FIPS 140-validated**:
+The cryptographic primitives PSI-Link uses are NIST-approved algorithms (X25519, Ed25519, SHA-256, HMAC-SHA-256, HKDF, AES-GCM), but **the cryptographic modules in use are not FIPS 140-validated**:
 
 - `@noble/curves` (elliptic-curve scalar multiplication) is not FIPS-validated.
 - The Web Crypto API implementations in Node.js and in browsers are generally not FIPS-validated as shipped.

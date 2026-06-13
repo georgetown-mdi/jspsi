@@ -43,7 +43,7 @@ Replacing each of the following:
 
 The only content accessible to the container will be that in `WORK_PATH`, so you are recommended to make a new directory and place it in the file you wish to transfer.
 
-The output file will contain the association-table mapping between each partners' data. It is formatted a csv with columns `our_row_id` and `their_row_id`. Each is a 0-based index into each dataset, giving the correspondence between rows in each dataset.
+The output file is a CSV giving the linkage between the two parties' records. Its first column identifies our matched records, headed by our configured identifier column's name (or `row_id` if none is configured); the remaining columns carry the partner's payload columns under their original names, prefixed `their_` only where a name collides with ours. When the partner shares no payload, a single `row_id` column (or `their_row_id` on a name collision) instead holds the partner's 0-based row index.
 
 For more information, see [apps/cli](apps/cli/).
 
