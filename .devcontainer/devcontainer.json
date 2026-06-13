@@ -7,7 +7,13 @@
       "CLAUDE_CODE_VERSION": "latest"
     }
   },
-  "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+    "--env-file",
+    "${localWorkspaceFolder}/.env"
+  ],
+  "initializeCommand": "test -f \"${localWorkspaceFolder}/.env\" || touch \"${localWorkspaceFolder}/.env\"",
   "customizations": {
     "vscode": {
       "extensions": [
