@@ -60,7 +60,10 @@ interface SignalingLocation {
  * `redactableIds` are the session's derived rendezvous ids; the installed
  * `logFunction` strips them from PeerJS output so the per-session diagnostic
  * toggle can raise the debug level (see {@link resolvePeerDebugLevel}) without
- * any derived id reaching the console.
+ * any derived id reaching the console. It is installed at every level, not only
+ * when diagnosing, so even the default errors-only output is redacted (PeerJS
+ * error logs can carry an `Error` whose message embeds an id); the only effect
+ * in non-diagnostic mode is the console prefix.
  */
 function buildPeerOptions(
   loc: SignalingLocation,

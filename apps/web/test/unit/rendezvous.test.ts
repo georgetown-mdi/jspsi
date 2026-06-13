@@ -284,10 +284,38 @@ describe("dialAsAcceptor", () => {
 });
 
 describe("peer logging wiring", () => {
-  test("installs a redacting logFunction closed over the derived ids", async () => {
+  // Assert the wired-in logFunction redacts every id in `ids` -- in particular
+  // the remote id, which is the one PeerJS interpolates into its warnings, so it
+  // must be in the redaction set, not just the local id the peer registers under.
+  function expectRedactsAll(
+    options: PeerOptions | undefined,
+    ids: Array<string>,
+  ): void {
+    expect(typeof options?.debug).toBe("number");
+    expect(typeof options?.logFunction).toBe("function");
+    const logFn = options?.logFunction as unknown as (
+      level: number,
+      ...rest: Array<unknown>
+    ) => void;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const id of ids)
+        logFn(2, `You received a malformed message from ${id}`);
+      const printed = warnSpy.mock.calls.flat().join(" ");
+      expect(printed).toContain("[redacted-peer-id]");
+      for (const id of ids) expect(printed).not.toContain(id);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  }
+
+  test("listenAsInviter installs a logFunction redacting both derived ids", async () => {
     stubWindow();
     const secret = generateSharedSecret();
-    const inviterId = await deriveRendezvousPeerId(secret, "inviter");
+    const [inviterId, acceptorId] = await Promise.all([
+      deriveRendezvousPeerId(secret, "inviter"),
+      deriveRendezvousPeerId(secret, "acceptor"),
+    ]);
 
     let capturedOptions: PeerOptions | undefined;
     const controller = new AbortController();
@@ -300,24 +328,34 @@ describe("peer logging wiring", () => {
     });
 
     await vi.waitFor(() => expect(capturedOptions).toBeDefined());
-    expect(typeof capturedOptions?.debug).toBe("number");
-    expect(typeof capturedOptions?.logFunction).toBe("function");
-
-    // The wired-in logFunction must redact the session's derived id, proving it
-    // was constructed over the real ids rather than an empty set.
-    const logFn = capturedOptions?.logFunction as unknown as (
-      level: number,
-      ...rest: Array<unknown>
-    ) => void;
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      logFn(2, `You received a malformed message from ${inviterId}`);
-      expect(warnSpy.mock.calls.flat().join(" ")).not.toContain(inviterId);
-    } finally {
-      warnSpy.mockRestore();
-    }
+    expectRedactsAll(capturedOptions, [inviterId, acceptorId]);
 
     // Drain the otherwise-pending listen so the test leaves nothing hanging.
+    controller.abort();
+    await expect(promise).rejects.toThrow(/aborted/i);
+  });
+
+  test("dialAsAcceptor installs a logFunction redacting both derived ids", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const [inviterId, acceptorId] = await Promise.all([
+      deriveRendezvousPeerId(secret, "inviter"),
+      deriveRendezvousPeerId(secret, "acceptor"),
+    ]);
+
+    let capturedOptions: PeerOptions | undefined;
+    const controller = new AbortController();
+    const promise = dialAsAcceptor(secret, endpoint, {
+      signal: controller.signal,
+      peerFactory: (_id, options) => {
+        capturedOptions = options;
+        return new FakePeer() as unknown as Peer;
+      },
+    });
+
+    await vi.waitFor(() => expect(capturedOptions).toBeDefined());
+    expectRedactsAll(capturedOptions, [inviterId, acceptorId]);
+
     controller.abort();
     await expect(promise).rejects.toThrow(/aborted/i);
   });

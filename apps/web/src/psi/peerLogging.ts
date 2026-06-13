@@ -73,7 +73,9 @@ function redactValue(
   if (typeof value === "string") return redactString(value, ids);
   // Collapse an Error to "(Name) message" the way PeerJS's own default printer
   // does, but redact the message first: the message can interpolate a peer id,
-  // and a raw Error object would otherwise slip that id past redaction.
+  // and a raw Error object would otherwise slip that id past redaction. The
+  // `.cause` chain is dropped, matching PeerJS's printer -- an id in a cause is
+  // discarded with it, never printed.
   if (value instanceof Error)
     return `(${value.name}) ${redactString(value.message, ids)}`;
   if (typeof value !== "object" || value === null) return value;
