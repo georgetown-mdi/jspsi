@@ -41,3 +41,11 @@ jobs:
         run: npm run lint
       - name: Format check
         run: npm run formatcheck
+      # Resolves every Markdown link/anchor across the repo (docs/ overview,
+      # docs/spec/ technical, and the root governance files), failing on a dead
+      # path or dead heading anchor. This is the forcing function that keeps the
+      # two-tier docs from drifting into stale cross-references on a move or
+      # rename. Needs only Node and git ls-files, so it does not depend on the
+      # @psilink/core build above.
+      - name: Doc links
+        run: npm run linkcheck

@@ -101,7 +101,7 @@ No decision has been taken here beyond "worth revisiting" - this note exists to 
 
 Under the honest-but-curious model the project adopts, the residual leak in the clean-cascade approach looks acceptable - a helper learning which of *its own* records matched, and roughly how strongly, is a modest disclosure between agencies that have already agreed to share the overlap. The clean cascade is also what the implementation does today. Combined with the deployment envelope - which rules the heavyweight alternatives out in the browser regardless - the leaning is to keep the simple in-engine approach for now. The live levers would be the choreography choice, the blurring measures, and enforced non-output on the helper's side. The secure-computation route, already scoped for threshold and weighted matching, is where to look if the model ever hardens - most plausibly in the command-line path rather than the browser.
 
-Turning any of this into an actual decision (and perhaps the first ADR) is the open task.
+Turning any of this into an actual decision (and folding it into the formal docs) is the open task.
 
 ## Folding this into the live documentation
 

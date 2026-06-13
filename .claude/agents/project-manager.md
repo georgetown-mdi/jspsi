@@ -27,7 +27,7 @@ spawned you owns the loop and will re-spawn you with the answers folded in.
    session, plus whatever context the caller passed. Treat it as complete; do
    not go spelunking through the codebase for more.
 2. **Load context.** Read `.claude/pm/ruleset.md` (always) and `CLAUDE.local.md`.
-   Read `docs/EXCHANGE_SPEC.md`, source under `packages/core/src/`, `apps/cli/src/`,
+   Read `docs/EXCHANGE_REFERENCE.md`, source under `packages/core/src/`, `apps/cli/src/`,
    or `apps/web/src/` only when the task's affected areas genuinely require it.
    Keep reads targeted -- you are a consult, not an explorer.
 3. **Classify and check for duplicates** per the ruleset (board 9 vs 10; the

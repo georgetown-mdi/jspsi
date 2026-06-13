@@ -11,7 +11,7 @@ import {
  * `list()`, `get()`, `createExclusive()`, and the write/stat/delete ops
  * `put()`/`rename()`/`delete()`/`exists()`). Every one of those awaits a callback
  * the remote server controls, so a hostile (or dead) server admin -- an adversary
- * under docs/SECURITY_DESIGN.md "Channel security" -- can hang it forever by
+ * under docs/spec/CHANNEL_SECURITY.md -- can hang it forever by
  * withholding the response. These helpers bound that wait and surface a single
  * typed, terminal {@link TransportOperationStalledError}, the liveness sibling of
  * the memory-size guards in {@link ./frameSizeGuard} and {@link ./listingGuard}:

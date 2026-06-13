@@ -56,7 +56,7 @@ export function resolveAtSignRef(value: string): string {
  * to a whole exchange spec: that resolves free-text fields such as
  * `linkageTerms.identity` and `retentionDisposition`, where a leading `@` is a
  * literal character -- use {@link resolveExchangeSpecRefs} for a loaded config
- * (see docs/EXCHANGE_SPEC.md "File references").
+ * (see docs/EXCHANGE_REFERENCE.md "File references").
  *
  * Credential preservation at persistence sites does NOT use this: it uses
  * {@link resolveConnectionCredentials} so the original `@path` survives to disk
@@ -82,7 +82,7 @@ export function resolveAtSignRefs(obj: unknown): unknown {
  * configuration file before connecting.
  *
  * Resolution is scoped to the fields the file-reference convention supports --
- * those documented "`@`-file recommended" in docs/EXCHANGE_SPEC.md, all of which
+ * those documented "`@`-file recommended" in docs/EXCHANGE_REFERENCE.md, all of which
  * live under `connection`: the SFTP `server.password`, `server.privateKey`, and
  * `server.privateKeyPassphrase`, the HTTP-auth `bearer` / `password` on every
  * provisioning endpoint (`server.provision`, `proxy`, `iceProvision`), each

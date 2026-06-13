@@ -314,7 +314,7 @@ export class QueuedMessageConnection implements MessageConnection {
   // overflow below, which latches a non-throwing fail() rather than throwing.
   // FileSyncConnection's retain-mode poll() advances recvSeq only after
   // emit("data", ...) returns, so a synchronous throw here would re-poll the
-  // same never-deleted message until peer_timeout_ms (docs/FILE_SYNC.md I8).
+  // same never-deleted message until peer_timeout_ms (docs/spec/FILE_SYNC.md I8).
   // messageConnection.test.ts pins this non-throwing contract.
   private deliver(message: unknown): void {
     // Ignore inbound once any terminal state is reached: a `draining` half-close

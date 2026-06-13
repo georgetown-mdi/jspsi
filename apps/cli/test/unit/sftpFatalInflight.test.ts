@@ -31,7 +31,7 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // `_requests` before the malformed-packet check that calls doFatalSFTPError, so
 // by the time cleanupRequests runs there is nothing left to fail for that reqid
 // and the in-flight callback never fires (see ssh2SftpAdapter.ts and
-// docs/SECURITY_DESIGN.md "Channel security"). This disproves the old claim that
+// docs/spec/CHANNEL_SECURITY.md). This disproves the old claim that
 // cleanupRequests rejects an in-flight read immediately, and pins the corrected
 // mechanism against a real wire packet rather than source-reading.
 //

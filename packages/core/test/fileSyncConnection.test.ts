@@ -6819,7 +6819,7 @@ test("composed via fromEventConnection: the first transient poll() error is term
   // finally runs; the first emitted error is therefore terminal and the
   // reschedule never happens. This pins that composed contract alongside the
   // isolation tests; see the "Production composition note" under I8 in
-  // docs/FILE_SYNC.md.
+  // docs/spec/FILE_SYNC.md.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const body = Buffer.from(

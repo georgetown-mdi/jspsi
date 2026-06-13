@@ -280,7 +280,7 @@ function fingerprintInput(cert: CertificateBody): Uint8Array<ArrayBuffer> {
  * both the public key and the asserted identity, so the fingerprint binds them
  * together -- pinning a fingerprint pins that key-to-identity binding. The same
  * logical certificate yields the same fingerprint on any implementation (RFC
- * 8785); see docs/CANONICAL_ENCODING.md.
+ * 8785); see docs/spec/CANONICAL_ENCODING.md.
  */
 export async function computeCertificateFingerprint(
   cert: CertificateBody,

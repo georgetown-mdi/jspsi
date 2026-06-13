@@ -54,7 +54,7 @@ export class BilateralModeMismatchError extends UsageError {
  * read layer -- the poll loop and rendezvous gate's pre-`get()` size check, and
  * the hard per-read byte cap inside each {@link FileTransportClient} adapter --
  * so an oversized file is refused before it is ingested into memory rather than
- * exhausting it (see docs/SECURITY_DESIGN.md, "Channel security").
+ * exhausting it (see docs/spec/CHANNEL_SECURITY.md).
  *
  * It is a {@link UsageError} subclass for two reasons. First, it must be a
  * terminal failure in the poll loop: {@link FileSyncConnection}'s poller stops
@@ -87,8 +87,8 @@ export class FrameSizeExceededError extends UsageError {
  * directory is being enumerated, before the full listing is materialized -- so a
  * hostile rendezvous directory cannot mount a memory-exhaustion denial of
  * service through directory enumeration (entry count or name length),
- * independent of file contents (see docs/SECURITY_DESIGN.md, "Channel
- * security"). This is the directory-enumeration sibling of the per-frame
+ * independent of file contents (see docs/spec/CHANNEL_SECURITY.md). This is the
+ * directory-enumeration sibling of the per-frame
  * {@link FrameSizeExceededError}: that bound guards the per-file body read; this
  * one guards the listing that precedes it.
  *
@@ -128,8 +128,7 @@ export class DirectoryListingBoundsError extends UsageError {
  * fires. Each is bounded -- by a round-trip cap, a per-chunk idle window, or a
  * whole-operation wall-clock deadline as the operation allows -- and surfaces
  * this error rather than awaiting forever (and, for a directory or file handle
- * opened before the stall, leaking it). See docs/SECURITY_DESIGN.md, "Channel
- * security".
+ * opened before the stall, leaking it). See docs/spec/CHANNEL_SECURITY.md.
  *
  * This is the liveness sibling of the memory bounds
  * {@link DirectoryListingBoundsError} and {@link FrameSizeExceededError}: those

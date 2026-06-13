@@ -1,7 +1,7 @@
 // This adapter drives ssh2's raw SFTPWrapper internals past the public
 // ssh2-sftp-client API, so ssh2 and ssh2-sftp-client are exact-pinned in
 // package.json. On any upgrade of either, re-verify the internal premises per
-// the checklist in docs/SECURITY_DESIGN.md ("Upgrading the SFTP stack") before
+// the checklist in CONTRIBUTING.md ("Upgrading the SFTP stack") before
 // it merges -- a "compatible" bump can silently break a premise no normal-path
 // test exercises.
 import Ssh2SftpClient from "ssh2-sftp-client";
@@ -189,7 +189,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // This and the other internal-ssh2 premises this adapter relies on are
   // enumerated, with the dependency source files to re-read and the
   // integration-test command to run, in the "Upgrading the SFTP stack" checklist
-  // in docs/SECURITY_DESIGN.md ("Channel security"). Re-verify them on any ssh2 /
+  // in CONTRIBUTING.md. Re-verify them on any ssh2 /
   // ssh2-sftp-client upgrade.
   //
   // ssh2's Client.sftp() attaches a setup-time 'error' listener to the wrapper
@@ -197,7 +197,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // back, and ssh2-sftp-client attaches 'error' handlers only to the SSH Client
   // and to per-operation read/write streams -- never to the wrapper itself. So
   // after connect() the wrapper carries no 'error' listener. A hostile or dead
-  // SFTP server (in scope under docs/SECURITY_DESIGN.md "Channel security") that
+  // SFTP server (in scope under docs/spec/CHANNEL_SECURITY.md) that
   // returns a malformed SFTP reply packet drives ssh2's doFatalSFTPError ->
   // sftp.emit('error', err) on a listener-free EventEmitter, which Node turns
   // into an uncaught exception that crashes the CLI -- skipping lock/temp-file
@@ -389,7 +389,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * rationale and the connect-time guard against an upstream API rename.
    *
    * The streamed read is bounded for liveness as well as for size. A hostile
-   * server admin (in scope under docs/SECURITY_DESIGN.md "Channel security") can
+   * server admin (in scope under docs/spec/CHANNEL_SECURITY.md) can
    * hang this read indefinitely -- by returning valid but empty (count = 0)
    * non-EOF readdir batches forever, which advance neither size bound and never
    * signal EOF, or by withholding a readdir/close callback entirely so the call

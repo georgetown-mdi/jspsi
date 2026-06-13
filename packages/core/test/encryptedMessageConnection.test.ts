@@ -694,7 +694,7 @@ test("deriveAeadKey rejects a context outside the fixed set", async () => {
 // independent oracle (Node's crypto.hkdfSync + createCipheriv, a different code
 // path than the decorator's WebCrypto crypto.subtle) and are checked in at
 // test/vectors/aead-envelope-vectors.json for cross-implementation reuse; the
-// wire format is specified in docs/SECURITY_DESIGN.md ("Channel security"). The
+// wire format is specified in docs/spec/CHANNEL_SECURITY.md. The
 // assertion compares against that recorded literal, never a decrypt/round-trip,
 // so a symmetric encode/decode bug a round-trip would mask is still caught.
 

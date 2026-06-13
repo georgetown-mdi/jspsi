@@ -110,7 +110,7 @@ Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
 - New or changed CLI commands and flags (`apps/cli/src/commands/`, `apps/cli/src/config.ts`, `apps/cli/src/keyFile.ts`).
 - Web app behavior (`apps/web/src/`).
 - Bug fixes that affect end-user behavior of the protocol, CLI, or web app.
-- User-facing documentation changes that describe features (`docs/EXCHANGE_SPEC.md`, `docs/README.md`).
+- User-facing documentation changes that describe features (`docs/EXCHANGE_REFERENCE.md`, `docs/README.md`), including product-facing technical specs under `docs/spec/` (e.g. a wire-format change in `docs/spec/PROTOCOL.md` is a product-board item).
 
 **Release & Operations (10)** -- work on how the project is built, tested, released, and maintained:
 

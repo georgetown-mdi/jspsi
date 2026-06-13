@@ -381,7 +381,7 @@ function splitOnFactory(params: Params): StandardizingFn {
 }
 
 // Each entry here must also be documented in
-// docs/EXCHANGE_SPEC.md § "Available functions".
+// docs/EXCHANGE_REFERENCE.md § "Available functions".
 //
 // NFC-comparison contract: any step that matches an authored value, pattern, or
 // delimiter against the intermediate value must NFC-normalize that value before

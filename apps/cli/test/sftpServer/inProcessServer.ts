@@ -34,7 +34,7 @@ const REMOTE_ROOT = "/psi";
 // The malformed-packet injection rides one documented ssh2 internal: the public
 // name()/data() server APIs only ever emit well-formed packets, so a malformed
 // reply has to be written through the protocol/stream seam, exactly as a real
-// hostile server would put it on the wire. docs/SECURITY_DESIGN.md documents this
+// hostile server would put it on the wire. docs/spec/CHANNEL_SECURITY.md documents this
 // premise and a committed adapter test already depends on the same internal.
 interface RawChannelSftp {
   _protocol: { channelData(id: unknown, data: Buffer): void };

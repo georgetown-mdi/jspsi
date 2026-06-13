@@ -1,5 +1,5 @@
 {
-  "description": "Known-answer vectors for the EncryptedMessageConnection AEAD encrypt path. Each vector fixes (sessionKey, role, sequence, plaintext) and records the exact serialized { enc } envelope the decorator emits: base64url(IV || ciphertext || 16-byte GCM tag), no padding. An independent implementation reproduces `enc` from the inputs below. The wire format is specified in docs/SECURITY_DESIGN.md (\"Channel security\"); this file is distinct from the deriveAeadKey KAT in encryptedMessageConnection.test.ts, which pins only the key derivation.",
+  "description": "Known-answer vectors for the EncryptedMessageConnection AEAD encrypt path. Each vector fixes (sessionKey, role, sequence, plaintext) and records the exact serialized { enc } envelope the decorator emits: base64url(IV || ciphertext || 16-byte GCM tag), no padding. An independent implementation reproduces `enc` from the inputs below. The wire format is specified in docs/spec/CHANNEL_SECURITY.md; this file is distinct from the deriveAeadKey KAT in encryptedMessageConnection.test.ts, which pins only the key derivation.",
   "cipher": "AES-256-GCM",
   "sessionKeyHex": "4242424242424242424242424242424242424242424242424242424242424242",
   "keyDerivation": {

@@ -36,7 +36,7 @@ const HttpAuthSchema: z.ZodType<HttpAuth> = z
 
 /**
  * An HTTP endpoint that provisions or wakes a supporting service before the
- * exchange begins. See EXCHANGE_SPEC.md §connection.server for lifecycle vs.
+ * exchange begins. See EXCHANGE_REFERENCE.md §connection.server for lifecycle vs.
  * address-returning provisioning semantics.
  */
 export interface ServerProvision {
@@ -185,7 +185,7 @@ const sharedSecretSchema = z
  * secret and its expiration are stored in `.psilink.key` and injected at
  * runtime; they never appear in `psilink.yaml`. This is the type of the
  * channel-agnostic top-level `authentication` block of an {@link ExchangeSpec}
- * (a sibling of `signing`); see exchangeSpec.ts and EXCHANGE_SPEC.md.
+ * (a sibling of `signing`); see exchangeSpec.ts and EXCHANGE_REFERENCE.md.
  *
  * IMPORTANT: This type is the parse-time representation. `sharedSecret` is
  * optional because a configuration file parsed in isolation may not yet
@@ -255,7 +255,7 @@ export const MAX_TOKEN_MAX_AGE_DAYS = 36500;
  * discard would silently disable max-age enforcement with no signal; failing
  * closed forces the operator to fix the key before any exchange runs. The
  * injected fields are removed by the loader's warn-and-strip before this schema
- * sees them, so strictness never rejects a key-file value. See EXCHANGE_SPEC.md
+ * sees them, so strictness never rejects a key-file value. See EXCHANGE_REFERENCE.md
  * ("Authentication").
  */
 export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
@@ -449,7 +449,7 @@ export interface FileSyncOptions extends SharedOptions {
    * How to handle a file that appears in the shared directory *during* the
    * message loop and is neither recognized as part of this exchange nor a
    * known transient (an in-flight `temp-*.tmp` write). Directory exclusivity
-   * is a stated precondition (see EXCHANGE_SPEC.md "Directory exclusivity"),
+   * is a stated precondition (see EXCHANGE_REFERENCE.md "Directory exclusivity"),
    * so such a file usually means the directory is being shared with another
    * process or session, or a sync tool produced a conflict copy or partial
    * download.
