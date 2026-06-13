@@ -684,6 +684,58 @@ interface AbortWriteInputs {
 }
 
 /**
+ * `ssh2-sftp-client` connect options an operator may set through the opaque
+ * `connection.providerOptions` map for the SFTP channel. Default-deny: only
+ * these non-security transport-tuning options pass through; every other key --
+ * including ssh2's connection-target, credential, and host-key-verification
+ * options, and any option a future ssh2 version adds -- is dropped (with a
+ * warning), so `providerOptions` can never override the security-critical
+ * connect options psilink derives from the operator's own `connection.server`
+ * config. This closes a latent injection sink: were untrusted input ever routed
+ * into `providerOptions`, it still could not redirect the host, swap
+ * credentials, or disable host-key verification.
+ *
+ * An allowlist, not a forbid-list, because ssh2's security-sensitive option
+ * surface is large and treacherous: `sock` redirects the connection without
+ * touching `host`; `authHandler` re-supplies every credential as one callback;
+ * `agent`/`agentForward` and `localHostname`/`localUsername` are non-obvious
+ * auth vectors; `algorithms.serverHostKey` is sensitive but nested inside an
+ * otherwise-benign object; and the set grows across ssh2 versions. A forbid-list
+ * fails OPEN whenever it misses one of those (a silent override). The benign
+ * tuning set named here is small and stable, so the allowlist fails CLOSED -- a
+ * forgotten benign key is a visible, logged functional gap, never a silent
+ * security regression.
+ *
+ * `readyTimeout` is intentionally excluded: psilink derives it from
+ * `serverConnectTimeoutMs`, and the structured value must win. `algorithms` is
+ * permitted but handled specially (see {@link FileSyncConnection.filterAlgorithms}),
+ * filtered to its non-host-key sub-categories. See docs/EXCHANGE_SPEC.md
+ * (`connection.provider_options`).
+ */
+const SFTP_PROVIDER_OPTIONS_ALLOWLIST: ReadonlySet<string> = new Set([
+  "keepaliveInterval",
+  "keepaliveCountMax",
+  "strictVendor",
+  "algorithms",
+]);
+
+/**
+ * Sub-categories of ssh2's `algorithms` option an operator may tune through
+ * `providerOptions`. `serverHostKey` is deliberately excluded: it constrains
+ * which host-key TYPES are accepted -- a host-key-trust decision -- so allowing
+ * it would let the opaque map weaken host-key negotiation, exactly what
+ * {@link SFTP_PROVIDER_OPTIONS_ALLOWLIST} exists to prevent. The categories here
+ * (cipher / HMAC / key-exchange / compression) are transport tuning with no
+ * host-identity bearing.
+ */
+const SFTP_ALGORITHMS_ALLOWED_SUBKEYS: ReadonlySet<string> = new Set([
+  "cipher",
+  "hmac",
+  "kex",
+  "compress",
+]);
+
+/**
  * File-based rendezvous and message-passing connection. Implements the
  * `-hello.json`/`-lock.json` handshake (or the lockless ack-handshake barrier) and
  * `.json` polling protocol over any {@link FileTransportClient} — an SFTP
@@ -994,10 +1046,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.path = config.server.path ?? "";
       if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
 
-      const connectOptions: Record<string, unknown> = {
-        host: config.server.host,
-        maxReconnectAttempts: config.options?.maxReconnectAttempts ?? 3,
-      };
+      // Apply the operator's opaque providerOptions FIRST, through a
+      // default-deny allowlist (see SFTP_PROVIDER_OPTIONS_ALLOWLIST), then assign
+      // psilink's own fields below. The security-critical options -- host,
+      // credentials, host-key verification, and the psilink-managed readyTimeout
+      // -- are therefore assigned AFTER providerOptions and always win, so a
+      // providerOptions entry can never override them even if the allowlist were
+      // ever loosened.
+      const connectOptions: Record<string, unknown> = {};
+      this.applyProviderOptions(connectOptions, config.providerOptions);
+
+      connectOptions["host"] = config.server.host;
+      connectOptions["maxReconnectAttempts"] =
+        config.options?.maxReconnectAttempts ?? 3;
       if (config.server.port !== undefined)
         connectOptions["port"] = config.server.port;
       if (config.server.username !== undefined)
@@ -1012,10 +1073,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // not a Promise.race wrapper — the per-attempt deadline is equivalent.
       if (config.options?.serverConnectTimeoutMs !== undefined)
         connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
-      // providerOptions are spread last so they can override any of the above.
-      // certificate, hostKeyFingerprint, and knownHosts also belong here.
-      if (config.providerOptions !== undefined)
-        Object.assign(connectOptions, config.providerOptions);
 
       const portString =
         config.server.port !== undefined ? `:${config.server.port}` : "";
@@ -1042,6 +1099,81 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.options.timeToLive = new Date(Date.now() + ttlMs);
     }
     this.log.debug(`[${this.role}] connected`);
+  }
+
+  /**
+   * Copy the operator's opaque `providerOptions` into `connectOptions`, filtered
+   * through {@link SFTP_PROVIDER_OPTIONS_ALLOWLIST}. A non-allowlisted key is
+   * dropped with a warning (so an operator who relied on it can see why it had no
+   * effect); `algorithms` passes through with its sub-object filtered by
+   * {@link filterAlgorithms}. Called before the security-critical fields are
+   * assigned, so an allowlisted key that ever collided with one of psilink's own
+   * host/credential fields would still lose to the structured value assigned
+   * afterward -- defense in depth atop the allowlist, which already excludes
+   * every such field (the host-key-verification keys included).
+   *
+   * Keys are matched case-sensitively against their canonical ssh2 spelling.
+   * That is sufficient: `ssh2-sftp-client` reads only the exact canonical keys
+   * (`host`, `hostVerifier`, ...), so a variant-cased key (`Host`) is inert at
+   * ssh2 regardless; matching the canonical spelling thus covers every key ssh2
+   * would actually act on, which is why providerOptions is left un-normalized.
+   */
+  private applyProviderOptions(
+    connectOptions: Record<string, unknown>,
+    providerOptions: Record<string, unknown> | undefined,
+  ): void {
+    if (providerOptions === undefined) return;
+    for (const [key, value] of Object.entries(providerOptions)) {
+      if (!SFTP_PROVIDER_OPTIONS_ALLOWLIST.has(key)) {
+        this.log.warn(
+          `[${this.role}] ignoring connection.providerOptions.` +
+            `${sanitizeForDisplay(key)}: not an allowed SFTP transport option ` +
+            `(psilink-managed and security-critical ssh2 options -- host, ` +
+            `credentials, host-key verification -- cannot be set here)`,
+        );
+        continue;
+      }
+      if (key === "algorithms") {
+        const filtered = this.filterAlgorithms(value);
+        if (filtered !== undefined) connectOptions["algorithms"] = filtered;
+        continue;
+      }
+      connectOptions[key] = value;
+    }
+  }
+
+  /**
+   * Filter an operator-supplied ssh2 `algorithms` value to the allowed
+   * sub-categories (see {@link SFTP_ALGORITHMS_ALLOWED_SUBKEYS}), dropping
+   * `serverHostKey` and any unrecognized sub-key with a warning. Returns the
+   * filtered object, or `undefined` when the value is not a plain object or
+   * nothing survives the filter -- so the `algorithms` key is omitted entirely
+   * rather than forwarded as an empty object.
+   */
+  private filterAlgorithms(
+    value: unknown,
+  ): Record<string, unknown> | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      this.log.warn(
+        `[${this.role}] ignoring connection.providerOptions.algorithms: ` +
+          `expected an object of algorithm categories`,
+      );
+      return undefined;
+    }
+    const filtered: Record<string, unknown> = {};
+    for (const [subKey, subValue] of Object.entries(value)) {
+      if (SFTP_ALGORITHMS_ALLOWED_SUBKEYS.has(subKey)) {
+        filtered[subKey] = subValue;
+      } else {
+        this.log.warn(
+          `[${this.role}] ignoring connection.providerOptions.algorithms.` +
+            `${sanitizeForDisplay(subKey)}: only ` +
+            `${[...SFTP_ALGORITHMS_ALLOWED_SUBKEYS].join("/")} may be tuned ` +
+            `here (host-key-type negotiation is not operator-overridable)`,
+        );
+      }
+    }
+    return Object.keys(filtered).length > 0 ? filtered : undefined;
   }
 
   async cleanup() {
