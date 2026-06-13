@@ -36,7 +36,9 @@ With the flag set, the client raises PeerJS to its most verbose level, so the co
 localStorage.removeItem("psilink:diagnostics");     // then reload the page
 ```
 
-The flag is read once per page load, so set or clear it and then reload. It is scoped to the one browser that sets it (it is not shared with the partner and does not travel in the invitation link), and it persists across reloads until cleared. Raised verbosity stays safe to share: the derived rendezvous peer ids are redacted out of the PeerJS console output before printing, so the diagnostic logs carry no rendezvous id even with the flag on. A development build (`npm run dev`) is in this diagnostic mode by default.
+The flag is read once per page load, so set or clear it and then reload. It is scoped to the one browser that sets it (it is not shared with the partner and does not travel in the invitation link), and it persists across reloads until cleared. A development build (`npm run dev`) is in this diagnostic mode by default.
+
+The derived rendezvous peer ids are redacted out of the PeerJS console output before printing, so a verbose capture carries no rendezvous id even with the flag on. It is not, however, unconditionally safe to share: at this level PeerJS also logs connection-establishment detail -- SDP and ICE candidates -- which includes the local machine's private/LAN IP addresses and network topology. Treat a verbose capture as a diagnostic containing network internals: share it only with trusted support, and review it first if your network layout is sensitive.
 
 ## SFTP server
 
