@@ -386,6 +386,224 @@ test("open derives timeToLive from config peerTimeoutMs when no constructor time
   ).toBe(45_000);
 });
 
+// --- open (sftp providerOptions hardening) -----------------------------------
+
+// Capture the options object an sftp open() passes to client.connect, so the
+// allowlist tests can assert exactly what reaches ssh2-sftp-client. The mock's
+// connect is a no-op; here it records its single argument instead.
+async function captureSftpConnectOptions(
+  config: SFTPConnectionConfig,
+): Promise<Record<string, unknown>> {
+  const { client } = makeMockClient();
+  let captured: Record<string, unknown> | undefined;
+  client.connect = async (options: Record<string, unknown>) => {
+    captured = options;
+  };
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  await conn.open(config);
+  if (captured === undefined) throw new Error("client.connect was not called");
+  return captured;
+}
+
+test("providerOptions cannot override the host", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { host: "attacker.example.org" },
+  });
+  expect(opts["host"]).toBe("sftp.example.org");
+});
+
+test("providerOptions cannot override a password credential", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org", password: "real-password" },
+    providerOptions: { password: "attacker-password" },
+  });
+  expect(opts["password"]).toBe("real-password");
+});
+
+test("providerOptions cannot inject a credential the config did not set", async () => {
+  // Config authenticates by private key; a providerOptions password must not be
+  // smuggled in as a second credential.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org", privateKey: "real-key" },
+    providerOptions: {
+      password: "attacker-password",
+      privateKey: "attacker-key",
+    },
+  });
+  expect(opts["privateKey"]).toBe("real-key");
+  expect(opts["password"]).toBeUndefined();
+});
+
+test("providerOptions cannot override the private key passphrase", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      privateKey: "real-key",
+      privateKeyPassphrase: "real-passphrase",
+    },
+    providerOptions: { passphrase: "attacker-passphrase" },
+  });
+  expect(opts["passphrase"]).toBe("real-passphrase");
+});
+
+test("providerOptions cannot disable host-key verification", async () => {
+  // hostVerifier/hostHash are the ssh2 host-key-verification settings; a map
+  // that tries to install an always-accept verifier must be dropped, not honored.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { hostVerifier: () => true, hostHash: "md5" },
+  });
+  expect(opts["hostVerifier"]).toBeUndefined();
+  expect(opts["hostHash"]).toBeUndefined();
+});
+
+test("providerOptions cannot redirect the connection via sock or authHandler", async () => {
+  // sock replaces the TCP connection without touching `host`; authHandler can
+  // re-supply every credential. Both are dropped by the default-deny allowlist.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { sock: {}, authHandler: () => ({}) },
+  });
+  expect(opts["sock"]).toBeUndefined();
+  expect(opts["authHandler"]).toBeUndefined();
+});
+
+test("providerOptions cannot override the psilink-managed readyTimeout", async () => {
+  // readyTimeout is derived from serverConnectTimeoutMs and is intentionally not
+  // on the allowlist, so a providerOptions value cannot shorten or lengthen it.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { serverConnectTimeoutMs: 30_000 },
+    providerOptions: { readyTimeout: 1 },
+  });
+  expect(opts["readyTimeout"]).toBe(30_000);
+});
+
+test("providerOptions cannot supply readyTimeout when the config omits a connect timeout", async () => {
+  // Symmetric to the case above: with no serverConnectTimeoutMs the allowlist
+  // drops a providerOptions readyTimeout rather than letting it populate the
+  // connect option, so the connection falls back to ssh2's own default.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { readyTimeout: 1 },
+  });
+  expect(opts["readyTimeout"]).toBeUndefined();
+});
+
+test("a benign providerOptions transport option still applies", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: {
+      keepaliveInterval: 5_000,
+      keepaliveCountMax: 4,
+      strictVendor: false,
+    },
+  });
+  expect(opts["keepaliveInterval"]).toBe(5_000);
+  expect(opts["keepaliveCountMax"]).toBe(4);
+  expect(opts["strictVendor"]).toBe(false);
+});
+
+test("providerOptions algorithms passes through but serverHostKey is stripped", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: {
+      algorithms: {
+        cipher: ["aes256-gcm@openssh.com"],
+        serverHostKey: ["ssh-dss"],
+      },
+    },
+  });
+  expect(opts["algorithms"]).toEqual({ cipher: ["aes256-gcm@openssh.com"] });
+});
+
+test("providerOptions algorithms with no allowed sub-keys is dropped entirely", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { algorithms: { serverHostKey: ["ssh-dss"] } },
+  });
+  expect(opts["algorithms"]).toBeUndefined();
+});
+
+test("providerOptions algorithms that is not an object of categories is dropped", async () => {
+  // A malformed algorithms value (here a bare string) is not an object of
+  // algorithm categories, so it is dropped rather than forwarded to ssh2.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: { algorithms: "aes256-gcm@openssh.com" },
+  });
+  expect(opts["algorithms"]).toBeUndefined();
+});
+
+test("providerOptions algorithms accepts ssh2's append/prepend/remove object form", async () => {
+  // ssh2 allows each algorithms category to be either an array of names or an
+  // object with append/prepend/remove. An allowed sub-category is copied through
+  // verbatim, so the object form must survive intact (not be coerced or dropped).
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    providerOptions: {
+      algorithms: { cipher: { append: ["aes256-gcm@openssh.com"] } },
+    },
+  });
+  expect(opts["algorithms"]).toEqual({
+    cipher: { append: ["aes256-gcm@openssh.com"] },
+  });
+});
+
+test("a dropped algorithms sub-key is logged with a warning", async () => {
+  const [, logs] = await withCapturedLogs(async () => {
+    await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: {
+        algorithms: {
+          cipher: ["aes256-gcm@openssh.com"],
+          serverHostKey: ["ssh-dss"],
+        },
+      },
+    });
+  });
+  expect(
+    logs.some(
+      (l) =>
+        l.level === "WARN" &&
+        l.message.includes("providerOptions.algorithms.serverHostKey"),
+    ),
+  ).toBe(true);
+});
+
+test("a dropped providerOptions key is logged with a warning", async () => {
+  const [, logs] = await withCapturedLogs(async () => {
+    await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: { host: "attacker.example.org" },
+    });
+  });
+  expect(
+    logs.some(
+      (l) =>
+        l.level === "WARN" &&
+        l.message.includes("providerOptions.host") &&
+        l.message.includes("not in the allowed set of SFTP"),
+    ),
+  ).toBe(true);
+});
+
 // --- open (filedrop) ---------------------------------------------------------
 
 test("open sets path and marks connected for filedrop config", async () => {

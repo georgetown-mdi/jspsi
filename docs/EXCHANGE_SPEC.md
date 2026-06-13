@@ -617,9 +617,17 @@ The receiver only reads files whose on-disk size matches the declared byte count
 *Required:* no  
 *Applies to:* `webrtc`, `sftp`
 
-An opaque key-value map passed verbatim to the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
+An opaque key-value map of additional, non-security transport-tuning options for the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
 
-Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase (e.g. `readyTimeout`, `algorithms`, `keepaliveInterval`).
+Unlike every other map in this spec, the keys here are **not** case-normalized: they are passed exactly as written, so author them in the casing the underlying transport library expects rather than snake_case. For the SFTP channel they are forwarded to `ssh2-sftp-client`, whose options are camelCase.
+
+For the SFTP channel this map is **not** a verbatim passthrough: it is filtered through a default-deny allowlist before reaching `ssh2-sftp-client`. The connection target, credentials, and host-key-verification settings are derived solely from the structured [`connection.server`](#connectionserver) fields and **cannot** be set or overridden here -- so `host`, `port`, `username`, `password`, `private_key`/`privateKey`, `passphrase`, `host_verifier`/`hostVerifier`, `host_hash`/`hostHash`, and the connection-redirecting `sock`/`authHandler` options are all rejected if placed in `provider_options`. Only these benign tuning options are honored:
+
+- `keepaliveInterval`, `keepaliveCountMax` -- SSH-level keepalive cadence.
+- `strictVendor` -- ssh2's server-vendor strictness toggle.
+- `algorithms` -- accepted, but filtered to its `cipher`, `hmac`, `kex`, and `compress` sub-categories; the `serverHostKey` sub-category is dropped, as host-key-type negotiation is a host-key-trust decision and not operator-overridable here.
+
+Any other key (including `readyTimeout`, which is set from [`connection.options.server_connect_timeout_ms`](#connectionoptions) instead) is ignored, with a warning naming the dropped key. This keeps the opaque escape hatch useful for transport tuning while ensuring it can never weaken where psilink connects, what credentials it presents, or whether the server's host key is trusted.
 
 ---
 

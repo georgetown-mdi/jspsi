@@ -309,11 +309,15 @@ const CHANNEL_SHAPES: Record<
 // SFTP and PeerJS field identifiers from connection.ts. `certificate` is SSH
 // cert-based auth material; `hostKeyFingerprint`/`knownHosts` are the
 // server-identity fields SECURITY_DESIGN.md names as excluded (not secret, but
-// not locators either). Every name is rejected by the same strictObject
-// unrecognized-keys branch, so this matrix documents the invariant and guards
-// against the allowlist being loosened (e.g. strictObject -> looseObject); it
-// is not additional branch coverage. This list is a curated regression sample,
-// not an exhaustive denylist -- the binding rule is the locator allowlist.
+// not locators either). `providerOptions` is the opaque transport-options map:
+// it is operator-local-only by design and an invitation must never carry it, so
+// this case pins that invariant -- a future change that let an invitation smuggle
+// a `providerOptions` (and thus reach the SFTP connect path) would fail this test
+// loudly. Every name is rejected by the same strictObject unrecognized-keys
+// branch, so this matrix documents the invariant and guards against the allowlist
+// being loosened (e.g. strictObject -> looseObject); it is not additional branch
+// coverage. This list is a curated regression sample, not an exhaustive denylist
+// -- the binding rule is the locator allowlist.
 const FORBIDDEN_FIELDS = [
   "password",
   "privateKey",
@@ -322,6 +326,7 @@ const FORBIDDEN_FIELDS = [
   "hostKeyFingerprint",
   "knownHosts",
   "key",
+  "providerOptions",
 ];
 
 const positiveCases = Object.entries(CHANNEL_SHAPES).flatMap(
