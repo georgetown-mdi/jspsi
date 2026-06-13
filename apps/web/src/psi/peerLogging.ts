@@ -62,7 +62,8 @@ function redactString(text: string, ids: ReadonlyArray<string>): string {
  * objects so an id buried in a structured PeerJS message (e.g. the `message`
  * object some warnings log) is stripped too, not just top-level strings. Numbers,
  * booleans, null, and undefined cannot carry an id and pass through untouched.
- * `seen` guards against a cyclic object spinning the recursion forever.
+ * `seen` guards against a cyclic object spinning the recursion forever; the
+ * caller passes a fresh set per top-level argument (see createRedactingLogFunction).
  */
 function redactValue(
   value: unknown,
@@ -76,7 +77,9 @@ function redactValue(
   if (value instanceof Error)
     return `(${value.name}) ${redactString(value.message, ids)}`;
   if (typeof value !== "object" || value === null) return value;
-  if (seen.has(value)) return value;
+  // A cyclic back-reference: return a placeholder, never the original object --
+  // returning the original would leak its unredacted ids straight to the sink.
+  if (seen.has(value)) return "[circular]";
   seen.add(value);
   if (Array.isArray(value))
     return value.map((item) => redactValue(item, ids, seen));
@@ -102,8 +105,16 @@ export function createRedactingLogFunction(
   sink: LogSink = console,
 ): (logLevel: number, ...rest: Array<unknown>) => void {
   return (logLevel, ...rest) => {
-    const seen = new WeakSet<object>();
-    const redacted = rest.map((arg) => redactValue(arg, ids, seen));
+    // A fresh cycle-guard per argument: one shared across sibling arguments would
+    // return the same object unredacted the second time it appeared (already in
+    // the set), so an id in a repeated argument would escape.
+    const redacted = rest.map((arg) =>
+      redactValue(arg, ids, new WeakSet<object>()),
+    );
+    // Mirrors PeerJS's own level mapping. A logLevel of 0 (Disabled) is
+    // intentionally a no-op: PeerJS gates messages against the level before
+    // calling a logFunction, so it never dispatches at 0, and dropping a
+    // disabled-level message is the correct response if it ever did.
     if (logLevel >= 3) sink.log("PeerJS:", ...redacted);
     else if (logLevel >= 2) sink.warn("PeerJS WARNING:", ...redacted);
     else if (logLevel >= 1) sink.error("PeerJS ERROR:", ...redacted);

@@ -90,6 +90,29 @@ describe("createRedactingLogFunction", () => {
     expect(allSinkOutput(sink)).not.toContain(OTHER_ID);
   });
 
+  test("redacts a peer id in an object passed as two separate arguments", () => {
+    const sink = makeSink();
+    const logFn = createRedactingLogFunction([SAMPLE_ID], sink);
+
+    // The same reference twice: a cycle-guard shared across arguments would
+    // return the second occurrence unredacted.
+    const arg = { src: SAMPLE_ID };
+    logFn(3, arg, arg);
+
+    expect(allSinkOutput(sink)).not.toContain(SAMPLE_ID);
+  });
+
+  test("redacts a peer id in a cyclic object without leaking the original", () => {
+    const sink = makeSink();
+    const logFn = createRedactingLogFunction([SAMPLE_ID], sink);
+
+    const cyclic: Record<string, unknown> = { src: SAMPLE_ID };
+    cyclic.self = cyclic;
+    logFn(3, cyclic);
+
+    expect(allSinkOutput(sink)).not.toContain(SAMPLE_ID);
+  });
+
   test("routes each level to the matching console method", () => {
     const sink = makeSink();
     const logFn = createRedactingLogFunction([], sink);
