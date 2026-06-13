@@ -9,7 +9,6 @@ import {
   getLogger,
   loadCSVFile,
   prepareForExchange,
-  sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
 import type { ExchangeDataSpec, PreparedExchange } from "@psilink/core";
@@ -30,13 +29,14 @@ import {
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
+import { exitWithError, parseOrExit, validateInputFile } from "../util/cli";
 import {
-  durationFlagSeconds,
-  LOG_LEVELS,
-  singleValue,
-  validateInputFile,
-} from "../util/cli";
-import { DURATION_VALUE_HELP } from "../util/duration";
+  addCommonBootstrapOptions,
+  connectionOverridesFrom,
+  parseCommonBootstrapArgs,
+  warnUnsupportedFileSyncFlags,
+  type CommonBootstrapOptions,
+} from "./bootstrap";
 import {
   runProtocol,
   type AuthPersist,
@@ -44,111 +44,41 @@ import {
 } from "../protocol";
 
 export function builder(cmd: Argv): Argv {
-  return cmd
-    .usage("Usage: $0 exchange [options] INPUT_FILE [OUTPUT_FILE]")
-    .positional("input", {
-      type: "string",
-      describe: "CSV to link; use `-` to read from stdin",
-      demandOption: true,
-    })
-    .positional("output", {
-      type: "string",
-      describe: "where to write results; defaults to stdout",
-    })
-    .option("config-file", {
-      type: "string",
-      describe: `exchange configuration file (default: ${DEFAULT_CONFIG_PATH})`,
-    })
-    .option("key-file", {
-      type: "string",
-      describe: `shared key file (default: ${DEFAULT_KEY_PATH})`,
-    })
-    .option("identity", {
-      type: "string",
-      describe: "identity string for this party (name, org, contact)",
-    })
-    .option("server-port", {
-      type: "number",
-      describe: "server port; overrides connection.server.port in config",
-    })
-    .option("server-username", {
-      type: "string",
-      describe:
+  return addCommonBootstrapOptions(
+    cmd
+      .usage("Usage: $0 exchange [options] INPUT_FILE [OUTPUT_FILE]")
+      .positional("input", {
+        type: "string",
+        describe: "CSV to link; use `-` to read from stdin",
+        demandOption: true,
+      })
+      .positional("output", {
+        type: "string",
+        describe: "where to write results; defaults to stdout",
+      }),
+    // exchange reads a config and has no URL, so the config/key files are read
+    // (not written) and the server-* / peer-id overrides apply to the config.
+    {
+      "config-file": `exchange configuration file (default: ${DEFAULT_CONFIG_PATH})`,
+      "key-file": `shared key file (default: ${DEFAULT_KEY_PATH})`,
+      "server-port": "server port; overrides connection.server.port in config",
+      "server-username":
         "server username; overrides connection.server.username in config",
-    })
-    .option("server-password", {
-      type: "string",
-      describe:
+      "server-password":
         "server password; use @path to read from file; overrides " +
         "connection.server.password in config",
-    })
-    .option("server-private-key", {
-      type: "string",
-      describe:
+      "server-private-key":
         "SSH private key; use @path to read from file; overrides " +
         "connection.server.privateKey in config",
-    })
-    .option("connection-timeout", {
-      type: "string",
-      describe:
-        "how long to wait when connecting to the primary exchange server. " +
-        DURATION_VALUE_HELP,
-    })
-    .option("peer-timeout", {
-      alias: "t",
-      type: "string",
-      describe:
-        "how long to wait for the peer before giving up. " +
-        DURATION_VALUE_HELP,
-    })
-    .option("max-reconnect-attempts", {
-      type: "number",
-      describe: "maximum reconnection attempts before giving up; default: 3",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("record", {
-      type: "boolean",
-      default: true,
-      describe:
-        "after a successful exchange, write a self-attested audit record (a " +
-        "local artifact, not a signed receipt) and its private opening file; " +
-        "use --no-record to skip",
-    })
-    .option("record-file", {
-      type: "string",
-      describe:
-        "path for the audit record (default: ./psilink-record-<timestamp>." +
-        "json); the private opening data is written alongside it as " +
-        "<name>.opening.json",
-    })
-    .option("lockless-rendezvous", {
-      type: "boolean",
-      describe:
-        "use the ack-handshake rendezvous instead of the atomic lock-file " +
-        "race; required on sync-mediated transports that lack atomic " +
-        "exclusive-create or deletion visibility during rendezvous. Both " +
-        "parties must set this flag identically",
-    })
-    .option("peer-id", {
-      type: "string",
-      describe:
+      "peer-id":
         "stable identifier for this party; appears in filenames and logs. " +
         "Overrides connection.options.peer_id in config. Requires " +
         "timestamp_in_filename: true. Both parties must use distinct ids",
-    })
-    .option("timestamp-in-filename", {
-      type: "boolean",
-      describe:
+      "timestamp-in-filename":
         "encode a UTC timestamp and per-session counter in each outgoing " +
         "message filename; --retain-files implies it, so it need not be passed " +
         "explicitly. Both parties must use the same value",
-    })
-    .option("retain-files", {
-      type: "boolean",
-      describe:
+      "retain-files":
         "keep all exchange files as a permanent transcript instead of " +
         "deleting them after consumption; intended for sync-mediated " +
         "transports that do not propagate deletions and for audit use cases. " +
@@ -159,7 +89,8 @@ export function builder(cmd: Argv): Argv {
         "directory is required for each exchange and is enforced: reusing a " +
         "directory with retained files from a prior session is rejected with " +
         "an error at startup",
-    })
+    },
+  )
     .option("sweep-exchange-files", {
       type: "boolean",
       describe:
@@ -180,45 +111,22 @@ export function builder(cmd: Argv): Argv {
         "prior transcript is permanently lost. Requires --sweep-exchange-files " +
         "-- on its own it is rejected. Only use when you intend to discard the " +
         "transcript",
-    })
-    .option("verbose", {
-      alias: "v",
-      type: "count",
-      describe:
-        "generate additional logging information for sub-libraries at all " +
-        "logging levels",
     });
 }
 
 // --- Argument parsing --------------------------------------------------------
 
-interface ExchangeArgs {
+// The common bootstrap options (config/key paths, identity, server-* overrides,
+// timeouts, record/-file, log-level, verbosity, the file-sync flags) plus the
+// exchange-specific positionals and CLI-only sweep controls. record/recordFile/
+// logLevel/verbosity come from CommonBootstrapOptions.
+interface ExchangeArgs extends CommonBootstrapOptions {
   input: string;
   output?: string;
-  configFile: string;
-  keyFile: string;
-  identity?: string;
-  serverPort?: number;
-  serverUsername?: string;
-  serverPassword?: string;
-  serverPrivateKey?: string;
-  connectionTimeout?: number;
-  peerTimeout?: number;
-  maxReconnectAttempts?: number;
-  locklessRendezvous?: boolean;
-  peerId?: string;
-  timestampInFilename?: boolean;
-  retainFiles?: boolean;
   // CLI-only sweep controls (see protocol.FileSyncRuntimeOptions). Excluded from
   // ExchangeOptions below so they never reach loadConfig / the config schema.
   sweepExchangeFiles: boolean;
   forceRetainSweep: boolean;
-  // CLI-only audit-record controls, consumed by the handler (resolveRecordOutput)
-  // and likewise excluded from ExchangeOptions: loadConfig never reads them.
-  record: boolean;
-  recordFile?: string;
-  logLevel: logLibrary.LogLevelNumbers;
-  verbosity: number;
 }
 
 type ExchangeOptions = Omit<
@@ -234,70 +142,37 @@ type ExchangeOptions = Omit<
 >;
 
 function parseArgs(argv: Arguments): ExchangeArgs {
-  const rawLogLevel = (
-    (singleValue(argv, "log-level") as string | undefined) || "info"
-  ).toLowerCase();
-  const logLevel = LOG_LEVELS[rawLogLevel];
-  if (logLevel === undefined)
-    // Invalid caller input (exit 64), the same classification the shared
-    // parseCommonBootstrapArgs gives an unrecognized log-level, so the handler's
-    // wrapper maps it to a clean usage error rather than a raw top-level dump.
-    throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-
-  // Each single-value (string/number) option is read through singleValue so a
-  // repeated flag is rejected with a clean usage error (mapped to exit 64 in the
-  // handler) before its array value reaches a cast that lies about the type. The
-  // boolean/count options keep their plain casts: a repeat is valid for them.
-  // `input`/`output` are positionals, not repeatable flags, so they stay plain.
+  // Parse the common options through the shared parser (the same singleValue
+  // repeat-rejection and log-level validation invite/accept use), then layer the
+  // exchange-specific handling on top.
+  const common = parseCommonBootstrapArgs(argv);
   return {
-    // Local filesystem paths accept a leading `~`; server-password /
-    // -private-key are credential values, not paths to tilde-expand here.
-    // Unlike the persistence commands (zero-setup --save, invite/accept),
-    // which defer @path resolution so a saved config keeps the reference,
-    // exchange resolves any @path credential ref here at parse time: it only
-    // ever reads a config, never writes one, so there is no reference to
-    // preserve and the resolved value is needed immediately for the connection.
+    ...common,
+    // exchange tilde-expands the local file paths it reads/writes. Unlike the
+    // persistence commands (zero-setup --save, invite/accept), which defer @path
+    // resolution so a saved config keeps the reference, exchange resolves any
+    // @path credential ref here at parse time: it only ever reads a config,
+    // never writes one, so there is no reference to preserve and the resolved
+    // value is needed immediately for the connection. (server-password /
+    // -private-key are credential values, not paths to tilde-expand.)
+    configFile: expandTilde(common.configFile),
+    keyFile: expandTilde(common.keyFile),
+    recordFile: expandTilde(common.recordFile),
+    serverPassword: resolveAtSignRefs(common.serverPassword) as
+      | string
+      | undefined,
+    serverPrivateKey: resolveAtSignRefs(common.serverPrivateKey) as
+      | string
+      | undefined,
+    // exchange-specific positionals; not repeatable flags, so they stay plain.
     input: expandTilde(argv["input"] as string),
     output: expandTilde(argv["output"] as string | undefined),
-    configFile: expandTilde(
-      (singleValue(argv, "config-file") as string | undefined) ??
-        DEFAULT_CONFIG_PATH,
-    ),
-    keyFile: expandTilde(
-      (singleValue(argv, "key-file") as string | undefined) ?? DEFAULT_KEY_PATH,
-    ),
-    identity: singleValue(argv, "identity") as string | undefined,
-    serverPort: singleValue(argv, "server-port") as number | undefined,
-    serverUsername: singleValue(argv, "server-username") as string | undefined,
-    serverPassword: resolveAtSignRefs(
-      singleValue(argv, "server-password") as string | undefined,
-    ) as string | undefined,
-    serverPrivateKey: resolveAtSignRefs(
-      singleValue(argv, "server-private-key") as string | undefined,
-    ) as string | undefined,
-    connectionTimeout: durationFlagSeconds(argv, "connection-timeout"),
-    peerTimeout: durationFlagSeconds(argv, "peer-timeout"),
-    maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
-      | number
-      | undefined,
-    locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
-    peerId: singleValue(argv, "peer-id") as string | undefined,
-    timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
-    retainFiles: argv["retain-files"] as boolean | undefined,
     // CLI-only, never persisted: resolve to a definite boolean here since there
-    // is no config layer to merge with (unlike the flags above).
+    // is no config layer to merge with (unlike the file-sync flags above).
     sweepExchangeFiles:
       (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
     forceRetainSweep:
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
-    // yargs sets `record` to false on --no-record and true by the option's
-    // default otherwise, so it is always a boolean here.
-    record: argv["record"] as boolean,
-    recordFile: expandTilde(
-      singleValue(argv, "record-file") as string | undefined,
-    ),
-    logLevel,
-    verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
 }
 
@@ -435,41 +310,21 @@ export function loadConfig(options: ExchangeOptions): {
   } = resolvedSpec;
   log.info("loaded exchange spec from", options.configFile);
 
-  const connection = applyConnectionOverrides(baseConn, {
-    connectionTimeout: options.connectionTimeout,
-    peerTimeout: options.peerTimeout,
-    maxReconnectAttempts: options.maxReconnectAttempts,
-    serverUsername: options.serverUsername,
-    serverPassword: options.serverPassword,
-    serverPrivateKey: options.serverPrivateKey,
-    serverPort: options.serverPort,
-    locklessRendezvous: options.locklessRendezvous,
-    peerId: options.peerId,
-    timestampInFilename: options.timestampInFilename,
-    retainFiles: options.retainFiles,
-  });
+  const connection = applyConnectionOverrides(
+    baseConn,
+    connectionOverridesFrom(options),
+  );
 
-  if (
-    options.locklessRendezvous === true &&
-    connection.channel !== "sftp" &&
-    connection.channel !== "filedrop"
-  ) {
-    log.warn(
-      `--lockless-rendezvous has no effect on the ${connection.channel} ` +
-        "channel and will be ignored; it is only supported on sftp and filedrop",
-    );
-  }
-
-  if (
-    options.retainFiles === true &&
-    connection.channel !== "sftp" &&
-    connection.channel !== "filedrop"
-  ) {
-    log.warn(
-      `--retain-files has no effect on the ${connection.channel} channel ` +
-        "and will be ignored; it is only supported on sftp and filedrop",
-    );
-  }
+  // The channel here comes from the loaded config (post-override); warn on the
+  // file-sync-only flags before the unsupported-channel throw below.
+  warnUnsupportedFileSyncFlags(
+    connection.channel,
+    {
+      locklessRendezvous: options.locklessRendezvous,
+      retainFiles: options.retainFiles,
+    },
+    log,
+  );
 
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
     // An unsupported channel in the config is invalid caller configuration
@@ -679,21 +534,11 @@ async function prepareDataset(
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  let parsed: ExchangeArgs;
-  try {
-    parsed = parseArgs(argv);
-  } catch (err) {
-    // parseArgs resolves the log level and reads every option, so it runs before
-    // the logger exists. Its usage errors -- a repeated single-value flag
-    // (singleValue) or an unrecognized log-level -- are UsageErrors, reported on
-    // stderr and exited 64 here. Any other (unexpected) failure propagates to the
-    // top-level handler unchanged rather than being reclassified.
-    if (err instanceof UsageError) {
-      console.error(sanitizeErrorForDisplay(err));
-      process.exit(64);
-    }
-    throw err;
-  }
+  // parseArgs resolves the log level and reads every option, so it runs before
+  // the logger exists. parseOrExit reports its usage errors -- a repeated
+  // single-value flag or an unrecognized log-level -- on stderr and exits 64,
+  // and lets any other (unexpected) failure propagate to the top-level handler.
+  const parsed = parseOrExit(() => parseArgs(argv));
   const {
     input,
     output,
@@ -710,19 +555,19 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
   } catch (err) {
-    log.error(sanitizeErrorForDisplay(err));
-    process.exit(64);
+    exitWithError(log, err, 64);
   }
 
   let configResult: ReturnType<typeof loadConfig>;
   try {
     configResult = loadConfig(options);
   } catch (err) {
-    log.error(sanitizeErrorForDisplay(err));
     // A malformed or missing config/key file is a usage error (exit 64); the
     // ENOENT arm keeps the missing-config case, which is tagged rather than a
     // UsageError. Anything else (e.g. an unsupported channel) stays exit 69.
-    process.exit(
+    exitWithError(
+      log,
+      err,
       err instanceof UsageError ||
         (err as NodeJS.ErrnoException).code === "ENOENT"
         ? 64
@@ -771,8 +616,7 @@ export async function handler(argv: Arguments): Promise<void> {
   try {
     prepared = await prepareDataset(exchangeDataSpec, identity, input);
   } catch (err) {
-    log.error(sanitizeErrorForDisplay(err));
-    process.exit((err as { exitCode?: number }).exitCode ?? 69);
+    exitWithError(log, err, (err as { exitCode?: number }).exitCode ?? 69);
   }
 
   const recordOutput = resolveRecordOutput({
@@ -829,8 +673,10 @@ export async function handler(argv: Arguments): Promise<void> {
   }
   if (advisory !== undefined) log.warn(advisory);
 
-  if (exchangeError !== undefined) {
-    log.error(sanitizeErrorForDisplay(exchangeError));
-    process.exit(exchangeError instanceof UsageError ? 64 : 69);
-  }
+  if (exchangeError !== undefined)
+    exitWithError(
+      log,
+      exchangeError,
+      exchangeError instanceof UsageError ? 64 : 69,
+    );
 }

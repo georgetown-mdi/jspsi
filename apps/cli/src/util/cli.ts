@@ -2,7 +2,7 @@ import fs from "node:fs";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 
-import { UsageError } from "@psilink/core";
+import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 
 import { parseDurationFlag } from "./duration";
 
@@ -53,6 +53,45 @@ export function durationFlagSeconds(
   // violation surfaces as parseDurationFlag's flag-named UsageError rather than a
   // raw TypeError from .trim() on a non-string.
   return parseDurationFlag(`--${name}`, String(raw)) / 1000;
+}
+
+/**
+ * Run a pre-logger parse step, mapping a {@link UsageError} it throws to a clean
+ * stderr message and exit 64. A bootstrap-style command resolves its log level
+ * and reads every option before the logger exists, so a usage error there (a
+ * repeated single-value flag, an unrecognized `--log-level`) cannot be routed
+ * through the logger; this is the one place that boundary lives, so the
+ * stderr-and-exit-64 behavior cannot drift between commands. Any other error
+ * propagates unchanged, with its stack intact, to the top-level handler rather
+ * than being flattened to a bare exit. `process.exit` is typed `never`, so this
+ * returns the parsed value on the success path.
+ */
+export function parseOrExit<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (err) {
+    if (!(err instanceof UsageError)) throw err;
+    console.error(sanitizeErrorForDisplay(err));
+    process.exit(64);
+  }
+}
+
+/**
+ * Log a caught error (sanitized) at error level and exit the process with
+ * `code`. The single log-and-exit boundary the bootstrap-style command handlers
+ * route a caught error through, so the error-level routing and the sanitized
+ * formatting cannot drift between call sites. `code` is supplied by the caller
+ * because the classification is site-specific: a {@link UsageError} is 64, a
+ * transport failure 69, a missing input file its own `exitCode`. Typed `never`
+ * so a caller's definite-assignment narrowing treats it like `process.exit`.
+ */
+export function exitWithError(
+  log: { error: (message: string) => void },
+  err: unknown,
+  code: number,
+): never {
+  log.error(sanitizeErrorForDisplay(err));
+  process.exit(code);
 }
 
 /** Mapping from log-level name to loglevel numeric constant. */

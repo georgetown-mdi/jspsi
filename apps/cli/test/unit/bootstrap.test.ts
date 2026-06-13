@@ -25,6 +25,7 @@ import {
   runOnlineBootstrap,
   runOrExit,
   unsatisfiedLinkageFields,
+  warnUnsupportedFileSyncFlags,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
@@ -357,6 +358,59 @@ test("parseCommonBootstrapArgs: a malformed timeout is a flag-named usage error"
       "connection-timeout": "soon",
     } as unknown as Arguments),
   ).toThrow("--connection-timeout");
+});
+
+// --- warnUnsupportedFileSyncFlags --------------------------------------------
+
+function collectWarnings(): { warn: (m: string) => void; messages: string[] } {
+  const messages: string[] = [];
+  return { warn: (m: string) => messages.push(m), messages };
+}
+
+test("warnUnsupportedFileSyncFlags: file-sync channels never warn", () => {
+  // sftp and filedrop support both flags, so neither warns even when both are
+  // set -- the predicate is the channel.
+  for (const channel of ["sftp", "filedrop"] as const) {
+    const log = collectWarnings();
+    warnUnsupportedFileSyncFlags(
+      channel,
+      { locklessRendezvous: true, retainFiles: true },
+      log,
+    );
+    expect(log.messages).toHaveLength(0);
+  }
+});
+
+test("warnUnsupportedFileSyncFlags: a non-file-sync channel warns only for the flags set", () => {
+  const onlyLockless = collectWarnings();
+  warnUnsupportedFileSyncFlags(
+    "webrtc",
+    { locklessRendezvous: true },
+    onlyLockless,
+  );
+  expect(onlyLockless.messages).toEqual([
+    "--lockless-rendezvous has no effect on the webrtc channel and will be " +
+      "ignored; it is only supported on sftp and filedrop",
+  ]);
+
+  const onlyRetain = collectWarnings();
+  warnUnsupportedFileSyncFlags("webrtc", { retainFiles: true }, onlyRetain);
+  expect(onlyRetain.messages).toEqual([
+    "--retain-files has no effect on the webrtc channel and will be ignored; " +
+      "it is only supported on sftp and filedrop",
+  ]);
+
+  const both = collectWarnings();
+  warnUnsupportedFileSyncFlags(
+    "webrtc",
+    { locklessRendezvous: true, retainFiles: true },
+    both,
+  );
+  expect(both.messages).toHaveLength(2);
+
+  const neither = collectWarnings();
+  warnUnsupportedFileSyncFlags("webrtc", {}, neither);
+  expect(neither.messages).toHaveLength(0);
 });
 
 test("runOrExit: a successful body does not exit", async () => {

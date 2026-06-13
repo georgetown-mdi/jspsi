@@ -1,8 +1,13 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 
-import { durationFlagSeconds, singleValue } from "../../src/util/cli";
+import {
+  durationFlagSeconds,
+  exitWithError,
+  parseOrExit,
+  singleValue,
+} from "../../src/util/cli";
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
@@ -95,4 +100,81 @@ test("durationFlagSeconds: a non-string value yields a UsageError, not a TypeErr
   expect(() =>
     durationFlagSeconds(argv({ "peer-timeout": 30 }), "peer-timeout"),
   ).toThrow("30s");
+});
+
+// --- parseOrExit -------------------------------------------------------------
+
+test("parseOrExit: returns the parsed value on success", () => {
+  expect(parseOrExit(() => 42)).toBe(42);
+});
+
+test("parseOrExit: a UsageError is reported on stderr and exits 64", () => {
+  // The pre-logger boundary the bootstrap-style handlers wrap parseArgs in: a
+  // repeated flag or an unrecognized log-level is a UsageError, reported on
+  // stderr (the logger does not exist yet) and mapped to exit 64.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    expect(() =>
+      parseOrExit(() => {
+        throw new UsageError("bad flag");
+      }),
+    ).toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith("bad flag");
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
+test("parseOrExit: a non-UsageError propagates unchanged without exiting", () => {
+  // An unexpected error keeps its stack and reaches the top-level handler rather
+  // than being flattened to a bare exit.
+  const exitSpy = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    expect(() =>
+      parseOrExit(() => {
+        throw new Error("unexpected");
+      }),
+    ).toThrow("unexpected");
+    expect(exitSpy).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+// --- exitWithError -----------------------------------------------------------
+
+test("exitWithError: logs the sanitized error and exits with the given code", () => {
+  // The single log-and-exit boundary the handlers route a caught error through;
+  // the caller supplies the (site-specific) exit code.
+  const messages: string[] = [];
+  const log = {
+    error: (message: string) => {
+      messages.push(message);
+    },
+  };
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    expect(() => exitWithError(log, new UsageError("nope"), 64)).toThrow(
+      "exit:64",
+    );
+    expect(messages).toEqual(["nope"]);
+    expect(() => exitWithError(log, new Error("transport"), 69)).toThrow(
+      "exit:69",
+    );
+    expect(messages).toEqual(["nope", "transport"]);
+  } finally {
+    exitSpy.mockRestore();
+  }
 });
