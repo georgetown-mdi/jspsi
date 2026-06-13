@@ -20,6 +20,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
 } from "../src/config/linkageTerms";
+import { describeDecodeError } from "../src/utils/describeDecodeError";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
 // InvitationTokenSchema now enforces that shape, so test tokens carry a real
@@ -414,9 +415,10 @@ test.each(nonLocatorCases)(
 
 test("escapes a hostile unrecognized endpoint key name in the rejection message", async () => {
   // The unrecognized-key rejection echoes the key NAME, which the inviter
-  // controls; accept.ts surfaces that message (the issue's message string) to
-  // the accepting operator's terminal via describeDecodeError. A name carrying
-  // control/ANSI bytes must be escaped, not relayed raw.
+  // controls; the shared describeDecodeError surfaces that message (the issue's
+  // message string) to the accepting operator (CLI terminal or web accept
+  // screen), relaying it as is. A name carrying control/ANSI bytes must be
+  // escaped at this source, not relayed raw.
   const hostileKey = "\x1b[31mFAKE";
   const encoded = await encodeRaw({
     ...baseToken,
@@ -427,6 +429,26 @@ test("escapes a hostile unrecognized endpoint key name in the rejection message"
   const messages = (err as ZodError).issues.map((i) => i.message).join("\n");
   expect(messages).not.toContain("\x1b");
   expect(messages).toContain("\\x1b");
+});
+
+test("does not relay a hostile partner VALUE raw through describeDecodeError", async () => {
+  // Sibling to the unrecognized-key test above, from the other direction: that
+  // pins a partner-controlled KEY escaped at its source; this pins a
+  // partner-controlled VALUE. An over-long identity (the inviter controls the
+  // token) is rejected with a default Zod message, which reports the constraint
+  // (a length) and not the offending value, so describeDecodeError -- which
+  // relays the issue message verbatim -- must not surface the planted control
+  // bytes. Pins that invariant end to end through the real schema: a future Zod
+  // that began interpolating the rejected value into its default message would
+  // trip this even though no source-level escape changed.
+  const hostileValue = "\x1b[31m" + "A".repeat(MAX_TEXT_LENGTH);
+  const encoded = await encodeRaw({
+    ...baseToken,
+    linkageTerms: { ...baseTerms, identity: hostileValue },
+  });
+  const err = await decodeInvitation(encoded).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ZodError);
+  expect(describeDecodeError(err)).not.toContain("\x1b");
 });
 
 // Structural rejections are an explicit table rather than a generated product:
