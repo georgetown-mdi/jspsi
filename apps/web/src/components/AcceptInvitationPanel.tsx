@@ -73,10 +73,11 @@ export function AcceptInvitationPanel({
           mt="md"
           ref={errorRef}
           tabIndex={-1}
-          // pre-line preserves the newline sanitizeErrorForDisplay puts before
-          // each "caused by:" link (browsers collapse it otherwise) so a
-          // multi-cause decode error shows one cause per line; the message is
-          // already escaped, so the only newlines present are those separators.
+          // A decode error is collapsed to a single readable line by
+          // describeDecodeError, so this is normally one line; pre-line is kept
+          // defensively to render a newline a relayed plain-Error message could
+          // still carry on its own line (browsers collapse it otherwise) rather
+          // than run two lines together.
           style={{ whiteSpace: "pre-line" }}
         >
           {decode.message}

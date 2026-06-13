@@ -9,23 +9,29 @@ import { sanitizeForDisplay } from "./sanitizeForDisplay";
  * plain `Error`s, whose `.message` passes through unchanged; any other thrown
  * value renders as `String(err)`.
  *
- * Path components are escaped via {@link sanitizeForDisplay}: a Zod path can name
- * a partner-controlled object key in the general case (the invitation is crafted
- * by the inviting party), not only a fixed schema field, so a key carrying
- * control/ANSI or deceptive-Unicode bytes must not reach the operator raw. The
- * issue `message` is relayed as is, because the one message that echoes a partner
- * value -- the unrecognized-endpoint-key list -- is escaped at its source in
- * `endpointKeyError` (config/invitation.ts), kept there so this concise relay
- * does not truncate that long guidance text.
+ * Escaping contract -- this helper escapes ONLY the path components it
+ * interpolates, via {@link sanitizeForDisplay}: a Zod path can name a
+ * partner-controlled object key in the general case (the invitation is crafted by
+ * the inviting party), not only a fixed schema field, so a key carrying
+ * control/ANSI or deceptive-Unicode bytes must not reach the operator raw. It
+ * does NOT escape the strings it relays -- the Zod issue `message` and a plain
+ * `Error`'s `.message` pass through verbatim, deliberately: the readable render
+ * must surface the plain message unchanged, and the one decode message that
+ * echoes a partner value (the unrecognized-endpoint-key list) is already escaped
+ * at its source in `endpointKeyError` (config/invitation.ts), kept there so this
+ * concise relay does not truncate that long guidance text. The contract a caller
+ * relies on is therefore that any error message reaching this helper which could
+ * carry partner-controlled bytes is escaped at its source; that holds for every
+ * error `decodeInvitation` and the invitation schema raise today. A future caller
+ * that passes an error whose message echoes unescaped partner-controlled input
+ * must escape it at the source rather than expect this helper to, since it relays
+ * the message as is.
  *
  * Shared by the CLI accept command and the web accept route so both collapse the
- * same failure into the same readable one-liner. The helper is self-contained on
- * the escaping it owns -- it escapes every path component it interpolates rather
- * than relying on a surrounding sanitizer -- so a caller may display its result
- * directly without a further wrapping pass (which would double-escape the
- * already-escaped path components).
- *
- * @internal exported for testing
+ * same failure into the same readable one-liner. Because it escapes the path
+ * components it owns rather than relying on a surrounding sanitizer, a caller may
+ * display its result directly without a further wrapping pass (which would
+ * double-escape those already-escaped components).
  */
 export function describeDecodeError(err: unknown): string {
   if (err !== null && typeof err === "object" && "issues" in err) {
