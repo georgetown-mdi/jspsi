@@ -22,7 +22,7 @@ PSI-Link is organized as an npm workspaces monorepo.
 - **Node.js** 26 or later (npm 10 or later is included)
 - **Docker** for building the container image
 
-The OpenMined PSI WebAssembly module is vendored at `lib/openmined-psi.js-2.0.6.tgz`. No Emscripten or native toolchain is required to work against it.
+The OpenMined PSI WebAssembly module is vendored at `lib/openmined-psi.js-2.0.6-seclink.1.tgz`. No Emscripten or native toolchain is required to work against it.
 
 ## Development Setup
 

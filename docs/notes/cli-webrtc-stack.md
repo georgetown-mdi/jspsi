@@ -10,7 +10,7 @@ The web application already conducts peer-to-peer WebRTC exchanges through PeerJ
 
 ## The problem
 
-To let the CLI take part in WebRTC exchanges (the CLI<->web case; CLI<->CLI is only an internal stepping stone, never a shipped feature with its own signaling), the CLI needs WebRTC - but Node has no built-in WebRTC, so a library has to supply it. The web stays on PeerJS for the foreseeable future; its own roadmap keeps it there (web item 196035727 still derives a *PeerJS* rendezvous id), so "CLI<->web" necessarily means the CLI speaks the PeerJS broker's signaling.
+To let the CLI take part in WebRTC exchanges (the CLI<->web case; CLI<->CLI is only an internal stepping stone, never a shipped feature with its own signaling), the CLI needs WebRTC - but Node has no built-in WebRTC, so a library has to supply it. The web stays on PeerJS for the foreseeable future (web item 196035727 derives the *PeerJS* rendezvous id from the shared secret but keeps the PeerJS broker), so "CLI<->web" necessarily means the CLI speaks the PeerJS broker's signaling.
 
 The dead-end risk is in the signaling layer, not the data channel. Every candidate library is browser-interoperable at DTLS/ICE/SCTP, so any of them can move bytes to a browser once a connection is up. What would lock the CLI out of CLI<->web is non-PeerJS signaling. The binding constraint on whatever is chosen is therefore that signaling stays PeerJS-broker-compatible, or sits behind a swappable interface a PeerJS client drops into.
 
@@ -67,7 +67,7 @@ Two consequences are worth recording:
 
 ## Signaling and discovery
 
-Independent of the library choice: the broker is reusable as-is - the vendored PeerServer already runs in Node (apps/web/src/peerServer.ts). Peer *discovery* is the moving piece the CLI must match. The web currently uses a backend rendezvous (the acceptor takes a broker-random peer id and POSTs it to an SSE rendezvous keyed by a session uuid; the inviter waits on that stream and dials it). Web item 196035727 replaces that with a token-derived id (an `HKDF(secret, role)` derivation) and drops the backend. The CLI must mirror whichever is live; the derivation is owned by that web item, and the CLI side adopts it rather than defining its own.
+Independent of the library choice: the broker is reusable as-is - the vendored PeerServer already runs in Node (apps/web/src/peerServer.ts). Peer *discovery* is the moving piece the CLI must match. The web derives the rendezvous peer id from the shared secret (a token-derived `HKDF(secret, role)` id; this landed with web item 196035727, replacing an earlier backend SSE rendezvous, so there is no backend left to mirror). The CLI must adopt that same derivation rather than defining its own.
 
 ## What would change the pick
 

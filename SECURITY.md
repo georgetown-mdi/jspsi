@@ -70,8 +70,8 @@ The following are out of scope:
 
 PSI-Link's security properties depend on several upstream cryptographic components. If you discover a vulnerability in one of these, please report it to the upstream maintainer and also notify us through the private advisory channel above.
 
-| Dependency          | Role                              | Upstream                                                            |
-| ------------------- | --------------------------------- | ------------------------------------------------------------------- |
-| `@openmined/psi.js` | PSI primitive (vendored WASM)     | [OpenMined/PSI](https://github.com/OpenMined/PSI)                   |
-| `@noble/curves`     | Elliptic-curve operations (P-256) | [paulmillr/noble-curves](https://github.com/paulmillr/noble-curves) |
-| Web Crypto API      | SHA-256, HMAC-SHA-256, HKDF       | Platform-provided; report to browser/runtime vendor                 |
+| Dependency          | Role                                        | Upstream                                                            |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------------------- |
+| `@openmined/psi.js` | PSI primitive (vendored WASM)               | [OpenMined/PSI](https://github.com/OpenMined/PSI)                   |
+| `@noble/curves`     | Elliptic-curve operations (X25519, Ed25519) | [paulmillr/noble-curves](https://github.com/paulmillr/noble-curves) |
+| Web Crypto API      | SHA-256, HMAC-SHA-256, HKDF                 | Platform-provided; report to browser/runtime vendor                 |
