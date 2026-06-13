@@ -1,17 +1,26 @@
-import { AddressInfo } from "node:net";
+import fsp from "node:fs/promises";
+import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 import {
   DirectoryListingBoundsError,
   TransportOperationStalledError,
   UsageError,
 } from "@psilink/core";
-import ssh2 from "ssh2";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { MAX_FILENAME_LENGTH } from "../../src/connection/listingGuard";
-
-const { Server, utils } = ssh2;
+import { startInProcessSftpServer } from "../sftpServer/inProcessServer";
+import { serverAuth } from "../sftpServer/testContext";
+import type { InProcessSftpServer } from "../sftpServer/types";
 
 // In-process fault-injection harness for the malformed-in-flight-reply path.
 //
@@ -26,153 +35,20 @@ const { Server, utils } = ssh2;
 // cleanupRequests rejects an in-flight read immediately, and pins the corrected
 // mechanism against a real wire packet rather than source-reading.
 //
-// The harness stands up a real ssh2 Server on loopback (its own ephemeral host
-// key -- no Docker atmoz/sftp container needed), accepts the session/sftp
-// subsystem, answers OPENDIR/OPEN with a handle, then on the in-flight
-// READDIR/READ writes RAW malformed bytes carrying that request's id straight to
-// the channel. ssh2's public name()/data() server APIs only ever emit valid
-// packets, so the malformed bytes are written through ssh2's internal
-// protocol/stream seam (`sftp._protocol.channelData(sftp.outgoing.id, ...)`),
-// which is what a real malformed server would put on the wire.
+// The same in-process ssh2 server module the integration conformance suite runs
+// against backs this test through its fault hooks (a malformed NAME reply to the
+// next READDIR, a malformed DATA reply to the next READ, or a valid-but-
+// over-length NAME batch), so the suite has one in-process server, not two. This
+// test stands up its own instance because driving the fault hooks needs the
+// server in the same worker as the adapter, where the conformance suite's
+// globalSetup server is out of reach; the malformed bytes still ride ssh2's
+// internal protocol/stream seam, which is what a real malformed server puts on
+// the wire.
 
-const RESPONSE_NAME = 104;
-const RESPONSE_DATA = 103;
-
-// Frame an SFTP packet: [length u32][type u8][reqid u32][...body].
-function frame(type: number, reqid: number, body: Buffer): Buffer {
-  const payload = Buffer.alloc(1 + 4 + body.length);
-  payload[0] = type;
-  payload.writeUInt32BE(reqid, 1);
-  body.copy(payload, 5);
-  const out = Buffer.alloc(4 + payload.length);
-  out.writeUInt32BE(payload.length, 0);
-  payload.copy(out, 4);
-  return out;
-}
-
-// A NAME packet that claims one entry (count = 1) but supplies no filename
-// bytes, so ssh2's parser reads the filename as undefined and falls into
-// doFatalSFTPError('Malformed NAME packet').
-function malformedNamePacket(reqid: number): Buffer {
-  const body = Buffer.alloc(4);
-  body.writeUInt32BE(1, 0); // count = 1, then truncated
-  return frame(RESPONSE_NAME, reqid, body);
-}
-
-// A DATA packet whose declared string length (0xffffffff) overruns the buffer,
-// so ssh2's parser returns undefined and falls into
-// doFatalSFTPError('Malformed DATA packet').
-function malformedDataPacket(reqid: number): Buffer {
-  const body = Buffer.alloc(4);
-  body.writeUInt32BE(0xffffffff, 0); // bogus data length
-  return frame(RESPONSE_DATA, reqid, body);
-}
-
-// The internal seam used to write raw bytes onto the SFTP channel. The public
-// server API will not emit a malformed packet, so the test reaches past it the
-// same way the spike that found this did.
-interface RawChannelSftp {
-  _protocol: { channelData(id: unknown, data: Buffer): void };
-  outgoing: { id: unknown };
-}
-
-// "readdir"/"read" inject a malformed reply to the in-flight request; the
-// "oversizeName" mode instead returns a VALID (well-formed) NAME batch whose one
-// filename exceeds MAX_FILENAME_LENGTH, so list() reaches its directory-listing
-// bound against real wire bytes rather than a mocked readdir.
-type InflightKind = "readdir" | "read" | "oversizeName";
-
-// Start a server that answers the directory-open/file-open with a handle and
-// then either injects a malformed reply to the first in-flight READDIR (for
-// list()) or READ (for get()), or serves a valid-but-over-bound NAME batch.
-// Returns the listening port and a closer.
-async function startMalformedServer(kind: InflightKind): Promise<{
-  port: number;
-  close: () => void;
-}> {
-  // ECDSA, not ed25519: ssh2's generateKeyPairSync intermittently emits an
-  // ed25519 OpenSSH private key it cannot parse back ("Malformed OpenSSH private
-  // key", ~0.2-0.3% per Server construction), and this harness builds a server
-  // several times per run, so an ed25519 key would flake in CI. The key type is
-  // irrelevant to what the test exercises (the malformed-reply injection); ecdsa
-  // is fast and has not reproduced the parse fault.
-  const hostKey = utils.generateKeyPairSync("ecdsa", { bits: 256 }).private;
-  const server = new Server({ hostKeys: [hostKey] }, (client) => {
-    client.on("authentication", (ctx) => ctx.accept());
-    client.on("ready", () => {
-      client.on("session", (acceptSession) => {
-        const session = acceptSession();
-        session.on("sftp", (acceptSftp) => {
-          const sftp = acceptSftp();
-          let handleSeq = 0;
-          const giveHandle = (reqid: number): void => {
-            const handle = Buffer.alloc(4);
-            handle.writeUInt32BE(++handleSeq, 0);
-            sftp.handle(reqid, handle);
-          };
-          const injectRaw = (packet: Buffer): void => {
-            const raw = sftp as unknown as RawChannelSftp;
-            raw._protocol.channelData(raw.outgoing.id, packet);
-          };
-          sftp.on("OPENDIR", (reqid) => giveHandle(reqid));
-          sftp.on("OPEN", (reqid) => giveHandle(reqid));
-          // get() issues an FSTAT before READ to size the transfer; answer it
-          // with a small size so the library proceeds to the READ we corrupt.
-          sftp.on("FSTAT", (reqid) => {
-            // Only `size` matters here (it sizes the transfer); the rest are
-            // zero-filled to satisfy the full Attributes shape, as in name() below.
-            sftp.attrs(reqid, {
-              mode: 0o100644,
-              uid: 0,
-              gid: 0,
-              size: 8,
-              atime: 0,
-              mtime: 0,
-            });
-          });
-          // For "oversizeName", READDIR is answered once with a valid NAME
-          // batch carrying an over-length filename, then with EOF; the batch
-          // delivery is tracked so the second READDIR returns EOF.
-          let oversizeServed = false;
-          sftp.on("READDIR", (reqid) => {
-            if (kind === "readdir") {
-              injectRaw(malformedNamePacket(reqid));
-            } else if (kind === "oversizeName" && !oversizeServed) {
-              oversizeServed = true;
-              const filename = "x".repeat(MAX_FILENAME_LENGTH + 1);
-              sftp.name(reqid, [
-                {
-                  filename,
-                  longname: filename,
-                  attrs: {
-                    mode: 0o100644,
-                    uid: 0,
-                    gid: 0,
-                    size: 0,
-                    atime: 0,
-                    mtime: 0,
-                  },
-                },
-              ]);
-            } else {
-              sftp.status(reqid, utils.sftp.STATUS_CODE.EOF);
-            }
-          });
-          sftp.on("READ", (reqid) => {
-            if (kind === "read") injectRaw(malformedDataPacket(reqid));
-            else sftp.status(reqid, utils.sftp.STATUS_CODE.EOF);
-          });
-        });
-      });
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const port = (server.address() as AddressInfo).port;
-  return { port, close: () => server.close() };
-}
+const NS = "fatal";
 
 async function connectAdapter(
-  port: number,
+  srv: InProcessSftpServer,
   stallDeadlineMs?: number,
 ): Promise<SSH2SFTPClientAdapter> {
   const adapter =
@@ -184,10 +60,9 @@ async function connectAdapter(
         // any config or CLI surface, so production keeps the fixed bound.
         new SSH2SFTPClientAdapter({ stallDeadlineMs });
   await adapter.connect({
-    host: "127.0.0.1",
-    port,
-    username: "u",
-    password: "p",
+    host: srv.handle.host,
+    port: srv.handle.port,
+    ...serverAuth(srv.handle.usera),
     maxReconnectAttempts: 0,
   });
   return adapter;
@@ -210,18 +85,39 @@ const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("malformed in-flight SFTP reply", () => {
-  let servers: Array<() => void>;
+  let srv: InProcessSftpServer;
+  let backingNamespace: string;
   let adapters: SSH2SFTPClientAdapter[];
 
+  beforeAll(async () => {
+    srv = await startInProcessSftpServer();
+    backingNamespace = path.join(srv.handle.backingDir, NS);
+    await fsp.mkdir(backingNamespace, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await srv.stop();
+  });
+
   beforeEach(() => {
-    servers = [];
     adapters = [];
+    // Reset every fault field, not just the ones this suite drives today, so a
+    // later test setting withholdOn/renameFailuresRemaining/readdirBatchSize
+    // cannot leak into the next test on the shared server instance.
+    srv.inject.malformedNameOnNextReaddir = false;
+    srv.inject.malformedDataOnNextRead = false;
+    srv.inject.oversizeNameOnNextReaddir = null;
+    srv.inject.withholdOn = null;
+    srv.inject.renameFailuresRemaining = 0;
+    srv.inject.readdirBatchSize = 0;
   });
 
   afterEach(async () => {
     await Promise.all(adapters.map((a) => a.end().catch(() => {})));
-    for (const close of servers) close();
   });
+
+  const remote = (suffix = ""): string =>
+    `${srv.handle.remoteRoot}/${NS}${suffix}`;
 
   test("does not crash and does not settle the in-flight list() promptly", async () => {
     // (a) the malformed in-flight reply does not crash the process -- reaching
@@ -231,12 +127,11 @@ describe("malformed in-flight SFTP reply", () => {
     // This is the assertion that disproves the old "rejects immediately via
     // cleanupRequests" claim. No deadline seam here, so the real 60 s bound is
     // untouched and the operation genuinely hangs for the window.
-    const { port, close } = await startMalformedServer("readdir");
-    servers.push(close);
-    const adapter = await connectAdapter(port);
+    const adapter = await connectAdapter(srv);
     adapters.push(adapter);
 
-    const tracked = track(adapter.list("/dir"));
+    srv.inject.malformedNameOnNextReaddir = true;
+    const tracked = track(adapter.list(remote()));
     await delay(300);
     expect(tracked.settled()).toBe(false);
   });
@@ -244,12 +139,12 @@ describe("malformed in-flight SFTP reply", () => {
   test("does not crash and does not settle the in-flight get() promptly", async () => {
     // Same proof on the read path: a malformed DATA reply to the in-flight READ
     // is not failed by cleanupRequests, so get() stays pending.
-    const { port, close } = await startMalformedServer("read");
-    servers.push(close);
-    const adapter = await connectAdapter(port);
+    await fsp.writeFile(path.join(backingNamespace, "file"), Buffer.alloc(8));
+    const adapter = await connectAdapter(srv);
     adapters.push(adapter);
 
-    const tracked = track(adapter.get("/dir/file", { maxBytes: 64 }));
+    srv.inject.malformedDataOnNextRead = true;
+    const tracked = track(adapter.get(remote("/file"), { maxBytes: 64 }));
     await delay(300);
     expect(tracked.settled()).toBe(false);
   });
@@ -263,12 +158,11 @@ describe("malformed in-flight SFTP reply", () => {
     // hangs past cleanupRequests (above) and that the deadline -- not
     // cleanupRequests -- is what ends it (here); the existing fake-timer adapter
     // tests in ssh2SftpAdapter.test.ts cover the deadline-logic details.
-    const { port, close } = await startMalformedServer("readdir");
-    servers.push(close);
-    const adapter = await connectAdapter(port, 150);
+    const adapter = await connectAdapter(srv, 150);
     adapters.push(adapter);
 
-    const err = await adapter.list("/dir").catch((e: unknown) => e);
+    srv.inject.malformedNameOnNextReaddir = true;
+    const err = await adapter.list(remote()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TransportOperationStalledError);
     expect(err).toBeInstanceOf(UsageError);
   });
@@ -282,12 +176,11 @@ describe("malformed in-flight SFTP reply", () => {
     // that mock test: it bites at the fixed 8,192-entry cap, which is not
     // test-lowerable and would need multi-packet batching to cross on the wire --
     // heavier and not worth the flakiness for a bound the mock already pins.)
-    const { port, close } = await startMalformedServer("oversizeName");
-    servers.push(close);
-    const adapter = await connectAdapter(port);
+    const adapter = await connectAdapter(srv);
     adapters.push(adapter);
 
-    const err = await adapter.list("/dir").catch((e: unknown) => e);
+    srv.inject.oversizeNameOnNextReaddir = "x".repeat(MAX_FILENAME_LENGTH + 1);
+    const err = await adapter.list(remote()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DirectoryListingBoundsError);
   });
 });

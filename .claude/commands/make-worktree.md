@@ -1,6 +1,6 @@
 ---
 name: make-worktree
-description: Create a ready-to-use git worktree for psilink on a new (or existing) branch. Worktrees live under a gitignored .worktrees/ at the repo root; the command symlinks the gitignored locals a worktree needs, gives it an isolated SFTP test container (own Compose project name and free host port), and runs npm install. Does not touch GitHub and does not write code.
+description: Create a ready-to-use git worktree for psilink on a new (or existing) branch. Worktrees live under a gitignored .worktrees/ at the repo root; the command symlinks the gitignored locals a worktree needs and runs npm install. Does not touch GitHub and does not write code.
 ---
 
 You are a setup agent for the psilink project. Your only job is to produce a working worktree and print a short summary. You do not write code or explore the codebase.
@@ -11,7 +11,7 @@ The user passes a branch name, optionally followed by a base ref:
 
     /make-worktree <branch> [base-ref]
 
-- `<branch>`: the branch to create (or reuse). Keep it to lowercase letters, digits, and hyphens so it is also a valid git ref and Docker Compose project suffix. If the user gives something else, slugify it and report what you used.
+- `<branch>`: the branch to create (or reuse). Keep it to lowercase letters, digits, and hyphens so it is also a valid git ref. If the user gives something else, slugify it and report what you used.
 - `[base-ref]`: the branch to fork from. Defaults to `staging`.
 
 If no branch is given, ask for one before doing anything else.
@@ -19,8 +19,6 @@ If no branch is given, ask for one before doing anything else.
 ## Why these steps exist
 
 A git worktree already checks out every *tracked* file -- including the tracked `.claude/` tree (agents, commands, skills, scripts), so the worktree gets its own copy and can carry branch-local changes to it. What it does NOT get are the gitignored locals: `CLAUDE.local.md`, `apps/web/.env*`, and `.claude/settings.local.json`. Those are symlinked in individually.
-
-The CLI integration tests run an SFTP container whose storage, host port, and Compose project name must be unique per checkout, or two checkouts clobber each other. This command gives each worktree its own. No special teardown is needed.
 
 **Enter order matters.** This command calls `EnterWorktree` *before* it does any `cd` into the worktree, and never `cd`s into it afterward. That is deliberate, not stylistic: `EnterWorktree` only registers the harness-owned cwd switch when it is invoked from a *different* cwd than the target. If a shell `cd` has already moved the session into the worktree, `EnterWorktree` refuses with "is the current working directory" and the switch silently never takes -- the shell happens to sit in the worktree for the rest of that turn, then reverts to the main checkout at the next turn boundary, and the continuing session runs bare commands against `staging` without any error. (Verified.) Entering first also means every setup step below runs *bare* inside the worktree, with no `cd`/`git -C` scoping -- the same pattern the implementing session uses.
 
@@ -47,7 +45,7 @@ If the branch already exists, drop `-b`:
 
     git -C "$MAIN" worktree add "$WORKTREE" <BRANCH>
 
-If the worktree path already exists, report it, then go straight to step 3 to enter it and step 6 to install -- skip the symlink and SFTP steps so you do not clobber its existing `.env`.
+If the worktree path already exists, report it, then go straight to step 3 to enter it and step 5 to install -- skip the symlink step so you do not clobber its existing locals.
 
 ### 3. Enter the worktree
 
@@ -84,23 +82,11 @@ The `settings.local.json` link must run as its OWN Bash call with the sandbox di
 
 Link only the gitignored locals. Do NOT symlink the whole `.claude` directory: it is tracked, so the worktree already has its own copy, and `ln -sf` onto that existing directory would nest the link inside it (`$WORKTREE/.claude/.claude`) rather than replace it. The worktree's checkout of `.claude/` already provides `settings.local.json`'s sibling files; only `settings.local.json` itself is gitignored and needs linking. Skip any symlink whose source does not exist and note the skip in the summary.
 
-### 5. Give the worktree its own SFTP test container
-
-You are already in the worktree (step 3), so run these bare:
-
-    sh apps/cli/test/container/setup.sh   # host keys, srv/, default .env
-
-    PORT=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})')
-    printf 'COMPOSE_PROJECT_NAME=psilink-sftp-%s\nSFTP_PORT=%s\n' "<BRANCH>" "$PORT" \
-      > apps/cli/test/container/.env
-
-This gives the worktree its own Compose project and a free host port, so its container can run alongside the main checkout's. The integration tests read `SFTP_PORT` from this file.
-
-### 6. Install dependencies
+### 5. Install dependencies
 
     npm install
 
-### 7. Print the summary
+### 6. Print the summary
 
 Output this block and nothing after it:
 
@@ -110,7 +96,6 @@ Output this block and nothing after it:
     Branch: <branch> (off <base>)
 
     Linked locals: <list, noting any skipped>
-    SFTP container: project psilink-sftp-<branch>, host port <PORT> (isolated)
 
     This session is now inside the worktree (via EnterWorktree, confirmed with
     pwd/git branch). Run plain commands here -- `git commit`, `npm test`, `npm
@@ -125,6 +110,6 @@ Output this block and nothing after it:
 ## What you do NOT do
 
 - Do not read source files or make implementation decisions.
-- Do not modify files in the worktree beyond the symlinks and the SFTP `.env`.
+- Do not modify files in the worktree beyond the symlinks.
 - Do not run builds or tests (npm install only).
 - Do not `cd` into the worktree at any point -- enter it with `EnterWorktree` (step 3) and run everything bare.

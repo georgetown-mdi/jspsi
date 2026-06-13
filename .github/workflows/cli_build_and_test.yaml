@@ -47,8 +47,17 @@ jobs:
       # Integration tests exercise the real ssh2 SFTPWrapper contract end to end
       # (unit tests run against mocks), so they are what actually catches a
       # dependency bump that breaks the coupling. The suite is self-managing: a
-      # vitest globalSetup brings up and tears down its own atmoz/sftp container
-      # (generating host keys/.env on first run), and ubuntu-latest ships Docker
-      # Compose, so no extra setup step is needed.
-      - name: Integration tests (CLI)
+      # vitest globalSetup starts the SFTP test server before the suite and stops
+      # it after, so no extra setup step is needed.
+      - name: Integration tests (CLI, in-process server)
         run: npm run test:integration -w apps/cli
+      # A second leg runs the same suite against a native OpenSSH sshd, so the
+      # adapter is also exercised against a real server. sshd ships on the Ubuntu
+      # runner, but its build fatally checks for the privilege-separation
+      # directory at startup even when run unprivileged, so create it here.
+      - name: Integration tests (CLI, native sshd server)
+        run: |
+          sudo mkdir -p /run/sshd
+          npm run test:integration -w apps/cli
+        env:
+          PSILINK_SFTP_BACKEND: native

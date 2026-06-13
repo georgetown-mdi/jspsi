@@ -1,31 +1,33 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { ensureServerDir, sftpPort } from "../container/env";
+import {
+  ensureNamespace,
+  localPath,
+  remotePath,
+  serverAuth,
+  sftpServer,
+} from "../sftpServer/testContext";
 
 import log from "loglevel";
 
 log.setLevel(log.levels.DEBUG);
 
-// compose.yaml mounts apps/cli/test/container/sftp/srv/ as /home/{user}/psi
-// inside the container, so subdirectories of srv/ are served as subdirectories
-// of /psi via SFTP. beforeAll creates SFTP_LOCAL_DIRECTORY with { recursive:
-// true } before opening connections, so the host directory exists when the
-// server needs it. The directory is resolved relative to this test file (via
-// import.meta.url) so it is independent of vitest's cwd, matching the pattern in
-// authenticatedExchange.test.ts; the resulting absolute path serves both the
-// cleanup helpers and LocalFSClient, which requires an absolute path.
-const SFTP_LOCAL_DIRECTORY = fileURLToPath(
-  new URL("../container/sftp/srv/mixed", import.meta.url),
-);
-const SFTP_PATH = "/psi/mixed";
-const SFTP_PORT = sftpPort();
+// This file mixes a real SFTP party with a filedrop party sharing one rendezvous
+// directory: SFTP_LOCAL_DIRECTORY is the host directory the SFTP server serves,
+// which the filedrop LocalFSClient also points at, so the two transports meet in
+// the same `mixed` namespace. ensureNamespace creates that directory before
+// either party connects (the SFTP connection does not create remote directories),
+// and LocalFSClient needs the absolute host path.
+const srv = sftpServer();
+const NS = "mixed";
+const SFTP_LOCAL_DIRECTORY = localPath(srv, NS);
+const SFTP_PATH = remotePath(srv, NS);
 
 async function cleanServer() {
   for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {
@@ -55,16 +57,15 @@ localConn.on("error", (err: unknown) => {
 });
 
 beforeAll(async () => {
-  await ensureServerDir(SFTP_LOCAL_DIRECTORY);
+  await ensureNamespace(srv, NS);
   await cleanServer();
   await Promise.all([
     sftpConn.open({
       channel: "sftp",
       server: {
-        host: "localhost",
-        port: SFTP_PORT,
-        username: "usera",
-        password: "usera",
+        host: srv.host,
+        port: srv.port,
+        ...serverAuth(srv.usera),
         path: SFTP_PATH,
       },
     }),

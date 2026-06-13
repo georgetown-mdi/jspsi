@@ -40,7 +40,8 @@ import {
 } from "../../src/commands/bootstrap";
 import { loadKeyFile } from "../../src/keyFile";
 import { openingPathFor, resolveRecordOutput } from "../../src/recordFile";
-import { ensureServerDir, sftpPort } from "../container/env";
+import { selectedBackend } from "../sftpServer";
+import { localPath, remotePath, sftpServer } from "../sftpServer/testContext";
 
 // Net-new coverage: the ONLINE invite + accept wiring, end to end, with both
 // sides on their real online code path (a live authenticated handshake, not the
@@ -62,8 +63,8 @@ import { ensureServerDir, sftpPort } from "../container/env";
 //
 // This file covers two concerns over that one seam:
 //   1. The happy-path round trip, run over BOTH transports for parity --
-//      `filedrop` (a file:// URL over a local directory) and `sftp` (a real
-//      atmoz/sftp container). The shared runOnlineRoundTrip helper makes the two
+//      `filedrop` (a file:// URL over a local directory) and `sftp` (the real
+//      SFTP test server). The shared runOnlineRoundTrip helper makes the two
 //      genuinely mirror each other: the assertions are identical and only the URL
 //      and the persisted connection-block shape differ. The sftp run is the only
 //      place credential and server-path threading through connectionFromURL is
@@ -76,9 +77,9 @@ import { ensureServerDir, sftpPort } from "../container/env";
 //      at the integration level, where the real validate/handshake code decides
 //      whether anything reaches disk.
 //
-// CLI integration tests are Docker-backed and self-managing via a vitest
-// globalSetup (see CLAUDE.local.md); run with `npm run test:integration -w
-// apps/cli`. Do not manage the container by hand.
+// The CLI integration suite is self-managing: a vitest globalSetup starts the
+// SFTP test server before the suite and stops it after. Run with `npm run
+// test:integration -w apps/cli`.
 
 let work: string;
 
@@ -453,7 +454,7 @@ test("filedrop: online invite + accept round-trip authenticates, finds the inter
 // runOnlineBootstrap) and assert the observable no-write outcome rather than
 // reaching into internals. filedrop is enough for the no-write guarantee: it is
 // decided by validate-time rejection and by the handshake, neither of which is
-// transport-specific, so a real container buys nothing here.
+// transport-specific, so the real SFTP server buys nothing here.
 
 test("filedrop: an expired invitation aborts the accept and the inviter's handshake, persisting no config or key on either side", async () => {
   const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
@@ -696,21 +697,22 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
 // alone; file-scoped beforeAll/afterAll would otherwise also bracket the filedrop
 // tests above, which have no business with the SFTP root.
 describe("sftp", () => {
-  const SFTP_PORT = sftpPort();
+  const srv = sftpServer();
+  // This leg threads inline user:password credentials through an sftp:// URL,
+  // which the password-authenticating in-process backend supports; the native
+  // sshd backend authenticates by public key (a URL cannot carry a key), so it
+  // runs in-process only.
+  const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
-  // compose.yaml mounts apps/cli/test/container/sftp/srv/ as /home/{user}/psi, so
-  // srv/onlineinvite is served at /psi/onlineinvite over SFTP. Both parties are
-  // SFTP clients of the same path -- the realistic recurring-exchange topology.
-  // The root is resolved relative to this test file (via import.meta.url) so it is
-  // independent of vitest's cwd, and the `onlineinvite` name keeps it distinct from
-  // the sibling integration files' server subdirs (authexchange, sftp, mixed).
-  const SFTP_LOCAL_ROOT = fileURLToPath(
-    new URL("../container/sftp/srv/onlineinvite", import.meta.url),
-  );
-  const SFTP_PATH_ROOT = "/psi/onlineinvite";
+  // Both parties are SFTP clients of the same served path -- the realistic
+  // recurring-exchange topology. The `onlineinvite` namespace keeps this root
+  // distinct from the sibling integration files' namespaces (authexchange, sftp,
+  // mixed).
+  const SFTP_LOCAL_ROOT = localPath(srv, "onlineinvite");
+  const SFTP_PATH_ROOT = remotePath(srv, "onlineinvite");
 
   // Start from a clean root so stale files from a previously crashed run cannot
-  // leak in; afterAll leaves the mounted dir tidy.
+  // leak in; afterAll leaves the served dir tidy.
   beforeAll(async () => {
     await fsp.rm(SFTP_LOCAL_ROOT, { recursive: true, force: true });
     await fsp.mkdir(SFTP_LOCAL_ROOT, { recursive: true });
@@ -720,33 +722,37 @@ describe("sftp", () => {
     await fsp.rm(SFTP_LOCAL_ROOT, { recursive: true, force: true });
   });
 
-  test("sftp: online invite + accept round-trip over the real server mirrors the filedrop result and threads credentials and the server path through the URL", async () => {
-    const tag = "roundtrip";
-    // Create the host directory the container serves so the SFTP path exists
-    // before either party connects (the connection does not create remote dirs).
-    await ensureServerDir(path.join(SFTP_LOCAL_ROOT, tag));
-    const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
-    // The inline usera:usera credentials and the server path are exactly what
-    // connectionFromURL must parse and thread into the live SFTP connection and
-    // the persisted config -- the net-new wiring the filedrop transport never
-    // touches.
-    const url = `sftp://usera:usera@localhost:${SFTP_PORT}${serverPath}`;
+  inProcessOnly(
+    "sftp: online invite + accept round-trip over the real server mirrors the filedrop result and threads credentials and the server path through the URL",
+    async () => {
+      const tag = "roundtrip";
+      // Create the host directory the server serves so the SFTP path exists
+      // before either party connects (the connection does not create remote dirs).
+      await fsp.mkdir(path.join(SFTP_LOCAL_ROOT, tag), { recursive: true });
+      const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
+      // The inline credentials and the server path are exactly what
+      // connectionFromURL must parse and thread into the live SFTP connection and
+      // the persisted config -- the net-new wiring the filedrop transport never
+      // touches.
+      const url = `sftp://${srv.usera.username}:${srv.usera.password}@${srv.host}:${srv.port}${serverPath}`;
 
-    await runOnlineRoundTrip({
-      url,
-      assertPersistedConnection: (spec) => {
-        expect(spec.connection.channel).toBe("sftp");
-        const server = (spec.connection as SFTPConnectionConfig).server;
-        // host/port/path/credentials were all carried from the URL through
-        // connectionFromURL into the persisted config (saveConfig keeps inline
-        // connection credentials, protected at 0600, and strips only the shared
-        // secret).
-        expect(server.host).toBe("localhost");
-        expect(server.port).toBe(SFTP_PORT);
-        expect(server.path).toBe(serverPath);
-        expect(server.username).toBe("usera");
-        expect(server.password).toBe("usera");
-      },
-    });
-  }, 90_000);
+      await runOnlineRoundTrip({
+        url,
+        assertPersistedConnection: (spec) => {
+          expect(spec.connection.channel).toBe("sftp");
+          const server = (spec.connection as SFTPConnectionConfig).server;
+          // host/port/path/credentials were all carried from the URL through
+          // connectionFromURL into the persisted config (saveConfig keeps inline
+          // connection credentials, protected at 0600, and strips only the shared
+          // secret).
+          expect(server.host).toBe(srv.host);
+          expect(server.port).toBe(srv.port);
+          expect(server.path).toBe(serverPath);
+          expect(server.username).toBe(srv.usera.username);
+          expect(server.password).toBe(srv.usera.password);
+        },
+      });
+    },
+    90_000,
+  );
 });
