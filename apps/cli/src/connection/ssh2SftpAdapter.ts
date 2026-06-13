@@ -57,6 +57,12 @@ const SSH_FX_FAILURE = 4;
 // exposes as `this.sftp`. Defined at file scope so connect(), createExclusive(),
 // and list() can share it without repeating the declaration.
 interface Ssh2SftpClientInternals {
+  // The underlying ssh2 Client instance. ssh2-sftp-client constructs it as
+  // `this.client` and drives every connection through it; its public
+  // setNoDelay(boolean) toggles TCP_NODELAY on the live socket. Optional so the
+  // guarded call in connect() can warn-and-continue (the setting is a latency
+  // optimization, not a correctness requirement) if an upgrade relocates it.
+  client?: { setNoDelay(noDelay: boolean): void };
   sftp: {
     open(
       path: string,
@@ -296,11 +302,36 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       maxReconnects,
       1_000,
     );
+
+    const internals = this.client as unknown as Ssh2SftpClientInternals;
+
+    // Disable Nagle's algorithm on the established client socket. The rendezvous
+    // protocol is a long run of small, latency-bound request/response round trips;
+    // with Nagle on, each can collide with the peer's TCP delayed-ACK and stall up
+    // to ~40 ms on Linux (it does not surface on macOS loopback), compounding
+    // across the many round trips an exchange performs. ssh2 leaves the client
+    // socket at the kernel default (Nagle on) and never calls setNoDelay itself,
+    // so drive its public setNoDelay here. connect() reruns on each reconnect and
+    // ssh2 mints a fresh socket per attempt, so the setting is re-applied to every
+    // socket, not just the first. Guarded and non-fatal: TCP_NODELAY is a latency
+    // optimization, not a correctness requirement, so a future upstream that drops
+    // the method must degrade to slower-but-correct, not fail to connect. See
+    // board item 199674097.
+    if (typeof internals.client?.setNoDelay === "function") {
+      internals.client.setNoDelay(true);
+    } else {
+      this.log.warn(
+        "ssh2's client.setNoDelay() is not available after connect(); the SFTP " +
+          "client socket keeps Nagle enabled and may incur per-round-trip " +
+          "latency. Check the ssh2 / ssh2-sftp-client changelog.",
+      );
+    }
+
     // Verify that the sftp session required by createExclusive is available.
     // Run this once after retryPromise resolves rather than inside its
     // callback so an API breakage (a permanent failure mode) does not consume
     // the retry budget with no chance of self-resolving.
-    const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
+    const { sftp } = internals;
     if (!sftp)
       throw new Error(
         "ssh2-sftp-client 'sftp' session property is not available " +
