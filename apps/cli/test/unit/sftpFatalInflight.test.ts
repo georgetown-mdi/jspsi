@@ -101,9 +101,15 @@ describe("malformed in-flight SFTP reply", () => {
 
   beforeEach(() => {
     adapters = [];
+    // Reset every fault field, not just the ones this suite drives today, so a
+    // later test setting withholdOn/renameFailuresRemaining/readdirBatchSize
+    // cannot leak into the next test on the shared server instance.
     srv.inject.malformedNameOnNextReaddir = false;
     srv.inject.malformedDataOnNextRead = false;
     srv.inject.oversizeNameOnNextReaddir = null;
+    srv.inject.withholdOn = null;
+    srv.inject.renameFailuresRemaining = 0;
+    srv.inject.readdirBatchSize = 0;
   });
 
   afterEach(async () => {

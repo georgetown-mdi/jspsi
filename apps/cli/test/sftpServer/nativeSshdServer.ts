@@ -84,6 +84,10 @@ function sshBannerReady(port: number, timeoutMs: number): Promise<boolean> {
     socket.setTimeout(timeoutMs);
     socket.once("timeout", () => settle(false));
     socket.once("error", () => settle(false));
+    // sshd may accept then drop the connection before sending a banner; that
+    // emits 'close' with no prior 'error', so settle here rather than waiting out
+    // the full probe timeout before the retry loop advances.
+    socket.once("close", () => settle(false));
     socket.on("data", (chunk) => {
       // Accumulate: the banner is spec-legal to arrive split across reads, so
       // judging only the first chunk could falsely report not-ready and burn a
@@ -191,16 +195,8 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
       "",
     ].join("\n");
 
-    const handle: SftpServerHandle = {
-      host: "127.0.0.1",
-      port: 0,
-      backingDir,
-      remoteRoot: backingDir,
-      usera: { username: osUser, privateKey: useraPriv },
-      userb: { username: osUser, privateKey: userbPriv },
-    };
-
     let attempt: NativeAttempt | undefined;
+    let boundPort = 0;
     let lastError = "";
     for (let i = 0; i < START_ATTEMPTS; i += 1) {
       const port = await freePort();
@@ -220,7 +216,7 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
 
       const ready = await waitForPortOrExit(port, exited);
       if (ready) {
-        handle.port = port;
+        boundPort = port;
         attempt = { child, stderr };
         break;
       }
@@ -238,6 +234,16 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
     }
 
     const { child } = attempt;
+    // Build the handle now the bound port is known, rather than constructing it
+    // with a placeholder and mutating it inside the retry loop.
+    const handle: SftpServerHandle = {
+      host: "127.0.0.1",
+      port: boundPort,
+      backingDir,
+      remoteRoot: backingDir,
+      usera: { username: osUser, privateKey: useraPriv },
+      userb: { username: osUser, privateKey: userbPriv },
+    };
     return {
       handle,
       async stop() {

@@ -193,7 +193,11 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
         const session = acceptSession();
         session.on("sftp", (acceptSftp) => {
           const sftp = acceptSftp();
-          attachSftpHandlers(sftp, backingDir, inject);
+          const closeOpenHandles = attachSftpHandlers(sftp, backingDir, inject);
+          // A graceful client sends CLOSE per handle; an abrupt disconnect (the
+          // adversarial tests abort mid-stream) does not, so close any fds still
+          // open for this session when the connection drops.
+          client.on("close", closeOpenHandles);
         });
       });
     });
@@ -293,11 +297,13 @@ interface DirHandle {
 }
 type OpenHandle = FileHandle | DirHandle;
 
+// Returns a cleanup that closes any file descriptors still open for this session
+// (a client that disconnects without sending CLOSE would otherwise leak them).
 function attachSftpHandlers(
   sftp: SFTPWrapper,
   backingDir: string,
   inject: SftpFaultInjection,
-): void {
+): () => void {
   const handles = new Map<number, OpenHandle>();
   let nextHandle = 0;
   const newHandle = (entry: OpenHandle): Buffer => {
@@ -316,9 +322,15 @@ function attachSftpHandlers(
   // segments against the root, so a path like `/psi/../../etc/passwd` can never
   // escape backingDir (plain path.join would let it resolve outside).
   const resolve = (p: string): string => {
-    const rel = p
-      .replace(new RegExp(`^${REMOTE_ROOT}/?`), "")
-      .replace(/^\/+/, "");
+    // Strip the virtual /psi root with plain string ops -- a dynamic RegExp built
+    // from REMOTE_ROOT would misbehave if the constant ever held regex
+    // metacharacters -- then confine the remainder under backingDir with chroot
+    // semantics so traversal segments collapse against the served root.
+    let rel = p;
+    if (rel === REMOTE_ROOT) rel = "";
+    else if (rel.startsWith(`${REMOTE_ROOT}/`))
+      rel = rel.slice(REMOTE_ROOT.length + 1);
+    rel = rel.replace(/^\/+/, "");
     const confined = path.posix.normalize(`/${rel}`).replace(/^\/+/, "");
     return path.join(backingDir, confined);
   };
@@ -528,6 +540,13 @@ function attachSftpHandlers(
       sftp.status(reqid, err ? STATUS_CODE.FAILURE : STATUS_CODE.OK),
     );
   });
+
+  return () => {
+    for (const h of handles.values()) {
+      if (h.type === "file") fs.close(h.fd, () => {});
+    }
+    handles.clear();
+  };
 }
 
 function attrsFromStat(st: {
