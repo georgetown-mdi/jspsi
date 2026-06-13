@@ -19,6 +19,7 @@ import {
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { MAX_FILENAME_LENGTH } from "../../src/connection/listingGuard";
 import { startInProcessSftpServer } from "../sftpServer/inProcessServer";
+import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
 
 // In-process fault-injection harness for the malformed-in-flight-reply path.
@@ -61,8 +62,7 @@ async function connectAdapter(
   await adapter.connect({
     host: srv.handle.host,
     port: srv.handle.port,
-    username: srv.handle.usera.username,
-    password: srv.handle.usera.password,
+    ...serverAuth(srv.handle.usera),
     maxReconnectAttempts: 0,
   });
   return adapter;

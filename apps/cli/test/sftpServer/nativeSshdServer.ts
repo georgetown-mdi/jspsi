@@ -50,7 +50,16 @@ function freePort(): Promise<number> {
     probe.on("error", reject);
     probe.listen(0, "127.0.0.1", () => {
       const address = probe.address();
-      const port = typeof address === "object" && address ? address.port : 0;
+      if (typeof address !== "object" || !address) {
+        // A null address would otherwise resolve to port 0, which sshd binds to
+        // a kernel-assigned port it never reports back -- an opaque readiness
+        // timeout. Fail loudly instead.
+        probe.close(() =>
+          reject(new Error("could not determine a free loopback port")),
+        );
+        return;
+      }
+      const port = address.port;
       probe.close(() => resolve(port));
     });
   });
@@ -65,6 +74,7 @@ function sshBannerReady(port: number, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let settled = false;
+    let received = Buffer.alloc(0);
     const settle = (ok: boolean) => {
       if (settled) return;
       settled = true;
@@ -74,9 +84,17 @@ function sshBannerReady(port: number, timeoutMs: number): Promise<boolean> {
     socket.setTimeout(timeoutMs);
     socket.once("timeout", () => settle(false));
     socket.once("error", () => settle(false));
-    socket.once("data", (chunk) =>
-      settle(chunk.toString("utf8", 0, 4) === "SSH-"),
-    );
+    socket.on("data", (chunk) => {
+      // Accumulate: the banner is spec-legal to arrive split across reads, so
+      // judging only the first chunk could falsely report not-ready and burn a
+      // start attempt. Wait until four bytes are in hand, then check the prefix.
+      received = Buffer.concat([
+        received,
+        typeof chunk === "string" ? Buffer.from(chunk) : chunk,
+      ]);
+      if (received.length < 4) return;
+      settle(received.toString("utf8", 0, 4) === "SSH-");
+    });
     socket.connect(port, "127.0.0.1");
   });
 }
@@ -143,9 +161,13 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
     ]);
 
     const authorizedKeysPath = path.join(workDir, "authorized_keys");
-    await fsp.writeFile(authorizedKeysPath, `${useraPub}${userbPub}`, {
-      mode: 0o600,
-    });
+    // One key per line with an explicit separator, rather than relying on
+    // ssh-keygen's .pub files always carrying a trailing newline.
+    await fsp.writeFile(
+      authorizedKeysPath,
+      `${useraPub.trimEnd()}\n${userbPub.trimEnd()}\n`,
+      { mode: 0o600 },
+    );
 
     // StrictModes off so sshd accepts key files under a world-readable temp dir;
     // internal-sftp without ChrootDirectory (root-owned components are

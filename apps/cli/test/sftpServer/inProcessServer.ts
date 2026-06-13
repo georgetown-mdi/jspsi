@@ -263,8 +263,8 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
   };
 }
 
-// Map an OPEN flags bitfield to an fs flags string.
-function openFlagsToFsFlags(flags: number): string {
+// Map an OPEN flags bitfield to an fs flags value.
+function openFlagsToFsFlags(flags: number): string | number {
   const write = !!(flags & OPEN_MODE.WRITE);
   const append = !!(flags & OPEN_MODE.APPEND);
   const creat = !!(flags & OPEN_MODE.CREAT);
@@ -273,7 +273,10 @@ function openFlagsToFsFlags(flags: number): string {
   if (excl && creat && write) return "wx"; // exclusive create (createExclusive)
   if (write && append) return "a";
   if (write && creat && trunc) return "w";
-  if (write && creat) return "w";
+  // WRITE+CREAT without TRUNC must create-if-absent yet preserve an existing
+  // file's bytes; no fs flag string expresses that ("w" truncates), so use the
+  // numeric open mode directly.
+  if (write && creat) return fs.constants.O_CREAT | fs.constants.O_WRONLY;
   if (write) return "r+";
   return "r";
 }
@@ -383,6 +386,7 @@ function attachSftpHandlers(
   );
 
   sftp.on("FSTAT", (reqid: number, handleBuf: Buffer) => {
+    if (inject.withholdOn === "FSTAT") return;
     const h = lookup(handleBuf);
     if (!h || h.type !== "file") return sftp.status(reqid, STATUS_CODE.FAILURE);
     fs.fstat(h.fd, (err, st) => {
@@ -474,7 +478,16 @@ function attachSftpHandlers(
     (reqid: number, p: string) => {
       if (inject.withholdOn === op) return;
       statFn(resolve(p), (err, st) => {
-        if (err) return sftp.status(reqid, STATUS_CODE.NO_SUCH_FILE);
+        // Only a genuinely missing path is NO_SUCH_FILE; anything else (EACCES,
+        // ENOTDIR) is a generic failure, matching the OPEN/OPENDIR handlers so a
+        // distinct error code is not flattened into "missing file".
+        if (err)
+          return sftp.status(
+            reqid,
+            err.code === "ENOENT"
+              ? STATUS_CODE.NO_SUCH_FILE
+              : STATUS_CODE.FAILURE,
+          );
         sftp.attrs(reqid, attrsFromStat(st));
       });
     };
