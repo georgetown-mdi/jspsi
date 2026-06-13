@@ -3,7 +3,12 @@ import Peer from "peerjs";
 import { deriveRendezvousPeerId, getLogger } from "@psilink/core";
 
 import { ConfigManager } from "@utils/clientConfig";
+import { isDiagnosticMode } from "@utils/diagnostics";
 
+import {
+  createRedactingLogFunction,
+  resolvePeerDebugLevel,
+} from "./peerLogging";
 import { DEFAULT_PEER_WAIT_TIMEOUT_MS } from "./waitForConnection";
 
 import type { DataConnection, PeerOptions } from "peerjs";
@@ -51,13 +56,22 @@ interface SignalingLocation {
  * TURN relay forwards data, and while all traffic is relayed across the Internet
  * regardless, we do not route through a third-party relay by default (a
  * self-hosted TURN server is a future option).
+ *
+ * `redactableIds` are the session's derived rendezvous ids; the installed
+ * `logFunction` strips them from PeerJS output so the per-session diagnostic
+ * toggle can raise the debug level (see {@link resolvePeerDebugLevel}) without
+ * any derived id reaching the console.
  */
-function buildPeerOptions(loc: SignalingLocation): PeerOptions {
+function buildPeerOptions(
+  loc: SignalingLocation,
+  redactableIds: ReadonlyArray<string>,
+): PeerOptions {
   return {
     host: loc.host,
     path: loc.path,
     port: loc.port,
-    debug: config.PEERJS_DEBUG_LEVEL,
+    debug: resolvePeerDebugLevel(config.PEERJS_DEBUG_LEVEL, isDiagnosticMode()),
+    logFunction: createRedactingLogFunction(redactableIds),
     config: {
       iceServers: [
         { urls: ["stun:stun.l.google.com:19302", "stun:44.247.30.68:443"] },
@@ -156,7 +170,13 @@ export async function listenAsInviter(
 ): Promise<Peer> {
   const makePeer = options?.peerFactory ?? defaultPeerFactory;
   const signal = options?.signal;
-  const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
+  // Derive both ids: the inviter listens on its own, but the acceptor's id is
+  // the remote id PeerJS interpolates into its warnings, so the redacting log
+  // function must know it too (see buildPeerOptions).
+  const [inviterId, acceptorId] = await Promise.all([
+    deriveRendezvousPeerId(sharedSecret, "inviter"),
+    deriveRendezvousPeerId(sharedSecret, "acceptor"),
+  ]);
   const loc = inviterLocationFromWindow();
   // Short-circuit before any broker contact -- placed after the (fast) async
   // derivation above so an abort that lands during it is caught here too -- so
@@ -168,7 +188,10 @@ export async function listenAsInviter(
   // out of default (info) logs; surface it only at debug for connection triage.
   log.info(`listening as inviter at ${loc.host}:${loc.port}`);
   log.debug(`derived inviter peer id ${inviterId}`);
-  const peer = makePeer(inviterId, buildPeerOptions(loc));
+  const peer = makePeer(
+    inviterId,
+    buildPeerOptions(loc, [inviterId, acceptorId]),
+  );
   try {
     await waitForPeerOpen(peer, { signal });
   } catch (err) {
@@ -381,7 +404,10 @@ export async function dialAsAcceptor(
   // of default (info) logs and surface them only at debug for connection triage.
   log.info(`dialing the inviter at ${loc.host}:${loc.port}`);
   log.debug(`derived peer ids: inviter ${inviterId}, acceptor ${acceptorId}`);
-  const peer = makePeer(acceptorId, buildPeerOptions(loc));
+  const peer = makePeer(
+    acceptorId,
+    buildPeerOptions(loc, [inviterId, acceptorId]),
+  );
   try {
     await waitForPeerOpen(peer, { signal });
     const conn = await dialInviterWithRetry(peer, inviterId, {

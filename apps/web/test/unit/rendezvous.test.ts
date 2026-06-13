@@ -6,7 +6,7 @@ import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
 
-import type { DataConnection } from "peerjs";
+import type { DataConnection, PeerOptions } from "peerjs";
 import type Peer from "peerjs";
 import type { WebRTCEndpoint } from "@psilink/core";
 
@@ -280,5 +280,45 @@ describe("dialAsAcceptor", () => {
 
     await expect(promise).rejects.toThrow("aborted");
     expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("peer logging wiring", () => {
+  test("installs a redacting logFunction closed over the derived ids", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const inviterId = await deriveRendezvousPeerId(secret, "inviter");
+
+    let capturedOptions: PeerOptions | undefined;
+    const controller = new AbortController();
+    const promise = listenAsInviter(secret, {
+      signal: controller.signal,
+      peerFactory: (_id, options) => {
+        capturedOptions = options;
+        return new FakePeer() as unknown as Peer;
+      },
+    });
+
+    await vi.waitFor(() => expect(capturedOptions).toBeDefined());
+    expect(typeof capturedOptions?.debug).toBe("number");
+    expect(typeof capturedOptions?.logFunction).toBe("function");
+
+    // The wired-in logFunction must redact the session's derived id, proving it
+    // was constructed over the real ids rather than an empty set.
+    const logFn = capturedOptions?.logFunction as unknown as (
+      level: number,
+      ...rest: Array<unknown>
+    ) => void;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      logFn(2, `You received a malformed message from ${inviterId}`);
+      expect(warnSpy.mock.calls.flat().join(" ")).not.toContain(inviterId);
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    // Drain the otherwise-pending listen so the test leaves nothing hanging.
+    controller.abort();
+    await expect(promise).rejects.toThrow(/aborted/i);
   });
 });
