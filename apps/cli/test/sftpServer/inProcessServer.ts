@@ -341,7 +341,16 @@ function attachSftpHandlers(
   };
 
   sftp.on("REALPATH", (reqid: number, p: string) => {
-    // ssh2-sftp-client calls realpath on connect/cwd; echo the rooted path back.
+    // Echo the requested path back as its own canonical form. This leaks nothing
+    // and cannot bypass confinement: the value returned is the client's own
+    // virtual path, never a backingDir-rooted host path, and every actual file
+    // operation re-confines independently through resolve() regardless of what
+    // REALPATH returned. In practice the production adapter addresses files by
+    // absolute path and never emits a REALPATH request at all (ssh2-sftp-client
+    // only canonicalizes paths beginning with "." or ".."), so this handler is
+    // here for generic SFTP-client compatibility, not for any path this suite
+    // drives. Routing it through resolve() would be wrong -- that returns the
+    // host path and would expose backingDir.
     sftp.name(reqid, [
       { filename: p, longname: p, attrs: attrsFromStat({ size: 0 }) },
     ]);

@@ -53,8 +53,8 @@ jobs:
         run: npm run test:integration -w apps/cli
       # A second leg runs the same suite against a native OpenSSH sshd, so the
       # adapter is also exercised against a real server. sshd ships on the Ubuntu
-      # runner; the unprivileged child needs the privilege-separation directory
-      # to exist, which is created here.
+      # runner, but its build fatally checks for the privilege-separation
+      # directory at startup even when run unprivileged, so create it here.
       - name: Integration tests (CLI, native sshd server)
         run: |
           sudo mkdir -p /run/sshd
