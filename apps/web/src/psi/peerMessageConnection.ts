@@ -4,6 +4,7 @@ import {
   asConnectionError,
 } from "@psilink/core";
 
+import { redactErrorIds } from "./peerLogging";
 import { waitForConnectionOpen } from "./waitForOpen";
 
 import type { DataConnection } from "peerjs";
@@ -53,8 +54,14 @@ export async function openPeerMessageConnection(
   const mc = new QueuedMessageConnection(
     (controls) => {
       const onData = (data: unknown) => controls.deliver(data);
+      // PeerJS interpolates the remote id (`conn.peer`, a derived rendezvous id)
+      // into the errors it emits on a mid-exchange failure; redact it before
+      // `asConnectionError` wraps, so neither the wrapped message nor the
+      // attached `.cause` carries the id to the lifecycle's console/alert sinks.
       const onError = (err: unknown) =>
-        controls.fail(asConnectionError(err, "transport"));
+        controls.fail(
+          asConnectionError(redactErrorIds(err, [conn.peer]), "transport"),
+        );
       // A clean remote close can carry the peer's final frame still queued, so
       // it uses finish(): receive() drains that frame before the close error
       // surfaces. A genuine error (onError) uses fail(), the abnormal
@@ -103,8 +110,9 @@ export async function openPeerMessageConnection(
     // error/close), so tag it as a `transport` ConnectionError at the boundary;
     // otherwise a consumer that branches on ConnectionError.kind cannot classify
     // an open-time failure (F5). asConnectionError passes an existing
-    // ConnectionError through unchanged.
-    throw asConnectionError(err, "transport");
+    // ConnectionError through unchanged. Redact first: a pre-open PeerJS error
+    // can carry the remote derived id (`conn.peer`).
+    throw asConnectionError(redactErrorIds(err, [conn.peer]), "transport");
   }
   return mc;
 }

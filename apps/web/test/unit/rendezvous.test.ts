@@ -6,7 +6,7 @@ import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
 
-import type { DataConnection } from "peerjs";
+import type { DataConnection, PeerOptions } from "peerjs";
 import type Peer from "peerjs";
 import type { WebRTCEndpoint } from "@psilink/core";
 
@@ -97,6 +97,28 @@ describe("listenAsInviter", () => {
     fake.emit("error", new Error("broker unreachable"));
 
     await expect(promise).rejects.toThrow("broker unreachable");
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("redacts derived ids from a rejected pre-open error", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const inviterId = await deriveRendezvousPeerId(secret, "inviter");
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const promise = listenAsInviter(secret, { peerFactory: cap.factory });
+
+    await vi.waitFor(() =>
+      expect(fake.listenerCount("error")).toBeGreaterThan(0),
+    );
+    // PeerJS emits the peer's own derived id in this error; it must not survive
+    // to the caller's error sink (console.error / the failure alert).
+    fake.emit("error", new Error(`ID "${inviterId}" is taken`));
+
+    const rejection = await promise.catch((e: unknown) => e);
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).not.toContain(inviterId);
+    expect((rejection as Error).message).toContain("[redacted-peer-id]");
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -280,5 +302,110 @@ describe("dialAsAcceptor", () => {
 
     await expect(promise).rejects.toThrow("aborted");
     expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("redacts derived ids from a rejected fatal dial error", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const inviterId = await deriveRendezvousPeerId(secret, "inviter");
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const promise = dialAsAcceptor(secret, endpoint, {
+      peerFactory: cap.factory,
+    });
+
+    await vi.waitFor(() =>
+      expect(fake.listenerCount("open")).toBeGreaterThan(0),
+    );
+    fake.emit("open", "acceptor");
+    await vi.waitFor(() => expect(fake.connect).toHaveBeenCalled());
+    // PeerJS interpolates the dialed (remote) id into this fatal error.
+    fake.emit(
+      "error",
+      new Error(`Negotiation of connection to ${inviterId} failed.`),
+    );
+
+    const rejection = await promise.catch((e: unknown) => e);
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).not.toContain(inviterId);
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("peer logging wiring", () => {
+  // Assert the wired-in logFunction redacts every id in `ids` -- in particular
+  // the remote id, which is the one PeerJS interpolates into its warnings, so it
+  // must be in the redaction set, not just the local id the peer registers under.
+  function expectRedactsAll(
+    options: PeerOptions | undefined,
+    ids: Array<string>,
+  ): void {
+    expect(typeof options?.debug).toBe("number");
+    expect(typeof options?.logFunction).toBe("function");
+    const logFn = options?.logFunction as unknown as (
+      level: number,
+      ...rest: Array<unknown>
+    ) => void;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const id of ids)
+        logFn(2, `You received a malformed message from ${id}`);
+      const printed = warnSpy.mock.calls.flat().join(" ");
+      expect(printed).toContain("[redacted-peer-id]");
+      for (const id of ids) expect(printed).not.toContain(id);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  }
+
+  test("listenAsInviter installs a logFunction redacting both derived ids", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const [inviterId, acceptorId] = await Promise.all([
+      deriveRendezvousPeerId(secret, "inviter"),
+      deriveRendezvousPeerId(secret, "acceptor"),
+    ]);
+
+    let capturedOptions: PeerOptions | undefined;
+    const controller = new AbortController();
+    const promise = listenAsInviter(secret, {
+      signal: controller.signal,
+      peerFactory: (_id, options) => {
+        capturedOptions = options;
+        return new FakePeer() as unknown as Peer;
+      },
+    });
+
+    await vi.waitFor(() => expect(capturedOptions).toBeDefined());
+    expectRedactsAll(capturedOptions, [inviterId, acceptorId]);
+
+    // Drain the otherwise-pending listen so the test leaves nothing hanging.
+    controller.abort();
+    await expect(promise).rejects.toThrow(/aborted/i);
+  });
+
+  test("dialAsAcceptor installs a logFunction redacting both derived ids", async () => {
+    stubWindow();
+    const secret = generateSharedSecret();
+    const [inviterId, acceptorId] = await Promise.all([
+      deriveRendezvousPeerId(secret, "inviter"),
+      deriveRendezvousPeerId(secret, "acceptor"),
+    ]);
+
+    let capturedOptions: PeerOptions | undefined;
+    const controller = new AbortController();
+    const promise = dialAsAcceptor(secret, endpoint, {
+      signal: controller.signal,
+      peerFactory: (_id, options) => {
+        capturedOptions = options;
+        return new FakePeer() as unknown as Peer;
+      },
+    });
+
+    await vi.waitFor(() => expect(capturedOptions).toBeDefined());
+    expectRedactsAll(capturedOptions, [inviterId, acceptorId]);
+
+    controller.abort();
+    await expect(promise).rejects.toThrow(/aborted/i);
   });
 });
