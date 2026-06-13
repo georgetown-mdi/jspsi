@@ -212,4 +212,18 @@ describe("redactErrorIds", () => {
     expect(redactErrorIds(obj, [SAMPLE_ID])).toBe(obj);
     expect(redactErrorIds("plain", [SAMPLE_ID])).toBe("plain");
   });
+
+  test("fails closed on a frozen error: no throw, no leaked id", () => {
+    // Assigning to a frozen error's message throws a TypeError that re-embeds the
+    // original message; the helper must catch that and return a redacted error,
+    // never let the id-bearing TypeError escape.
+    const err = Object.freeze(new Error(`ID "${SAMPLE_ID}" is taken`));
+    let result: unknown;
+    expect(() => {
+      result = redactErrorIds(err, [SAMPLE_ID]);
+    }).not.toThrow();
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).not.toContain(SAMPLE_ID);
+    expect((result as Error).message).toContain("[redacted-peer-id]");
+  });
 });

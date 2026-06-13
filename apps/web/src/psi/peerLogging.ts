@@ -146,27 +146,46 @@ export function createRedactingLogFunction(
 }
 
 /**
- * Redact the rendezvous `ids` out of an `Error`'s `message` and `stack`, in
- * place, returning the same value (non-`Error` inputs pass through untouched).
+ * Redact the given `ids` out of an `Error`'s `message` and `stack`, in place,
+ * returning the same value (non-`Error` inputs pass through untouched). Applied
+ * at every seam where a PeerJS error crosses into app code -- the rendezvous
+ * setup catch and the live data-connection's `onError` (see callers) -- because
+ * PeerJS not only *prints* ids through its logger, it also *emits* them inside
+ * the `Error` objects it raises on connection failure (e.g. `ID "<id>" is taken`,
+ * a failed negotiation to a dialed id mid-exchange). Those errors propagate to
+ * the app's own error sinks (a `console.error` of the raw object, the failure
+ * alert), which the `logFunction` never sees. Redacting at the seam, before the
+ * error is wrapped, also cleans the `.cause` the wrapper attaches.
  *
- * This covers a channel the `logFunction` above does not: PeerJS not only
- * *prints* ids through its logger, it also *emits* them inside the `Error`
- * objects it raises on connection failure (e.g. `ID "<id>" is taken`, a failed
- * negotiation to a dialed id). Those errors propagate to the app's own error
- * sinks (a `console.error` of the raw object, the failure alert), which never
- * touch the redactor. The rendezvous strips the ids at the boundary where it
- * catches and re-throws, while they are still in scope, so neither sink prints
- * one. Mutating in place (rather than wrapping) preserves the error's identity
- * and any `type`/`kind` discriminant a caller's control flow keys off.
+ * Mutating in place (rather than wrapping) preserves the error's identity and any
+ * `type`/`kind` discriminant a caller's control flow keys off. If the in-place
+ * assignment throws -- a frozen or read-only-`message` error, which is not what
+ * PeerJS emits but could be a hostile or future shape -- it fails closed: a fresh
+ * redacted error is returned rather than letting the throwing `TypeError`, which
+ * re-embeds the unredacted message, escape.
+ *
+ * Redaction is exact-substring on the supplied ids: best-effort over the known
+ * PeerJS error shapes, not a guarantee against an id interpolated in some other
+ * form.
  */
 export function redactErrorIds(
   err: unknown,
   ids: ReadonlyArray<string>,
 ): unknown {
   if (!(err instanceof Error)) return err;
-  err.message = redactString(err.message, ids);
-  // The stack's first line embeds the (pre-redaction) message, so redact it too;
-  // `console.error(error)` prints the stack, not just the message.
-  if (err.stack !== undefined) err.stack = redactString(err.stack, ids);
-  return err;
+  try {
+    err.message = redactString(err.message, ids);
+    // The stack's first line embeds the (pre-redaction) message, so redact it
+    // too; `console.error(error)` prints the stack, not just the message.
+    if (err.stack !== undefined) err.stack = redactString(err.stack, ids);
+    return err;
+  } catch {
+    // Fail closed: a frozen/read-only-`message` error makes the assignment throw,
+    // and the resulting TypeError would itself embed the unredacted message.
+    // Return a fresh error with only the redacted message (name preserved),
+    // dropping the original's stack/cause rather than let an id escape.
+    const redacted = new Error(redactString(err.message, ids));
+    redacted.name = err.name;
+    return redacted;
+  }
 }

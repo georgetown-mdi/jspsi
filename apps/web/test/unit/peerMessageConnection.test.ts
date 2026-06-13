@@ -10,6 +10,10 @@ import type { DataConnection } from "peerjs";
 
 class FakeDataConnection extends EventEmitter {
   open: boolean;
+  // The remote peer id PeerJS exposes; empty by default so redaction is a no-op
+  // for tests that do not set it. A real connection's `peer` is the derived
+  // rendezvous id.
+  peer = "";
   send = vi.fn();
   // Mirrors PeerJS: a flush close on a channel that never opened only queues a
   // close sentinel and returns without tearing down the RTCPeerConnection, so
@@ -94,6 +98,42 @@ describe("openPeerMessageConnection", () => {
     expect((err as ConnectionError).kind).toBe("transport");
     expect((err as ConnectionError).message).toBe("ICE failure");
     expect((err as ConnectionError).cause).toBe(cause);
+  });
+
+  test("redacts the derived peer id from a remote error before it surfaces", async () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const { fake, conn } = makeConn();
+    fake.peer = id;
+    const mc = await openPeerMessageConnection(conn);
+
+    // A mid-exchange PeerJS failure interpolates conn.peer (a derived rendezvous
+    // id) into the error it emits.
+    fake.emit("error", new Error(`Negotiation of connection to ${id} failed.`));
+
+    const err = (await mc
+      .receive()
+      .catch((e: unknown) => e)) as ConnectionError;
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.message).not.toContain(id);
+    expect(err.message).toContain("[redacted-peer-id]");
+    // The wrapped cause (the original PeerJS error) is redacted too, so the
+    // cause-walking alert and console.error cannot reprint the id.
+    const cause = err.cause as Error;
+    expect(cause.message).not.toContain(id);
+    expect(cause.stack ?? "").not.toContain(id);
+  });
+
+  test("redacts the derived peer id from a pre-open error", async () => {
+    const id = "fedcba9876543210fedcba9876543210";
+    const { fake, conn } = makeConn(false);
+    fake.peer = id;
+    const promise = openPeerMessageConnection(conn);
+
+    fake.emit("error", new Error(`Could not connect to peer ${id}`));
+
+    const err = (await promise.catch((e: unknown) => e)) as ConnectionError;
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.message).not.toContain(id);
   });
 
   test("a remote error drains a buffered frame before failing (abnormal tail)", async () => {
