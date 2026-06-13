@@ -16,10 +16,11 @@ npm ci
 npm run build -w packages/core
 
 # Default this container's Claude sessions to prompt-free. The container's egress
-# firewall plus the checked-in command deny-list in .claude/settings.json are the
-# safety floor (deny rules are enforced even in bypassPermissions mode), so
-# prompts add nothing here. This sets only the CONTAINER's user settings (a
-# mounted volume), never the project or host config, so it does not change how
+# firewall plus the checked-in deny-list and protected-branch push hook in
+# .claude/ are the safety floor (both deny rules and PreToolUse hooks apply even in
+# bypassPermissions mode), so prompts add nothing here. This sets only the
+# CONTAINER's user settings (a mounted volume), never the project or host config,
+# so it does not change how
 # Claude behaves on the host that shares this repo's .claude/settings.json. It is
 # idempotent: it leaves an existing defaultMode untouched.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -44,5 +45,18 @@ SETTINGS="$CONFIG_DIR/settings.json" node -e '
   }
   fs.writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
 '
+
+# Wire git push (over HTTPS) and the gh CLI to a GitHub token when one is present.
+# devcontainer.json loads a repo-root .env into the container via docker
+# --env-file; `gh auth setup-git` then registers gh as git's credential helper, so
+# both `git push` and `gh pr create` authenticate with no interactive prompt.
+# Pushes to staging/main are still refused by the protected-branch hook and,
+# server-side, by GitHub branch protection. With no token forwarded, push/PR stay
+# unauthenticated -- the prior posture -- so skip rather than failing creation.
+if [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+  gh auth setup-git || echo "post-create: warning -- 'gh auth setup-git' failed; 'git push' over HTTPS may prompt."
+else
+  echo "post-create: no GH_TOKEN/GITHUB_TOKEN in env; skipping git credential setup (push/PR unauthenticated)."
+fi
 
 echo "post-create complete: dependencies installed; container Claude sessions default to prompt-free."

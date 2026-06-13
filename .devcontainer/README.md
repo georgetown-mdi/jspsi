@@ -32,15 +32,22 @@ Three layers, so prompt-free operation inside is safe:
    API and login, and the VS Code extension CDN. Telemetry and updater hosts are
    absent: the container sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and
    `DISABLE_AUTOUPDATER`, so Claude makes no such calls.
-3. **Command deny-list** (`.claude/settings.json`, checked in): a guardrail that
-   holds even with prompts disabled -- it denies `git push`, and through Claude's
-   Read/Edit/Write tools it blocks reads and writes of SSH private keys and `.env`
-   files and writes to `/etc`. Deny rules are enforced in every permission mode,
-   including bypass. It is a floor against the common paths, not an airtight wall:
-   an arbitrary shell command (`cp`, `tar`, a script) can still touch those files,
-   which is why layer 1 -- the container boundary -- is the real protection. Note
-   this file is checked in, so the same deny rules also apply to Claude sessions
-   run against this repo *on the host*, where there is no container wall behind them.
+3. **Command deny-list and a protected-branch push hook** (`.claude/settings.json`,
+   checked in): guardrails that hold even with prompts disabled. Through Claude's
+   Read/Edit/Write tools the deny-list blocks reads and writes of SSH private keys
+   and `.env` files and writes to `/etc`; a checked-in `PreToolUse` hook
+   (`.claude/hooks/block-protected-push.mjs`) blocks a direct `git push` to
+   `staging` or `main`. Both deny rules and PreToolUse hooks are enforced in every
+   permission mode, including bypass. These are a floor against the common paths,
+   not an airtight wall: an arbitrary shell command (`cp`, `tar`, a script) can
+   still touch the denied files, and the push hook is best-effort -- it catches a
+   direct or accidental push but is bypassable by shell indirection (`sh -c`,
+   `eval`, a subshell, `git -c`), so it is fast local feedback, not a security
+   boundary. The authoritative wall for `staging`/`main` is GitHub branch
+   protection (server-side, no bypass actors); layer 1 -- the container boundary --
+   is the real protection for the filesystem. Note this file is checked in, so the
+   same rules also apply to Claude sessions run against this repo *on the host*,
+   where there is no container wall behind them.
 
 `post-create.sh` sets `permissions.defaultMode: bypassPermissions` in the
 container's *user* settings only, so sessions inside start prompt-free without
@@ -58,10 +65,20 @@ the host filesystem, not an airtight seal:
   Pages/`raw`/the API are allowlisted wholesale) can be reached by sending a
   different SNI/Host to that IP. GitHub in particular is a usable exfiltration
   channel via `git`/`gh` whenever a token is present.
-- **"Pushing is blocked" means literal `git push` plus the absence of
-  credentials.** The deny-list blocks `git push`, not every `gh` write path
-  (`gh pr create`, `gh api -X POST`, ...). In practice push fails because no push
-  credential is mounted, not because every path is denied.
+- **A provided token grants real GitHub write access.** When `GH_TOKEN` is set in
+  `.env` (see Prerequisites), the container can push feature branches and open
+  PRs. The push hook refuses `staging`/`main` and branch protection rejects them
+  server-side, but any other branch is writable, and -- as the bullet above notes --
+  `git`/`gh` over an allowlisted GitHub IP is then a usable exfiltration channel.
+  Scope the token narrowly (a fine-grained PAT limited to this repo, contents +
+  pull-requests write) so a leak cannot reach other repos. With no token, push/PR
+  are unauthenticated and fail.
+- **The push hook is not a security boundary.** It blocks direct or accidental
+  pushes to `staging`/`main`, but a wrapped command (`sh -c`, `eval`, a subshell,
+  `git -c remote.origin.push=...`) bypasses it, and it does not gate `gh` API
+  writes (`gh pr merge`, `gh api`) at all. GitHub branch protection enforces
+  `staging`/`main` server-side across every path -- that is the wall; the hook is
+  fast local feedback for an unattended agent, nothing more.
 - **DNS egress is permitted** to the container's resolver -- a low-bandwidth
   exfiltration channel an IP allowlist cannot close.
 - **A write into the workspace is a write to the host repo.** The workspace bind is
@@ -76,8 +93,19 @@ scope here.
 - Docker on the host (Docker Desktop on macOS).
 - Git identity: VS Code's Dev Containers feature shares the host `~/.gitconfig`
   into the container automatically. With the bare `devcontainer` CLI, set it once
-  inside (`git config --global user.name/.email`) if you need to commit; pushing
-  is blocked from inside regardless.
+  inside (`git config --global user.name/.email`) if you need to commit.
+- Push/PR credentials (optional): to let a session push and open PRs from inside,
+  copy `.env.example` to `.env` at the repository root and set `GH_TOKEN` to a
+  GitHub PAT. The container loads `.env` via docker `--env-file` (`devcontainer.json`
+  `runArgs`) and `post-create.sh` runs `gh auth setup-git`, so both `git push`
+  (HTTPS) and `gh pr create` authenticate with no prompt. Use a fine-grained PAT
+  scoped to this repo (contents + pull-requests write). `.env` is gitignored.
+  `--env-file` is **literal**: write `GH_TOKEN=<value>` unquoted, with no `export`,
+  and with no inline `# comment` -- quotes, an `export` prefix, and a trailing
+  comment all become part of the token value (a corrupted token then fails only
+  later, at push time). `GITHUB_TOKEN` is accepted as an alternative name. With no
+  `.env` (an empty one is created automatically so the container always starts),
+  push/PR stay unauthenticated.
 
 ## Using it
 
@@ -101,4 +129,7 @@ PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli   # native sshd
 npm run dev -w apps/web            # web dev server on localhost:3000
 ```
 
-Pushing is intentionally blocked inside the container; push from the host.
+With a `GH_TOKEN` set in `.env` (see Prerequisites) a session can push feature
+branches and open PRs from inside; pushes to `staging`/`main` are refused by the
+push hook and by GitHub branch protection. With no token, push/PR are
+unauthenticated and fail.
