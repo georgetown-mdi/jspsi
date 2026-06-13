@@ -60,8 +60,21 @@ test("parseDurationFlag: a bare integer is rejected naming the flag and the suff
   expect(message).toContain("--peer-timeout");
   expect(message).toContain("30s");
   expect(message).toContain("unit suffix");
-  // A leading-zero / non-canonical integer is normalized in the suggestion.
-  expect(parseDurationFlag.bind(null, "--peer-timeout", "030")).toThrow("30s");
+});
+
+test("parseDurationFlag: the bare-integer hint echoes a huge value verbatim, not a rounded one", () => {
+  // A digit string past 2^53 must not be suggested back through Number() (which
+  // would round it or yield Infinity); the hint echoes exactly what was typed,
+  // even though parseDuration would itself reject that suffixed value as too large.
+  const huge = "99999999999999999";
+  let message = "";
+  try {
+    parseDurationFlag("--peer-timeout", huge);
+  } catch (err) {
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain(`${huge}s`);
+  expect(message).not.toContain("Infinity");
 });
 
 test("parseDurationFlag: a malformed value yields parseDuration's message prefixed with the flag", () => {

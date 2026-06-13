@@ -83,3 +83,16 @@ test("durationFlagSeconds: a repeated flag is rejected before parsing", () => {
     ),
   ).toThrow("--peer-timeout may be given only once");
 });
+
+test("durationFlagSeconds: a non-string value yields a UsageError, not a TypeError", () => {
+  // The flags routed here are type:"string", so yargs always yields a string; a
+  // contract violation (a number slipping through, a test bypassing yargs) is
+  // coerced so it still fails as a clean flag-named usage error rather than a raw
+  // .trim() TypeError.
+  expect(() =>
+    durationFlagSeconds(argv({ "peer-timeout": 30 }), "peer-timeout"),
+  ).toThrow(UsageError);
+  expect(() =>
+    durationFlagSeconds(argv({ "peer-timeout": 30 }), "peer-timeout"),
+  ).toThrow("30s");
+});

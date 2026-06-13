@@ -46,9 +46,13 @@ export function durationFlagSeconds(
   argv: Arguments,
   name: string,
 ): number | undefined {
-  const raw = singleValue(argv, name) as string | undefined;
+  const raw = singleValue(argv, name);
   if (raw === undefined) return undefined;
-  return parseDurationFlag(`--${name}`, raw) / 1000;
+  // singleValue returns unknown; the flags routed here are declared type:"string"
+  // so yargs always yields a string, but coerce defensively so a contract
+  // violation surfaces as parseDurationFlag's flag-named UsageError rather than a
+  // raw TypeError from .trim() on a non-string.
+  return parseDurationFlag(`--${name}`, String(raw)) / 1000;
 }
 
 /** Mapping from log-level name to loglevel numeric constant. */
