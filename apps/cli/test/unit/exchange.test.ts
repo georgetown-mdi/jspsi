@@ -2,13 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Arguments } from "yargs";
+import yargs, { type Arguments } from "yargs";
 import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import { getLogger } from "@psilink/core";
 import { saveKeyFile } from "../../src/keyFile";
 import { runProtocol } from "../../src/protocol";
 import {
+  builder,
   handler,
   loadConfig,
   warnAndStripInjectedAuthFields,
@@ -89,6 +90,23 @@ afterEach(() => {
 function baseOptions() {
   return { configFile, keyFile };
 }
+
+// --- builder help overrides --------------------------------------------------
+
+test("builder: exchange's command-specific option help reaches the rendered help", async () => {
+  // The describe-override map exchange passes to addCommonBootstrapOptions must
+  // actually reach the rendered help. A stale/typo'd key -- or a shared option
+  // that stops reading its override -- would silently fall back to the
+  // invite/accept URL/write-oriented default, with no other test catching it.
+  // Whitespace is normalized so a help line wrapped by yargs still matches.
+  const help = (await builder(yargs([])).getHelp()).replace(/\s+/g, " ");
+  expect(help).toContain("exchange configuration file");
+  expect(help).toContain("overrides connection.server.port in config");
+  // The URL/write-oriented defaults must NOT appear: exchange reads a config and
+  // has no URL, so their presence would mean an override was dropped.
+  expect(help).not.toContain("overrides the port in URL");
+  expect(help).not.toContain("where to write psilink.yaml");
+});
 
 // --- happy path --------------------------------------------------------------
 

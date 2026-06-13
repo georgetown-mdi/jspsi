@@ -9,10 +9,11 @@ import {
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Arguments } from "yargs";
+import yargs, { type Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 import type { SFTPConnectionConfig } from "@psilink/core";
 import {
+  builder,
   channelFromURL,
   createConnection,
   handler,
@@ -35,6 +36,21 @@ beforeEach(() => {
 
 afterEach(() => {
   existsSyncSpy.mockRestore();
+});
+
+// --- builder help overrides --------------------------------------------------
+
+test("builder: zero-setup's --save-scoped config/key help reaches the rendered help", async () => {
+  // zero-setup overrides only the config/key file describes (they are written
+  // only under --save); a dropped override would fall back to the unqualified
+  // shared default. Whitespace is normalized so a wrapped help line still
+  // matches.
+  const help = (await builder(yargs([])).getHelp()).replace(/\s+/g, " ");
+  expect(help).toContain("where to write psilink.yaml when --save is given");
+  expect(help).toContain("where to write .psilink.key when --save is given");
+  // zero-setup intentionally keeps the shared URL wording for server-*, so the
+  // default text remains (it did not override those).
+  expect(help).toContain("overrides the port in URL");
 });
 
 // --- channelFromURL ----------------------------------------------------------

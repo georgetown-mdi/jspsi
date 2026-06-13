@@ -8,7 +8,6 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
-  sanitizeErrorForDisplay,
   serializeCertificate,
   UsageError,
 } from "@psilink/core";
@@ -21,7 +20,12 @@ import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../signingIdentityFile";
-import { LOG_LEVELS, singleValue } from "../util/cli";
+import {
+  exitWithError,
+  LOG_LEVELS,
+  parseOrExit,
+  singleValue,
+} from "../util/cli";
 
 // `psilink fingerprint` is the front door to the signing identity. Generation is
 // LAZY and anchored here, not at exchange time: a party must display its
@@ -280,29 +284,22 @@ function report(
 
 export async function handler(argv: Arguments): Promise<void> {
   // This command resolves and applies the log level before the logger exists, so
-  // a bad --log-level is reported on stderr and exited 64 here rather than
+  // a bad --log-level is reported on stderr and exited 64 here (via the shared
+  // parseOrExit boundary, the same one exchange/zeroSetup use) rather than
   // through the logger-based catch below. Both usage errors -- a repeated flag
   // (singleValue, the same shared accessor and message as every other command)
-  // and an unrecognized value -- are UsageErrors handled in one place.
-  let logLevel: logLibrary.LogLevelNumbers;
-  try {
+  // and an unrecognized value -- are UsageErrors handled in one place; its
+  // log-level resolution stays here rather than going through the shared parser,
+  // which a fingerprint run does not need.
+  const logLevel = parseOrExit((): logLibrary.LogLevelNumbers => {
     const rawLogLevel = (
       (singleValue(argv, "log-level") as string | undefined) || "info"
     ).toLowerCase();
     const resolved = LOG_LEVELS[rawLogLevel];
     if (resolved === undefined)
       throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-    logLevel = resolved;
-  } catch (err) {
-    // Mirror the pre-logger parse guard in exchange.ts / zeroSetup.ts: a usage
-    // error (a repeated --log-level or an unrecognized value) is reported on
-    // stderr and exited 64 here; any other (unexpected) error propagates to the
-    // top-level handler with its stack intact rather than being flattened to a
-    // bare exit 69 with the cause lost.
-    if (!(err instanceof UsageError)) throw err;
-    console.error(sanitizeErrorForDisplay(err));
-    process.exit(64);
-  }
+    return resolved;
+  });
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("fingerprint");
 
@@ -369,7 +366,6 @@ export async function handler(argv: Arguments): Promise<void> {
 
     report(action, identityPath, identity, fingerprint);
   } catch (err) {
-    log.error(sanitizeErrorForDisplay(err));
-    process.exit(err instanceof UsageError ? 64 : 69);
+    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
   }
 }

@@ -845,20 +845,56 @@ export async function runOrExit(
 // --- Shared CLI options ------------------------------------------------------
 
 /**
- * Add the options common to `invite` and `accept` (config/key paths, identity,
- * SFTP credential overrides, connection/exchange tuning, logging, recording).
- * Positionals and `accept-timeout` (invite-only) are added by each command's
- * own builder.
+ * Per-command overrides for the descriptions of the common bootstrap options
+ * whose accurate wording is command-specific -- chiefly whether the config/key
+ * files are written or read, and whether the `server-*` (and `peer-id`)
+ * overrides apply to a connection URL or to a loaded config. Keyed by the yargs
+ * option name; an absent key keeps the default (`invite`/`accept`) wording. Only
+ * the describe text varies -- the option name, type, alias, and default live
+ * once in {@link addCommonBootstrapOptions}, so a new common flag is added there
+ * alone and appears in every command.
  */
-export function addCommonBootstrapOptions(cmd: Argv): Argv {
+export type CommonBootstrapDescribeOverrides = Partial<
+  Record<
+    | "config-file"
+    | "key-file"
+    | "server-port"
+    | "server-username"
+    | "server-password"
+    | "server-private-key"
+    | "peer-id"
+    | "timestamp-in-filename"
+    | "retain-files",
+    string
+  >
+>;
+
+/**
+ * Add the options common to the bootstrap-style commands (config/key paths,
+ * identity, SFTP credential overrides, connection/exchange tuning, logging,
+ * recording). Positionals and command-specific options (`accept-timeout` for
+ * `invite`, `save`/sweep controls for `zero-setup`/`exchange`) are added by each
+ * command's own builder. `describe` lets a command supply accurate wording for
+ * the few options whose meaning differs from the `invite`/`accept` default --
+ * e.g. `exchange` reads a config and has no URL, so its `server-*` text names
+ * the config rather than the URL.
+ */
+export function addCommonBootstrapOptions(
+  cmd: Argv,
+  describe: CommonBootstrapDescribeOverrides = {},
+): Argv {
   return cmd
     .option("config-file", {
       type: "string",
-      describe: `where to write psilink.yaml (default: ${DEFAULT_CONFIG_PATH})`,
+      describe:
+        describe["config-file"] ??
+        `where to write psilink.yaml (default: ${DEFAULT_CONFIG_PATH})`,
     })
     .option("key-file", {
       type: "string",
-      describe: `where to write .psilink.key (default: ${DEFAULT_KEY_PATH})`,
+      describe:
+        describe["key-file"] ??
+        `where to write .psilink.key (default: ${DEFAULT_KEY_PATH})`,
     })
     .option("identity", {
       type: "string",
@@ -866,21 +902,27 @@ export function addCommonBootstrapOptions(cmd: Argv): Argv {
     })
     .option("server-port", {
       type: "number",
-      describe: "server port; overrides the port in URL",
+      describe:
+        describe["server-port"] ?? "server port; overrides the port in URL",
     })
     .option("server-username", {
       type: "string",
-      describe: "server username; overrides the username in URL",
+      describe:
+        describe["server-username"] ??
+        "server username; overrides the username in URL",
     })
     .option("server-password", {
       type: "string",
       describe:
+        describe["server-password"] ??
         "server password; use @path to read from file; overrides the " +
-        "password in URL",
+          "password in URL",
     })
     .option("server-private-key", {
       type: "string",
-      describe: "SSH private key; use @path to read from file",
+      describe:
+        describe["server-private-key"] ??
+        "SSH private key; use @path to read from file",
     })
     .option("connection-timeout", {
       type: "string",
@@ -929,23 +971,26 @@ export function addCommonBootstrapOptions(cmd: Argv): Argv {
     .option("peer-id", {
       type: "string",
       describe:
+        describe["peer-id"] ??
         "stable identifier for this party; appears in filenames and logs. " +
-        "Requires timestamp_in_filename: true. Both parties must use " +
-        "distinct ids",
+          "Requires timestamp_in_filename: true. Both parties must use " +
+          "distinct ids",
     })
     .option("timestamp-in-filename", {
       type: "boolean",
       describe:
+        describe["timestamp-in-filename"] ??
         "encode a UTC timestamp and per-session counter in each outgoing " +
-        "message filename; --retain-files implies it. Both parties must use " +
-        "the same value",
+          "message filename; --retain-files implies it. Both parties must use " +
+          "the same value",
     })
     .option("retain-files", {
       type: "boolean",
       describe:
+        describe["retain-files"] ??
         "keep all exchange files as a permanent transcript instead of " +
-        "deleting them after consumption. Requires --timestamp-in-filename. " +
-        "Both parties must set this flag identically",
+          "deleting them after consumption. Requires --timestamp-in-filename. " +
+          "Both parties must set this flag identically",
     })
     .option("verbose", {
       alias: "v",
@@ -1029,9 +1074,30 @@ export function parseCommonBootstrapArgs(
   };
 }
 
+/**
+ * The subset of parsed common options {@link connectionOverridesFrom} reads. A
+ * `Pick` rather than the full {@link CommonBootstrapOptions} so the command
+ * `Options` shapes that carry only the override fields (exchange's, zero-setup's)
+ * also satisfy it; the full options object is assignable to it too.
+ */
+export type ConnectionOverrideOptions = Pick<
+  CommonBootstrapOptions,
+  | "connectionTimeout"
+  | "peerTimeout"
+  | "maxReconnectAttempts"
+  | "serverUsername"
+  | "serverPassword"
+  | "serverPrivateKey"
+  | "serverPort"
+  | "locklessRendezvous"
+  | "peerId"
+  | "timestampInFilename"
+  | "retainFiles"
+>;
+
 /** Map the parsed common options to the connection-override shape. */
 export function connectionOverridesFrom(
-  options: CommonBootstrapOptions,
+  options: ConnectionOverrideOptions,
   extra: { peerTimeout?: number } = {},
 ): ConnectionOverrides {
   return {
@@ -1047,4 +1113,31 @@ export function connectionOverridesFrom(
     timestampInFilename: options.timestampInFilename,
     retainFiles: options.retainFiles,
   };
+}
+
+/**
+ * Warn that the file-sync-only flags (`--lockless-rendezvous`, `--retain-files`)
+ * have no effect on a channel that is not `sftp` or `filedrop`, naming whichever
+ * flags the caller actually set. The channel is taken as input so the one helper
+ * serves both call sites: `exchange` derives it from the loaded connection
+ * (post-override), `zero-setup` from the server URL (pre-connection). A file-sync
+ * channel warns for neither flag. Shared so the wording cannot drift between the
+ * two commands.
+ */
+export function warnUnsupportedFileSyncFlags(
+  channel: ConnectionConfig["channel"],
+  flags: { locklessRendezvous?: boolean; retainFiles?: boolean },
+  log: { warn: (message: string) => void },
+): void {
+  if (channel === "sftp" || channel === "filedrop") return;
+  if (flags.locklessRendezvous === true)
+    log.warn(
+      `--lockless-rendezvous has no effect on the ${channel} channel and will ` +
+        "be ignored; it is only supported on sftp and filedrop",
+    );
+  if (flags.retainFiles === true)
+    log.warn(
+      `--retain-files has no effect on the ${channel} channel and will be ` +
+        "ignored; it is only supported on sftp and filedrop",
+    );
 }
