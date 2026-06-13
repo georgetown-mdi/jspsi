@@ -46,6 +46,31 @@ async function encodeAcceptToken(): Promise<string> {
   return encodeInvitation(token);
 }
 
+// Encode a token WITHOUT schema validation, mirroring encodeInvitation's wire
+// format (base64url body plus a 4-byte SHA-256 checksum), so a test can mint a
+// checksum-valid string that fails the invitation schema and thus makes
+// decodeInvitation throw a ZodError. encodeInvitation itself validates first, so
+// it cannot produce a schema-invalid token.
+async function encodeRaw(obj: unknown): Promise<string> {
+  const toBase64Url = (b: Uint8Array): string =>
+    btoa(Array.from(b, (x) => String.fromCharCode(x)).join(""))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const body = toBase64Url(bytes);
+  const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return body + toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
+}
+
+// Flip the final checksum character of a valid encoded invitation so the body
+// still decodes but the appended checksum no longer matches -- decodeInvitation
+// then throws the plain "invitation checksum mismatch" Error (not a ZodError).
+function corruptChecksum(encoded: string): string {
+  const last = encoded.slice(-1);
+  return encoded.slice(0, -1) + (last === "A" ? "B" : "A");
+}
+
 let container: HTMLElement | undefined;
 let root: Root | undefined;
 
@@ -115,5 +140,46 @@ describe("accept consent gate (route wiring)", () => {
       .element(page.getByRole("button", { name: "Accept and continue" }))
       .toBeDisabled();
     expect(exchangeMounted()).toBe(false);
+  });
+});
+
+describe("decode error rendering", () => {
+  test("renders a schema failure as a readable line, not a raw ZodError blob", async () => {
+    // A checksum-valid token that fails the invitation schema (an invalid
+    // sharedSecret) makes decodeInvitation throw a ZodError. The acceptor must
+    // see the collapsed `<path>: <message>` one-liner from describeDecodeError,
+    // never Zod's serialized issues blob -- the readability this change delivers.
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: getDefaultLinkageTerms("County Health Department"),
+      sharedSecret: "not-a-valid-shared-secret",
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    });
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain("sharedSecret:");
+    // The raw blob is `JSON.stringify(issues)`, which always carries a "code"
+    // key; the readable one-liner never does.
+    expect(text).not.toContain('"code"');
+  });
+
+  test("surfaces a non-ZodError failure's plain message unchanged", async () => {
+    // A corrupted checksum is a plain Error, not a ZodError; its fixed message
+    // must pass through verbatim.
+    window.location.hash = corruptChecksum(await encodeAcceptToken());
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("invitation checksum mismatch"))
+      .toBeInTheDocument();
   });
 });
