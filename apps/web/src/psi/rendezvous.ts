@@ -7,6 +7,7 @@ import { isDiagnosticMode } from "@utils/diagnostics";
 
 import {
   createRedactingLogFunction,
+  redactErrorIds,
   resolvePeerDebugLevel,
 } from "./peerLogging";
 import { DEFAULT_PEER_WAIT_TIMEOUT_MS } from "./waitForConnection";
@@ -199,7 +200,9 @@ export async function listenAsInviter(
     await waitForPeerOpen(peer, { signal });
   } catch (err) {
     peer.destroy();
-    throw err;
+    // PeerJS embeds a derived id in some emitted errors (e.g. `ID "<id>" is
+    // taken`); strip the ids before the error escapes to the app's error sinks.
+    throw redactErrorIds(err, [inviterId, acceptorId]);
   }
   return peer;
 }
@@ -422,6 +425,9 @@ export async function dialAsAcceptor(
     return [peer, conn];
   } catch (err) {
     peer.destroy();
-    throw err;
+    // PeerJS embeds a derived id in some emitted errors (e.g. a failed
+    // negotiation to the dialed id); strip the ids before the error escapes to
+    // the app's error sinks.
+    throw redactErrorIds(err, [inviterId, acceptorId]);
   }
 }

@@ -32,12 +32,21 @@ const PEERJS_ALL = 3;
  *
  * Never lowers below the configured base, so an operator who raised the base via
  * config does not lose verbosity when the toggle is off.
+ *
+ * A base outside PeerJS's valid 0-3 integer range falls back to errors-only: a
+ * misconfigured `NaN` would otherwise reach PeerJS as `NaN || 0 === 0` and
+ * silently disable all logging (including while diagnosing), and a negative or
+ * fractional value undershoots the documented default.
  */
 export function resolvePeerDebugLevel(
   baseLevel: number,
   diagnostic: boolean,
 ): number {
-  return diagnostic ? Math.max(baseLevel, PEERJS_ALL) : baseLevel;
+  const base =
+    Number.isInteger(baseLevel) && baseLevel >= 0 && baseLevel <= PEERJS_ALL
+      ? baseLevel
+      : PEERJS_ERRORS_ONLY;
+  return diagnostic ? Math.max(base, PEERJS_ALL) : base;
 }
 
 /** Console-shaped sink the redacting log function writes to; injectable so a
@@ -79,12 +88,18 @@ function redactValue(
   if (value instanceof Error)
     return `(${value.name}) ${redactString(value.message, ids)}`;
   if (typeof value !== "object" || value === null) return value;
-  // A cyclic back-reference: return a placeholder, never the original object --
-  // returning the original would leak its unredacted ids straight to the sink.
+  // An already-visited reference (a true cycle, or a node shared at two points of
+  // one argument): return a placeholder, never the original object -- returning
+  // the original would leak its unredacted ids straight to the sink.
   if (seen.has(value)) return "[circular]";
   seen.add(value);
   if (Array.isArray(value))
     return value.map((item) => redactValue(item, ids, seen));
+  // Only string-keyed enumerable own properties are traversed. A Map/Set/typed
+  // array or a Symbol-keyed value yields an empty object here -- its contents are
+  // dropped, never printed, so an id inside one cannot leak (it just is not
+  // shown). PeerJS logs only strings, plain objects, and Errors, so this loses no
+  // real diagnostic content today.
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value))
     out[key] = redactValue(item, ids, seen);
@@ -110,9 +125,16 @@ export function createRedactingLogFunction(
     // A fresh cycle-guard per argument: one shared across sibling arguments would
     // return the same object unredacted the second time it appeared (already in
     // the set), so an id in a repeated argument would escape.
-    const redacted = rest.map((arg) =>
-      redactValue(arg, ids, new WeakSet<object>()),
-    );
+    const redacted = rest.map((arg) => {
+      try {
+        return redactValue(arg, ids, new WeakSet<object>());
+      } catch {
+        // A throwing getter or pathologically deep structure must never surface
+        // the raw (unredacted) argument or throw back into PeerJS's emit path;
+        // drop to a placeholder instead. Fails closed, not open.
+        return "[unredactable]";
+      }
+    });
     // Mirrors PeerJS's own level mapping. A logLevel of 0 (Disabled) is
     // intentionally a no-op: PeerJS gates messages against the level before
     // calling a logFunction, so it never dispatches at 0, and dropping a
@@ -121,4 +143,30 @@ export function createRedactingLogFunction(
     else if (logLevel >= 2) sink.warn("PeerJS WARNING:", ...redacted);
     else if (logLevel >= 1) sink.error("PeerJS ERROR:", ...redacted);
   };
+}
+
+/**
+ * Redact the rendezvous `ids` out of an `Error`'s `message` and `stack`, in
+ * place, returning the same value (non-`Error` inputs pass through untouched).
+ *
+ * This covers a channel the `logFunction` above does not: PeerJS not only
+ * *prints* ids through its logger, it also *emits* them inside the `Error`
+ * objects it raises on connection failure (e.g. `ID "<id>" is taken`, a failed
+ * negotiation to a dialed id). Those errors propagate to the app's own error
+ * sinks (a `console.error` of the raw object, the failure alert), which never
+ * touch the redactor. The rendezvous strips the ids at the boundary where it
+ * catches and re-throws, while they are still in scope, so neither sink prints
+ * one. Mutating in place (rather than wrapping) preserves the error's identity
+ * and any `type`/`kind` discriminant a caller's control flow keys off.
+ */
+export function redactErrorIds(
+  err: unknown,
+  ids: ReadonlyArray<string>,
+): unknown {
+  if (!(err instanceof Error)) return err;
+  err.message = redactString(err.message, ids);
+  // The stack's first line embeds the (pre-redaction) message, so redact it too;
+  // `console.error(error)` prints the stack, not just the message.
+  if (err.stack !== undefined) err.stack = redactString(err.stack, ids);
+  return err;
 }

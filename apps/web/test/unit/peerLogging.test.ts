@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   PEERJS_ERRORS_ONLY,
   createRedactingLogFunction,
+  redactErrorIds,
   resolvePeerDebugLevel,
 } from "../../src/psi/peerLogging.js";
 
@@ -41,6 +42,17 @@ describe("resolvePeerDebugLevel", () => {
   test("never lowers below a base already above errors-only", () => {
     expect(resolvePeerDebugLevel(3, false)).toBe(3);
     expect(resolvePeerDebugLevel(2, true)).toBe(3);
+  });
+
+  test("falls back to errors-only for an out-of-range or non-integer base", () => {
+    // NaN would otherwise reach PeerJS as `NaN || 0` and disable all logging.
+    expect(resolvePeerDebugLevel(NaN, false)).toBe(PEERJS_ERRORS_ONLY);
+    expect(resolvePeerDebugLevel(NaN, true)).toBe(3);
+    expect(resolvePeerDebugLevel(-1, false)).toBe(PEERJS_ERRORS_ONLY);
+    expect(resolvePeerDebugLevel(2.5, false)).toBe(PEERJS_ERRORS_ONLY);
+    expect(resolvePeerDebugLevel(99, false)).toBe(PEERJS_ERRORS_ONLY);
+    // A valid explicit 0 (Disabled) is honored.
+    expect(resolvePeerDebugLevel(0, false)).toBe(0);
   });
 });
 
@@ -126,17 +138,78 @@ describe("createRedactingLogFunction", () => {
     expect(sink.error).toHaveBeenCalledTimes(1);
   });
 
-  test("passes non-id content through unchanged", () => {
+  test("level 0 (Disabled) prints nothing", () => {
+    const sink = makeSink();
+    const logFn = createRedactingLogFunction([], sink);
+
+    logFn(0, "should not print");
+
+    expect(sink.log).not.toHaveBeenCalled();
+    expect(sink.warn).not.toHaveBeenCalled();
+    expect(sink.error).not.toHaveBeenCalled();
+  });
+
+  test("passes non-id content through unchanged and preserves structure", () => {
     const sink = makeSink();
     const logFn = createRedactingLogFunction([SAMPLE_ID], sink);
 
-    logFn(3, "ICE candidate gathered", 42, { state: "connected" });
+    logFn(3, "ICE candidate gathered", 42, {
+      state: "connected",
+      src: SAMPLE_ID,
+    });
 
+    // Non-id content survives; the surrounding structure is preserved, only the
+    // id is replaced (guards against a regression that over-redacts or flattens).
     expect(sink.log).toHaveBeenCalledWith(
       "PeerJS:",
       "ICE candidate gathered",
       42,
-      { state: "connected" },
+      {
+        state: "connected",
+        src: "[redacted-peer-id]",
+      },
     );
+  });
+
+  test("never throws into the caller, and never prints the raw value, on a throwing getter", () => {
+    const sink = makeSink();
+    const logFn = createRedactingLogFunction([SAMPLE_ID], sink);
+    const hostile = {
+      get peer(): string {
+        throw new Error("boom");
+      },
+    };
+
+    expect(() => logFn(2, hostile)).not.toThrow();
+    expect(sink.warn).toHaveBeenCalledTimes(1);
+    expect(sink.warn).toHaveBeenCalledWith("PeerJS WARNING:", "[unredactable]");
+  });
+});
+
+describe("redactErrorIds", () => {
+  test("redacts ids from an Error's message and stack, in place", () => {
+    const err = new Error(`ID "${SAMPLE_ID}" is taken`);
+    const result = redactErrorIds(err, [SAMPLE_ID]);
+
+    expect(result).toBe(err);
+    expect(err.message).not.toContain(SAMPLE_ID);
+    expect(err.message).toContain("[redacted-peer-id]");
+    expect(err.stack ?? "").not.toContain(SAMPLE_ID);
+  });
+
+  test("preserves a control discriminant the error carries", () => {
+    const err = Object.assign(new Error(`from peer:${SAMPLE_ID}`), {
+      type: "peer-unavailable",
+    });
+    redactErrorIds(err, [SAMPLE_ID]);
+
+    expect((err as { type: string }).type).toBe("peer-unavailable");
+    expect(err.message).not.toContain(SAMPLE_ID);
+  });
+
+  test("passes a non-Error value through unchanged", () => {
+    const obj = { type: "network" };
+    expect(redactErrorIds(obj, [SAMPLE_ID])).toBe(obj);
+    expect(redactErrorIds("plain", [SAMPLE_ID])).toBe("plain");
   });
 });
