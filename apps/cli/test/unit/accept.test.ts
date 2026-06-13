@@ -19,7 +19,6 @@ import type {
 
 import {
   decodeAndValidateInvitation,
-  describeDecodeError,
   displayInvitation,
   handler as acceptHandler,
   resolveAcceptPositionals,
@@ -470,25 +469,6 @@ test("decode error escapes a hostile unrecognized endpoint key name end to end",
   const msg = (err as Error).message;
   expect(msg).not.toContain("\x1b");
   expect(msg).toContain("\\x1b");
-});
-
-test("describeDecodeError escapes a partner-controlled path component", () => {
-  // A Zod path can name a partner-controlled object key in the general case; pin
-  // that the path is escaped even though the current invitation schema does not
-  // surface one (a synthetic issue stands in).
-  const out = describeDecodeError({
-    issues: [{ path: ["connectionEndpoint", "\x1b[31mKEY"], message: "bad" }],
-  });
-  expect(out).not.toContain("\x1b");
-  expect(out).toContain("\\x1b");
-});
-
-test("describeDecodeError leaves an ordinary path and message unchanged", () => {
-  expect(
-    describeDecodeError({
-      issues: [{ path: ["connectionEndpoint", "host"], message: "Invalid" }],
-    }),
-  ).toBe("connectionEndpoint.host: Invalid");
 });
 
 test("displayInvitation escapes a hostile inviter identity and key names", () => {

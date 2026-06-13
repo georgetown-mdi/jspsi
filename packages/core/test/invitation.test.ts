@@ -414,9 +414,10 @@ test.each(nonLocatorCases)(
 
 test("escapes a hostile unrecognized endpoint key name in the rejection message", async () => {
   // The unrecognized-key rejection echoes the key NAME, which the inviter
-  // controls; accept.ts surfaces that message (the issue's message string) to
-  // the accepting operator's terminal via describeDecodeError. A name carrying
-  // control/ANSI bytes must be escaped, not relayed raw.
+  // controls; the shared describeDecodeError surfaces that message (the issue's
+  // message string) to the accepting operator (CLI terminal or web accept
+  // screen), relaying it as is. A name carrying control/ANSI bytes must be
+  // escaped at this source, not relayed raw.
   const hostileKey = "\x1b[31mFAKE";
   const encoded = await encodeRaw({
     ...baseToken,

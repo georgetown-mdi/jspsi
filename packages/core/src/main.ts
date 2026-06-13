@@ -34,6 +34,7 @@ export {
   sanitizeErrorForDisplay,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
+export { describeDecodeError } from "./utils/describeDecodeError";
 
 export * from "./config/standardization";
 export * from "./config/connection";

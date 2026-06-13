@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Container, Paper, Title } from "@mantine/core";
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { describeDecodeError } from "@psilink/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
@@ -52,12 +52,16 @@ export function AcceptInvitation() {
         if (!controller.signal.aborted)
           setDecode({ status: "ready", invitation });
       } catch (err) {
-        // The error parses a partner-supplied token, so its message or cause
-        // chain can embed partner-controlled bytes (control/ANSI/deceptive
-        // Unicode); route it through the display-boundary seam before it reaches
-        // the alert, as the exchange's own failure alert does.
+        // A schema-validation failure throws a ZodError whose raw `.message` is a
+        // multi-line issues blob; collapse it to a readable one-liner (and let a
+        // plain checksum/JSON/base64 Error pass its message through) via the same
+        // describeDecodeError the CLI uses. The helper escapes every path
+        // component it interpolates -- a Zod path can name a partner-controlled
+        // object key in the general case -- so it is the display-boundary seam
+        // here and needs no further wrapping pass (which would double-escape
+        // those components).
         if (!controller.signal.aborted)
-          setDecode({ status: "error", message: sanitizeErrorForDisplay(err) });
+          setDecode({ status: "error", message: describeDecodeError(err) });
       }
     })();
     return () => controller.abort();

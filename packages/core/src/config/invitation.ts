@@ -71,9 +71,11 @@ export type ConnectionEndpoint =
 const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code === "unrecognized_keys") {
     // The rejected key names are partner-controlled (the inviter crafts the
-    // token), and this message is surfaced to the accepting operator's terminal
-    // via describeDecodeError. Escape each name so a key like "\x1b[31m..."
-    // cannot inject terminal control/ANSI sequences or deceptive Unicode.
+    // token), and this message is surfaced to the accepting operator (the CLI
+    // terminal or the web accept screen) via the shared describeDecodeError,
+    // which relays the issue message as is. Escape each name so a key like
+    // "\x1b[31m..." cannot inject terminal control/ANSI sequences or deceptive
+    // Unicode.
     return (
       "a connection endpoint may carry only a credential-free locator " +
       "(channel plus host/port/path); every other field is rejected so that no " +
