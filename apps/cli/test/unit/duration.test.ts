@@ -77,6 +77,20 @@ test("parseDurationFlag: the bare-integer hint echoes a huge value verbatim, not
   expect(message).not.toContain("Infinity");
 });
 
+test("parseDurationFlag: the bare-integer hint strips leading zeros from its suggestion", () => {
+  // parseDuration reads 007s as 7s, so the migration hint must suggest 7s, not a
+  // 007s the phrase "007 seconds" would misdescribe -- done with a string op, so
+  // it does not reintroduce the Number() rounding the huge-value case avoids.
+  let message = "";
+  try {
+    parseDurationFlag("--peer-timeout", "007");
+  } catch (err) {
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain("use 7s for 7 seconds");
+  expect(message).not.toContain("007");
+});
+
 test("parseDurationFlag: a malformed value yields parseDuration's message prefixed with the flag", () => {
   expect(() => parseDurationFlag("--connection-timeout", "2hours")).toThrow(
     UsageError,

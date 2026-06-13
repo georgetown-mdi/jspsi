@@ -78,14 +78,21 @@ export function parseDurationFlag(flag: string, value: string): number {
   // the suffixed equivalent rather than the generic "needs a unit" message, since
   // that is the one malformed form a user migrating from the old syntax will hit.
   // A bare 0 falls through to parseDuration: "0s" is itself rejected as a zero
-  // duration, so suggesting it would be wrong. Echo `trimmed` verbatim, not
-  // Number(trimmed): a digit string past 2^53 would round (or become Infinity)
-  // and suggest a value the user never typed and parseDuration would itself reject.
-  if (/^\d+$/.test(trimmed) && Number(trimmed) > 0)
+  // duration, so suggesting it would be wrong.
+  if (/^\d+$/.test(trimmed) && Number(trimmed) > 0) {
+    // Canonicalize the suggested value with a string op, never Number(): stripping
+    // leading zeros keeps the hint honest (007 -> use 7s, since parseDuration reads
+    // 007s as 7s) while avoiding the rounding (or Infinity) a Number() round-trip
+    // would inflict on a digit string past 2^53. The (?=\d) lookahead keeps a
+    // final digit, so an all-zeros string would be untouched -- but it never
+    // reaches here, having failed the Number(trimmed) > 0 guard above.
+    const canonical = trimmed.replace(/^0+(?=\d)/, "");
     throw new UsageError(
       `${flag} no longer accepts a bare number of seconds; durations need a ` +
-        `unit suffix (s, m, h, or d) -- use ${trimmed}s for ${trimmed} seconds.`,
+        `unit suffix (s, m, h, or d) -- use ${canonical}s for ${canonical} ` +
+        `seconds.`,
     );
+  }
   try {
     return parseDuration(trimmed);
   } catch (err) {

@@ -84,7 +84,7 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "online only: how long to wait for the partner to accept before " +
-        `giving up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS / 60}m). ` +
+        `giving up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}s). ` +
         DURATION_VALUE_HELP,
     })
     .option("expires-in", {
@@ -213,12 +213,16 @@ export async function validateInvite(params: {
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
-    // A non-positive --accept-timeout is a pure usage error; reject it before any
+    // A non-positive accept-timeout is a pure usage error; reject it before any
     // filesystem probe or connection construction (it feeds peerTimeout below).
+    // The CLI handler already rejects a non-positive or malformed value when it
+    // parses the flag (durationFlagSeconds -> parseDurationFlag -> parseDuration),
+    // so this is unreachable from the command line; it is kept as an independent
+    // guard because validateInvite is exported and unit-tested with a raw numeric
+    // acceptTimeout that does not pass through that parse.
     if (acceptTimeout <= 0)
       throw new UsageError(
-        `--accept-timeout must be a positive number of seconds; got ` +
-          `${acceptTimeout}`,
+        `accept-timeout must be a positive duration; got ${acceptTimeout}s`,
       );
     // Detect a pre-existing config before anything else so a bootstrap never
     // clobbers a configuration partway through an exchange. A pre-existing config
