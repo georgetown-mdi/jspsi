@@ -26,6 +26,8 @@ import { acceptorExchangeDataSpec } from "@psi/acceptInvitation";
 import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
+import { whenDiagnostic } from "@utils/diagnostics";
+
 import FileSelect from "@components/FileSelect";
 import { Status } from "@components/Status";
 
@@ -293,7 +295,13 @@ export function Exchange(config: ExchangeConfig) {
         setStageById("done");
       },
       onError: ({ category, error }) => {
-        console.error(error);
+        // Dev-gated: the raw Error object's message/cause can embed
+        // partner-/server-controlled bytes (e.g. a hostile message-file path in
+        // a transport error), so a production console carries none of it, while a
+        // developer (or a deployed client with the diagnostics toggle on) keeps
+        // the full object -- expandable stack and `.cause` chain. The adjacent
+        // user-facing alert is separately sanitized below.
+        whenDiagnostic(() => console.error(error));
         if (category === "output") {
           // The exchange succeeded; only results-file generation failed. The user
           // must not be told to re-run a privacy-sensitive exchange.
@@ -312,7 +320,7 @@ export function Exchange(config: ExchangeConfig) {
           // is not retryable -- a silent retry would re-run into the same wrong
           // secret, or into a peer that is tampering -- so the user is steered to
           // a fresh invitation rather than a re-run. The underlying error is
-          // logged above (console.error) but deliberately kept out of the alert:
+          // dev-gated to the console above but deliberately kept out of the alert:
           // the kex failure message is intentionally non-oracular, and the other
           // tagged cases carry developer-facing text (secret-format rules,
           // re-invite phrasing) that does not belong in an end-user alert.

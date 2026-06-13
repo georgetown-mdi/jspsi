@@ -43,3 +43,23 @@ export function isDiagnosticMode(): boolean {
     return false;
   }
 }
+
+/**
+ * Run `emit` only under {@link isDiagnosticMode}: a development build, or a
+ * deployed client whose operator set {@link DIAGNOSTICS_STORAGE_KEY}. The single
+ * seam for a console/devtools sink that would otherwise put raw
+ * partner-/server-influenced bytes (a hostile message/cause in a transport
+ * error, a partner-supplied endpoint host) into a production browser console --
+ * routing every such sink through here keeps the dev-gating a uniform policy
+ * rather than a per-line guard, so a future raw sink follows it by being wrapped
+ * the same way.
+ *
+ * Pass a closure that performs the raw log, not a pre-stringified value, so the
+ * devtools affordance is preserved: `whenDiagnostic(() => console.error(err))`
+ * logs the live `Error` object (expandable stack and `.cause` chain) when
+ * diagnosing, and never even constructs the message in an ordinary production
+ * session.
+ */
+export function whenDiagnostic(emit: () => void): void {
+  if (isDiagnosticMode()) emit();
+}

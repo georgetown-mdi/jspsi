@@ -2,8 +2,8 @@ import Peer from "peerjs";
 
 import { deriveRendezvousPeerId, getLogger } from "@psilink/core";
 
+import { isDiagnosticMode, whenDiagnostic } from "@utils/diagnostics";
 import { ConfigManager } from "@utils/clientConfig";
-import { isDiagnosticMode } from "@utils/diagnostics";
 
 import {
   createRedactingLogFunction,
@@ -408,7 +408,13 @@ export async function dialAsAcceptor(
   const loc = acceptorLocationFromEndpoint(endpoint);
   // Derived ids are rendezvous addresses that correlate exchanges; keep them out
   // of default (info) logs and surface them only at debug for connection triage.
-  log.info(`dialing the inviter at ${loc.host}:${loc.port}`);
+  // The host/port come from the partner's invitation endpoint
+  // (`acceptorLocationFromEndpoint`), so dev-gate this line: a production console
+  // carries no partner-influenced bytes, while a developer or a diagnosing
+  // tester still gets the dial target.
+  whenDiagnostic(() =>
+    log.info(`dialing the inviter at ${loc.host}:${loc.port}`),
+  );
   log.debug(`derived peer ids: inviter ${inviterId}, acceptor ${acceptorId}`);
   const peer = makePeer(
     acceptorId,
