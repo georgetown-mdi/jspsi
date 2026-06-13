@@ -27,15 +27,26 @@ npm run dev -w apps/cli --server-private-key=@PEM_FILE sftp://USER@HOST/PATH INP
 
 ## To build for Docker Hub
 
-Do once:
+Multi-platform images require a `docker-container`-driver buildx builder. Create
+it once, but do NOT make it your default (no `--use`): a global default
+`docker-container` builder breaks tools that build and then load a single image
+into the local engine -- notably `devcontainer up`, which then hangs after the
+build with no container created. Select the builder explicitly with `--builder`
+on each deployment build instead, leaving your everyday default on the
+engine-native `docker` driver.
+
+Run these from the repository root (the Dockerfile lives there).
+
+Do once (skip if `multiarch-builder` already exists; run `docker buildx rm
+multiarch-builder` first to recreate):
 ```sh
-docker buildx create --use --name multiarch-builder
-docker buildx inspect --bootstrap
+docker buildx create --name multiarch-builder
+docker buildx inspect --bootstrap multiarch-builder
 ```
 
 Do every time:
 ```sh
-docker buildx build \
+docker buildx build --builder multiarch-builder \
   --platform linux/amd64,linux/arm64 \
   -t vdorie/psi-link:latest \
   --push .
@@ -45,7 +56,7 @@ docker buildx stop multiarch-builder
 
 ## To build for testing
 
-Before pushing to Docker hub:
+Before pushing to Docker hub, from the repository root:
 
 ```sh
 docker image rm -f vdorie/psi-link:latest
