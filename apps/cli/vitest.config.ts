@@ -21,16 +21,6 @@ export default defineConfig({
           // chdir in one file could corrupt a concurrently-running sibling's cwd.
           // Forks gives each file its own process, the isolation safety needs.
           pool: "forks",
-          // Run the integration files one at a time. The default in-process SFTP
-          // backend is a single-threaded server living in this (the main) vitest
-          // process; several forked files each driving a full PSI exchange over
-          // SFTP at once starve its event loop on a CPU-limited CI runner, which
-          // stretches a roughly 3s exchange past its message-consume timeout. The
-          // old Docker sshd was a separate multi-process server that absorbed the
-          // concurrency; the in-process one cannot, so serialize -- each file gets
-          // the server's full attention. isolate (on by default) still gives each
-          // file its own process for the cwd isolation noted above.
-          fileParallelism: false,
           // Starts the SFTP test server (the in-process backend by default, or
           // the native sshd backend when PSILINK_SFTP_BACKEND=native) before the
           // suite and stops it after, handing the conformance tests its

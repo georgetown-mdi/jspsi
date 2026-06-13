@@ -41,6 +41,12 @@ interface RawChannelSftp {
   outgoing: { id: unknown };
 }
 
+// ssh2's server Connection exposes setNoDelay() at runtime (lib/server.js), but
+// @types/ssh2 only declares it on the client; cast to reach it server-side.
+interface NoDelayConnection {
+  setNoDelay(noDelay: boolean): void;
+}
+
 // Frame an SFTP packet: [length u32][type u8][reqid u32][...body].
 function frame(type: number, reqid: number, body: Buffer): Buffer {
   const payload = Buffer.alloc(1 + 4 + body.length);
@@ -144,6 +150,12 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
 
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
     clients.add(client);
+    // Disable Nagle, matching a real OpenSSH server. Left on, the small SFTP
+    // request/response writes collide with TCP delayed-ACK and stall ~40ms each
+    // on Linux; that is negligible per call but compounds over the thousands of
+    // round-trips in a full PSI exchange, stretching a ~3s exchange to tens of
+    // seconds on a CI runner (macOS loopback masks it, Linux does not).
+    (client as unknown as NoDelayConnection).setNoDelay(true);
     // A peer reset (the adversarial tests deliberately abort mid-stream) surfaces
     // as an 'error' on the connection; without a listener it would crash the test
     // process. There is nothing to recover here -- the connection is going away.
