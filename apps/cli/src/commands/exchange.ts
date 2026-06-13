@@ -30,7 +30,13 @@ import {
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
-import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
+import {
+  durationFlagSeconds,
+  LOG_LEVELS,
+  singleValue,
+  validateInputFile,
+} from "../util/cli";
+import { DURATION_VALUE_HELP } from "../util/duration";
 import {
   runProtocol,
   type AuthPersist,
@@ -83,13 +89,17 @@ export function builder(cmd: Argv): Argv {
         "connection.server.privateKey in config",
     })
     .option("connection-timeout", {
-      type: "number",
-      describe: "seconds to wait when connecting to primary exchange server",
+      type: "string",
+      describe:
+        "how long to wait when connecting to the primary exchange server. " +
+        DURATION_VALUE_HELP,
     })
     .option("peer-timeout", {
       alias: "t",
-      type: "number",
-      describe: "seconds to wait for peer before giving up",
+      type: "string",
+      describe:
+        "how long to wait for the peer before giving up. " +
+        DURATION_VALUE_HELP,
     })
     .option("max-reconnect-attempts", {
       type: "number",
@@ -265,10 +275,8 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     serverPrivateKey: resolveAtSignRefs(
       singleValue(argv, "server-private-key") as string | undefined,
     ) as string | undefined,
-    connectionTimeout: singleValue(argv, "connection-timeout") as
-      | number
-      | undefined,
-    peerTimeout: singleValue(argv, "peer-timeout") as number | undefined,
+    connectionTimeout: durationFlagSeconds(argv, "connection-timeout"),
+    peerTimeout: durationFlagSeconds(argv, "peer-timeout"),
     maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
       | number
       | undefined,

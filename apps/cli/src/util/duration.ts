@@ -47,3 +47,57 @@ export function parseDuration(input: string): number {
     throw new UsageError(`duration ${JSON.stringify(trimmed)} is too large`);
   return ms;
 }
+
+/**
+ * Help-text fragment describing the duration value syntax, so every
+ * duration-valued flag's `--help` states the same format (documented once as a
+ * cross-cutting convention in docs/CLI.md "Configuration"). Kept beside
+ * {@link parseDuration} -- the parser this prose describes -- so the two cannot
+ * drift.
+ */
+export const DURATION_VALUE_HELP =
+  "A duration with a required unit suffix: s, m, h, or d, e.g. 45s, 30m, 2h, or 1d";
+
+/**
+ * Parse a duration-valued CLI flag's value through {@link parseDuration}, naming
+ * the flag in any error. A bare positive integer -- the pre-migration
+ * seconds-only form of the flags this replaces -- is rejected with the exact
+ * suffixed value to use (`30` -> use `30s`), so migrating an old invocation is
+ * mechanical; every other malformed value yields parseDuration's message
+ * prefixed with the flag name.
+ *
+ * Returns the same positive millisecond offset {@link parseDuration} does; the
+ * caller converts to the unit its downstream consumer expects.
+ *
+ * @param flag the flag name as written on the command line, e.g. `--peer-timeout`.
+ * @throws {UsageError} for a bare integer, or any input parseDuration rejects.
+ */
+export function parseDurationFlag(flag: string, value: string): number {
+  const trimmed = value.trim();
+  // A bare positive integer used to mean "that many seconds"; point straight at
+  // the suffixed equivalent rather than the generic "needs a unit" message, since
+  // that is the one malformed form a user migrating from the old syntax will hit.
+  // A bare 0 falls through to parseDuration: "0s" is itself rejected as a zero
+  // duration, so suggesting it would be wrong.
+  if (/^\d+$/.test(trimmed) && Number(trimmed) > 0) {
+    // Canonicalize the suggested value with a string op, never Number(): stripping
+    // leading zeros keeps the hint honest (007 -> use 7s, since parseDuration reads
+    // 007s as 7s) while avoiding the rounding (or Infinity) a Number() round-trip
+    // would inflict on a digit string past 2^53. The (?=\d) lookahead keeps a
+    // final digit, so an all-zeros string would be untouched -- but it never
+    // reaches here, having failed the Number(trimmed) > 0 guard above.
+    const canonical = trimmed.replace(/^0+(?=\d)/, "");
+    throw new UsageError(
+      `${flag} no longer accepts a bare number of seconds; durations need a ` +
+        `unit suffix (s, m, h, or d) -- use ${canonical}s for ${canonical} ` +
+        `seconds.`,
+    );
+  }
+  try {
+    return parseDuration(trimmed);
+  } catch (err) {
+    if (err instanceof UsageError)
+      throw new UsageError(`${flag}: ${err.message}`);
+    throw err;
+  }
+}

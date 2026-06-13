@@ -42,7 +42,13 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
-import { LOG_LEVELS, singleValue, validateInputFile } from "../util/cli";
+import {
+  durationFlagSeconds,
+  LOG_LEVELS,
+  singleValue,
+  validateInputFile,
+} from "../util/cli";
+import { DURATION_VALUE_HELP } from "../util/duration";
 import { runProtocol, type AuthPersist } from "../protocol";
 import {
   decodeUrlComponent,
@@ -877,13 +883,17 @@ export function addCommonBootstrapOptions(cmd: Argv): Argv {
       describe: "SSH private key; use @path to read from file",
     })
     .option("connection-timeout", {
-      type: "number",
-      describe: "seconds to wait when connecting to primary exchange server",
+      type: "string",
+      describe:
+        "how long to wait when connecting to the primary exchange server. " +
+        DURATION_VALUE_HELP,
     })
     .option("peer-timeout", {
       alias: "t",
-      type: "number",
-      describe: "seconds to wait for peer before giving up",
+      type: "string",
+      describe:
+        "how long to wait for the peer before giving up. " +
+        DURATION_VALUE_HELP,
     })
     .option("max-reconnect-attempts", {
       type: "number",
@@ -1001,10 +1011,8 @@ export function parseCommonBootstrapArgs(
     serverPrivateKey: singleValue(argv, "server-private-key") as
       | string
       | undefined,
-    connectionTimeout: singleValue(argv, "connection-timeout") as
-      | number
-      | undefined,
-    peerTimeout: singleValue(argv, "peer-timeout") as number | undefined,
+    connectionTimeout: durationFlagSeconds(argv, "connection-timeout"),
+    peerTimeout: durationFlagSeconds(argv, "peer-timeout"),
     maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
       | number
       | undefined,

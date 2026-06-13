@@ -19,8 +19,8 @@ import type {
 import { loadConfigLinkageSource } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
-import { parseDuration } from "../util/duration";
-import { singleValue } from "../util/cli";
+import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
+import { durationFlagSeconds, singleValue } from "../util/cli";
 import { redactUrlCredentials } from "../util/connectionUrl";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
@@ -81,17 +81,17 @@ export function builder(cmd: Argv): Argv {
       ),
   )
     .option("accept-timeout", {
-      type: "number",
+      type: "string",
       describe:
-        "online only: seconds to wait for the partner to accept before giving " +
-        `up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}, i.e. 15 minutes)`,
+        "online only: how long to wait for the partner to accept before " +
+        `giving up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}s). ` +
+        DURATION_VALUE_HELP,
     })
     .option("expires-in", {
       type: "string",
       describe:
-        "override the invitation lifetime (default: 1 hour, maximum: 365d). A " +
-        "duration with a required unit suffix: s, m, h, or d, e.g. 45s, 30m, " +
-        "2h, or 1d",
+        "override the invitation lifetime (default: 1 hour, maximum: 365d). " +
+        DURATION_VALUE_HELP,
     });
 }
 
@@ -213,12 +213,16 @@ export async function validateInvite(params: {
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
-    // A non-positive --accept-timeout is a pure usage error; reject it before any
+    // A non-positive accept-timeout is a pure usage error; reject it before any
     // filesystem probe or connection construction (it feeds peerTimeout below).
+    // The CLI handler already rejects a non-positive or malformed value when it
+    // parses the flag (durationFlagSeconds -> parseDurationFlag -> parseDuration),
+    // so this is unreachable from the command line; it is kept as an independent
+    // guard because validateInvite is exported and unit-tested with a raw numeric
+    // acceptTimeout that does not pass through that parse.
     if (acceptTimeout <= 0)
       throw new UsageError(
-        `--accept-timeout must be a positive number of seconds; got ` +
-          `${acceptTimeout}`,
+        `accept-timeout must be a positive duration; got ${acceptTimeout}s`,
       );
     // Detect a pre-existing config before anything else so a bootstrap never
     // clobbers a configuration partway through an exchange. A pre-existing config
@@ -402,13 +406,15 @@ export async function handler(argv: Arguments): Promise<void> {
     const options = parseCommonBootstrapArgs(argv);
     logLibrary.setDefaultLevel(options.logLevel);
     const log = getLogger("invite");
-    // singleValue rejects a repeated single-value flag with a clean usage error
-    // (exit 64) before the array can flow into a numeric comparison
-    // (accept-timeout, in validateInvite) or the string-typed parseDuration
-    // (expires-in, which would otherwise throw a raw TypeError on .trim() and
-    // surface as a confusing exit 69).
+    // accept-timeout is parsed to seconds here (not in validateInvite) so a
+    // malformed or bare-integer value is a clean usage error (exit 64) before any
+    // side effect; durationFlagSeconds also rejects a repeat (via singleValue)
+    // before the array could reach validateInvite's numeric comparisons. expires-in
+    // is read as a string and parsed inside validateInvite; singleValue rejects its
+    // repeat too, before the array would hit parseDuration's .trim() and surface as
+    // a confusing exit 69.
     const acceptTimeout =
-      (singleValue(argv, "accept-timeout") as number | undefined) ??
+      durationFlagSeconds(argv, "accept-timeout") ??
       DEFAULT_ACCEPT_TIMEOUT_SECONDS;
     const expiresIn = singleValue(argv, "expires-in") as string | undefined;
     const positionals = (argv["args"] as Array<string> | undefined) ?? [];

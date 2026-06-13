@@ -4,6 +4,8 @@ import type { Arguments } from "yargs";
 
 import { UsageError } from "@psilink/core";
 
+import { parseDurationFlag } from "./duration";
+
 /**
  * Read a single-value CLI option from parsed yargs `Arguments`, rejecting a flag
  * that was given more than once. yargs collects a repeated option into an array
@@ -26,6 +28,31 @@ export function singleValue(argv: Arguments, name: string): unknown {
   if (Array.isArray(value))
     throw new UsageError(`--${name} may be given only once`);
   return value;
+}
+
+/**
+ * Read a duration-valued CLI option from parsed `Arguments` and return it as a
+ * whole number of seconds (or `undefined` when the flag is absent). Rejects a
+ * repeat (via {@link singleValue}) and a malformed or bare-integer value (via
+ * {@link parseDurationFlag}), naming the flag in either error.
+ *
+ * {@link parseDurationFlag} yields a positive millisecond offset whose smallest
+ * unit is seconds, so the divide-by-1000 to seconds is always exact. Seconds is
+ * the unit the migrated timeout flags' downstream consumers take:
+ * `applyConnectionOverrides` scales `connection-timeout`/`peer-timeout` to ms,
+ * and `--accept-timeout` compares against a seconds-valued invitation lifetime.
+ */
+export function durationFlagSeconds(
+  argv: Arguments,
+  name: string,
+): number | undefined {
+  const raw = singleValue(argv, name);
+  if (raw === undefined) return undefined;
+  // singleValue returns unknown; the flags routed here are declared type:"string"
+  // so yargs always yields a string, but coerce defensively so a contract
+  // violation surfaces as parseDurationFlag's flag-named UsageError rather than a
+  // raw TypeError from .trim() on a non-string.
+  return parseDurationFlag(`--${name}`, String(raw)) / 1000;
 }
 
 /** Mapping from log-level name to loglevel numeric constant. */
