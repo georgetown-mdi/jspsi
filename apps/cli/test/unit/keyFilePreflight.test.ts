@@ -171,6 +171,114 @@ test.skipIf(process.platform === "win32")(
 );
 
 test.skipIf(process.platform === "win32")(
+  "falls through to friendly guidance when the key-path lstat fails with EACCES",
+  () => {
+    // root bypasses mode bits, so lstat would succeed; skip there.
+    if (process.getuid?.() === 0) return;
+    // A parent without search/execute permission makes lstat on the child key
+    // path throw EACCES. The guard must NOT rethrow that raw errno; it should
+    // fall through to the write probe, which classifies the same locked-down-
+    // directory condition with the actionable "not writable" guidance. Locks
+    // the (B) fix: the raw `lstat` errno must never preempt that message.
+    const { log } = makeLogger();
+    const noSearchDir = path.join(dir, "no-search");
+    fs.mkdirSync(noSearchDir);
+    fs.chmodSync(noSearchDir, 0o600); // read+write, no execute/search
+    let caught: unknown;
+    try {
+      preflightKeyFilePath(path.join(noSearchDir, "key.json"), log);
+    } catch (err) {
+      caught = err;
+    } finally {
+      // Restore mode so afterEach can remove the tmp dir.
+      fs.chmodSync(noSearchDir, 0o755);
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("not writable");
+    expect((caught as Error).message).toContain("Restore write permission");
+    // The raw lstat errno must not be surfaced.
+    expect((caught as Error).message).not.toContain("lstat");
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "falls through to friendly guidance when the key-path lstat fails with ELOOP",
+  () => {
+    // A symlink loop in a non-final path component makes lstat on the child key
+    // path throw ELOOP -- the other code the implementation notes name for (B),
+    // distinct from the EACCES case above. Like EACCES, the guard must not
+    // rethrow the raw errno; here it falls through to statSync(parent), which
+    // re-hits the loop and wraps it as the friendly "is not accessible"
+    // message while preserving the underlying ELOOP hint. ELOOP is a path-
+    // resolution limit, not a permission check, so it fires for root too -- no
+    // getuid guard needed.
+    const { log } = makeLogger();
+    const loopA = path.join(dir, "loop-a");
+    const loopB = path.join(dir, "loop-b");
+    fs.symlinkSync(loopB, loopA); // loop-a -> loop-b
+    fs.symlinkSync(loopA, loopB); // loop-b -> loop-a (mutual: resolving either loops)
+    let caught: unknown;
+    try {
+      preflightKeyFilePath(path.join(loopA, "key.json"), log);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("not accessible");
+    // The friendly wrapper preserves the underlying errno hint rather than
+    // dropping it (the old code rethrew the raw errno with no such wrapper).
+    expect((caught as Error).message).toMatch(/ELOOP|too many symbolic links/);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "rejects a key path whose final component exceeds NAME_MAX up front",
+  () => {
+    // A >255-byte final component makes lstat throw ENAMETOOLONG. Unlike EACCES/
+    // ELOOP, that is NOT a parent/ancestor condition the downstream checks
+    // reproduce -- the parent is fine, and the short-named write probe and
+    // parent read-open both pass -- so the guard must rethrow it and halt
+    // pre-flight here, not swallow it and let saveKeyFile's write of the long
+    // name fail post-handshake after the secret has rotated. Pins the (B) fall-
+    // through allowlist against re-broadening to swallow-everything.
+    const { log } = makeLogger();
+    const longLeaf = "k".repeat(300);
+    let caught: unknown;
+    try {
+      preflightKeyFilePath(path.join(dir, longLeaf), log);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/ENAMETOOLONG|too long/);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "rejects a parent that is write+execute but not readable",
+  () => {
+    // root bypasses mode bits, so the read-open would succeed; skip there.
+    if (process.getuid?.() === 0) return;
+    // A 0o300 (write+execute, no read) parent passes the write probe but would
+    // fail saveKeyFile's post-rename fsyncParentDir, which opens the parent for
+    // READ -- after the handshake has rotated the secret. The pre-flight must
+    // reject it up front. Locks the (C) fix.
+    const { log } = makeLogger();
+    const noReadDir = path.join(dir, "write-exec-no-read");
+    fs.mkdirSync(noReadDir);
+    fs.chmodSync(noReadDir, 0o300);
+    try {
+      expect(() =>
+        preflightKeyFilePath(path.join(noReadDir, "key.json"), log),
+      ).toThrow("not readable");
+    } finally {
+      // Restore mode so afterEach can remove the tmp dir.
+      fs.chmodSync(noReadDir, 0o755);
+    }
+  },
+);
+
+test.skipIf(process.platform === "win32")(
   "reports an inaccessible parent when an ancestor of the parent is a file",
   () => {
     // kfp's grandparent is a regular file, so statSync(parent) throws ENOTDIR

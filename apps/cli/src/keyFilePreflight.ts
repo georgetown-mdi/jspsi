@@ -9,7 +9,8 @@ import { getLogger } from "@psilink/core";
  * before any connection is opened so a misconfiguration fails deterministically
  * -- with no rendezvous I/O and before the partner can be left holding a rotated
  * token this side cannot persist. It mirrors what {@link saveKeyFile} will do
- * post-handshake (a recursive parent `mkdir`, then a write) and rejects up front
+ * post-handshake (a recursive parent `mkdir`, a write, and -- on POSIX -- a
+ * parent-directory fsync that opens the parent for reading) and rejects up front
  * the cases where that write would fail after a successful key exchange, when
  * recovery would otherwise require a re-invitation.
  *
@@ -20,7 +21,8 @@ import { getLogger } from "@psilink/core";
  *
  * - `keyFilePath` is missing or whitespace-only;
  * - the path already exists but is a directory or other non-regular node;
- * - the parent exists but is not a directory, or cannot be created or written.
+ * - the parent exists but is not a directory, or cannot be created, written,
+ *   or (on POSIX) read.
  *
  * Side effect: creates the parent directory (recursively) when it does not yet
  * exist, mirroring {@link saveKeyFile}; the creation is logged and left in place
@@ -54,28 +56,60 @@ export function preflightKeyFilePath(
   // rotated token and recovery needs a preventable re-invitation. Use lstatSync
   // (not statSync) so a symlink is classified as a symlink and accepted as-is
   // rather than resolved to its target's type.
+  let targetStat: fs.Stats | undefined;
   try {
-    const targetStat = fs.lstatSync(kfp);
-    if (!targetStat.isFile() && !targetStat.isSymbolicLink())
-      throw new Error(
-        `keyFilePath ${kfp} exists but is not a regular file (` +
-          `${
-            targetStat.isDirectory()
-              ? "directory"
-              : "non-regular filesystem entry"
-          }); saveKeyFile would fail after a successful key exchange. ` +
-          "Remove or rename it before running the exchange.",
-      );
+    targetStat = fs.lstatSync(kfp);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    // ENOENT: keyFilePath does not yet exist (first run after invite/
-    // accept) and saveKeyFile will create it — fine.
-    // ENOTDIR: a component of the path prefix is a regular file, so kfp
-    // cannot exist; fall through and let the parent-directory check below
-    // raise the more specific "parent exists but is not a directory"
-    // error.
-    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    // Fall through (leaving targetStat undefined) ONLY for the codes the
+    // downstream parent/probe checks re-encounter and re-classify with
+    // actionable guidance, so the raw Node errno does not preempt it:
+    //   ENOENT  -- keyFilePath does not yet exist (first run after invite/
+    //              accept); saveKeyFile will create it.
+    //   ENOTDIR -- a path-prefix component is a regular file, so kfp cannot
+    //              exist; the parent check raises the more specific "parent
+    //              exists but is not a directory" error.
+    //   EACCES  -- a parent/ancestor directory lacks search permission. lstat
+    //              needs search on the parent to look up kfp, so this is always
+    //              a parent-side condition: the write probe (immediate parent)
+    //              or statSync(parent) (a higher ancestor) re-hits it and
+    //              yields the friendly "...is not writable: ... Restore write
+    //              permission..." or "...is not accessible" guidance.
+    //   ELOOP   -- a symlink loop in a non-final path component (lstat does not
+    //              follow the final component, so the loop is always parent-
+    //              side); statSync(parent) re-hits it and wraps it as
+    //              "...is not accessible".
+    // Any OTHER code is a key-path-specific failure the downstream checks do
+    // NOT reproduce -- above all ENAMETOOLONG on the final component, where the
+    // parent stat succeeds and the short-named probe and parent read-open both
+    // pass, so swallowing it would let pre-flight wrongly pass and leave
+    // saveKeyFile to fail on the long name post-handshake, after the secret has
+    // rotated. Rethrow those so they still halt pre-flight before any
+    // connection opens (the behavior before the (B) fix), keeping the failure
+    // on the recoverable side of the handshake.
+    if (
+      code !== "ENOENT" &&
+      code !== "ENOTDIR" &&
+      code !== "EACCES" &&
+      code !== "ELOOP"
+    )
+      throw err;
   }
+  // The directory/special-node rejection runs outside the try because it
+  // applies only when lstat SUCCEEDED and returned a stat (a non-file, non-
+  // symlink node); gating it on targetStat being set keeps the "lstat threw"
+  // errno handling above and this "lstat returned a bad node" check as separate
+  // concerns.
+  if (targetStat && !targetStat.isFile() && !targetStat.isSymbolicLink())
+    throw new Error(
+      `keyFilePath ${kfp} exists but is not a regular file (` +
+        `${
+          targetStat.isDirectory()
+            ? "directory"
+            : "non-regular filesystem entry"
+        }); saveKeyFile would fail after a successful key exchange. ` +
+        "Remove or rename it before running the exchange.",
+    );
   // Pre-validate that the parent directory exists (creating it if missing,
   // mirroring saveKeyFile's `mkdirSync({ recursive: true })`) and that it
   // is a directory, so saveKeyFile failure cannot occur after a successful
@@ -202,6 +236,37 @@ export function preflightKeyFilePath(
     } catch {
       /* best-effort cleanup; open() may have failed before the file was
        * created, in which case unlink ENOENT is expected. */
+    }
+  }
+  // saveKeyFile's post-rename durability step (fsyncParentDir) opens the parent
+  // directory for READ (openSync(parent, "r")) to flush the new directory entry
+  // durably. A parent that is write+execute but not readable (mode 0o300)
+  // passes the write probe above yet would fail that read-open with EACCES --
+  // after the handshake has already rotated the secret. Mirror the read-open
+  // here so the pre-flight covers that failure class up front instead of
+  // letting saveKeyFile fail post-handshake. POSIX-only, exactly like
+  // fsyncParentDir: on Windows openSync on a directory fails outright and the
+  // parent fsync is skipped, so there is no read requirement to verify.
+  if (process.platform !== "win32") {
+    let parentReadFd: number | undefined;
+    try {
+      parentReadFd = fs.openSync(parent, "r");
+    } catch (err) {
+      throw new Error(
+        `keyFilePath parent directory ${parent} is not readable: ` +
+          (err instanceof Error ? err.message : String(err)) +
+          ". Restore read permission before running the exchange, otherwise " +
+          "saveKeyFile's post-write directory fsync would fail after a " +
+          "successful key exchange and both parties would need to re-invite.",
+      );
+    } finally {
+      if (parentReadFd !== undefined) {
+        try {
+          fs.closeSync(parentReadFd);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
     }
   }
   return kfp;
