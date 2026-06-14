@@ -99,7 +99,11 @@ scope here.
   GitHub PAT. The container loads `.env` via docker `--env-file` (`devcontainer.json`
   `runArgs`) and `post-create.sh` runs `gh auth setup-git`, so both `git push`
   (HTTPS) and `gh pr create` authenticate with no prompt. Use a fine-grained PAT
-  scoped to this repo (contents + pull-requests write). `.env` is gitignored.
+  scoped to this repo (contents + pull-requests write); add the organization
+  Projects (read and write) permission as well if the session uses the
+  `.claude/scripts` board tooling, since those hit the org's GitHub Projects
+  v2 API, which the repository contents/pull-requests scopes do not cover.
+  `.env` is gitignored.
   `--env-file` is **literal**: write `GH_TOKEN=<value>` unquoted, with no `export`,
   and with no inline `# comment` -- quotes, an `export` prefix, and a trailing
   comment all become part of the token value (a corrupted token then fails only
