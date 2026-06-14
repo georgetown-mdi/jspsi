@@ -245,14 +245,16 @@ test("decodeInvitation swallows the JSON.parse error, never relaying partner byt
   );
 });
 
-test("fromBase64Url swallows the atob error, throwing only the fixed string", async () => {
-  // Reach fromBase64Url's atob catch through the real decode path: the body
-  // (everything but the trailing 6-char checksum slot) carries bytes outside the
-  // base64url alphabet, so atob throws. Node's atob never echoes its input (its
-  // message is the fixed "Invalid character"), so unlike the JSON path these
-  // bytes cannot reach the thrown message even with the swallow removed; the
-  // value pinned here is the fixed string itself, so a relay of atob's message
-  // (or one that interpolated the offending input) would fail the assertion.
+test("decodeInvitation swallows the atob error, throwing only the fixed string", async () => {
+  // Reach the atob catch through the real decode path: the body (everything but
+  // the trailing 6-char checksum slot) carries the planted bytes, all outside the
+  // base64url alphabet, so atob throws. Deliberately NO planted-bytes loop here,
+  // unlike the JSON test: Node's atob never echoes its input (its message is the
+  // fixed "Invalid character"), so no input byte can reach the thrown message
+  // even with the swallow removed -- a not.toContain assertion would pass
+  // vacuously and falsely imply this path is as load-bearing as the JSON one. The
+  // regression guard is the fixed string itself: relaying atob's message (or one
+  // that interpolated the offending input) changes it and fails the toBe below.
   const encoded = PLANTED_DISPLAY_BYTES.join("") + "AAAAAA";
 
   const err = await decodeInvitation(encoded).catch((e: unknown) => e);
@@ -260,9 +262,6 @@ test("fromBase64Url swallows the atob error, throwing only the fixed string", as
   expect((err as Error).message).toBe(
     "invitation string is not valid base64url",
   );
-  for (const byte of PLANTED_DISPLAY_BYTES) {
-    expect((err as Error).message).not.toContain(byte);
-  }
 });
 
 // --- Expiry field ------------------------------------------------------------
