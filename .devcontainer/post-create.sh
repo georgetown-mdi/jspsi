@@ -46,6 +46,36 @@ SETTINGS="$CONFIG_DIR/settings.json" node -e '
   fs.writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
 '
 
+# Pre-seed Claude Code's interactive first-run state so sessions in this container
+# open at the prompt instead of the theme/welcome onboarding and the per-workspace
+# "Do you trust the files in this folder?" dialog. Auth (CLAUDE_CODE_OAUTH_TOKEN or
+# a per-container login) is separate and unaffected, and headless `claude -p` skips
+# these gates already -- this is for the interactive CLI and the VS Code extension,
+# which share this config dir. These keys live in .claude.json and are internal to
+# Claude Code (undocumented), captured against 2.1.177 -- re-verify on an upgrade.
+# Idempotent: fills only missing keys and refuses to overwrite an unreadable file,
+# matching the settings.json seeding above.
+CLAUDE_JSON="$CONFIG_DIR/.claude.json" WORKSPACE="/workspace" node -e '
+  const fs = require("fs");
+  const path = process.env.CLAUDE_JSON;
+  let state = {};
+  try {
+    state = JSON.parse(fs.readFileSync(path, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("refusing to overwrite existing " + path + ": " + err.message);
+      process.exit(1);
+    }
+  }
+  if (!state.hasCompletedOnboarding) state.hasCompletedOnboarding = true;
+  state.projects = state.projects || {};
+  const ws = (state.projects[process.env.WORKSPACE] =
+    state.projects[process.env.WORKSPACE] || {});
+  if (!ws.hasTrustDialogAccepted) ws.hasTrustDialogAccepted = true;
+  if (!ws.hasCompletedProjectOnboarding) ws.hasCompletedProjectOnboarding = true;
+  fs.writeFileSync(path, JSON.stringify(state, null, 2) + "\n");
+'
+
 # Wire git push (over HTTPS) and the gh CLI to a GitHub token when one is present.
 # devcontainer.json loads a repo-root .env into the container via docker
 # --env-file; `gh auth setup-git` then registers gh as git's credential helper, so

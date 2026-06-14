@@ -51,7 +51,12 @@ Three layers, so prompt-free operation inside is safe:
 
 `post-create.sh` sets `permissions.defaultMode: bypassPermissions` in the
 container's *user* settings only, so sessions inside start prompt-free without
-changing how Claude behaves on the host.
+changing how Claude behaves on the host. It also pre-seeds Claude Code's
+interactive first-run state -- the onboarding and per-workspace trust prompts --
+and sets the VS Code extension's own bypass mode in `devcontainer.json` (the
+extension does not honor the CLI's `defaultMode`), so interactive sessions,
+terminal or extension, start prompt-free as well. Headless `claude -p` skips
+these gates either way.
 
 ### What it does not protect against
 
@@ -99,7 +104,11 @@ scope here.
   GitHub PAT. The container loads `.env` via docker `--env-file` (`devcontainer.json`
   `runArgs`) and `post-create.sh` runs `gh auth setup-git`, so both `git push`
   (HTTPS) and `gh pr create` authenticate with no prompt. Use a fine-grained PAT
-  scoped to this repo (contents + pull-requests write). `.env` is gitignored.
+  scoped to this repo (contents + pull-requests write); add the organization
+  Projects (read and write) permission as well if the session uses the
+  `.claude/scripts` board tooling, since those hit the org's GitHub Projects
+  v2 API, which the repository contents/pull-requests scopes do not cover.
+  `.env` is gitignored.
   `--env-file` is **literal**: write `GH_TOKEN=<value>` unquoted, with no `export`,
   and with no inline `# comment` -- quotes, an `export` prefix, and a trailing
   comment all become part of the token value (a corrupted token then fails only
