@@ -80,13 +80,14 @@ export const MAX_FILENAME_LENGTH = 255;
 
 /**
  * Construct the typed, terminal error for a directory whose entry count exceeds
- * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the operator-configured rendezvous
- * path (not partner-controlled), but it is routed through
- * {@link sanitizeForDisplay} anyway so it is escaped uniformly with the path the
- * listing-stall builders below carry (both go through the same display escape via
- * the shared `transportOperationStalledError` for those, and directly here). The
- * partner-controlled value on this surface -- the offending filename -- is
- * escaped by {@link filenameTooLongError}.
+ * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the rendezvous path (operator-
+ * configured, but it can be seeded from a charset-unconstrained partner
+ * invitation endpoint on an offline-accept config), so it is routed through
+ * {@link sanitizeForDisplay}, escaped uniformly with the path the listing-stall
+ * builders below carry (both go through the same display escape via the shared
+ * `transportOperationStalledError` for those, and directly here) and with the
+ * same path in {@link filenameTooLongError}. The offending filename, the other
+ * untrusted value on this surface, is escaped there too.
  */
 export function directoryTooLargeError(
   dirPath: string,
@@ -107,6 +108,10 @@ export function directoryTooLargeError(
  * control/ANSI/deceptive-Unicode characters (so a hostile server cannot spoof
  * the operator's terminal through a crafted filename). The true length is
  * reported separately and unsanitized: it is a number, not partner text.
+ * `dirPath` is escaped through the same helper as in {@link directoryTooLargeError},
+ * so the rendezvous path is escaped uniformly across both bound errors regardless
+ * of its provenance (defense-in-depth: a path seeded from a partner invitation
+ * endpoint is charset-unconstrained).
  */
 export function filenameTooLongError(
   dirPath: string,
@@ -115,9 +120,9 @@ export function filenameTooLongError(
 ): DirectoryListingBoundsError {
   const shown = sanitizeForDisplay(name, { maxLength: 64 });
   return new DirectoryListingBoundsError(
-    `directory ${dirPath} contains an entry whose filename is ${name.length} ` +
-      `characters, exceeding the maximum of ${max} (${shown}); refusing to ` +
-      `process it`,
+    `directory ${sanitizeForDisplay(dirPath)} contains an entry whose filename ` +
+      `is ${name.length} characters, exceeding the maximum of ${max} (${shown}); ` +
+      `refusing to process it`,
   );
 }
 
