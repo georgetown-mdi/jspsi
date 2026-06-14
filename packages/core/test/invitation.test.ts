@@ -189,13 +189,17 @@ test("rejects invalid base64url characters in the body", async () => {
 // decodeInvitation deliberately catches the JSON.parse and atob failures and
 // rethrows a FIXED string rather than the engine's message, because those
 // messages can quote partner-controlled input bytes. That thrown .message is
-// relayed verbatim by describeDecodeError for a non-Zod Error and reaches the
-// web accept page's operator-facing alert, where React/terminal escaping
-// neutralizes markup but NOT the deceptive-Unicode / terminal-control /
-// bidi-override / zero-width bytes below. The swallows are the only thing
-// keeping partner bytes out of that .message; these tests pin them so a future
-// "improve the error by relaying the original" refactor fails loudly here
-// instead of silently reopening the vector. See board item 199895565.
+// relayed verbatim by describeDecodeError for a non-Zod Error. Its load-bearing
+// consumer is the web accept page's operator-facing alert (apps/web
+// AcceptInvitation), which renders describeDecodeError's output in a React text
+// node with no further sanitize pass: React neutralizes HTML markup but NOT the
+// deceptive-Unicode / terminal-control / bidi-override / zero-width bytes below.
+// (The CLI accept path renders the same decode error to a terminal but escapes
+// it independently via sanitizeErrorForDisplay, so the swallow is
+// belt-and-suspenders there, not the sole guard.) For the web alert the swallows
+// are the only thing keeping partner bytes out of that .message; these tests pin
+// them so a future "improve the error by relaying the original" refactor fails
+// loudly here instead of silently reopening the vector. See board item 199895565.
 
 // Representative partner-controllable bytes, one per class the display-boundary
 // hardening neutralizes. Written as explicit escapes -- never pasted glyphs --
