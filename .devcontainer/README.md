@@ -106,6 +106,27 @@ scope here.
   later, at push time). `GITHUB_TOKEN` is accepted as an alternative name. With no
   `.env` (an empty one is created automatically so the container always starts),
   push/PR stay unauthenticated.
+- Claude credentials (optional): each container's `~/.claude` is a separate
+  per-`${devcontainerId}` volume, so by default every container needs its own
+  one-time browser `/login` -- friction once several agents run in parallel. To
+  reuse one host-side login instead, run `claude setup-token` on the host and
+  export the resulting `CLAUDE_CODE_OAUTH_TOKEN` in the shell that launches the
+  container; `devcontainer.json` forwards it through `containerEnv` via
+  `${localEnv:...}`, so Claude authenticates with no per-container login. The
+  token is inference-scoped and draws on your Claude subscription
+  (Pro/Max/Team/Enterprise) rather than per-token API billing. Only this one
+  credential is forwarded, not `ANTHROPIC_API_KEY`: Claude Code's auth precedence
+  lets an API key silently override an OAuth token when both are set, so wiring
+  both invites a surprise-billing footgun. Unlike `GH_TOKEN`, the token comes from
+  the launching process's *shell environment*, not from `.env` -- so start VS Code
+  or the `devcontainer` CLI from a shell where the variable is exported (a
+  GUI-launched editor may not inherit it). With no token set the variable forwards
+  empty, the passthrough is inactive, and the container still starts with the
+  per-container `/login` available as the fallback. No firewall change is needed:
+  the token authenticates against `api.anthropic.com`, already on the egress
+  allowlist (`init-firewall.sh`). It is readable by anything running inside the
+  container -- the same posture as `GH_TOKEN` -- so use a dedicated token and
+  rotate or revoke it through your Claude account if it may be exposed.
 
 ## Using it
 
