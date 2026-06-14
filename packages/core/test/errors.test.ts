@@ -48,23 +48,28 @@ describe("terminal transport/directory error taxonomy", () => {
     expect(err.message).toMatch(/^SFTP read stalled\. /);
     expect(err.message).toContain("then retry");
   });
+});
 
-  test("BilateralModeMismatchError tags the hint but leaves the call-site message intact", () => {
-    // Unlike its siblings the constructor appends nothing: the call-site message
-    // already carries the fix. The tag is present for family consistency even
-    // though detection is pre-handshake, where the generic advisory never fires.
+describe("errors deliberately left without a recovery hint", () => {
+  test("BilateralModeMismatchError stays untagged and leaves its message intact", () => {
+    // A terminal UsageError that carries its fix in the call-site message ("both
+    // parties must use the same setting"), so the constructor appends nothing.
+    // It is deliberately NOT tagged: the tag only suppresses the post-handshake
+    // generic advisory, and a mismatch is detected pre-handshake where that
+    // advisory never fires, so a tag would suppress nothing.
     const message =
       "retain_files mismatch: this party has retain_files=true but the peer " +
       "has retain_files=false; both parties must use the same setting";
     const err = new BilateralModeMismatchError(message);
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("BilateralModeMismatchError");
-    expect(err.psilinkRecoveryHintEmitted).toBe(true);
+    expect(
+      (err as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted,
+    ).toBeUndefined();
     expect(err.message).toBe(message);
   });
-});
 
-describe("errors deliberately left without a recovery hint", () => {
   test("ConnectionClosedError carries no hint and is not a UsageError", () => {
     // Judged stepless by the audit: an internal teardown signal that almost
     // never reaches the exit code, so the generic advisory has nothing to

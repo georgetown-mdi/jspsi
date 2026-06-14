@@ -41,18 +41,18 @@ export class UsageError extends Error {
  * advertisement and fails too -- while still being classified as a usage error
  * (CLI exit 64) by the `instanceof UsageError` check at the CLI catch sites.
  *
- * Carries `psilinkRecoveryHintEmitted` for consistency with the rest of the
- * terminal `UsageError` family. Unlike its siblings the constructor appends no
- * next step: the call-site message already names each side's setting and the
- * concrete fix ("both parties must use the same setting"). The tag has no effect
- * today -- a mismatch is detected at rendezvous, before authentication starts,
- * so the CLI's generic post-handshake advisory never fires for it -- but
- * suppression is the correct behavior were the advisory ever to reach it (a
- * mode mismatch needs a config fix, not a blind retry or re-invite).
+ * Unlike its terminal {@link UsageError} siblings it carries no
+ * `psilinkRecoveryHintEmitted` tag and appends no next step. Its call-site
+ * message already names each side's setting and the concrete fix ("both parties
+ * must use the same setting"), so there is no missing step to add. The tag is
+ * deliberately omitted rather than set for family symmetry: the tag exists only
+ * to make the CLI suppress its generic post-handshake "retry without
+ * re-inviting" advisory, and a mode mismatch is detected at rendezvous, before
+ * authentication starts, so that advisory never fires for it -- a tag here would
+ * read as load-bearing while suppressing nothing. (Were detection ever to move
+ * after the handshake, this class is where the tag would belong.)
  */
 export class BilateralModeMismatchError extends UsageError {
-  readonly psilinkRecoveryHintEmitted = true;
-
   constructor(message: string) {
     super(message);
     this.name = "BilateralModeMismatchError";
