@@ -945,6 +945,12 @@ export function addCommonBootstrapOptions(
       type: "string",
       describe: "silent | error | warn | info | debug | trace; default=info",
     })
+    .option("log-file", {
+      type: "string",
+      describe:
+        "append all log output to this file instead of the terminal; the " +
+        "parent directory must already exist",
+    })
     .option("record", {
       type: "boolean",
       default: true,
@@ -1020,6 +1026,7 @@ export interface CommonBootstrapOptions {
   record: boolean;
   recordFile?: string;
   logLevel: logLibrary.LogLevelNumbers;
+  logFile?: string;
   verbosity: number;
 }
 
@@ -1070,6 +1077,7 @@ export function parseCommonBootstrapArgs(
     record: argv["record"] as boolean,
     recordFile: singleValue(argv, "record-file") as string | undefined,
     logLevel,
+    logFile: singleValue(argv, "log-file") as string | undefined,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
   };
 }

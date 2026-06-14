@@ -29,6 +29,7 @@ import {
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveAtSignRefs } from "../util/atSignRefs";
+import { configureLogFile } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
@@ -444,92 +445,105 @@ function reconcileAcceptConfig(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  await runOrExit("accept", async () => {
-    // Parse and apply the log level before creating the logger, so the
-    // configured level actually takes effect (loglevel binds a logger's level at
-    // creation). Doing this inside runOrExit also routes an invalid option (e.g.
-    // an unrecognized --log-level) through the same error->exit path as
-    // everything else, rather than yargs's noisier top-level catch.
-    const options = parseCommonBootstrapArgs(argv);
-    logLibrary.setDefaultLevel(options.logLevel);
-    const log = getLogger("accept");
-    const positionals = (argv["args"] as Array<string> | undefined) ?? [];
-    const resolved = resolveAcceptPositionals(positionals);
-    // All validation runs before the prompt: the user is never asked to confirm
-    // an invitation, URL, or input file that has not validated, and the prompt
-    // itself runs inside runOrExit so a stdin error exits cleanly rather than
-    // crashing.
-    const ready = await validateAccept({ resolved, options, log });
+  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
+  try {
+    await runOrExit("accept", async () => {
+      // Parse and apply the log level before creating the logger, so the
+      // configured level actually takes effect (loglevel binds a logger's level
+      // at creation). Doing this inside runOrExit also routes an invalid option
+      // (e.g. an unrecognized --log-level) through the same error->exit path as
+      // everything else, rather than yargs's noisier top-level catch.
+      const options = parseCommonBootstrapArgs(argv);
+      // Redirect logging to the file (if requested) before the level is applied
+      // and any logger is created, so getLogger("accept") below inherits the
+      // file sink. A missing parent directory is a UsageError -> exit 64 here.
+      if (options.logFile !== undefined)
+        logFileSink = configureLogFile(options.logFile);
+      logLibrary.setDefaultLevel(options.logLevel);
+      const log = getLogger("accept");
+      const positionals = (argv["args"] as Array<string> | undefined) ?? [];
+      const resolved = resolveAcceptPositionals(positionals);
+      // All validation runs before the prompt: the user is never asked to confirm
+      // an invitation, URL, or input file that has not validated, and the prompt
+      // itself runs inside runOrExit so a stdin error exits cleanly rather than
+      // crashing.
+      const ready = await validateAccept({ resolved, options, log });
 
-    displayInvitation(ready.token, log);
-    const confirmed = await promptConfirm(
-      "Accept this invitation and write configuration?",
-    );
-    if (!confirmed) {
-      log.info("invitation declined; no files were written");
-      return;
-    }
+      displayInvitation(ready.token, log);
+      const confirmed = await promptConfirm(
+        "Accept this invitation and write configuration?",
+      );
+      if (!confirmed) {
+        log.info("invitation declined; no files were written");
+        return;
+      }
 
-    if (ready.mode === "online") {
-      const { configWriteError } = await runOnlineBootstrap({
+      if (ready.mode === "online") {
+        const { configWriteError } = await runOnlineBootstrap({
+          connection: ready.connection,
+          dataSpec: ready.dataSpec,
+          prepared: ready.prepared,
+          sharedSecret: ready.token.sharedSecret,
+          // Pass the invitation's expiry through unchanged; authenticateConnection
+          // re-checks it before and after the key exchange.
+          expires: ready.token.expires,
+          keyPath: options.keyFile,
+          configPath: options.configFile,
+          output: ready.output,
+          verbosity: options.verbosity,
+          loggerName: "accept",
+          recordOutput: resolveRecordOutput({
+            enabled: options.record,
+            recordFile: options.recordFile,
+          }),
+          reuseExistingConfig: ready.reuseExistingConfig,
+        });
+        logOnlineBootstrapOutcome(log, {
+          configFile: options.configFile,
+          keyFile: options.keyFile,
+          configWriteError,
+          reuseExistingConfig: ready.reuseExistingConfig,
+        });
+        return;
+      }
+
+      const spec: ExchangeSpec = {
         connection: ready.connection,
-        dataSpec: ready.dataSpec,
-        prepared: ready.prepared,
-        sharedSecret: ready.token.sharedSecret,
-        // Pass the invitation's expiry through unchanged; authenticateConnection
-        // re-checks it before and after the key exchange.
-        expires: ready.token.expires,
-        keyPath: options.keyFile,
-        configPath: options.configFile,
-        output: ready.output,
-        verbosity: options.verbosity,
-        loggerName: "accept",
-        recordOutput: resolveRecordOutput({
-          enabled: options.record,
-          recordFile: options.recordFile,
-        }),
-        reuseExistingConfig: ready.reuseExistingConfig,
-      });
-      logOnlineBootstrapOutcome(log, {
-        configFile: options.configFile,
-        keyFile: options.keyFile,
-        configWriteError,
-        reuseExistingConfig: ready.reuseExistingConfig,
-      });
-      return;
-    }
+        ...ready.dataSpec,
+      };
+      // When reusing a pre-existing config, provisionConfigAndKey ignores `spec`
+      // and writes only the key file, leaving the user's config untouched.
+      const { configPath, keyPath } = provisionConfigAndKey(
+        spec,
+        // The acceptor's key file holds the invitation token without an expiry; the
+        // inviter's copy carries the expiry. The token rotates on first exchange.
+        { sharedSecret: ready.token.sharedSecret },
+        { configPath: options.configFile, keyPath: options.keyFile },
+        { reuseExistingConfig: ready.reuseExistingConfig },
+      );
 
-    const spec: ExchangeSpec = {
-      connection: ready.connection,
-      ...ready.dataSpec,
-    };
-    // When reusing a pre-existing config, provisionConfigAndKey ignores `spec`
-    // and writes only the key file, leaving the user's config untouched.
-    const { configPath, keyPath } = provisionConfigAndKey(
-      spec,
-      // The acceptor's key file holds the invitation token without an expiry; the
-      // inviter's copy carries the expiry. The token rotates on first exchange.
-      { sharedSecret: ready.token.sharedSecret },
-      { configPath: options.configFile, keyPath: options.keyFile },
-      { reuseExistingConfig: ready.reuseExistingConfig },
-    );
-
-    if (ready.reuseExistingConfig)
-      log.info(
-        `reused the existing configuration at ${configPath}; it already matches ` +
-          "the invitation, so the connection and linkage settings are unchanged.",
-      );
-    else if (ready.seeded)
-      log.info(
-        `wrote config to ${configPath}, seeding the connection block from the ` +
-          "invitation's endpoint; review it and add your own credentials " +
-          "before running 'psilink exchange'.",
-      );
-    else
-      log.info(
-        `wrote config to ${configPath}; fill in the connection block before ` +
-          "running 'psilink exchange'.",
-      );
-    log.info(`wrote key file to ${keyPath}. Keep it private.`);
-  });
+      if (ready.reuseExistingConfig)
+        log.info(
+          `reused the existing configuration at ${configPath}; it already matches ` +
+            "the invitation, so the connection and linkage settings are unchanged.",
+        );
+      else if (ready.seeded)
+        log.info(
+          `wrote config to ${configPath}, seeding the connection block from the ` +
+            "invitation's endpoint; review it and add your own credentials " +
+            "before running 'psilink exchange'.",
+        );
+      else
+        log.info(
+          `wrote config to ${configPath}; fill in the connection block before ` +
+            "running 'psilink exchange'.",
+        );
+      log.info(`wrote key file to ${keyPath}. Keep it private.`);
+    });
+  } finally {
+    // Close the log-file descriptor on the normal exit path. Writes are
+    // synchronous and already durable, so the error path's process.exit (which
+    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
+    logFileSink?.close();
+  }
 }

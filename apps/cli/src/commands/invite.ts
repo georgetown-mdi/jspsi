@@ -20,7 +20,11 @@ import { loadConfigLinkageSource } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
-import { durationFlagSeconds, singleValue } from "../util/cli";
+import {
+  configureLogFile,
+  durationFlagSeconds,
+  singleValue,
+} from "../util/cli";
 import { redactUrlCredentials } from "../util/connectionUrl";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
@@ -397,118 +401,131 @@ export async function validateInvite(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  await runOrExit("invite", async () => {
-    // Parse and apply the log level before creating the logger, so the
-    // configured level actually takes effect (loglevel binds a logger's level at
-    // creation). Doing this inside runOrExit also routes an invalid option (e.g.
-    // an unrecognized --log-level) through the same error->exit path as
-    // everything else, rather than yargs's noisier top-level catch.
-    const options = parseCommonBootstrapArgs(argv);
-    logLibrary.setDefaultLevel(options.logLevel);
-    const log = getLogger("invite");
-    // accept-timeout is parsed to seconds here (not in validateInvite) so a
-    // malformed or bare-integer value is a clean usage error (exit 64) before any
-    // side effect; durationFlagSeconds also rejects a repeat (via singleValue)
-    // before the array could reach validateInvite's numeric comparisons. expires-in
-    // is read as a string and parsed inside validateInvite; singleValue rejects its
-    // repeat too, before the array would hit parseDuration's .trim() and surface as
-    // a confusing exit 69.
-    const acceptTimeout =
-      durationFlagSeconds(argv, "accept-timeout") ??
-      DEFAULT_ACCEPT_TIMEOUT_SECONDS;
-    const expiresIn = singleValue(argv, "expires-in") as string | undefined;
-    const positionals = (argv["args"] as Array<string> | undefined) ?? [];
-    const resolved = resolveInvitePositionals(positionals);
-    const ready = await validateInvite({
-      resolved,
-      options,
-      acceptTimeout,
-      expiresIn,
-      log,
-    });
-
-    if (ready.mode === "online") {
-      // The token is disclosed only now -- after all validation and prep above
-      // succeeded. Nothing fallible runs after this print except the network
-      // wait it is meant to precede.
-      printInvitation(ready.invitation, { url: ready.url });
-      // State the invitation's validity contract before announcing the wait. The
-      // inviter's exit (cancel, connection timeout, or accept-timeout) already
-      // makes the printed invitation unacceptable -- the setup secret is held
-      // only in memory until a handshake succeeds and the rendezvous is swept on
-      // cleanup -- so this notice is the user-facing half of that guarantee. It
-      // is logged here rather than at exit because a SIGINT exits via the signal
-      // handler's process.exit before any post-wait line could run.
-      log.info(onlineWaitInvalidationNotice(acceptTimeout));
-      log.info("waiting for the partner to accept...");
-      const { configWriteError } = await runOnlineBootstrap({
-        connection: ready.connection,
-        dataSpec: ready.dataSpec,
-        prepared: ready.prepared,
-        sharedSecret: ready.sharedSecret,
-        expires: ready.expires,
-        keyPath: options.keyFile,
-        configPath: options.configFile,
-        output: ready.output,
-        verbosity: options.verbosity,
-        loggerName: "invite",
-        recordOutput: resolveRecordOutput({
-          enabled: options.record,
-          recordFile: options.recordFile,
-        }),
+  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
+  try {
+    await runOrExit("invite", async () => {
+      // Parse and apply the log level before creating the logger, so the
+      // configured level actually takes effect (loglevel binds a logger's level
+      // at creation). Doing this inside runOrExit also routes an invalid option
+      // (e.g. an unrecognized --log-level) through the same error->exit path as
+      // everything else, rather than yargs's noisier top-level catch.
+      const options = parseCommonBootstrapArgs(argv);
+      // Redirect logging to the file (if requested) before the level is applied
+      // and any logger is created, so getLogger("invite") below inherits the
+      // file sink. A missing parent directory is a UsageError -> exit 64 here.
+      if (options.logFile !== undefined)
+        logFileSink = configureLogFile(options.logFile);
+      logLibrary.setDefaultLevel(options.logLevel);
+      const log = getLogger("invite");
+      // accept-timeout is parsed to seconds here (not in validateInvite) so a
+      // malformed or bare-integer value is a clean usage error (exit 64) before any
+      // side effect; durationFlagSeconds also rejects a repeat (via singleValue)
+      // before the array could reach validateInvite's numeric comparisons. expires-in
+      // is read as a string and parsed inside validateInvite; singleValue rejects its
+      // repeat too, before the array would hit parseDuration's .trim() and surface as
+      // a confusing exit 69.
+      const acceptTimeout =
+        durationFlagSeconds(argv, "accept-timeout") ??
+        DEFAULT_ACCEPT_TIMEOUT_SECONDS;
+      const expiresIn = singleValue(argv, "expires-in") as string | undefined;
+      const positionals = (argv["args"] as Array<string> | undefined) ?? [];
+      const resolved = resolveInvitePositionals(positionals);
+      const ready = await validateInvite({
+        resolved,
+        options,
+        acceptTimeout,
+        expiresIn,
+        log,
       });
-      logOnlineBootstrapOutcome(log, {
-        configFile: options.configFile,
-        keyFile: options.keyFile,
-        configWriteError,
-      });
-      return;
-    }
 
-    if (ready.mode === "offlineFromConfig") {
-      // The config already exists and sourced the linkage terms; reuse it and
-      // write only the key file (refusing to clobber an existing one). Under
-      // reuseExistingConfig the spec is ignored and the existing config is left
-      // untouched, so the placeholder spec here is never written.
-      const { keyPath } = provisionConfigAndKey(
-        specWithPlaceholderConnection({ linkageTerms: ready.linkageTerms }),
+      if (ready.mode === "online") {
+        // The token is disclosed only now -- after all validation and prep above
+        // succeeded. Nothing fallible runs after this print except the network
+        // wait it is meant to precede.
+        printInvitation(ready.invitation, { url: ready.url });
+        // State the invitation's validity contract before announcing the wait. The
+        // inviter's exit (cancel, connection timeout, or accept-timeout) already
+        // makes the printed invitation unacceptable -- the setup secret is held
+        // only in memory until a handshake succeeds and the rendezvous is swept on
+        // cleanup -- so this notice is the user-facing half of that guarantee. It
+        // is logged here rather than at exit because a SIGINT exits via the signal
+        // handler's process.exit before any post-wait line could run.
+        log.info(onlineWaitInvalidationNotice(acceptTimeout));
+        log.info("waiting for the partner to accept...");
+        const { configWriteError } = await runOnlineBootstrap({
+          connection: ready.connection,
+          dataSpec: ready.dataSpec,
+          prepared: ready.prepared,
+          sharedSecret: ready.sharedSecret,
+          expires: ready.expires,
+          keyPath: options.keyFile,
+          configPath: options.configFile,
+          output: ready.output,
+          verbosity: options.verbosity,
+          loggerName: "invite",
+          recordOutput: resolveRecordOutput({
+            enabled: options.record,
+            recordFile: options.recordFile,
+          }),
+        });
+        logOnlineBootstrapOutcome(log, {
+          configFile: options.configFile,
+          keyFile: options.keyFile,
+          configWriteError,
+        });
+        return;
+      }
+
+      if (ready.mode === "offlineFromConfig") {
+        // The config already exists and sourced the linkage terms; reuse it and
+        // write only the key file (refusing to clobber an existing one). Under
+        // reuseExistingConfig the spec is ignored and the existing config is left
+        // untouched, so the placeholder spec here is never written.
+        const { keyPath } = provisionConfigAndKey(
+          specWithPlaceholderConnection({ linkageTerms: ready.linkageTerms }),
+          { sharedSecret: ready.sharedSecret, expires: ready.expires },
+          { configPath: ready.configPath, keyPath: options.keyFile },
+          { reuseExistingConfig: true },
+        );
+
+        printInvitation(ready.invitation, undefined);
+        log.info(
+          `derived the invitation's linkage terms from ${ready.configPath} and ` +
+            `wrote the key file to ${keyPath} (the invitation expires at ` +
+            `${ready.expires}). Keep the key file private.`,
+        );
+        log.info(offlineAbandonNotice(keyPath));
+        log.info(
+          `ensure the connection block in ${ready.configPath} is filled in ` +
+            "before running 'psilink exchange'.",
+        );
+        return;
+      }
+
+      const spec = specWithPlaceholderConnection(ready.dataSpec);
+      const { configPath, keyPath } = provisionConfigAndKey(
+        spec,
         { sharedSecret: ready.sharedSecret, expires: ready.expires },
-        { configPath: ready.configPath, keyPath: options.keyFile },
-        { reuseExistingConfig: true },
+        { configPath: options.configFile, keyPath: options.keyFile },
       );
 
       printInvitation(ready.invitation, undefined);
       log.info(
-        `derived the invitation's linkage terms from ${ready.configPath} and ` +
-          `wrote the key file to ${keyPath} (the invitation expires at ` +
-          `${ready.expires}). Keep the key file private.`,
+        `wrote config to ${configPath} and key file to ${keyPath} (the ` +
+          `invitation expires at ${ready.expires}). Keep the key file private.`,
       );
       log.info(offlineAbandonNotice(keyPath));
       log.info(
-        `ensure the connection block in ${ready.configPath} is filled in ` +
-          "before running 'psilink exchange'.",
+        `fill in the connection block in ${configPath} before running ` +
+          "'psilink exchange'.",
       );
-      return;
-    }
-
-    const spec = specWithPlaceholderConnection(ready.dataSpec);
-    const { configPath, keyPath } = provisionConfigAndKey(
-      spec,
-      { sharedSecret: ready.sharedSecret, expires: ready.expires },
-      { configPath: options.configFile, keyPath: options.keyFile },
-    );
-
-    printInvitation(ready.invitation, undefined);
-    log.info(
-      `wrote config to ${configPath} and key file to ${keyPath} (the ` +
-        `invitation expires at ${ready.expires}). Keep the key file private.`,
-    );
-    log.info(offlineAbandonNotice(keyPath));
-    log.info(
-      `fill in the connection block in ${configPath} before running ` +
-        "'psilink exchange'.",
-    );
-  });
+    });
+  } finally {
+    // Close the log-file descriptor on the normal exit path. Writes are
+    // synchronous and already durable, so the error path's process.exit (which
+    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
+    logFileSink?.close();
+  }
 }
 
 // --- Helpers -----------------------------------------------------------------

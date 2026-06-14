@@ -29,7 +29,12 @@ import {
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
-import { exitWithError, parseOrExit, validateInputFile } from "../util/cli";
+import {
+  configureLogFile,
+  exitWithError,
+  parseOrExit,
+  validateInputFile,
+} from "../util/cli";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -134,6 +139,7 @@ type ExchangeOptions = Omit<
   | "input"
   | "output"
   | "logLevel"
+  | "logFile"
   | "verbosity"
   | "sweepExchangeFiles"
   | "forceRetainSweep"
@@ -543,140 +549,157 @@ export async function handler(argv: Arguments): Promise<void> {
     input,
     output,
     logLevel,
+    logFile,
     verbosity,
     sweepExchangeFiles,
     forceRetainSweep,
     ...options
   } = parsed;
 
+  // Redirect logging to the file (if requested) before the level is applied and
+  // the logger is created, so getLogger("exchange") below inherits the file
+  // sink. A missing parent directory is a UsageError reported on stderr (the
+  // file is not the sink) and exits 64.
+  const logFileSink =
+    logFile !== undefined
+      ? parseOrExit(() => configureLogFile(logFile))
+      : undefined;
+
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("exchange");
 
   try {
-    assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
-  } catch (err) {
-    exitWithError(log, err, 64);
-  }
+    try {
+      assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
+    } catch (err) {
+      exitWithError(log, err, 64);
+    }
 
-  let configResult: ReturnType<typeof loadConfig>;
-  try {
-    configResult = loadConfig(options);
-  } catch (err) {
-    // A malformed or missing config/key file is a usage error (exit 64); the
-    // ENOENT arm keeps the missing-config case, which is tagged rather than a
-    // UsageError. Anything else (e.g. an unsupported channel) stays exit 69.
-    exitWithError(
-      log,
-      err,
-      err instanceof UsageError ||
-        (err as NodeJS.ErrnoException).code === "ENOENT"
-        ? 64
-        : 69,
+    let configResult: ReturnType<typeof loadConfig>;
+    try {
+      configResult = loadConfig(options);
+    } catch (err) {
+      // A malformed or missing config/key file is a usage error (exit 64); the
+      // ENOENT arm keeps the missing-config case, which is tagged rather than a
+      // UsageError. Anything else (e.g. an unsupported channel) stays exit 69.
+      exitWithError(
+        log,
+        err,
+        err instanceof UsageError ||
+          (err as NodeJS.ErrnoException).code === "ENOENT"
+          ? 64
+          : 69,
+      );
+    }
+    const { connection, authentication, ...exchangeDataSpec } = configResult;
+
+    // Token expiry advisory baseline: was the token expiring soon at load time?
+    // This recheck uses a fresh clock just after loadConfig's hard stop, so in the
+    // (sub-millisecond) gap a token can tip from "expiring-soon" to "expired". That
+    // is handled, not guaranteed away: the advisory below is keyed on
+    // "expiring-soon" and self-skips on "expired", and runProtocol's pre-handshake
+    // assertSharedSecretReadyForHandshake aborts an expired token with the re-invite
+    // message before any handshake. The threshold comes from the max-age policy;
+    // without a policy it is undefined and the status is "ok" (never
+    // "expiring-soon"). Re-evaluated after the exchange to decide whether to warn
+    // (see shouldWarnTokenExpiring).
+    const warnThresholdDays = warnThresholdDaysForPolicy(
+      authentication.tokenMaxAgeDays,
     );
-  }
-  const { connection, authentication, ...exchangeDataSpec } = configResult;
-
-  // Token expiry advisory baseline: was the token expiring soon at load time?
-  // This recheck uses a fresh clock just after loadConfig's hard stop, so in the
-  // (sub-millisecond) gap a token can tip from "expiring-soon" to "expired". That
-  // is handled, not guaranteed away: the advisory below is keyed on
-  // "expiring-soon" and self-skips on "expired", and runProtocol's pre-handshake
-  // assertSharedSecretReadyForHandshake aborts an expired token with the re-invite
-  // message before any handshake. The threshold comes from the max-age policy;
-  // without a policy it is undefined and the status is "ok" (never
-  // "expiring-soon"). Re-evaluated after the exchange to decide whether to warn
-  // (see shouldWarnTokenExpiring).
-  const warnThresholdDays = warnThresholdDaysForPolicy(
-    authentication.tokenMaxAgeDays,
-  );
-  const expiryBefore = checkKeyFileExpiry(
-    {
-      sharedSecret: authentication.sharedSecret,
-      expires: authentication.expires,
-    },
-    Date.now(),
-    { warnThresholdDays },
-  );
-
-  announceRetainMode(connection, log);
-
-  let identity: string;
-  if (options.identity) {
-    identity = options.identity;
-    if (exchangeDataSpec.linkageTerms)
-      exchangeDataSpec.linkageTerms = {
-        ...exchangeDataSpec.linkageTerms,
-        identity,
-      };
-  } else {
-    identity = exchangeDataSpec.linkageTerms?.identity ?? userInfo().username;
-  }
-
-  let prepared: PreparedExchange;
-  try {
-    prepared = await prepareDataset(exchangeDataSpec, identity, input);
-  } catch (err) {
-    exitWithError(log, err, (err as { exitCode?: number }).exitCode ?? 69);
-  }
-
-  const recordOutput = resolveRecordOutput({
-    enabled: options.record,
-    recordFile: options.recordFile,
-  });
-
-  let exchangeError: unknown;
-  try {
-    await runProtocol(
-      connection,
-      authentication,
-      prepared,
-      output,
-      verbosity,
-      "exchange",
-      recordOutput,
-      // saveIntent and onAuthenticated are both undefined on the authenticated
-      // exchange path; the trailing object carries the CLI-only sweep controls.
-      undefined,
-      undefined,
-      { sweepExchangeFiles, forceRetainSweep },
-    );
-  } catch (err) {
-    // Capture rather than exit here so the expiry advisory below can run on the
-    // failure path too (the criterion is "expiring soon AND rotation did not
-    // refresh the token", which only a failed exchange leaves unsatisfied-by-
-    // refresh). The exit follows the advisory.
-    exchangeError = err;
-  }
-
-  // Emit the token-expiry advisory when the token was expiring soon at load and
-  // the exchange did not refresh it (a successful rotation stamps a fresh,
-  // farther-out expires, so the advisory would contradict runProtocol's "retry
-  // without re-inviting" guidance). The decision and message are built by
-  // tokenExpiringAdvisory, which re-reads the on-disk token.
-  let advisory: string | undefined;
-  try {
-    advisory = tokenExpiringAdvisory(
-      expiryBefore,
-      authentication.keyFilePath,
+    const expiryBefore = checkKeyFileExpiry(
+      {
+        sharedSecret: authentication.sharedSecret,
+        expires: authentication.expires,
+      },
       Date.now(),
-      warnThresholdDays,
+      { warnThresholdDays },
     );
-  } catch (err) {
-    // The advisory is best-effort. A re-read failure here (the file became
-    // unreadable or corrupt during the exchange; the load-time read had already
-    // validated it) is non-fatal -- record it at debug rather than let it mask
-    // the exchange's own outcome reported below.
-    log.debug(
-      "could not re-read the key file for the token-expiry advisory:",
-      err instanceof Error ? err.message : String(err),
-    );
-  }
-  if (advisory !== undefined) log.warn(advisory);
 
-  if (exchangeError !== undefined)
-    exitWithError(
-      log,
-      exchangeError,
-      exchangeError instanceof UsageError ? 64 : 69,
-    );
+    announceRetainMode(connection, log);
+
+    let identity: string;
+    if (options.identity) {
+      identity = options.identity;
+      if (exchangeDataSpec.linkageTerms)
+        exchangeDataSpec.linkageTerms = {
+          ...exchangeDataSpec.linkageTerms,
+          identity,
+        };
+    } else {
+      identity = exchangeDataSpec.linkageTerms?.identity ?? userInfo().username;
+    }
+
+    let prepared: PreparedExchange;
+    try {
+      prepared = await prepareDataset(exchangeDataSpec, identity, input);
+    } catch (err) {
+      exitWithError(log, err, (err as { exitCode?: number }).exitCode ?? 69);
+    }
+
+    const recordOutput = resolveRecordOutput({
+      enabled: options.record,
+      recordFile: options.recordFile,
+    });
+
+    let exchangeError: unknown;
+    try {
+      await runProtocol(
+        connection,
+        authentication,
+        prepared,
+        output,
+        verbosity,
+        "exchange",
+        recordOutput,
+        // saveIntent and onAuthenticated are both undefined on the authenticated
+        // exchange path; the trailing object carries the CLI-only sweep controls.
+        undefined,
+        undefined,
+        { sweepExchangeFiles, forceRetainSweep },
+      );
+    } catch (err) {
+      // Capture rather than exit here so the expiry advisory below can run on the
+      // failure path too (the criterion is "expiring soon AND rotation did not
+      // refresh the token", which only a failed exchange leaves unsatisfied-by-
+      // refresh). The exit follows the advisory.
+      exchangeError = err;
+    }
+
+    // Emit the token-expiry advisory when the token was expiring soon at load and
+    // the exchange did not refresh it (a successful rotation stamps a fresh,
+    // farther-out expires, so the advisory would contradict runProtocol's "retry
+    // without re-inviting" guidance). The decision and message are built by
+    // tokenExpiringAdvisory, which re-reads the on-disk token.
+    let advisory: string | undefined;
+    try {
+      advisory = tokenExpiringAdvisory(
+        expiryBefore,
+        authentication.keyFilePath,
+        Date.now(),
+        warnThresholdDays,
+      );
+    } catch (err) {
+      // The advisory is best-effort. A re-read failure here (the file became
+      // unreadable or corrupt during the exchange; the load-time read had already
+      // validated it) is non-fatal -- record it at debug rather than let it mask
+      // the exchange's own outcome reported below.
+      log.debug(
+        "could not re-read the key file for the token-expiry advisory:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+    if (advisory !== undefined) log.warn(advisory);
+
+    if (exchangeError !== undefined)
+      exitWithError(
+        log,
+        exchangeError,
+        exchangeError instanceof UsageError ? 64 : 69,
+      );
+  } finally {
+    // Close the log-file descriptor on the normal exit path. Writes are
+    // synchronous and already durable, so exitWithError's process.exit (which
+    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
+    logFileSink?.close();
+  }
 }

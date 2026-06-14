@@ -221,6 +221,16 @@ The pre-existing `psilink.yaml` configuration file is reused; only the key file 
 
 See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full procedure. In summary: notify the partner out-of-band, both parties delete their key files, and re-invite over a channel known to be uncompromised.
 
+## Logging
+
+Every command that produces diagnostic output - `invite`, `accept`, `exchange`, the zero-setup form, and `fingerprint` - accepts `--log-level` and `--log-file`.
+
+`--log-level <level>` selects the verbosity: `silent`, `error`, `warn`, `info` (the default), `debug`, or `trace`. `silent` suppresses all log output.
+
+`--log-file <path>` appends log output to `<path>` instead of writing it to the terminal, so psilink can be run unattended or in automation without shell redirection. The file is opened in append mode, preserving any content from previous runs; each line already carries an ISO-8601 timestamp, so successive runs stay distinguishable without a separate flag. The parent directory must already exist - a missing directory aborts the command with a usage error (exit 64) before any exchange work begins. A log file psilink creates is owner-only (mode `0600`), since at `debug`/`trace` it can record partner identity, linkage keys, and data categories; if you point `--log-file` at a file that already exists, its permissions are left as they are. `--log-level` still applies to the file, so `--log-level silent --log-file run.log` writes nothing. Results written to `stdout` (an exchange's CSV output, the `fingerprint` summary) are not log output and are unaffected by `--log-file`.
+
+One exception: a few low-level warnings (from data cleaning and file handling) are not redirected and may still appear on the terminal even with `--log-file` set. If a run must leave no diagnostics on the terminal, also redirect the terminal output (for example with a shell redirect) alongside `--log-file`.
+
 ## Exit codes
 
 The CLI distinguishes two failure classes, following the BSD `sysexits` convention:
@@ -230,7 +240,7 @@ The CLI distinguishes two failure classes, following the BSD `sysexits` conventi
 
 For `psilink exchange`, a missing, malformed, or unreadable configuration file (`psilink.yaml`) or key file (`.psilink.key`) - including a key file whose stored token is malformed - is a usage error and exits 64. An unsupported channel or URL scheme - a `webrtc` config or `ws://` URL the CLI does not yet support, an unknown scheme, or a malformed `file://` authority - is likewise a usage error and exits 64, as is an invalid combination of connection options (for example a reserved `peer_id` or a `retain_files`/`lockless_rendezvous` contradiction). Failures during the exchange itself - connecting to the server, the rendezvous, or the message loop - exit 69. A successful run exits 0; a run terminated by a signal exits 130 (SIGINT) or 143 (SIGTERM).
 
-Passing a single-value option more than once - for example `psilink invite --accept-timeout 60s --accept-timeout 120s`, or a repeated `--log-level`, `--server-port`, or `--peer-timeout` - is a usage error and exits 64, naming the flag (`--<flag> may be given only once`), rather than silently taking one of the values. Count flags (`-v`/`--verbose`) and boolean flags (and their `--no-` forms, such as `--record`/`--no-record`) may still be repeated and keep their accumulate / last-one-wins / negation semantics.
+Passing a single-value option more than once - for example `psilink invite --accept-timeout 60s --accept-timeout 120s`, or a repeated `--log-level`, `--log-file`, `--server-port`, or `--peer-timeout` - is a usage error and exits 64, naming the flag (`--<flag> may be given only once`), rather than silently taking one of the values. Count flags (`-v`/`--verbose`) and boolean flags (and their `--no-` forms, such as `--record`/`--no-record`) may still be repeated and keep their accumulate / last-one-wins / negation semantics.
 
 ## See also
 
