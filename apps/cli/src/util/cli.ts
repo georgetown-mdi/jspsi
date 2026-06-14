@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import util from "node:util";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 
@@ -103,6 +104,82 @@ export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
   debug: logLibrary.levels.DEBUG,
   trace: logLibrary.levels.TRACE,
 };
+
+/**
+ * Redirect every loglevel message to `logFilePath` (append mode) instead of the
+ * terminal, returning the {@link fs.WriteStream} so the caller can close it after
+ * the exchange. Omitting the flag leaves logging on the terminal untouched -- a
+ * handler only calls this when `--log-file` was given.
+ *
+ * loglevel has no built-in file sink, so this installs one by overriding the
+ * library's global `methodFactory` -- the factory every named logger inherits at
+ * construction (loglevel's `getLogger` does `new Logger(name,
+ * defaultLogger.methodFactory)`). The installed factory returns a function that
+ * writes its formatted arguments to the stream rather than calling
+ * `console[method]`. core's `setLogPrefixer` wraps this leaf factory per logger,
+ * so each line keeps its `[ISO] [LEVEL] [CONTEXT]` prefix: the prefixer passes
+ * that prefix as the first argument to the function returned here, and
+ * `util.format` renders it ahead of the message exactly as `console.log` would.
+ * Unlike `setLogPrefixer`, this factory does not chain to the previous factory:
+ * the file sink replaces console output rather than decorating it, so there is
+ * no prior return value to forward.
+ *
+ * Level filtering is unaffected: loglevel installs `noop` for methods below the
+ * active level and calls `methodFactory` only for enabled ones, so
+ * `--log-level silent` writes nothing to the file.
+ *
+ * A logger captures the global factory at CREATION, so this must run before the
+ * loggers whose output should land in the file exist -- the handlers call it
+ * before `setDefaultLevel` and `getLogger`. The two loggers created at import
+ * time (`file-utils`, `cleaning`) predate any handler and are therefore not
+ * redirected; this is the same limitation core's `withCapturedLogs` documents
+ * for child loggers created before it installs its interceptor.
+ *
+ * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
+ * directory or other open failure surfaces here, as a {@link UsageError} before
+ * any exchange work begins, rather than as an asynchronous stream `'error'`
+ * mid-run.
+ */
+export function configureLogFile(logFilePath: string): fs.WriteStream {
+  // Windows paths are accepted: fold backslashes to forward slashes on ingestion
+  // (the CLAUDE.local.md Windows-path convention) before the path reaches the
+  // filesystem call, so a backslash or UNC form opens the intended file.
+  const normalized = logFilePath.replace(/\\/g, "/");
+
+  let fd: number;
+  try {
+    // "a" creates-or-appends and throws synchronously (ENOENT) when the parent
+    // directory is absent, so the failure is reported before the stream -- and
+    // any exchange work -- begins, not as an async 'error' event later.
+    fd = fs.openSync(normalized, "a");
+  } catch (err) {
+    throw new UsageError(
+      `could not open log file ${normalized}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  const stream = fs.createWriteStream(normalized, { fd, flags: "a" });
+  // loglevel is redirected into this same stream, so a mid-run write failure
+  // (e.g. the disk filling) cannot be reported through the logger; surface it on
+  // the original stderr so an unhandled 'error' event does not crash the process.
+  stream.on("error", (err) => {
+    process.stderr.write(
+      `log file ${normalized} write error: ${err.message}\n`,
+    );
+  });
+
+  // The factory ignores its (methodName, level, loggerName) arguments: the level
+  // is already encoded in the prefix setLogPrefixer prepends, and level filtering
+  // is handled by loglevel before the factory is consulted.
+  logLibrary.methodFactory = () => {
+    return (...args: unknown[]) => {
+      stream.write(util.format(...args) + "\n");
+    };
+  };
+
+  return stream;
+}
 
 /**
  * Validate that `input` is a readable file path; throws on failure.

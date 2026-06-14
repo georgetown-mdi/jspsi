@@ -30,7 +30,12 @@ import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
-import { exitWithError, parseOrExit, validateInputFile } from "../util/cli";
+import {
+  configureLogFile,
+  exitWithError,
+  parseOrExit,
+  validateInputFile,
+} from "../util/cli";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -135,6 +140,7 @@ type ZeroSetupOptions = Omit<
   ZeroSetupArgs,
   | "positionals"
   | "logLevel"
+  | "logFile"
   | "verbosity"
   | "sweepExchangeFiles"
   | "forceRetainSweep"
@@ -452,179 +458,200 @@ export async function handler(argv: Arguments): Promise<void> {
   const {
     positionals,
     logLevel,
+    logFile,
     verbosity,
     sweepExchangeFiles,
     forceRetainSweep,
     ...options
   } = parsed;
 
+  // Redirect logging to the file (if requested) before the level is applied and
+  // the logger is created, so getLogger("psilink") below inherits the file sink.
+  // A missing parent directory is a UsageError reported on stderr (the file is
+  // not the sink) and exits 64.
+  const logFileStream =
+    logFile !== undefined
+      ? parseOrExit(() => configureLogFile(logFile))
+      : undefined;
+
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("psilink");
 
   try {
-    assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
-  } catch (err) {
-    exitWithError(log, err, 64);
-  }
-
-  log.warn(
-    "WARNING: this exchange relies on transport-layer authentication only. " +
-      "You must trust the server administrator. " +
-      "Run 'psilink invite' / 'psilink accept' to establish a recurring " +
-      "exchange with application-layer encryption.",
-  );
-
-  let resolved: ReturnType<typeof resolvePositionals>;
-  try {
-    resolved = resolvePositionals(positionals);
-  } catch (err) {
-    exitWithError(log, err, 64);
-  }
-
-  const { server, input, output } = resolved;
-
-  // Warn before createConnection can throw so the user sees the flag issue even
-  // if the channel is not yet supported. The channel is derived from the URL
-  // here (pre-connection); an unknown scheme is swallowed because
-  // createConnection surfaces it below.
-  let channel: ConnectionConfig["channel"] | undefined;
-  try {
-    channel = channelFromURL(server);
-  } catch {
-    // Unknown URL scheme; createConnection handles this.
-  }
-  if (channel !== undefined)
-    warnUnsupportedFileSyncFlags(
-      channel,
-      {
-        locklessRendezvous: options.locklessRendezvous,
-        retainFiles: options.retainFiles,
-      },
-      log,
-    );
-
-  // Detect a pre-existing config/key before any network activity. With --save,
-  // a target that already exists is an error -- a half-finished bootstrap must
-  // never clobber a user's configuration -- and the check runs up front so it
-  // aborts before a connection is opened. Without --save, no files are written,
-  // so an existing config/key is merely ignored; warn and point at the command
-  // that would use it (docs/CLI.md "Zero-setup exchange").
-  //
-  // Both paths are reserved here even though the partner-did-not-save branch
-  // ends up writing only the config: whether a key file is written depends on
-  // the partner's intent, which is not known until after the terms round-trip.
-  // Reserving both up front fails fast on an existing key file rather than
-  // discovering the conflict post-exchange, where the secret has already crossed
-  // the wire and the only recovery is a re-invite. The conservative gate trades a
-  // rare false block (a stale key file plus a partner who declines to save) for
-  // never stranding a half-saved bootstrap, and matches docs/CLI.md (an existing
-  // config OR key with --save is an error).
-  if (options.save) {
     try {
-      assertNoProvisionConflicts({
-        configPath: options.configFile,
-        keyPath: options.keyFile,
-      });
+      assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
     } catch (err) {
       exitWithError(log, err, 64);
     }
-  } else {
-    const existing = detectFileConflicts([options.configFile, options.keyFile]);
-    if (existing.length > 0) {
-      const noun = existing.length === 1 ? "file" : "files";
-      log.warn(
-        `existing ${noun} ${existing.join(", ")} will be ignored by this ` +
-          "zero-setup exchange; to use saved configuration and key material, " +
-          "run 'psilink exchange' instead",
+
+    log.warn(
+      "WARNING: this exchange relies on transport-layer authentication only. " +
+        "You must trust the server administrator. " +
+        "Run 'psilink invite' / 'psilink accept' to establish a recurring " +
+        "exchange with application-layer encryption.",
+    );
+
+    let resolved: ReturnType<typeof resolvePositionals>;
+    try {
+      resolved = resolvePositionals(positionals);
+    } catch (err) {
+      exitWithError(log, err, 64);
+    }
+
+    const { server, input, output } = resolved;
+
+    // Warn before createConnection can throw so the user sees the flag issue even
+    // if the channel is not yet supported. The channel is derived from the URL
+    // here (pre-connection); an unknown scheme is swallowed because
+    // createConnection surfaces it below.
+    let channel: ConnectionConfig["channel"] | undefined;
+    try {
+      channel = channelFromURL(server);
+    } catch {
+      // Unknown URL scheme; createConnection handles this.
+    }
+    if (channel !== undefined)
+      warnUnsupportedFileSyncFlags(
+        channel,
+        {
+          locklessRendezvous: options.locklessRendezvous,
+          retainFiles: options.retainFiles,
+        },
+        log,
+      );
+
+    // Detect a pre-existing config/key before any network activity. With --save,
+    // a target that already exists is an error -- a half-finished bootstrap must
+    // never clobber a user's configuration -- and the check runs up front so it
+    // aborts before a connection is opened. Without --save, no files are written,
+    // so an existing config/key is merely ignored; warn and point at the command
+    // that would use it (docs/CLI.md "Zero-setup exchange").
+    //
+    // Both paths are reserved here even though the partner-did-not-save branch
+    // ends up writing only the config: whether a key file is written depends on
+    // the partner's intent, which is not known until after the terms round-trip.
+    // Reserving both up front fails fast on an existing key file rather than
+    // discovering the conflict post-exchange, where the secret has already crossed
+    // the wire and the only recovery is a re-invite. The conservative gate trades a
+    // rare false block (a stale key file plus a partner who declines to save) for
+    // never stranding a half-saved bootstrap, and matches docs/CLI.md (an existing
+    // config OR key with --save is an error).
+    if (options.save) {
+      try {
+        assertNoProvisionConflicts({
+          configPath: options.configFile,
+          keyPath: options.keyFile,
+        });
+      } catch (err) {
+        exitWithError(log, err, 64);
+      }
+    } else {
+      const existing = detectFileConflicts([
+        options.configFile,
+        options.keyFile,
+      ]);
+      if (existing.length > 0) {
+        const noun = existing.length === 1 ? "file" : "files";
+        log.warn(
+          `existing ${noun} ${existing.join(", ")} will be ignored by this ` +
+            "zero-setup exchange; to use saved configuration and key material, " +
+            "run 'psilink exchange' instead",
+        );
+      }
+    }
+
+    let connection: ConnectionConfig;
+    let liveConnection: ConnectionConfig;
+    let prepared: PreparedExchange;
+    try {
+      connection = createConnection(server, options);
+      // `connection` keeps any `@path` credential ref so finalizeBootstrap's save
+      // persists the reference, not the secret; `liveConnection` resolves it for
+      // the exchange itself. A missing or unreadable `@path` file is a UsageError
+      // here (exit 64), before any network activity.
+      liveConnection = resolveConnectionCredentials(connection);
+      const identity = options.identity ?? userInfo().username;
+      prepared = await prepareDataset(identity, input);
+    } catch (err) {
+      // A bad URL scheme or unsupported channel is a usage error (exit 64);
+      // prepareDataset failures carry their own exitCode; otherwise exit 69.
+      exitWithError(
+        log,
+        err,
+        err instanceof UsageError
+          ? 64
+          : ((err as { exitCode?: number }).exitCode ?? 69),
       );
     }
-  }
 
-  let connection: ConnectionConfig;
-  let liveConnection: ConnectionConfig;
-  let prepared: PreparedExchange;
-  try {
-    connection = createConnection(server, options);
-    // `connection` keeps any `@path` credential ref so finalizeBootstrap's save
-    // persists the reference, not the secret; `liveConnection` resolves it for
-    // the exchange itself. A missing or unreadable `@path` file is a UsageError
-    // here (exit 64), before any network activity.
-    liveConnection = resolveConnectionCredentials(connection);
-    const identity = options.identity ?? userInfo().username;
-    prepared = await prepareDataset(identity, input);
-  } catch (err) {
-    // A bad URL scheme or unsupported channel is a usage error (exit 64);
-    // prepareDataset failures carry their own exitCode; otherwise exit 69.
-    exitWithError(
-      log,
-      err,
-      err instanceof UsageError
-        ? 64
-        : ((err as { exitCode?: number }).exitCode ?? 69),
-    );
-  }
+    announceRetainMode(connection, log);
 
-  announceRetainMode(connection, log);
+    let runResult: Awaited<ReturnType<typeof runProtocol>>;
+    try {
+      // Cast: `liveConnection` is `ConnectionConfig` (which includes the webrtc
+      // channel), so TypeScript cannot verify it fits `ProtocolConnectionConfig`
+      // (constrained to sftp and filedrop). The double cast through `unknown` is
+      // intentional; the channel guard inside `runProtocol` rejects unsupported
+      // channels at runtime.
+      // auth: null is the explicit opt-out that tells runProtocol to proceed
+      // without authentication and without a warning.
+      runResult = await runProtocol(
+        liveConnection as unknown as ProtocolConnectionConfig,
+        null,
+        prepared,
+        output,
+        verbosity,
+        "psilink",
+        resolveRecordOutput({
+          enabled: options.record,
+          recordFile: options.recordFile,
+        }),
+        // Carry this party's --save intent into the in-band bootstrap. The
+        // exchange advertises it to the partner and, when both saved, returns the
+        // established secret on runResult.bootstrap. Pass the raw boolean, never
+        // `options.save || undefined`: a non-saving party (options.save === false)
+        // must still receive a defined bootstrap so finalizeBootstrap can emit the
+        // "your partner wanted to save" notice. Collapsing false to undefined
+        // would route it through the interrupt guard below and silently swallow
+        // that notice. The wire is unaffected either way -- the save field only
+        // rides the terms frame when intent is true (see exchangeTerms).
+        options.save,
+        // onAuthenticated is undefined on the unauthenticated zero-setup path; the
+        // trailing object carries the CLI-only sweep controls.
+        undefined,
+        { sweepExchangeFiles, forceRetainSweep },
+      );
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    }
 
-  let runResult: Awaited<ReturnType<typeof runProtocol>>;
-  try {
-    // Cast: `liveConnection` is `ConnectionConfig` (which includes the webrtc
-    // channel), so TypeScript cannot verify it fits `ProtocolConnectionConfig`
-    // (constrained to sftp and filedrop). The double cast through `unknown` is
-    // intentional; the channel guard inside `runProtocol` rejects unsupported
-    // channels at runtime.
-    // auth: null is the explicit opt-out that tells runProtocol to proceed
-    // without authentication and without a warning.
-    runResult = await runProtocol(
-      liveConnection as unknown as ProtocolConnectionConfig,
-      null,
-      prepared,
-      output,
-      verbosity,
-      "psilink",
-      resolveRecordOutput({
-        enabled: options.record,
-        recordFile: options.recordFile,
-      }),
-      // Carry this party's --save intent into the in-band bootstrap. The
-      // exchange advertises it to the partner and, when both saved, returns the
-      // established secret on runResult.bootstrap. Pass the raw boolean, never
-      // `options.save || undefined`: a non-saving party (options.save === false)
-      // must still receive a defined bootstrap so finalizeBootstrap can emit the
-      // "your partner wanted to save" notice. Collapsing false to undefined
-      // would route it through the interrupt guard below and silently swallow
-      // that notice. The wire is unaffected either way -- the save field only
-      // rides the terms frame when intent is true (see exchangeTerms).
-      options.save,
-      // onAuthenticated is undefined on the unauthenticated zero-setup path; the
-      // trailing object carries the CLI-only sweep controls.
-      undefined,
-      { sweepExchangeFiles, forceRetainSweep },
-    );
-  } catch (err) {
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
-  }
+    const { bootstrap } = runResult;
+    // bootstrap is undefined only when a signal cut the run short and the process
+    // is already exiting; there is nothing to save or announce in that case.
+    if (bootstrap === undefined) return;
 
-  const { bootstrap } = runResult;
-  // bootstrap is undefined only when a signal cut the run short and the process
-  // is already exiting; there is nothing to save or announce in that case.
-  if (bootstrap === undefined) return;
-
-  // The exchange has already succeeded and written its output by this point, so
-  // a provisioning failure here (a config/key conflict that appeared in the
-  // post-exchange window, or a disk error) cannot undo the linkage -- but it
-  // must still exit cleanly with a diagnostic rather than crash as an unhandled
-  // rejection. A conflict is a UsageError (exit 64); anything else exits 69.
-  try {
-    finalizeBootstrap({
-      save: options.save,
-      bootstrap,
-      spec: buildSaveSpec(connection, prepared),
-      configFile: options.configFile,
-      keyFile: options.keyFile,
-      log,
-    });
-  } catch (err) {
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    // The exchange has already succeeded and written its output by this point, so
+    // a provisioning failure here (a config/key conflict that appeared in the
+    // post-exchange window, or a disk error) cannot undo the linkage -- but it
+    // must still exit cleanly with a diagnostic rather than crash as an unhandled
+    // rejection. A conflict is a UsageError (exit 64); anything else exits 69.
+    try {
+      finalizeBootstrap({
+        save: options.save,
+        bootstrap,
+        spec: buildSaveSpec(connection, prepared),
+        configFile: options.configFile,
+        keyFile: options.keyFile,
+        log,
+      });
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    }
+  } finally {
+    // Flush the log-file sink. exitWithError calls process.exit, which bypasses
+    // this finally, so the file is flushed here only on the normal-completion
+    // path (including the early return above); a caller needing a guaranteed
+    // flush before exit should use stream.end() with a callback.
+    logFileStream?.end();
   }
 }
