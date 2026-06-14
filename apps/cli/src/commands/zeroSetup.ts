@@ -469,7 +469,7 @@ export async function handler(argv: Arguments): Promise<void> {
   // the logger is created, so getLogger("psilink") below inherits the file sink.
   // A missing parent directory is a UsageError reported on stderr (the file is
   // not the sink) and exits 64.
-  const logFileStream =
+  const logFileSink =
     logFile !== undefined
       ? parseOrExit(() => configureLogFile(logFile))
       : undefined;
@@ -648,10 +648,10 @@ export async function handler(argv: Arguments): Promise<void> {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
   } finally {
-    // Flush the log-file sink. exitWithError calls process.exit, which bypasses
-    // this finally, so the file is flushed here only on the normal-completion
-    // path (including the early return above); a caller needing a guaranteed
-    // flush before exit should use stream.end() with a callback.
-    logFileStream?.end();
+    // Close the log-file descriptor on the normal exit path (including the early
+    // return above). Writes are synchronous and already durable, so
+    // exitWithError's process.exit (which bypasses this finally) loses nothing --
+    // this is only descriptor cleanup.
+    logFileSink?.close();
   }
 }

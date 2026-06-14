@@ -12,7 +12,7 @@ import { parseCommonBootstrapArgs } from "../../src/commands/bootstrap";
 // configureLogFile mutates loglevel's global methodFactory (the seam every named
 // logger captures at creation). These tests snapshot and restore that factory --
 // and the level -- around each case, and give every test a uniquely named logger
-// so a cached logger from one test never writes into another's closed stream.
+// so a cached logger from one test never writes into another's closed descriptor.
 
 let tmpDir: string;
 let originalFactory: typeof logLibrary.methodFactory;
@@ -36,25 +36,19 @@ function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
 }
 
-/** Flush and close a WriteStream, resolving once its data is on disk. */
-function endAndFlush(stream: fs.WriteStream): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.on("error", reject);
-    stream.end(() => resolve());
-  });
-}
-
 // --- (a) log lines appear in the file when --log-file is set -----------------
 
-test("configureLogFile: redirects loglevel output to the file with the standard prefix", async () => {
+test("configureLogFile: redirects loglevel output to the file with the standard prefix", () => {
+  // Writes are synchronous, so the lines are on disk by the time logging returns
+  // -- no flush wait, and process.exit could not truncate them.
   const logPath = path.join(tmpDir, "run.log");
-  const stream = configureLogFile(logPath);
+  const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
   const log = getLogger("logfile-test-a");
 
   log.info("hello from the file sink");
   log.warn("a warning too");
-  await endAndFlush(stream);
+  sink.close();
 
   const contents = fs.readFileSync(logPath, "utf8");
   expect(contents).toContain("hello from the file sink");
@@ -68,14 +62,14 @@ test("configureLogFile: redirects loglevel output to the file with the standard 
   expect(contents).toMatch(/\[WARN\] \[logfile-test-a\] a warning too/);
 });
 
-test("configureLogFile: opens in append mode, preserving existing content", async () => {
+test("configureLogFile: opens in append mode, preserving existing content", () => {
   const logPath = path.join(tmpDir, "existing.log");
   fs.writeFileSync(logPath, "PRE-EXISTING LINE\n");
 
-  const stream = configureLogFile(logPath);
+  const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
   getLogger("logfile-test-append").info("appended line");
-  await endAndFlush(stream);
+  sink.close();
 
   const contents = fs.readFileSync(logPath, "utf8");
   expect(contents).toContain("PRE-EXISTING LINE");
@@ -85,22 +79,35 @@ test("configureLogFile: opens in append mode, preserving existing content", asyn
   );
 });
 
-test("configureLogFile: --log-level silent writes nothing to the file", async () => {
+test("configureLogFile: --log-level silent writes nothing to the file", () => {
   // Level filtering happens before the factory: loglevel installs noop for every
   // method under SILENT, so the sink is never called even though the file exists.
   const logPath = path.join(tmpDir, "silent.log");
-  const stream = configureLogFile(logPath);
+  const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
   const log = getLogger("logfile-test-silent");
 
   log.error("should not appear");
   log.info("nor this");
-  await endAndFlush(stream);
+  sink.close();
 
   expect(fs.readFileSync(logPath, "utf8")).toBe("");
 });
 
-test("configureLogFile: a Windows-style backslash path is normalized before opening", async () => {
+test("configureLogFile: a long message is written whole, not truncated by a short write", () => {
+  // writeAll loops over a partial fs.writeSync, so a large serialized argument
+  // lands in full rather than being clipped to the first kernel write.
+  const logPath = path.join(tmpDir, "long.log");
+  const sink = configureLogFile(logPath);
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  const payload = "x".repeat(200_000);
+  getLogger("logfile-test-long").info(payload);
+  sink.close();
+
+  expect(fs.readFileSync(logPath, "utf8")).toContain(payload);
+});
+
+test("configureLogFile: a Windows-style backslash path is normalized before opening", () => {
   // Backslashes are folded to forward slashes on ingestion (the Windows-path
   // convention), so a path written with backslashes opens its forward-slash form.
   const sub = path.join(tmpDir, "sub");
@@ -108,10 +115,10 @@ test("configureLogFile: a Windows-style backslash path is normalized before open
   const target = path.join(sub, "win.log");
   const backslashed = target.replace(/\//g, "\\");
 
-  const stream = configureLogFile(backslashed);
+  const sink = configureLogFile(backslashed);
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
   getLogger("logfile-test-win").info("windows path line");
-  await endAndFlush(stream);
+  sink.close();
 
   expect(fs.existsSync(target)).toBe(true);
   expect(fs.readFileSync(target, "utf8")).toContain("windows path line");
@@ -123,11 +130,11 @@ test("parseCommonBootstrapArgs: logFile is undefined when --log-file is omitted"
   expect(parseCommonBootstrapArgs(argv({})).logFile).toBeUndefined();
 });
 
-test("an omitted --log-file opens no stream and creates no file", () => {
+test("an omitted --log-file opens no sink and creates no file", () => {
   // Mirrors the handlers' guard: configureLogFile runs only when logFile is set.
   const { logFile } = parseCommonBootstrapArgs(argv({}));
-  const stream = logFile !== undefined ? configureLogFile(logFile) : undefined;
-  expect(stream).toBeUndefined();
+  const sink = logFile !== undefined ? configureLogFile(logFile) : undefined;
+  expect(sink).toBeUndefined();
   expect(fs.readdirSync(tmpDir)).toHaveLength(0);
 });
 

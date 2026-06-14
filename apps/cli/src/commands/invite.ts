@@ -401,7 +401,7 @@ export async function validateInvite(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logFileStream: ReturnType<typeof configureLogFile> | undefined;
+  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
   try {
     await runOrExit("invite", async () => {
       // Parse and apply the log level before creating the logger, so the
@@ -414,7 +414,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // and any logger is created, so getLogger("invite") below inherits the
       // file sink. A missing parent directory is a UsageError -> exit 64 here.
       if (options.logFile !== undefined)
-        logFileStream = configureLogFile(options.logFile);
+        logFileSink = configureLogFile(options.logFile);
       logLibrary.setDefaultLevel(options.logLevel);
       const log = getLogger("invite");
       // accept-timeout is parsed to seconds here (not in validateInvite) so a
@@ -521,12 +521,10 @@ export async function handler(argv: Arguments): Promise<void> {
       );
     });
   } finally {
-    // Flush and close the log-file sink. runOrExit calls process.exit on error,
-    // which bypasses this finally, so the file is flushed here only on the
-    // success path; on the error path the final error is written to the stream
-    // but may not be flushed. A caller needing a guaranteed flush before exit
-    // should use stream.end() with a callback.
-    logFileStream?.end();
+    // Close the log-file descriptor on the normal exit path. Writes are
+    // synchronous and already durable, so the error path's process.exit (which
+    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
+    logFileSink?.close();
   }
 }
 

@@ -311,7 +311,7 @@ export async function handler(argv: Arguments): Promise<void> {
   // logger is created, so getLogger("fingerprint") below inherits the file sink.
   // singleValue rejects a repeated --log-file and configureLogFile rejects an
   // unopenable path; both are UsageErrors mapped to stderr + exit 64 here.
-  const logFileStream = parseOrExit(() => {
+  const logFileSink = parseOrExit(() => {
     const logFilePath = singleValue(argv, "log-file") as string | undefined;
     return logFilePath !== undefined
       ? configureLogFile(logFilePath)
@@ -385,10 +385,9 @@ export async function handler(argv: Arguments): Promise<void> {
   } catch (err) {
     exitWithError(log, err, err instanceof UsageError ? 64 : 69);
   } finally {
-    // Flush the log-file sink. exitWithError calls process.exit, which bypasses
-    // this finally, so the file is flushed here only on the normal path; a
-    // caller needing a guaranteed flush before exit should use stream.end() with
-    // a callback.
-    logFileStream?.end();
+    // Close the log-file descriptor on the normal exit path. Writes are
+    // synchronous and already durable, so exitWithError's process.exit (which
+    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
+    logFileSink?.close();
   }
 }

@@ -105,17 +105,23 @@ export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
   trace: logLibrary.levels.TRACE,
 };
 
+/** A redirect of loglevel output to a file, returned by {@link configureLogFile}. */
+export interface LogFileSink {
+  /** Close the underlying file descriptor; best-effort and idempotent. */
+  close(): void;
+}
+
 /**
  * Redirect every loglevel message to `logFilePath` (append mode) instead of the
- * terminal, returning the {@link fs.WriteStream} so the caller can close it after
- * the exchange. Omitting the flag leaves logging on the terminal untouched -- a
- * handler only calls this when `--log-file` was given.
+ * terminal, returning a {@link LogFileSink} the caller closes after the exchange.
+ * Omitting the flag leaves logging on the terminal untouched -- a handler only
+ * calls this when `--log-file` was given.
  *
  * loglevel has no built-in file sink, so this installs one by overriding the
  * library's global `methodFactory` -- the factory every named logger inherits at
  * construction (loglevel's `getLogger` does `new Logger(name,
  * defaultLogger.methodFactory)`). The installed factory returns a function that
- * writes its formatted arguments to the stream rather than calling
+ * writes its formatted arguments to the file rather than calling
  * `console[method]`. core's `setLogPrefixer` wraps this leaf factory per logger,
  * so each line keeps its `[ISO] [LEVEL] [CONTEXT]` prefix: the prefixer passes
  * that prefix as the first argument to the function returned here, and
@@ -123,6 +129,14 @@ export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
  * Unlike `setLogPrefixer`, this factory does not chain to the previous factory:
  * the file sink replaces console output rather than decorating it, so there is
  * no prior return value to forward.
+ *
+ * Writes are synchronous (`fs.writeSync` to the open descriptor), not buffered
+ * through a `WriteStream`. This is deliberate: a handler reports its final error
+ * with `log.error(...)` immediately before `process.exit`, which would abandon a
+ * stream's unflushed buffer -- losing exactly the diagnostic an unattended
+ * operator opened the file to capture. A synchronous write is durable before the
+ * call returns, so `process.exit` cannot truncate it. It also matches how Node's
+ * `console` writes to a file descriptor, the `> file` redirection this replaces.
  *
  * Level filtering is unaffected: loglevel installs `noop` for methods below the
  * active level and calls `methodFactory` only for enabled ones, so
@@ -137,20 +151,21 @@ export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
  *
  * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
  * directory or other open failure surfaces here, as a {@link UsageError} before
- * any exchange work begins, rather than as an asynchronous stream `'error'`
- * mid-run.
+ * any exchange work begins.
  */
-export function configureLogFile(logFilePath: string): fs.WriteStream {
+export function configureLogFile(logFilePath: string): LogFileSink {
   // Windows paths are accepted: fold backslashes to forward slashes on ingestion
-  // (the CLAUDE.local.md Windows-path convention) before the path reaches the
-  // filesystem call, so a backslash or UNC form opens the intended file.
+  // (the Windows-path convention in CONTRIBUTING.md -- normalize backslashes
+  // wherever a user can supply a local path) so a backslash or UNC form opens the
+  // intended file.
   const normalized = logFilePath.replace(/\\/g, "/");
 
   let fd: number;
   try {
     // "a" creates-or-appends and throws synchronously (ENOENT) when the parent
-    // directory is absent, so the failure is reported before the stream -- and
-    // any exchange work -- begins, not as an async 'error' event later.
+    // directory is absent, so the failure is reported before any exchange work
+    // begins, and opens the descriptor with O_APPEND so each writeSync lands at
+    // the current end of file.
     fd = fs.openSync(normalized, "a");
   } catch (err) {
     throw new UsageError(
@@ -159,26 +174,47 @@ export function configureLogFile(logFilePath: string): fs.WriteStream {
     );
   }
 
-  const stream = fs.createWriteStream(normalized, { fd, flags: "a" });
-  // loglevel is redirected into this same stream, so a mid-run write failure
-  // (e.g. the disk filling) cannot be reported through the logger; surface it on
-  // the original stderr so an unhandled 'error' event does not crash the process.
-  stream.on("error", (err) => {
-    process.stderr.write(
-      `log file ${normalized} write error: ${err.message}\n`,
-    );
-  });
-
   // The factory ignores its (methodName, level, loggerName) arguments: the level
   // is already encoded in the prefix setLogPrefixer prepends, and level filtering
   // is handled by loglevel before the factory is consulted.
   logLibrary.methodFactory = () => {
     return (...args: unknown[]) => {
-      stream.write(util.format(...args) + "\n");
+      try {
+        writeAll(fd, util.format(...args) + "\n");
+      } catch (err) {
+        // loglevel is redirected into this descriptor, so a mid-run write failure
+        // (e.g. the disk filling) cannot be reported through the logger, and must
+        // not throw out of a log call into the exchange; surface it on the
+        // original stderr and continue.
+        process.stderr.write(
+          `log file ${normalized} write error: ` +
+            (err instanceof Error ? err.message : String(err)) +
+            "\n",
+        );
+      }
     };
   };
 
-  return stream;
+  return {
+    close(): void {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Best-effort: the descriptor may already be closed.
+      }
+    },
+  };
+}
+
+// Write the whole buffer to `fd`, looping over a partial write. fs.writeSync on a
+// regular file normally writes everything in one call, but POSIX permits a short
+// write, which would silently truncate a long line (a serialized object) -- so
+// drain the remainder rather than trust a single call.
+function writeAll(fd: number, text: string): void {
+  const buf = Buffer.from(text, "utf8");
+  let offset = 0;
+  while (offset < buf.length)
+    offset += fs.writeSync(fd, buf, offset, buf.length - offset);
 }
 
 /**
