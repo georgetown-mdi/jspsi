@@ -245,11 +245,11 @@ describe("sftp", () => {
   });
 
   test("sftp: a mid-exchange fault writes a real abort marker over the server the waiting peer fast-fails on", async () => {
-    // A per-test served subdir so the rendezvous namespace is isolated; the
-    // connection does not create remote directories, so create it first.
-    const localDir = path.join(SFTP_LOCAL_ROOT, "run");
-    await fsp.mkdir(localDir, { recursive: true });
-    const serverPath = `${SFTP_PATH_ROOT}/run`;
+    // A unique served subdir per run so the rendezvous namespace is isolated
+    // from any sibling test and from a prior run that bypassed cleanup; the
+    // connection does not create remote directories, so mkdtemp creates it first.
+    const localDir = await fsp.mkdtemp(path.join(SFTP_LOCAL_ROOT, "run-"));
+    const serverPath = `${SFTP_PATH_ROOT}/${path.basename(localDir)}`;
     const makeConfig = (): ProtocolConnectionConfig => ({
       channel: "sftp",
       server: {
