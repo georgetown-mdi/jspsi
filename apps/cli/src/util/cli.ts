@@ -107,7 +107,10 @@ export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
 
 /** A redirect of loglevel output to a file, returned by {@link configureLogFile}. */
 export interface LogFileSink {
-  /** Close the underlying file descriptor; best-effort and idempotent. */
+  /**
+   * Restore the loglevel factory in place before the redirect and close the
+   * underlying file descriptor; best-effort and idempotent.
+   */
   close(): void;
 }
 
@@ -142,12 +145,19 @@ export interface LogFileSink {
  * active level and calls `methodFactory` only for enabled ones, so
  * `--log-level silent` writes nothing to the file.
  *
- * A logger captures the global factory at CREATION, so this must run before the
- * loggers whose output should land in the file exist -- the handlers call it
- * before `setDefaultLevel` and `getLogger`. The two loggers created at import
- * time (`file-utils`, `cleaning`) predate any handler and are therefore not
- * redirected; this is the same limitation core's `withCapturedLogs` documents
- * for child loggers created before it installs its interceptor.
+ * A logger binds its method to a factory at CREATION (and only rebuilds on its
+ * own `setLevel`), so this must run before the loggers whose output should land
+ * in the file exist -- the handlers call it before `setDefaultLevel` and
+ * `getLogger`. A logger that already exists is NOT redirected, and `rebuild()`
+ * cannot help: it re-runs each logger's own captured factory rather than
+ * reassigning it. In a fresh CLI process this affects only the two loggers
+ * created at import time (`file-utils`, `cleaning`) -- the same limitation core's
+ * `withCapturedLogs` documents -- so their occasional warnings reach the
+ * terminal. The other case is a logger cached from a PRIOR handler invocation in
+ * the same process, which only arises in shared-process tests, never in the
+ * one-command-per-process CLI; {@link LogFileSink.close} restoring the prior
+ * factory keeps that case from leaving the global seam pointed at a closed
+ * descriptor for whatever runs next.
  *
  * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
  * directory or other open failure surfaces here, as a {@link UsageError} before
@@ -174,6 +184,11 @@ export function configureLogFile(logFilePath: string): LogFileSink {
     );
   }
 
+  // Capture the factory we are replacing so close() can restore it, leaving the
+  // global seam as it was found. The install/restore is bracketed; it does not
+  // retro-redirect loggers that already exist (see the limitation above).
+  const previousFactory = logLibrary.methodFactory;
+
   // The factory ignores its (methodName, level, loggerName) arguments: the level
   // is already encoded in the prefix setLogPrefixer prepends, and level filtering
   // is handled by loglevel before the factory is consulted.
@@ -197,6 +212,12 @@ export function configureLogFile(logFilePath: string): LogFileSink {
 
   return {
     close(): void {
+      // Restore the prior factory first, so a logger created after close() (e.g.
+      // a later handler invocation in a shared-process test) binds to the
+      // original sink rather than this closed descriptor; then release the fd.
+      // Both steps are idempotent: a redundant restore is a no-op and a double
+      // close throws EBADF, which is swallowed.
+      logLibrary.methodFactory = previousFactory;
       try {
         fs.closeSync(fd);
       } catch {

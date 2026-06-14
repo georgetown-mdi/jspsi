@@ -124,6 +124,16 @@ test("configureLogFile: a Windows-style backslash path is normalized before open
   expect(fs.readFileSync(target, "utf8")).toContain("windows path line");
 });
 
+test("configureLogFile: close() restores the methodFactory in place before it", () => {
+  // The install/restore is bracketed, so the global loglevel seam is left as it
+  // was found and a logger created after close() does not bind to the closed fd.
+  const before = logLibrary.methodFactory;
+  const sink = configureLogFile(path.join(tmpDir, "restore.log"));
+  expect(logLibrary.methodFactory).not.toBe(before);
+  sink.close();
+  expect(logLibrary.methodFactory).toBe(before);
+});
+
 // --- (b) no file is created when the option is omitted -----------------------
 
 test("parseCommonBootstrapArgs: logFile is undefined when --log-file is omitted", () => {
