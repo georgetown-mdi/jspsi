@@ -44,20 +44,30 @@ const baseToken: InvitationToken = {
   sharedSecret: VALID_SECRET,
 };
 
+// Appends a valid 4-byte checksum over an ARBITRARY payload string, reproducing
+// encodeInvitation's body+checksum encoding without its schema validation. The
+// payload-string form (rather than an object) lets a test craft a checksum-valid
+// invitation whose decoded bytes are deliberately NOT valid JSON, to exercise
+// decodeInvitation's JSON.parse swallow -- a path encodeRaw cannot reach because
+// it always emits well-formed JSON.
+async function encodeRawPayload(payload: string): Promise<string> {
+  const toBase64Url = (b: Uint8Array): string => {
+    const s = Array.from(b, (byte) => String.fromCharCode(byte)).join("");
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  };
+  const bytes = new TextEncoder().encode(payload);
+  const body = toBase64Url(bytes);
+  const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  const checksum = toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
+  return body + checksum;
+}
+
 // Reproduces the encoding step without schema validation so that tests can
 // craft valid-checksum / invalid-schema strings. Cannot delegate to
 // encodeInvitation because that function validates the token first, which would
 // prevent testing decodeInvitation's own schema-rejection behavior.
 async function encodeRaw(obj: unknown): Promise<string> {
-  const toBase64Url = (b: Uint8Array): string => {
-    const s = Array.from(b, (byte) => String.fromCharCode(byte)).join("");
-    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-  };
-  const bytes = new TextEncoder().encode(JSON.stringify(obj));
-  const body = toBase64Url(bytes);
-  const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  const checksum = toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
-  return body + checksum;
+  return encodeRawPayload(JSON.stringify(obj));
 }
 
 // --- Lifetime policy ---------------------------------------------------------
@@ -172,6 +182,87 @@ test("rejects invalid base64url characters in the body", async () => {
   await expect(decodeInvitation("!!!!!!!!!!!!")).rejects.toThrow(
     "not valid base64url",
   );
+});
+
+// --- Decode-error message swallows (display-injection backstop) --------------
+
+// decodeInvitation deliberately catches the JSON.parse and atob failures and
+// rethrows a FIXED string rather than the engine's message, because those
+// messages can quote partner-controlled input bytes. That thrown .message is
+// relayed verbatim by describeDecodeError for a non-Zod Error and reaches the
+// web accept page's operator-facing alert, where React/terminal escaping
+// neutralizes markup but NOT the deceptive-Unicode / terminal-control /
+// bidi-override / zero-width bytes below. The swallows are the only thing
+// keeping partner bytes out of that .message; these tests pin them so a future
+// "improve the error by relaying the original" refactor fails loudly here
+// instead of silently reopening the vector. See board item 199895565.
+
+// Representative partner-controllable bytes, one per class the display-boundary
+// hardening neutralizes. Written as explicit escapes -- never pasted glyphs --
+// so the diff is reviewable and no editor or formatter can silently mangle an
+// invisible literal.
+const PLANTED_DISPLAY_BYTES = [
+  "\x1b", // ESC -- ANSI / terminal control
+  "\x07", // BEL -- terminal control
+  "\x00", // NUL -- control
+  "\u0430", // Cyrillic letter a -- deceptive homoglyph
+  "\u200b", // zero-width space
+  "\u200d", // zero-width joiner
+  "\u202e", // RIGHT-TO-LEFT OVERRIDE -- bidi
+  "\u202d", // LEFT-TO-RIGHT OVERRIDE -- bidi
+];
+
+test("decodeInvitation swallows the JSON.parse error, never relaying partner bytes", async () => {
+  // A checksum-valid token whose decoded bytes are not valid JSON. The hostile
+  // bytes lead the payload so JSON.parse fails on the first token and emits its
+  // input-quoting "Unexpected token X, \"...\" is not valid JSON" form, which
+  // embeds a span of the offending input verbatim.
+  const hostile = PLANTED_DISPLAY_BYTES.join("") + "not valid json";
+  const encoded = await encodeRawPayload(hostile);
+
+  const err = await decodeInvitation(encoded).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  // The fixed string, not JSON.parse's message: a relay would change this.
+  expect((err as Error).message).toBe("invitation payload is not valid JSON");
+  for (const byte of PLANTED_DISPLAY_BYTES) {
+    expect((err as Error).message).not.toContain(byte);
+  }
+
+  // Proves the swallow is load-bearing rather than the assertion vacuous: the
+  // SAME bytes parsed raw DO leak into the engine's message, so without the
+  // swallow at least one would reach the operator-facing alert. If a future
+  // engine stopped quoting input this would fail here, signaling the swallow's
+  // premise (not just our code) needs re-examination -- the right place to learn
+  // it, rather than a silently toothless test elsewhere.
+  let rawMessage = "";
+  try {
+    JSON.parse(hostile);
+  } catch (e) {
+    rawMessage = (e as Error).message;
+  }
+  expect(PLANTED_DISPLAY_BYTES.some((byte) => rawMessage.includes(byte))).toBe(
+    true,
+  );
+});
+
+test("fromBase64Url swallows the atob error, throwing only the fixed string", async () => {
+  // Reach fromBase64Url's atob catch through the real decode path: the body
+  // (everything but the trailing 6-char checksum slot) carries bytes outside the
+  // base64url alphabet, so atob throws. Node's atob never echoes its input (its
+  // message is the fixed "Invalid character"), so unlike the JSON path these
+  // bytes cannot reach the thrown message even with the swallow removed; the
+  // value pinned here is the fixed string itself, so a relay of atob's message
+  // (or one that interpolated the offending input) would fail the assertion.
+  const encoded = PLANTED_DISPLAY_BYTES.join("") + "AAAAAA";
+
+  const err = await decodeInvitation(encoded).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toBe(
+    "invitation string is not valid base64url",
+  );
+  for (const byte of PLANTED_DISPLAY_BYTES) {
+    expect((err as Error).message).not.toContain(byte);
+  }
 });
 
 // --- Expiry field ------------------------------------------------------------
