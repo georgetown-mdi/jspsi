@@ -222,8 +222,13 @@ export function resolvePositionals(positionals: Array<unknown>): {
 
   const server = tryParseURL(
     arg0,
-    `unable to parse server URL: ${arg0}; ` +
-      "usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+    // Do not interpolate the raw input: a malformed but credential-bearing URL
+    // (e.g. a mistyped port on sftp://user:secret@host) reaches here, and the
+    // message surfaces to the terminal and any --log-file. Unlike the redacted
+    // file:// case below, the input failed to parse, so there is no URL to route
+    // through redactUrlCredentials; drop it entirely. The usage hint stands in
+    // for the offending value, which the operator just typed.
+    "unable to parse server URL; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
   );
   return { server, input: arg1, output: arg2 };
 }

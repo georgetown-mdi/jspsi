@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yargs, { type Arguments } from "yargs";
-import { UsageError } from "@psilink/core";
+import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 import type { SFTPConnectionConfig } from "@psilink/core";
 import {
   builder,
@@ -129,6 +129,27 @@ test("invalid server URL with two positionals throws a parse error", () => {
   expect(() => resolvePositionals(["not-a-url", "input.csv"])).toThrow(
     "unable to parse server URL",
   );
+});
+
+test("a malformed credential-bearing server URL does not echo the credential", () => {
+  // A typo the WHATWG parser rejects (here, a bad port) on a credentialed URL
+  // reaches the parse-error site. The operator-facing render must carry neither
+  // the password nor the username -- not via the message, and not via the parse
+  // error's enumerable `input` property on the attached cause. Assert at the
+  // render boundary (sanitizeErrorForDisplay, the sole path exitWithError uses)
+  // so both are covered end to end. Before the fix the raw input was
+  // interpolated into the message and this failed on the credential bytes.
+  let err: unknown;
+  try {
+    resolvePositionals(["sftp://alice:s3cr3t@host:99999999/drop", "input.csv"]);
+  } catch (caught) {
+    err = caught;
+  }
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toContain("unable to parse server URL");
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).not.toContain("s3cr3t");
+  expect(rendered).not.toContain("alice");
 });
 
 // --- createConnection --------------------------------------------------------

@@ -1076,10 +1076,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       const portString =
         config.server.port !== undefined ? `:${config.server.port}` : "";
+      // The configured SFTP username is a credential component, so log only that
+      // one is set, never its value -- consistent with redactUrlCredentials,
+      // which strips userinfo from any echoed URL. (The password is never
+      // logged.) A debug log reaches the terminal, shell history, and any
+      // --log-file, so the value must not ride along.
       const usernameString =
-        config.server.username !== undefined
-          ? ` as ${config.server.username}`
-          : "";
+        config.server.username !== undefined ? " as a configured user" : "";
       this.log.debug(
         `[${this.role}] connecting to ${config.server.host}` +
           `${portString}${usernameString}, path: ${this.path}`,
