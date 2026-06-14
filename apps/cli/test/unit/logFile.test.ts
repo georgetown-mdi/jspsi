@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -79,6 +79,22 @@ test("configureLogFile: opens in append mode, preserving existing content", () =
   );
 });
 
+test("configureLogFile: a newly created log file is owner-only (no group/world access)", () => {
+  // The log can hold partner identity, linkage keys, and data categories, so it
+  // is created owner-only rather than inheriting a world-readable umask default.
+  // Assert the disclosure-relevant invariant (no group/world bits) rather than an
+  // exact mode, since a restrictive umask may tighten 0o600 further but never
+  // widen it. POSIX permissions only.
+  if (process.platform === "win32") return;
+  const logPath = path.join(tmpDir, "perms.log");
+  const sink = configureLogFile(logPath);
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  getLogger("logfile-test-perms").info("line");
+  sink.close();
+
+  expect(fs.statSync(logPath).mode & 0o077).toBe(0);
+});
+
 test("configureLogFile: --log-level silent writes nothing to the file", () => {
   // Level filtering happens before the factory: loglevel installs noop for every
   // method under SILENT, so the sink is never called even though the file exists.
@@ -132,6 +148,36 @@ test("configureLogFile: close() restores the methodFactory in place before it", 
   expect(logLibrary.methodFactory).not.toBe(before);
   sink.close();
   expect(logLibrary.methodFactory).toBe(before);
+});
+
+test("configureLogFile: close() is idempotent", () => {
+  // A redundant restore is a no-op and the second fs.closeSync throws EBADF,
+  // which close() swallows, so a double close must not throw.
+  const sink = configureLogFile(path.join(tmpDir, "idem.log"));
+  sink.close();
+  expect(() => sink.close()).not.toThrow();
+});
+
+test("configureLogFile: a write to the closed descriptor is caught, not thrown into the log call", () => {
+  // A logger created during the redirect keeps writing to the captured fd; after
+  // close() that fd is gone, so the write fails. The failure must be caught and
+  // surfaced on stderr, never thrown back out of the log call -- the invariant
+  // that keeps a mid-run write failure from crashing an exchange.
+  const sink = configureLogFile(path.join(tmpDir, "closed.log"));
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  const log = getLogger("logfile-test-closed");
+  log.info("before close");
+  sink.close();
+
+  const stderrSpy = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation(() => true);
+  try {
+    expect(() => log.info("after close")).not.toThrow();
+    expect(stderrSpy).toHaveBeenCalled();
+  } finally {
+    stderrSpy.mockRestore();
+  }
 });
 
 // --- (b) no file is created when the option is omitted -----------------------

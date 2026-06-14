@@ -157,11 +157,18 @@ export interface LogFileSink {
  * the same process, which only arises in shared-process tests, never in the
  * one-command-per-process CLI; {@link LogFileSink.close} restoring the prior
  * factory keeps that case from leaving the global seam pointed at a closed
- * descriptor for whatever runs next.
+ * descriptor for whatever runs next. The converse also holds: a logger created
+ * WHILE the redirect is active holds the file descriptor in its captured method
+ * and must not be used after `close()` -- a write would hit the closed fd (caught
+ * and surfaced on stderr, never thrown). The one-command-per-process CLI exits
+ * right after `close()`, so this is a constraint only for shared-process tests.
  *
  * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
  * directory or other open failure surfaces here, as a {@link UsageError} before
- * any exchange work begins.
+ * any exchange work begins, and created owner-only (`0o600`). The path is an
+ * operator-supplied flag value, not attacker-derived, so the open deliberately
+ * does not apply the `O_NOFOLLOW`/`O_EXCL` hardening psilink's credential writers
+ * use for paths it derives itself.
  */
 export function configureLogFile(logFilePath: string): LogFileSink {
   // Windows paths are accepted: fold backslashes to forward slashes on ingestion
@@ -175,8 +182,15 @@ export function configureLogFile(logFilePath: string): LogFileSink {
     // "a" creates-or-appends and throws synchronously (ENOENT) when the parent
     // directory is absent, so the failure is reported before any exchange work
     // begins, and opens the descriptor with O_APPEND so each writeSync lands at
-    // the current end of file.
-    fd = fs.openSync(normalized, "a");
+    // the current end of file. The 0o600 mode creates the file owner-only, since
+    // a debug/trace log can hold partner identity, linkage keys, and data
+    // categories -- the owner-only convention psilink applies to its other
+    // sensitive artifacts (see writeFileOwnerOnly, docs/SECURITY_DESIGN.md
+    // "Required permissions"), rather than inheriting a world-readable umask
+    // default. The mode applies only when the file is created, so an operator who
+    // points --log-file at an existing file keeps that file's permissions; a
+    // restrictive umask can only tighten the new file further, never widen it.
+    fd = fs.openSync(normalized, "a", 0o600);
   } catch (err) {
     throw new UsageError(
       `could not open log file ${normalized}: ` +
@@ -200,12 +214,18 @@ export function configureLogFile(logFilePath: string): LogFileSink {
         // loglevel is redirected into this descriptor, so a mid-run write failure
         // (e.g. the disk filling) cannot be reported through the logger, and must
         // not throw out of a log call into the exchange; surface it on the
-        // original stderr and continue.
-        process.stderr.write(
-          `log file ${normalized} write error: ` +
-            (err instanceof Error ? err.message : String(err)) +
-            "\n",
-        );
+        // original stderr and continue. The stderr write is itself guarded: if it
+        // too fails (a wedged stderr), give up silently rather than let that throw
+        // back into the log call this catch exists to protect.
+        try {
+          process.stderr.write(
+            `log file ${normalized} write error: ` +
+              (err instanceof Error ? err.message : String(err)) +
+              "\n",
+          );
+        } catch {
+          // Nothing left to report to; drop it.
+        }
       }
     };
   };
