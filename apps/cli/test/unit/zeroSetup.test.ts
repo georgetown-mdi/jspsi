@@ -20,6 +20,7 @@ import {
   resolvePositionals,
 } from "../../src/commands/zeroSetup";
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
+import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
@@ -155,6 +156,27 @@ test("createConnection filedrop: non-localhost authority throws a UsageError", (
   expect(() =>
     createConnection(new URL("file://host/mnt/share"), baseOptions),
   ).toThrow("three slashes");
+});
+
+test("createConnection filedrop: the non-localhost error echoes the redacted URL, not the raw href", () => {
+  // Defense-in-depth, mirroring connectionFromURL's twin branch: the rejection
+  // must echo the URL through redactUrlCredentials so it stays credential-free if
+  // the parse/validation order is ever reworked. A file:// URL cannot carry
+  // userinfo today -- the WHATWG parser rejects `file://user:pass@host` with
+  // ERR_INVALID_URL and the username/password setters are no-ops on a file URL --
+  // so the redacted form equals the raw href here, and the value is pinning the
+  // message to the redacted form rather than catching a live leak.
+  const server = new URL("file://host/mnt/share");
+  let message = "";
+  try {
+    createConnection(server, baseOptions);
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain(`got: ${redactUrlCredentials(server)}`);
+  // No userinfo can survive to the message: neither a username nor a password is
+  // ever echoed.
+  expect(message).not.toContain("@host");
 });
 
 test("createConnection webrtc throws a UsageError 'not yet supported'", () => {

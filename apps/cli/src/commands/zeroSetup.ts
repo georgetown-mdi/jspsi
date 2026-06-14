@@ -45,7 +45,10 @@ import {
 } from "./bootstrap";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
-import { decodeUrlComponent } from "../util/connectionUrl";
+import {
+  decodeUrlComponent,
+  redactUrlCredentials,
+} from "../util/connectionUrl";
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
@@ -261,7 +264,7 @@ export function createConnection(
     if (server.hostname && server.hostname !== "localhost") {
       throw new UsageError(
         `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
-          `or file://localhost/path; got: ${server.href}`,
+          `or file://localhost/path; got: ${redactUrlCredentials(server)}`,
       );
     }
     const base: FileDropConnectionConfig = {
