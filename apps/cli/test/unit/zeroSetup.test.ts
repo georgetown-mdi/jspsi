@@ -158,25 +158,22 @@ test("createConnection filedrop: non-localhost authority throws a UsageError", (
   ).toThrow("three slashes");
 });
 
-test("createConnection filedrop: the non-localhost error echoes the redacted URL, not the raw href", () => {
-  // Defense-in-depth, mirroring connectionFromURL's twin branch: the rejection
-  // must echo the URL through redactUrlCredentials so it stays credential-free if
-  // the parse/validation order is ever reworked. A file:// URL cannot carry
-  // userinfo today -- the WHATWG parser rejects `file://user:pass@host` with
+test("createConnection filedrop: the non-localhost error echoes the redacted URL", () => {
+  // The rejection echoes the URL through redactUrlCredentials, mirroring
+  // connectionFromURL's twin branch, so the message stays credential-free if the
+  // parse/validation order is ever reworked. A file:// URL cannot carry userinfo
+  // today -- the WHATWG parser rejects `file://user:pass@host` with
   // ERR_INVALID_URL and the username/password setters are no-ops on a file URL --
-  // so the redacted form equals the raw href here, and the value is pinning the
-  // message to the redacted form rather than catching a live leak.
+  // so redactUrlCredentials(server) equals server.href for every constructible
+  // file:// URL and no assertion here can distinguish the two. This pins the
+  // message to the redacted form, which is credential-free by construction, and
+  // documents the convention the twin builders share. The string `.toThrow`
+  // arg requires an actual throw whose message contains the substring, so the
+  // assertion cannot pass vacuously.
   const server = new URL("file://host/mnt/share");
-  let message = "";
-  try {
-    createConnection(server, baseOptions);
-  } catch (err) {
-    message = (err as Error).message;
-  }
-  expect(message).toContain(`got: ${redactUrlCredentials(server)}`);
-  // No userinfo can survive to the message: neither a username nor a password is
-  // ever echoed.
-  expect(message).not.toContain("@host");
+  expect(() => createConnection(server, baseOptions)).toThrow(
+    `got: ${redactUrlCredentials(server)}`,
+  );
 });
 
 test("createConnection webrtc throws a UsageError 'not yet supported'", () => {
