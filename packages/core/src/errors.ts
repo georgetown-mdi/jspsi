@@ -40,6 +40,17 @@ export class UsageError extends Error {
  * terminal state -- skipping the on-disk sweep so the peer reads the
  * advertisement and fails too -- while still being classified as a usage error
  * (CLI exit 64) by the `instanceof UsageError` check at the CLI catch sites.
+ *
+ * Unlike its terminal {@link UsageError} siblings it carries no
+ * `psilinkRecoveryHintEmitted` tag and appends no next step. Its call-site
+ * message already names each side's setting and the concrete fix ("both parties
+ * must use the same setting"), so there is no missing step to add. The tag is
+ * deliberately omitted rather than set for family symmetry: the tag exists only
+ * to make the CLI suppress its generic post-handshake "retry without
+ * re-inviting" advisory, and a mode mismatch is detected at rendezvous, before
+ * authentication starts, so that advisory never fires for it -- a tag here would
+ * read as load-bearing while suppressing nothing. (Were detection ever to move
+ * after the handshake, this class is where the tag would belong.)
  */
 export class BilateralModeMismatchError extends UsageError {
   constructor(message: string) {
@@ -71,10 +82,27 @@ export class BilateralModeMismatchError extends UsageError {
  * their capped `get()` so a server that under-reports a file's size in its
  * directory listing -- evading the pre-`get()` check -- still surfaces the same
  * terminal, typed failure once the read itself crosses the cap.
+ *
+ * Every instance carries `psilinkRecoveryHintEmitted` and the constructor
+ * appends a uniform operator next step to the call-site message. The next step
+ * is class-uniform (this fault always means a peer- or admin-supplied frame
+ * crossed the cap), so it lives here rather than being repeated at each throw
+ * site, which supply only the specific fault detail. The tag makes the CLI's
+ * hint-walker suppress its generic "retry without re-inviting" advisory: this is
+ * a terminal refusal, so re-reading the same over-cap frame cannot help, and the
+ * generic "retry" would contradict the specific guidance. Call-site messages
+ * must not end with terminal punctuation or carry their own next step, or the
+ * appended step would read as a second sentence fragment or duplicate.
  */
 export class FrameSizeExceededError extends UsageError {
+  readonly psilinkRecoveryHintEmitted = true;
+
   constructor(message: string) {
-    super(message);
+    super(
+      `${message}. Confirm the rendezvous directory is dedicated to a single ` +
+        `exchange and contact your partner, who may be sending a malformed or ` +
+        `oversized frame.`,
+    );
     this.name = "FrameSizeExceededError";
   }
 }
@@ -108,10 +136,23 @@ export class FrameSizeExceededError extends UsageError {
  * sites in the CLI adapters (`apps/cli/src/connection/listingGuard.ts`), not
  * here: unlike the frame-size cap, no `packages/core` code pre-checks a listing
  * size, so the constants belong where they are enforced.
+ *
+ * Carries `psilinkRecoveryHintEmitted` and appends a uniform operator next step
+ * in the constructor, on the same reasoning as {@link FrameSizeExceededError}: a
+ * listing that breaches its bound is terminal, so the CLI's generic "retry"
+ * advisory is suppressed and replaced with the specific "the directory is shared
+ * or contaminated" guidance. Call-site messages supply the specific bound detail
+ * and must not end with terminal punctuation or carry their own next step.
  */
 export class DirectoryListingBoundsError extends UsageError {
+  readonly psilinkRecoveryHintEmitted = true;
+
   constructor(message: string) {
-    super(message);
+    super(
+      `${message}. Confirm the rendezvous directory is dedicated to a single ` +
+        `exchange between exactly two parties and is not shared or ` +
+        `contaminated; clear any foreign entries or use a fresh directory.`,
+    );
     this.name = "DirectoryListingBoundsError";
   }
 }
@@ -153,10 +194,24 @@ export class DirectoryListingBoundsError extends UsageError {
  * `listingGuard.ts`), alongside the size bounds, for the same reason: no
  * `packages/core` code drives these reads, so the constants belong where they
  * are enforced.
+ *
+ * Carries `psilinkRecoveryHintEmitted` and appends a uniform operator next step
+ * in the constructor, on the same reasoning as {@link FrameSizeExceededError}:
+ * the operation is failed rather than retried into the same hang, so the CLI's
+ * generic advisory is suppressed and replaced with the specific "check the
+ * endpoint and the peer, then retry" guidance -- the one terminal-transport
+ * fault where re-running the command can succeed once the server recovers.
+ * Call-site messages supply the specific stalled-operation detail and must not
+ * end with terminal punctuation or carry their own next step.
  */
 export class TransportOperationStalledError extends UsageError {
+  readonly psilinkRecoveryHintEmitted = true;
+
   constructor(message: string) {
-    super(message);
+    super(
+      `${message}. Verify the transport endpoint is reachable and the peer is ` +
+        `still running, then retry.`,
+    );
     this.name = "TransportOperationStalledError";
   }
 }
@@ -186,6 +241,13 @@ export class TransportOperationStalledError extends UsageError {
  * this class as an internal teardown signal, not a stability contract -- the
  * plain-`Error`/exit-69 classification above is the contract; consumers should
  * not depend on catching it by type.
+ *
+ * It deliberately carries no `psilinkRecoveryHintEmitted` tag and no operator
+ * next step: the operator-facing-error audit (board item 199419757) judged it to
+ * have none. It is a local teardown signal that almost never reaches the process
+ * exit code (the signal handler owns 130/143 and this rejection is logged and
+ * swallowed), so there is no actionable step to surface and nothing for the
+ * generic CLI advisory to contradict.
  */
 export class ConnectionClosedError extends Error {
   constructor(message = "connection closed during wait") {
