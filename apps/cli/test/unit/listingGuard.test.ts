@@ -73,8 +73,10 @@ describe("filenameTooLongError", () => {
     expect(err.message).not.toContain(hostile);
     expect(err.message).toContain("a".repeat(64));
     expect(err.message).toContain("...");
-    // The message itself stays small regardless of the input name length.
-    expect(err.message.length).toBeLessThan(300);
+    // The message itself stays small (the truncated preview plus the fixed
+    // class-appended recovery step) regardless of the input name length -- well
+    // under the 5000-character hostile input, so it cannot relay it whole.
+    expect(err.message.length).toBeLessThan(500);
   });
 
   test("escapes control/ANSI characters so a hostile name cannot spoof the terminal", () => {
@@ -94,6 +96,8 @@ describe("filenameTooLongError", () => {
     const hostile = "\u{1f600}".repeat(5000);
     const err = filenameTooLongError("/drop", hostile, 255);
     expect(err.message).not.toContain(hostile);
-    expect(err.message.length).toBeLessThan(300);
+    // Bounded by the preview plus the fixed class-appended recovery step, not by
+    // the code-point count, so the message cannot balloon.
+    expect(err.message.length).toBeLessThan(500);
   });
 });

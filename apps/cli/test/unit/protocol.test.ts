@@ -87,6 +87,7 @@ import {
   runExchange,
   PeerAbortError,
   ConnectionError,
+  FrameSizeExceededError,
 } from "@psilink/core";
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
 import {
@@ -1052,6 +1053,75 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
 
   // Neither generic advisory should fire: the tag is on the inner error,
   // not the outer wrap, but the cause walker finds it anyway.
+  expect(
+    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
+  ).toBe(true);
+  expect(
+    mockState.errors.every((m) => !m.includes("already rotated and saved")),
+  ).toBe(true);
+}, 15_000);
+
+test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceededError", async () => {
+  // A terminal transport/directory UsageError thrown during the data exchange
+  // reaches the catch with tokenRotated=true, where the generic "retry without
+  // re-inviting" advisory would otherwise fire and contradict the error's own
+  // terminal refusal. FrameSizeExceededError now carries a class-level
+  // psilinkRecoveryHintEmitted tag (board item 199419757), so the hint-walker
+  // must suppress the generic advisory -- this pins that the new class tag is
+  // honored end to end, not just the Object.assign tags the other tests cover.
+  //
+  // Both parties wait for both key files to rotate before throwing, for the same
+  // synchronization reason as the cause-wrap test above: a premature throw would
+  // tear down one connection mid-handshake and surface the very authStarted
+  // advisory this test asserts is absent.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  async function waitForRotationThenThrowFrameSize(): Promise<never> {
+    const { readFileSync } = await import("node:fs");
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      try {
+        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
+        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
+        if (a !== TOKEN_A && b !== TOKEN_A) break;
+      } catch {
+        // file may not exist yet; retry
+      }
+      if (Date.now() > deadline)
+        throw new Error("timed out waiting for both key files to rotate");
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    throw new FrameSizeExceededError("inbound frame exceeds the cap");
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrowFrameSize)
+    .mockImplementationOnce(waitForRotationThenThrowFrameSize);
+
+  const pA = runProtocol(
+    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+  );
+  const pB = runProtocol(
+    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+  );
+
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+
+  // The terminal error's class tag suppresses both generic advisory lines.
   expect(
     mockState.errors.every((m) => !m.includes("key exchange was in progress")),
   ).toBe(true);
