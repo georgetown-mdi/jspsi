@@ -202,7 +202,8 @@ export interface Authentication {
    * Must be a base64url-encoded 32-byte value (exactly 43 characters from
    * `[A-Za-z0-9_-]`, with the final character constrained to
    * `[AEIMQUYcgkosw048]`).  Both invitation secrets and persistent (rotation)
-   * secrets use this format; they differ only in whether `expires` is set.
+   * secrets use this format; they differ only in the {@link expires} that
+   * accompanies them (see that field for how its two sources are treated).
    *
    * REQUIRED at the moment {@link authenticateConnection} is invoked, even
    * though the type marks it optional. The optionality exists only so that
@@ -213,10 +214,15 @@ export interface Authentication {
    */
   sharedSecret?: string;
   /**
-   * Expiration for this token (ISO 8601 datetime). The exchange is aborted
-   * before the key exchange if the current time is past this value.
-   * Invitation tokens default to 1 hour; rotation-generated tokens carry none
-   * unless {@link tokenMaxAgeDays} is set.
+   * Expiration for this token (ISO 8601 datetime), or absent for a persistent
+   * token with no maximum age. The exchange is aborted before the key exchange
+   * -- and again after it, catching a lapse during the round-trip -- if the
+   * current time is past this value. This one field is written by two sources,
+   * an invitation's bounded lifetime (default 1 hour) and a
+   * {@link tokenMaxAgeDays} stamp on a rotated token, which core deliberately
+   * does not distinguish: expiry means the same thing, and recovers the same
+   * way (re-invite), for both. See docs/SECURITY_DESIGN.md ("Two sources, one
+   * `expires`").
    */
   expires?: string;
   /**
