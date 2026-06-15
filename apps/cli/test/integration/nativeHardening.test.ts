@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
+import Ssh2SftpClient from "ssh2-sftp-client";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { selectedBackend, selectedNativeProfile } from "../sftpServer";
@@ -19,6 +20,15 @@ import { remotePath, sftpServer } from "../sftpServer/testContext";
 // assertion is the security property, not which sshd stage enforces it.)
 const allowlistOnly = test.skipIf(
   !(selectedBackend() === "native" && selectedNativeProfile() === "allowlist"),
+);
+const chrootOnly = test.skipIf(
+  !(selectedBackend() === "native" && selectedNativeProfile() === "chroot"),
+);
+const restrictedCryptoOnly = test.skipIf(
+  !(
+    selectedBackend() === "native" &&
+    selectedNativeProfile() === "restricted-crypto"
+  ),
 );
 
 const srv = sftpServer();
@@ -55,5 +65,56 @@ allowlistOnly(
     ).rejects.toThrow();
 
     await conn.close().catch(() => {});
+  },
+);
+
+chrootOnly(
+  "confines the session: a path outside the served root is unreachable",
+  async () => {
+    const client = new Ssh2SftpClient();
+    await client.connect({
+      host: srv.host,
+      port: srv.port,
+      username: srv.usera.username,
+      privateKey: srv.usera.privateKey,
+      readyTimeout: 5_000,
+    });
+    try {
+      // /etc/passwd exists on the host but not inside the jail, so a chrooted
+      // session cannot reach it. This is non-vacuous: without ChrootDirectory the
+      // path would resolve to the host's real /etc/passwd and stat would succeed,
+      // so asserting it is refused proves the jail confines -- and this fails red
+      // if the chroot is ever dropped.
+      await expect(client.stat("/etc/passwd")).rejects.toThrow();
+      // Positive control: the served root inside the jail IS reachable, so the
+      // rejection above is confinement, not a stat that simply never works.
+      const served = await client.stat(srv.remoteRoot);
+      expect(served.isDirectory).toBe(true);
+    } finally {
+      await client.end().catch(() => {});
+    }
+  },
+);
+
+restrictedCryptoOnly(
+  "rejects a client offering only a weak, non-advertised key exchange",
+  async () => {
+    // The restricted-crypto profile advertises only curve25519 kex. A client that
+    // offers ONLY the legacy diffie-hellman-group14-sha1 (which ssh2 supports but
+    // the server does not allow) shares no kex with the server, so the handshake
+    // must fail -- proving the locked-down policy actually rejects a
+    // non-conforming client, not merely that a conforming one still connects.
+    const client = new Ssh2SftpClient();
+    await expect(
+      client.connect({
+        host: srv.host,
+        port: srv.port,
+        username: srv.usera.username,
+        privateKey: srv.usera.privateKey,
+        readyTimeout: 5_000,
+        algorithms: { kex: ["diffie-hellman-group14-sha1"] },
+      }),
+    ).rejects.toThrow();
+    await client.end().catch(() => {});
   },
 );

@@ -97,9 +97,16 @@ jobs:
   # sudo, so this leg runs the suite as root; the runner (test/sftpServer/
   # runChrootProfile.mjs) would skip cleanly with exit 0 where root is
   # unavailable. PATH is forwarded through sudo so npm and node resolve as root.
+  #
+  # Gated to same-repository (non-fork) PRs: this is the one leg that runs a whole
+  # test process as root via passwordless sudo, so it is not exposed to fork PRs,
+  # which run untrusted workflow/code. Branch PRs (this repo's normal flow) still
+  # get full chroot coverage. If this job is ever made a required status check,
+  # configure branch protection so the skipped fork-PR run does not block the PR.
   chroot-native:
     name: Hardened native sshd (chroot)
     runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup
