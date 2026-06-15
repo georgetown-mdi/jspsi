@@ -248,28 +248,21 @@ async function validateConfig(
   }
 }
 
-// Whether the locally resolved sshd accepts a single directive, probed by
-// validating a minimal config that carries only it. Used to gate version-fragile
-// directives (PerSourcePenalties is unknown before OpenSSH 9.8) rather than
-// assuming the CI sshd's feature set.
-async function sshdAcceptsDirective(
+// Whether the locally resolved sshd accepts PerSourcePenalties -- the one
+// rate-limit directive that cannot be validated as part of the served config,
+// because an sshd too old to know it (before OpenSSH 9.8) would reject the whole
+// rate-limited config at the validation step, turning a soft capability gap into
+// a hard test failure. So it is probed in isolation with a minimal config. The
+// probe mirrors the served config's `StrictModes no` so the host key under the
+// world-readable temp workDir is judged on the directive's validity, not
+// key-file permission strictness (which would false-negative and silently drop a
+// supported directive); the probe file is removed in the finally.
+async function sshdSupportsPerSourcePenalties(
   sshd: string,
   hostKeyPath: string,
   workDir: string,
-  directive: string,
 ): Promise<boolean> {
-  // A transient probe config: write it, validate, remove it. The filename is the
-  // full hex of the directive (not a prefix, so distinct directives can never
-  // map to the same name), and the file is deleted in the finally, so repeated
-  // probes neither collide nor accumulate. The probe mirrors the served config's
-  // `StrictModes no` so the host key under the world-readable temp workDir is
-  // judged on the directive's validity, not key-file permission strictness --
-  // otherwise the probe could false-negative and silently drop a supported
-  // hardening directive.
-  const probePath = path.join(
-    workDir,
-    `sshd_probe_${Buffer.from(directive).toString("hex")}`,
-  );
+  const probePath = path.join(workDir, "sshd_probe_persourcepenalties");
   try {
     await fsp.writeFile(
       probePath,
@@ -278,7 +271,7 @@ async function sshdAcceptsDirective(
         "ListenAddress 127.0.0.1",
         `HostKey ${hostKeyPath}`,
         "StrictModes no",
-        directive,
+        "PerSourcePenalties yes",
         "",
       ].join("\n"),
     );
@@ -437,14 +430,7 @@ export async function startNativeSshdServer(
       // an older local sshd does not reject the whole rate-limited config. It
       // penalizes misbehaving SOURCE addresses, never clean loopback traffic, so
       // it cannot trip the suite's successful connections.
-      if (
-        await sshdAcceptsDirective(
-          sshd,
-          hostKeyPath,
-          workDir,
-          "PerSourcePenalties yes",
-        )
-      ) {
+      if (await sshdSupportsPerSourcePenalties(sshd, hostKeyPath, workDir)) {
         directives.push("PerSourcePenalties yes");
       }
     }
