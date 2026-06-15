@@ -57,6 +57,13 @@ jobs:
       - name: Run tests
         run: |
           npm run -w packages/core test
+      # Web unit tests run in the node environment against the already-built
+      # @psilink/core -- no dev server or Docker (the integration and browser
+      # projects are the ones that stand up a server), so the shared setup above
+      # is all they need. Kept a discrete step from the core "Run tests" above so
+      # a web-unit regression gives a clear failure signal of its own.
+      - name: Web unit tests
+        run: npm run test:unit -w apps/web
       # Web integration tests gate the web deploy on the app's own behavior,
       # independent of the CLI (whose tests live in release.yaml). The suite is
       # self-managing -- a vitest globalSetup spawns the dev server, waits for
