@@ -186,6 +186,39 @@ describe("summarizeInvitation", () => {
     expect(summary.linkageKeys[0].name).toContain("\\x07");
   });
 
+  test("sanitizes partner-controlled transform and constraint text", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          {
+            name: "first_name",
+            type: "firstName",
+            constraints: { allowedCharacters: "A-Z" + BEL },
+          },
+        ],
+        linkageKeys: [
+          {
+            name: "FN",
+            elements: [
+              {
+                field: "first_name",
+                transform: [{ function: "substring" + BEL }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    // A transform function name and a constraint's allowedCharacters are both
+    // partner-controlled, so each is neutralized before it reaches the summary.
+    const fn = summary.linkageKeys[0].elements[0].transforms[0];
+    expect(fn).not.toContain(BEL);
+    expect(fn).toContain("\\x07");
+    const constraint = summary.linkageFields[0].constraints[0];
+    expect(constraint).not.toContain(BEL);
+    expect(constraint).toContain("\\x07");
+  });
+
   test("surfaces a transform, swap, and fuzzy expansion, flagging only the affected keys", () => {
     const summary = summarizeInvitation(
       makeToken({

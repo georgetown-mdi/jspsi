@@ -95,8 +95,8 @@ export interface InvitationKeySummary {
    * The two swapped elements' field labels, present only when both swap
    * references resolve to elements with *distinct* labels (the common case,
    * e.g. ["Last name", "First name"]). Absent when an identifier names no
-   * element or the two would carry the same label: a repeated label or an echoed
-   * raw identifier reads as a worse note than a generic one, so the renderer
+   * element or the two would carry the same label. No identifier, raw or
+   * sanitized, ever enters this tuple: in those cases the renderer
    * falls back to a generic swap note keyed off {@link hasSwap} instead.
    */
   swap?: [string, string];
@@ -230,8 +230,8 @@ function summarizeKey(
     // that `name ?? field` is unique within a key, so this Map never drops an
     // element. The note names the two fields only when both references resolve
     // to distinct labels; otherwise the renderer shows a generic note (see the
-    // `swap` field doc), since a repeated label or a raw unresolved identifier
-    // would mislead rather than inform.
+    // `swap` field doc); `swap` is left undefined, never holding a raw or
+    // sanitized identifier, since either would mislead rather than inform.
     const labelByIdentifier = new Map(
       key.elements.map((element) => [
         element.name ?? element.field,
@@ -273,16 +273,20 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     terms.linkageFields.map((field) => [field.name, field.type]),
   );
 
-  // Collapse fields that are fully identical for display -- same semantic-type
-  // label and same constraints -- so several fields of one type (the schema
+  // Collapse fields that are identical for display -- same semantic-type label
+  // and same constraint phrases -- so several fields of one type (the schema
   // permits, e.g., a maiden and a current name both typed `firstName`) do not
   // list the same line twice with nothing to tell them apart (the field `name`
   // that would distinguish them is partner-controlled and deliberately not
   // shown). Fields whose constraints differ stay distinct, since the constraint
-  // text then distinguishes them. The dedupe key joins the label and the
-  // constraint phrases: each phrase is a distinct fixed string in a fixed order
-  // (the one free value is embedded verbatim behind a fixed prefix), so the
-  // joined key collides only when the rendered lines are themselves identical.
+  // text then distinguishes them. The dedupe key is the JSON encoding of the
+  // (label, constraints) pair, which is injective over that displayed content:
+  // a plain join would not be, since a constraint phrase can itself contain the
+  // separator (`characters limited to <chars>` carries partner-controlled
+  // spaces). The key is built from the already-sanitized display strings, so two
+  // fields whose `allowedCharacters` differ only in characters sanitizeForDisplay
+  // folds together collapse -- correctly, since they render identically and
+  // nothing the acceptor could distinguish is lost.
   const seenFields = new Set<string>();
   const linkageFields: Array<InvitationFieldSummary> = [];
   for (const field of terms.linkageFields) {
@@ -290,7 +294,7 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
       label: FIELD_TYPE_LABELS[field.type],
       constraints: describeConstraints(field),
     };
-    const dedupeKey = `${summary.label} ${summary.constraints.join(" ")}`;
+    const dedupeKey = JSON.stringify([summary.label, summary.constraints]);
     if (seenFields.has(dedupeKey)) continue;
     seenFields.add(dedupeKey);
     linkageFields.push(summary);
