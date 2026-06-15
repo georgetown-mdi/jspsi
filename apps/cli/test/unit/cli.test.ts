@@ -305,21 +305,22 @@ test("openInputSource: stdin is disabled by default", () => {
 
 // --- writeOutput -------------------------------------------------------------
 
-// writeOutput closes its write stream without awaiting 'finish', so the file may
-// lag a tick behind the call returning. Poll until it is present and stable.
-async function readWhenReady(file: string): Promise<string> {
+// writeOutput closes its write stream without awaiting 'finish' and does not
+// expose it, so the test polls the file until it holds the exact expected
+// content before asserting. Matching the full content (rather than "non-empty
+// and stable for two reads") avoids a mid-flush race where only the header has
+// landed, and returns immediately once complete rather than spinning to the
+// deadline.
+async function waitForContent(file: string, expected: string): Promise<void> {
   const deadline = Date.now() + 5_000;
-  let last = "";
   for (;;) {
     try {
-      const cur = fs.readFileSync(file, "utf8");
-      if (cur.length > 0 && cur === last) return cur;
-      last = cur;
+      if (fs.readFileSync(file, "utf8") === expected) return;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
     if (Date.now() > deadline)
-      throw new Error(`output file ${file} never stabilized with content`);
+      throw new Error(`output file ${file} never reached the expected content`);
     await new Promise<void>((r) => setTimeout(r, 20));
   }
 }
@@ -342,7 +343,7 @@ test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () =
         ["3", "4"],
       ],
     );
-    expect(await readWhenReady(out)).toBe("a,b\n1,2\n3,4\n");
+    await waitForContent(out, "a,b\n1,2\n3,4\n");
     expect(fs.statSync(out).mode & 0o777).toBe(0o600);
   } finally {
     process.umask(prevUmask);

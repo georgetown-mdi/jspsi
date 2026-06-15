@@ -630,10 +630,13 @@ export function writeFileAtomic(
  *    `createWriteStream` and is acceptable for a recomputable result output --
  *    unlike a credential, whose partial state would matter.
  *
- * On Unix the descriptor is opened with the `0600` create mode and then
- * `fchmod`'d to exactly `0600`: the `fchmod` both forces the mode regardless of a
- * relaxed umask (which would otherwise apply `0600 & ~umask`) and tightens an
- * existing over-permissive file at the path. Like the `--log-file` open in
+ * On Unix the descriptor is opened with the `0600` create mode (without
+ * `O_TRUNC`) and then `fchmod`'d to exactly `0600`: the `fchmod` both forces the
+ * mode regardless of a relaxed umask (which would otherwise apply `0600 & ~umask`)
+ * and tightens an existing over-permissive file at the path. The file is
+ * truncated only after that succeeds, so a failure to secure the mode (e.g.
+ * `EPERM` on a file owned by another user) leaves any existing content intact
+ * rather than emptied. Like the `--log-file` open in
  * `configureLogFile`, and unlike the credential writers, the path is an
  * operator-supplied flag value -- not attacker-derived -- so the open does not add
  * the `O_NOFOLLOW`/`O_EXCL` hardening those writers use for paths psilink derives
@@ -671,9 +674,11 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     return fs.createWriteStream(destPath, { encoding: "utf8" });
   }
 
+  // Open without O_TRUNC so an existing file is not emptied before its mode is
+  // secured; it is truncated below, only once fchmod has succeeded.
   const fd = fs.openSync(
     destPath,
-    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT,
     0o600,
   );
   try {
@@ -682,7 +687,8 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     // Refuse to write the result CSV where we cannot make it owner-only (e.g. a
     // pre-existing file owned by another user, which fchmod rejects with EPERM):
     // close the descriptor and let the failure propagate rather than leave PII at
-    // relaxed permissions.
+    // relaxed permissions. Because the file was not truncated above, an existing
+    // file's content survives intact and no empty orphan is left behind.
     try {
       fs.closeSync(fd);
     } catch {
@@ -690,6 +696,9 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     }
     throw err;
   }
+  // Mode is now owner-only; truncate to overwrite (the create above did not),
+  // then stream the rows in from offset 0.
+  fs.ftruncateSync(fd, 0);
   return fs.createWriteStream(destPath, {
     fd,
     encoding: "utf8",

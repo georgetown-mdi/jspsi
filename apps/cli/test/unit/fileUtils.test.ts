@@ -334,6 +334,23 @@ describe("createOwnerOnlyWriteStream", () => {
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
     expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
   });
+
+  test("preserves an existing file's content when the mode cannot be secured (POSIX)", () => {
+    // Simulates fchmod failing as it would on a file owned by another user
+    // (EPERM): the writer must refuse rather than leave PII at relaxed
+    // permissions, and -- because it opens without O_TRUNC -- must not have
+    // emptied the existing file before that failure.
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "foreign.csv");
+    fs.writeFileSync(p, "original,content\n");
+    vi.spyOn(fs, "fchmodSync").mockImplementation(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+
+    expect(() => createOwnerOnlyWriteStream(p)).toThrow("EPERM");
+
+    expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+  });
 });
 
 // --- expandTilde -------------------------------------------------------------
