@@ -84,8 +84,8 @@ PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm ru
 ```
 
 - `restricted-crypto` -- a locked-down kex/cipher/MAC/host-key/pubkey policy,
-  plus a test that a client offering only a weak, non-advertised key exchange is
-  refused.
+  plus a test that a client offering only a key exchange the policy excludes (one
+  OpenSSH allows by default) is refused.
 - `rate-limited` -- connection and auth rate limits. The suite running under them
   is the coverage; there is no exceed-the-limit test (it would be CI-flaky).
 - `allowlist` -- an explicit `user@host` allow matrix, plus a test asserting a

@@ -97,13 +97,17 @@ chrootOnly(
 );
 
 restrictedCryptoOnly(
-  "rejects a client offering only a weak, non-advertised key exchange",
+  "rejects a client offering only a key exchange the policy excludes",
   async () => {
-    // The restricted-crypto profile advertises only curve25519 kex. A client that
-    // offers ONLY the legacy diffie-hellman-group14-sha1 (which ssh2 supports but
-    // the server does not allow) shares no kex with the server, so the handshake
-    // must fail -- proving the locked-down policy actually rejects a
-    // non-conforming client, not merely that a conforming one still connects.
+    // The restricted-crypto profile pins KexAlgorithms to curve25519 only. A
+    // client offering ONLY ecdh-sha2-nistp256 shares no kex with the server, so
+    // the handshake must fail. ecdh-sha2-nistp256 is deliberate: it is a kex
+    // OpenSSH advertises BY DEFAULT but this profile excludes, so the rejection
+    // is attributable to the profile's restriction -- if the KexAlgorithms line
+    // were dropped, the server's default set would include ecdh-sha2-nistp256,
+    // the handshake would succeed, and this test would fail red. (A legacy kex
+    // like diffie-hellman-group14-sha1 would not catch that regression, since a
+    // modern OpenSSH default already excludes it.)
     const client = new Ssh2SftpClient();
     await expect(
       client.connect({
@@ -112,7 +116,7 @@ restrictedCryptoOnly(
         username: srv.usera.username,
         privateKey: srv.usera.privateKey,
         readyTimeout: 5_000,
-        algorithms: { kex: ["diffie-hellman-group14-sha1"] },
+        algorithms: { kex: ["ecdh-sha2-nistp256"] },
       }),
     ).rejects.toThrow();
     await client.end().catch(() => {});
