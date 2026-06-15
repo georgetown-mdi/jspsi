@@ -521,6 +521,37 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(html).not.toContain("Non-standard matching");
   });
 
+  test("flags only the keys that carry a non-default rule", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            { name: "ssn", type: "ssn" },
+            { name: "dob", type: "dateOfBirth" },
+          ],
+          linkageKeys: [
+            {
+              name: "plain key",
+              elements: [{ field: "ssn" }, { field: "dob" }],
+            },
+            {
+              name: "fuzzy key",
+              elements: [
+                { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    // Exactly one of the two keys carries a rule, so the visible flag appears
+    // once -- the plain key is not flagged. (The match is case-sensitive, so it
+    // counts the badge text, not the lowercase aria-label.)
+    const flags = html.match(/Non-standard matching/g) ?? [];
+    expect(flags.length).toBe(1);
+  });
+
   test("escapes injection characters in the rendered identity", () => {
     const html = render(
       createElement(InvitationTerms, {
