@@ -31,7 +31,7 @@ import {
 } from "../../src/commands/bootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
-import { streamOf, withStdin } from "../stdinStream";
+import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // runOnlineBootstrap's config-persistence tests below drive its wiring without
 // opening a connection: runProtocol is mocked so each test chooses whether the
@@ -1431,4 +1431,17 @@ test("loadInputRows: `-` is rejected as a usage error when stdin is disallowed (
     /file path/,
   );
   await expect(loadInputRows("-")).rejects.toThrow(/stdin/);
+});
+
+test("loadInputRows: `-` at an interactive terminal is rejected (invite path inherits the TTY guard)", async () => {
+  // invite allows stdin, but a `-` typed at a prompt with nothing piped would
+  // hang on an EOF that never arrives; the shared guard rejects it up front.
+  await withStdin(ttyStream(), async () => {
+    await expect(
+      loadInputRows("-", { allowStdin: true }),
+    ).rejects.toBeInstanceOf(UsageError);
+    await expect(loadInputRows("-", { allowStdin: true })).rejects.toThrow(
+      /pipe/,
+    );
+  });
 });

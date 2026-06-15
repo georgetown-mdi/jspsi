@@ -279,6 +279,17 @@ function writeAll(fd: number, text: string): void {
  * inherits a rejection that does not misattribute itself to `accept`. (Re-enable
  * for `accept` once it gains a non-interactive confirmation bypass -- board item
  * 200218548.)
+ *
+ * When `-` is allowed but `process.stdin` is an interactive terminal with nothing
+ * piped in, reading it would block on an EOF that never arrives -- the parser
+ * resolves only at end-of-stream and the read precedes every connection/exchange
+ * timeout, so the command would hang indefinitely with no feedback. That case is
+ * always a mistake (no one hand-types a PII CSV at a prompt), so it is rejected up
+ * front as a {@link UsageError} naming both escape hatches. The check is strict
+ * `=== true`: `isTTY` is `undefined` (not `false`) for a pipe, a `<` redirect, or
+ * `/dev/null`, so a strict test can never reject a legitimate non-interactive run;
+ * a false negative (an effectively-interactive stream that reports falsy) merely
+ * falls through to the read, no worse than blocking-until-Ctrl-D.
  */
 export function openInputSource(
   input: string,
@@ -289,6 +300,12 @@ export function openInputSource(
       throw new UsageError(
         "this command cannot read its input CSV from stdin; pass a file path " +
           "instead of `-`",
+      );
+    if (process.stdin.isTTY === true)
+      throw new UsageError(
+        "nothing is piped to stdin, so `-` would wait for input forever; pipe " +
+          "a CSV (e.g. `cat data.csv | psilink exchange - results.csv`) or pass " +
+          "a file path instead of `-`",
       );
     return process.stdin;
   }

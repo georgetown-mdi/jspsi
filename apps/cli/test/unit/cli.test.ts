@@ -13,7 +13,7 @@ import {
   parseOrExit,
   singleValue,
 } from "../../src/util/cli";
-import { streamOf, withStdin } from "../stdinStream";
+import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
@@ -210,10 +210,28 @@ test("openInputSource: a missing file throws exit 69 (not a stdin error)", () =>
   expect((caught as { exitCode?: number }).exitCode).toBe(69);
 });
 
-test("openInputSource: `-` returns process.stdin when stdin is allowed", async () => {
+test("openInputSource: `-` returns process.stdin when stdin is allowed (non-interactive)", async () => {
+  // streamOf leaves isTTY undefined, modelling a pipe/redirect -- the TTY guard
+  // must not fire, so the piped stdin is returned for the loader to consume.
   const stub = streamOf("");
   await withStdin(stub, () => {
     expect(openInputSource("-", { allowStdin: true })).toBe(stub);
+  });
+});
+
+test("openInputSource: `-` at an interactive terminal (nothing piped) is rejected as a usage error", async () => {
+  // An interactive stdin (isTTY === true) with `-` would block on an EOF that
+  // never comes; reject up front naming both escape hatches rather than hang.
+  await withStdin(ttyStream(), () => {
+    let caught: unknown;
+    try {
+      openInputSource("-", { allowStdin: true });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toMatch(/pipe/);
+    expect((caught as Error).message).toMatch(/file path/);
   });
 });
 
