@@ -107,4 +107,10 @@ jobs:
         run: |
           # sshd needs its privilege-separation directory present at startup.
           sudo mkdir -p /run/sshd
-          sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli
+          # PSILINK_SFTP_CHROOT_REQUIRED=1 makes the runner FAIL (not skip) if it
+          # cannot run as root here, so a broken sudo elevation cannot let this
+          # leg go green without actually exercising the chroot path. It is set
+          # via env (not sudo's environment) since sudo forwards only PATH.
+          sudo --preserve-env=PATH \
+            env "PATH=$PATH" PSILINK_SFTP_CHROOT_REQUIRED=1 \
+            npm run test:integration:native-chroot -w apps/cli

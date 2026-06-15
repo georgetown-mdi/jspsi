@@ -31,11 +31,20 @@ function chrootCapability() {
 
 const cap = chrootCapability();
 if (!cap.ok) {
-  console.log(
-    `[sftp-test-server] SKIP native chroot profile: ${cap.reason}. ` +
-      `Run on Linux as root (CI runs it under sudo).`,
+  // A clean skip (exit 0) is right for local/dev where chroot cannot run -- but
+  // in CI this leg is the ONLY coverage of the chroot path, so a silent skip
+  // there would go green having tested nothing. PSILINK_SFTP_CHROOT_REQUIRED=1
+  // (set by the CI leg) turns the skip into a loud failure, so a broken sudo
+  // elevation or a runner change cannot mask the chroot tests never running.
+  const required = process.env.PSILINK_SFTP_CHROOT_REQUIRED === "1";
+  const verb = required ? "FAIL" : "SKIP";
+  console[required ? "error" : "log"](
+    `[sftp-test-server] ${verb} native chroot profile: ${cap.reason}. ` +
+      (required
+        ? `This leg requires root on Linux (it runs the suite under sudo).`
+        : `Run on Linux as root (CI runs it under sudo).`),
   );
-  process.exit(0);
+  process.exit(required ? 1 : 0);
 }
 
 const child = spawn("npm", ["run", "test:integration"], {
