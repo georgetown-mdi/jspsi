@@ -29,6 +29,7 @@ import {
   ConnectionError,
 } from "../src/connection/messageConnection";
 import { withCapturedLogs } from "../src/testing";
+import logLibrary from "loglevel";
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
 // send() need real implementations; everything else is a no-op.
@@ -384,6 +385,43 @@ test("open derives timeToLive from config peerTimeoutMs when no constructor time
       }
     ).config?.options?.peerTimeoutMs,
   ).toBe(45_000);
+});
+
+test("open (sftp): the connect debug log records only that a username is set, not its value", async () => {
+  // The configured SFTP username is a credential component; the connect debug log
+  // must record only that one is set, never the value. The line is this.log.debug,
+  // so two things are needed to observe it: (1) raise the root level to "trace"
+  // (getLoggerForVerbosity never makes a named logger more verbose than the root,
+  // so the logger must be built while the root permits DEBUG), restored in
+  // finally; and (2) construct the connection inside the withCapturedLogs callback
+  // so its logger binds to the capture's method factory -- mirroring the
+  // providerOptions warning tests below. Teeth: reverting to `as ${username}`
+  // would surface "alice" on this line.
+  const { client } = makeMockClient();
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", username: "alice" },
+  };
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("trace");
+  try {
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, { verbose: 1 });
+        await conn.open(config);
+      },
+      (level) => level === "DEBUG",
+    );
+    const debugLines = logs.map((l) => l.message).join("\n");
+    // The connect line was captured (guards against a level-setup mistake that
+    // would make the credential assertion vacuous), carries the presence marker,
+    // and never the username value.
+    expect(debugLines).toContain("connecting to sftp.example.org");
+    expect(debugLines).toContain("as a configured user");
+    expect(debugLines).not.toContain("alice");
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
 });
 
 // --- open (sftp providerOptions hardening) -----------------------------------

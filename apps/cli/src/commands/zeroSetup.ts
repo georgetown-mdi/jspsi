@@ -45,7 +45,10 @@ import {
 } from "./bootstrap";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
-import { decodeUrlComponent } from "../util/connectionUrl";
+import {
+  decodeUrlComponent,
+  redactUrlCredentials,
+} from "../util/connectionUrl";
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
@@ -219,8 +222,13 @@ export function resolvePositionals(positionals: Array<unknown>): {
 
   const server = tryParseURL(
     arg0,
-    `unable to parse server URL: ${arg0}; ` +
-      "usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+    // Do not interpolate the raw input: a malformed but credential-bearing URL
+    // (e.g. a mistyped port on sftp://user:secret@host) reaches here, and the
+    // message surfaces to the terminal and any --log-file. Unlike the redacted
+    // file:// case below, the input failed to parse, so there is no URL to route
+    // through redactUrlCredentials; drop it entirely. The usage hint stands in
+    // for the offending value, which the operator just typed.
+    "unable to parse server URL; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
   );
   return { server, input: arg1, output: arg2 };
 }
@@ -261,7 +269,7 @@ export function createConnection(
     if (server.hostname && server.hostname !== "localhost") {
       throw new UsageError(
         `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
-          `or file://localhost/path; got: ${server.href}`,
+          `or file://localhost/path; got: ${redactUrlCredentials(server)}`,
       );
     }
     const base: FileDropConnectionConfig = {

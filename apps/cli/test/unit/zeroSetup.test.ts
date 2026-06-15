@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yargs, { type Arguments } from "yargs";
-import { UsageError } from "@psilink/core";
+import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 import type { SFTPConnectionConfig } from "@psilink/core";
 import {
   builder,
@@ -20,6 +20,7 @@ import {
   resolvePositionals,
 } from "../../src/commands/zeroSetup";
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
+import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
@@ -130,6 +131,27 @@ test("invalid server URL with two positionals throws a parse error", () => {
   );
 });
 
+test("a malformed credential-bearing server URL does not echo the credential", () => {
+  // A typo the WHATWG parser rejects (here, a bad port) on a credentialed URL
+  // reaches the parse-error site. The operator-facing render must carry neither
+  // the password nor the username -- not via the message, and not via the parse
+  // error's enumerable `input` property on the attached cause. Assert at the
+  // render boundary (sanitizeErrorForDisplay, the sole path exitWithError uses)
+  // so both are covered end to end. Before the fix the raw input was
+  // interpolated into the message and this failed on the credential bytes.
+  let err: unknown;
+  try {
+    resolvePositionals(["sftp://alice:s3cr3t@host:99999999/drop", "input.csv"]);
+  } catch (caught) {
+    err = caught;
+  }
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toContain("unable to parse server URL");
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).not.toContain("s3cr3t");
+  expect(rendered).not.toContain("alice");
+});
+
 // --- createConnection --------------------------------------------------------
 
 const baseOptions = {
@@ -155,6 +177,24 @@ test("createConnection filedrop: non-localhost authority throws a UsageError", (
   expect(() =>
     createConnection(new URL("file://host/mnt/share"), baseOptions),
   ).toThrow("three slashes");
+});
+
+test("createConnection filedrop: the non-localhost error echoes the redacted URL", () => {
+  // The rejection echoes the URL through redactUrlCredentials, mirroring
+  // connectionFromURL's twin branch, so the message stays credential-free if the
+  // parse/validation order is ever reworked. A file:// URL cannot carry userinfo
+  // today -- the WHATWG parser rejects `file://user:pass@host` with
+  // ERR_INVALID_URL and the username/password setters are no-ops on a file URL --
+  // so redactUrlCredentials(server) equals server.href for every constructible
+  // file:// URL and no assertion here can distinguish the two. This pins the
+  // message to the redacted form, which is credential-free by construction, and
+  // documents the convention the twin builders share. The string `.toThrow`
+  // arg requires an actual throw whose message contains the substring, so the
+  // assertion cannot pass vacuously.
+  const server = new URL("file://host/mnt/share");
+  expect(() => createConnection(server, baseOptions)).toThrow(
+    `got: ${redactUrlCredentials(server)}`,
+  );
 });
 
 test("createConnection webrtc throws a UsageError 'not yet supported'", () => {
