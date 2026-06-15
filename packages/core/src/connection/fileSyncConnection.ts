@@ -840,6 +840,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     return this.selfAbortToken !== undefined;
   }
 
+  // The rendezvous path escaped for operator-facing logs and thrown errors. On an
+  // offline-accept-seeded config the path is partner-reachable (the partner's
+  // charset-unconstrained invitation endpoint, copied verbatim), so it can carry
+  // control/ANSI/Unicode bytes; every display sink routes it through here while
+  // the byte-exact this.path is reserved for transport-path construction. The ""
+  // fallback covers the post-handshake/close window where close() nulls this.path;
+  // a display sink only ever runs with it set, so the fallback never shows.
+  private get displayPath(): string {
+    return sanitizeForDisplay(this.path ?? "");
+  }
+
   constructor(client: FileTransportClient, options?: Partial<Options>) {
     super();
     // Retain the raw transport for the short-bounded abort marker write, then
@@ -1035,7 +1046,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // normalizeFiledropPath); the CLI reconcile compares paths through the same
       // function so its verdict matches what this connection actually opens.
       const dirPath = normalizeFiledropPath(config.path);
-      this.log.debug(`[${this.role}] opening local path ${dirPath}`);
+      this.log.debug(
+        `[${this.role}] opening local path ${sanitizeForDisplay(dirPath)}`,
+      );
       await this.client.connect({
         path: dirPath,
         connectTimeoutMs: config.options?.serverConnectTimeoutMs,
@@ -1083,9 +1096,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // --log-file, so the value must not ride along.
       const usernameString =
         config.server.username !== undefined ? " as a configured user" : "";
+      // Escape the host and remote path before they reach the debug log. Both are
+      // partner-reachable: on an offline-accept-seeded config they come from the
+      // partner's invitation endpoint, whose host/path are charset-unconstrained
+      // and copied verbatim, so they can carry CR/LF or other control/ANSI/Unicode
+      // bytes; emitted raw they would enable log-line forging/spoofing on the
+      // operator's terminal or --log-file. This routes them through
+      // sanitizeForDisplay like every other partner/server-controlled string in
+      // this file. The port is a validated integer and the username is logged
+      // only as a presence marker, so neither needs escaping.
       this.log.debug(
-        `[${this.role}] connecting to ${config.server.host}` +
-          `${portString}${usernameString}, path: ${this.path}`,
+        `[${this.role}] connecting to ` +
+          `${sanitizeForDisplay(config.server.host)}${portString}` +
+          `${usernameString}, path: ${this.displayPath}`,
       );
       await this.client.connect(connectOptions);
     }
@@ -1711,7 +1734,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           : "a peer hello body that did not resolve within the inspection " +
             "budget (retain-uncertain)";
       throw new UsageError(
-        `path ${this.path} shows a retain-mode signal (${reason}), so ` +
+        `path ${this.displayPath} shows a retain-mode signal ` +
+          `(${reason}), so ` +
           "--sweep-exchange-files refuses to delete what may be a durable audit " +
           "transcript. Re-run with --force-retain-sweep to wipe the prior " +
           "transcript and start a fresh exchange, after confirming no concurrent " +
@@ -1733,7 +1757,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.warn(
         `[${this.id}] --force-retain-sweep: permanently deleting a ` +
           `retain-mode audit transcript (${toDelete.length} protocol file(s)) ` +
-          `in ${this.path}. This is destructive and irreversible; the prior ` +
+          `in ${this.displayPath}. This is destructive and ` +
+          `irreversible; the prior ` +
           "transcript will be lost. Only use --force-retain-sweep when you " +
           "intend to discard it.",
       );
@@ -1746,7 +1771,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     this.log.info(
       `[${this.id}] sweeping ${toDelete.length} protocol file(s) at ` +
-        `${this.path} (--sweep-exchange-files): ` +
+        `${this.displayPath} (--sweep-exchange-files): ` +
         `${toDelete.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
     );
     // allSettled, not all: await every delete before reporting, so a single
@@ -1772,7 +1797,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (failures.length > 0)
       throw new Error(
         `--sweep-exchange-files failed to delete ${failures.length} of ` +
-          `${toDelete.length} protocol file(s) at ${this.path}: ` +
+          `${toDelete.length} protocol file(s) at ${this.displayPath}: ` +
           `${failures.join("; ")}. The directory may be partially swept; ` +
           "resolve the transport error and re-run.",
       );
@@ -1842,7 +1867,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "them (every message would be silently skipped)",
       );
 
-    this.log.info(`[${this.role}] synchronizing at path ${this.path}`);
+    this.log.info(`[${this.role}] synchronizing at path ${this.displayPath}`);
 
     // Reset the foreign-file snapshot up front so it is rebuilt fresh on every
     // synchronize() entry even when the list() below throws: a failed entry must
@@ -2044,7 +2069,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (foreignFiles.length > 0)
       this.log.info(
         `[${this.id}] tolerating ${foreignFiles.length} foreign file(s) ` +
-          `present at entry in ${this.path}: ` +
+          `present at entry in ${this.displayPath}: ` +
           `${foreignFiles.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
       );
 
@@ -2063,7 +2088,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // terminal usage error that now also points at the opt-in sweep.
       if (unexpectedProtocol.length > 0)
         throw new UsageError(
-          `path ${this.path} must be empty except for a single peer hello at ` +
+          `path ${this.displayPath} must be empty except for a ` +
+            "single peer hello at " +
             "the start of the protocol, but contains " +
             `${unexpectedProtocol.length} unexpected protocol file(s): ` +
             `${unexpectedProtocol
@@ -2084,7 +2110,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
       if (peerHellos.length > 1)
         throw new UsageError(
-          `path ${this.path} contains ${peerHellos.length} peer hello files ` +
+          `path ${this.displayPath} contains ${peerHellos.length} peer hello files ` +
             `(${peerHellos.map((f) => sanitizeForDisplay(f.name)).join(", ")}); ` +
             `only one peer may ` +
             "share a rendezvous directory -- are there other sessions using " +
@@ -2407,7 +2433,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             if (peerHellos.length > 1) {
               throw new UsageError(
-                `more than one peer hello file in ${this.path} - are there ` +
+                `more than one peer hello file in ${this.displayPath} - are there ` +
                   "other sessions using this path?",
               );
             }
@@ -2581,7 +2607,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // surface it the same way rather than silently timing the first.
               if (joiningFiles.length > 1) {
                 throw new UsageError(
-                  `more than one joining sentinel in ${this.path} - are ` +
+                  `more than one joining sentinel in ${this.displayPath} - are ` +
                     "there other sessions using this path?",
                 );
               }
@@ -2675,7 +2701,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           if (foreignSentinel) {
             throw new UsageError(
               `joining sentinel ${sanitizeForDisplay(foreignSentinel.name)} ` +
-                `in ${this.path} ` +
+                `in ${this.displayPath} ` +
                 "matches no peer hello - are there other sessions using " +
                 "this path?",
             );
@@ -2792,7 +2818,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
           if (otherFiles.length > 1) {
             throw new UsageError(
-              `more than one peer hello file in ${this.path} - are there ` +
+              `more than one peer hello file in ${this.displayPath} - are there ` +
                 "other sessions using this path?",
             );
           }
@@ -2850,7 +2876,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           } else {
             if (theseFiles.length > 1) {
               throw new UsageError(
-                `more than one self hello file in ${this.path} - are there ` +
+                `more than one self hello file in ${this.displayPath} - are there ` +
                   "other sessions using this path?",
               );
             }
@@ -3447,7 +3473,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (policy === "ignore") return;
     if (policy === "error")
       throw new UsageError(
-        `unexpected file(s) appeared in ${path} during the exchange: ` +
+        `unexpected file(s) appeared in ${sanitizeForDisplay(path)} during the exchange: ` +
           `${names.map((n) => sanitizeForDisplay(n)).join(", ")}. The ` +
           `directory must be dedicated to a single ` +
           'exchange between exactly two parties (see EXCHANGE_REFERENCE.md "Directory ' +
@@ -3465,7 +3491,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.warnedUnexpectedFiles.add(name);
       this.log.warn(
         `[${this.role}] unexpected file ${sanitizeForDisplay(name)} in ` +
-          `${path} during the ` +
+          `${sanitizeForDisplay(path)} during the ` +
           "exchange; continuing (unexpected_files: warn). If this directory is " +
           "dedicated to the exchange, this may be a conflict copy, a partial " +
           "download, or another session sharing the path.",
@@ -3628,7 +3654,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 // rather than listing them.
                 throw new UsageError(
                   `message file ${sanitizeForDisplay(name)} from ` +
-                    `${sanitizeForDisplay(peerId)} in ${path} has a ` +
+                    `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} has a ` +
                     "byte-count terminal segment but no parseable NNN segment; " +
                     "a correctly configured retain-mode peer cannot produce " +
                     "this name, so the file is corrupt or does not belong to " +
@@ -3705,7 +3731,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           // directory reuse, not necessarily a separate session.
           throw new UsageError(
             `more than one message file with NNN=${this.recvSeq} from ` +
-              `${sanitizeForDisplay(peerId)} in ${path} - possible ` +
+              `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} - possible ` +
               `duplicate-NNN or directory reuse`,
           );
         }
@@ -3713,7 +3739,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // so two peer messages means a concurrent session or a protocol bug.
         throw new UsageError(
           `more than one message file from ${sanitizeForDisplay(peerId)} in ` +
-            `${path} - are there ` +
+            `${sanitizeForDisplay(path)} - are there ` +
             "other sessions using this path?",
         );
       }
@@ -3739,7 +3765,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         ) {
           throw new FrameSizeExceededError(
             `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-              `${sanitizeForDisplay(peerId)} in ${path} ` +
+              `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} ` +
               `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
               `exceeding the maximum inbound frame size of ` +
               `${MAX_FRAME_SIZE_BYTES} bytes; refusing to read it into memory`,
