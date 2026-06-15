@@ -18,6 +18,7 @@ import {
   warnThresholdDaysForPolicy,
   EXPIRY_WARN_THRESHOLD_DIVISOR,
 } from "../../src/commands/exchange";
+import { ttyStream, withStdin } from "../stdinStream";
 
 const mockState = vi.hoisted(() => ({ warnings: [] as string[] }));
 
@@ -597,6 +598,36 @@ test("handler: an unrecognized log-level exits 64, not the top-level dump", asyn
     expect(errSpy).toHaveBeenCalledWith("unrecognized log-level: bogus");
   } finally {
     errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: `-` input at an interactive terminal exits 64 (usage), not 69", async () => {
+  // openInputSource raises a UsageError for `-` at a TTY with nothing piped; the
+  // prepareDataset catch must map that to exit 64 (usage), not collapse it to the
+  // default 69 (transport). A valid config and key let the handler reach
+  // prepareDataset, where the `-` is resolved.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await withStdin(ttyStream(), () =>
+      expect(
+        handler({
+          _: [],
+          $0: "psilink",
+          input: "-",
+          "config-file": configFile,
+          "key-file": keyFile,
+          "log-level": "silent",
+        } as unknown as Arguments),
+      ).rejects.toThrow("exit:64"),
+    );
+  } finally {
     exitSpy.mockRestore();
   }
 });

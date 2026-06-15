@@ -185,6 +185,51 @@ test("validateAccept: online rejects a missing input file before the prompt, pre
   ).rejects.toMatchObject({ exitCode: 69 });
 });
 
+// accept reads its y/N confirmation from stdin, so it cannot also take the CSV
+// there. validateAccept runs before promptConfirm, so a `-` input is rejected up
+// front (a UsageError naming a file path) instead of a stdin CSV starving the
+// prompt into a silent EOF decline. Both positional modes pass allowStdin: false.
+async function expectStdinRejection(
+  resolved: Parameters<typeof validateAccept>[0]["resolved"],
+): Promise<void> {
+  let caught: unknown;
+  try {
+    await validateAccept({ resolved, options: testOptions(), log: silentLog });
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  // Match the stdin-specific phrasing, not just "file path": several unrelated
+  // UsageErrors on this path (e.g. config reconciliation) also mention a file
+  // path, so require the stdin rejection's own wording to avoid a pass for the
+  // wrong reason.
+  expect((caught as Error).message).toMatch(/stdin/);
+  expect((caught as Error).message).toMatch(/file path/);
+}
+
+test("validateAccept: online `-` input is rejected as a usage error before the prompt, not silently declined", async () => {
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  await expectStdinRejection({
+    mode: "online",
+    url: new URL("sftp://host/drop"),
+    invitation: encoded,
+    input: "-",
+  });
+});
+
+test("validateAccept: offline `-` input is rejected as a usage error before the prompt, not silently declined", async () => {
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  await expectStdinRejection({
+    mode: "offline",
+    invitation: encoded,
+    input: "-",
+  });
+});
+
 test("validateAccept: an unsupported URL is rejected before the input file is read", async () => {
   const encoded = await encodeInvitation(
     sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
