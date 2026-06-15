@@ -258,24 +258,35 @@ async function sshdAcceptsDirective(
   workDir: string,
   directive: string,
 ): Promise<boolean> {
-  // Uniquify the probe-config filename per directive so a future second probe
-  // cannot clobber a config a concurrent or in-flight `sshd -t` is still reading.
+  // A transient probe config: write it, validate, remove it. The filename is the
+  // full hex of the directive (not a prefix, so distinct directives can never
+  // map to the same name), and the file is deleted in the finally, so repeated
+  // probes neither collide nor accumulate. The probe mirrors the served config's
+  // `StrictModes no` so the host key under the world-readable temp workDir is
+  // judged on the directive's validity, not key-file permission strictness --
+  // otherwise the probe could false-negative and silently drop a supported
+  // hardening directive.
   const probePath = path.join(
     workDir,
-    `sshd_probe_${Buffer.from(directive).toString("hex").slice(0, 16)}`,
+    `sshd_probe_${Buffer.from(directive).toString("hex")}`,
   );
-  await fsp.writeFile(
-    probePath,
-    [
-      `Port ${VALIDATE_ONLY_PORT}`,
-      "ListenAddress 127.0.0.1",
-      `HostKey ${hostKeyPath}`,
-      directive,
-      "",
-    ].join("\n"),
-  );
-  const { ok } = await validateConfig(sshd, probePath);
-  return ok;
+  try {
+    await fsp.writeFile(
+      probePath,
+      [
+        `Port ${VALIDATE_ONLY_PORT}`,
+        "ListenAddress 127.0.0.1",
+        `HostKey ${hostKeyPath}`,
+        "StrictModes no",
+        directive,
+        "",
+      ].join("\n"),
+    );
+    const { ok } = await validateConfig(sshd, probePath);
+    return ok;
+  } finally {
+    await fsp.rm(probePath, { force: true });
+  }
 }
 
 interface NativeAttempt {
@@ -329,7 +340,8 @@ export async function startNativeSshdServer(
   // The chroot jail lives outside workDir: ChrootDirectory requires every path
   // component to be root-owned and not group/world-writable, which os.tmpdir()
   // (world-writable) can never satisfy. /run is root-owned, so a jail under it
-  // qualifies; mkdtemp creates it mode 0700, owned by the running root process.
+  // qualifies; mkdtemp creates it owned by the running root process, and the
+  // chmod below pins it to 0700 explicitly rather than leaning on mkdtemp's mode.
   let jailDir: string | undefined;
   // Everything below creates files (keys, config, the jail); on any failure
   // before a server is handed back the catch removes both dirs so generated
@@ -339,6 +351,9 @@ export async function startNativeSshdServer(
     let remoteRoot: string;
     if (isChroot) {
       jailDir = await fsp.mkdtemp("/run/psilink-sftp-chroot-");
+      // Enforce the jail's ownership requirement in code: 0700 is root-owned and
+      // not group/world-writable, so ChrootDirectory accepts it.
+      await fsp.chmod(jailDir, 0o700);
       backingDir = path.join(jailDir, "srv");
       // The served subdir is the writable root inside the jail; the session runs
       // as root (the only user a root sshd authenticates here), so 0755 is
@@ -407,6 +422,9 @@ export async function startNativeSshdServer(
       allowUsers,
     ];
     if (isChroot)
+      // Keeps the plain `AllowUsers ${osUser}` from the base: the user@host
+      // allow matrix is the allowlist profile's dimension, not this one's, which
+      // exercises the jail and channel confinement.
       directives.push(
         `ChrootDirectory ${jailDir}`,
         ...CHROOT_CONFINEMENT_DIRECTIVES,
@@ -444,6 +462,14 @@ export async function startNativeSshdServer(
       throw new Error(
         `Native sshd rejected the "${profile}" profile config` +
           (validation.stderr ? `:\n${validation.stderr}` : "."),
+      );
+    } else if (validation.stderr) {
+      // sshd -t accepted the config but emitted a warning (e.g. a deprecated
+      // directive). Surface it instead of dropping it, so a notice of a future
+      // breakage is visible in the test log rather than silent.
+      console.warn(
+        `[sftp-test-server] sshd -t warning for the "${profile}" profile:\n` +
+          validation.stderr,
       );
     }
 
