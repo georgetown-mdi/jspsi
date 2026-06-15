@@ -424,6 +424,124 @@ test("open (sftp): the connect debug log records only that a username is set, no
   }
 });
 
+test("open (sftp): the connect debug log escapes control bytes in the host and path", async () => {
+  // The host and remote path are server-controlled and -- now that the CLI
+  // decodes percent-encoded URL components -- can carry CR/LF or other control
+  // bytes. At debug level an unescaped newline would let a hostile host or path
+  // forge an extra log line on the operator's terminal or --log-file, so this
+  // site routes both through sanitizeForDisplay. Same logger-capture setup as the
+  // username test above: raise the root level to "trace" so the named logger is
+  // built permitting DEBUG, and construct the connection inside the callback so it
+  // binds to the capture's method factory. Teeth: dropping sanitizeForDisplay from
+  // either value would surface the raw newline and split this into a forged line.
+  const { client } = makeMockClient();
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "evil.example.org\nFORGED: injected via host",
+      path: "/exchanges\r\nFORGED: injected via path",
+    },
+  };
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("trace");
+  try {
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, { verbose: 1 });
+        await conn.open(config);
+      },
+      (level) => level === "DEBUG",
+    );
+    const connectLine = logs
+      .map((l) => l.message)
+      .find((m) => m.includes("connecting to"));
+    // The connect line was captured (guards against a level-setup mistake that
+    // would make the escaping assertions vacuous).
+    expect(connectLine).toBeDefined();
+    // Control bytes are shown as visible escapes, never emitted raw, so the single
+    // debug line cannot be split into a forged second line.
+    expect(connectLine).not.toContain("\n");
+    expect(connectLine).not.toContain("\r");
+    expect(connectLine).toContain("evil.example.org\\x0a");
+    expect(connectLine).toContain("/exchanges\\x0d\\x0a");
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
+test("open (filedrop): the connect debug log escapes control bytes in the path", async () => {
+  // The filedrop directory is partner-reachable -- an offline-accept config seeds
+  // it verbatim from the partner's charset-unconstrained invitation endpoint -- so
+  // open()'s "opening local path" debug log must escape it. Same trace/capture
+  // setup as the sftp connect-log test above. Teeth: dropping sanitizeForDisplay
+  // from the dirPath interpolation would surface the raw CR/LF on this line.
+  const { client } = makeMockClient();
+  const config: FileDropConnectionConfig = {
+    channel: "filedrop",
+    path: "/drop\r\nFORGED: injected via filedrop path",
+  };
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("trace");
+  try {
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, { verbose: 1 });
+        await conn.open(config);
+      },
+      (level) => level === "DEBUG",
+    );
+    const openLine = logs
+      .map((l) => l.message)
+      .find((m) => m.includes("opening local path"));
+    expect(openLine).toBeDefined();
+    expect(openLine).not.toContain("\n");
+    expect(openLine).not.toContain("\r");
+    expect(openLine).toContain("/drop\\x0d\\x0a");
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
+test("synchronize: the 'synchronizing at path' info log escapes control bytes in the path", async () => {
+  // synchronize() logs the rendezvous path at INFO (default verbosity) before any
+  // transport I/O, so an unescaped control byte forges an operator log line at
+  // normal verbosity, not just under -v -- a higher-exposure sink than the debug
+  // connect log. The line is emitted synchronously at the top of synchronize();
+  // the short peerTimeoutMs then bounds the rendezvous wait so the call rejects
+  // (no peer ever appears) rather than hanging the test. Teeth: dropping the
+  // escaping would surface the raw CR/LF in this line.
+  const { client } = makeMockClient();
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      path: "/drop\r\nFORGED: injected via path",
+    },
+    options: { peerTimeoutMs: 100, pollIntervalMs: 10 },
+  };
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("trace");
+  try {
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, { verbose: 1 });
+        await conn.open(config);
+        await conn.synchronize().catch(() => {});
+      },
+      (level) => level === "INFO",
+    );
+    const syncLine = logs
+      .map((l) => l.message)
+      .find((m) => m.includes("synchronizing at path"));
+    expect(syncLine).toBeDefined();
+    expect(syncLine).not.toContain("\n");
+    expect(syncLine).not.toContain("\r");
+    expect(syncLine).toContain("/drop\\x0d\\x0a");
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
 // --- open (sftp providerOptions hardening) -----------------------------------
 
 // Capture the options object an sftp open() passes to client.connect, so the
