@@ -216,6 +216,13 @@ export async function validateInvite(params: {
         `(the maximum invitation lifetime); got ${expiresIn}`,
     );
 
+  // The input is read at most once per invocation. The online branch below and
+  // the two offline branches (config-as-source, and infer-from-input) are
+  // mutually exclusive -- each returns -- and each reads the input through a
+  // single loadInputRows call with allowStdin enabled. When the input is `-`
+  // that stream is process.stdin, which is single-use, so this exclusivity is
+  // load-bearing: merging these branches such that two loadInputRows calls could
+  // both run would read stdin twice and silently yield empty rows the second time.
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
     // A non-positive accept-timeout is a pure usage error; reject it before any

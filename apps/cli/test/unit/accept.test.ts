@@ -199,6 +199,11 @@ async function expectStdinRejection(
     caught = err;
   }
   expect(caught).toBeInstanceOf(UsageError);
+  // Match the stdin-specific phrasing, not just "file path": several unrelated
+  // UsageErrors on this path (e.g. config reconciliation) also mention a file
+  // path, so require the stdin rejection's own wording to avoid a pass for the
+  // wrong reason.
+  expect((caught as Error).message).toMatch(/stdin/);
   expect((caught as Error).message).toMatch(/file path/);
 }
 
