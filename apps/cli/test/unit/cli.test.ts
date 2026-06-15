@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
@@ -14,34 +13,10 @@ import {
   parseOrExit,
   singleValue,
 } from "../../src/util/cli";
+import { streamOf, withStdin } from "../stdinStream";
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
-}
-
-/** A binary readable emitting `content` (then EOF), as a file or stdin stream
- *  would; an empty string yields an immediately-ending stream like an empty file. */
-function streamOf(content: string): Readable {
-  const s = new Readable({ read() {} });
-  if (content.length > 0) s.push(Buffer.from(content, "utf8"));
-  s.push(null);
-  return s;
-}
-
-/** Run `fn` with `process.stdin` replaced by `stub`, restoring it afterward.
- *  Awaits `fn` so the swap outlives an async stdin read before it is undone. */
-async function withStdin<T>(
-  stub: Readable,
-  fn: () => T | Promise<T>,
-): Promise<T> {
-  const spy = vi
-    .spyOn(process, "stdin", "get")
-    .mockReturnValue(stub as unknown as typeof process.stdin);
-  try {
-    return await fn();
-  } finally {
-    spy.mockRestore();
-  }
 }
 
 // --- singleValue -------------------------------------------------------------
@@ -285,18 +260,22 @@ test("openInputSource: empty stdin parses like an empty file", async () => {
   }
 });
 
-test("openInputSource: `-` is rejected (exit 69) when stdin is not allowed", () => {
+test("openInputSource: `-` is rejected as a usage error when stdin is not allowed", () => {
   // accept's gate: stdin is reserved for the confirmation prompt, so `-` is an
-  // actionable rejection naming the file-path alternative, never a silent stream.
+  // actionable usage error naming the file-path alternative, never a silent
+  // stream. A usage violation (UsageError -> exit 64), distinct from the
+  // missing-file case (exit 69). The message is command-agnostic so a future
+  // caller does not see itself blamed as `accept`.
   let caught: unknown;
   try {
     openInputSource("-", { allowStdin: false });
   } catch (err) {
     caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
   expect((caught as Error).message).toMatch(/stdin/);
   expect((caught as Error).message).toMatch(/file path/);
-  expect((caught as { exitCode?: number }).exitCode).toBe(69);
+  expect((caught as Error).message).not.toMatch(/accept/);
 });
 
 test("openInputSource: stdin is disabled by default", () => {

@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
-
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
@@ -32,6 +30,7 @@ import {
 } from "../../src/commands/bootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
+import { streamOf, withStdin } from "../stdinStream";
 
 // runOnlineBootstrap's config-persistence tests below drive its wiring without
 // opening a connection: runProtocol is mocked so each test chooses whether the
@@ -1382,31 +1381,6 @@ test("diffConnectionAgainstTarget: a filedrop path differing only by backslashes
 
 // --- loadInputRows -----------------------------------------------------------
 
-/** A binary readable emitting `content` (then EOF), as a file or stdin stream
- *  would; an empty string yields an immediately-ending stream like an empty file. */
-function streamOf(content: string): Readable {
-  const s = new Readable({ read() {} });
-  if (content.length > 0) s.push(Buffer.from(content, "utf8"));
-  s.push(null);
-  return s;
-}
-
-/** Run `fn` with `process.stdin` replaced by `stub`, restoring it afterward.
- *  Awaits `fn` so the swap outlives the async stdin read before it is undone. */
-async function withStdin<T>(
-  stub: Readable,
-  fn: () => T | Promise<T>,
-): Promise<T> {
-  const spy = vi
-    .spyOn(process, "stdin", "get")
-    .mockReturnValue(stub as unknown as typeof process.stdin);
-  try {
-    return await fn();
-  } finally {
-    spy.mockRestore();
-  }
-}
-
 test("loadInputRows: a CSV piped via `-` yields the same rows as the equivalent file (invite path)", async () => {
   // invite reads its input through loadInputRows with allowStdin enabled; a CSV
   // piped through stdin must parse to the same rows and columns as the file.
@@ -1445,13 +1419,13 @@ test("loadInputRows: empty stdin is handled like an empty file", async () => {
   }
 });
 
-test("loadInputRows: `-` is rejected with exit 69 when stdin is disallowed (accept path)", async () => {
+test("loadInputRows: `-` is rejected as a usage error when stdin is disallowed (accept path)", async () => {
   // accept passes allowStdin: false because it reads its y/N confirmation from
-  // stdin; `-` must be a clear rejection naming a file path, never a silent
+  // stdin; `-` must be a clear usage error naming a file path, never a silent
   // decline. The default is also stdin-disabled.
-  await expect(loadInputRows("-", { allowStdin: false })).rejects.toMatchObject(
-    { exitCode: 69 },
-  );
+  await expect(
+    loadInputRows("-", { allowStdin: false }),
+  ).rejects.toBeInstanceOf(UsageError);
   await expect(loadInputRows("-", { allowStdin: false })).rejects.toThrow(
     /file path/,
   );

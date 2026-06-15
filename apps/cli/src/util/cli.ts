@@ -272,10 +272,13 @@ function writeAll(fd: number, text: string): void {
  * `accept`, which reads its interactive y/N confirmation from `process.stdin`
  * (`promptConfirm`); stdin is single-use, so a stdin CSV would starve that prompt
  * into a silent decline. `accept` passes `allowStdin: false`, turning `-` into an
- * actionable rejection (`exitCode: 69`) that names the file-path alternative
- * rather than returning a stream. The default is `false` so a new caller does not
- * silently inherit stdin support. (Re-enable for `accept` once it gains a
- * non-interactive confirmation bypass -- board item 200218548.)
+ * actionable {@link UsageError} (exit 64) that names the file-path alternative
+ * rather than returning a stream -- a usage violation, distinct from the
+ * missing-file case below (exit 69, the input named cannot be opened). The
+ * message is command-agnostic because the default is `false`, so a future caller
+ * inherits a rejection that does not misattribute itself to `accept`. (Re-enable
+ * for `accept` once it gains a non-interactive confirmation bypass -- board item
+ * 200218548.)
  */
 export function openInputSource(
   input: string,
@@ -283,12 +286,9 @@ export function openInputSource(
 ): NodeJS.ReadableStream {
   if (input === "-") {
     if (!allowStdin)
-      throw Object.assign(
-        new Error(
-          "accept cannot read its input CSV from stdin (it reads the y/N " +
-            "confirmation from stdin); pass a file path instead of `-`",
-        ),
-        { exitCode: 69 },
+      throw new UsageError(
+        "this command cannot read its input CSV from stdin; pass a file path " +
+          "instead of `-`",
       );
     return process.stdin;
   }
