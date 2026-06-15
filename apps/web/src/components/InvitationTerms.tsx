@@ -1,10 +1,12 @@
-import { List, Stack, Text, Title } from "@mantine/core";
+import { Badge, Group, List, Stack, Text, Title } from "@mantine/core";
 
 import { summarizeInvitation } from "@psi/invitationSummary";
 
 import type { ReactNode, Ref } from "react";
 
 import type { InvitationToken } from "@psilink/core";
+
+import type { InvitationKeySummary } from "@psi/invitationSummary";
 
 function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
@@ -19,6 +21,58 @@ function Term({ label, children }: { label: string; children: ReactNode }) {
       </Text>
       {children}
     </Stack>
+  );
+}
+
+/**
+ * One linkage key: its name, a flag when it carries any non-default matching
+ * rule, its ordered elements (each annotated with the transform or fuzzy
+ * comparison that alters its match), and a note for a swap. So the acceptor
+ * sees every rule that changes which records match -- and, under `psi`, which
+ * shared identifiers are disclosed -- not just the key's name.
+ */
+function MatchKey({ summary }: { summary: InvitationKeySummary }) {
+  return (
+    <List.Item>
+      <Stack gap={2}>
+        <Group gap="xs">
+          <Text size="sm">{summary.name}</Text>
+          {summary.hasNonDefaultRule && (
+            <Badge size="xs" color="yellow" variant="light">
+              Non-standard matching
+            </Badge>
+          )}
+        </Group>
+        <List size="sm" withPadding listStyleType="circle">
+          {summary.elements.map((element, index) => (
+            // Keyed by index: the element order is fixed for a given key, so the
+            // position is a stable key (the field label is not unique -- one
+            // field can appear in several elements with different transforms).
+            <List.Item key={index}>
+              {element.fieldLabel}
+              {element.transforms.length > 0 && (
+                <Text span size="xs" c="dimmed">
+                  {" "}
+                  - transformed ({element.transforms.join(", ")})
+                </Text>
+              )}
+              {element.fuzzyComparison !== undefined && (
+                <Text span size="xs" c="dimmed">
+                  {" "}
+                  - fuzzy match: {element.fuzzyComparison}
+                </Text>
+              )}
+            </List.Item>
+          ))}
+        </List>
+        {summary.swap !== undefined && (
+          <Text size="xs" c="dimmed">
+            {summary.swap[0]} and {summary.swap[1]} may be matched in either
+            order
+          </Text>
+        )}
+      </Stack>
+    </List.Item>
   );
 }
 
@@ -70,14 +124,26 @@ export function InvitationTerms({
                 the raw key names, but two that differ only in characters
                 sanitizeForDisplay escapes would collide as React keys. The list
                 is static, so the index is a stable key. */}
-            {summary.linkageKeyNames.map((name, index) => (
-              <List.Item key={index}>{name}</List.Item>
+            {summary.linkageKeys.map((key, index) => (
+              <MatchKey key={index} summary={key} />
             ))}
           </List>
         </Term>
 
         <Term label="Personal data used">
-          <Text size="sm">{summary.linkageFieldLabels.join(", ")}</Text>
+          <List size="sm" withPadding>
+            {summary.linkageFields.map((field, index) => (
+              <List.Item key={index}>
+                {field.label}
+                {field.constraints.length > 0 && (
+                  <Text span size="xs" c="dimmed">
+                    {" "}
+                    ({field.constraints.join("; ")})
+                  </Text>
+                )}
+              </List.Item>
+            ))}
+          </List>
         </Term>
 
         <Term label="Result sharing">

@@ -144,8 +144,10 @@ describe("summarizeInvitation", () => {
     expect(summary.algorithm).toBe("psi");
     expect(summary.inviterReceivesOutput).toBe(true);
     expect(summary.inviterSharesResult).toBe(false);
-    expect(summary.linkageKeyNames).toEqual(["SSN + LN + DOB"]);
-    expect(summary.linkageFieldLabels).toEqual([
+    expect(summary.linkageKeys.map((key) => key.name)).toEqual([
+      "SSN + LN + DOB",
+    ]);
+    expect(summary.linkageFields.map((field) => field.label)).toEqual([
       "Social Security number",
       "Last name",
       "Date of birth",
@@ -180,8 +182,110 @@ describe("summarizeInvitation", () => {
     expect(summary.invitingParty).not.toContain(RLO);
     expect(summary.invitingParty).toContain("\\x1b");
     expect(summary.invitingParty).toContain("\\u202e");
-    expect(summary.linkageKeyNames[0]).not.toContain(BEL);
-    expect(summary.linkageKeyNames[0]).toContain("\\x07");
+    expect(summary.linkageKeys[0].name).not.toContain(BEL);
+    expect(summary.linkageKeys[0].name).toContain("\\x07");
+  });
+
+  test("surfaces a transform, swap, and fuzzy expansion, flagging only the affected keys", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "ssn", type: "ssn" },
+          { name: "first_name", type: "firstName" },
+          { name: "last_name", type: "lastName" },
+          { name: "dob", type: "dateOfBirth" },
+        ],
+        linkageKeys: [
+          { name: "plain", elements: [{ field: "ssn" }, { field: "dob" }] },
+          {
+            name: "transformed",
+            elements: [
+              { field: "ssn" },
+              {
+                field: "first_name",
+                transform: [
+                  { function: "substring", params: { start: 1, length: 1 } },
+                ],
+              },
+            ],
+          },
+          {
+            name: "swapped",
+            elements: [{ field: "last_name" }, { field: "first_name" }],
+            swap: ["last_name", "first_name"],
+          },
+          {
+            name: "fuzzy",
+            elements: [
+              { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const [plain, transformed, swapped, fuzzy] = summary.linkageKeys;
+
+    // A plain key carries no rule and raises no flag.
+    expect(plain.hasNonDefaultRule).toBe(false);
+    expect(plain.swap).toBeUndefined();
+    expect(
+      plain.elements.every(
+        (element) =>
+          element.transforms.length === 0 &&
+          element.fuzzyComparison === undefined,
+      ),
+    ).toBe(true);
+
+    // A transform is flagged, and its (sanitized) function name surfaces on the
+    // element it applies to.
+    expect(transformed.hasNonDefaultRule).toBe(true);
+    expect(transformed.elements[1].transforms).toEqual(["substring"]);
+
+    // A swap is flagged, and resolves to the swapped elements' field labels.
+    expect(swapped.hasNonDefaultRule).toBe(true);
+    expect(swapped.swap).toEqual(["Last name", "First name"]);
+
+    // A fuzzy expansion is flagged, and maps to its plain-language label.
+    expect(fuzzy.hasNonDefaultRule).toBe(true);
+    expect(fuzzy.elements[0].fuzzyComparison).toBe("adjacent years");
+  });
+
+  test("surfaces each field's declared constraints, summarizing the denylist", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          {
+            name: "ssn",
+            type: "ssn",
+            constraints: {
+              validOnly: true,
+              exclude: ["111111111", "123456789"],
+            },
+          },
+          {
+            name: "first_name",
+            type: "firstName",
+            constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
+          },
+          { name: "dob", type: "dateOfBirth" },
+        ],
+        linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+      }),
+    );
+
+    const [ssn, firstName, dob] = summary.linkageFields;
+    // The exclude denylist is a count, not its values.
+    expect(ssn.constraints).toEqual([
+      "values must be valid",
+      "2 excluded values",
+    ]);
+    expect(firstName.constraints).toEqual([
+      "honorifics and suffixes removed",
+      "characters limited to A-Z ",
+    ]);
+    // A field with no constraints contributes nothing.
+    expect(dob.constraints).toEqual([]);
   });
 });
 
@@ -209,6 +313,68 @@ describe("accept screen: terms render from a decoded token", () => {
     });
     expect(html).toContain("number of records");
     expect(html).not.toContain("shared identifiers");
+  });
+
+  test("renders the transform, swap, fuzzy, and constraint rules that affect matching", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            {
+              name: "first_name",
+              type: "firstName",
+              constraints: { allowedCharacters: "A-Z " },
+            },
+            { name: "last_name", type: "lastName" },
+            { name: "dob", type: "dateOfBirth" },
+          ],
+          linkageKeys: [
+            {
+              name: "FN1 + DOB",
+              elements: [
+                {
+                  field: "first_name",
+                  transform: [
+                    { function: "substring", params: { start: 1, length: 1 } },
+                  ],
+                },
+                { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+              ],
+            },
+            {
+              name: "swap(LN, FN) + DOB",
+              elements: [
+                { field: "last_name" },
+                { field: "first_name" },
+                { field: "dob" },
+              ],
+              swap: ["last_name", "first_name"],
+            },
+          ],
+        }),
+      },
+    });
+    // The non-default-rule flag is present (both keys carry a rule).
+    expect(html).toContain("Non-standard matching");
+    // The transform's function name and the fuzzy expansion's plain-language
+    // label surface on the elements.
+    expect(html).toContain("transformed (substring)");
+    expect(html).toContain("adjacent years");
+    // The swap is described in field-label terms.
+    expect(html).toContain(
+      "Last name and First name may be matched in either order",
+    );
+    // The field constraint surfaces under the data used.
+    expect(html).toContain("characters limited to A-Z");
+  });
+
+  test("shows no non-default-rule flag for a plain term", () => {
+    const html = renderPanel({
+      decode: { status: "ready", invitation: makeInvitation() },
+    });
+    // baseTerms carries a single key with no transform, swap, or fuzzy rule.
+    expect(html).not.toContain("Non-standard matching");
   });
 
   test("escapes injection characters in the rendered identity", () => {
