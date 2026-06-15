@@ -5,6 +5,7 @@ import type { Arguments } from "yargs";
 
 import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 
+import { createOwnerOnlyWriteStream } from "../fileUtils";
 import { parseDurationFlag } from "./duration";
 
 /**
@@ -321,15 +322,19 @@ export function openInputSource(
   return fs.createReadStream(input);
 }
 
-/** Write formatted exchange results to a file or stdout as CSV. */
+/**
+ * Write formatted exchange results to a file or stdout as CSV. When given an
+ * output path, the result CSV -- the most sensitive artifact the tool produces --
+ * is created owner-only (see {@link createOwnerOnlyWriteStream}) so it does not
+ * inherit a world/group-readable umask default; the stdout branch (no path given)
+ * is unchanged.
+ */
 export function writeOutput(
   output: string | undefined,
   headers: string[],
   rows: Array<Array<string>>,
 ): void {
-  const out = output
-    ? fs.createWriteStream(output, { encoding: "utf8" })
-    : process.stdout;
+  const out = output ? createOwnerOnlyWriteStream(output) : process.stdout;
   out.write(headers.join(",") + "\n");
   for (const row of rows) out.write(row.join(",") + "\n");
   if (output) (out as fs.WriteStream).close();

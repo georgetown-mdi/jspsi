@@ -131,6 +131,8 @@ icacls .psilink.key /inheritance:r /grant:r "%USERDOMAIN%\%USERNAME%":(M)
 
 `%USERDOMAIN%\%USERNAME%` produces the domain-qualified name (e.g. `CORP\alice` or `COMPUTER\alice`) that `icacls` requires to resolve domain accounts unambiguously. This matches the value the CLI obtains internally via `whoami`. On a standalone (non-domain) machine `%USERDOMAIN%` equals the computer name, which is correct.
 
+**Result CSV output**: The matched-records CSV that `psilink exchange` writes to an output path -- the most sensitive artifact the tool produces -- is created owner-only on the same principle as the key file: `0600` on Unix and an `icacls`-narrowed ACL on Windows, applied before any rows are written, so the output is never left world- or group-readable by an inherited umask or inherited ACEs. It is streamed directly to the output path (the result set may be large) rather than written through the temp-file-and-rename the credential writers use, and the operator-supplied output path is not symlink-hardened; the owner-only guarantee is the same. Writing the result to stdout (no output path given) applies no permission handling, unchanged.
+
 ## What not to do
 
 - Never commit `.psilink.key` to version control. Add it to `.gitignore`:

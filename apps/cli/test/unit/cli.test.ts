@@ -12,6 +12,7 @@ import {
   openInputSource,
   parseOrExit,
   singleValue,
+  writeOutput,
 } from "../../src/util/cli";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -300,4 +301,71 @@ test("openInputSource: stdin is disabled by default", () => {
   // A new caller does not silently inherit stdin support: the gate defaults off,
   // so `-` is rejected unless the caller opts in.
   expect(() => openInputSource("-")).toThrow(/stdin/);
+});
+
+// --- writeOutput -------------------------------------------------------------
+
+// writeOutput closes its write stream without awaiting 'finish', so the file may
+// lag a tick behind the call returning. Poll until it is present and stable.
+async function readWhenReady(file: string): Promise<string> {
+  const deadline = Date.now() + 5_000;
+  let last = "";
+  for (;;) {
+    try {
+      const cur = fs.readFileSync(file, "utf8");
+      if (cur.length > 0 && cur === last) return cur;
+      last = cur;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    if (Date.now() > deadline)
+      throw new Error(`output file ${file} never stabilized with content`);
+    await new Promise<void>((r) => setTimeout(r, 20));
+  }
+}
+
+test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
+  // The result CSV is the most sensitive artifact the tool produces, so a file
+  // path must be created owner-only rather than inherit a world/group-readable
+  // umask default (the prior unprotected createWriteStream left it 0644 here).
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
+  // 0o022 is the umask under which the old write produced a world-readable 0644.
+  const prevUmask = process.umask(0o022);
+  try {
+    const out = path.join(dir, "results.csv");
+    writeOutput(
+      out,
+      ["a", "b"],
+      [
+        ["1", "2"],
+        ["3", "4"],
+      ],
+    );
+    expect(await readWhenReady(out)).toBe("a,b\n1,2\n3,4\n");
+    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+  } finally {
+    process.umask(prevUmask);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOutput: the stdout branch writes to process.stdout unchanged", () => {
+  // No output path: the rows go to process.stdout with no file and no permission
+  // handling, exactly as before.
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(
+      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+    );
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    writeOutput(undefined, ["a", "b"], [["1", "2"]]);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+  expect(chunks.join("")).toBe("a,b\n1,2\n");
 });

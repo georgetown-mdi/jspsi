@@ -613,6 +613,91 @@ export function writeFileAtomic(
 }
 
 /**
+ * Open `destPath` for owner-only *streaming* writes -- the result-CSV equivalent
+ * of {@link writeFileOwnerOnly} for a large, incrementally written output.
+ * Returns an `fs.WriteStream` the caller writes rows to and closes. The file is
+ * owner-only (`0600` on Unix; an ACL restricted to the current user with
+ * inheritance stripped on Windows) before any content is written, whether it is
+ * newly created or overwrites a pre-existing file -- so the tool's most sensitive
+ * output is never momentarily world/group-readable, nor left readable by reusing
+ * a stale loose-permission file already at the path.
+ *
+ * Two deliberate differences from {@link writeFileOwnerOnly}:
+ *  - It streams (the caller writes row by row) rather than buffering a whole
+ *    string, so a large result set is never held in memory in full.
+ *  - It writes `destPath` directly, with no temp+rename, so it is NOT atomic: a
+ *    crash mid-write leaves a partial CSV. That matches the prior unprotected
+ *    `createWriteStream` and is acceptable for a recomputable result output --
+ *    unlike a credential, whose partial state would matter.
+ *
+ * On Unix the descriptor is opened with the `0600` create mode and then
+ * `fchmod`'d to exactly `0600`: the `fchmod` both forces the mode regardless of a
+ * relaxed umask (which would otherwise apply `0600 & ~umask`) and tightens an
+ * existing over-permissive file at the path. Like the `--log-file` open in
+ * `configureLogFile`, and unlike the credential writers, the path is an
+ * operator-supplied flag value -- not attacker-derived -- so the open does not add
+ * the `O_NOFOLLOW`/`O_EXCL` hardening those writers use for paths psilink derives
+ * itself.
+ *
+ * On Windows the synthetic POSIX mode bits set no ACL, so -- mirroring
+ * {@link writeFileOwnerOnly}'s Windows branch -- the file is created/truncated
+ * empty, its ACL narrowed with `icacls` (inheritance stripped, the current user
+ * granted Modify) before any content is written, then streamed into. The brief
+ * window while the empty file carries inherited ACEs exposes only the file's
+ * existence, not its contents.
+ */
+export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
+  if (process.platform === "win32") {
+    const owner = whoami();
+    // Create or truncate to an empty file, narrow its ACL, then stream content
+    // into the now-protected file. Reopening with createWriteStream's default
+    // "w" truncates the (already empty) file again but does not reset the DACL,
+    // which is a property of the file object and survives the reopen.
+    fs.closeSync(fs.openSync(destPath, "w"));
+    try {
+      execFileSync(
+        "icacls",
+        [destPath, "/inheritance:r", "/grant:r", `${owner}:(M)`],
+        { stdio: "ignore", timeout: 5000 },
+      );
+    } catch {
+      // Surface a clear remediation rather than stream PII into a file whose ACL
+      // we could not restrict; the empty placeholder is left for the operator.
+      throw new Error(
+        `Could not restrict ACLs on ${destPath}; restrict manually to ` +
+          "owner-read-only via icacls or File Properties",
+      );
+    }
+    return fs.createWriteStream(destPath, { encoding: "utf8" });
+  }
+
+  const fd = fs.openSync(
+    destPath,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC,
+    0o600,
+  );
+  try {
+    fs.fchmodSync(fd, 0o600);
+  } catch (err) {
+    // Refuse to write the result CSV where we cannot make it owner-only (e.g. a
+    // pre-existing file owned by another user, which fchmod rejects with EPERM):
+    // close the descriptor and let the failure propagate rather than leave PII at
+    // relaxed permissions.
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // best-effort close before re-throwing
+    }
+    throw err;
+  }
+  return fs.createWriteStream(destPath, {
+    fd,
+    encoding: "utf8",
+    autoClose: true,
+  });
+}
+
+/**
  * Expand a leading `~` (or `~/`) in a filesystem path to the current user's home
  * directory. A bare `~` becomes the home directory; `~/x` becomes `<home>/x`.
  * Any other form -- including `~user` (another user's home, which we do not

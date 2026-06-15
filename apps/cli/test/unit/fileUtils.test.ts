@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  createOwnerOnlyWriteStream,
   detectFileConflicts,
   expandTilde,
   FileExistsError,
@@ -284,6 +285,54 @@ describe("writeFileAtomic", () => {
     expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
     expect(fs.readFileSync(dest, "utf8")).toBe("x");
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+});
+
+// --- createOwnerOnlyWriteStream ----------------------------------------------
+
+// Write `text` through the stream and resolve once it is fully flushed and
+// closed (writeOutput likewise closes without awaiting, so the test drives the
+// lifecycle explicitly before stat'ing the file).
+function writeAndClose(stream: fs.WriteStream, text: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    stream.on("error", reject);
+    stream.on("close", () => resolve());
+    stream.write(text);
+    stream.close();
+  });
+}
+
+describe("createOwnerOnlyWriteStream", () => {
+  test("creates the file owner-only (0600) regardless of umask (POSIX)", async () => {
+    if (process.platform === "win32") return;
+    // The fchmod forces exactly 0600 whatever the process umask, including the
+    // 0o022 under which the prior unprotected createWriteStream left it 0644.
+    for (const umask of [0o022, 0o077, 0o000]) {
+      const prev = process.umask(umask);
+      try {
+        const p = path.join(dir, `out-${umask.toString(8)}.csv`);
+        await writeAndClose(createOwnerOnlyWriteStream(p), "a,b\n1,2\n");
+        expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+        expect(fs.readFileSync(p, "utf8")).toBe("a,b\n1,2\n");
+      } finally {
+        process.umask(prev);
+      }
+    }
+  });
+
+  test("tightens a pre-existing world/group-readable file to 0600 (POSIX)", async () => {
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "stale.csv");
+    fs.writeFileSync(p, "stale,data\n");
+    // writeFileSync's mode is umask-masked; force 0644 so the test starts from a
+    // genuinely over-permissive file the writer must tighten.
+    fs.chmodSync(p, 0o644);
+    expect(fs.statSync(p).mode & 0o777).toBe(0o644);
+
+    await writeAndClose(createOwnerOnlyWriteStream(p), "fresh,data\n");
+
+    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
   });
 });
 
