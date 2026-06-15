@@ -358,6 +358,14 @@ describe("createOwnerOnlyWriteStream", () => {
     // way out rather than leak it.
     if (process.platform === "win32") return;
     const p = path.join(dir, "trunc-fail.csv");
+    let openedFd: number | undefined;
+    const realOpen = fs.openSync;
+    vi.spyOn(fs, "openSync").mockImplementation(
+      (...args: Parameters<typeof fs.openSync>) => {
+        openedFd = realOpen(...args);
+        return openedFd;
+      },
+    );
     const closeSpy = vi.spyOn(fs, "closeSync");
     vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
       throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
@@ -365,7 +373,9 @@ describe("createOwnerOnlyWriteStream", () => {
 
     expect(() => createOwnerOnlyWriteStream(p)).toThrow("EINVAL");
 
-    expect(closeSpy).toHaveBeenCalled();
+    // the exact descriptor opened above was closed, not leaked
+    expect(openedFd).toBeDefined();
+    expect(closeSpy).toHaveBeenCalledWith(openedFd);
   });
 });
 

@@ -643,20 +643,37 @@ export function writeFileAtomic(
  * itself.
  *
  * On Windows the synthetic POSIX mode bits set no ACL, so -- mirroring
- * {@link writeFileOwnerOnly}'s Windows branch -- the file is created/truncated
- * empty, its ACL narrowed with `icacls` (inheritance stripped, the current user
- * granted Modify) before any content is written, then streamed into. The brief
- * window while the empty file carries inherited ACEs exposes only the file's
- * existence, not its contents.
+ * {@link writeFileOwnerOnly}'s Windows branch -- any existing file is first
+ * unlinked and recreated as a fresh inode (so the destination carries no foreign
+ * principal's explicit ACE that an in-place narrow would miss), its ACL narrowed
+ * with `icacls` (inheritance stripped, the current user granted Modify) before any
+ * content is written, then streamed into. The brief window while the empty file
+ * carries inherited ACEs exposes only the file's existence, not its contents.
  */
 export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
   if (process.platform === "win32") {
     const owner = whoami();
-    // Create or truncate to an empty file, narrow its ACL, then stream content
-    // into the now-protected file. Reopening with createWriteStream's default
-    // "w" truncates the (already empty) file again but does not reset the DACL,
-    // which is a property of the file object and survives the reopen.
-    fs.closeSync(fs.openSync(destPath, "w"));
+    // Replace any existing file with a fresh inode before narrowing: icacls
+    // /inheritance:r strips inherited ACEs and /grant:r replaces the current
+    // user's own grant, but neither removes a foreign principal's explicit
+    // (non-inherited) ACE left on a pre-existing file -- so an overwrite-in-place
+    // could leave the result CSV readable by that principal. writeFileOwnerOnly
+    // avoids this by writing a fresh temp inode and renaming over the destination;
+    // here we unlink and recreate to the same effect, so the file icacls narrows
+    // carries only the inheritable ACEs a brand-new inode gets. unlinkSync does
+    // not follow a symlink (it removes the link itself); ENOENT is the common
+    // new-file case.
+    try {
+      fs.unlinkSync(destPath);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
+    fs.closeSync(
+      fs.openSync(
+        destPath,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      ),
+    );
     try {
       execFileSync(
         "icacls",
@@ -671,6 +688,8 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
           "owner-read-only via icacls or File Properties",
       );
     }
+    // The narrowed ACL is a property of the file object and survives the reopen:
+    // createWriteStream's default "w" truncates the (empty) file, not its DACL.
     return fs.createWriteStream(destPath, { encoding: "utf8" });
   }
 
