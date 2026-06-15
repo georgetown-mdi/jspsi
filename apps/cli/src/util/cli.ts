@@ -290,6 +290,13 @@ function writeAll(fd: number, text: string): void {
  * `/dev/null`, so a strict test can never reject a legitimate non-interactive run;
  * a false negative (an effectively-interactive stream that reports falsy) merely
  * falls through to the read, no worse than blocking-until-Ctrl-D.
+ *
+ * The guard covers only an interactive terminal. A non-TTY stream that delivers
+ * data but never reaches EOF -- an unclosed FIFO, a stalled producer -- is not
+ * detectable by an `isTTY` check and still blocks (papaparse resolves only at
+ * end-of-stream); only an idle watchdog could bound that, which the normal
+ * `cat file |` / `< file` usage does not warrant. It is a visible, interruptible
+ * hang on an exotic invocation, not data loss.
  */
 export function openInputSource(
   input: string,

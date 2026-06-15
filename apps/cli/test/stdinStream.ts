@@ -18,14 +18,17 @@ export function streamOf(content: string): Readable {
 
 /**
  * A stdin stub that reports as an interactive terminal (`isTTY === true`),
- * modelling `-` given at a prompt with nothing piped. It carries no data and is
- * never read: the TTY guard rejects before any read, so a test using it asserts
- * the rejection rather than risking a real block.
+ * modelling `-` given at a prompt with nothing piped. The TTY guard rejects
+ * before any read, so in the passing case the stream is never consumed. It still
+ * pushes EOF (`null`): if the guard ever regressed, a consumer would read empty
+ * and end rather than block on a never-ending stream, so the asserting test fails
+ * fast instead of hanging until the runner's timeout.
  * @internal test-only
  */
 export function ttyStream(): Readable {
   const s = new Readable({ read() {} });
   (s as Readable & { isTTY?: boolean }).isTTY = true;
+  s.push(null);
   return s;
 }
 
