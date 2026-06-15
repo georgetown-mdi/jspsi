@@ -1,10 +1,18 @@
 import type { SftpTestServer } from "./types";
 import { startInProcessSftpServer } from "./inProcessServer";
-import { startNativeSshdServer } from "./nativeSshdServer";
+import {
+  NATIVE_PROFILES,
+  type NativeProfile,
+  startNativeSshdServer,
+} from "./nativeSshdServer";
 
 export * from "./types";
 export { startInProcessSftpServer } from "./inProcessServer";
-export { startNativeSshdServer } from "./nativeSshdServer";
+export {
+  NATIVE_PROFILES,
+  type NativeProfile,
+  startNativeSshdServer,
+} from "./nativeSshdServer";
 
 /** The test SFTP server backends the suite can run against. */
 export type SftpBackendName = "in-process" | "native";
@@ -24,9 +32,27 @@ export function selectedBackend(): SftpBackendName {
   );
 }
 
+/**
+ * The hardened configuration the native backend runs, from
+ * PSILINK_SFTP_NATIVE_PROFILE. Unset selects `baseline` (the unchanged Phase-1
+ * config). Only meaningful when the native backend is selected; the in-process
+ * backend ignores it. Conformance tests read it to gate profile-specific
+ * assertions (e.g. the allowlist wrong-user rejection).
+ */
+export function selectedNativeProfile(): NativeProfile {
+  const raw = process.env.PSILINK_SFTP_NATIVE_PROFILE;
+  if (raw === undefined || raw === "") return "baseline";
+  if ((NATIVE_PROFILES as readonly string[]).includes(raw))
+    return raw as NativeProfile;
+  throw new Error(
+    `Unknown PSILINK_SFTP_NATIVE_PROFILE "${raw}" ` +
+      `(expected one of ${NATIVE_PROFILES.join(", ")}).`,
+  );
+}
+
 /** Start the backend PSILINK_SFTP_BACKEND selects. */
 export async function startSelectedSftpServer(): Promise<SftpTestServer> {
   return selectedBackend() === "native"
-    ? startNativeSshdServer()
+    ? startNativeSshdServer({ profile: selectedNativeProfile() })
     : startInProcessSftpServer();
 }

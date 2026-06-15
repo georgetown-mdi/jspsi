@@ -75,6 +75,34 @@ unprivileged child, exercising the adapter against a real server:
 PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli
 ```
 
+The native backend runs hardened configurations real deployments use, selected
+by `PSILINK_SFTP_NATIVE_PROFILE` (default `baseline`, the plain forced
+`internal-sftp` config); the same conformance suite runs against each:
+
+```sh
+PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm run test:integration -w apps/cli
+```
+
+- `restricted-crypto` -- a locked-down kex/cipher/MAC/host-key/pubkey policy,
+  plus a test that a client offering only a key exchange the policy excludes (one
+  OpenSSH allows by default) is refused.
+- `rate-limited` -- connection and auth rate limits. The suite running under them
+  is the coverage; there is no exceed-the-limit test (it would be CI-flaky).
+- `allowlist` -- an explicit `user@host` allow matrix, plus a test asserting a
+  valid key under a username other than the served user is rejected.
+- `chroot` -- `ChrootDirectory` confinement, plus a test that a path outside the
+  served root is unreachable from a chrooted session. It needs `sshd` running as
+  root over a root-owned jail, so it runs only on Linux as root and is launched
+  through a dedicated script that skips cleanly (exit 0, with a message)
+  everywhere else:
+
+```sh
+# Linux only; skips cleanly elsewhere. The PATH forwarding lets npm and node
+# resolve under sudo when secure_path would otherwise drop them (the CI leg uses
+# the same form); a plain `sudo npm run ...` works where sudo keeps your PATH.
+sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli
+```
+
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
 ```sh

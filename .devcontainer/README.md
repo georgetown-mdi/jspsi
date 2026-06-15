@@ -11,7 +11,10 @@ with its writes confined to the container.
 - **Node 26** (`node:26-bookworm`), matching the shipped runtime and CI.
 - **OpenSSH server and client** plus the baked-in `/run/sshd` directory, so the
   native `sshd` SFTP test backend (`PSILINK_SFTP_BACKEND=native`) spawns without
-  root. The in-process backend (the default) needs nothing extra.
+  root. The in-process backend (the default) needs nothing extra. The hardened
+  native profiles (`PSILINK_SFTP_NATIVE_PROFILE`) run too, except `chroot`, which
+  needs a root `sshd` the unprivileged container does not provide -- its runner
+  skips cleanly (exit 0) here rather than failing.
 - **git**, the **GitHub CLI**, and the build toolchain for native npm modules.
 - An **egress firewall** (`init-firewall.sh`) applied on start.
 

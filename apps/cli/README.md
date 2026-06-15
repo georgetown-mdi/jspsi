@@ -74,6 +74,8 @@ npm test -w apps/cli
 The integration suite drives the real SFTP adapter against an SFTP server it
 stands up itself -- in-process by default (an `ssh2.Server` on an ephemeral
 loopback port), or a native OpenSSH `sshd` with `PSILINK_SFTP_BACKEND=native`.
+The native backend can run hardened configurations (restricted crypto, rate
+limits, an allowlist, a chroot jail) selected by `PSILINK_SFTP_NATIVE_PROFILE`.
 It is self-managing (a vitest `globalSetup` starts the server before the suite
 and stops it after):
 
