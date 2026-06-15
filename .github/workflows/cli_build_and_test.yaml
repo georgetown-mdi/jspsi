@@ -83,6 +83,9 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Integration tests (CLI, native sshd, ${{ matrix.profile }} profile)
         run: |
+          # sshd fatally checks for its privilege-separation directory at startup
+          # even when run unprivileged (as the baseline native leg notes), so
+          # create it here.
           sudo mkdir -p /run/sshd
           npm run test:integration -w apps/cli
         env:
@@ -102,5 +105,6 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Integration tests (CLI, native sshd, chroot profile)
         run: |
+          # sshd needs its privilege-separation directory present at startup.
           sudo mkdir -p /run/sshd
           sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli

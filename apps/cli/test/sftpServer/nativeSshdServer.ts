@@ -24,6 +24,11 @@ const READY_PROBE_INTERVAL_MS = 100;
 const READY_PROBE_TIMEOUT_MS = 2_000;
 const START_ATTEMPTS = 3;
 
+// The Port in a config handed only to `sshd -t` (extended test mode): it parses
+// the config and checks the host keys but never binds a socket, so this value is
+// never claimed and cannot collide with the ephemeral ports the server uses.
+const VALIDATE_ONLY_PORT = 22222;
+
 /**
  * The hardened native-sshd configurations the conformance suite can run against,
  * selected by PSILINK_SFTP_NATIVE_PROFILE. `baseline` is the Phase-1 config
@@ -253,11 +258,16 @@ async function sshdAcceptsDirective(
   workDir: string,
   directive: string,
 ): Promise<boolean> {
-  const probePath = path.join(workDir, "sshd_probe_config");
+  // Uniquify the probe-config filename per directive so a future second probe
+  // cannot clobber a config a concurrent or in-flight `sshd -t` is still reading.
+  const probePath = path.join(
+    workDir,
+    `sshd_probe_${Buffer.from(directive).toString("hex").slice(0, 16)}`,
+  );
   await fsp.writeFile(
     probePath,
     [
-      "Port 22222",
+      `Port ${VALIDATE_ONLY_PORT}`,
       "ListenAddress 127.0.0.1",
       `HostKey ${hostKeyPath}`,
       directive,
@@ -425,7 +435,10 @@ export async function startNativeSshdServer(
     // Validate before spending start attempts so an unsupported directive on
     // this host's sshd surfaces as a clear error, not a readiness timeout.
     const validationConfigPath = path.join(workDir, "sshd_config_validate");
-    await fsp.writeFile(validationConfigPath, `Port 22222\n${configBody}`);
+    await fsp.writeFile(
+      validationConfigPath,
+      `Port ${VALIDATE_ONLY_PORT}\n${configBody}`,
+    );
     const validation = await validateConfig(sshd, validationConfigPath);
     if (!validation.ok) {
       throw new Error(

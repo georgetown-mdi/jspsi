@@ -93,7 +93,10 @@ PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm ru
   everywhere else:
 
 ```sh
-sudo npm run test:integration:native-chroot -w apps/cli   # Linux only; skips elsewhere
+# Linux only; skips cleanly elsewhere. The PATH forwarding lets npm and node
+# resolve under sudo when secure_path would otherwise drop them (the CI leg uses
+# the same form); a plain `sudo npm run ...` works where sudo keeps your PATH.
+sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli
 ```
 
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
