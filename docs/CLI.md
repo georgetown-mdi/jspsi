@@ -26,6 +26,8 @@ An `INPUT_FILE` argument may be given as `-` to read the CSV from standard input
 
 Durations on the command line are written as a positive integer followed by a single-character unit -- `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); for example `45s`, `30m`, `2h`, or `1d`. The unit suffix is required: a bare number is not a valid duration, and an old seconds-only value such as `30` is rejected with the suffixed form to use (`30s`) rather than silently reinterpreted. This applies to every duration-valued option, including `--expires-in`, `--accept-timeout`, `--connection-timeout`, and `--peer-timeout`.
 
+The timeout flags `--connection-timeout`, `--peer-timeout`, and `--accept-timeout` also have a sanity ceiling of `7d`: a value above it is rejected with a usage error naming the flag and the maximum, before any connection attempt, token, or file write. A timeout is a coordination window that even a generous async setup measures in hours, so a value past a week is treated as a mistake rather than an intent; this is a usability guard, not a security bound (the accept window is in any case bounded by the invitation lifetime). It is separate from the `--expires-in` one-year ceiling, which bounds how long the invitation stays valid rather than how long a command waits.
+
 ## Initialization
 
 ```sh

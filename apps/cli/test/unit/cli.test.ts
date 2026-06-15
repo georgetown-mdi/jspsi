@@ -9,6 +9,7 @@ import { loadCSVFile, UsageError } from "@psilink/core";
 import {
   durationFlagSeconds,
   exitWithError,
+  MAX_TIMEOUT_SECONDS,
   openInputSource,
   parseOrExit,
   singleValue,
@@ -106,6 +107,79 @@ test("durationFlagSeconds: a non-string value yields a UsageError, not a TypeErr
   expect(() =>
     durationFlagSeconds(argv({ "peer-timeout": 30 }), "peer-timeout"),
   ).toThrow("30s");
+});
+
+// --- durationFlagSeconds: sanity ceiling -------------------------------------
+
+test("durationFlagSeconds: a value at the ceiling is accepted", () => {
+  // The boundary is inclusive: exactly MAX_TIMEOUT_SECONDS (7d) parses to its
+  // seconds value unchanged, so an at-cap value behaves exactly as it does today.
+  const atCeiling = `${MAX_TIMEOUT_SECONDS / 86_400}d`;
+  expect(
+    durationFlagSeconds(
+      argv({ "peer-timeout": atCeiling }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toBe(MAX_TIMEOUT_SECONDS);
+});
+
+test("durationFlagSeconds: a value just above the ceiling is rejected naming the flag and the max", () => {
+  // One minute past 7d (7d is a whole number of minutes): rejected with a
+  // flag-named usage error that states the maximum in days and echoes the
+  // offending value, the shape the --expires-in ceiling error uses.
+  const justOver = `${MAX_TIMEOUT_SECONDS / 60 + 1}m`;
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": justOver }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toThrow(UsageError);
+  let message = "";
+  try {
+    durationFlagSeconds(
+      argv({ "connection-timeout": justOver }),
+      "connection-timeout",
+      MAX_TIMEOUT_SECONDS,
+    );
+  } catch (err) {
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain("--connection-timeout");
+  expect(message).toContain("must not exceed");
+  expect(message).toContain("7d");
+  expect(message).toContain(justOver);
+});
+
+test("durationFlagSeconds: the ceiling is opt-in; without a max a large value still parses", () => {
+  // The cap is a per-call ceiling, not a global one: a call that passes no
+  // maxSeconds is unbounded below the safe-integer overflow guard, exactly as
+  // before the cap existed, so a non-timeout duration flag is unaffected.
+  expect(
+    durationFlagSeconds(argv({ "peer-timeout": "30d" }), "peer-timeout"),
+  ).toBe(30 * 86_400);
+});
+
+test("durationFlagSeconds: the existing rejections precede the ceiling check", () => {
+  // The cap layers on top of parsing rather than replacing it: a bare integer
+  // still yields the migration hint (not the cap error) even when a max is
+  // supplied, since parseDurationFlag runs first...
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": "30" }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toThrow("30s");
+  // ...and a zero is still rejected as a zero duration, never as over-ceiling.
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": "0s" }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toThrow(/greater than zero/);
 });
 
 // --- parseOrExit -------------------------------------------------------------

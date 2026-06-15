@@ -30,6 +30,7 @@ import {
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
+import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
 import { runProtocol } from "../../src/protocol";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -360,6 +361,42 @@ test("parseCommonBootstrapArgs: a malformed timeout is a flag-named usage error"
       "connection-timeout": "soon",
     } as unknown as Arguments),
   ).toThrow("--connection-timeout");
+});
+
+test("parseCommonBootstrapArgs: a connection-/peer-timeout above the 7d ceiling is rejected before any side effect", () => {
+  // parseCommonBootstrapArgs is the pure parse step every bootstrap command runs
+  // before it opens a connection or writes anything, so a rejection here is a
+  // rejection before any side effect. Both flags share MAX_TIMEOUT_SECONDS; a
+  // value one minute past it (7d is a whole number of minutes) is rejected with a
+  // flag-named, max-stating usage error.
+  const justOver = `${MAX_TIMEOUT_SECONDS / 60 + 1}m`;
+  for (const flag of ["connection-timeout", "peer-timeout"] as const) {
+    const parse = () =>
+      parseCommonBootstrapArgs({
+        _: [],
+        $0: "psilink",
+        [flag]: justOver,
+      } as unknown as Arguments);
+    // Assert the throw first, so a regression that fails to reject surfaces as a
+    // clear "did not throw" rather than the message assertions failing on "".
+    expect(parse).toThrow(UsageError);
+    expect(parse).toThrow(`--${flag}`);
+    expect(parse).toThrow("must not exceed");
+    expect(parse).toThrow("7d");
+  }
+});
+
+test("parseCommonBootstrapArgs: a connection-/peer-timeout at the 7d ceiling is accepted", () => {
+  // The boundary is inclusive: exactly 7d parses to its seconds value, so the
+  // largest in-range value behaves exactly as it does today.
+  const parsed = parseCommonBootstrapArgs({
+    _: [],
+    $0: "psilink",
+    "connection-timeout": `${MAX_TIMEOUT_SECONDS / 86_400}d`,
+    "peer-timeout": `${MAX_TIMEOUT_SECONDS / 86_400}d`,
+  } as unknown as Arguments);
+  expect(parsed.connectionTimeout).toBe(MAX_TIMEOUT_SECONDS);
+  expect(parsed.peerTimeout).toBe(MAX_TIMEOUT_SECONDS);
 });
 
 // --- warnUnsupportedFileSyncFlags --------------------------------------------

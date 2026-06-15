@@ -32,10 +32,32 @@ export function singleValue(argv: Arguments, name: string): unknown {
 }
 
 /**
+ * Sanity ceiling, in seconds, for the duration-valued CLI timeout flags
+ * (`--connection-timeout`, `--peer-timeout`, `--accept-timeout`): seven days. A
+ * timeout is a coordination window, and even a generous async setup waits hours,
+ * not days, for a connection, a peer, or a partner to accept -- so a value past a
+ * week is a typo or a misunderstanding, not an intent. The human-readable
+ * `<int><unit>` duration syntax makes a value like `30d` trivially typeable, so
+ * each capped flag rejects an over-ceiling value with a flag-named usage error
+ * before any side effect, mirroring the `--expires-in` ceiling
+ * (`MAX_INVITATION_LIFETIME_SECONDS`, 365d) that bounds the invitation lifetime.
+ * This is a deliberately lower, product-level sanity bound layered on top of
+ * parseDuration's safe-integer overflow guard, not a replacement for it, and a
+ * usability cap rather than a security control: the accept window is
+ * independently bounded by the invitation token's lifetime, and an over-long
+ * connect/peer wait only makes the user's own exchange hang longer.
+ */
+export const MAX_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
+
+/**
  * Read a duration-valued CLI option from parsed `Arguments` and return it as a
  * whole number of seconds (or `undefined` when the flag is absent). Rejects a
  * repeat (via {@link singleValue}) and a malformed or bare-integer value (via
- * {@link parseDurationFlag}), naming the flag in either error.
+ * {@link parseDurationFlag}), naming the flag in either error. When `maxSeconds`
+ * is given, a value above it is rejected with a flag-named usage error stating
+ * the maximum -- the shared parsing seam for the timeout-flag sanity cap (see
+ * {@link MAX_TIMEOUT_SECONDS}). The cap is checked after parsing, so it layers on
+ * top of the malformed/zero/overflow rejections rather than replacing them.
  *
  * {@link parseDurationFlag} yields a positive millisecond offset whose smallest
  * unit is seconds, so the divide-by-1000 to seconds is always exact. Seconds is
@@ -46,6 +68,7 @@ export function singleValue(argv: Arguments, name: string): unknown {
 export function durationFlagSeconds(
   argv: Arguments,
   name: string,
+  maxSeconds?: number,
 ): number | undefined {
   const raw = singleValue(argv, name);
   if (raw === undefined) return undefined;
@@ -53,7 +76,18 @@ export function durationFlagSeconds(
   // so yargs always yields a string, but coerce defensively so a contract
   // violation surfaces as parseDurationFlag's flag-named UsageError rather than a
   // raw TypeError from .trim() on a non-string.
-  return parseDurationFlag(`--${name}`, String(raw)) / 1000;
+  const seconds = parseDurationFlag(`--${name}`, String(raw)) / 1000;
+  // The sanity cap is the last check: parseDurationFlag has already rejected a
+  // zero, malformed, bare-integer, or overflowing value, so a value reaching here
+  // is a positive in-range duration and the only thing left to reject is one that
+  // is well-formed but past the product ceiling. The ceiling is stated in whole
+  // days, the coarsest unit these magnitudes warrant; callers pass a whole-day
+  // cap (MAX_TIMEOUT_SECONDS).
+  if (maxSeconds !== undefined && seconds > maxSeconds)
+    throw new UsageError(
+      `--${name} must not exceed ${maxSeconds / 86_400}d; got ${String(raw)}`,
+    );
+  return seconds;
 }
 
 /**
