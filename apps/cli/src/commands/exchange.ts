@@ -33,7 +33,7 @@ import {
   configureLogFile,
   exitWithError,
   parseOrExit,
-  validateInputFile,
+  openInputSource,
 } from "../util/cli";
 import {
   addCommonBootstrapOptions,
@@ -522,9 +522,9 @@ async function prepareDataset(
 ): Promise<PreparedExchange> {
   const log = getLogger("exchange");
 
-  validateInputFile(input);
-
-  const csvResult = await loadCSVFile(fs.createReadStream(input));
+  const csvResult = await loadCSVFile(
+    openInputSource(input, { allowStdin: true }),
+  );
   const rawRows = csvResult.data as Array<Record<string, string>>;
   const prepared = prepareForExchange(
     exchangeDataSpec,
@@ -633,7 +633,17 @@ export async function handler(argv: Arguments): Promise<void> {
     try {
       prepared = await prepareDataset(exchangeDataSpec, identity, input);
     } catch (err) {
-      exitWithError(log, err, (err as { exitCode?: number }).exitCode ?? 69);
+      // A usage error (exit 64) -- the `-`-at-an-interactive-terminal rejection
+      // openInputSource raises is a UsageError carrying no exitCode -- must map to
+      // 64, not collapse to 69; a missing input file carries its own exitCode 69.
+      // Mirrors zeroSetup's prepareDataset boundary.
+      exitWithError(
+        log,
+        err,
+        err instanceof UsageError
+          ? 64
+          : ((err as { exitCode?: number }).exitCode ?? 69),
+      );
     }
 
     const recordOutput = resolveRecordOutput({

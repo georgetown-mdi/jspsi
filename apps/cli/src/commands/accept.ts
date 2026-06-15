@@ -287,7 +287,9 @@ export async function validateAccept(params: {
       target: connection,
       log,
     });
-    const rows = await loadInputRows(input);
+    // accept reads its y/N confirmation from stdin (promptConfirm), so it cannot
+    // also take the CSV there: reject `-` rather than starve the prompt.
+    const rows = await loadInputRows(input, { allowStdin: false });
     const { dataSpec, warnings } = buildDataSpec({
       terms: myTerms,
       identity: myIdentity,
@@ -316,7 +318,7 @@ export async function validateAccept(params: {
   });
   const rows =
     resolved.input !== undefined
-      ? await loadInputRows(resolved.input)
+      ? await loadInputRows(resolved.input, { allowStdin: false })
       : undefined;
   const { dataSpec, warnings } = buildDataSpec({
     terms: myTerms,

@@ -19,6 +19,7 @@ import {
   connectionFromURL,
   diffConnectionAgainstTarget,
   generateSharedSecret,
+  loadInputRows,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
@@ -30,6 +31,7 @@ import {
 } from "../../src/commands/bootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
+import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // runOnlineBootstrap's config-persistence tests below drive its wiring without
 // opening a connection: runProtocol is mocked so each test chooses whether the
@@ -1376,4 +1378,70 @@ test("diffConnectionAgainstTarget: a filedrop path differing only by backslashes
   };
   const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
+});
+
+// --- loadInputRows -----------------------------------------------------------
+
+test("loadInputRows: a CSV piped via `-` yields the same rows as the equivalent file (invite path)", async () => {
+  // invite reads its input through loadInputRows with allowStdin enabled; a CSV
+  // piped through stdin must parse to the same rows and columns as the file.
+  const csv = "first_name,last_name,dob\nAlice,Smith,1990-01-02\n";
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, csv);
+    const fromFile = await loadInputRows(file, { allowStdin: true });
+    const fromStdin = await withStdin(streamOf(csv), () =>
+      loadInputRows("-", { allowStdin: true }),
+    );
+    expect(fromStdin).toEqual(fromFile);
+    expect(fromStdin.columns).toEqual(["first_name", "last_name", "dob"]);
+    expect(fromStdin.rawRows).toEqual([
+      { first_name: "Alice", last_name: "Smith", dob: "1990-01-02" },
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRows: empty stdin is handled like an empty file", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
+  try {
+    const empty = path.join(dir, "empty.csv");
+    fs.writeFileSync(empty, "");
+    const fromFile = await loadInputRows(empty, { allowStdin: true });
+    const fromStdin = await withStdin(streamOf(""), () =>
+      loadInputRows("-", { allowStdin: true }),
+    );
+    expect(fromStdin).toEqual(fromFile);
+    expect(fromStdin.rawRows).toEqual([]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRows: `-` is rejected as a usage error when stdin is disallowed (accept path)", async () => {
+  // accept passes allowStdin: false because it reads its y/N confirmation from
+  // stdin; `-` must be a clear usage error naming a file path, never a silent
+  // decline. The default is also stdin-disabled.
+  await expect(
+    loadInputRows("-", { allowStdin: false }),
+  ).rejects.toBeInstanceOf(UsageError);
+  await expect(loadInputRows("-", { allowStdin: false })).rejects.toThrow(
+    /file path/,
+  );
+  await expect(loadInputRows("-")).rejects.toThrow(/stdin/);
+});
+
+test("loadInputRows: `-` at an interactive terminal is rejected (invite path inherits the TTY guard)", async () => {
+  // invite allows stdin, but a `-` typed at a prompt with nothing piped would
+  // hang on an EOF that never arrives; the shared guard rejects it up front.
+  await withStdin(ttyStream(), async () => {
+    await expect(
+      loadInputRows("-", { allowStdin: true }),
+    ).rejects.toBeInstanceOf(UsageError);
+    await expect(loadInputRows("-", { allowStdin: true })).rejects.toThrow(
+      /pipe/,
+    );
+  });
 });

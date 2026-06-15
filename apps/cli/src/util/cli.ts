@@ -259,19 +259,66 @@ function writeAll(fd: number, text: string): void {
 }
 
 /**
- * Validate that `input` is a readable file path; throws on failure.
- * Thrown errors carry an `exitCode` property for the caller to forward to
- * `process.exit`. Stdin (`-`) throws with `exitCode: 1`; a missing file
- * throws with `exitCode: 69`.
+ * Resolve a CSV input positional to the readable stream core's `loadCSVFile`
+ * consumes: `process.stdin` when `input` is `-`, otherwise the file at `input`,
+ * opened with `fs.createReadStream` after confirming it exists. The pipeline is
+ * already stream-based, so the loaders feed the returned stream to `loadCSVFile`
+ * unchanged whether it is a file or stdin -- papaparse consumes either.
+ *
+ * Thrown errors carry an `exitCode` for the caller to forward to `process.exit`:
+ * a missing file throws with `exitCode: 69`, exactly as before.
+ *
+ * `allowStdin` gates the `-` case. Every input command supports stdin except
+ * `accept`, which reads its interactive y/N confirmation from `process.stdin`
+ * (`promptConfirm`); stdin is single-use, so a stdin CSV would starve that prompt
+ * into a silent decline. `accept` passes `allowStdin: false`, turning `-` into an
+ * actionable {@link UsageError} (exit 64) that names the file-path alternative
+ * rather than returning a stream -- a usage violation, distinct from the
+ * missing-file case below (exit 69, the input named cannot be opened). The
+ * message is command-agnostic because the default is `false`, so a future caller
+ * inherits a rejection that does not misattribute itself to `accept`. (Re-enable
+ * for `accept` once it gains a non-interactive confirmation bypass -- board item
+ * 200218548.)
+ *
+ * When `-` is allowed but `process.stdin` is an interactive terminal with nothing
+ * piped in, reading it would block on an EOF that never arrives -- the parser
+ * resolves only at end-of-stream and the read precedes every connection/exchange
+ * timeout, so the command would hang indefinitely with no feedback. That case is
+ * always a mistake (no one hand-types a PII CSV at a prompt), so it is rejected up
+ * front as a {@link UsageError} naming both escape hatches. The check is strict
+ * `=== true`: `isTTY` is `undefined` (not `false`) for a pipe, a `<` redirect, or
+ * `/dev/null`, so a strict test can never reject a legitimate non-interactive run;
+ * a false negative (an effectively-interactive stream that reports falsy) merely
+ * falls through to the read, no worse than blocking-until-Ctrl-D.
+ *
+ * The guard covers only an interactive terminal. A non-TTY stream that delivers
+ * data but never reaches EOF -- an unclosed FIFO, a stalled producer -- is not
+ * detectable by an `isTTY` check and still blocks (papaparse resolves only at
+ * end-of-stream); only an idle watchdog could bound that, which the normal
+ * `cat file |` / `< file` usage does not warrant. It is a visible, interruptible
+ * hang on an exotic invocation, not data loss.
  */
-export function validateInputFile(input: string): void {
-  if (input === "-")
-    throw Object.assign(
-      new Error("reading from stdin is not yet implemented"),
-      { exitCode: 69 },
-    );
+export function openInputSource(
+  input: string,
+  { allowStdin = false }: { allowStdin?: boolean } = {},
+): NodeJS.ReadableStream {
+  if (input === "-") {
+    if (!allowStdin)
+      throw new UsageError(
+        "this command cannot read its input CSV from stdin; pass a file path " +
+          "instead of `-`",
+      );
+    if (process.stdin.isTTY === true)
+      throw new UsageError(
+        "nothing is piped to stdin, so `-` would wait for input forever; pipe " +
+          "a CSV (e.g. `cat data.csv | psilink exchange - results.csv`) or pass " +
+          "a file path instead of `-`",
+      );
+    return process.stdin;
+  }
   if (!fs.existsSync(input))
     throw Object.assign(new Error(`${input} does not exist`), { exitCode: 69 });
+  return fs.createReadStream(input);
 }
 
 /** Write formatted exchange results to a file or stdout as CSV. */

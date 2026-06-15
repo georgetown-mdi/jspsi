@@ -22,6 +22,8 @@ The `--config-file` and `--key-file` arguments are expected to be available for 
 
 A leading `~` (or `~/`) in any local filesystem path -- whether given on the command line or written into the configuration file -- is expanded to the current user's home directory. This applies to path arguments such as `--config-file`, `--key-file`, `--record-file`, the input/output paths, and `signing.identity_file`, as well as the path inside an `@`-file reference (for example, `@~/secrets/id_rsa`). Note that `~user` (another user's home) is not resolved.
 
+An `INPUT_FILE` argument may be given as `-` to read the CSV from standard input instead of a file on disk -- for example, `cat data.csv | psilink exchange - results.csv` -- so a pipeline need not stage a temporary file. This applies to `psilink exchange`, the zero-setup form (`psilink URL INPUT_FILE`), and `psilink invite`. It does not apply to `psilink accept`, which reads its interactive confirmation from standard input and so cannot also take the CSV there; give `accept` a file path. Passing `-` at an interactive terminal with nothing piped in is reported as an error rather than left waiting silently for input -- pipe the CSV or pass a file path.
+
 Durations on the command line are written as a positive integer followed by a single-character unit -- `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); for example `45s`, `30m`, `2h`, or `1d`. The unit suffix is required: a bare number is not a valid duration, and an old seconds-only value such as `30` is rejected with the suffixed form to use (`30s`) rather than silently reinterpreted. This applies to every duration-valued option, including `--expires-in`, `--accept-timeout`, `--connection-timeout`, and `--peer-timeout`.
 
 ## Initialization
