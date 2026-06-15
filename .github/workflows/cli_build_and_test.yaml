@@ -61,3 +61,46 @@ jobs:
           npm run test:integration -w apps/cli
         env:
           PSILINK_SFTP_BACKEND: native
+
+  # Phase 3 hardened native-sshd profiles. The same conformance suite runs against
+  # the native backend under each hardened configuration real deployments use
+  # (restricted kex/cipher policy, connection/auth rate limits, an explicit user
+  # allowlist), proving the pure-JS ssh2 adapter still negotiates and runs under
+  # them. Additive and parallel: the in-process and baseline native legs in the
+  # `test` job above are unchanged. Integration tests import the adapter from src
+  # (vitest transpiles) and consume @psilink/core from the setup action's build,
+  # so no CLI build step is needed. If the added CI minutes prove too costly, trim
+  # this matrix per board-10 item 199637670.
+  hardened-native:
+    name: Hardened native sshd (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [restricted-crypto, rate-limited, allowlist]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - name: Integration tests (CLI, native sshd, ${{ matrix.profile }} profile)
+        run: |
+          sudo mkdir -p /run/sshd
+          npm run test:integration -w apps/cli
+        env:
+          PSILINK_SFTP_BACKEND: native
+          PSILINK_SFTP_NATIVE_PROFILE: ${{ matrix.profile }}
+
+  # The chroot profile confines the SFTP session with ChrootDirectory, which needs
+  # sshd to run as root over a root-owned jail. The Ubuntu runner has passwordless
+  # sudo, so this leg runs the suite as root; the runner (test/sftpServer/
+  # runChrootProfile.mjs) would skip cleanly with exit 0 where root is
+  # unavailable. PATH is forwarded through sudo so npm and node resolve as root.
+  chroot-native:
+    name: Hardened native sshd (chroot)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - name: Integration tests (CLI, native sshd, chroot profile)
+        run: |
+          sudo mkdir -p /run/sshd
+          sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli

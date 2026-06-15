@@ -24,6 +24,81 @@ const READY_PROBE_INTERVAL_MS = 100;
 const READY_PROBE_TIMEOUT_MS = 2_000;
 const START_ATTEMPTS = 3;
 
+/**
+ * The hardened native-sshd configurations the conformance suite can run against,
+ * selected by PSILINK_SFTP_NATIVE_PROFILE. `baseline` is the Phase-1 config
+ * (forced internal-sftp, no chroot) and is the default -- it must stay unchanged.
+ * The rest layer on the hardening real deployments use:
+ *   - `chroot`: ChrootDirectory confinement. Requires sshd to run as root (for
+ *     chroot(2)) over a root-owned jail, so it is a privileged/CI-only leg that
+ *     skips where it cannot run (see the runChrootProfile.mjs runner).
+ *   - `restricted-crypto`: a modern, locked-down kex/cipher/MAC/host-key/pubkey
+ *     policy, proving the pure-JS ssh2 client still negotiates under it.
+ *   - `rate-limited`: connection and auth rate limits.
+ *   - `allowlist`: an explicit user@host allow matrix.
+ */
+export type NativeProfile =
+  | "baseline"
+  | "chroot"
+  | "restricted-crypto"
+  | "rate-limited"
+  | "allowlist";
+
+export const NATIVE_PROFILES: readonly NativeProfile[] = [
+  "baseline",
+  "chroot",
+  "restricted-crypto",
+  "rate-limited",
+  "allowlist",
+];
+
+export interface NativeSshdOptions {
+  /** Which hardened configuration to run; defaults to `baseline`. */
+  profile?: NativeProfile;
+}
+
+// A modern, deliberately narrow crypto policy. Every entry intersects what the
+// pure-JS ssh2 client offers by default on Node 26 (curve25519 kex, an ed25519
+// host key, AEAD ciphers, ETM MACs, ed25519 user keys), so the positive
+// handshake stays green while the server advertises only a locked-down set. The
+// host and user keys this backend generates are ed25519, which is why the host
+// key and pubkey algorithms can be pinned to ssh-ed25519 alone.
+const RESTRICTED_CRYPTO_DIRECTIVES = [
+  "KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org",
+  "Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com",
+  "MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com",
+  "HostKeyAlgorithms ssh-ed25519",
+  "PubkeyAcceptedAlgorithms ssh-ed25519",
+];
+
+// Realistic connection/auth rate limits, kept loose enough that a slow CI run --
+// the heavy-exchange tests run ~13x slower on this backend on CI -- cannot trip
+// them and turn a perf issue into a flaky failure. LoginGraceTime bounds the
+// per-connection auth window (auth completes in well under a second normally);
+// MaxStartups governs concurrent UNAUTHENTICATED connections (the suite opens a
+// couple at a time); MaxSessions caps sessions per connection (the adapter uses
+// one). PerSourcePenalties is appended separately, gated on sshd support, since
+// it is unknown on OpenSSH older than the CI/runner version.
+const RATE_LIMITED_DIRECTIVES = [
+  "MaxAuthTries 4",
+  "LoginGraceTime 30",
+  "MaxStartups 10:30:60",
+  "MaxSessions 10",
+];
+
+// Channel confinement that ForceCommand does not imply: ForceCommand pins the
+// executed command to internal-sftp, but the session can still open forwarding,
+// tunnel, and X11 channels, so a real internal-sftp deployment pairs it with
+// these. Applied to the chroot profile, whose session authenticates as root --
+// completing the jail, since one that still allows TCP forwarding is a weak jail.
+// The conformance suite never forwards, so pinning them off cannot affect a run.
+const CHROOT_CONFINEMENT_DIRECTIVES = [
+  "AllowTcpForwarding no",
+  "AllowAgentForwarding no",
+  "PermitTunnel no",
+  "X11Forwarding no",
+];
+
 async function resolveSshd(): Promise<string> {
   for (const candidate of SSHD_CANDIDATES) {
     if (existsSync(candidate)) return candidate;
@@ -39,6 +114,39 @@ async function resolveSshd(): Promise<string> {
     "The native sshd test backend requires OpenSSH's sshd on PATH " +
       "(install openssh-server); none was found.",
   );
+}
+
+/**
+ * Whether the chroot profile can run here. ChrootDirectory requires sshd to call
+ * chroot(2) (root only) over a jail whose every path component is root-owned and
+ * not group/world-writable, so the unprivileged child sshd this backend normally
+ * runs cannot do it. The leg therefore needs the whole test process to run as
+ * root on Linux; the reason string is surfaced to the operator when it cannot.
+ * The backstop in startNativeSshdServer calls this; the chroot runner
+ * (runChrootProfile.mjs) re-implements the same check in plain JS, since it must
+ * decide to skip before this module -- and vitest -- is ever loaded.
+ *
+ * @internal exported for testing
+ */
+export function chrootCapability(): { ok: boolean; reason: string } {
+  if (process.platform !== "linux") {
+    return {
+      ok: false,
+      reason:
+        `the chroot profile needs Linux for ChrootDirectory + chroot(2); ` +
+        `this host is ${process.platform}`,
+    };
+  }
+  const uid = typeof process.getuid === "function" ? process.getuid() : -1;
+  if (uid !== 0) {
+    return {
+      ok: false,
+      reason:
+        `the chroot profile needs sshd to run as root (uid 0) to chroot(2) ` +
+        `and own the jail; current uid is ${uid}`,
+    };
+  }
+  return { ok: true, reason: "" };
 }
 
 // A free loopback port. There is an unavoidable gap between closing this probe
@@ -117,36 +225,124 @@ async function keygen(keyPath: string): Promise<void> {
   ]);
 }
 
+// Validate a complete sshd config with `sshd -t` (extended test mode: it parses
+// the config and checks the host keys without binding). Returns the captured
+// stderr so a profile whose directives the locally resolved sshd does not
+// understand -- macOS ships a different OpenSSH than the Ubuntu runners -- fails
+// loudly with the exact complaint instead of an opaque start timeout.
+async function validateConfig(
+  sshd: string,
+  configPath: string,
+): Promise<{ ok: boolean; stderr: string }> {
+  try {
+    const { stderr } = await execFileAsync(sshd, ["-t", "-f", configPath]);
+    return { ok: true, stderr };
+  } catch (err) {
+    const e = err as { stderr?: string; message?: string };
+    return { ok: false, stderr: (e.stderr ?? e.message ?? "").trim() };
+  }
+}
+
+// Whether the locally resolved sshd accepts a single directive, probed by
+// validating a minimal config that carries only it. Used to gate version-fragile
+// directives (PerSourcePenalties is unknown before OpenSSH 9.8) rather than
+// assuming the CI sshd's feature set.
+async function sshdAcceptsDirective(
+  sshd: string,
+  hostKeyPath: string,
+  workDir: string,
+  directive: string,
+): Promise<boolean> {
+  const probePath = path.join(workDir, "sshd_probe_config");
+  await fsp.writeFile(
+    probePath,
+    [
+      "Port 22222",
+      "ListenAddress 127.0.0.1",
+      `HostKey ${hostKeyPath}`,
+      directive,
+      "",
+    ].join("\n"),
+  );
+  const { ok } = await validateConfig(sshd, probePath);
+  return ok;
+}
+
 interface NativeAttempt {
   child: ChildProcess;
   stderr: { value: string };
 }
 
 /**
- * Spawn a native OpenSSH sshd as an unprivileged child running internal-sftp
- * without a chroot (the Phase-1 native backend). It authenticates two distinct
- * client keys -- both mapped to the current OS user, since an unprivileged sshd
- * cannot authenticate users that do not exist in the OS -- over a single shared
- * served directory, which is the served-directory fidelity the rendezvous
- * protocol needs. Password auth as the current user is the fiddliest path
- * (PAM/shadow), so this backend authenticates by public key; the bulk
- * password-auth coverage runs against the in-process backend.
+ * Spawn a native OpenSSH sshd as a child running internal-sftp, in one of the
+ * hardened profiles (see NativeProfile). The `baseline` default is the Phase-1
+ * config: an unprivileged child serving a real temp-dir path without a chroot.
+ * It authenticates two distinct client keys -- both mapped to the current OS
+ * user, since an unprivileged sshd cannot authenticate users that do not exist
+ * in the OS -- over a single shared served directory, which is the
+ * served-directory fidelity the rendezvous protocol needs. Password auth as the
+ * current user is the fiddliest path (PAM/shadow), so this backend authenticates
+ * by public key; the bulk password-auth coverage runs against the in-process
+ * backend.
+ *
+ * The hardened profiles layer additional sshd directives (and, for `chroot`, a
+ * root-owned jail and a root sshd) onto that same backend, each run against the
+ * unchanged conformance suite.
  *
  * @internal exported for testing
  */
-export async function startNativeSshdServer(): Promise<SftpTestServer> {
+export async function startNativeSshdServer(
+  options: NativeSshdOptions = {},
+): Promise<SftpTestServer> {
+  const profile = options.profile ?? "baseline";
+  const isChroot = profile === "chroot";
+  if (isChroot) {
+    const cap = chrootCapability();
+    if (!cap.ok) {
+      // Backstop for a direct `PSILINK_SFTP_NATIVE_PROFILE=chroot` run that
+      // bypasses the runChrootProfile.mjs runner (which skips cleanly instead);
+      // fail with the actionable reason rather than a confusing chroot error.
+      throw new Error(
+        `Cannot start the chroot native-sshd profile: ${cap.reason}. ` +
+          `Run it as root on Linux (the test:integration:native-chroot script, ` +
+          `under sudo on CI), or pick a different PSILINK_SFTP_NATIVE_PROFILE.`,
+      );
+    }
+  }
+
   const sshd = await resolveSshd();
   const osUser = os.userInfo().username;
 
   const workDir = await fsp.mkdtemp(
     path.join(os.tmpdir(), "psilink-sftp-sshd-"),
   );
-  // Everything below creates files (keys, config) under workDir; on any failure
-  // before a server is handed back, the catch removes the dir so the generated
+  // The chroot jail lives outside workDir: ChrootDirectory requires every path
+  // component to be root-owned and not group/world-writable, which os.tmpdir()
+  // (world-writable) can never satisfy. /run is root-owned, so a jail under it
+  // qualifies; mkdtemp creates it mode 0700, owned by the running root process.
+  let jailDir: string | undefined;
+  // Everything below creates files (keys, config, the jail); on any failure
+  // before a server is handed back the catch removes both dirs so generated
   // private keys are not left on disk.
   try {
-    const backingDir = path.join(workDir, "srv");
-    await fsp.mkdir(backingDir, { recursive: true });
+    let backingDir: string;
+    let remoteRoot: string;
+    if (isChroot) {
+      jailDir = await fsp.mkdtemp("/run/psilink-sftp-chroot-");
+      backingDir = path.join(jailDir, "srv");
+      // The served subdir is the writable root inside the jail; the session runs
+      // as root (the only user a root sshd authenticates here), so 0755 is
+      // enough for it to write while keeping the jail itself owner-only.
+      await fsp.mkdir(backingDir, { mode: 0o755 });
+      // Inside the jail "/" is jailDir, so the served subdir is reached at
+      // "/srv" over SFTP; remoteRoot already models a served path that differs
+      // from the host path, so the conformance suite needs no change.
+      remoteRoot = "/srv";
+    } else {
+      backingDir = path.join(workDir, "srv");
+      await fsp.mkdir(backingDir, { recursive: true });
+      remoteRoot = backingDir;
+    }
 
     const hostKeyPath = path.join(workDir, "ssh_host_ed25519_key");
     const useraKeyPath = path.join(workDir, "usera_id_ed25519");
@@ -173,10 +369,20 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
       { mode: 0o600 },
     );
 
-    // StrictModes off so sshd accepts key files under a world-readable temp dir;
-    // internal-sftp without ChrootDirectory (root-owned components are
-    // unattainable unprivileged) serves backingDir at its real absolute path.
-    const configBody = [
+    // The base config is the unchanged baseline: StrictModes off so sshd accepts
+    // key files under a world-readable temp dir; internal-sftp serves backingDir.
+    // The non-chroot profiles serve it at its real absolute path (root-owned
+    // chroot components are unattainable unprivileged); the chroot profile adds
+    // ChrootDirectory below. The adapter only ever opens the SFTP subsystem;
+    // ForceCommand pins every session to internal-sftp so an authenticated
+    // connection cannot open a shell or run an arbitrary command as the OS user.
+    // The allowlist profile narrows AllowUsers to an explicit user@host matrix;
+    // every other profile keeps the plain baseline allowlist.
+    const allowUsers =
+      profile === "allowlist"
+        ? `AllowUsers ${osUser}@127.0.0.1`
+        : `AllowUsers ${osUser}`;
+    const directives = [
       "ListenAddress 127.0.0.1",
       `HostKey ${hostKeyPath}`,
       "LogLevel ERROR",
@@ -186,14 +392,47 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
       "PubkeyAuthentication yes",
       `AuthorizedKeysFile ${authorizedKeysPath}`,
       "Subsystem sftp internal-sftp",
-      // The adapter only ever opens the SFTP subsystem; ForceCommand pins every
-      // session to internal-sftp so an authenticated connection cannot open a shell
-      // or run an arbitrary command as the OS user.
       "ForceCommand internal-sftp",
       "StrictModes no",
-      `AllowUsers ${osUser}`,
-      "",
-    ].join("\n");
+      allowUsers,
+    ];
+    if (isChroot)
+      directives.push(
+        `ChrootDirectory ${jailDir}`,
+        ...CHROOT_CONFINEMENT_DIRECTIVES,
+      );
+    if (profile === "restricted-crypto")
+      directives.push(...RESTRICTED_CRYPTO_DIRECTIVES);
+    if (profile === "rate-limited") {
+      directives.push(...RATE_LIMITED_DIRECTIVES);
+      // PerSourcePenalties only on a new-enough OpenSSH; probe before adding so
+      // an older local sshd does not reject the whole rate-limited config. It
+      // penalizes misbehaving SOURCE addresses, never clean loopback traffic, so
+      // it cannot trip the suite's successful connections.
+      if (
+        await sshdAcceptsDirective(
+          sshd,
+          hostKeyPath,
+          workDir,
+          "PerSourcePenalties yes",
+        )
+      ) {
+        directives.push("PerSourcePenalties yes");
+      }
+    }
+    const configBody = `${directives.join("\n")}\n`;
+
+    // Validate before spending start attempts so an unsupported directive on
+    // this host's sshd surfaces as a clear error, not a readiness timeout.
+    const validationConfigPath = path.join(workDir, "sshd_config_validate");
+    await fsp.writeFile(validationConfigPath, `Port 22222\n${configBody}`);
+    const validation = await validateConfig(sshd, validationConfigPath);
+    if (!validation.ok) {
+      throw new Error(
+        `Native sshd rejected the "${profile}" profile config` +
+          (validation.stderr ? `:\n${validation.stderr}` : "."),
+      );
+    }
 
     let attempt: NativeAttempt | undefined;
     let boundPort = 0;
@@ -227,20 +466,21 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
 
     if (!attempt) {
       throw new Error(
-        `Native sshd did not accept connections within ` +
+        `Native sshd (${profile}) did not accept connections within ` +
           `${READY_TIMEOUT_MS / 1000}s over ${START_ATTEMPTS} attempts.` +
           (lastError ? `\nLast sshd stderr:\n${lastError}` : ""),
       );
     }
 
     const { child } = attempt;
+    const jailToClean = jailDir;
     // Build the handle now the bound port is known, rather than constructing it
     // with a placeholder and mutating it inside the retry loop.
     const handle: SftpServerHandle = {
       host: "127.0.0.1",
       port: boundPort,
       backingDir,
-      remoteRoot: backingDir,
+      remoteRoot,
       usera: { username: osUser, privateKey: useraPriv },
       userb: { username: osUser, privateKey: userbPriv },
     };
@@ -256,10 +496,13 @@ export async function startNativeSshdServer(): Promise<SftpTestServer> {
           setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
         });
         await fsp.rm(workDir, { recursive: true, force: true });
+        if (jailToClean)
+          await fsp.rm(jailToClean, { recursive: true, force: true });
       },
     };
   } catch (err) {
     await fsp.rm(workDir, { recursive: true, force: true });
+    if (jailDir) await fsp.rm(jailDir, { recursive: true, force: true });
     throw err;
   }
 }

@@ -1,6 +1,10 @@
 import type { ProvidedContext } from "vitest";
 
-import { selectedBackend, startSelectedSftpServer } from "./index";
+import {
+  selectedBackend,
+  selectedNativeProfile,
+  startSelectedSftpServer,
+} from "./index";
 
 // Structural slice of vitest's globalSetup context: only `provide` is used, and
 // typing it inline keeps this robust to where vitest re-exports the full context
@@ -23,8 +27,17 @@ export default async function setup({
 }: GlobalSetupContext): Promise<() => Promise<void>> {
   const server = await startSelectedSftpServer();
   provide("sftpServer", server.handle);
+  const backend = selectedBackend();
+  // Surface the native profile (other than the default baseline) so a CI leg's
+  // log makes clear which hardened configuration ran.
+  const profile =
+    backend === "native" ? selectedNativeProfile() : ("baseline" as const);
+  const label =
+    backend === "native" && profile !== "baseline"
+      ? `${backend} (${profile})`
+      : backend;
   console.log(
-    `[sftp-test-server] ${selectedBackend()} backend listening on ` +
+    `[sftp-test-server] ${label} backend listening on ` +
       `${server.handle.host}:${server.handle.port}`,
   );
   return async () => {

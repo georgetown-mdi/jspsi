@@ -75,6 +75,27 @@ unprivileged child, exercising the adapter against a real server:
 PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli
 ```
 
+The native backend runs hardened configurations real deployments use, selected
+by `PSILINK_SFTP_NATIVE_PROFILE` (default `baseline`, the plain forced
+`internal-sftp` config); the same conformance suite runs against each:
+
+```sh
+PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm run test:integration -w apps/cli
+```
+
+- `restricted-crypto` -- a locked-down kex/cipher/MAC/host-key/pubkey policy.
+- `rate-limited` -- connection and auth rate limits.
+- `allowlist` -- an explicit `user@host` allow matrix, plus a test asserting a
+  valid key under an unlisted username is rejected.
+- `chroot` -- `ChrootDirectory` confinement. It needs `sshd` running as root
+  over a root-owned jail, so it runs only on Linux as root and is launched
+  through a dedicated script that skips cleanly (exit 0, with a message)
+  everywhere else:
+
+```sh
+sudo npm run test:integration:native-chroot -w apps/cli   # Linux only; skips elsewhere
+```
+
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
 ```sh

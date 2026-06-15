@@ -10,7 +10,8 @@
     "dev": "PKG_DIR=$(pwd) && cd \"$INIT_CWD\" && node --import=tsx \"$PKG_DIR/dist/index.js\"",
     "test": "vitest run --project unit",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "test:integration:native-chroot": "node test/sftpServer/runChrootProfile.mjs"
   },
   "dependencies": {
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",
