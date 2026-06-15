@@ -219,6 +219,22 @@ describe("summarizeInvitation", () => {
     expect(constraint).toContain("\\x07");
   });
 
+  test("falls back to the sanitized field identifier for an unknown field reference", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [{ name: "K", elements: [{ field: "mystery" + BEL }] }],
+      }),
+    );
+    // No linkageField is named "mystery...", so the element's field cannot
+    // resolve to a semantic-type label; the raw identifier is surfaced as the
+    // most transparent fallback, but sanitized first.
+    const label = summary.linkageKeys[0].elements[0].fieldLabel;
+    expect(label).toContain("mystery");
+    expect(label).not.toContain(BEL);
+    expect(label).toContain("\\x07");
+  });
+
   test("surfaces a transform, swap, and fuzzy expansion, flagging only the affected keys", () => {
     const summary = summarizeInvitation(
       makeToken({

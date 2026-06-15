@@ -135,12 +135,26 @@ export function InvitationTerms({
           <List size="sm" withPadding>
             {summary.linkageFields.map((field, index) => (
               <List.Item key={index}>
-                {field.label}
-                {field.constraints.length > 0 && (
-                  <Text span size="xs" c="dimmed">
-                    {" "}
-                    ({field.constraints.join("; ")})
-                  </Text>
+                {field.constraints.length > 0 ? (
+                  // Render each constraint as its own item rather than
+                  // joining them: a constraint phrase can contain the
+                  // separator (a partner-controlled allowedCharacters class
+                  // may hold punctuation), which joined text would render as
+                  // spurious extra clauses.
+                  <Stack gap={2}>
+                    <Text size="sm">{field.label}</Text>
+                    <List size="xs" withPadding listStyleType="circle">
+                      {field.constraints.map((constraint, ci) => (
+                        <List.Item key={ci}>
+                          <Text size="xs" c="dimmed">
+                            {constraint}
+                          </Text>
+                        </List.Item>
+                      ))}
+                    </List>
+                  </Stack>
+                ) : (
+                  field.label
                 )}
               </List.Item>
             ))}
