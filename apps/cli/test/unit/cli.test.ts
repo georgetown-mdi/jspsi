@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
@@ -305,37 +306,19 @@ test("openInputSource: stdin is disabled by default", () => {
 
 // --- writeOutput -------------------------------------------------------------
 
-// writeOutput closes its write stream without awaiting 'finish' and does not
-// expose it, so the test polls the file until it holds the exact expected
-// content before asserting. Matching the full content (rather than "non-empty
-// and stable for two reads") avoids a mid-flush race where only the header has
-// landed, and returns immediately once complete rather than spinning to the
-// deadline.
-async function waitForContent(file: string, expected: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  for (;;) {
-    try {
-      if (fs.readFileSync(file, "utf8") === expected) return;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    }
-    if (Date.now() > deadline)
-      throw new Error(`output file ${file} never reached the expected content`);
-    await new Promise<void>((r) => setTimeout(r, 20));
-  }
-}
-
 test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
   // The result CSV is the most sensitive artifact the tool produces, so a file
   // path must be created owner-only rather than inherit a world/group-readable
   // umask default (the prior unprotected createWriteStream left it 0644 here).
+  // Awaiting the returned promise guarantees the rows are flushed, so the read
+  // and stat are deterministic with no polling.
   if (process.platform === "win32") return;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
   // 0o022 is the umask under which the old write produced a world-readable 0644.
   const prevUmask = process.umask(0o022);
   try {
     const out = path.join(dir, "results.csv");
-    writeOutput(
+    await writeOutput(
       out,
       ["a", "b"],
       [
@@ -343,7 +326,7 @@ test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () =
         ["3", "4"],
       ],
     );
-    await waitForContent(out, "a,b\n1,2\n3,4\n");
+    expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
     expect(fs.statSync(out).mode & 0o777).toBe(0o600);
   } finally {
     process.umask(prevUmask);
@@ -351,7 +334,38 @@ test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () =
   }
 });
 
-test("writeOutput: the stdout branch writes to process.stdout unchanged", () => {
+test("writeOutput: a mid-write stream error rejects rather than crashing", async () => {
+  // A write that fails after the stream opens (here a Writable whose first write
+  // errors) must surface as a rejected promise the caller's error boundary can
+  // map to an exit code -- not an unhandled 'error' event that crashes the
+  // process. Asserting the rejection is itself the proof it was handled: an
+  // unguarded 'error' would tear the worker down instead.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "psilink-writeoutput-err-"),
+  );
+  try {
+    vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+      // createOwnerOnlyWriteStream has already opened a real fd and handed it in;
+      // close it so the substitute stream does not leak it.
+      const fd = (args[1] as { fd?: number } | undefined)?.fd;
+      if (typeof fd === "number") fs.closeSync(fd);
+      return new Writable({
+        write(_chunk, _enc, cb) {
+          cb(new Error("disk full"));
+        },
+      }) as unknown as fs.WriteStream;
+    });
+    await expect(
+      writeOutput(path.join(dir, "results.csv"), ["a"], [["1"]]),
+    ).rejects.toThrow("disk full");
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOutput: the stdout branch writes to process.stdout unchanged", async () => {
   // No output path: the rows go to process.stdout with no file and no permission
   // handling, exactly as before.
   const chunks: string[] = [];
@@ -364,7 +378,7 @@ test("writeOutput: the stdout branch writes to process.stdout unchanged", () => 
     return true;
   }) as typeof process.stdout.write);
   try {
-    writeOutput(undefined, ["a", "b"], [["1", "2"]]);
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]]);
   } finally {
     stdoutSpy.mockRestore();
   }

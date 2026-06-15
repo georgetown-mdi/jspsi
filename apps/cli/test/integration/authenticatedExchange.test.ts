@@ -78,8 +78,10 @@ function preparedFor(identity: string, rows: Array<Record<string, string>>) {
 // union narrows correctly.
 type ConfigFactory = () => ProtocolConnectionConfig;
 
-// writeOutput closes its write stream without awaiting 'finish', so the file may
-// lag a tick behind runProtocol resolving. Poll until it is present and stable.
+// writeOutput now resolves on the stream's 'finish' and runProtocol awaits it, so
+// the file is fully flushed before runProtocol resolves; this poll is retained as
+// cheap insurance against filesystem visibility lag, waiting until it is present
+// and byte-stable.
 async function readWhenReady(file: string): Promise<string> {
   const deadline = Date.now() + 5_000;
   let last = "";

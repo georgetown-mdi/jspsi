@@ -812,7 +812,7 @@ export async function runProtocol(
       prepared.metadata,
       partnerPayload,
     );
-    writeOutput(output, headers, rows);
+    await writeOutput(output, headers, rows);
 
     // Persist the self-attested record after the results: it is a secondary
     // audit artifact, so it is written last and its failure is non-fatal (see

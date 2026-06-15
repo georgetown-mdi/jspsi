@@ -129,15 +129,14 @@ function testOptions(label: string): CommonBootstrapOptions {
   };
 }
 
-// writeOutput emits the header and each row as separate write() calls and closes
-// the stream without awaiting 'finish', so a reader can briefly observe a partial
-// file (header only, or header plus some rows). Poll until the file holds exactly
-// the expected line count (header + dataRows) AND is byte-stable across two reads,
-// so a partial flush that happens to repeat within one 20 ms window is never
-// mistaken for the complete output. On timeout, report the last content seen, so a
-// genuine stall (or an unexpected row count) is diagnosable rather than blamed on
-// an empty file. Stricter than the sibling authenticatedExchange test's
-// stability-only poll because here the exact output shape is known up front.
+// writeOutput now resolves on the stream's 'finish' and runProtocol awaits it, so
+// the output file is fully flushed by the time runProtocol resolves; this poll is
+// retained as cheap insurance against filesystem visibility lag. It waits until the
+// file holds exactly the expected line count (header + dataRows) AND is byte-stable
+// across two reads. On timeout, report the last content seen, so a genuine stall
+// (or an unexpected row count) is diagnosable rather than blamed on an empty file.
+// Stricter than the sibling authenticatedExchange test's stability-only poll
+// because here the exact output shape is known up front.
 async function readStableOutput(
   file: string,
   dataRows: number,
