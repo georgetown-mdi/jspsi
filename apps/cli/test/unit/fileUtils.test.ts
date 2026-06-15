@@ -291,8 +291,8 @@ describe("writeFileAtomic", () => {
 // --- createOwnerOnlyWriteStream ----------------------------------------------
 
 // Write `text` through the stream and resolve once it is fully flushed and
-// closed (writeOutput likewise closes without awaiting, so the test drives the
-// lifecycle explicitly before stat'ing the file).
+// closed. createOwnerOnlyWriteStream returns the raw stream to its caller, so the
+// test drives the write/close lifecycle explicitly before stat'ing the file.
 function writeAndClose(stream: fs.WriteStream, text: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     stream.on("error", reject);
@@ -350,6 +350,22 @@ describe("createOwnerOnlyWriteStream", () => {
     expect(() => createOwnerOnlyWriteStream(p)).toThrow("EPERM");
 
     expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+  });
+
+  test("closes the descriptor if truncation fails rather than leaking it (POSIX)", () => {
+    // fchmod succeeds but the truncate (which runs before createWriteStream takes
+    // ownership of the fd) fails: the writer must close the open descriptor on the
+    // way out rather than leak it.
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "trunc-fail.csv");
+    const closeSpy = vi.spyOn(fs, "closeSync");
+    vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
+      throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
+    });
+
+    expect(() => createOwnerOnlyWriteStream(p)).toThrow("EINVAL");
+
+    expect(closeSpy).toHaveBeenCalled();
   });
 });
 

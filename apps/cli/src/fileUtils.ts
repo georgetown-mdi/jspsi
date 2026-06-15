@@ -682,13 +682,20 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     0o600,
   );
   try {
+    // fchmod forces exactly 0600 regardless of a relaxed umask and tightens an
+    // existing over-permissive file; only once that has succeeded is the file
+    // truncated to overwrite it (the no-O_TRUNC create above did not). Both run
+    // before createWriteStream takes ownership of the descriptor, so a failure in
+    // either must close fd here rather than leak it.
     fs.fchmodSync(fd, 0o600);
+    fs.ftruncateSync(fd, 0);
   } catch (err) {
     // Refuse to write the result CSV where we cannot make it owner-only (e.g. a
     // pre-existing file owned by another user, which fchmod rejects with EPERM):
     // close the descriptor and let the failure propagate rather than leave PII at
-    // relaxed permissions. Because the file was not truncated above, an existing
-    // file's content survives intact and no empty orphan is left behind.
+    // relaxed permissions. Because the truncate runs only after fchmod succeeds,
+    // a chmod failure leaves an existing file's content intact and no empty
+    // orphan behind.
     try {
       fs.closeSync(fd);
     } catch {
@@ -696,9 +703,6 @@ export function createOwnerOnlyWriteStream(destPath: string): fs.WriteStream {
     }
     throw err;
   }
-  // Mode is now owner-only; truncate to overwrite (the create above did not),
-  // then stream the rows in from offset 0.
-  fs.ftruncateSync(fd, 0);
   return fs.createWriteStream(destPath, {
     fd,
     encoding: "utf8",
