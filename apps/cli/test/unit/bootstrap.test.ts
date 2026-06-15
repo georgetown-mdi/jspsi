@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
@@ -19,6 +20,7 @@ import {
   connectionFromURL,
   diffConnectionAgainstTarget,
   generateSharedSecret,
+  loadInputRows,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
@@ -1376,4 +1378,82 @@ test("diffConnectionAgainstTarget: a filedrop path differing only by backslashes
   };
   const r = diffConnectionAgainstTarget(existing, target);
   expect(r.conflicts).toEqual([]);
+});
+
+// --- loadInputRows -----------------------------------------------------------
+
+/** A binary readable emitting `content` (then EOF), as a file or stdin stream
+ *  would; an empty string yields an immediately-ending stream like an empty file. */
+function streamOf(content: string): Readable {
+  const s = new Readable({ read() {} });
+  if (content.length > 0) s.push(Buffer.from(content, "utf8"));
+  s.push(null);
+  return s;
+}
+
+/** Run `fn` with `process.stdin` replaced by `stub`, restoring it afterward.
+ *  Awaits `fn` so the swap outlives the async stdin read before it is undone. */
+async function withStdin<T>(
+  stub: Readable,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  const spy = vi
+    .spyOn(process, "stdin", "get")
+    .mockReturnValue(stub as unknown as typeof process.stdin);
+  try {
+    return await fn();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+test("loadInputRows: a CSV piped via `-` yields the same rows as the equivalent file (invite path)", async () => {
+  // invite reads its input through loadInputRows with allowStdin enabled; a CSV
+  // piped through stdin must parse to the same rows and columns as the file.
+  const csv = "first_name,last_name,dob\nAlice,Smith,1990-01-02\n";
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, csv);
+    const fromFile = await loadInputRows(file, { allowStdin: true });
+    const fromStdin = await withStdin(streamOf(csv), () =>
+      loadInputRows("-", { allowStdin: true }),
+    );
+    expect(fromStdin).toEqual(fromFile);
+    expect(fromStdin.columns).toEqual(["first_name", "last_name", "dob"]);
+    expect(fromStdin.rawRows).toEqual([
+      { first_name: "Alice", last_name: "Smith", dob: "1990-01-02" },
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRows: empty stdin is handled like an empty file", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
+  try {
+    const empty = path.join(dir, "empty.csv");
+    fs.writeFileSync(empty, "");
+    const fromFile = await loadInputRows(empty, { allowStdin: true });
+    const fromStdin = await withStdin(streamOf(""), () =>
+      loadInputRows("-", { allowStdin: true }),
+    );
+    expect(fromStdin).toEqual(fromFile);
+    expect(fromStdin.rawRows).toEqual([]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRows: `-` is rejected with exit 69 when stdin is disallowed (accept path)", async () => {
+  // accept passes allowStdin: false because it reads its y/N confirmation from
+  // stdin; `-` must be a clear rejection naming a file path, never a silent
+  // decline. The default is also stdin-disabled.
+  await expect(loadInputRows("-", { allowStdin: false })).rejects.toMatchObject(
+    { exitCode: 69 },
+  );
+  await expect(loadInputRows("-", { allowStdin: false })).rejects.toThrow(
+    /file path/,
+  );
+  await expect(loadInputRows("-")).rejects.toThrow(/stdin/);
 });

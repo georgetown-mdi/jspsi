@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
@@ -46,7 +45,7 @@ import {
   durationFlagSeconds,
   LOG_LEVELS,
   singleValue,
-  validateInputFile,
+  openInputSource,
 } from "../util/cli";
 import { DURATION_VALUE_HELP } from "../util/duration";
 import { runProtocol, type AuthPersist } from "../protocol";
@@ -400,12 +399,18 @@ export function expiresFromNow(durationSeconds: number): string {
 
 // --- Input data --------------------------------------------------------------
 
-/** Load and parse a CSV input file into raw rows and column names. */
+/**
+ * Load and parse a CSV input into raw rows and column names. `input` is a file
+ * path or `-` for stdin; the caller gates stdin via `allowStdin` because the two
+ * commands sharing this loader differ on it -- `invite` supports `-`, `accept`
+ * rejects it (it reads its confirmation prompt from stdin). Defaults to stdin
+ * disabled so the shared loader never enables it unconditionally.
+ */
 export async function loadInputRows(
   input: string,
+  { allowStdin = false }: { allowStdin?: boolean } = {},
 ): Promise<{ rawRows: Array<Record<string, string>>; columns: string[] }> {
-  validateInputFile(input);
-  const csvResult = await loadCSVFile(fs.createReadStream(input));
+  const csvResult = await loadCSVFile(openInputSource(input, { allowStdin }));
   return {
     rawRows: csvResult.data as Array<Record<string, string>>,
     columns: csvResult.meta.fields ?? [],
@@ -815,7 +820,7 @@ export async function promptConfirm(question: string): Promise<boolean> {
  * the bootstrap commands; routing the whole handler body through it -- including
  * option parsing and the accept confirmation prompt -- means a thrown or
  * rejected step exits cleanly rather than crashing with an unhandled rejection.
- * The `?? exitCode` rung is load-bearing: `validateInputFile` and `buildDataSpec`
+ * The `?? exitCode` rung is load-bearing: `openInputSource` and `buildDataSpec`
  * throw plain `Error`s carrying `exitCode`, so a missing input file keeps its own
  * exit code rather than collapsing to 69.
  *

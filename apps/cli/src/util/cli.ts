@@ -259,19 +259,42 @@ function writeAll(fd: number, text: string): void {
 }
 
 /**
- * Validate that `input` is a readable file path; throws on failure.
- * Thrown errors carry an `exitCode` property for the caller to forward to
- * `process.exit`. Stdin (`-`) throws with `exitCode: 1`; a missing file
- * throws with `exitCode: 69`.
+ * Resolve a CSV input positional to the readable stream core's `loadCSVFile`
+ * consumes: `process.stdin` when `input` is `-`, otherwise the file at `input`,
+ * opened with `fs.createReadStream` after confirming it exists. The pipeline is
+ * already stream-based, so the loaders feed the returned stream to `loadCSVFile`
+ * unchanged whether it is a file or stdin -- papaparse consumes either.
+ *
+ * Thrown errors carry an `exitCode` for the caller to forward to `process.exit`:
+ * a missing file throws with `exitCode: 69`, exactly as before.
+ *
+ * `allowStdin` gates the `-` case. Every input command supports stdin except
+ * `accept`, which reads its interactive y/N confirmation from `process.stdin`
+ * (`promptConfirm`); stdin is single-use, so a stdin CSV would starve that prompt
+ * into a silent decline. `accept` passes `allowStdin: false`, turning `-` into an
+ * actionable rejection (`exitCode: 69`) that names the file-path alternative
+ * rather than returning a stream. The default is `false` so a new caller does not
+ * silently inherit stdin support. (Re-enable for `accept` once it gains a
+ * non-interactive confirmation bypass -- board item 200218548.)
  */
-export function validateInputFile(input: string): void {
-  if (input === "-")
-    throw Object.assign(
-      new Error("reading from stdin is not yet implemented"),
-      { exitCode: 69 },
-    );
+export function openInputSource(
+  input: string,
+  { allowStdin = false }: { allowStdin?: boolean } = {},
+): NodeJS.ReadableStream {
+  if (input === "-") {
+    if (!allowStdin)
+      throw Object.assign(
+        new Error(
+          "accept cannot read its input CSV from stdin (it reads the y/N " +
+            "confirmation from stdin); pass a file path instead of `-`",
+        ),
+        { exitCode: 69 },
+      );
+    return process.stdin;
+  }
   if (!fs.existsSync(input))
     throw Object.assign(new Error(`${input} does not exist`), { exitCode: 69 });
+  return fs.createReadStream(input);
 }
 
 /** Write formatted exchange results to a file or stdout as CSV. */

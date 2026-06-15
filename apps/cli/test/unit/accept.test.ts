@@ -185,6 +185,40 @@ test("validateAccept: online rejects a missing input file before the prompt, pre
   ).rejects.toMatchObject({ exitCode: 69 });
 });
 
+test("validateAccept: `-` as the input is rejected with exit 69 before the prompt, not silently declined", async () => {
+  // accept reads its y/N confirmation from stdin, so it cannot also take the CSV
+  // there. validateAccept runs before promptConfirm, so the `-` rejection (exit
+  // 69, naming a file path) fires up front instead of a stdin CSV starving the
+  // prompt into a silent EOF decline.
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  await expect(
+    validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        invitation: encoded,
+        input: "-",
+      },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toMatchObject({ exitCode: 69 });
+  await expect(
+    validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        invitation: encoded,
+        input: "-",
+      },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toThrow(/file path/);
+});
+
 test("validateAccept: an unsupported URL is rejected before the input file is read", async () => {
   const encoded = await encodeInvitation(
     sampleToken(new Date(Date.now() + 3_600_000).toISOString()),

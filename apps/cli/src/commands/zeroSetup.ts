@@ -34,7 +34,7 @@ import {
   configureLogFile,
   exitWithError,
   parseOrExit,
-  validateInputFile,
+  openInputSource,
 } from "../util/cli";
 import {
   addCommonBootstrapOptions,
@@ -317,9 +317,9 @@ async function prepareDataset(
 ): Promise<PreparedExchange> {
   const log = getLogger("psilink");
 
-  validateInputFile(input);
-
-  const csvResult = await loadCSVFile(fs.createReadStream(input));
+  const csvResult = await loadCSVFile(
+    openInputSource(input, { allowStdin: true }),
+  );
   const rawRows = csvResult.data as Array<Record<string, string>>;
   const prepared = prepareForExchange(
     {},

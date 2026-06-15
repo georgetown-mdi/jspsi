@@ -81,7 +81,8 @@ export function builder(cmd: Argv): Argv {
           "partner out-of-band. Online: also connect, wait for the partner to\n" +
           "accept, and run the exchange. Offline, linkage terms are taken from a\n" +
           "pre-existing configuration file when present (the INPUT_FILE, if given,\n" +
-          "is checked against it) and inferred from INPUT_FILE otherwise.",
+          "is checked against it) and inferred from INPUT_FILE otherwise.\n\n" +
+          "INPUT_FILE may be `-` to read the CSV from stdin.",
       ),
   )
     .option("accept-timeout", {
@@ -263,7 +264,7 @@ export async function validateInvite(params: {
           "first and a later acceptance will be rejected.",
       );
 
-    const rows = await loadInputRows(input);
+    const rows = await loadInputRows(input, { allowStdin: true });
     const { dataSpec, warnings } = buildDataSpec({ identity, rows });
     for (const w of warnings) log.warn(w);
 
@@ -317,7 +318,7 @@ export async function validateInvite(params: {
       // standardizations to produce the config's linkage fields. Fail naming the
       // unsatisfiable fields rather than minting an invitation the input cannot
       // honor.
-      const rows = await loadInputRows(resolved.input);
+      const rows = await loadInputRows(resolved.input, { allowStdin: true });
       const unsatisfied = unsatisfiedLinkageFields(
         rows.columns,
         configTerms,
@@ -382,7 +383,7 @@ export async function validateInvite(params: {
     keyPath: options.keyFile,
   });
 
-  const rows = await loadInputRows(resolved.input);
+  const rows = await loadInputRows(resolved.input, { allowStdin: true });
   const { dataSpec, warnings } = buildDataSpec({ identity, rows });
   for (const w of warnings) log.warn(w);
 
