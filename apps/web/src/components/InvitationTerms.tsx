@@ -65,10 +65,11 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
             </List.Item>
           ))}
         </List>
-        {summary.swap !== undefined && (
+        {summary.hasSwap && (
           <Text size="xs" c="dimmed">
-            {summary.swap[0]} and {summary.swap[1]} may be matched in either
-            order
+            {summary.swap !== undefined
+              ? `${summary.swap[0]} and ${summary.swap[1]} may be matched in either order`
+              : "Two of these elements may be matched in either order"}
           </Text>
         )}
       </Stack>

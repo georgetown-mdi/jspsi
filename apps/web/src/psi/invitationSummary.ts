@@ -89,10 +89,15 @@ export interface InvitationKeySummary {
   name: string;
   /** Ordered elements combined to form the key. */
   elements: Array<InvitationKeyElementSummary>;
+  /** True when the key declares a swap (two elements matched in either order). */
+  hasSwap: boolean;
   /**
-   * The two elements the receiver matches in either order, resolved to their
-   * field labels (or the sanitized raw identifier when one does not resolve to
-   * an element); present only when the key declares a swap.
+   * The two swapped elements' field labels, present only when both swap
+   * references resolve to elements with *distinct* labels (the common case,
+   * e.g. ["Last name", "First name"]). Absent when an identifier names no
+   * element or the two would carry the same label: a repeated label or an echoed
+   * raw identifier reads as a worse note than a generic one, so the renderer
+   * falls back to a generic swap note keyed off {@link hasSwap} instead.
    */
   swap?: [string, string];
   /**
@@ -216,24 +221,31 @@ function summarizeKey(
     }),
   );
 
+  const hasSwap = key.swap !== undefined;
   let swap: [string, string] | undefined;
   if (key.swap !== undefined) {
     // A swap names two elements by their effective identifier (element `name`
     // if present, otherwise `field`); resolve each to its field label so the
-    // note reads in the same terms as the element list.
+    // note reads in the same terms as the element list. The schema enforces
+    // that `name ?? field` is unique within a key, so this Map never drops an
+    // element. The note names the two fields only when both references resolve
+    // to distinct labels; otherwise the renderer shows a generic note (see the
+    // `swap` field doc), since a repeated label or a raw unresolved identifier
+    // would mislead rather than inform.
     const labelByIdentifier = new Map(
       key.elements.map((element) => [
         element.name ?? element.field,
         labelForField(element.field),
       ]),
     );
-    const resolve = (identifier: string): string =>
-      labelByIdentifier.get(identifier) ?? sanitizeForDisplay(identifier);
-    swap = [resolve(key.swap[0]), resolve(key.swap[1])];
+    const first = labelByIdentifier.get(key.swap[0]);
+    const second = labelByIdentifier.get(key.swap[1]);
+    if (first !== undefined && second !== undefined && first !== second)
+      swap = [first, second];
   }
 
   const hasNonDefaultRule =
-    swap !== undefined ||
+    hasSwap ||
     elements.some(
       (element) =>
         element.transforms.length > 0 || element.fuzzyComparison !== undefined,
@@ -242,6 +254,7 @@ function summarizeKey(
   return {
     name: sanitizeForDisplay(key.name),
     elements,
+    hasSwap,
     swap,
     hasNonDefaultRule,
   };
@@ -260,16 +273,36 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     terms.linkageFields.map((field) => [field.name, field.type]),
   );
 
+  // Collapse fields that are fully identical for display -- same semantic-type
+  // label and same constraints -- so several fields of one type (the schema
+  // permits, e.g., a maiden and a current name both typed `firstName`) do not
+  // list the same line twice with nothing to tell them apart (the field `name`
+  // that would distinguish them is partner-controlled and deliberately not
+  // shown). Fields whose constraints differ stay distinct, since the constraint
+  // text then distinguishes them. The dedupe key joins the label and the
+  // constraint phrases: each phrase is a distinct fixed string in a fixed order
+  // (the one free value is embedded verbatim behind a fixed prefix), so the
+  // joined key collides only when the rendered lines are themselves identical.
+  const seenFields = new Set<string>();
+  const linkageFields: Array<InvitationFieldSummary> = [];
+  for (const field of terms.linkageFields) {
+    const summary = {
+      label: FIELD_TYPE_LABELS[field.type],
+      constraints: describeConstraints(field),
+    };
+    const dedupeKey = `${summary.label} ${summary.constraints.join(" ")}`;
+    if (seenFields.has(dedupeKey)) continue;
+    seenFields.add(dedupeKey);
+    linkageFields.push(summary);
+  }
+
   const summary: InvitationSummary = {
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
-    linkageFields: terms.linkageFields.map((field) => ({
-      label: FIELD_TYPE_LABELS[field.type],
-      constraints: describeConstraints(field),
-    })),
+    linkageFields,
   };
 
   if (terms.legalAgreement !== undefined) {

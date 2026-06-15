@@ -244,11 +244,78 @@ describe("summarizeInvitation", () => {
 
     // A swap is flagged, and resolves to the swapped elements' field labels.
     expect(swapped.hasNonDefaultRule).toBe(true);
+    expect(swapped.hasSwap).toBe(true);
     expect(swapped.swap).toEqual(["Last name", "First name"]);
 
     // A fuzzy expansion is flagged, and maps to its plain-language label.
     expect(fuzzy.hasNonDefaultRule).toBe(true);
     expect(fuzzy.elements[0].fuzzyComparison).toBe("adjacent years");
+  });
+
+  test("flags a swap but withholds field labels when they would not distinguish the two elements", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "first_name", type: "firstName" }],
+        linkageKeys: [
+          {
+            // Two elements of the same type, distinguished only by alias: the
+            // schema permits this, but both resolve to "First name", so naming
+            // them would read as "First name and First name".
+            name: "alias swap",
+            elements: [
+              { field: "first_name", name: "given" },
+              { field: "first_name", name: "preferred" },
+            ],
+            swap: ["given", "preferred"],
+          },
+          {
+            // A swap that references an element identifier present on no element
+            // (schema-valid: swap references are not cross-checked against the
+            // elements). The note must not echo the raw identifier.
+            name: "dangling swap",
+            elements: [{ field: "first_name" }],
+            swap: ["first_name", "missing"],
+          },
+        ],
+      }),
+    );
+
+    for (const key of summary.linkageKeys) {
+      // The swap is still flagged so it is never silently consented to ...
+      expect(key.hasSwap).toBe(true);
+      expect(key.hasNonDefaultRule).toBe(true);
+      // ... but the specific labels are withheld, so the renderer falls back to
+      // a generic note rather than a duplicated or raw-identifier one.
+      expect(key.swap).toBeUndefined();
+    }
+  });
+
+  test("collapses fields that render identically but keeps constraint-distinct ones", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          // Two firstName fields with no constraints render identically.
+          { name: "given_name", type: "firstName" },
+          { name: "preferred_name", type: "firstName" },
+          // A third firstName field whose constraints differ stays distinct.
+          {
+            name: "legal_name",
+            type: "firstName",
+            constraints: { allowedCharacters: "A-Z " },
+          },
+          { name: "dob", type: "dateOfBirth" },
+        ],
+        linkageKeys: [{ name: "FN", elements: [{ field: "given_name" }] }],
+      }),
+    );
+
+    // The two unconstrained "First name" entries collapse to one; the
+    // constraint-bearing one and the date field stay distinct.
+    expect(summary.linkageFields).toEqual([
+      { label: "First name", constraints: [] },
+      { label: "First name", constraints: ["characters limited to A-Z "] },
+      { label: "Date of birth", constraints: [] },
+    ]);
   });
 
   test("surfaces each field's declared constraints, summarizing the denylist", () => {
@@ -367,6 +434,34 @@ describe("accept screen: terms render from a decoded token", () => {
     );
     // The field constraint surfaces under the data used.
     expect(html).toContain("characters limited to A-Z");
+  });
+
+  test("renders a generic swap note when the swapped fields share a label", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "first_name", type: "firstName" }],
+          linkageKeys: [
+            {
+              name: "alias swap",
+              elements: [
+                { field: "first_name", name: "given" },
+                { field: "first_name", name: "preferred" },
+              ],
+              swap: ["given", "preferred"],
+            },
+          ],
+        }),
+      },
+    });
+    // The swap is still flagged, but the note is generic rather than naming
+    // "First name and First name".
+    expect(html).toContain("Non-standard matching");
+    expect(html).toContain(
+      "Two of these elements may be matched in either order",
+    );
+    expect(html).not.toContain("First name and First name");
   });
 
   test("shows no non-default-rule flag for a plain term", () => {
