@@ -143,6 +143,29 @@ test("parses shared options including maxReconnectAttempts on an SFTP config", (
   expect(result.data.options?.maxReconnectAttempts).toBe(5);
 });
 
+test("peer_timeout_ms of zero is rejected", () => {
+  // peerTimeoutMs is the per-await peer-inactivity liveness budget; a zero would
+  // fire every transport await immediately and disable the liveness control. The
+  // CLI's --peer-timeout already rejects zero, so the schema must close the same
+  // hole on the config/programmatic path (snake_case, as read from disk).
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peer_timeout_ms: 0 },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("a positive peer_timeout_ms is still accepted", () => {
+  // Teeth for the test above: the rejection is the zero, not the field.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peer_timeout_ms: 1 },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.peerTimeoutMs).toBe(1);
+});
+
 // --- provider_options (opaque, verbatim) -------------------------------------
 
 test("provider_options keys pass through verbatim (snake_case preserved)", () => {

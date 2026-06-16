@@ -344,8 +344,10 @@ const SFTPProxySchema: z.ZodType<SFTPProxy> = z.object({
 export interface SharedOptions {
   /**
    * Total milliseconds to wait for the partner before giving up; default:
-   * 3600000. The effective limit is the minimum of this and the remaining
-   * shared-secret lifetime.
+   * 3600000. Must be a positive integer: it is the per-await peer-inactivity
+   * liveness budget, so a zero value would fire every transport await
+   * immediately and disable the liveness control. The effective limit is the
+   * minimum of this and the remaining shared-secret lifetime.
    */
   peerTimeoutMs?: number;
   /**
@@ -361,7 +363,11 @@ export interface SharedOptions {
 }
 
 const sharedOptionsFields = {
-  peerTimeoutMs: z.int().nonnegative().optional(),
+  // positive, not nonnegative: peerTimeoutMs is the per-await liveness budget,
+  // so a zero would fire every transport await immediately and disable the
+  // liveness control (the CLI's --peer-timeout already rejects zero; this closes
+  // the same hole on the config/programmatic path).
+  peerTimeoutMs: z.int().positive().optional(),
   serverConnectTimeoutMs: z.int().nonnegative().optional(),
   maxReconnectAttempts: z.int().nonnegative().optional(),
 };
