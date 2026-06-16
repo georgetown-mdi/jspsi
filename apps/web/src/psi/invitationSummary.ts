@@ -42,6 +42,22 @@ const FUZZY_COMPARISON_LABELS: Record<
   adjacentYears: "adjacent years",
 };
 
+/**
+ * Whether today's PSI exchange actually applies the inviter's `deduplicate`
+ * setting and per-element `generateFuzzyComparisons`. Both are surfaced on the
+ * consent screen under the terms-as-proposed model, but the run does not yet
+ * honor them -- matching is hard-wired to one-to-one cardinality and fuzzy
+ * expansion is unimplemented. The screen flags the affected rows as
+ * proposed-but-not-applied off these flags, rather than stating a matching
+ * behavior that does not occur. Flip a flag to `true` when the exchange wires
+ * the feature in (tracked on the product board); the on-screen flag then
+ * disappears, and the paired render tests fail loudly so the consent copy is
+ * not left stale. Left as bare literals (not annotated) so they read as the
+ * single source of truth for that status.
+ */
+const DEDUPLICATE_APPLIED = false;
+const FUZZY_COMPARISONS_APPLIED = false;
+
 /** Legal-agreement context, with the partner-controlled free text sanitized. */
 export interface InvitationLegalAgreementSummary {
   /** Agreement identifier (e.g. "MOU-2025-0042"), sanitized for display. */
@@ -95,6 +111,13 @@ export interface InvitationKeyElementSummary {
   transforms: Array<InvitationTransformSummary>;
   /** Plain-language label for the fuzzy-comparison expansion, if any. */
   fuzzyComparison?: string;
+  /**
+   * Whether today's exchange actually applies the fuzzy comparison above (see
+   * {@link FUZZY_COMPARISONS_APPLIED}). Meaningful only alongside a
+   * `fuzzyComparison`; the renderer flags that annotation as proposed-but-not-
+   * applied when this is false.
+   */
+  fuzzyComparisonApplied: boolean;
 }
 
 /**
@@ -170,6 +193,13 @@ export interface InvitationSummary {
    * inviter's declared deduplicate setting).
    */
   deduplicate: boolean;
+  /**
+   * Whether today's exchange actually applies the deduplicate setting above
+   * (see {@link DEDUPLICATE_APPLIED}). False while matching is hard-wired
+   * one-to-one; the renderer flags the duplicate-matches row as proposed-but-
+   * not-applied when a looser setting is proposed but this is false.
+   */
+  deduplicateApplied: boolean;
   /**
    * Linkage keys (records are matched on these), in the inviter's order, each
    * carrying its ordered elements and matching rules.
@@ -287,6 +317,7 @@ function summarizeKey(
         element.generateFuzzyComparisons !== undefined
           ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
           : undefined,
+      fuzzyComparisonApplied: FUZZY_COMPARISONS_APPLIED,
     }),
   );
 
@@ -381,6 +412,7 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,
     deduplicate: terms.deduplicate,
+    deduplicateApplied: DEDUPLICATE_APPLIED,
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
     linkageFields,
   };

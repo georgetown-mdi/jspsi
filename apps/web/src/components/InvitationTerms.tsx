@@ -40,10 +40,15 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
       <Group gap="xs">
         <Text size="sm">{summary.name}</Text>
         {summary.hasNonDefaultRule && (
+          // role="img" makes the aria-label the badge's accessible name: a
+          // Mantine Badge renders as a plain <div>, on which an aria-label alone
+          // is unreliably exposed to assistive tech and, where honored, would
+          // clash with the visible text.
           <Badge
             size="xs"
             color="yellow"
             variant="light"
+            role="img"
             aria-label="Warning: this key uses non-standard matching rules"
           >
             Non-standard matching
@@ -64,6 +69,11 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
                 <Text span size="xs" c="dimmed">
                   {" "}
                   - fuzzy match: {element.fuzzyComparison}
+                  {/* Flag a proposed expansion the run does not yet perform, so
+                      the acceptor is not told a looser match occurs when it
+                      does not. */}
+                  {!element.fuzzyComparisonApplied &&
+                    " (proposed; not yet applied)"}
                 </Text>
               )}
             </Text>
@@ -145,6 +155,14 @@ export function InvitationTerms({
               ? "A record may match more than one of the partner's records."
               : "Each record matches at most one of the partner's records."}
           </Text>
+          {/* A proposed looser setting the run does not yet honor: flag it
+              rather than let the line above read as the behavior in force. */}
+          {summary.deduplicate && !summary.deduplicateApplied && (
+            <Text size="xs" c="dimmed">
+              Your partner proposes this, but this version of the exchange does
+              not yet apply it; each record still matches at most one.
+            </Text>
+          )}
         </Term>
 
         <Term label="Records are matched on">

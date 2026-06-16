@@ -15,7 +15,11 @@ import { summarizeInvitation } from "@psi/invitationSummary";
 
 import type { ReactElement } from "react";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type {
+  InvitationToken,
+  LinkageKeyElement,
+  LinkageTerms,
+} from "@psilink/core";
 
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 import type { DecodeState } from "@components/AcceptInvitationPanel";
@@ -442,6 +446,173 @@ describe("summarizeInvitation", () => {
     // A field with no constraints contributes nothing.
     expect(dob.constraints).toEqual([]);
   });
+
+  test("labels every fuzzy-comparison expansion in plain language", () => {
+    const fuzzyLabelFor = (
+      value: NonNullable<LinkageKeyElement["generateFuzzyComparisons"]>,
+    ) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "dob", type: "dateOfBirth" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "dob", generateFuzzyComparisons: value }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].elements[0].fuzzyComparison;
+
+    // All three enum values map to a distinct plain-language label, so a typo
+    // or swapped entry in the lookup cannot ship unnoticed.
+    expect(fuzzyLabelFor("transpositions")).toBe("two-digit transpositions");
+    expect(fuzzyLabelFor("editDistances")).toBe("single-character edits");
+    expect(fuzzyLabelFor("adjacentYears")).toBe("adjacent years");
+  });
+
+  test("renders transform parameter values of every type", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "ssn",
+                transform: [
+                  {
+                    function: "f",
+                    params: {
+                      s: "text",
+                      n: 5,
+                      b: true,
+                      nul: null,
+                      undef: undefined,
+                      obj: { a: 1 },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    // Each parameter is a "key: value" line: primitives in plain form,
+    // null/undefined made explicit, and a structured value JSON-encoded.
+    expect(summary.linkageKeys[0].elements[0].transforms[0].params).toEqual([
+      "s: text",
+      "n: 5",
+      "b: true",
+      "nul: null",
+      "undef: ",
+      'obj: {"a":1}',
+    ]);
+  });
+
+  test("surfaces a transform with no declared parameters as an empty list", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "ssn", transform: [{ function: "trim" }] }],
+          },
+        ],
+      }),
+    );
+    expect(summary.linkageKeys[0].elements[0].transforms).toEqual([
+      { function: "trim", params: [] },
+    ]);
+  });
+
+  test("sanitizes payload column names on both the send and receive sides", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        payload: {
+          send: [{ name: "out" + BEL }],
+          receive: [{ name: "in" + BEL }],
+        },
+      }),
+    );
+    // Send and receive are independent partner-controlled paths; each is
+    // sanitized before display.
+    expect(summary.payload?.send[0]).not.toContain(BEL);
+    expect(summary.payload?.send[0]).toContain("\\x07");
+    expect(summary.payload?.receive[0]).not.toContain(BEL);
+    expect(summary.payload?.receive[0]).toContain("\\x07");
+  });
+
+  test("sanitizes a swap label resolved from an unknown field identifier", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        // Neither swapped element resolves to a known field, so each falls back
+        // to its sanitized raw identifier -- which must not carry the raw byte
+        // into the swap note.
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "alpha" + BEL }, { field: "beta" + BEL }],
+            swap: ["alpha" + BEL, "beta" + BEL],
+          },
+        ],
+      }),
+    );
+    const swap = summary.linkageKeys[0].swap;
+    expect(swap).toBeDefined();
+    expect(swap?.[0]).not.toContain(BEL);
+    expect(swap?.[0]).toContain("\\x07");
+    expect(swap?.[1]).not.toContain(BEL);
+  });
+
+  test("emits no constraint phrase for no-op constraint settings", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          // affixesAllowed=true and validOnly=false are the default direction:
+          // neither should produce a phrase (only the opposite direction does).
+          {
+            name: "first_name",
+            type: "firstName",
+            constraints: { affixesAllowed: true },
+          },
+          { name: "ssn", type: "ssn", constraints: { validOnly: false } },
+        ],
+        linkageKeys: [{ name: "K", elements: [{ field: "ssn" }] }],
+      }),
+    );
+    expect(summary.linkageFields.map((field) => field.constraints)).toEqual([
+      [],
+      [],
+    ]);
+  });
+
+  test("marks deduplicate and fuzzy comparisons as proposed but not yet applied", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        deduplicate: true,
+        linkageFields: [{ name: "dob", type: "dateOfBirth" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+            ],
+          },
+        ],
+      }),
+    );
+    // Both are surfaced (terms as proposed) but flagged as not run by today's
+    // exchange, so the renderer marks them rather than state a behavior that
+    // does not occur.
+    expect(summary.deduplicateApplied).toBe(false);
+    expect(summary.linkageKeys[0].elements[0].fuzzyComparisonApplied).toBe(
+      false,
+    );
+  });
 });
 
 describe("accept screen: terms render from a decoded token", () => {
@@ -529,8 +700,12 @@ describe("accept screen: terms render from a decoded token", () => {
     // The transform's function name and the fuzzy expansion's plain-language
     // label surface on the elements.
     expect(html).toContain("transformed (substring)");
-    // ... including its parameters, each on its own line.
+    // ... including its parameters, each on its own line, never joined: a
+    // separator inside one value must not read as additional parameters
+    // (mirrors the payload-column disambiguation below).
     expect(html).toContain("start: 1");
+    expect(html).toContain("length: 1");
+    expect(html).not.toContain("start: 1, length: 1");
     expect(html).toContain("adjacent years");
     // The swap is described in field-label terms.
     expect(html).toContain(
@@ -636,6 +811,67 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(html).not.toContain(ESC);
     expect(html).not.toContain(RLO);
     expect(html).toContain("\\x1b");
+  });
+
+  test("renders the transform-parameter overflow marker", () => {
+    const params: Record<string, number> = {};
+    for (let i = 0; i < 20; i += 1) params["p" + i] = i;
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "ssn", type: "ssn" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                { field: "ssn", transform: [{ function: "f", params }] },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    // 16 parameters render, then the overflow marker for the remaining 4.
+    expect(html).toContain("... 4 more");
+  });
+
+  test("flags a proposed deduplicate setting the current exchange does not apply", () => {
+    const proposed = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({ deduplicate: true }),
+      },
+    });
+    expect(proposed).toContain("may match more than one");
+    expect(proposed).toContain("does not yet apply it");
+    // The default (deduplicate off) matches the run, so it carries no flag.
+    const off = renderPanel({
+      decode: { status: "ready", invitation: makeInvitation() },
+    });
+    expect(off).toContain("matches at most one");
+    expect(off).not.toContain("does not yet apply it");
+  });
+
+  test("flags a proposed fuzzy comparison the current exchange does not apply", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "dob", type: "dateOfBirth" }],
+          linkageKeys: [
+            {
+              name: "DOB",
+              elements: [
+                { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    expect(html).toContain("adjacent years");
+    expect(html).toContain("(proposed; not yet applied)");
   });
 });
 
