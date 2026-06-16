@@ -5,9 +5,12 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  unsatisfiedLinkageFields,
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
+import { inferMetadata } from "../src/config/metadata";
+import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 import { StandardizationSchema } from "../src/config/standardization";
@@ -1242,6 +1245,76 @@ describe("validateStandardizationAgainstTerms", () => {
     expect(
       validateStandardizationAgainstTerms(standardization, minimalTerms),
     ).toEqual([]);
+  });
+});
+
+// --- unsatisfiedLinkageFields ------------------------------------------------
+
+// Fixture: columns that cover firstName, lastName, dateOfBirth, ssn.
+const FULL_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
+const fullTerms = getDefaultLinkageTerms(
+  "Agency A",
+  inferMetadata(FULL_COLUMNS),
+);
+
+describe("unsatisfiedLinkageFields", () => {
+  test("an input that covers every field type is fully satisfiable", () => {
+    expect(unsatisfiedLinkageFields(FULL_COLUMNS, fullTerms)).toEqual([]);
+  });
+
+  test("names the fields whose type no input column provides", () => {
+    // Only first_name is present; lastName, dateOfBirth, and ssn cannot be
+    // produced.
+    const unsatisfied = unsatisfiedLinkageFields(["first_name"], fullTerms);
+    const names = unsatisfied.map((f) => f.name).sort();
+    expect(names).toContain("lastName");
+    expect(names).toContain("dateOfBirth");
+    expect(names).toContain("ssn");
+    expect(names).not.toContain("firstName");
+  });
+
+  test("a column of the right type but different name still satisfies", () => {
+    // `fname` and `dob` are aliases inferred as firstName / dateOfBirth.
+    const unsatisfied = unsatisfiedLinkageFields(
+      ["fname", "lname", "dob", "ssn"],
+      fullTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+  });
+
+  test("an explicit standardization mapping a present column satisfies a field its type does not", () => {
+    // `tax_id` is not inferred as ssn, but an explicit mapping makes it so.
+    const columns = ["first_name", "last_name", "dob", "tax_id"];
+    expect(
+      unsatisfiedLinkageFields(columns, fullTerms).map((f) => f.name),
+    ).toContain("ssn");
+    expect(
+      unsatisfiedLinkageFields(columns, fullTerms, [
+        { output: "ssn", input: "tax_id" },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("an explicit standardization whose input column is absent does not satisfy", () => {
+    // The mapping references tax_id, but the input has no tax_id column.
+    const unsatisfied = unsatisfiedLinkageFields(
+      ["first_name", "last_name", "dob"],
+      fullTerms,
+      [{ output: "ssn", input: "tax_id" }],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
+
+  test("an explicit standardization with an absent input preempts the type fallback", () => {
+    // The config maps ssn from `tax_id` (absent) even though an `ssn` column is
+    // present. The explicit mapping preempts the type fallback, so ssn is still
+    // unsatisfiable -- the exchange would bind it to the missing column.
+    const unsatisfied = unsatisfiedLinkageFields(
+      ["first_name", "last_name", "dob", "ssn"],
+      fullTerms,
+      [{ output: "ssn", input: "tax_id" }],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
   });
 });
 

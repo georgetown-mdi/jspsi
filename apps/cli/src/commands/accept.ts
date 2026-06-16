@@ -12,6 +12,7 @@ import {
   isInvitationExpired,
   parseExchangeSpec,
   sanitizeForDisplay,
+  unsatisfiedLinkageFields,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -290,6 +291,7 @@ export async function validateAccept(params: {
     // accept reads its y/N confirmation from stdin (promptConfirm), so it cannot
     // also take the CSV there: reject `-` rather than starve the prompt.
     const rows = await loadInputRows(input, { allowStdin: false });
+    checkLinkageSatisfiability(rows.columns, myTerms, log);
     const { dataSpec, warnings } = buildDataSpec({
       terms: myTerms,
       identity: myIdentity,
@@ -320,6 +322,7 @@ export async function validateAccept(params: {
     resolved.input !== undefined
       ? await loadInputRows(resolved.input, { allowStdin: false })
       : undefined;
+  if (rows !== undefined) checkLinkageSatisfiability(rows.columns, myTerms, log);
   const { dataSpec, warnings } = buildDataSpec({
     terms: myTerms,
     identity: myIdentity,
@@ -442,6 +445,40 @@ function reconcileAcceptConfig(params: {
           "the connection differences above apply to this exchange only.",
   );
   return true;
+}
+
+// --- Linkage preflight -------------------------------------------------------
+
+// Check that the acceptor's columns can satisfy the adopted linkage terms.
+// When no key is satisfiable, throws a UsageError (the exchange would produce
+// a silent empty result). When some keys are unsatisfiable, warns and proceeds.
+function checkLinkageSatisfiability(
+  columns: string[],
+  terms: LinkageTerms,
+  log: ReturnType<typeof getLogger>,
+): void {
+  const unsatisfied = unsatisfiedLinkageFields(columns, terms);
+  if (unsatisfied.length === 0) return;
+
+  const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
+  const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
+    k.elements.every((e) => !unsatisfiedNames.has(e.field)),
+  ).length;
+  const fieldList = unsatisfied.map((f) => `${f.name} (${f.type})`).join(", ");
+
+  if (satisfiableKeyCount === 0)
+    throw new UsageError(
+      "the CSV cannot satisfy any of the invitation's linkage keys " +
+        `(unsatisfied fields: ${fieldList}); running would produce a silent ` +
+        "empty result. Provide a CSV that covers the required field types, or " +
+        "ask your partner for an invitation with different linkage terms.",
+    );
+
+  log.warn(
+    "the CSV cannot satisfy all of the invitation's linkage fields " +
+      `(unsatisfied: ${fieldList}); keys that require those fields will be ` +
+      "inactive for this exchange.",
+  );
 }
 
 // --- Handler -----------------------------------------------------------------

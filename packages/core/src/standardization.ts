@@ -5,11 +5,13 @@ import type {
   StandardizationStep,
 } from "./config/standardization.js";
 import type {
+  LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
   TransformStep,
 } from "./config/linkageTerms.js";
+import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 
 const logger = getLogger("cleaning");
@@ -865,4 +867,41 @@ export function validateStandardizationAgainstTerms(
   }
 
   return errors;
+}
+
+/**
+ * The linkage fields in `terms` that the input `columns` cannot satisfy
+ * through the available data standardizations. Mirrors the column-to-field
+ * resolution in {@link buildStandardizedDataset}: a field is producible when
+ *
+ * 1. the spec carries an explicit `standardization` for it whose source input
+ *    column is present (the explicit mapping preempts the type fallback), OR
+ * 2. the field has NO explicit standardization and the input has a column whose
+ *    inferred semantic type matches the field's type.
+ *
+ * An explicit standardization preempts the type fallback: a field whose
+ * explicit source column is absent is unsatisfiable even when a same-typed
+ * column is present -- the exchange would bind it to the missing column and
+ * emit no values. An empty result means every configured field can be
+ * produced; a non-empty result names the fields that cannot.
+ */
+export function unsatisfiedLinkageFields(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): LinkageField[] {
+  const present = new Set(columns);
+  const inputTypes = new Set(inferMetadata(columns).map((c) => c.type));
+  // Field name -> the input column its explicit standardization reads. A field
+  // present here is resolved by the explicit transformation (which preempts the
+  // type fallback), so it is producible iff that column exists; a field absent
+  // here falls back to semantic-type coverage.
+  const explicitInput = new Map(
+    (standardization ?? []).map((t) => [t.output, t.input]),
+  );
+  return terms.linkageFields.filter((f) => {
+    const mapped = explicitInput.get(f.name);
+    if (mapped !== undefined) return !present.has(mapped);
+    return !inputTypes.has(f.type);
+  });
 }

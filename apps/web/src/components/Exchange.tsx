@@ -19,6 +19,7 @@ import {
   sanitizeForDisplay,
   serializeExchangeRecord,
   serializeOpeningData,
+  unsatisfiedLinkageFields,
 } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "@psi/rendezvous";
@@ -143,6 +144,10 @@ export function Exchange(config: ExchangeConfig) {
     title: string;
     message: string;
   }>();
+  const [warningAlert, setWarningAlert] = useState<{
+    title: string;
+    message: string;
+  }>();
 
   // Drives the lifecycle's AbortSignal. A useEffect cleanup aborts it on unmount,
   // so the owner tears down any in-flight wait or exchange and every owner-driven
@@ -237,6 +242,42 @@ export function Exchange(config: ExchangeConfig) {
       void psi.catch(() => undefined);
       const csvResult = await loadCSVFile(files[0]);
       const rawRows = csvResult.data as Array<Record<string, string>>;
+      const columns = csvResult.meta.fields ?? [];
+
+      // Pre-flight for the acceptor: the CSV must satisfy the adopted linkage
+      // terms the user just consented to on the consent screen. A mismatch is
+      // silent at exchange time (fields resolve to empty and keys produce no
+      // strings), so check here before any connection is opened.
+      if (config.role === "acceptor") {
+        const unsatisfied = unsatisfiedLinkageFields(
+          columns,
+          config.linkageTerms,
+        );
+        if (unsatisfied.length > 0) {
+          const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
+          const satisfiableKeyCount = config.linkageTerms.linkageKeys.filter(
+            (k) => k.elements.every((e) => !unsatisfiedNames.has(e.field)),
+          ).length;
+          const fieldList = unsatisfied
+            .map((f) => sanitizeForDisplay(f.name))
+            .join(", ");
+          if (satisfiableKeyCount === 0)
+            throw new Error(
+              `Your CSV does not cover any of the linkage fields required by ` +
+                `this invitation (missing: ${fieldList}). No matches are ` +
+                "possible. Upload a file that includes columns for the " +
+                "required field types.",
+            );
+          setWarningAlert({
+            title: "Partial CSV coverage",
+            message:
+              `Your CSV is missing some linkage fields (${fieldList}). ` +
+              "Keys that depend on those fields will be inactive for this " +
+              "exchange; other keys will proceed normally.",
+          });
+        }
+      }
+
       // The acceptor adopts the inviter's linkage terms (the same terms shown on
       // the consent screen), so the run is governed by the terms the user
       // consented to rather than a default inferred from the acceptor's CSV
@@ -247,12 +288,7 @@ export function Exchange(config: ExchangeConfig) {
         config.role === "acceptor"
           ? acceptorExchangeDataSpec(config.linkageTerms, partyName)
           : {};
-      const prepared = prepareForExchange(
-        dataSpec,
-        partyName,
-        rawRows,
-        csvResult.meta.fields ?? [],
-      );
+      const prepared = prepareForExchange(dataSpec, partyName, rawRows, columns);
       onStages(buildStageList(prepared));
 
       if (config.role === "acceptor") await psi;
@@ -359,6 +395,11 @@ export function Exchange(config: ExchangeConfig) {
           style={{ whiteSpace: "pre-line" }}
         >
           {errorAlert.message}
+        </Alert>
+      )}
+      {warningAlert && (
+        <Alert color="yellow" title={warningAlert.title}>
+          {warningAlert.message}
         </Alert>
       )}
       <Group justify="center" align="stretch" grow>
