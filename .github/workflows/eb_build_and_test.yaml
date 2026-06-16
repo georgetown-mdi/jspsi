@@ -10,25 +10,23 @@ on:
   # branch that already has an open PR. If this job becomes a required status
   # check, configure branch protection so a path-skipped run does not block an
   # unrelated PR -- a skipped required check otherwise stays pending.
+  #
+  # Note: this PR filter deliberately diverges from the push filter in
+  # eb_deploy.yaml on test sources -- it uses the broad apps/web/** and
+  # packages/core/** globs so a test-only PR (deleting or weakening assertions,
+  # or changing vitest config) still runs the full suite, including the core
+  # tests this gate runs via `npm run -w packages/core test`. The deploy filter
+  # stays scoped to deploy-affecting sources only and omits the test/** trees.
+  # The two filters cannot share a single list because of this intentional
+  # difference. packages/core/** matches the sibling cli_build_and_test.yaml.
   pull_request:
     branches: [main, staging]
     paths:
       - "lib/**"
       - "package-lock.json"
       - "tsconfig.base.json"
-      - "apps/web/deploy/aws_eb/**"
-      - "apps/web/public/**"
-      - "apps/web/server/**"
-      - "apps/web/src/**"
-      - "apps/web/nitro.config.ts"
-      - "apps/web/package.json"
-      - "apps/web/postcss.config.cjs"
-      - "apps/web/tsconfig.json"
-      - "apps/web/vite.config.ts"
-      - "packages/core/src/**"
-      - "packages/core/package.json"
-      - "packages/core/rollup.config.ts"
-      - "packages/core/tsconfig.json"
+      - "apps/web/**"
+      - "packages/core/**"
       - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
 
@@ -37,6 +35,23 @@ on:
       artifactName:
         description: "Name of the uploaded artifact"
         value: ${{jobs.build-and-test.outputs.artifactName}}
+
+# Cancel a superseded PR run when a newer commit lands on the same PR/branch.
+# NOT keyed on github.workflow: in a workflow_call invocation the github context
+# is the caller's, so github.workflow resolves to eb_deploy.yaml's name and this
+# block would share eb_deploy.yaml's concurrency group, self-cancelling the
+# deploy on a single push (a GitHub Actions reusable-workflow footgun). A literal
+# prefix keeps this group independent of any caller. The || github.run_id
+# fallback gives the deploy leg's reused build a unique group (head_ref is empty
+# off pull_request), so cancel-in-progress is inert there and never cancels a
+# deploy; on a PR, head_ref groups the PR's runs so a newer commit supersedes.
+concurrency:
+  group: eb-build-and-test-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+# Least privilege: this build/test gate only needs to read the repo.
+permissions:
+  contents: read
 
 env:
   ARTIFACT_NAME: ${{format('{0}-{1}', vars.EB_APPLICATION_NAME, github.sha)}}
