@@ -25,6 +25,18 @@ on:
 
   workflow_dispatch:
 
+concurrency:
+  # Serialize deploys to the same Elastic Beanstalk environment: two pushes to
+  # the same branch must never race `update-environment` against one environment.
+  # github.ref keys the group so it lines up with the branch -> environment
+  # mapping in eb_deploy_reusable_action.yaml (main -> Production, staging ->
+  # Staging); different environments still deploy in parallel. cancel-in-progress
+  # is false -- unlike the PR test gates, cancelling a deploy mid-update can leave
+  # the environment inconsistent, so an in-flight run finishes before the next
+  # one starts rather than being superseded.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-and-test:
     uses: ./.github/workflows/eb_build_and_test.yaml
