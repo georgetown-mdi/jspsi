@@ -460,6 +460,20 @@ test("SFTP host_key_fingerprint with base64url chars (- or _) is rejected", () =
   expect(result.success).toBe(false);
 });
 
+test("SFTP host_key_fingerprint as an @-file reference passes parse (format-checked after resolution)", () => {
+  // The @path cannot match the SHA256: format; the format check is deferred to
+  // @-file resolution, so the literal @path must survive parse like password
+  // and private_key do. Rejecting it here would make @-file support unusable.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint: "@/run/secrets/host-fingerprint",
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
 test("SFTP server with privateKeyPassphrase and privateKey together is valid", () => {
   const result = safeParseConnectionConfig({
     channel: "sftp",

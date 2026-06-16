@@ -205,6 +205,47 @@ test("resolveExchangeSpecRefs resolves an @path private key passphrase (companio
   expect(conn.server.privateKeyPassphrase).toBe("PHRASE");
 });
 
+test("resolveExchangeSpecRefs resolves an @path host_key_fingerprint end to end", () => {
+  // The whole point of the @-file support: a config pointing the fingerprint at
+  // a secrets file must parse (the @path is exempt from the format refine) and
+  // then resolve to the file's SHA256:... contents.
+  const pin = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const spec = parseSpec({
+    connection: {
+      channel: "sftp",
+      server: { host: "h", host_key_fingerprint: atFile("fp", pin + "\n") },
+    },
+  });
+  const conn = resolveExchangeSpecRefs(spec).connection as SFTPConnectionConfig;
+  expect(conn.server.hostKeyFingerprint).toBe(pin);
+});
+
+test("resolveExchangeSpecRefs rejects an @path host_key_fingerprint whose file contents are malformed", () => {
+  // The @path passed parse unvalidated, so the resolved value is format-checked
+  // at resolution: a secrets file holding a non-fingerprint must fail as a
+  // UsageError naming the reference, not later as a confusing host-key mismatch.
+  const ref = atFile("bad-fp", "not-a-valid-fingerprint\n");
+  const spec = parseSpec({
+    connection: {
+      channel: "sftp",
+      server: { host: "h", host_key_fingerprint: ref },
+    },
+  });
+  expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);
+  expect(() => resolveExchangeSpecRefs(spec)).toThrow(ref);
+});
+
+test("resolveExchangeSpecRefs rejects an @path host_key_fingerprint that resolves to an empty file", () => {
+  const ref = atFile("empty-fp", "\n");
+  const spec = parseSpec({
+    connection: {
+      channel: "sftp",
+      server: { host: "h", host_key_fingerprint: ref },
+    },
+  });
+  expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);
+});
+
 test("resolveExchangeSpecRefs resolves @path turn credentials and provision auth on a webrtc connection", () => {
   const spec = parseSpec({
     connection: {

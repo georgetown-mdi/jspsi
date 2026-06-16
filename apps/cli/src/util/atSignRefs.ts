@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 import type { ConnectionConfig, ExchangeSpec, HttpAuth } from "@psilink/core";
-import { UsageError } from "@psilink/core";
+import { HOST_KEY_FINGERPRINT_REGEX, UsageError } from "@psilink/core";
 
 import { expandTilde } from "../fileUtils";
 
@@ -128,9 +128,26 @@ function resolveConnectionAtSignRefs(
       // Only the LOAD resolver handles it: nothing sets the fingerprint via a
       // CLI flag or connection URL, so resolveConnectionCredentials (the save/
       // flag resolver) correctly omits it -- dead code there would never run.
-      resolved.server.hostKeyFingerprint = resolveOptionalAtSignRef(
-        resolved.server.hostKeyFingerprint,
-      );
+      {
+        const fpRef = resolved.server.hostKeyFingerprint;
+        resolved.server.hostKeyFingerprint = resolveOptionalAtSignRef(fpRef);
+        // A literal fingerprint was format-validated at parse; an @-file one was
+        // not (the @path could not match the SHA256: format, so the schema
+        // skipped it). Re-validate the resolved value so a malformed secrets
+        // file fails here as a clear UsageError (exit 64) naming the reference,
+        // rather than later as a confusing host-key "mismatch" at connect time.
+        const fp = resolved.server.hostKeyFingerprint;
+        if (
+          fpRef?.startsWith("@") &&
+          fp !== undefined &&
+          !HOST_KEY_FINGERPRINT_REGEX.test(fp)
+        )
+          throw new UsageError(
+            `the @-file reference ${fpRef} resolved to a value that is not a ` +
+              `valid OpenSSH SHA256 host-key fingerprint ` +
+              `(SHA256:<43 standard base64 chars>)`,
+          );
+      }
       resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
       resolveHttpAuthAtSignRefs(resolved.proxy?.auth);
       resolveProviderOptionsAtSignRefs(resolved);

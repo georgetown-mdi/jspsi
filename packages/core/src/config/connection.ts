@@ -173,7 +173,12 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
   })
   .superRefine((s, ctx) => {
     const fp = s.hostKeyFingerprint;
-    if (fp === undefined) return;
+    // A literal `@path` is an @-file reference resolved after parse (see
+    // resolveConnectionAtSignRefs): the `@path` cannot match the SHA256: format,
+    // so it is exempt here and the resolved file contents are format-checked at
+    // resolution instead. The sibling @-file fields (password, privateKey) carry
+    // no format refine, so they pass parse the same way.
+    if (fp === undefined || fp.startsWith("@")) return;
     if (SIGNING_FINGERPRINT_SHAPE.test(fp)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
