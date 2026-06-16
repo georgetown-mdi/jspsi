@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  createOwnerOnlyWriteStream,
   detectFileConflicts,
   expandTilde,
   FileExistsError,
@@ -284,6 +285,101 @@ describe("writeFileAtomic", () => {
     expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
     expect(fs.readFileSync(dest, "utf8")).toBe("x");
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
+  });
+});
+
+// --- createOwnerOnlyWriteStream ----------------------------------------------
+
+// Write `text` through the stream and resolve once it is fully flushed and
+// closed. createOwnerOnlyWriteStream returns the raw stream to its caller, so the
+// test drives the write/close lifecycle explicitly before stat'ing the file.
+function writeAndClose(stream: fs.WriteStream, text: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    stream.on("error", reject);
+    stream.on("close", () => resolve());
+    stream.write(text);
+    stream.close();
+  });
+}
+
+describe("createOwnerOnlyWriteStream", () => {
+  test("creates the file owner-only (0600) regardless of umask (POSIX)", async () => {
+    if (process.platform === "win32") return;
+    // The fchmod forces exactly 0600 whatever the process umask, including the
+    // 0o022 under which the prior unprotected createWriteStream left it 0644.
+    for (const umask of [0o022, 0o077, 0o000]) {
+      const prev = process.umask(umask);
+      try {
+        const p = path.join(dir, `out-${umask.toString(8)}.csv`);
+        await writeAndClose(createOwnerOnlyWriteStream(p), "a,b\n1,2\n");
+        expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+        expect(fs.readFileSync(p, "utf8")).toBe("a,b\n1,2\n");
+      } finally {
+        process.umask(prev);
+      }
+    }
+  });
+
+  test("tightens a pre-existing world/group-readable file to 0600 (POSIX)", async () => {
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "stale.csv");
+    fs.writeFileSync(p, "stale,data\n");
+    // writeFileSync's mode is umask-masked; force 0644 so the test starts from a
+    // genuinely over-permissive file the writer must tighten.
+    fs.chmodSync(p, 0o644);
+    expect(fs.statSync(p).mode & 0o777).toBe(0o644);
+
+    await writeAndClose(createOwnerOnlyWriteStream(p), "fresh,data\n");
+
+    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
+  });
+
+  test("preserves an existing file's content when the mode cannot be secured (POSIX)", () => {
+    // Simulates fchmod failing as it would on a file owned by another user
+    // (EPERM): the writer must refuse rather than leave PII at relaxed
+    // permissions, and -- because it opens without O_TRUNC -- must not have
+    // emptied the existing file before that failure.
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "foreign.csv");
+    fs.writeFileSync(p, "original,content\n");
+    vi.spyOn(fs, "fchmodSync").mockImplementation(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+
+    expect(() => createOwnerOnlyWriteStream(p)).toThrow("EPERM");
+
+    expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+  });
+
+  test("closes the descriptor if truncation fails rather than leaking it (POSIX)", () => {
+    // fchmod succeeds but the truncate (which runs before createWriteStream takes
+    // ownership of the fd) fails: the writer must close the open descriptor on the
+    // way out rather than leak it.
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "trunc-fail.csv");
+    let openedFd: number | undefined;
+    const realOpen = fs.openSync;
+    const openSpy = vi
+      .spyOn(fs, "openSync")
+      .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+        openedFd = realOpen(...args);
+        return openedFd;
+      });
+    const closeSpy = vi.spyOn(fs, "closeSync");
+    vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
+      throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
+    });
+
+    expect(() => createOwnerOnlyWriteStream(p)).toThrow("EINVAL");
+
+    // The failing path opens exactly one descriptor, so `openedFd` is
+    // unambiguous; that exact fd is the one closed, not leaked. The
+    // called-once assertion pins the single-open assumption: were a second open
+    // ever added before the truncate, this would catch the now-ambiguous capture.
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openedFd).toBeDefined();
+    expect(closeSpy).toHaveBeenCalledWith(openedFd);
   });
 });
 

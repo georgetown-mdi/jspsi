@@ -44,6 +44,7 @@ import { resolveConnectionCredentials } from "../util/atSignRefs";
 import {
   durationFlagSeconds,
   LOG_LEVELS,
+  MAX_TIMEOUT_SECONDS,
   singleValue,
   openInputSource,
 } from "../util/cli";
@@ -932,14 +933,16 @@ export function addCommonBootstrapOptions(
     .option("connection-timeout", {
       type: "string",
       describe:
-        "how long to wait when connecting to the primary exchange server. " +
+        "how long to wait when connecting to the primary exchange server " +
+        `(maximum: ${MAX_TIMEOUT_SECONDS / 86_400}d). ` +
         DURATION_VALUE_HELP,
     })
     .option("peer-timeout", {
       alias: "t",
       type: "string",
       describe:
-        "how long to wait for the peer before giving up. " +
+        "how long to wait for the peer before giving up " +
+        `(maximum: ${MAX_TIMEOUT_SECONDS / 86_400}d). ` +
         DURATION_VALUE_HELP,
     })
     .option("max-reconnect-attempts", {
@@ -1068,8 +1071,12 @@ export function parseCommonBootstrapArgs(
     serverPrivateKey: singleValue(argv, "server-private-key") as
       | string
       | undefined,
-    connectionTimeout: durationFlagSeconds(argv, "connection-timeout"),
-    peerTimeout: durationFlagSeconds(argv, "peer-timeout"),
+    connectionTimeout: durationFlagSeconds(
+      argv,
+      "connection-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+    peerTimeout: durationFlagSeconds(argv, "peer-timeout", MAX_TIMEOUT_SECONDS),
     maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
       | number
       | undefined,

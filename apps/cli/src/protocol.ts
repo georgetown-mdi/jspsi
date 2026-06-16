@@ -336,6 +336,10 @@ export async function runProtocol(
   // only after our own save succeeds.
   let authStarted = false;
   let tokenRotated = false;
+  // Set once runExchange returns: the two-party protocol is then complete, so a
+  // failure in the purely-local output stage that follows must not write the
+  // cross-party abort marker (the catch gates the marker on this being false).
+  let exchangeComplete = false;
   // Set synchronously at the top of a signal handler before any await, so the
   // catch block below can detect that an in-flight failure was caused by the
   // signal-driven cleanup (rather than an organic protocol error) and yield
@@ -806,20 +810,35 @@ export async function runProtocol(
         },
       );
 
+    // The two-party exchange is complete: runExchange has returned, so this side
+    // has received everything and already sent the peer its terminal payload
+    // (durable before runExchange resolved). Mark it so the catch's abort-marker
+    // gate excludes a failure in the purely-local output stage below: formatting
+    // and writing the result CSV (and the audit record) is local I/O with no peer
+    // waiting on it, so a fault there must not write a cross-party abort marker
+    // telling a peer whose exchange succeeded to fail fast -- at worst an exit-69
+    // PeerAbortError while its results sit readable on disk. (sealAbort does not
+    // help here: it resolves the decision for close(), but writeAbortMarker writes
+    // regardless, and the gate keys on abortArmed, still true.)
+    exchangeComplete = true;
+
     const { headers, rows } = buildOutputTable(
       associationTable,
       prepared.rawRows,
       prepared.metadata,
       partnerPayload,
     );
-    writeOutput(output, headers, rows);
+    await writeOutput(output, headers, rows);
 
     // Persist the self-attested record after the results: it is a secondary
     // audit artifact, so it is written last and its failure is non-fatal (see
     // writeExchangeRecord). Skipped when records are disabled, or when the
     // record could not be built (runExchange returns audit undefined and has
-    // already warned -- the exchange still succeeded). The record and its
-    // opening are a single optional field, so one check covers both.
+    // already warned -- the exchange still succeeded). It is likewise not reached
+    // if the result-CSV write above failed (that await throws to the catch),
+    // which also avoids orphaning the plaintext-opening file on a disk that just
+    // failed mid-write. The record and its opening are a single optional field,
+    // so one check covers both.
     if (recordOutput !== undefined && audit !== undefined)
       writeExchangeRecord(
         recordOutput,
@@ -973,7 +992,11 @@ export async function runProtocol(
     // from the same fast-fail. Those UsageErrors are peer- or environment-induced,
     // not local misconfiguration -- the config-shaped UsageErrors (token expiry,
     // bilateral mode mismatch, not-clean directory) are all detected pre-arm and
-    // so never reach here armed. The marker carries no cause, so signalling on a
+    // so never reach here armed. A failure in the purely-local post-exchange
+    // output stage (the result CSV and audit record) is excluded instead by the
+    // exchangeComplete gate above: it does reach here armed, but by then the
+    // exchange is complete and no peer is waiting on it, so the marker is skipped.
+    // The marker carries no cause, so signalling on a
     // UsageError discloses nothing the peer's own view of the teardown would not;
     // the local party still sees its specific error and exits 64, while the peer
     // sees the cause-free "peer aborted" and exits 69. The pre-arm/post-arm line
@@ -981,6 +1004,7 @@ export async function runProtocol(
     // authenticate the marker) and a waiting post-handshake peer both exist.
     if (
       conn.abortArmed &&
+      !exchangeComplete &&
       signalReceived === undefined &&
       !errIsPeerAbort(err)
     ) {

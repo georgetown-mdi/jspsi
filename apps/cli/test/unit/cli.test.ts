@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
@@ -9,9 +10,11 @@ import { loadCSVFile, UsageError } from "@psilink/core";
 import {
   durationFlagSeconds,
   exitWithError,
+  MAX_TIMEOUT_SECONDS,
   openInputSource,
   parseOrExit,
   singleValue,
+  writeOutput,
 } from "../../src/util/cli";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -106,6 +109,79 @@ test("durationFlagSeconds: a non-string value yields a UsageError, not a TypeErr
   expect(() =>
     durationFlagSeconds(argv({ "peer-timeout": 30 }), "peer-timeout"),
   ).toThrow("30s");
+});
+
+// --- durationFlagSeconds: sanity ceiling -------------------------------------
+
+test("durationFlagSeconds: a value at the ceiling is accepted", () => {
+  // The boundary is inclusive: exactly MAX_TIMEOUT_SECONDS (7d) parses to its
+  // seconds value unchanged, so an at-cap value behaves exactly as it does today.
+  const atCeiling = `${MAX_TIMEOUT_SECONDS / 86_400}d`;
+  expect(
+    durationFlagSeconds(
+      argv({ "peer-timeout": atCeiling }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toBe(MAX_TIMEOUT_SECONDS);
+});
+
+test("durationFlagSeconds: a value just above the ceiling is rejected naming the flag and the max", () => {
+  // One minute past 7d (7d is a whole number of minutes): rejected with a
+  // flag-named usage error that states the maximum in days and echoes the
+  // offending value, the shape the --expires-in ceiling error uses.
+  const justOver = `${MAX_TIMEOUT_SECONDS / 60 + 1}m`;
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": justOver }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toThrow(UsageError);
+  let message = "";
+  try {
+    durationFlagSeconds(
+      argv({ "connection-timeout": justOver }),
+      "connection-timeout",
+      MAX_TIMEOUT_SECONDS,
+    );
+  } catch (err) {
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain("--connection-timeout");
+  expect(message).toContain("must not exceed");
+  expect(message).toContain("7d");
+  expect(message).toContain(justOver);
+});
+
+test("durationFlagSeconds: the ceiling is opt-in; without a max a large value still parses", () => {
+  // The cap is a per-call ceiling, not a global one: a call that passes no
+  // maxSeconds is unbounded below the safe-integer overflow guard, exactly as
+  // before the cap existed, so a non-timeout duration flag is unaffected.
+  expect(
+    durationFlagSeconds(argv({ "peer-timeout": "30d" }), "peer-timeout"),
+  ).toBe(30 * 86_400);
+});
+
+test("durationFlagSeconds: the existing rejections precede the ceiling check", () => {
+  // The cap layers on top of parsing rather than replacing it: a bare integer
+  // still yields the migration hint (not the cap error) even when a max is
+  // supplied, since parseDurationFlag runs first...
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": "30" }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toThrow("30s");
+  // ...and a zero is still rejected as a zero duration, never as over-ceiling.
+  expect(() =>
+    durationFlagSeconds(
+      argv({ "peer-timeout": "0s" }),
+      "peer-timeout",
+      MAX_TIMEOUT_SECONDS,
+    ),
+  ).toThrow(/greater than zero/);
 });
 
 // --- parseOrExit -------------------------------------------------------------
@@ -300,4 +376,85 @@ test("openInputSource: stdin is disabled by default", () => {
   // A new caller does not silently inherit stdin support: the gate defaults off,
   // so `-` is rejected unless the caller opts in.
   expect(() => openInputSource("-")).toThrow(/stdin/);
+});
+
+// --- writeOutput -------------------------------------------------------------
+
+test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
+  // The result CSV is the most sensitive artifact the tool produces, so a file
+  // path must be created owner-only rather than inherit a world/group-readable
+  // umask default (the prior unprotected createWriteStream left it 0644 here).
+  // Awaiting the returned promise guarantees the rows are flushed, so the read
+  // and stat are deterministic with no polling.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
+  // 0o022 is the umask under which the old write produced a world-readable 0644.
+  const prevUmask = process.umask(0o022);
+  try {
+    const out = path.join(dir, "results.csv");
+    await writeOutput(
+      out,
+      ["a", "b"],
+      [
+        ["1", "2"],
+        ["3", "4"],
+      ],
+    );
+    expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
+    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+  } finally {
+    process.umask(prevUmask);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOutput: a mid-write stream error rejects rather than crashing", async () => {
+  // A write that fails after the stream opens (here a Writable whose first write
+  // errors) must surface as a rejected promise the caller's error boundary can
+  // map to an exit code -- not an unhandled 'error' event that crashes the
+  // process. Asserting the rejection is itself the proof it was handled: an
+  // unguarded 'error' would tear the worker down instead.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "psilink-writeoutput-err-"),
+  );
+  try {
+    vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+      // createOwnerOnlyWriteStream has already opened a real fd and handed it in;
+      // close it so the substitute stream does not leak it.
+      const fd = (args[1] as { fd?: number } | undefined)?.fd;
+      if (typeof fd === "number") fs.closeSync(fd);
+      return new Writable({
+        write(_chunk, _enc, cb) {
+          cb(new Error("disk full"));
+        },
+      }) as unknown as fs.WriteStream;
+    });
+    await expect(
+      writeOutput(path.join(dir, "results.csv"), ["a"], [["1"]]),
+    ).rejects.toThrow("disk full");
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOutput: the stdout branch writes to process.stdout unchanged", async () => {
+  // No output path: the rows go to process.stdout with no file and no permission
+  // handling, exactly as before.
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(
+      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+    );
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]]);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+  expect(chunks.join("")).toBe("a,b\n1,2\n");
 });
