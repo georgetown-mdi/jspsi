@@ -22,7 +22,11 @@ function keyTypeFromBlob(blob: Uint8Array): string {
       ((blob[2] as number) << 8) |
       (blob[3] as number)) >>>
     0;
-  if (typeLen > blob.length - 4) return "(unknown)";
+  // A zero-length type is malformed -- every real OpenSSH blob names a
+  // non-empty key type -- and a length past the blob is truncated. Both yield
+  // "(unknown)" rather than letting `subarray` decode an empty ("") or partial
+  // range into the operator-facing mismatch message.
+  if (typeLen === 0 || typeLen > blob.length - 4) return "(unknown)";
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(
       blob.subarray(4, 4 + typeLen),

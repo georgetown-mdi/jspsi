@@ -1144,6 +1144,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               if (match) {
                 verify(true);
               } else {
+                // This re-hashes the blob that verifyHostKeyFingerprint already
+                // hashed -- deliberately. It runs only on the mismatch branch,
+                // which tears down the connection, so the extra digest is free;
+                // keeping it here preserves verifyHostKeyFingerprint's narrow
+                // boolean (constant-time compare) contract rather than widening
+                // it to return the digest for one terminal-path caller.
                 const presented = await computeHostKeyFingerprint(blob);
                 // keyTypeFromBlob decodes UTF-8 bytes straight from the
                 // server-controlled key blob, so -- like host and path below --

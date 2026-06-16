@@ -88,6 +88,14 @@ test("keyTypeFromBlob returns (unknown) when claimed type length exceeds the blo
   expect(keyTypeFromBlob(blob)).toBe("(unknown)");
 });
 
+test("keyTypeFromBlob returns (unknown) for a zero-length type prefix", () => {
+  // All-zero length prefix: subarray(4, 4) would decode to "" and leave a blank
+  // type in the mismatch message ("the server presented a  key ..."); a
+  // well-formed blob always names a non-empty type, so this is "(unknown)".
+  const blob = new Uint8Array([0, 0, 0, 0, 1, 2, 3, 4]);
+  expect(keyTypeFromBlob(blob)).toBe("(unknown)");
+});
+
 test("keyTypeFromBlob returns (unknown) when the length prefix has the high bit set", () => {
   // A first byte >= 0x80 sets the sign bit of the bitwise-OR length. Without
   // the unsigned `>>> 0` coercion this is a huge negative number that slips past
