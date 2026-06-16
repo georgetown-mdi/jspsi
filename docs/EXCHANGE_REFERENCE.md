@@ -352,7 +352,7 @@ SFTP requires at most one primary authentication method alongside `username`. `p
 | `password` | string | Password authentication; `@`-file recommended |
 | `private_key` | string | Path to SSH private key; `@`-file recommended |
 | `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key`; `@`-file recommended |
-| `host_key_fingerprint` | string | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 standard base64 chars>`, the `+`/`/` alphabet OpenSSH emits, not base64url). When set, the server's host key is verified before authentication and the connection is rejected if it does not match; a warning is emitted when absent. `@`-file supported. Applies to the CLI `sftp` channel only. |
+| `host_key_fingerprint` | string | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 standard base64 chars>`, the `+`/`/` alphabet OpenSSH emits, not base64url). When set, the server's host key is verified before authentication and the connection is rejected if it does not match; when absent, a warning is emitted and the connection proceeds without host-key verification, leaving it exposed to a man-in-the-middle that substitutes the server's host key. `@`-file supported. Applies to the CLI `sftp` channel only. |
 
 ```yaml
 # WebRTC example
