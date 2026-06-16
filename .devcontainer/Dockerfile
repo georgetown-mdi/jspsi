@@ -48,20 +48,17 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
   && apt-get install -y --no-install-recommends gh \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# The headless Chromium the web app's `test:browser` suite drives through
-# Playwright, baked into the image at build time -- the browser binary plus its
-# apt shared libraries (`--with-deps`) -- so the container starts ready with no
-# per-create download. (Fetching the browser in post-create instead blocked the
-# postCreate step, and with it the VS Code remote connection, on a ~180 MB
-# download.) Installed under a fixed PLAYWRIGHT_BROWSERS_PATH owned by the node
-# user, rather than the per-user ~/.cache default, so the non-root user that runs
-# the tests finds the browser this root build step downloaded. Pinned to the
-# lockfile's playwright (apps/web depends on ^1.55.0, resolved to 1.59.1); bump
-# this together with that dependency -- a mismatch makes Playwright error loudly
-# asking for `playwright install`, so it cannot pass silently.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN npx --yes playwright@1.59.1 install --with-deps chromium \
-  && chown -R node:node /ms-playwright \
+# Shared-library dependencies for the headless Chromium the web app's
+# `test:browser` suite drives through Playwright. Only the apt libraries are baked
+# here (they need root and are version-stable across Chromium builds); the browser
+# BINARY is fetched in post-create.sh, after `npm ci`, so it always matches the
+# lockfile's playwright -- whereas a version baked here would have to be hand-kept
+# in lockstep, and a drift would make the runtime re-download a browser the egress
+# firewall then blocks. `install-deps` only runs apt (no zip extraction), so it is
+# unaffected by the Node 26 yauzl hang that the browser download hit before
+# playwright 1.60. The version here is just what npx runs to emit the apt list; it
+# is version-tolerant, so it need not track the lockfile exactly.
+RUN npx --yes playwright@1.61.0 install-deps chromium \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The native sshd test backend spawns an unprivileged sshd, which still fatally
