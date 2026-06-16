@@ -87,3 +87,11 @@ test("keyTypeFromBlob returns (unknown) when claimed type length exceeds the blo
   const blob = new Uint8Array([0, 0, 0, 100, 1, 2, 3, 4, 5]);
   expect(keyTypeFromBlob(blob)).toBe("(unknown)");
 });
+
+test("keyTypeFromBlob returns (unknown) when the length prefix has the high bit set", () => {
+  // A first byte >= 0x80 sets the sign bit of the bitwise-OR length. Without
+  // the unsigned `>>> 0` coercion this is a huge negative number that slips past
+  // the bound check and decodes an empty range as "" instead of "(unknown)".
+  const blob = new Uint8Array([0x80, 0, 0, 11, 1, 2, 3, 4, 5]);
+  expect(keyTypeFromBlob(blob)).toBe("(unknown)");
+});

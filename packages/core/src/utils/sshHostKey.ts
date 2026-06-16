@@ -11,11 +11,17 @@ import { sha256, bytesEqual } from "./crypto.js";
  */
 function keyTypeFromBlob(blob: Uint8Array): string {
   if (blob.length < 4) return "(unknown)";
+  // The length prefix is a wire-format uint32. Coerce the bitwise-OR result to
+  // unsigned with `>>> 0`: without it a first byte >= 0x80 sets the sign bit and
+  // yields a negative `typeLen`, which slips past the `> blob.length - 4` bound
+  // check and makes `subarray(4, 4 + typeLen)` decode an empty range as "" rather
+  // than falling through to "(unknown)".
   const typeLen =
-    ((blob[0] as number) << 24) |
-    ((blob[1] as number) << 16) |
-    ((blob[2] as number) << 8) |
-    (blob[3] as number);
+    (((blob[0] as number) << 24) |
+      ((blob[1] as number) << 16) |
+      ((blob[2] as number) << 8) |
+      (blob[3] as number)) >>>
+    0;
   if (typeLen > blob.length - 4) return "(unknown)";
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(
@@ -79,8 +85,9 @@ export async function computeHostKeyFingerprint(
  *
  * @param keyBlob - raw host-key blob from ssh2's `hostVerifier`
  * @param pin - pinned fingerprint in OpenSSH SHA256 format, e.g.
- *   `SHA256:abc...xyz` (44 characters total including the prefix; validated
- *   at config-parse time by {@link HOST_KEY_FINGERPRINT_REGEX})
+ *   `SHA256:abc...xyz` (50 characters total: the 7-character `SHA256:` prefix
+ *   plus 43 unpadded base64 characters for the 32-byte digest; validated at
+ *   config-parse time by {@link HOST_KEY_FINGERPRINT_REGEX})
  */
 export async function verifyHostKeyFingerprint(
   keyBlob: Uint8Array<ArrayBuffer>,

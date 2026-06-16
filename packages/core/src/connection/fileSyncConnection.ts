@@ -1145,7 +1145,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 verify(true);
               } else {
                 const presented = await computeHostKeyFingerprint(blob);
-                const keyType = keyTypeFromBlob(blob);
+                // keyTypeFromBlob decodes UTF-8 bytes straight from the
+                // server-controlled key blob, so -- like host and path below --
+                // it is escaped before reaching the error message (which is
+                // logged and shown to the operator). The presented fingerprint
+                // is base64 and the pin is format-validated, so neither needs it.
+                const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
                 mismatchDetails =
                   `the server presented a ${keyType} key with fingerprint ` +
                   `${presented}, which does not match the pinned fingerprint ` +
