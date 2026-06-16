@@ -104,8 +104,13 @@ test("a result-write failure after a completed exchange writes no abort marker",
     ),
   ]);
 
-  // A failed on its local output write; B completed the exchange unaffected.
+  // A failed on its local output write -- specifically the ENOENT from the
+  // missing parent directory, not some masked earlier fault -- while B completed
+  // the exchange unaffected.
   expect(resA.status).toBe("rejected");
+  expect((resA as PromiseRejectedResult).reason).toMatchObject({
+    code: "ENOENT",
+  });
   expect(resB.status).toBe("fulfilled");
 
   // The decisive guard: A's post-exchange local failure left no cross-party abort
