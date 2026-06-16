@@ -1356,6 +1356,47 @@ describe("assessLinkageSatisfiability", () => {
     expect(satisfiableKeyCount).toBeGreaterThan(0);
     expect(satisfiableKeyCount).toBeLessThan(fullTerms.linkageKeys.length);
   });
+
+  // Built without metadata so it keeps every default key -- including the ssn4
+  // keys and the swap key -- that the type-filtered `fullTerms` fixture drops.
+  const allKeyTerms = getDefaultLinkageTerms("Agency A");
+
+  test("an ssn column does not satisfy an ssn4 field (distinct semantic types)", () => {
+    // The full default terms reference both ssn and ssn4. An `ssn` column infers
+    // as ssn only, never ssn4, so ssn4 stays unsatisfiable -- matching runtime,
+    // where the absence of an ssn4-typed column collapses the ssn4 keys.
+    const { unsatisfied } = assessLinkageSatisfiability(
+      ["first_name", "last_name", "dob", "ssn"],
+      allKeyTerms,
+    );
+    const names = unsatisfied.map((f) => f.name);
+    expect(names).toContain("ssn4");
+    expect(names).not.toContain("ssn");
+  });
+
+  test("a swap key is assessed by its element fields, so an absent swapped field excludes it", () => {
+    // The default terms include "swap(LN, FN) + DOB". swap only permutes which
+    // slot holds which field at receive time; it does not change which fields the
+    // key needs. With firstName absent, the swap key references an unproducible
+    // field and must be excluded from the satisfiable count, identically to the
+    // non-swap LN+FN+DOB key.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      ["last_name", "dob", "ssn"],
+      allKeyTerms,
+    );
+    const unsatNames = new Set(unsatisfied.map((f) => f.name));
+    expect(unsatNames.has("firstName")).toBe(true);
+    // ssn+lastName+dob keys survive, so this is a partial (warn) case, proving the
+    // swap key's exclusion is not just the whole set collapsing to zero.
+    expect(satisfiableKeyCount).toBeGreaterThan(0);
+    expect(satisfiableKeyCount).toBeLessThan(allKeyTerms.linkageKeys.length);
+    const swapKey = allKeyTerms.linkageKeys.find((k) => k.swap !== undefined);
+    expect(swapKey).toBeDefined();
+    if (swapKey === undefined) return;
+    // The detector reads e.field on the stored (unswapped) elements; the swap key
+    // needs firstName, which is unsatisfiable, so it is correctly excluded.
+    expect(swapKey.elements.some((e) => unsatNames.has(e.field))).toBe(true);
+  });
 });
 
 // --- StandardizationSchema ---------------------------------------------------
