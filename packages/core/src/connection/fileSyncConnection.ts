@@ -192,6 +192,26 @@ function withTransportBudgetVoid(
  * {@link fromEventConnection} inactivity deadline.
  */
 export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
+// Teardown-only bound on the close() terminal-frame drain (delete mode). The
+// drain waits for the peer to consume (delete) the last sent frame before
+// cleanup() sweeps it; unlike the live exchange's peer-inactivity budget this
+// wait protects nothing durable -- the exchange result is already computed and
+// persisted, and cleanup() deletes the frame as a fallback if the drain times
+// out (durability is decoupled from deletion; see close()). So it is bounded by
+// this short fixed budget, sized to a sync tool's flush latency (a peer's poller
+// listing the directory, consuming the frame, and the deletion propagating back)
+// and on the same order as the per-operation liveness bounds, NOT the full
+// peerTimeoutMs (default one hour): a clean close against a crashed or departed
+// peer then fast-fails in seconds instead of parking for up to the hour. close()
+// applies it as min(this, peerTimeoutMs) so an operator who configures a tiny
+// peer budget still never gets a LONGER teardown than they asked for. Kept above
+// single-digit seconds so an ordinary sync-mediated (filedrop) last-frame
+// propagation is not routinely lost to a too-tight race, and internal-only (not
+// a config knob) for the same reason as DEFAULT_JOINER_RECOVERY_MS: the value
+// only matters when a peer is mid-consumption at teardown, which a correct peer
+// resolves well inside it.
+/** @internal */
+export const TERMINAL_FRAME_DRAIN_TIMEOUT_MS = 1000 * 60;
 const DEFAULT_POLLING_FREQUENCY_MS = 100;
 const DEFAULT_VERBOSITY = 1;
 // Bounds the pre-sweep retain-signal inspection's peer-hello read (see
@@ -1408,11 +1428,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    *
    * Before cleanup, drains the last sent file: waits for the peer to consume
    * it so a clean close never deletes an unconsumed terminal frame. The wait is
-   * bounded by a fresh `peerTimeoutMs` budget from close() start (not the
-   * remaining timeToLive, which may be near-zero for long exchanges). An
-   * unresponsive peer causes the drain to time out and cleanup() to delete the
-   * file as a fallback. Idempotent: safe to call repeatedly and on a
-   * connection that was never opened.
+   * bounded by the short fixed {@link TERMINAL_FRAME_DRAIN_TIMEOUT_MS} (capped
+   * at `peerTimeoutMs`), not the full peer-inactivity budget -- the result is
+   * already persisted by close() time and cleanup() deletes the frame as a
+   * fallback, so a departed peer fast-fails teardown in seconds rather than
+   * parking for up to an hour. An unresponsive peer causes the drain to time
+   * out and cleanup() to delete the file as a fallback. Idempotent: safe to
+   * call repeatedly and on a connection that was never opened.
    */
   async close() {
     // Abort-marker decision gate, FIRST -- before stop()/the drain/client.end()
@@ -1462,9 +1484,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     if (this.path !== undefined) {
       // Drain the last sent file before sweeping: a clean close must not
-      // delete a terminal frame the peer has not yet consumed. Uses a fresh
-      // peerTimeoutMs budget from close() start so a long exchange does not
-      // leave the budget near-zero for teardown. Drain failure (list() error
+      // delete a terminal frame the peer has not yet consumed. Bounded by the
+      // short fixed TERMINAL_FRAME_DRAIN_TIMEOUT_MS (min'd with peerTimeoutMs),
+      // NOT the full peer-inactivity budget: at teardown the result is already
+      // persisted and cleanup() deletes the frame as a fallback, so a long wait
+      // protects nothing and would hang a clean close against a departed peer
+      // for up to peerTimeoutMs (default one hour). Drain failure (list() error
       // or timeout) falls through to cleanup(), which deletes as a fallback.
       // In retain mode the last sent file is never deleted, so the drain would
       // spin to its deadline; skip it since cleanup() is a no-op anyway. This
@@ -1479,20 +1504,28 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
-        const drainTimeoutMs =
+        const peerBudgetMs =
           this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+        // min() so a configured peer budget smaller than the fixed drain budget
+        // still caps teardown below it rather than above it (see
+        // TERMINAL_FRAME_DRAIN_TIMEOUT_MS).
+        const drainTimeoutMs = Math.min(
+          TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
+          peerBudgetMs,
+        );
         const deadline = Date.now() + drainTimeoutMs;
         // Bound each drain list() by the time remaining to `deadline`, not the
         // per-call transport budget: boundTransport arms a fresh peerTimeoutMs on
-        // every list(), so a list issued late in the drain could otherwise run a
-        // full budget PAST `deadline`, blocking teardown for up to twice the
-        // budget. Racing it against the remaining window keeps total teardown
-        // within the drain deadline (the documented "drain times out" contract).
-        // This is teardown-specific and does not contradict the fresh-per-await
-        // budget the live exchange uses: the drain has its own short deadline to
-        // honor, whereas a healthy long-running poll deliberately has none. A
-        // list() that loses this race rejects and the enclosing catch falls
-        // through to cleanup(), exactly as a list() error already does.
+        // every list() -- now potentially far LARGER than this short drain
+        // deadline -- so a list issued late in the drain could otherwise run a
+        // full peer budget PAST `deadline`, blocking teardown well beyond it.
+        // Racing it against the remaining window keeps total teardown within the
+        // drain deadline (the documented "drain times out" contract). This is
+        // teardown-specific and does not contradict the fresh-per-await budget
+        // the live exchange uses: the drain has its own short deadline to honor,
+        // whereas a healthy long-running poll deliberately has none. A list()
+        // that loses this race rejects and the enclosing catch falls through to
+        // cleanup(), exactly as a list() error already does.
         const filePresent = async () => {
           const remaining = Math.max(0, deadline - Date.now());
           const files = await withTransportBudget(
