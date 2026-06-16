@@ -3482,6 +3482,110 @@ test("close() drains the last sent file before cleanup, preventing premature del
   expect(deletedBeforeConsumed).toBe(false);
 });
 
+test("close() emits an info log at drain entry when the last sent file is still present", async () => {
+  // Verifies the info-level breadcrumb added so an operator running at default
+  // verbosity (verbose:0 = INFO) can tell close() is in a non-trivial drain
+  // rather than hanging. The file is consumed before the deadline so only the
+  // entry log appears, not the deadline-fired log.
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  let capturedOutName = "";
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: 500 },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        capturedOutName = outName;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // Remove the file after 30 ms so close() finishes well before the deadline.
+        setTimeout(() => files.delete(`/test/${outName}`), 30);
+
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    const entryLog = logs.find(
+      (l) => l.level === "INFO" && l.message.includes("close: waiting up to"),
+    );
+    expect(entryLog).toBeDefined();
+    expect(entryLog!.message).toContain("500 ms");
+    expect(entryLog!.message).toContain(capturedOutName);
+    // File was consumed before the deadline; no deadline-fired log.
+    expect(logs.some((l) => l.message.includes("drain deadline reached"))).toBe(
+      false,
+    );
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
+test("close() emits an info log when the drain deadline fires", async () => {
+  // Verifies the info-level breadcrumb added so an operator can distinguish a
+  // completed (peer consumed the terminal frame) close from a timed-out one that
+  // deleted the frame as a fallback. The file is never consumed here, so close()
+  // runs to the deadline and both the entry and deadline logs appear.
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  let capturedOutName = "";
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: 50 },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        capturedOutName = outName;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // Never delete the file; close() will time out and delete as fallback.
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    const entryLog = logs.find(
+      (l) => l.level === "INFO" && l.message.includes("close: waiting up to"),
+    );
+    expect(entryLog).toBeDefined();
+    expect(entryLog!.message).toContain("50 ms");
+    expect(entryLog!.message).toContain(capturedOutName);
+
+    const deadlineLog = logs.find(
+      (l) =>
+        l.level === "INFO" && l.message.includes("drain deadline reached"),
+    );
+    expect(deadlineLog).toBeDefined();
+    expect(deadlineLog!.message).toContain("50 ms");
+    expect(deadlineLog!.message).toContain(capturedOutName);
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
 // --- synchronize(): unconditional hello rename --------------------------------
 
 test("synchronize() lock path writes hello as <id>-hello.json and self-hello detection still works", async () => {

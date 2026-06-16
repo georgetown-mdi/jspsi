@@ -1479,9 +1479,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
-        const deadline =
-          Date.now() +
-          (this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
+        const drainTimeoutMs =
+          this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+        const deadline = Date.now() + drainTimeoutMs;
         // Bound each drain list() by the time remaining to `deadline`, not the
         // per-call transport budget: boundTransport arms a fresh peerTimeoutMs on
         // every list(), so a list issued late in the drain could otherwise run a
@@ -1508,6 +1508,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         };
         try {
           if (await filePresent()) {
+            this.log.info(
+              `[${this.role}] close: waiting up to ${drainTimeoutMs} ms for ` +
+                `peer to consume ${lastSentFile} before cleanup`,
+            );
             this.log.debug(
               `[${this.role}] draining ${lastSentFile} before cleanup`,
             );
@@ -1520,6 +1524,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // swallows failures, so a separate controller buys nothing.
               await new Promise((resolve) =>
                 setTimeout(resolve, this.options.pollingFrequency),
+              );
+            }
+            if (Date.now() >= deadline) {
+              this.log.info(
+                `[${this.role}] close: drain deadline reached after ` +
+                  `${drainTimeoutMs} ms; deleting ${lastSentFile} as fallback`,
               );
             }
           }
