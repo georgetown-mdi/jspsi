@@ -3698,7 +3698,9 @@ test("close() drain is bounded by the fixed terminal-frame budget, not the full 
       l.message.includes("close: waiting up to"),
     );
     expect(entryLog).toBeDefined();
-    expect(entryLog!.message).toContain(`${TERMINAL_FRAME_DRAIN_TIMEOUT_MS} ms`);
+    expect(entryLog!.message).toContain(
+      `${TERMINAL_FRAME_DRAIN_TIMEOUT_MS} ms`,
+    );
     expect(entryLog!.message).not.toContain(`${hugePeerTimeoutMs} ms`);
   } finally {
     logLibrary.setLevel(prevLevel);
