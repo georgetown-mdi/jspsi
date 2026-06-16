@@ -45,6 +45,21 @@ const GUARDED_ROOTS = ["apps/web", "packages/core"];
 // list.
 const DEPLOY_EXCLUDED = new Set(["apps/web/test", "packages/core/test"]);
 
+// Inputs that feed the shipped artifact but live OUTSIDE the guarded roots, so
+// the top-level-dir scan cannot see them. Assert the deploy filter still lists
+// each: dropping one means a real change (e.g. a crypto-lib bump via lib/**, or
+// a build-setup change via the setup action) silently never deploys -- a stale
+// deploy that is invisible both here and in a workflow-diff review. This is a
+// fixed floor, not a mirror of the whole filter: the set is stable (it does not
+// change when web/core subdirs are added or removed), so the check only fires
+// when an entry is actually deleted, which is exactly the bug worth catching.
+const REQUIRED_DEPLOY_INPUTS = [
+  "lib/**", // vendored @openmined/psi.js tgz, bundled into the artifact
+  "package-lock.json", // lockfile npm ci resolves the artifact's deps from
+  "tsconfig.base.json", // shared TS config the build inherits
+  ".github/actions/setup/**", // composite action: npm ci + core build -> bundle
+];
+
 // The on.<event>.paths list of a workflow. yaml 2.x uses the YAML 1.2 core
 // schema, so the `on` key is a plain string (not folded to the boolean true the
 // way a YAML 1.1 parser would), and parsed.on.<event>.paths reads straight off.
@@ -163,6 +178,12 @@ describe("ci path-filter drift guard (live workflows)", () => {
     const prEntries = workflowPaths(PR_WORKFLOW, "pull_request");
     for (const root of GUARDED_ROOTS) {
       expect(prEntries).toContain(`${root}/**`);
+    }
+  });
+
+  it("the deploy filter still lists each out-of-root artifact input", () => {
+    for (const input of REQUIRED_DEPLOY_INPUTS) {
+      expect(deployEntries).toContain(input);
     }
   });
 
