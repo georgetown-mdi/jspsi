@@ -23,6 +23,7 @@ import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
   configureLogFile,
   durationFlagSeconds,
+  MAX_TIMEOUT_SECONDS,
   singleValue,
 } from "../util/cli";
 import { redactUrlCredentials } from "../util/connectionUrl";
@@ -89,7 +90,8 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "online only: how long to wait for the partner to accept before " +
-        `giving up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}s). ` +
+        `giving up (default: ${DEFAULT_ACCEPT_TIMEOUT_SECONDS}s, maximum: ` +
+        `${MAX_TIMEOUT_SECONDS / 86_400}d). ` +
         DURATION_VALUE_HELP,
     })
     .option("expires-in", {
@@ -433,7 +435,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // repeat too, before the array would hit parseDuration's .trim() and surface as
       // a confusing exit 69.
       const acceptTimeout =
-        durationFlagSeconds(argv, "accept-timeout") ??
+        durationFlagSeconds(argv, "accept-timeout", MAX_TIMEOUT_SECONDS) ??
         DEFAULT_ACCEPT_TIMEOUT_SECONDS;
       const expiresIn = singleValue(argv, "expires-in") as string | undefined;
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
