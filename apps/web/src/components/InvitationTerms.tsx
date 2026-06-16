@@ -184,15 +184,29 @@ export function InvitationTerms({
         {summary.payload !== undefined && (
           <Term label="Additional data for matched records">
             {summary.payload.send.length > 0 && (
-              <Text size="sm">
-                Your partner will send: {summary.payload.send.join(", ")}
-              </Text>
+              <Stack gap={2}>
+                <Text size="sm">Your partner will send:</Text>
+                {/* One column per item rather than a joined string: a
+                    partner-controlled column name may contain the separator,
+                    which joined text would render as spurious extra columns.
+                    Keyed by index -- column order is fixed and a sanitized
+                    name is not unique. */}
+                <List size="sm" withPadding listStyleType="circle">
+                  {summary.payload.send.map((column, index) => (
+                    <List.Item key={index}>{column}</List.Item>
+                  ))}
+                </List>
+              </Stack>
             )}
             {summary.payload.receive.length > 0 && (
-              <Text size="sm">
-                Your partner requests from you:{" "}
-                {summary.payload.receive.join(", ")}
-              </Text>
+              <Stack gap={2}>
+                <Text size="sm">Your partner requests from you:</Text>
+                <List size="sm" withPadding listStyleType="circle">
+                  {summary.payload.receive.map((column, index) => (
+                    <List.Item key={index}>{column}</List.Item>
+                  ))}
+                </List>
+              </Stack>
             )}
           </Term>
         )}

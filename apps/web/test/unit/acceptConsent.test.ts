@@ -552,6 +552,26 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(flags.length).toBe(1);
   });
 
+  test("renders payload columns as separate items so a comma in a name cannot merge them", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          payload: {
+            send: [{ name: "risk, score" }, { name: "tier" }],
+            receive: [],
+          },
+        }),
+      },
+    });
+    // The comma-bearing name renders intact ...
+    expect(html).toContain("risk, score");
+    expect(html).toContain("tier");
+    // ... and as its own item: a join would have produced
+    // "risk, score, tier", making two columns read as three.
+    expect(html).not.toContain("score, tier");
+  });
+
   test("escapes injection characters in the rendered identity", () => {
     const html = render(
       createElement(InvitationTerms, {
