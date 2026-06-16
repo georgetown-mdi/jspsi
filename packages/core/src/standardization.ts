@@ -5,11 +5,13 @@ import type {
   StandardizationStep,
 } from "./config/standardization.js";
 import type {
+  LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
   TransformStep,
 } from "./config/linkageTerms.js";
+import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 
 const logger = getLogger("cleaning");
@@ -865,4 +867,102 @@ export function validateStandardizationAgainstTerms(
   }
 
   return errors;
+}
+
+/**
+ * The linkage fields in `terms` that the input `columns` cannot satisfy
+ * through the available data standardizations. Mirrors the column-to-field
+ * resolution in {@link buildStandardizedDataset}: a field is producible when
+ *
+ * 1. the spec carries an explicit `standardization` for it whose source input
+ *    column is present (the explicit mapping preempts the type fallback), OR
+ * 2. the field has NO explicit standardization and the input has a column whose
+ *    inferred semantic type matches the field's type.
+ *
+ * An explicit standardization preempts the type fallback: a field whose
+ * explicit source column is absent is unsatisfiable even when a same-typed
+ * column is present -- the exchange would bind it to the missing column and
+ * emit no values. An empty result means every configured field can be
+ * produced; a non-empty result names the fields that cannot.
+ */
+export function unsatisfiedLinkageFields(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): LinkageField[] {
+  const present = new Set(columns);
+  const inputTypes = new Set(inferMetadata(columns).map((c) => c.type));
+  // Field name -> the input column its explicit standardization reads. A field
+  // present here is resolved by the explicit transformation (which preempts the
+  // type fallback), so it is producible iff that column exists; a field absent
+  // here falls back to semantic-type coverage.
+  const explicitInput = new Map(
+    (standardization ?? []).map((t) => [t.output, t.input]),
+  );
+  return terms.linkageFields.filter((f) => {
+    const mapped = explicitInput.get(f.name);
+    if (mapped !== undefined) return !present.has(mapped);
+    return !inputTypes.has(f.type);
+  });
+}
+
+/** How an input's columns fare against a set of linkage terms: which fields it
+ * cannot produce, and how many of the terms' linkage keys remain usable as a
+ * result. {@link satisfiableKeyCount} of 0 is the block signal -- every key
+ * references at least one unproducible field, so an exchange would emit no key
+ * strings and yield a result byte-indistinguishable from a legitimately empty
+ * intersection. */
+export interface LinkageSatisfiability {
+  /** The linkage fields the columns cannot produce (see
+   * {@link unsatisfiedLinkageFields}); empty when the input satisfies every field. */
+  unsatisfied: LinkageField[];
+  /** The number of linkage keys all of whose element fields are satisfiable.
+   * Zero means no key can match and the exchange should be blocked rather than
+   * run to a silent empty result. */
+  satisfiableKeyCount: number;
+}
+
+/**
+ * Assess whether an input's `columns` can satisfy `terms`, for the accept-path
+ * pre-flight shared by the web acceptor and the CLI. Combines
+ * {@link unsatisfiedLinkageFields} (which fields cannot be produced) with the
+ * downstream consequence (how many linkage keys survive): a key is satisfiable
+ * only when EVERY element field is producible -- both declared in
+ * `linkageFields` and resolvable from the columns -- since a single empty field
+ * collapses the whole key for that record. The caller decides policy from the
+ * result -- block when {@link LinkageSatisfiability.satisfiableKeyCount} is 0,
+ * warn when it is positive but below `linkageKeys.length` -- and owns its own
+ * message wording and display sanitization.
+ *
+ * The satisfiability check is over column SHAPE, not row VALUES: a field whose
+ * same-typed column exists but whose every row standardizes to empty (e.g. an
+ * all-invalid date column) is reported satisfiable yet yields no key strings at
+ * runtime. That residual is data-dependent and unavoidable from columns alone;
+ * it can only over-claim "satisfiable", never wrongly block.
+ */
+export function assessLinkageSatisfiability(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): LinkageSatisfiability {
+  const unsatisfied = unsatisfiedLinkageFields(columns, terms, standardization);
+  const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
+  // The set of field names that are BOTH declared and producible. A key element
+  // referencing a name absent from this set is unsatisfiable -- whether the field
+  // is declared-but-unproducible (in `unsatisfied`) or not declared at all. The
+  // latter matters: the schema does not require a key element's `field` to name a
+  // declared linkage field, and at exchange time an undeclared reference resolves
+  // to no values (buildStandardizedDataset only builds declared fields, so
+  // getField returns undefined and the key collapses to null). Counting such a
+  // key satisfiable would let an incoherent or hostile terms set defeat the block
+  // and run to the silent-empty result this pre-flight exists to prevent.
+  const producibleNames = new Set(
+    terms.linkageFields
+      .map((f) => f.name)
+      .filter((name) => !unsatisfiedNames.has(name)),
+  );
+  const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
+    k.elements.every((e) => producibleNames.has(e.field)),
+  ).length;
+  return { unsatisfied, satisfiableKeyCount };
 }
