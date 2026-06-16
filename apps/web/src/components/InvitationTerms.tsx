@@ -50,31 +50,42 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
           </Badge>
         )}
       </Group>
-      <List size="sm" withPadding listStyleType="circle">
+      {/* Elements (and their transforms/parameters) render as a Stack of
+          blocks, not a Mantine List: a transform with parameters needs nested
+          structure, which a List.Item -- whose children sit in an inline span
+          -- cannot hold validly. Keyed by index: element order is fixed for a
+          given key, and a field label is not unique across elements. */}
+      <Stack gap={4}>
         {summary.elements.map((element, index) => (
-          // Keyed by index: the element order is fixed for a given key, so the
-          // position is a stable key (the field label is not unique -- one
-          // field can appear in several elements with different transforms).
-          <List.Item key={index}>
-            {element.fieldLabel}
-            {/* One annotation per transform step rather than a joined list: a
-                partner-controlled function name may contain the join separator,
-                which joined text would render as spurious extra steps. */}
-            {element.transforms.map((fn, ti) => (
-              <Text span key={ti} size="xs" c="dimmed">
-                {" "}
-                - transformed ({fn})
-              </Text>
+          <Stack key={index} gap={2}>
+            <Text size="sm">
+              {element.fieldLabel}
+              {element.fuzzyComparison !== undefined && (
+                <Text span size="xs" c="dimmed">
+                  {" "}
+                  - fuzzy match: {element.fuzzyComparison}
+                </Text>
+              )}
+            </Text>
+            {/* Each transform, and each of its parameters, is its own block --
+                never joined: a partner-controlled function name or parameter
+                value may contain any separator, which joined text would render
+                as spurious extra steps or parameters. */}
+            {element.transforms.map((transform, ti) => (
+              <Stack key={ti} gap={0} pl="md">
+                <Text size="xs" c="dimmed">
+                  transformed ({transform.function})
+                </Text>
+                {transform.params.map((param, pi) => (
+                  <Text key={pi} size="xs" c="dimmed" pl="md">
+                    {param}
+                  </Text>
+                ))}
+              </Stack>
             ))}
-            {element.fuzzyComparison !== undefined && (
-              <Text span size="xs" c="dimmed">
-                {" "}
-                - fuzzy match: {element.fuzzyComparison}
-              </Text>
-            )}
-          </List.Item>
+          </Stack>
         ))}
-      </List>
+      </Stack>
       {summary.hasSwap && (
         <Text size="xs" c="dimmed">
           {summary.swap !== undefined

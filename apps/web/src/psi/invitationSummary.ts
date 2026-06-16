@@ -6,6 +6,7 @@ import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
+  TransformStep,
 } from "@psilink/core";
 
 /**
@@ -60,6 +61,25 @@ export interface InvitationPayloadSummary {
 }
 
 /**
+ * A single transform step applied to an element's value before hashing,
+ * reduced to display form: the function name and a bounded, sanitized view of
+ * its parameters -- which determine what the function does, and so what
+ * matches.
+ */
+export interface InvitationTransformSummary {
+  /** Sanitized name of the transform function. */
+  function: string;
+  /**
+   * One sanitized `key: value` string per declared parameter, in declaration
+   * order, capped at {@link MAX_DISPLAYED_PARAMS} (a trailing "... N more"
+   * entry marks any overflow). sanitizeForDisplay bounds each entry's length and
+   * the count is capped, so an arbitrarily large partner-supplied `params`
+   * record cannot flood the screen. Empty when the step declares no parameters.
+   */
+  params: Array<string>;
+}
+
+/**
  * One element of a linkage key, reduced to what determines whether records
  * match on it: the field it derives from and any non-default matching rule it
  * carries (a value transform or a fuzzy-comparison expansion).
@@ -68,12 +88,11 @@ export interface InvitationKeyElementSummary {
   /** Human-readable label for the field this element derives from. */
   fieldLabel: string;
   /**
-   * Sanitized function names of the transform steps applied to the value, in
-   * order; empty when the value is matched as-is. The function name is a short,
-   * length-bounded string; the partner-controlled `params` are not surfaced (an
-   * arbitrary, unbounded record), only that a transform is present and which.
+   * Transform steps applied to the value before hashing, in order; empty when
+   * the value is matched as-is. Each carries the sanitized function name and a
+   * bounded, sanitized view of its parameters.
    */
-  transforms: Array<string>;
+  transforms: Array<InvitationTransformSummary>;
   /** Plain-language label for the fuzzy-comparison expansion, if any. */
   fuzzyComparison?: string;
 }
@@ -197,6 +216,53 @@ function describeConstraints(field: LinkageField): Array<string> {
 }
 
 /**
+ * Upper bound on the number of transform parameters surfaced per step. A real
+ * function takes a handful; the cap (with an overflow marker) keeps an
+ * arbitrarily large partner-supplied `params` record -- the schema bounds
+ * neither the entry count nor the value content -- from flooding the screen.
+ */
+const MAX_DISPLAYED_PARAMS = 16;
+
+/**
+ * Render a transform parameter value for display. Primitives become their plain
+ * string form; anything structured is JSON-encoded (best effort). The result is
+ * sanitized and length-bounded by the caller, so it need not be safe on its own.
+ */
+function describeParamValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (value === null) return "null";
+  if (value === undefined) return "";
+  try {
+    // A value past the checks above is an object/array from a JSON-parsed
+    // params record, so JSON.stringify yields a string (and throws only on the
+    // unreachable circular/bigint cases, caught below).
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Reduce one transform step to its display summary: the sanitized function name
+ * and a bounded, sanitized `key: value` view of its parameters. Each entry is
+ * sanitized as a whole (so a parameter key or value cannot carry control, bidi,
+ * or homoglyph characters, and is truncated), and the entry count is capped.
+ */
+function summarizeTransform(step: TransformStep): InvitationTransformSummary {
+  const entries = Object.entries(step.params ?? {});
+  const params = entries
+    .slice(0, MAX_DISPLAYED_PARAMS)
+    .map((entry) =>
+      sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
+    );
+  if (entries.length > MAX_DISPLAYED_PARAMS)
+    params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
+  return { function: sanitizeForDisplay(step.function), params };
+}
+
+/**
  * Reduce one linkage key to its display summary, resolving each element's field
  * reference to a human-readable label and surfacing every non-default matching
  * rule. `fieldByName` maps a field `name` to its semantic type; an element or
@@ -216,9 +282,7 @@ function summarizeKey(
   const elements: Array<InvitationKeyElementSummary> = key.elements.map(
     (element) => ({
       fieldLabel: labelForField(element.field),
-      transforms: (element.transform ?? []).map((step) =>
-        sanitizeForDisplay(step.function),
-      ),
+      transforms: (element.transform ?? []).map(summarizeTransform),
       fuzzyComparison:
         element.generateFuzzyComparisons !== undefined
           ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]

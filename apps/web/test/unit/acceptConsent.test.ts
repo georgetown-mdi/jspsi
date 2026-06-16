@@ -209,21 +209,51 @@ describe("summarizeInvitation", () => {
             elements: [
               {
                 field: "first_name",
-                transform: [{ function: "substring" + BEL }],
+                transform: [
+                  {
+                    function: "substring" + BEL,
+                    params: { ["k" + BEL]: "v" + BEL },
+                  },
+                ],
               },
             ],
           },
         ],
       }),
     );
-    // A transform function name and a constraint's allowedCharacters are both
-    // partner-controlled, so each is neutralized before it reaches the summary.
-    const fn = summary.linkageKeys[0].elements[0].transforms[0];
-    expect(fn).not.toContain(BEL);
-    expect(fn).toContain("\\x07");
+    // A transform function name, its parameters, and a constraint's
+    // allowedCharacters are all partner-controlled, so each is neutralized
+    // before it reaches the summary.
+    const transform = summary.linkageKeys[0].elements[0].transforms[0];
+    expect(transform.function).not.toContain(BEL);
+    expect(transform.function).toContain("\\x07");
+    expect(transform.params[0]).not.toContain(BEL);
+    expect(transform.params[0]).toContain("\\x07");
     const constraint = summary.linkageFields[0].constraints[0];
     expect(constraint).not.toContain(BEL);
     expect(constraint).toContain("\\x07");
+  });
+
+  test("caps the number of transform parameters shown", () => {
+    const params: Record<string, number> = {};
+    for (let i = 0; i < 20; i += 1) params["p" + i] = i;
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              { field: "ssn", transform: [{ function: "f", params }] },
+            ],
+          },
+        ],
+      }),
+    );
+    const shown = summary.linkageKeys[0].elements[0].transforms[0].params;
+    // 16 parameters shown, then one overflow marker for the remaining 4.
+    expect(shown).toHaveLength(17);
+    expect(shown[16]).toBe("... 4 more");
   });
 
   test("falls back to the sanitized field identifier for an unknown field reference", () => {
@@ -296,7 +326,9 @@ describe("summarizeInvitation", () => {
     // A transform is flagged, and its (sanitized) function name surfaces on the
     // element it applies to.
     expect(transformed.hasNonDefaultRule).toBe(true);
-    expect(transformed.elements[1].transforms).toEqual(["substring"]);
+    expect(transformed.elements[1].transforms).toEqual([
+      { function: "substring", params: ["start: 1", "length: 1"] },
+    ]);
 
     // A swap is flagged, and resolves to the swapped elements' field labels.
     expect(swapped.hasNonDefaultRule).toBe(true);
