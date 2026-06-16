@@ -464,7 +464,9 @@ function checkLinkageSatisfiability(
   const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
     k.elements.every((e) => !unsatisfiedNames.has(e.field)),
   ).length;
-  const fieldList = unsatisfied.map((f) => `${f.name} (${f.type})`).join(", ");
+  const fieldList = unsatisfied
+    .map((f) => `${sanitizeForDisplay(f.name)} (${f.type})`)
+    .join(", ");
 
   if (satisfiableKeyCount === 0)
     throw new UsageError(

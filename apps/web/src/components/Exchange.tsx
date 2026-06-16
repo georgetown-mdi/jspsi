@@ -179,6 +179,7 @@ export function Exchange(config: ExchangeConfig) {
     if (abortRef.current) return;
     setSubmitted(true);
     setErrorAlert(undefined);
+    setWarningAlert(undefined);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -258,20 +259,24 @@ export function Exchange(config: ExchangeConfig) {
           const satisfiableKeyCount = config.linkageTerms.linkageKeys.filter(
             (k) => k.elements.every((e) => !unsatisfiedNames.has(e.field)),
           ).length;
-          const fieldList = unsatisfied
-            .map((f) => sanitizeForDisplay(f.name))
-            .join(", ");
+          // Raw names for the throw path: sanitizeErrorForDisplay in onError
+          // handles the final sanitization so they are not encoded twice.
+          const rawFieldList = unsatisfied.map((f) => f.name).join(", ");
           if (satisfiableKeyCount === 0)
             throw new Error(
               `Your CSV does not cover any of the linkage fields required by ` +
-                `this invitation (missing: ${fieldList}). No matches are ` +
+                `this invitation (missing: ${rawFieldList}). No matches are ` +
                 "possible. Upload a file that includes columns for the " +
                 "required field types.",
             );
+          // Sanitize for direct JSX display (not routed through sanitizeErrorForDisplay).
+          const safeFieldList = unsatisfied
+            .map((f) => sanitizeForDisplay(f.name))
+            .join(", ");
           setWarningAlert({
             title: "Partial CSV coverage",
             message:
-              `Your CSV is missing some linkage fields (${fieldList}). ` +
+              `Your CSV is missing some linkage fields (${safeFieldList}). ` +
               "Keys that depend on those fields will be inactive for this " +
               "exchange; other keys will proceed normally.",
           });
