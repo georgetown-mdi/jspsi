@@ -3586,6 +3586,75 @@ test("close() emits an info log when the drain deadline fires", async () => {
   }
 });
 
+test("close() does not emit the deadline log when the final poll observes the file consumed at/after the deadline", async () => {
+  // Teeth for the deadline-log gate: it must key on the LAST OBSERVED presence,
+  // not the clock. A clock-only check (`Date.now() >= deadline`) mislabels a
+  // clean drain whose final filePresent() returned "absent" at/after the
+  // deadline as a fallback-delete timeout. That straddle is a sub-millisecond
+  // boundary with real timers (each list() is budgeted to exactly the time left
+  // to the deadline, so a late return is pre-empted into the catch), so this
+  // forces it with fake timers: setSystemTime() advances Date.now() past the
+  // deadline WITHOUT firing the unref'd budget setTimeout (which advanceTimers
+  // would), leaving the mocked list() to resolve "consumed" on a microtask that
+  // still wins the budget race. The drain then exits via filePresent()===false
+  // with Date.now() past the deadline -- the exact case a clock-only gate gets
+  // wrong.
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: 1000 },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // First list() (the entry filePresent at deadline-time 0) surfaces the
+        // file; the second (first loop poll) jumps the clock past the 1000 ms
+        // deadline, then reports the file consumed. setSystemTime moves Date.now()
+        // only -- it does not fire the budget timer -- so the list resolves
+        // "absent" rather than the budget rejecting.
+        let listCalls = 0;
+        client.list = async () => {
+          listCalls++;
+          if (listCalls === 1)
+            return [{ name: outName, modifyTime: 0, size: 2 }];
+          vi.setSystemTime(1001);
+          return [];
+        };
+
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    // The entry log still fires (file present at entry), but the deadline log
+    // must NOT: the peer's consumption was observed, so this was a clean drain.
+    expect(
+      logs.some((l) => l.message.includes("close: waiting up to")),
+    ).toBe(true);
+    expect(logs.some((l) => l.message.includes("drain deadline reached"))).toBe(
+      false,
+    );
+  } finally {
+    logLibrary.setLevel(prevLevel);
+    vi.useRealTimers();
+  }
+});
+
 // --- synchronize(): unconditional hello rename --------------------------------
 
 test("synchronize() lock path writes hello as <id>-hello.json and self-hello detection still works", async () => {

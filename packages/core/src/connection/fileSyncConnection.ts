@@ -1515,7 +1515,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             this.log.debug(
               `[${this.role}] draining ${lastSentFile} before cleanup`,
             );
-            while (Date.now() < deadline && (await filePresent())) {
+            // Tracks the last OBSERVED presence so the deadline-fired log gates
+            // on "peer never consumed the file", not on the clock alone. The
+            // loop exits on either deadline expiry or filePresent() going false;
+            // a clock-only check would mislabel a clean drain whose final
+            // filePresent() returned false at/after the deadline as a timeout.
+            let stillPresent = true;
+            while (Date.now() < deadline) {
+              stillPresent = await filePresent();
+              if (!stillPresent) break;
               // Deliberately a plain setTimeout, not this.wait(): this drain IS
               // the teardown wait and runs after the session controller is
               // already aborted (above), so wiring it to that signal would make
@@ -1526,7 +1534,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 setTimeout(resolve, this.options.pollingFrequency),
               );
             }
-            if (Date.now() >= deadline) {
+            if (stillPresent) {
               this.log.info(
                 `[${this.role}] close: drain deadline reached after ` +
                   `${drainTimeoutMs} ms; deleting ${lastSentFile} as fallback`,
