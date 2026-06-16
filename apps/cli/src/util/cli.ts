@@ -5,6 +5,7 @@ import type { Arguments } from "yargs";
 
 import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 
+import { createOwnerOnlyWriteStream } from "../fileUtils";
 import { parseDurationFlag } from "./duration";
 
 /**
@@ -355,16 +356,45 @@ export function openInputSource(
   return fs.createReadStream(input);
 }
 
-/** Write formatted exchange results to a file or stdout as CSV. */
+/**
+ * Write formatted exchange results to a file or stdout as CSV, resolving once the
+ * write is complete. When given an output path, the result CSV -- the most
+ * sensitive artifact the tool produces -- is created owner-only (see
+ * {@link createOwnerOnlyWriteStream}) so it does not inherit a world/group-readable
+ * umask default.
+ *
+ * The file path is owned end to end: the returned promise resolves on the
+ * stream's `'finish'` (all rows flushed) and rejects on any `'error'`. Awaiting it
+ * is what makes a mid-write or close failure (a full disk, a revoked mount)
+ * recoverable -- without an `'error'` listener that failure would be emitted on a
+ * listener-free stream and crash the process with no diagnostic; rejecting instead
+ * lets the caller's error boundary map it to a non-zero exit with a sanitized
+ * message, and the `'finish'` resolution lets the caller order a later write (the
+ * secondary exchange record) after the result file is durable.
+ *
+ * The stdout branch (no path given) writes to `process.stdout` -- a long-lived
+ * stream the CLI neither owns nor closes, whose write errors stay with Node's
+ * default stdout handling -- and resolves immediately, unchanged.
+ */
 export function writeOutput(
   output: string | undefined,
   headers: string[],
   rows: Array<Array<string>>,
-): void {
-  const out = output
-    ? fs.createWriteStream(output, { encoding: "utf8" })
-    : process.stdout;
-  out.write(headers.join(",") + "\n");
-  for (const row of rows) out.write(row.join(",") + "\n");
-  if (output) (out as fs.WriteStream).close();
+): Promise<void> {
+  if (output === undefined) {
+    process.stdout.write(headers.join(",") + "\n");
+    for (const row of rows) process.stdout.write(row.join(",") + "\n");
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve, reject) => {
+    // createOwnerOnlyWriteStream is inside the executor so a synchronous failure
+    // (a missing parent dir, the fchmod/icacls refusal) rejects the promise too,
+    // rather than throwing past it -- the caller sees one failure channel.
+    const out = createOwnerOnlyWriteStream(output);
+    out.on("error", reject);
+    out.on("finish", () => resolve());
+    out.write(headers.join(",") + "\n");
+    for (const row of rows) out.write(row.join(",") + "\n");
+    out.end();
+  });
 }

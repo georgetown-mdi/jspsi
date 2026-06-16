@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
@@ -13,6 +14,7 @@ import {
   openInputSource,
   parseOrExit,
   singleValue,
+  writeOutput,
 } from "../../src/util/cli";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -374,4 +376,85 @@ test("openInputSource: stdin is disabled by default", () => {
   // A new caller does not silently inherit stdin support: the gate defaults off,
   // so `-` is rejected unless the caller opts in.
   expect(() => openInputSource("-")).toThrow(/stdin/);
+});
+
+// --- writeOutput -------------------------------------------------------------
+
+test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
+  // The result CSV is the most sensitive artifact the tool produces, so a file
+  // path must be created owner-only rather than inherit a world/group-readable
+  // umask default (the prior unprotected createWriteStream left it 0644 here).
+  // Awaiting the returned promise guarantees the rows are flushed, so the read
+  // and stat are deterministic with no polling.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
+  // 0o022 is the umask under which the old write produced a world-readable 0644.
+  const prevUmask = process.umask(0o022);
+  try {
+    const out = path.join(dir, "results.csv");
+    await writeOutput(
+      out,
+      ["a", "b"],
+      [
+        ["1", "2"],
+        ["3", "4"],
+      ],
+    );
+    expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
+    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+  } finally {
+    process.umask(prevUmask);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOutput: a mid-write stream error rejects rather than crashing", async () => {
+  // A write that fails after the stream opens (here a Writable whose first write
+  // errors) must surface as a rejected promise the caller's error boundary can
+  // map to an exit code -- not an unhandled 'error' event that crashes the
+  // process. Asserting the rejection is itself the proof it was handled: an
+  // unguarded 'error' would tear the worker down instead.
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "psilink-writeoutput-err-"),
+  );
+  try {
+    vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+      // createOwnerOnlyWriteStream has already opened a real fd and handed it in;
+      // close it so the substitute stream does not leak it.
+      const fd = (args[1] as { fd?: number } | undefined)?.fd;
+      if (typeof fd === "number") fs.closeSync(fd);
+      return new Writable({
+        write(_chunk, _enc, cb) {
+          cb(new Error("disk full"));
+        },
+      }) as unknown as fs.WriteStream;
+    });
+    await expect(
+      writeOutput(path.join(dir, "results.csv"), ["a"], [["1"]]),
+    ).rejects.toThrow("disk full");
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOutput: the stdout branch writes to process.stdout unchanged", async () => {
+  // No output path: the rows go to process.stdout with no file and no permission
+  // handling, exactly as before.
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(
+      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+    );
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]]);
+  } finally {
+    stdoutSpy.mockRestore();
+  }
+  expect(chunks.join("")).toBe("a,b\n1,2\n");
 });
