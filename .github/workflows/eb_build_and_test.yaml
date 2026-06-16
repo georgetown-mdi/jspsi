@@ -10,21 +10,20 @@ on:
   # branch that already has an open PR. If this job becomes a required status
   # check, configure branch protection so a path-skipped run does not block an
   # unrelated PR -- a skipped required check otherwise stays pending.
+  #
+  # Note: this PR filter deliberately diverges from the push filter in
+  # eb_deploy.yaml on apps/web/test/** -- the PR filter uses apps/web/** so a
+  # test-only PR (deleting or weakening assertions) still runs the full suite,
+  # while the deploy filter stays scoped to deploy-affecting sources only and
+  # omits test/**. The two filters cannot share a single list because of this
+  # intentional difference.
   pull_request:
     branches: [main, staging]
     paths:
       - "lib/**"
       - "package-lock.json"
       - "tsconfig.base.json"
-      - "apps/web/deploy/aws_eb/**"
-      - "apps/web/public/**"
-      - "apps/web/server/**"
-      - "apps/web/src/**"
-      - "apps/web/nitro.config.ts"
-      - "apps/web/package.json"
-      - "apps/web/postcss.config.cjs"
-      - "apps/web/tsconfig.json"
-      - "apps/web/vite.config.ts"
+      - "apps/web/**"
       - "packages/core/src/**"
       - "packages/core/package.json"
       - "packages/core/rollup.config.ts"
@@ -37,6 +36,18 @@ on:
       artifactName:
         description: "Name of the uploaded artifact"
         value: ${{jobs.build-and-test.outputs.artifactName}}
+
+# Cancel a superseded PR run when a newer commit lands on the same PR/branch.
+# Keyed on github.workflow so a deploy's workflow_call reuse (where the top-level
+# caller is eb_deploy.yaml, not this file) lands in a different group and is never
+# cancelled by a concurrent pull_request run of this workflow.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this build/test gate only needs to read the repo.
+permissions:
+  contents: read
 
 env:
   ARTIFACT_NAME: ${{format('{0}-{1}', vars.EB_APPLICATION_NAME, github.sha)}}
