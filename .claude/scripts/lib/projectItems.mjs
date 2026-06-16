@@ -336,7 +336,7 @@ async function runQueryViaFetch(query) {
  * Fetch every item of a project with its field values and node IDs, returning
  * [{ id, nodeId, title, fields }] where id is the numeric item ID, nodeId is the
  * `PVTI_` global node ID, and fields is the { name -> value } map (see
- * extractFields, which surfaces Status / Epic / Implementation Order among
+ * extractFields, which surfaces Status / Epic / Order among
  * others). Pages through the items connection with a cursor until hasNextPage is
  * false, so no item is dropped however large the board grows -- the silent
  * truncation a single `gh project item-list --limit N` would cause is impossible

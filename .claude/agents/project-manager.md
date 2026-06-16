@@ -48,8 +48,8 @@ then report: the board, the item URL, a one-line summary, and any unresolved
 points you logged. Unanswered questions do **not** block a capture -- they ride
 along in the draft's **Open questions** section (an honest draft with open
 choices is fine). Filing a new draft is additive and reversible, so capture
-autonomously rather than asking permission first. On board 9, also run the
-ruleset's epic/implementation-order step: set both fields autonomously when an
+autonomously rather than asking permission first. Also run the
+ruleset's epic/order step: set both fields autonomously when an
 existing epic clearly fits, and note the parenting in your report; when the fit
 is unclear, leave them unset and log it in **Open questions**.
 

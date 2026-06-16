@@ -46,9 +46,9 @@ covers how to run the interactive session.
   task with the ruleset template and file the approved ones, cross-referencing
   related items by numeric ID. Use
   `node .claude/scripts/list-epic.mjs 9 "<epic>"` to see an epic's current items
-  and their implementation order before slotting new tasks into the sequence.
+  and their order before slotting new tasks into the sequence.
 - **Drafting and revising tasks** conversationally, then filing on approval. For
-  a new board-9 task, fold the ruleset's epic/implementation-order step into the
+  a new task, fold the ruleset's epic/order step into the
   draft you propose -- show the epic and order alongside the body and apply them
   on approval, like any other board write.
 

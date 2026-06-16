@@ -6,7 +6,7 @@
 //
 // A board-hygiene pass needs the whole inventory in one round-trip: every item
 // with its numeric `?itemId=N` id, its `PVTI_` node id, status, Epic, and
-// Implementation Order. `gh project item-list` cannot supply that -- its JSON
+// Order. `gh project item-list` cannot supply that -- its JSON
 // omits the numeric id and the custom fields, and it silently caps at `--limit`
 // (board 9 already holds more than one 100-item page), so a too-low limit drops
 // items with no warning. This script goes through the same paginated GraphQL
@@ -17,7 +17,7 @@
 //   node list-issues.mjs [--json] [--status NAME]... <project-number>
 //
 // Default output is human-readable: one tab-separated line per item with numeric
-// id, node id, status, [Implementation Order], Epic, and title, in board order.
+// id, node id, status, [Order], Epic, and title, in board order.
 // --json emits a compact array of { id, nodeId, status, epic, order, title } for
 // programmatic consumers, consistent with fetch-issues.mjs and list-epic.mjs.
 //
@@ -73,7 +73,7 @@ async function main() {
       nodeId: item.nodeId,
       status: item.fields.Status ?? null,
       epic: item.fields.Epic ?? null,
-      order: item.fields["Implementation Order"],
+      order: item.fields["Order"],
       title: item.title,
     }))
     .filter(

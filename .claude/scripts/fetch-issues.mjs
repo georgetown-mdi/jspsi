@@ -41,7 +41,7 @@ import { fetchItems, toNumericId } from "./lib/projectItems.mjs";
 // Fields surfaced first, in this order, in human-readable output; any other
 // populated field is printed afterward in encounter order. These three are the
 // board's primary triage axes, so they lead.
-const LEAD_FIELDS = ["Status", "Epic", "Implementation Order"];
+const LEAD_FIELDS = ["Status", "Epic", "Order"];
 
 async function main() {
   const argv = process.argv.slice(2);

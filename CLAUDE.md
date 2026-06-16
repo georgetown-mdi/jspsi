@@ -22,7 +22,7 @@ Read and edit drafts by numeric ID (the `?itemId=N` URL value) or a `PVTI_` node
 
 - `node .claude/scripts/fetch-issues.mjs <project> <itemId> ...` -- read; shows custom fields
 - `node .claude/scripts/edit-issue.mjs <project> <itemId> ...` -- edit status/title/body/fields
-- `node .claude/scripts/list-epic.mjs <project> "<Epic>"` -- list an epic's items by Implementation Order
+- `node .claude/scripts/list-epic.mjs <project> "<Epic>"` -- list an epic's items by Order
 - `node .claude/scripts/list-issues.mjs <project>` -- list every item on a board, fully paginated; `--status NAME` filters, `--json` for a machine array
 
 Create a draft (the one board op still on `gh`): `gh project item-create <project> --owner georgetown-mdi --title "..." --body "..."`.
