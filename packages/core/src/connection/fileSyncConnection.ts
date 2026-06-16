@@ -1508,6 +1508,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         };
         try {
           if (await filePresent()) {
+            // lastSentFile is NOT routed through sanitizeForDisplay, unlike the
+            // partner/server-reachable strings elsewhere in close(). It is this
+            // party's own message filename (set only from send()'s outName, never
+            // adopted from a listing), whose sole non-numeric input is this.id --
+            // a local uuidv4() or the operator's own config peer_id. The partner
+            // ingress (the invitation endpoint) is a strict-object schema with no
+            // peerId key, so a peer cannot inject one; the name carries no
+            // partner-controlled bytes even at default verbosity.
             this.log.info(
               `[${this.role}] close: waiting up to ${drainTimeoutMs} ms for ` +
                 `peer to consume ${lastSentFile} before cleanup`,
