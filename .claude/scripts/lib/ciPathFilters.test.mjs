@@ -16,10 +16,17 @@ import { describe, expect, it } from "vitest";
 // turns that silent stale-deploy into a red test at the PR that introduces the
 // directory, forcing an explicit ship-or-exclude decision then and there.
 //
-// It is intentionally directory-level: it polices new top-level dirs, not new
-// files inside an already-enumerated subtree (e.g. a new root config file),
-// which still need manual filter upkeep. See the paths: comments in both
-// workflows for the divergence rationale.
+// It catches exactly ONE drift mode and is deliberately narrow: a NEW top-level
+// directory appearing under a guarded root without a matching deploy entry. It
+// does NOT verify the deploy filter's existing entries -- a named-file entry can
+// be deleted, a subtree glob narrowed (apps/web/src/** -> apps/web/src/sub/**),
+// or an out-of-root input (lib/**, package-lock.json, tsconfig.base.json,
+// .github/actions/setup/**) dropped, and this test stays green. Those are direct
+// edits to the deploy workflow, visible in the PR diff and reviewed there; the
+// drift this guards is the kind NOT in that diff -- a new dir added elsewhere
+// while the filter is left untouched. So a green run does NOT mean "the deploy
+// filter is fully in sync"; review workflow edits on their own merits. See the
+// paths: comments in both workflows for the divergence rationale.
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -31,9 +38,11 @@ const DEPLOY_WORKFLOW = ".github/workflows/eb_deploy.yaml";
 const GUARDED_ROOTS = ["apps/web", "packages/core"];
 
 // Subtrees the deploy filter omits ON PURPOSE: a change to test sources runs the
-// PR suite but must not trigger a rebuild+redeploy. Adding an entry here is an
-// explicit "this directory does not ship" decision; the live tests below also
-// assert each entry still exists, so a removed/renamed tree cannot rot the list.
+// PR suite but must not trigger a rebuild+redeploy. Allowlisting a directory
+// SUPPRESSES its deploy-coverage check, so an entry here must be a real "this
+// directory does not ship" decision, not a way to mute a failure. The live tests
+// below assert each entry still exists, so a removed/renamed tree cannot rot the
+// list.
 const DEPLOY_EXCLUDED = new Set(["apps/web/test", "packages/core/test"]);
 
 // The on.<event>.paths list of a workflow. yaml 2.x uses the YAML 1.2 core
@@ -54,11 +63,25 @@ function workflowPaths(file, event) {
 // the source of truth for what a PR can change -- it ignores node_modules and
 // untracked build output (dist, .output) without an exclusion list.
 function trackedTopLevelDirs(root) {
-  const out = execFileSync("git", ["-C", repoRoot, "ls-files", "--", root], {
-    encoding: "utf8",
-  });
+  // -z + core.quotepath=false: NUL-delimited, unquoted output, so a non-ASCII
+  // directory name (which git otherwise wraps in quotes and octal-escapes) is
+  // sliced at the right offset instead of yielding a garbage dir.
+  const out = execFileSync(
+    "git",
+    [
+      "-C",
+      repoRoot,
+      "-c",
+      "core.quotepath=false",
+      "ls-files",
+      "-z",
+      "--",
+      root,
+    ],
+    { encoding: "utf8" },
+  );
   const dirs = new Set();
-  for (const line of out.split("\n")) {
+  for (const line of out.split("\0")) {
     if (!line) continue;
     const rest = line.slice(root.length + 1); // strip "apps/web/"
     const slash = rest.indexOf("/");
