@@ -529,6 +529,8 @@ describe("accept screen: terms render from a decoded token", () => {
     // The transform's function name and the fuzzy expansion's plain-language
     // label surface on the elements.
     expect(html).toContain("transformed (substring)");
+    // ... including its parameters, each on its own line.
+    expect(html).toContain("start: 1");
     expect(html).toContain("adjacent years");
     // The swap is described in field-label terms.
     expect(html).toContain(
