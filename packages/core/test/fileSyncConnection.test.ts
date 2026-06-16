@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import {
   FileSyncConnection,
   normalizeFiledropPath,
+  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
 } from "../src/connection/fileSyncConnection";
 import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
@@ -3651,6 +3652,58 @@ test("close() does not emit the deadline log when the final poll observes the fi
   } finally {
     logLibrary.setLevel(prevLevel);
     vi.useRealTimers();
+  }
+});
+
+test("close() drain is bounded by the fixed terminal-frame budget, not the full peer timeout", async () => {
+  // The teardown drain must NOT inherit the (default one-hour) peer-inactivity
+  // budget: at close() the result is already persisted and cleanup() deletes the
+  // frame as a fallback, so the drain is bounded by TERMINAL_FRAME_DRAIN_TIMEOUT_MS
+  // (min'd with the configured peer budget). With a peer budget far larger than
+  // that constant, the bound named at drain entry is the constant -- proving the
+  // cap. Teeth: the prior code interpolated the full peerTimeoutMs here, so this
+  // would read the one-hour value and fail.
+  const hugePeerTimeoutMs = 60 * 60 * 1000; // one hour, > the fixed drain budget
+  expect(hugePeerTimeoutMs).toBeGreaterThan(TERMINAL_FRAME_DRAIN_TIMEOUT_MS);
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: hugePeerTimeoutMs },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // Consume shortly after entry so the test never actually waits the bound.
+        setTimeout(() => files.delete(`/test/${outName}`), 20);
+
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    const entryLog = logs.find((l) =>
+      l.message.includes("close: waiting up to"),
+    );
+    expect(entryLog).toBeDefined();
+    expect(entryLog!.message).toContain(
+      `${TERMINAL_FRAME_DRAIN_TIMEOUT_MS} ms`,
+    );
+    expect(entryLog!.message).not.toContain(`${hugePeerTimeoutMs} ms`);
+  } finally {
+    logLibrary.setLevel(prevLevel);
   }
 });
 

@@ -235,6 +235,8 @@ Every command that produces diagnostic output - `invite`, `accept`, `exchange`, 
 
 One exception: a few low-level warnings (from data cleaning and file handling) are not redirected and may still appear on the terminal even with `--log-file` set. If a run must leave no diagnostics on the terminal, also redirect the terminal output (for example with a shell redirect) alongside `--log-file`.
 
+For unattended runs, set `--peer-timeout` to a value that suits how long you are willing to wait for a partner that never appears (it defaults to one hour); a dead or departed peer makes the command wait out this budget at the rendezvous and live-exchange steps before exiting. The teardown after a successful exchange does not inherit this budget - it is bounded separately and short - so the long wait only applies while the exchange is still in progress. Wrapping the command in your pipeline's own outer timeout is still recommended as a backstop.
+
 ## Exit codes
 
 The CLI distinguishes two failure classes, following the BSD `sysexits` convention:
