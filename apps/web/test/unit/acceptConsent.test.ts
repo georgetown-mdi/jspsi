@@ -170,6 +170,13 @@ describe("summarizeInvitation", () => {
     expect(summary.payload).toBeUndefined();
   });
 
+  test("surfaces the deduplicate setting", () => {
+    expect(summarizeInvitation(makeToken()).deduplicate).toBe(false);
+    expect(
+      summarizeInvitation(makeToken({ deduplicate: true })).deduplicate,
+    ).toBe(true);
+  });
+
   test("sanitizes partner-controlled free text (identity and key names)", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -418,6 +425,20 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(html).toContain("MOU-2025-0042");
     expect(html).toContain("risk_score");
     expect(html).toContain("program_outcome");
+  });
+
+  test("renders the deduplicate setting as a duplicate-matches note", () => {
+    const many = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({ deduplicate: true }),
+      },
+    });
+    expect(many).toContain("may match more than one");
+    const one = renderPanel({
+      decode: { status: "ready", invitation: makeInvitation() },
+    });
+    expect(one).toContain("matches at most one");
   });
 
   test("renders psi-c as the count-only description", () => {

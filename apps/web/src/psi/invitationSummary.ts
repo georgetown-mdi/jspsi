@@ -147,6 +147,11 @@ export interface InvitationSummary {
   /** Whether the inviter will share the result with the accepting partner. */
   inviterSharesResult: boolean;
   /**
+   * Whether a record may match more than one of the partner's records (the
+   * inviter's declared deduplicate setting).
+   */
+  deduplicate: boolean;
+  /**
    * Linkage keys (records are matched on these), in the inviter's order, each
    * carrying its ordered elements and matching rules.
    */
@@ -300,19 +305,18 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     linkageFields.push(summary);
   }
 
-  // terms.deduplicate is intentionally not surfaced. It is documented as a
-  // per-party cardinality setting (whether one record may match several of the
-  // partner's), but the exchange is currently hard-wired to one-to-one matching
-  // (see exchange.ts), so deduplicate does not affect the match -- or the
-  // disclosure -- the acceptor is consenting to; showing it would display a rule
-  // that is not applied, and the displayed terms must equal the terms run. The
-  // CLI's displayInvitation omits it for the same reason. Surface it here -- and
-  // there -- if deduplicate is ever wired into the run.
+  // The consent screen reflects the inviter's terms as proposed, not only what
+  // today's exchange executes: deduplicate and the per-element
+  // generateFuzzyComparisons are surfaced even though the run does not yet apply
+  // them (matching is currently hard-wired to one-to-one, and fuzzy expansion is
+  // unimplemented). Wiring both into the run is tracked on the product board; the
+  // displayed terms are what the acceptor agrees to.
   const summary: InvitationSummary = {
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,
+    deduplicate: terms.deduplicate,
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
     linkageFields,
   };

@@ -128,6 +128,14 @@ export function InvitationTerms({
           </Text>
         </Term>
 
+        <Term label="Duplicate matches">
+          <Text size="sm">
+            {summary.deduplicate
+              ? "A record may match more than one of the partner's records."
+              : "Each record matches at most one of the partner's records."}
+          </Text>
+        </Term>
+
         <Term label="Records are matched on">
           {/* A Stack of key blocks, not a Mantine List: each key renders flow
               content (see MatchKey), which a List.Item would nest invalidly.
