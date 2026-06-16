@@ -425,6 +425,37 @@ test("validateAccept: a pre-existing config that cannot be parsed aborts with gu
   }
 });
 
+test("validateAccept: a schema-invalid pre-existing config renders readably, not as a raw ZodError blob", async () => {
+  const options = testOptions();
+  // Well-formed YAML that fails schema validation: the embedded detail must be
+  // the describeDecodeError one-liner (`<path>: <message>` with an `(and N
+  // more)` suffix), not Zod's multi-line JSON dump of every issue.
+  fs.writeFileSync(options.configFile, "connection: 123\n");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    let message = "";
+    try {
+      await validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        log: silentLog,
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    // The surrounding UsageError wrapper text is preserved.
+    expect(message).toContain("could not be parsed to compare against");
+    // The readable `<path>: <message>` form appears, with the multi-issue suffix.
+    expect(message).toMatch(/connection: /);
+    expect(message).toContain("(and 1 more)");
+    // The raw multi-line ZodError JSON blob does not: no newlines, no JSON keys.
+    expect(message).not.toContain("\n");
+    expect(message).not.toContain('"code"');
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
 test("validateAccept: a malformed-YAML config does not echo an inline credential", async () => {
   const options = testOptions();
   const SECRET = "S3cr3tSFTPPassw0rd";

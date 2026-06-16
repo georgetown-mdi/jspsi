@@ -1479,9 +1479,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (this.lastSentFile !== undefined && !this.options.retainFiles) {
         const path = this.path;
         const lastSentFile = this.lastSentFile;
-        const deadline =
-          Date.now() +
-          (this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS);
+        const drainTimeoutMs =
+          this.config?.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+        const deadline = Date.now() + drainTimeoutMs;
         // Bound each drain list() by the time remaining to `deadline`, not the
         // per-call transport budget: boundTransport arms a fresh peerTimeoutMs on
         // every list(), so a list issued late in the drain could otherwise run a
@@ -1508,10 +1508,30 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         };
         try {
           if (await filePresent()) {
+            // lastSentFile is NOT routed through sanitizeForDisplay, unlike the
+            // partner/server-reachable strings elsewhere in close(). It is this
+            // party's own message filename (set only from send()'s outName, never
+            // adopted from a listing), whose sole non-numeric input is this.id --
+            // a local uuidv4() or the operator's own config peer_id. The partner
+            // ingress (the invitation endpoint) is a strict-object schema with no
+            // peerId key, so a peer cannot inject one; the name carries no
+            // partner-controlled bytes even at default verbosity.
+            this.log.info(
+              `[${this.role}] close: waiting up to ${drainTimeoutMs} ms for ` +
+                `peer to consume ${lastSentFile} before cleanup`,
+            );
             this.log.debug(
               `[${this.role}] draining ${lastSentFile} before cleanup`,
             );
-            while (Date.now() < deadline && (await filePresent())) {
+            // Tracks the last OBSERVED presence so the deadline-fired log gates
+            // on "peer never consumed the file", not on the clock alone. The
+            // loop exits on either deadline expiry or filePresent() going false;
+            // a clock-only check would mislabel a clean drain whose final
+            // filePresent() returned false at/after the deadline as a timeout.
+            let stillPresent = true;
+            while (Date.now() < deadline) {
+              stillPresent = await filePresent();
+              if (!stillPresent) break;
               // Deliberately a plain setTimeout, not this.wait(): this drain IS
               // the teardown wait and runs after the session controller is
               // already aborted (above), so wiring it to that signal would make
@@ -1520,6 +1540,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // swallows failures, so a separate controller buys nothing.
               await new Promise((resolve) =>
                 setTimeout(resolve, this.options.pollingFrequency),
+              );
+            }
+            if (stillPresent) {
+              this.log.info(
+                `[${this.role}] close: drain deadline reached after ` +
+                  `${drainTimeoutMs} ms; deleting ${lastSentFile} as fallback`,
               );
             }
           }
