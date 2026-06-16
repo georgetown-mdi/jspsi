@@ -48,6 +48,22 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
   && apt-get install -y --no-install-recommends gh \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# The headless Chromium the web app's `test:browser` suite drives through
+# Playwright, baked into the image at build time -- the browser binary plus its
+# apt shared libraries (`--with-deps`) -- so the container starts ready with no
+# per-create download. (Fetching the browser in post-create instead blocked the
+# postCreate step, and with it the VS Code remote connection, on a ~180 MB
+# download.) Installed under a fixed PLAYWRIGHT_BROWSERS_PATH owned by the node
+# user, rather than the per-user ~/.cache default, so the non-root user that runs
+# the tests finds the browser this root build step downloaded. Pinned to the
+# lockfile's playwright (apps/web depends on ^1.55.0, resolved to 1.59.1); bump
+# this together with that dependency -- a mismatch makes Playwright error loudly
+# asking for `playwright install`, so it cannot pass silently.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx --yes playwright@1.59.1 install --with-deps chromium \
+  && chown -R node:node /ms-playwright \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # The native sshd test backend spawns an unprivileged sshd, which still fatally
 # checks for the privilege-separation directory at startup even when run as a
 # normal user; create it at build time so the backend needs no root at test time
@@ -83,8 +99,8 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 
 ENV SHELL=/bin/zsh
-ENV EDITOR=nano
-ENV VISUAL=nano
+ENV EDITOR=vim
+ENV VISUAL=vim
 
 # Claude Code itself, so an agent session runs inside the container.
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}

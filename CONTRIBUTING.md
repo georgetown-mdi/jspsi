@@ -182,8 +182,8 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 
 1. For significant changes, open a draft issue on the Github project first to align on approach. Bug fixes and documentation improvements do not require a prior issue.
 2. Keep pull requests focused - one logical change per PR.
-3. Ensure all tests pass and lint is clean before marking the PR ready for review. Include this as a checklist in the PR.
-4. Changes to cryptographic code require explicit security review before merging (see Dependency Policy).
+3. Ensure typecheck, lint, format, and the relevant tests pass before marking the PR ready for review (CI enforces all four). Record what you ran and the coverage you added in the PR's Test plan, and resolve every line of the template Checklist.
+4. Changes within the security-review scope -- cryptographic code, the channel-security controls, credential or disclosure surfaces, or a security-relevant dependency -- require explicit security review before merging (see [Dependency Policy](#dependency-policy) for the full enumeration).
 5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
 6. A maintainer will review and merge. Force-pushes to `main` are not permitted.
 
@@ -192,6 +192,18 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 Opening a PR populates [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md), whose inline comments explain each section and the writing conventions (ASCII, imperative mood, `##` headings, board-reference verbs). Fill in what applies; delete any optional section with nothing non-obvious to say -- keep small PRs small.
 
 ## Dependency Policy
+
+A change requires explicit security review and maintainer approval before merging if it touches any of the following. This list is the trigger; [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md) is the model behind it, consulted only to decide a case the list does not settle.
+
+- Cryptographic code or its inputs: the PSI protocol, the X25519 key exchange / handshake / key schedule, token generation / rotation / derivation, or canonical encoding.
+- The application-layer AEAD: encryption, the nonce / sequence scheme, or the integrity / replay / reordering / gap checks.
+- The channel-hardening controls: the frame-size, directory-listing, liveness / timeout, connect-probe, and whole-exchange bounds, plus the SFTP crash-safety and authenticated abort-marker controls.
+- Credential and secret handling: how the key file, signing identity, or result CSV is written or permissioned; how secrets are stored, transmitted, logged, or referenced (the configuration `@path` resolution).
+- Authentication and identity: the auth gate's fail-closed behavior, fingerprint / certificate pinning and verification, or token expiry and `token_max_age_days` enforcement.
+- What is disclosed: any change to what is sent on the wire, logged, displayed, or written to disk, or to what the result reveals (cardinality, linkage terms, consent-surfaced fields).
+- A security-relevant dependency (see Cryptographic dependencies and the SFTP stack below).
+
+Modifying an existing control in these areas is in scope exactly as adding one is: a change that weakens or removes a guarantee triggers review no less than a new control does.
 
 PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
 

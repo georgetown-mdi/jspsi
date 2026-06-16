@@ -1,5 +1,5 @@
 {
-  "name": "psilink",
+  "name": "${localWorkspaceFolderBasename}",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
