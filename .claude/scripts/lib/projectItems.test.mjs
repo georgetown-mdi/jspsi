@@ -30,7 +30,7 @@ function fakeNode(projectNumber, numericId, { status, epic, order, title }) {
         {
           __typename: "ProjectV2ItemFieldNumberValue",
           number: order,
-          field: { name: "Implementation Order" },
+          field: { name: "Order" },
         },
       ],
     },
@@ -86,7 +86,7 @@ describe("fetchAllItems pagination", () => {
     expect(total).toBeGreaterThan(PAGE_SIZE);
 
     // Each item carries numeric id, node id, title, and the extracted fields
-    // (status / Epic / Implementation Order) the listing promises.
+    // (status / Epic / Order) the listing promises.
     const last = result[total - 1];
     expect(last.id).toBe(numericIdFromNodeId(nodes[total - 1].id));
     expect(last.nodeId).toBe(nodes[total - 1].id);
@@ -94,7 +94,7 @@ describe("fetchAllItems pagination", () => {
     expect(last.fields).toEqual({
       Status: "Todo",
       Epic: "Epic A",
-      "Implementation Order": total - 1,
+      Order: total - 1,
     });
   });
 

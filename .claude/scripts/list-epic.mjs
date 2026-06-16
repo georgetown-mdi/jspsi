@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 //
 // List every GitHub Projects v2 item whose `Epic` field equals a given name,
-// sorted by `Implementation Order`. Companion to fetch-issues.mjs and
+// sorted by `Order`. Companion to fetch-issues.mjs and
 // edit-issue.mjs.
 //
-// Addressing a listed item, and seeing its Epic / Implementation Order, used to
+// Addressing a listed item, and seeing its Epic / Order, used to
 // require `gh project item-list` plus hand-decoding the PVTI_ node IDs it prints
-// and guessing the camelized jq key names it derives (e.g. "implementation
-// Order"). This script removes both: it pulls all items with their field values
-// over GraphQL, converts each node ID to a numeric ID via numericIdFromNodeId
+// and guessing the camelized jq key names it derives (e.g. "Order"). This
+// script removes both: it pulls all items with their field values over
+// GraphQL, converts each node ID to a numeric ID via numericIdFromNodeId
 // (the inverse used by fetch/edit), and prints the numeric IDs so the output
 // pipes straight into fetch-issues.mjs / edit-issue.mjs.
 //
@@ -18,10 +18,9 @@
 //
 // The epic name is matched case-insensitively but otherwise exactly (no
 // substring match). Default output is human-readable: one line per item with
-// numeric ID, Implementation Order, Status, and title, sorted by Implementation
-// Order ascending with unset orders last. --json emits a compact array of
-// { id, order, status, title } for programmatic consumers, consistent with
-// fetch-issues.mjs.
+// numeric ID, Order, Status, and title, sorted by Order ascending with unset
+// orders last. --json emits a compact array of { id, order, status, title }
+// for programmatic consumers, consistent with fetch-issues.mjs.
 
 // fetchAllItems (the paginated, field-rich whole-project fetch) lives in
 // lib/projectItems.mjs so list-issues.mjs shares the exact same pagination and
@@ -29,7 +28,7 @@
 import { fetchAllItems } from "./lib/projectItems.mjs";
 
 /**
- * Sort comparator: by Implementation Order ascending, with unset orders last.
+ * Sort comparator: by Order ascending, with unset orders last.
  * An unset order sorts as +Infinity so it falls after every numbered item; ties
  * (including two unset) keep input order via the stable Array.prototype.sort.
  */
@@ -63,7 +62,7 @@ async function main() {
     .filter((item) => (item.fields.Epic ?? "").toLowerCase() === wanted)
     .map((item) => ({
       id: item.id,
-      order: item.fields["Implementation Order"],
+      order: item.fields["Order"],
       status: item.fields.Status ?? null,
       title: item.title,
     }))

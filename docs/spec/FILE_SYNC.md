@@ -188,7 +188,7 @@ The operator guidance is the baseline beneath the marker, not a claimed ceiling,
 
 *Living section -- prune rows as items land. Item numbers are product-board ids and are intentionally confined to this section so the rest of the document stays evergreen.*
 
-Lockless rendezvous (item `194002643`) is **merged**: it introduced the lockless path, the unconditional `<id>-hello.json` rename, and the grammar discriminant at sites 3 and 4, and is the prerequisite for most of the rest. It shipped the hello/ack as empty files; the payload-envelope precursor `194332289` added the hello body + read gate, and `194304738` later returned the ack to a zero-length, existence-matched marker (the hello keeps the body). `193204378` (byte count, timestamp filenames, right-anchored parsing) is also merged and underpins the grammar. The board's `Implementation Order` field carries the sequence below.
+Lockless rendezvous (item `194002643`) is **merged**: it introduced the lockless path, the unconditional `<id>-hello.json` rename, and the grammar discriminant at sites 3 and 4, and is the prerequisite for most of the rest. It shipped the hello/ack as empty files; the payload-envelope precursor `194332289` added the hello body + read gate, and `194304738` later returned the ack to a zero-length, existence-matched marker (the hello keeps the body). `193204378` (byte count, timestamp filenames, right-anchored parsing) is also merged and underpins the grammar. The board's `Order` field carries the sequence below.
 
 | Item | Delivers (slice of this model) | Key reconciliation note |
 |------|-------------------------------|-------------------------|

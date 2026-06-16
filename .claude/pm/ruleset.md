@@ -138,7 +138,7 @@ node .claude/scripts/list-issues.mjs <PROJECT_NUMBER>
 ```
 
 This pages through the whole board with no silent truncation -- one line per
-item with its numeric id, node id, status, Implementation Order, Epic, and
+item with its numeric id, node id, status, Order, Epic, and
 title. A raw `gh project item-list --limit N` would instead cap at N and drop
 the rest without warning (board 9 already exceeds one 100-item page), and its
 JSON omits the numeric id and the custom fields. Add `--json` for a
@@ -186,12 +186,11 @@ only `gh project item-create` is called directly. If `gh` is not installed or no
 authenticated, stop and say so (`brew install gh && gh auth login`) rather than
 filing without it.
 
-## Epic and implementation order (board 9 only)
+## Epic and order
 
-Board 9 carries two custom fields board 10 does not: `Epic` (free text) and
-`Implementation Order` (a number). When you file a new task on board 9, slot it
-into an existing epic if one clearly fits. Do not invent a new epic, and do not
-do any of this on board 10.
+Both boards carry `Epic` (free text) and `Order` (a number). When you file a
+new task, slot it into an existing epic if one clearly fits. Do not invent a
+new epic.
 
 Discover the candidate epics from the same `list-issues.mjs` call you already run
 for the duplicate check -- its Epic column already carries them, so take the
@@ -209,7 +208,7 @@ call, choosing the order from the epic's current items:
 node .claude/scripts/list-epic.mjs 9 "<epic>"   # see the epic's existing orders
 node .claude/scripts/edit-issue.mjs 9 <newItemId> \
   --field "Epic" --value "<epic>" \
-  --field "Implementation Order" --value "<N>"
+  --field "Order" --value "<N>"
 ```
 
 Default the order to the end (highest existing + 1). Slot it earlier only when
