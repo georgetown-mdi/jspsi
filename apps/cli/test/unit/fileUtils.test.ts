@@ -360,12 +360,12 @@ describe("createOwnerOnlyWriteStream", () => {
     const p = path.join(dir, "trunc-fail.csv");
     let openedFd: number | undefined;
     const realOpen = fs.openSync;
-    vi.spyOn(fs, "openSync").mockImplementation(
-      (...args: Parameters<typeof fs.openSync>) => {
+    const openSpy = vi
+      .spyOn(fs, "openSync")
+      .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
         openedFd = realOpen(...args);
         return openedFd;
-      },
-    );
+      });
     const closeSpy = vi.spyOn(fs, "closeSync");
     vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
       throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
@@ -373,7 +373,11 @@ describe("createOwnerOnlyWriteStream", () => {
 
     expect(() => createOwnerOnlyWriteStream(p)).toThrow("EINVAL");
 
-    // the exact descriptor opened above was closed, not leaked
+    // The failing path opens exactly one descriptor, so `openedFd` is
+    // unambiguous; that exact fd is the one closed, not leaked. The
+    // called-once assertion pins the single-open assumption: were a second open
+    // ever added before the truncate, this would catch the now-ambiguous capture.
+    expect(openSpy).toHaveBeenCalledTimes(1);
     expect(openedFd).toBeDefined();
     expect(closeSpy).toHaveBeenCalledWith(openedFd);
   });
