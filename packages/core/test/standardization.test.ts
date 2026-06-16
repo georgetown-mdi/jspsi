@@ -1397,6 +1397,62 @@ describe("assessLinkageSatisfiability", () => {
     // needs firstName, which is unsatisfiable, so it is correctly excluded.
     expect(swapKey.elements.some((e) => unsatNames.has(e.field))).toBe(true);
   });
+
+  test("a key referencing an undeclared field is unsatisfiable even when no declared field is missing", () => {
+    // The schema does not require a key element's `field` to name a declared
+    // linkage field. A key referencing an undeclared field resolves to no values
+    // at exchange time (buildStandardizedDataset only builds declared fields), so
+    // it must be counted unsatisfiable -- otherwise an incoherent or hostile terms
+    // set defeats the block and runs to a silent empty result. Build such terms by
+    // dropping ssn from the declared fields while keeping the keys that use it.
+    const base = getDefaultLinkageTerms(
+      "Agency A",
+      inferMetadata(FULL_COLUMNS),
+    );
+    const keysUsingSsn = base.linkageKeys.filter((k) =>
+      k.elements.some((e) => e.field === "ssn"),
+    ).length;
+    expect(keysUsingSsn).toBeGreaterThan(0);
+    const undeclaredTerms: LinkageTerms = {
+      ...base,
+      linkageFields: base.linkageFields.filter((f) => f.name !== "ssn"),
+    };
+    // FULL_COLUMNS carries an ssn column, so no DECLARED field is unproducible...
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      FULL_COLUMNS,
+      undeclaredTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+    // ...yet the keys that reference the now-undeclared ssn are excluded.
+    expect(satisfiableKeyCount).toBe(base.linkageKeys.length - keysUsingSsn);
+    expect(satisfiableKeyCount).toBeLessThan(base.linkageKeys.length);
+  });
+
+  test("terms whose every key references an undeclared field report zero satisfiable keys (the block signal)", () => {
+    // The strong form of the above: if all keys reference undeclared fields, the
+    // count is 0 and the caller blocks, even though `unsatisfied` (declared but
+    // unproducible) is empty.
+    const base = getDefaultLinkageTerms(
+      "Agency A",
+      inferMetadata(FULL_COLUMNS),
+    );
+    const firstNameField = base.linkageFields.find(
+      (f) => f.name === "firstName",
+    );
+    expect(firstNameField).toBeDefined();
+    if (firstNameField === undefined) return;
+    const phantomTerms: LinkageTerms = {
+      ...base,
+      linkageFields: [firstNameField],
+      linkageKeys: [{ name: "needs ssn", elements: [{ field: "ssn" }] }],
+    };
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      FULL_COLUMNS,
+      phantomTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+    expect(satisfiableKeyCount).toBe(0);
+  });
 });
 
 // --- StandardizationSchema ---------------------------------------------------

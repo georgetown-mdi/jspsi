@@ -927,11 +927,18 @@ export interface LinkageSatisfiability {
  * pre-flight shared by the web acceptor and the CLI. Combines
  * {@link unsatisfiedLinkageFields} (which fields cannot be produced) with the
  * downstream consequence (how many linkage keys survive): a key is satisfiable
- * only when none of its element fields is unproducible, since a single empty
- * field collapses the whole key for that record. The caller decides policy from
- * the result -- block when {@link LinkageSatisfiability.satisfiableKeyCount} is
- * 0, warn when it is positive but some fields are unsatisfied -- and owns its own
+ * only when EVERY element field is producible -- both declared in
+ * `linkageFields` and resolvable from the columns -- since a single empty field
+ * collapses the whole key for that record. The caller decides policy from the
+ * result -- block when {@link LinkageSatisfiability.satisfiableKeyCount} is 0,
+ * warn when it is positive but below `linkageKeys.length` -- and owns its own
  * message wording and display sanitization.
+ *
+ * The satisfiability check is over column SHAPE, not row VALUES: a field whose
+ * same-typed column exists but whose every row standardizes to empty (e.g. an
+ * all-invalid date column) is reported satisfiable yet yields no key strings at
+ * runtime. That residual is data-dependent and unavoidable from columns alone;
+ * it can only over-claim "satisfiable", never wrongly block.
  */
 export function assessLinkageSatisfiability(
   columns: string[],
@@ -940,8 +947,22 @@ export function assessLinkageSatisfiability(
 ): LinkageSatisfiability {
   const unsatisfied = unsatisfiedLinkageFields(columns, terms, standardization);
   const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
+  // The set of field names that are BOTH declared and producible. A key element
+  // referencing a name absent from this set is unsatisfiable -- whether the field
+  // is declared-but-unproducible (in `unsatisfied`) or not declared at all. The
+  // latter matters: the schema does not require a key element's `field` to name a
+  // declared linkage field, and at exchange time an undeclared reference resolves
+  // to no values (buildStandardizedDataset only builds declared fields, so
+  // getField returns undefined and the key collapses to null). Counting such a
+  // key satisfiable would let an incoherent or hostile terms set defeat the block
+  // and run to the silent-empty result this pre-flight exists to prevent.
+  const producibleNames = new Set(
+    terms.linkageFields
+      .map((f) => f.name)
+      .filter((name) => !unsatisfiedNames.has(name)),
+  );
   const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
-    k.elements.every((e) => !unsatisfiedNames.has(e.field)),
+    k.elements.every((e) => producibleNames.has(e.field)),
   ).length;
   return { unsatisfied, satisfiableKeyCount };
 }

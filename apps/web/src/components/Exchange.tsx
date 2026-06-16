@@ -407,17 +407,26 @@ export function Exchange(config: ExchangeConfig) {
         // standardization argument is for the config-driven invite path).
         const { unsatisfied, satisfiableKeyCount } =
           assessLinkageSatisfiability(columns, config.linkageTerms);
-        if (unsatisfied.length > 0) {
+        // Gate on the key count, not unsatisfied.length: a key can be
+        // unsatisfiable by referencing a field the terms never declare
+        // (unsatisfied empty yet the key collapses), which satisfiableKeyCount
+        // accounts for.
+        if (satisfiableKeyCount < config.linkageTerms.linkageKeys.length) {
           // Partner-controlled field name and type: sanitize both for the alert,
           // which is rendered directly in JSX (not routed through
-          // sanitizeErrorForDisplay). The type names which column to supply when
-          // the field name alone is ambiguous, matching the CLI warning.
-          const fieldList = unsatisfied
-            .map(
-              (f) =>
-                `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
-            )
-            .join(", ");
+          // sanitizeErrorForDisplay). The detail is omitted when no declared field
+          // is unproducible (keys are unsatisfiable only via undeclared references).
+          const detail =
+            unsatisfied.length > 0
+              ? " (missing: " +
+                unsatisfied
+                  .map(
+                    (f) =>
+                      `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
+                  )
+                  .join(", ") +
+                ")"
+              : "";
           if (satisfiableKeyCount === 0) {
             // Block: no linkage key can match, so the exchange would produce a
             // silent empty result. Do NOT start the lifecycle -- nothing is
@@ -427,10 +436,9 @@ export function Exchange(config: ExchangeConfig) {
             setErrorAlert({
               title: "This file cannot be linked",
               message:
-                "Your CSV does not cover any of the linkage fields required " +
-                `by this invitation (missing: ${fieldList}). No matches are ` +
-                "possible. Upload a file that includes columns for the required " +
-                "field types.",
+                "Your CSV cannot satisfy any of this invitation's linkage " +
+                `keys${detail}. No matches are possible. Upload a file that ` +
+                "includes columns for the required field types.",
             });
             controller.abort();
             abortRef.current = undefined;
@@ -440,8 +448,8 @@ export function Exchange(config: ExchangeConfig) {
           setWarningAlert({
             title: "Partial CSV coverage",
             message:
-              `Your CSV is missing some linkage fields (${fieldList}). ` +
-              "Keys that depend on those fields will be inactive for this " +
+              `Your CSV cannot satisfy all of this invitation's linkage keys${detail}. ` +
+              "Keys that depend on the missing fields will be inactive for this " +
               "exchange; other keys will proceed normally.",
           });
         }
