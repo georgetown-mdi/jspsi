@@ -458,14 +458,22 @@ function checkLinkageSatisfiability(
   terms: LinkageTerms,
   log: ReturnType<typeof getLogger>,
 ): void {
+  // No standardization is passed: the acceptor adopts only the inviter's
+  // linkage terms and infers its standardization from its own CSV (default
+  // type-based pipelines, which never remap a column onto a field whose type is
+  // absent), so a purely type-based check matches the acceptor's exchange-time
+  // satisfiability exactly. The standardization argument is for the invite path,
+  // whose config can carry an explicit column remapping.
   const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
     columns,
     terms,
   );
   if (unsatisfied.length === 0) return;
 
+  // f.type is a schema-validated enum literal, but sanitize it like f.name so
+  // every partner-sourced token in the message crosses the display boundary.
   const fieldList = unsatisfied
-    .map((f) => `${sanitizeForDisplay(f.name)} (${f.type})`)
+    .map((f) => `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`)
     .join(", ");
 
   if (satisfiableKeyCount === 0)

@@ -306,8 +306,15 @@ export function Exchange(config: ExchangeConfig) {
         onResult: (o) => {
           setOutputs(o);
           setStageById("done");
+          // A partial-coverage warning (set before launch) is intentionally kept
+          // on success: it explains why some keys were inactive and the match
+          // count may be lower. It is cleared only on failure (onError below).
         },
         onError: ({ category, error }) => {
+          // Clear any partial-coverage warning so it cannot render beside a
+          // failure alert and read as the cause: the exchange did not complete,
+          // so the "some keys were inactive" advisory is no longer the message.
+          setWarningAlert(undefined);
           // Dev-gated: the raw Error object's message/cause can embed
           // partner-/server-controlled bytes (e.g. a hostile message-file path in
           // a transport error), so a production console carries none of it, while
@@ -391,6 +398,10 @@ export function Exchange(config: ExchangeConfig) {
       // empty intersection. Detect it here, before any connection: block when no
       // key can match, warn when only some can.
       if (config.role === "acceptor") {
+        // No standardization is passed: the acceptor adopts only the inviter's
+        // linkage terms and infers its standardization from its own CSV, so a
+        // type-based check matches the run's actual satisfiability (the
+        // standardization argument is for the config-driven invite path).
         const { unsatisfied, satisfiableKeyCount } =
           assessLinkageSatisfiability(columns, config.linkageTerms);
         if (unsatisfied.length > 0) {
