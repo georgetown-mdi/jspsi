@@ -15,6 +15,15 @@ npm ci
 # node_modules volume), so a fresh container would otherwise see it unbuilt.
 npm run build -w packages/core
 
+# Fetch the Chromium build the web app's browser test suite drives via Playwright.
+# Here -- after `npm ci`, so the browser tracks the locked playwright version, and
+# before the egress firewall (a postStartCommand), so the one-time CDN download
+# reaches the network. The shared libraries Chromium links against are baked into
+# the image (.devcontainer/Dockerfile); this pulls only the browser binary, so it
+# needs no root. The test:browser run itself is loopback-only (dev server on
+# 127.0.0.1), so the firewall does not affect it.
+npx playwright install chromium
+
 # Default this container's Claude sessions to prompt-free. The container's egress
 # firewall plus the checked-in deny-list and protected-branch push hook in
 # .claude/ are the safety floor (both deny rules and PreToolUse hooks apply even in

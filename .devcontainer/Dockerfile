@@ -48,6 +48,18 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
   && apt-get install -y --no-install-recommends gh \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Shared-library dependencies for the headless Chromium that the web app's
+# `test:browser` suite drives through Playwright. Playwright's own installer
+# resolves the exact apt set for this Debian release; only the libraries are baked
+# here (stable across Chromium builds), while the matching browser BINARY is
+# fetched in post-create.sh -- after `npm ci`, so it tracks the locked playwright
+# version, and before the egress firewall, so the download succeeds. Pinned to the
+# lockfile's playwright; a small lag behind a version bump is harmless here because
+# the dep list rarely shifts (the binary, which must match exactly, is not pinned
+# here -- post-create derives it from the lockfile).
+RUN npx --yes playwright@1.59.1 install-deps chromium \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # The native sshd test backend spawns an unprivileged sshd, which still fatally
 # checks for the privilege-separation directory at startup even when run as a
 # normal user; create it at build time so the backend needs no root at test time
@@ -83,8 +95,8 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 
 ENV SHELL=/bin/zsh
-ENV EDITOR=nano
-ENV VISUAL=nano
+ENV EDITOR=vim
+ENV VISUAL=vim
 
 # Claude Code itself, so an agent session runs inside the container.
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
