@@ -81,24 +81,38 @@ export async function computeHostKeyFingerprint(
 
 /**
  * Verify that a raw SSH host-key blob matches a pinned fingerprint string.
+ * Returns `true` only when the SHA-256 digest of `keyBlob` exactly equals the
+ * digest encoded in `pin`, and `false` otherwise -- including when `pin` is
+ * malformed (a body `atob` cannot decode), so a bad pin fails closed rather
+ * than throwing. A malformed pin names no key, so refusing it is the safe
+ * answer for any caller that reaches this exported primitive with a value that
+ * did not pass {@link HOST_KEY_FINGERPRINT_REGEX}.
  *
- * The comparison is constant-time (via {@link bytesEqual} over the decoded
- * digest bytes) so a timing side-channel cannot distinguish a wrong prefix
- * from a wrong suffix. Returns `true` only when the digest of `keyBlob`
- * exactly equals the digest encoded in `pin`.
+ * The digest comparison uses {@link bytesEqual} (constant-time over the decoded
+ * bytes). Nothing secret is compared -- a host key and its fingerprint are both
+ * public -- so the constant-time compare is house-style hygiene for digest
+ * comparisons rather than a defense against a timing oracle.
  *
  * @param keyBlob - raw host-key blob from ssh2's `hostVerifier`
  * @param pin - pinned fingerprint in OpenSSH SHA256 format, e.g.
  *   `SHA256:abc...xyz` (50 characters total: the 7-character `SHA256:` prefix
- *   plus 43 unpadded base64 characters for the 32-byte digest; validated at
- *   config-parse time by {@link HOST_KEY_FINGERPRINT_REGEX})
+ *   plus 43 unpadded standard-base64 characters for the 32-byte digest;
+ *   validated at config-parse time by {@link HOST_KEY_FINGERPRINT_REGEX})
  */
 export async function verifyHostKeyFingerprint(
   keyBlob: Uint8Array<ArrayBuffer>,
   pin: string,
 ): Promise<boolean> {
   const digest = await sha256(keyBlob);
-  const pinBytes = fromBase64Unpadded(pin.slice("SHA256:".length));
+  let pinBytes: Uint8Array;
+  try {
+    pinBytes = fromBase64Unpadded(pin.slice("SHA256:".length));
+  } catch {
+    // A pin body atob rejects (a non-standard-base64 char, or a length it
+    // refuses) cannot match any key -- fail closed rather than let the
+    // exception escape this verification predicate.
+    return false;
+  }
   return bytesEqual(
     digest as Uint8Array<ArrayBuffer>,
     pinBytes as Uint8Array<ArrayBuffer>,

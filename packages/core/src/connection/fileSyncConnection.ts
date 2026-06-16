@@ -1156,11 +1156,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 // it is escaped before reaching the error message (which is
                 // logged and shown to the operator). The presented fingerprint
                 // is base64 and the pin is format-validated, so neither needs it.
+                // It is also quoted as `of type '...'` so a printable-ASCII value
+                // that survives sanitizeForDisplay (which strips control/bidi/
+                // homoglyph bytes but not quotes) reads as the type field rather
+                // than masquerading as surrounding prose.
                 const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
                 mismatchDetails =
-                  `the server presented a ${keyType} key with fingerprint ` +
-                  `${presented}, which does not match the pinned fingerprint ` +
-                  `${pin}. This may be a legitimate key rotation or an active ` +
+                  `the server presented a host key of type '${keyType}' with ` +
+                  `fingerprint ${presented}, which does not match the pinned ` +
+                  `fingerprint ${pin}. This may be a legitimate key rotation or an active ` +
                   `attack -- only the server administrator can disambiguate. ` +
                   `If the key was rotated, obtain the new fingerprint from the ` +
                   `server administrator out-of-band and update ` +
