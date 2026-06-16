@@ -300,6 +300,14 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     linkageFields.push(summary);
   }
 
+  // terms.deduplicate is intentionally not surfaced. It is documented as a
+  // per-party cardinality setting (whether one record may match several of the
+  // partner's), but the exchange is currently hard-wired to one-to-one matching
+  // (see exchange.ts), so deduplicate does not affect the match -- or the
+  // disclosure -- the acceptor is consenting to; showing it would display a rule
+  // that is not applied, and the displayed terms must equal the terms run. The
+  // CLI's displayInvitation omits it for the same reason. Surface it here -- and
+  // there -- if deduplicate is ever wired into the run.
   const summary: InvitationSummary = {
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
