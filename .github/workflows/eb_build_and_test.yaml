@@ -12,11 +12,13 @@ on:
   # unrelated PR -- a skipped required check otherwise stays pending.
   #
   # Note: this PR filter deliberately diverges from the push filter in
-  # eb_deploy.yaml on apps/web/test/** -- the PR filter uses apps/web/** so a
-  # test-only PR (deleting or weakening assertions) still runs the full suite,
-  # while the deploy filter stays scoped to deploy-affecting sources only and
-  # omits test/**. The two filters cannot share a single list because of this
-  # intentional difference.
+  # eb_deploy.yaml on test sources -- it uses the broad apps/web/** and
+  # packages/core/** globs so a test-only PR (deleting or weakening assertions,
+  # or changing vitest config) still runs the full suite, including the core
+  # tests this gate runs via `npm run -w packages/core test`. The deploy filter
+  # stays scoped to deploy-affecting sources only and omits the test/** trees.
+  # The two filters cannot share a single list because of this intentional
+  # difference. packages/core/** matches the sibling cli_build_and_test.yaml.
   pull_request:
     branches: [main, staging]
     paths:
@@ -24,10 +26,7 @@ on:
       - "package-lock.json"
       - "tsconfig.base.json"
       - "apps/web/**"
-      - "packages/core/src/**"
-      - "packages/core/package.json"
-      - "packages/core/rollup.config.ts"
-      - "packages/core/tsconfig.json"
+      - "packages/core/**"
       - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
 
