@@ -988,8 +988,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // duration cap. It is the same single coarse knob the operator already tunes
   // (peerTimeoutMs / DEFAULT_PEER_TIMEOUT_MS), deliberately coarse rather than a
   // tight per-op timeout that would risk false-failing a legitimately large/slow
-  // transfer. close() needs no special handling: its ops get the same fresh
-  // budget, matching the fresh peerTimeoutMs deadline its drain already uses.
+  // transfer. close()'s ops get the same fresh per-await budget here; its
+  // terminal-frame drain is the one site that does NOT use a fresh peerTimeoutMs
+  // deadline -- it bounds itself by the short TERMINAL_FRAME_DRAIN_TIMEOUT_MS and
+  // races each list() against the time remaining to that drain deadline rather
+  // than this (now potentially far larger) per-await budget (see close()).
   //
   // The bound reads the budget lazily per call (config is populated by open()), so
   // the wrap is installed once in the constructor. On a SFTP read the adapter's

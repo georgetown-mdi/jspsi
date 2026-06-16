@@ -155,6 +155,30 @@ test("peer_timeout_ms of zero is rejected", () => {
   expect(result.success).toBe(false);
 });
 
+test("server_connect_timeout_ms of zero is rejected", () => {
+  // A zero serverConnectTimeoutMs is not a meaningful "no timeout": it times out
+  // the filedrop local-FS connect probe immediately and disables ssh2's connect
+  // readyTimeout (armed only when > 0). The CLI's --connection-timeout already
+  // rejects zero; the schema closes the same hole on the config path.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { server_connect_timeout_ms: 0 },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("max_reconnect_attempts of zero is still accepted", () => {
+  // Contrast with the two budgets above: zero is meaningful here ("connect once,
+  // do not reconnect"), so it must remain valid.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { max_reconnect_attempts: 0 },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.maxReconnectAttempts).toBe(0);
+});
+
 test("a positive peer_timeout_ms is still accepted", () => {
   // Teeth for the test above: the rejection is the zero, not the field.
   const result = safeParseConnectionConfig({

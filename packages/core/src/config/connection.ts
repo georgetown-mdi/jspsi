@@ -352,10 +352,13 @@ export interface SharedOptions {
   peerTimeoutMs?: number;
   /**
    * Milliseconds to wait per connection attempt to the primary exchange server;
-   * default: 30000. For channels that retry (e.g. `sftp` and `filedrop`), this
-   * limit applies to each attempt individually, not to the total across all
-   * attempts. Retry delays between attempts are not counted against this
-   * budget.
+   * default: 30000. Must be a positive integer: a zero is not a meaningful
+   * "no timeout" sentinel here -- on `filedrop` it makes the local-FS connect
+   * probe time out immediately against a healthy mount, and on `sftp` it
+   * disables ssh2's connect-establishment timeout entirely (it arms only when
+   * positive). For channels that retry (e.g. `sftp` and `filedrop`), this limit
+   * applies to each attempt individually, not to the total across all attempts.
+   * Retry delays between attempts are not counted against this budget.
    */
   serverConnectTimeoutMs?: number;
   /** Maximum reconnect attempts before giving up; default: 3. */
@@ -368,7 +371,13 @@ const sharedOptionsFields = {
   // liveness control (the CLI's --peer-timeout already rejects zero; this closes
   // the same hole on the config/programmatic path).
   peerTimeoutMs: z.int().positive().optional(),
-  serverConnectTimeoutMs: z.int().nonnegative().optional(),
+  // positive for the same reason: a zero serverConnectTimeoutMs is not a
+  // meaningful "no timeout" -- it times out the filedrop local-FS connect probe
+  // immediately and disables ssh2's connect readyTimeout (armed only when > 0).
+  // The CLI's --connection-timeout already rejects zero.
+  serverConnectTimeoutMs: z.int().positive().optional(),
+  // nonnegative, NOT positive: zero is meaningful here -- "connect once, do not
+  // reconnect" -- so it stays a valid value.
   maxReconnectAttempts: z.int().nonnegative().optional(),
 };
 
