@@ -5,9 +5,13 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  unsatisfiedLinkageFields,
+  assessLinkageSatisfiability,
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
+import { inferMetadata } from "../src/config/metadata";
+import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 import { StandardizationSchema } from "../src/config/standardization";
@@ -1242,6 +1246,212 @@ describe("validateStandardizationAgainstTerms", () => {
     expect(
       validateStandardizationAgainstTerms(standardization, minimalTerms),
     ).toEqual([]);
+  });
+});
+
+// --- unsatisfiedLinkageFields ------------------------------------------------
+
+// Fixture: columns that cover firstName, lastName, dateOfBirth, ssn.
+const FULL_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
+const fullTerms = getDefaultLinkageTerms(
+  "Agency A",
+  inferMetadata(FULL_COLUMNS),
+);
+
+describe("unsatisfiedLinkageFields", () => {
+  test("an input that covers every field type is fully satisfiable", () => {
+    expect(unsatisfiedLinkageFields(FULL_COLUMNS, fullTerms)).toEqual([]);
+  });
+
+  test("names the fields whose type no input column provides", () => {
+    // Only first_name is present; lastName, dateOfBirth, and ssn cannot be
+    // produced.
+    const unsatisfied = unsatisfiedLinkageFields(["first_name"], fullTerms);
+    const names = unsatisfied.map((f) => f.name).sort();
+    expect(names).toContain("lastName");
+    expect(names).toContain("dateOfBirth");
+    expect(names).toContain("ssn");
+    expect(names).not.toContain("firstName");
+  });
+
+  test("a column of the right type but different name still satisfies", () => {
+    // `fname` and `dob` are aliases inferred as firstName / dateOfBirth.
+    const unsatisfied = unsatisfiedLinkageFields(
+      ["fname", "lname", "dob", "ssn"],
+      fullTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+  });
+
+  test("an explicit standardization mapping a present column satisfies a field its type does not", () => {
+    // `tax_id` is not inferred as ssn, but an explicit mapping makes it so.
+    const columns = ["first_name", "last_name", "dob", "tax_id"];
+    expect(
+      unsatisfiedLinkageFields(columns, fullTerms).map((f) => f.name),
+    ).toContain("ssn");
+    expect(
+      unsatisfiedLinkageFields(columns, fullTerms, [
+        { output: "ssn", input: "tax_id" },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("an explicit standardization whose input column is absent does not satisfy", () => {
+    // The mapping references tax_id, but the input has no tax_id column.
+    const unsatisfied = unsatisfiedLinkageFields(
+      ["first_name", "last_name", "dob"],
+      fullTerms,
+      [{ output: "ssn", input: "tax_id" }],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
+
+  test("an explicit standardization with an absent input preempts the type fallback", () => {
+    // The config maps ssn from `tax_id` (absent) even though an `ssn` column is
+    // present. The explicit mapping preempts the type fallback, so ssn is still
+    // unsatisfiable -- the exchange would bind it to the missing column.
+    const unsatisfied = unsatisfiedLinkageFields(
+      ["first_name", "last_name", "dob", "ssn"],
+      fullTerms,
+      [{ output: "ssn", input: "tax_id" }],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
+});
+
+describe("assessLinkageSatisfiability", () => {
+  test("a full input satisfies every field and every key", () => {
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      FULL_COLUMNS,
+      fullTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+    expect(satisfiableKeyCount).toBe(fullTerms.linkageKeys.length);
+  });
+
+  test("an input covering no complete key reports zero satisfiable keys (the block signal)", () => {
+    // Only first_name is present. Every default key has at least one other
+    // required field (ssn, lastName, or dateOfBirth), so no key can match and
+    // the exchange should be blocked rather than run to a silent empty result.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      ["first_name"],
+      fullTerms,
+    );
+    expect(satisfiableKeyCount).toBe(0);
+    const names = unsatisfied.map((f) => f.name);
+    expect(names).toContain("ssn");
+    expect(names).toContain("lastName");
+    expect(names).toContain("dateOfBirth");
+  });
+
+  test("an input missing one field keeps the keys that do not need it (partial, warn)", () => {
+    // No ssn column, but first/last name and dob are present. Keys that require
+    // ssn become unsatisfiable; the name+dob keys survive, so the count is
+    // positive-but-not-all -- the warn (not block) case.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      ["last_name", "first_name", "dob"],
+      fullTerms,
+    );
+    expect(unsatisfied.map((f) => f.name)).toEqual(["ssn"]);
+    expect(satisfiableKeyCount).toBeGreaterThan(0);
+    expect(satisfiableKeyCount).toBeLessThan(fullTerms.linkageKeys.length);
+  });
+
+  // Built without metadata so it keeps every default key -- including the ssn4
+  // keys and the swap key -- that the type-filtered `fullTerms` fixture drops.
+  const allKeyTerms = getDefaultLinkageTerms("Agency A");
+
+  test("an ssn column does not satisfy an ssn4 field (distinct semantic types)", () => {
+    // The full default terms reference both ssn and ssn4. An `ssn` column infers
+    // as ssn only, never ssn4, so ssn4 stays unsatisfiable -- matching runtime,
+    // where the absence of an ssn4-typed column collapses the ssn4 keys.
+    const { unsatisfied } = assessLinkageSatisfiability(
+      ["first_name", "last_name", "dob", "ssn"],
+      allKeyTerms,
+    );
+    const names = unsatisfied.map((f) => f.name);
+    expect(names).toContain("ssn4");
+    expect(names).not.toContain("ssn");
+  });
+
+  test("a swap key is assessed by its element fields, so an absent swapped field excludes it", () => {
+    // The default terms include "swap(LN, FN) + DOB". swap only permutes which
+    // slot holds which field at receive time; it does not change which fields the
+    // key needs. With firstName absent, the swap key references an unproducible
+    // field and must be excluded from the satisfiable count, identically to the
+    // non-swap LN+FN+DOB key.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      ["last_name", "dob", "ssn"],
+      allKeyTerms,
+    );
+    const unsatNames = new Set(unsatisfied.map((f) => f.name));
+    expect(unsatNames.has("firstName")).toBe(true);
+    // ssn+lastName+dob keys survive, so this is a partial (warn) case, proving the
+    // swap key's exclusion is not just the whole set collapsing to zero.
+    expect(satisfiableKeyCount).toBeGreaterThan(0);
+    expect(satisfiableKeyCount).toBeLessThan(allKeyTerms.linkageKeys.length);
+    const swapKey = allKeyTerms.linkageKeys.find((k) => k.swap !== undefined);
+    expect(swapKey).toBeDefined();
+    if (swapKey === undefined) return;
+    // The detector reads e.field on the stored (unswapped) elements; the swap key
+    // needs firstName, which is unsatisfiable, so it is correctly excluded.
+    expect(swapKey.elements.some((e) => unsatNames.has(e.field))).toBe(true);
+  });
+
+  test("a key referencing an undeclared field is unsatisfiable even when no declared field is missing", () => {
+    // The schema does not require a key element's `field` to name a declared
+    // linkage field. A key referencing an undeclared field resolves to no values
+    // at exchange time (buildStandardizedDataset only builds declared fields), so
+    // it must be counted unsatisfiable -- otherwise an incoherent or hostile terms
+    // set defeats the block and runs to a silent empty result. Build such terms by
+    // dropping ssn from the declared fields while keeping the keys that use it.
+    const base = getDefaultLinkageTerms(
+      "Agency A",
+      inferMetadata(FULL_COLUMNS),
+    );
+    const keysUsingSsn = base.linkageKeys.filter((k) =>
+      k.elements.some((e) => e.field === "ssn"),
+    ).length;
+    expect(keysUsingSsn).toBeGreaterThan(0);
+    const undeclaredTerms: LinkageTerms = {
+      ...base,
+      linkageFields: base.linkageFields.filter((f) => f.name !== "ssn"),
+    };
+    // FULL_COLUMNS carries an ssn column, so no DECLARED field is unproducible...
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      FULL_COLUMNS,
+      undeclaredTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+    // ...yet the keys that reference the now-undeclared ssn are excluded.
+    expect(satisfiableKeyCount).toBe(base.linkageKeys.length - keysUsingSsn);
+    expect(satisfiableKeyCount).toBeLessThan(base.linkageKeys.length);
+  });
+
+  test("terms whose every key references an undeclared field report zero satisfiable keys (the block signal)", () => {
+    // The strong form of the above: if all keys reference undeclared fields, the
+    // count is 0 and the caller blocks, even though `unsatisfied` (declared but
+    // unproducible) is empty.
+    const base = getDefaultLinkageTerms(
+      "Agency A",
+      inferMetadata(FULL_COLUMNS),
+    );
+    const firstNameField = base.linkageFields.find(
+      (f) => f.name === "firstName",
+    );
+    expect(firstNameField).toBeDefined();
+    if (firstNameField === undefined) return;
+    const phantomTerms: LinkageTerms = {
+      ...base,
+      linkageFields: [firstNameField],
+      linkageKeys: [{ name: "needs ssn", elements: [{ field: "ssn" }] }],
+    };
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      FULL_COLUMNS,
+      phantomTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+    expect(satisfiableKeyCount).toBe(0);
   });
 });
 

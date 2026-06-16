@@ -6,6 +6,7 @@ import { userInfo } from "node:os";
 
 import {
   parseExchangeSpec,
+  describeDecodeError,
   getLogger,
   loadCSVFile,
   prepareForExchange,
@@ -294,7 +295,7 @@ export function loadConfig(options: ExchangeOptions): {
     // configuration (exit 64), not a transport failure.
     throw new UsageError(
       `config file ${options.configFile} is not a valid exchange spec: ` +
-        (err instanceof Error ? err.message : String(err)),
+        describeDecodeError(err),
     );
   }
 

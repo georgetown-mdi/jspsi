@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import {
   FileSyncConnection,
   normalizeFiledropPath,
+  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
 } from "../src/connection/fileSyncConnection";
 import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
@@ -3480,6 +3481,230 @@ test("close() drains the last sent file before cleanup, preventing premature del
   await closePromise;
 
   expect(deletedBeforeConsumed).toBe(false);
+});
+
+test("close() emits an info log at drain entry when the last sent file is still present", async () => {
+  // Verifies the info-level breadcrumb added so an operator running at default
+  // verbosity (verbose:0 = INFO) can tell close() is in a non-trivial drain
+  // rather than hanging. The file is consumed before the deadline so only the
+  // entry log appears, not the deadline-fired log.
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  let capturedOutName = "";
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: 500 },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        capturedOutName = outName;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // Remove the file after 30 ms so close() finishes well before the deadline.
+        setTimeout(() => files.delete(`/test/${outName}`), 30);
+
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    const entryLog = logs.find(
+      (l) => l.level === "INFO" && l.message.includes("close: waiting up to"),
+    );
+    expect(entryLog).toBeDefined();
+    expect(entryLog!.message).toContain("500 ms");
+    expect(entryLog!.message).toContain(capturedOutName);
+    // File was consumed before the deadline; no deadline-fired log.
+    expect(logs.some((l) => l.message.includes("drain deadline reached"))).toBe(
+      false,
+    );
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
+test("close() emits an info log when the drain deadline fires", async () => {
+  // Verifies the info-level breadcrumb added so an operator can distinguish a
+  // completed (peer consumed the terminal frame) close from a timed-out one that
+  // deleted the frame as a fallback. The file is never consumed here, so close()
+  // runs to the deadline and both the entry and deadline logs appear.
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  let capturedOutName = "";
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: 50 },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        capturedOutName = outName;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // Never delete the file; close() will time out and delete as fallback.
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    const entryLog = logs.find(
+      (l) => l.level === "INFO" && l.message.includes("close: waiting up to"),
+    );
+    expect(entryLog).toBeDefined();
+    expect(entryLog!.message).toContain("50 ms");
+    expect(entryLog!.message).toContain(capturedOutName);
+
+    const deadlineLog = logs.find(
+      (l) => l.level === "INFO" && l.message.includes("drain deadline reached"),
+    );
+    expect(deadlineLog).toBeDefined();
+    expect(deadlineLog!.message).toContain("50 ms");
+    expect(deadlineLog!.message).toContain(capturedOutName);
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
+});
+
+test("close() does not emit the deadline log when the final poll observes the file consumed at/after the deadline", async () => {
+  // Teeth for the deadline-log gate: it must key on the LAST OBSERVED presence,
+  // not the clock. A clock-only check (`Date.now() >= deadline`) mislabels a
+  // clean drain whose final filePresent() returned "absent" at/after the
+  // deadline as a fallback-delete timeout. That straddle is a sub-millisecond
+  // boundary with real timers (each list() is budgeted to exactly the time left
+  // to the deadline, so a late return is pre-empted into the catch), so this
+  // forces it with fake timers: setSystemTime() advances Date.now() past the
+  // deadline WITHOUT firing the unref'd budget setTimeout (which advanceTimers
+  // would), leaving the mocked list() to resolve "consumed" on a microtask that
+  // still wins the budget race. The drain then exits via filePresent()===false
+  // with Date.now() past the deadline -- the exact case a clock-only gate gets
+  // wrong.
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: 1000 },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // First list() (the entry filePresent at deadline-time 0) surfaces the
+        // file; the second (first loop poll) jumps the clock past the 1000 ms
+        // deadline, then reports the file consumed. setSystemTime moves Date.now()
+        // only -- it does not fire the budget timer -- so the list resolves
+        // "absent" rather than the budget rejecting.
+        let listCalls = 0;
+        client.list = async () => {
+          listCalls++;
+          if (listCalls === 1)
+            return [{ name: outName, modifyTime: 0, size: 2 }];
+          vi.setSystemTime(1001);
+          return [];
+        };
+
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    // The entry log still fires (file present at entry), but the deadline log
+    // must NOT: the peer's consumption was observed, so this was a clean drain.
+    expect(logs.some((l) => l.message.includes("close: waiting up to"))).toBe(
+      true,
+    );
+    expect(logs.some((l) => l.message.includes("drain deadline reached"))).toBe(
+      false,
+    );
+  } finally {
+    logLibrary.setLevel(prevLevel);
+    vi.useRealTimers();
+  }
+});
+
+test("close() drain is bounded by the fixed terminal-frame budget, not the full peer timeout", async () => {
+  // The teardown drain must NOT inherit the (default one-hour) peer-inactivity
+  // budget: at close() the result is already persisted and cleanup() deletes the
+  // frame as a fallback, so the drain is bounded by TERMINAL_FRAME_DRAIN_TIMEOUT_MS
+  // (min'd with the configured peer budget). With a peer budget far larger than
+  // that constant, the bound named at drain entry is the constant -- proving the
+  // cap. Teeth: the prior code interpolated the full peerTimeoutMs here, so this
+  // would read the one-hour value and fail.
+  const hugePeerTimeoutMs = 60 * 60 * 1000; // one hour, > the fixed drain budget
+  expect(hugePeerTimeoutMs).toBeGreaterThan(TERMINAL_FRAME_DRAIN_TIMEOUT_MS);
+  const prevLevel = logLibrary.getLevel();
+  logLibrary.setLevel("info");
+  try {
+    const { client, files } = makeMockClient();
+    const [, logs] = await withCapturedLogs(
+      async () => {
+        const conn = new FileSyncConnection(client, {
+          pollingFrequency: 5,
+          verbose: 0,
+        });
+        await conn.open({
+          channel: "filedrop",
+          path: "/test",
+          options: { peerTimeoutMs: hugePeerTimeoutMs },
+        });
+        conn.peerId = "stub-peer";
+
+        const outName = `${conn.id}-99.json`;
+        files.set(`/test/${outName}`, Buffer.from("{}"));
+        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+
+        // Consume shortly after entry so the test never actually waits the bound.
+        setTimeout(() => files.delete(`/test/${outName}`), 20);
+
+        await conn.close();
+      },
+      (level) => level === "INFO",
+    );
+
+    const entryLog = logs.find((l) =>
+      l.message.includes("close: waiting up to"),
+    );
+    expect(entryLog).toBeDefined();
+    expect(entryLog!.message).toContain(
+      `${TERMINAL_FRAME_DRAIN_TIMEOUT_MS} ms`,
+    );
+    expect(entryLog!.message).not.toContain(`${hugePeerTimeoutMs} ms`);
+  } finally {
+    logLibrary.setLevel(prevLevel);
+  }
 });
 
 // --- synchronize(): unconditional hello rename --------------------------------

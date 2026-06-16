@@ -5,6 +5,11 @@ on:
   # dev push must not trigger a deploy.
   push:
     branches: [main, staging]
+    # Scoped to deploy-affecting sources only: apps/web/test/** is intentionally
+    # excluded so a test-only push to staging/main does not trigger a rebuild and
+    # redeploy of unchanged behavior. The PR gate (eb_build_and_test.yaml) uses
+    # apps/web/** instead to catch test-only PRs; the two filters diverge on
+    # test/** by design -- see the comment in eb_build_and_test.yaml.
     paths:
       - "lib/**"
       - "package-lock.json"
@@ -22,6 +27,7 @@ on:
       - "packages/core/package.json"
       - "packages/core/rollup.config.ts"
       - "packages/core/tsconfig.json"
+      - ".github/actions/setup/**"
 
   workflow_dispatch:
 

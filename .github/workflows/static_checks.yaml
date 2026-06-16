@@ -49,3 +49,9 @@ jobs:
       # @psilink/core build above.
       - name: Doc links
         run: npm run linkcheck
+      # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
+      # .mjs with no server or Docker dependency, so a stock runner suffices. This
+      # is the repo-wide non-path-filtered gate that guarantees the suite is always
+      # guarded -- no workflow invoked it before this step was added.
+      - name: Scripts tests
+        run: npm run test:scripts

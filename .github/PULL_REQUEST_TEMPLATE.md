@@ -1,59 +1,65 @@
 <!--
-PR description guidance. A PR is a task closed out, so this skeleton mirrors the PM task template (Summary / Acceptance criteria / Affected areas / notes). Drop any optional section that has nothing non-obvious to say -- keep small PRs small. Conventions: ASCII only, `-` (not `*`) for bullets, no en-dash, em-dash, or arrow characters, imperative mood, terse and technical, single space after periods, wrap and don't break lines. Start headings at `##`; do not repeat the PR title as a heading.
+PR description. Drop any optional section that has nothing non-obvious to say -- keep small PRs small. Delete every HTML comment (guidance, not content) before submitting.
+Conventions:
+- ASCII only: `-` (not `*`) for bullets; no en-dash, em-dash, or arrow characters.
+- Imperative mood, terse and technical. Single space after periods. Soft-wrap; do not hard-wrap lines.
+- Headings start at `##`. Do not repeat the PR title as a heading.
 -->
 
 ## Summary
 
-One short paragraph, outcome first: what this PR delivers and why it matters, not how.
+One short paragraph, outcome first: what this PR delivers and why it matters. The "how" goes in Changes.
 
-Implements <board> item [<id>](https://github.com/orgs/georgetown-mdi/projects/<board>/views/1?pane=issue&itemId=<id>).
+Implements [<id>](https://github.com/orgs/georgetown-mdi/projects/<board>/views/1?pane=issue&itemId=<id>).
 <!--
-Board items are GitHub Project draft IDs, not issue numbers -- `Closes #<id>` does not work and renders as a broken link. Always use the full itemId URL. Use project 9 (Product) or 10 (Release & Operations). Pick the verb:
-  Implements [<id>](url) -- this PR closes out the task
-  Part of     [<id>](url) -- partial delivery
-  Depends on  [<id>](url) -- needs another item merged first
-  Follow-on:  [<id>](url) -- spun off, tracked separately
+Board items are GitHub Project draft itemIds, not issue numbers -- `Closes #<id>` renders as a broken link. Use the full itemId URL; board is 9 (Product) or 10 (Release & Operations). Pick one verb for the line above, or delete the line for a bug fix or doc tweak with no board item:
+  Implements -- closes the task
+  Part of -- partial delivery
+  Depends on -- needs another item merged first
+  Follow-on -- spun off, tracked separately
 -->
 
 ## Changes
 
-<!--
-Focused PR (<= ~5 files): one bullet or table row per file, with the why. Broad PR (rename, refactor, cross-cutting): group by area or pattern and call out only what is non-obvious.
--->
+<!-- The map of the diff (the "how"); the "why" is in Summary. Focused PR (<= ~5 files): one bullet per file. Broad PR (rename, refactor, cross-cutting): group by area and call out only what is non-obvious. -->
 
--
+- <file or area>: <what changed>
+
+## Test plan
+
+<!-- CI runs typecheck, lint, format, and the test suites and is the authority on pass/fail. Here, record what you exercised locally and the coverage this change adds, and point a reviewer at the evidence. -->
+
+Ran: <suites or files exercised locally, e.g. `npx vitest run packages/core/test/foo.test.ts`>
+New tests cover: <the specific behaviors verified, or n/a -- reason>
 
 ## Background
 
-<!-- Optional. Root cause, the invariant being preserved, a non-obvious constraint honored. Omit if the Summary already says everything. -->
-
-## Breaking change
-
-<!-- Only if applicable. What breaks and what a consumer must do. Delete if not. -->
+<!-- Optional. Context that predates this PR: root cause, the invariant preserved, a non-obvious constraint. Omit if the Summary covers it. -->
 
 ## Out of scope / follow-on
 
 <!-- Optional. Deferred work, each with its board link. Delete if none. -->
 
--
-
-## Test plan
-
-<!-- How the change was verified. The evidence it works -- maps back to the task's acceptance criteria. Verification only; housekeeping goes below. -->
-
-- [ ] `npm run typecheck && npm run lint` clean
-- [ ] `npm test -w packages/core` (N/N)
-- [ ] `npm run test:unit -w apps/cli` and/or `apps/web` as relevant
-- [ ] CLI integration tests: `npm run test:integration -w apps/cli`
-
-New tests cover: <name the specific behaviors, as the acceptance criteria do>
+- <deferred item and its board link>
 
 ## Checklist
 
-<!-- Pre-merge hygiene that keeps the rest of the repo consistent. Not testing. Check or mark n/a -- do not delete; a deliberate "n/a" is the signal you looked. -->
+<!--
+Pre-merge obligations CI does not verify. Resolve every line: check it when done OR when genuinely not applicable -- a checked box means "resolved", and the trailing clause says which. Checking n/a items too keeps the PR-list progress badge honest (it counts only checked boxes); never leave a box unchecked to mean n/a. Every n/a MUST carry a reason tied to this diff; a bare "n/a" does not count. Do not delete lines here.
+  done:  - [x] CHANGELOG.md [Unreleased] updated -- added under Fixed
+  n/a:   - [x] CHANGELOG.md [Unreleased] updated -- n/a: internal refactor, no user-facing change
+-->
 
-- [ ] Ran `ls docs/` and `ls docs/spec/`, checked each file for impact, and updated affected pages or confirmed none needed (enumerate both directories -- do not rely on a static list)
-- [ ] Any detail I added to a `docs/` overview is conceptual -- no constants, byte/wire layouts, algorithm steps, or deferred-decision rationale (those go in `docs/spec/`), or n/a
-  <!-- Tier litmus, kept in sync across this template, CONTRIBUTING.md, and docs/spec/README.md: If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or a "would only need revisiting if..." design rationale, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational. -->
-- [ ] `CHANGELOG.md` `[Unreleased]` updated, or n/a
-- [ ] Cryptographic code changed? Security review requested (see Dependency Policy), or n/a
+- [ ] Docs: enumerated `docs/` and `docs/spec/` and updated affected pages or added new ones at the appropriate level of detail for the document tier (`/docs` high level + design; `/docs/spec` low level + details) -- <which pages, or n/a: no documented behavior changed>
+- [ ] `CHANGELOG.md` `[Unreleased]` updated -- <the entry, or n/a: reason>
+<!--
+Security review applies if this PR touches any of -- do it and record the type, else n/a:
+- cryptographic code or its inputs: the PSI / key-exchange protocol, key derivation, or canonical encoding
+- the application-layer AEAD, or the frame-size / directory-listing / liveness / connect bounds
+- credential or secret handling: the key file, signing identity, result CSV, or config @path resolution
+- authentication, fingerprint / certificate pinning, or token expiry / token_max_age_days
+- what is disclosed: data sent, logged, displayed, or written to disk, or what the result reveals (cardinality, linkage terms, consent-surfaced fields)
+- a security-relevant dependency: @openmined/psi.js, @noble/curves, any AEAD / key-agreement / KDF library, or the SFTP stack (ssh2 / ssh2-sftp-client)
+Modifying an existing control counts, not only adding one. Full list: CONTRIBUTING Dependency Policy.
+-->
+- [ ] Security review -- <type of review done, or n/a: none of the above touched>

@@ -43,7 +43,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Prefer ASCII: `-` not an en-dash or em-dash, `->` not an arrow character.
 - Never commit to staging or main by yourself; don't attribute yourself on commits or pull requests.
 - Commit messages use no markdown and no top-level lists (other format rules in `CONTRIBUTING.md`, Commit Messages).
-- After a chain of edits, run `npm run typecheck && npm run lint`; the LSP server often has a stale cache.
+- After a chain of edits, run `npm run typecheck && npm run lint && npm run format`; the LSP server often has a stale cache.
 - Typecheck, lint, and format are CI checks.
 - Project state belongs in the GitHub project and docs/, not agent memory.
 - Prettier ignores markdown.
