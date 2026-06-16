@@ -6,6 +6,7 @@ import {
   buildKeyStrings,
   validateStandardizationAgainstTerms,
   unsatisfiedLinkageFields,
+  assessLinkageSatisfiability,
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
@@ -1315,6 +1316,45 @@ describe("unsatisfiedLinkageFields", () => {
       [{ output: "ssn", input: "tax_id" }],
     );
     expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
+});
+
+describe("assessLinkageSatisfiability", () => {
+  test("a full input satisfies every field and every key", () => {
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      FULL_COLUMNS,
+      fullTerms,
+    );
+    expect(unsatisfied).toEqual([]);
+    expect(satisfiableKeyCount).toBe(fullTerms.linkageKeys.length);
+  });
+
+  test("an input covering no complete key reports zero satisfiable keys (the block signal)", () => {
+    // Only first_name is present. Every default key has at least one other
+    // required field (ssn, lastName, or dateOfBirth), so no key can match and
+    // the exchange should be blocked rather than run to a silent empty result.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      ["first_name"],
+      fullTerms,
+    );
+    expect(satisfiableKeyCount).toBe(0);
+    const names = unsatisfied.map((f) => f.name);
+    expect(names).toContain("ssn");
+    expect(names).toContain("lastName");
+    expect(names).toContain("dateOfBirth");
+  });
+
+  test("an input missing one field keeps the keys that do not need it (partial, warn)", () => {
+    // No ssn column, but first/last name and dob are present. Keys that require
+    // ssn become unsatisfiable; the name+dob keys survive, so the count is
+    // positive-but-not-all -- the warn (not block) case.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      ["last_name", "first_name", "dob"],
+      fullTerms,
+    );
+    expect(unsatisfied.map((f) => f.name)).toEqual(["ssn"]);
+    expect(satisfiableKeyCount).toBeGreaterThan(0);
+    expect(satisfiableKeyCount).toBeLessThan(fullTerms.linkageKeys.length);
   });
 });
 

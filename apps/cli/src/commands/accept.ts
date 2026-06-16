@@ -6,13 +6,13 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 
 import {
+  assessLinkageSatisfiability,
   describeDecodeError,
   getLogger,
   decodeInvitation,
   isInvitationExpired,
   parseExchangeSpec,
   sanitizeForDisplay,
-  unsatisfiedLinkageFields,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -322,7 +322,8 @@ export async function validateAccept(params: {
     resolved.input !== undefined
       ? await loadInputRows(resolved.input, { allowStdin: false })
       : undefined;
-  if (rows !== undefined) checkLinkageSatisfiability(rows.columns, myTerms, log);
+  if (rows !== undefined)
+    checkLinkageSatisfiability(rows.columns, myTerms, log);
   const { dataSpec, warnings } = buildDataSpec({
     terms: myTerms,
     identity: myIdentity,
@@ -457,13 +458,12 @@ function checkLinkageSatisfiability(
   terms: LinkageTerms,
   log: ReturnType<typeof getLogger>,
 ): void {
-  const unsatisfied = unsatisfiedLinkageFields(columns, terms);
+  const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+    columns,
+    terms,
+  );
   if (unsatisfied.length === 0) return;
 
-  const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
-  const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
-    k.elements.every((e) => !unsatisfiedNames.has(e.field)),
-  ).length;
   const fieldList = unsatisfied
     .map((f) => `${sanitizeForDisplay(f.name)} (${f.type})`)
     .join(", ");

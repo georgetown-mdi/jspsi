@@ -905,3 +905,43 @@ export function unsatisfiedLinkageFields(
     return !inputTypes.has(f.type);
   });
 }
+
+/** How an input's columns fare against a set of linkage terms: which fields it
+ * cannot produce, and how many of the terms' linkage keys remain usable as a
+ * result. {@link satisfiableKeyCount} of 0 is the block signal -- every key
+ * references at least one unproducible field, so an exchange would emit no key
+ * strings and yield a result byte-indistinguishable from a legitimately empty
+ * intersection. */
+export interface LinkageSatisfiability {
+  /** The linkage fields the columns cannot produce (see
+   * {@link unsatisfiedLinkageFields}); empty when the input satisfies every field. */
+  unsatisfied: LinkageField[];
+  /** The number of linkage keys all of whose element fields are satisfiable.
+   * Zero means no key can match and the exchange should be blocked rather than
+   * run to a silent empty result. */
+  satisfiableKeyCount: number;
+}
+
+/**
+ * Assess whether an input's `columns` can satisfy `terms`, for the accept-path
+ * pre-flight shared by the web acceptor and the CLI. Combines
+ * {@link unsatisfiedLinkageFields} (which fields cannot be produced) with the
+ * downstream consequence (how many linkage keys survive): a key is satisfiable
+ * only when none of its element fields is unproducible, since a single empty
+ * field collapses the whole key for that record. The caller decides policy from
+ * the result -- block when {@link LinkageSatisfiability.satisfiableKeyCount} is
+ * 0, warn when it is positive but some fields are unsatisfied -- and owns its own
+ * message wording and display sanitization.
+ */
+export function assessLinkageSatisfiability(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): LinkageSatisfiability {
+  const unsatisfied = unsatisfiedLinkageFields(columns, terms, standardization);
+  const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
+  const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
+    k.elements.every((e) => !unsatisfiedNames.has(e.field)),
+  ).length;
+  return { unsatisfied, satisfiableKeyCount };
+}
