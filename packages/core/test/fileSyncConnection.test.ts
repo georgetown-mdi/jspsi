@@ -3575,8 +3575,7 @@ test("close() emits an info log when the drain deadline fires", async () => {
     expect(entryLog!.message).toContain(capturedOutName);
 
     const deadlineLog = logs.find(
-      (l) =>
-        l.level === "INFO" && l.message.includes("drain deadline reached"),
+      (l) => l.level === "INFO" && l.message.includes("drain deadline reached"),
     );
     expect(deadlineLog).toBeDefined();
     expect(deadlineLog!.message).toContain("50 ms");
@@ -3643,9 +3642,9 @@ test("close() does not emit the deadline log when the final poll observes the fi
 
     // The entry log still fires (file present at entry), but the deadline log
     // must NOT: the peer's consumption was observed, so this was a clean drain.
-    expect(
-      logs.some((l) => l.message.includes("close: waiting up to")),
-    ).toBe(true);
+    expect(logs.some((l) => l.message.includes("close: waiting up to"))).toBe(
+      true,
+    );
     expect(logs.some((l) => l.message.includes("drain deadline reached"))).toBe(
       false,
     );
