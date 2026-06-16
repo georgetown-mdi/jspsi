@@ -345,16 +345,14 @@ The primary server for the exchange. For WebRTC this is the PeerJS peer coordina
 
 #### SFTP server authentication
 
-SFTP requires at most one primary authentication method alongside `username`. `private_key_passphrase` and `certificate` are companions to `private_key` and are invalid without it.
+SFTP requires at most one primary authentication method alongside `username`. `private_key_passphrase` is a companion to `private_key` and is invalid without it.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `password` | string | Password authentication; `@`-file recommended |
 | `private_key` | string | Path to SSH private key; `@`-file recommended |
 | `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key`; `@`-file recommended |
-| `certificate` | string | Path to SSH certificate; only valid with `private_key`; enables certificate-based authentication |
-| `host_key_fingerprint` | string | Optional expected server host key fingerprint for host verification |
-| `known_hosts` | string | Optional path to a `known_hosts` file; alternative to `host_key_fingerprint` |
+| `host_key_fingerprint` | string | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 base64 chars>`). When set, the server's host key is verified before authentication and the connection is rejected if it does not match; a warning is emitted when absent. `@`-file supported. Applies to the CLI `sftp` channel only. |
 
 ```yaml
 # WebRTC example
@@ -373,7 +371,7 @@ connection:
     path: /exchanges/agency-a-agency-b/
     username: psilink
     private_key: "@/run/secrets/id_ed25519"
-    host_key_fingerprint: "SHA256:..."
+    host_key_fingerprint: "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s"
 
 # File-drop example (network-mounted folder)
 connection:

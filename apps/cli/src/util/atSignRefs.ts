@@ -123,6 +123,14 @@ function resolveConnectionAtSignRefs(
       resolved.server.privateKeyPassphrase = resolveOptionalAtSignRef(
         resolved.server.privateKeyPassphrase,
       );
+      // The fingerprint is non-secret but supports @-file for operators who
+      // manage it alongside other server config in a read-only secrets mount.
+      // Only the LOAD resolver handles it: nothing sets the fingerprint via a
+      // CLI flag or connection URL, so resolveConnectionCredentials (the save/
+      // flag resolver) correctly omits it -- dead code there would never run.
+      resolved.server.hostKeyFingerprint = resolveOptionalAtSignRef(
+        resolved.server.hostKeyFingerprint,
+      );
       resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
       resolveHttpAuthAtSignRefs(resolved.proxy?.auth);
       resolveProviderOptionsAtSignRefs(resolved);

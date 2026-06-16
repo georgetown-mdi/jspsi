@@ -9,6 +9,11 @@ import {
 import { getLoggerForVerbosity } from "../utils/logger";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
 import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
+import {
+  computeHostKeyFingerprint,
+  verifyHostKeyFingerprint,
+  keyTypeFromBlob,
+} from "../utils/sshHostKey";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -1110,6 +1115,66 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       if (config.options?.serverConnectTimeoutMs !== undefined)
         connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
 
+      // Host-key verification. The hostVerifier is set AFTER providerOptions so
+      // a providerOptions entry (already dropped by the allowlist) cannot win even
+      // if the allowlist were ever loosened. Verification applies to the CLI sftp
+      // channel only -- the browser/proxy SFTP path and filedrop do not run ssh2's
+      // hostVerifier.
+      //
+      // mismatchDetails captures the human-readable mismatch message from inside
+      // the async hostVerifier callback so the enclosing catch block can re-throw
+      // with the detail rather than the opaque "Host denied (verification failed)"
+      // message from ssh2. It is set before verify(false) is called, ensuring it
+      // is populated by the time the rejection propagates from this.client.connect().
+      let mismatchDetails: string | undefined;
+      if (config.server.hostKeyFingerprint !== undefined) {
+        const pin = config.server.hostKeyFingerprint;
+        connectOptions["hostVerifier"] = (
+          keyBlob: Buffer,
+          verify: (permitted: boolean) => void,
+        ): void => {
+          void (async () => {
+            try {
+              const blob = new Uint8Array(
+                keyBlob.buffer as ArrayBuffer,
+                keyBlob.byteOffset,
+                keyBlob.byteLength,
+              );
+              const match = await verifyHostKeyFingerprint(blob, pin);
+              if (match) {
+                verify(true);
+              } else {
+                const presented = await computeHostKeyFingerprint(blob);
+                const keyType = keyTypeFromBlob(blob);
+                mismatchDetails =
+                  `the server presented a ${keyType} key with fingerprint ` +
+                  `${presented}, which does not match the pinned fingerprint ` +
+                  `${pin}. This may be a legitimate key rotation or an active ` +
+                  `attack -- only the server administrator can disambiguate. ` +
+                  `If the key was rotated, obtain the new fingerprint from the ` +
+                  `server administrator out-of-band and update ` +
+                  `connection.server.host_key_fingerprint.`;
+                verify(false);
+              }
+            } catch (err) {
+              mismatchDetails =
+                `failed to verify host key: ` +
+                (err instanceof Error ? err.message : String(err));
+              verify(false);
+            }
+          })();
+        };
+      } else {
+        this.log.warn(
+          `[${this.role}] SFTP server identity is NOT verified: ` +
+            `no host_key_fingerprint is pinned for ` +
+            `${sanitizeForDisplay(config.server.host)}. ` +
+            `A host-key man-in-the-middle attack cannot be detected. ` +
+            `Set connection.server.host_key_fingerprint to the server's ` +
+            `SSH host-key fingerprint to enable verification.`,
+        );
+      }
+
       const portString =
         config.server.port !== undefined ? `:${config.server.port}` : "";
       // The configured SFTP username is a credential component, so log only that
@@ -1133,7 +1198,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `${sanitizeForDisplay(config.server.host)}${portString}` +
           `${usernameString}, path: ${this.displayPath}`,
       );
-      await this.client.connect(connectOptions);
+      try {
+        await this.client.connect(connectOptions);
+      } catch (err) {
+        if (mismatchDetails !== undefined) {
+          throw Object.assign(
+            new Error(`SFTP host-key verification failed: ${mismatchDetails}`),
+            { cause: err },
+          );
+        }
+        throw err;
+      }
     }
 
     this.connected = true;

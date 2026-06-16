@@ -77,9 +77,22 @@ const WebRTCServerSchema: z.ZodType<WebRTCServer> = z.object({
 });
 
 /**
+ * Regex matching a valid SSH host-key fingerprint in OpenSSH SHA256 format:
+ * the `SHA256:` prefix followed by 43 unpadded standard base64 characters
+ * (alphabet `[A-Za-z0-9+/]`, NOT base64url `[A-Za-z0-9_-]`). The final
+ * character is constrained to the 16 values whose low 2 bits are zero
+ * (32 bytes * 8 = 256 bits / 6 = 42 full characters + 4 remaining data bits;
+ * the last character's two unused low bits must be zero in the canonical
+ * encoding). A bare base64url value -- the shape of a signing
+ * `partner_fingerprint` -- is detected separately to name the confusion.
+ */
+export const HOST_KEY_FINGERPRINT_REGEX =
+  /^SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]$/;
+
+/**
  * SFTP host for an SFTP exchange. At most one primary authentication method
- * (`password` or `privateKey`) may be specified. `privateKeyPassphrase` and
- * `certificate` are companions to `privateKey` and are invalid without it.
+ * (`password` or `privateKey`) may be specified. `privateKeyPassphrase` is a
+ * companion to `privateKey` and is invalid without it.
  */
 export interface SFTPServer {
   host: string;
@@ -96,15 +109,19 @@ export interface SFTPServer {
    */
   privateKeyPassphrase?: string;
   /**
-   * SSH certificate for certificate-based auth; only valid with `privateKey`.
+   * Expected server host-key fingerprint in OpenSSH SHA256 format
+   * (`SHA256:<43 standard base64 chars>`). When set, every SFTP connection on
+   * the CLI `sftp` channel verifies the server presents a matching host key
+   * before authentication; a mismatch aborts the connection. @-file supported.
    */
-  certificate?: string;
-  /** Expected server host key fingerprint for host verification. */
   hostKeyFingerprint?: string;
-  /** Path to a known_hosts file; alternative to `hostKeyFingerprint`. */
-  knownHosts?: string;
   provision?: ServerProvision;
 }
+
+// Shape of a signing partner_fingerprint (base64url, 43 chars, no prefix) --
+// detected to name the confusion when an operator pastes one into
+// host_key_fingerprint instead of an OpenSSH SHA256 fingerprint.
+const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 const SFTPServerSchema: z.ZodType<SFTPServer> = z
   .object({
@@ -115,6 +132,10 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     password: z.string().optional(),
     privateKey: z.string().optional(),
     privateKeyPassphrase: z.string().optional(),
+    // Kept in the schema (not stripped by z.object()) so that a config that
+    // supplies either field gets a clear rejection refine below rather than
+    // silent discard. The transform at the end drops both before the output
+    // reaches the SFTPServer interface type.
     certificate: z.string().optional(),
     hostKeyFingerprint: z.string().optional(),
     knownHosts: z.string().optional(),
@@ -137,10 +158,48 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
       path: ["privateKeyPassphrase"],
     },
   )
-  .refine((s) => !(s.certificate !== undefined && s.privateKey === undefined), {
-    message: "certificate is only valid with privateKey",
+  .refine((s) => s.certificate === undefined, {
+    message:
+      "certificate is not yet supported; remove it from the config -- " +
+      "SSH client-auth certificates are a planned feature and will be " +
+      "accepted in a future release",
     path: ["certificate"],
-  });
+  })
+  .refine((s) => s.knownHosts === undefined, {
+    message:
+      "known_hosts is not yet implemented; use host_key_fingerprint to " +
+      "pin the server's SSH host-key fingerprint instead",
+    path: ["knownHosts"],
+  })
+  .superRefine((s, ctx) => {
+    const fp = s.hostKeyFingerprint;
+    if (fp === undefined) return;
+    if (SIGNING_FINGERPRINT_SHAPE.test(fp)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "host_key_fingerprint looks like a signing partner_fingerprint " +
+          "(43 base64url characters, no prefix); SSH host-key fingerprints " +
+          "use standard base64 (+ and / not _ and -) with a SHA256: prefix, " +
+          "e.g. SHA256:abc...xyz",
+        path: ["hostKeyFingerprint"],
+      });
+    } else if (!HOST_KEY_FINGERPRINT_REGEX.test(fp)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "host_key_fingerprint must be in OpenSSH SHA256 format: the " +
+          "SHA256: prefix followed by 43 unpadded standard base64 characters",
+        path: ["hostKeyFingerprint"],
+      });
+    }
+  })
+  .transform(
+    // Strip the detected-but-rejected fields so the output matches SFTPServer,
+    // which no longer declares them. The refines above ensure neither reaches
+    // here with a non-undefined value; the transform only runs on a valid parse.
+    ({ certificate: _cert, knownHosts: _kh, ...rest }) => rest,
+  );
 
 // --- Authentication ----------------------------------------------------------
 
