@@ -174,6 +174,32 @@ test("throws a UsageError when config file fails schema validation", () => {
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
+test("a schema-invalid config renders readably, not as a raw ZodError blob", () => {
+  // Well-formed YAML that fails schema validation (bad channel, missing
+  // linkageTerms): the embedded detail must be the describeDecodeError one-liner
+  // (`<path>: <message>` with an `(and N more)` suffix), not Zod's multi-line
+  // JSON dump of every issue.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ connection: { channel: "ftp", server: {} } }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  // The surrounding UsageError wrapper text is preserved.
+  expect(message).toContain("is not a valid exchange spec");
+  // The readable `<path>: <message>` form appears, with the multi-issue suffix.
+  expect(message).toMatch(/connection\.channel: /);
+  expect(message).toContain("(and 1 more)");
+  // The raw multi-line ZodError JSON blob does not: no newlines, no JSON keys.
+  expect(message).not.toContain("\n");
+  expect(message).not.toContain('"code"');
+});
+
 test("throws a UsageError at config load when a preserved @path credential file is missing", () => {
   // A saved config keeps the @path reference, not the secret; the reference is
   // resolved when the config loads, before any network activity. A moved or

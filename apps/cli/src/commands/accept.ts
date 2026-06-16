@@ -395,7 +395,7 @@ function reconcileAcceptConfig(params: {
     throw new UsageError(
       `a configuration file already exists at ${configPath} but could not be ` +
         `parsed to compare against ${against}: ` +
-        (err instanceof Error ? err.message : String(err)) +
+        describeDecodeError(err) +
         `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
         `retry with ${retryWith}.`,
     );
