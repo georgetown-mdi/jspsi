@@ -378,7 +378,10 @@ export function Exchange(config: ExchangeConfig) {
               message: sanitizeErrorForDisplay(error),
             });
             // The read failed before any connection: this is not an in-flight
-            // exchange, so release the re-entry latch and re-enable submit.
+            // exchange, so abort and release the controller (keeping the
+            // unmount-cleanup invariant that the stored controller is the live
+            // one) and re-enable submit.
+            controller.abort();
             abortRef.current = undefined;
             setSubmitted(false);
           }
@@ -405,16 +408,22 @@ export function Exchange(config: ExchangeConfig) {
         const { unsatisfied, satisfiableKeyCount } =
           assessLinkageSatisfiability(columns, config.linkageTerms);
         if (unsatisfied.length > 0) {
-          // Partner-controlled field names: sanitize for the alert, which is
-          // rendered directly in JSX (not routed through sanitizeErrorForDisplay).
+          // Partner-controlled field name and type: sanitize both for the alert,
+          // which is rendered directly in JSX (not routed through
+          // sanitizeErrorForDisplay). The type names which column to supply when
+          // the field name alone is ambiguous, matching the CLI warning.
           const fieldList = unsatisfied
-            .map((f) => sanitizeForDisplay(f.name))
+            .map(
+              (f) =>
+                `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
+            )
             .join(", ");
           if (satisfiableKeyCount === 0) {
             // Block: no linkage key can match, so the exchange would produce a
             // silent empty result. Do NOT start the lifecycle -- nothing is
-            // dialed. Release the re-entry latch and re-enable submit so the user
-            // can choose a file that carries the required columns.
+            // dialed. Abort and release the controller (keeping the unmount-cleanup
+            // invariant that the stored controller is the live one) and re-enable
+            // submit so the user can choose a file that carries the required columns.
             setErrorAlert({
               title: "This file cannot be linked",
               message:
@@ -423,6 +432,7 @@ export function Exchange(config: ExchangeConfig) {
                 "possible. Upload a file that includes columns for the required " +
                 "field types.",
             });
+            controller.abort();
             abortRef.current = undefined;
             setSubmitted(false);
             return;

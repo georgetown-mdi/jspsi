@@ -251,9 +251,74 @@ test("validateAccept: an unsupported URL is rejected before the input file is re
   ).rejects.toBeInstanceOf(UsageError);
 });
 
-// --- reconciling a pre-existing config ---------------------------------------
+// --- linkage pre-flight (block vs warn) --------------------------------------
 
 const FUTURE = () => new Date(Date.now() + 3_600_000).toISOString();
+
+// Write a temp CSV with the given header columns (one filler data row; the
+// pre-flight reasons about column names, not values). Returns the path.
+function writeInputCSV(columns: string[]): string {
+  const id = `${process.pid}-${optionsCounter++}`;
+  const file = path.join(tmpdir(), `psilink-accept-input-${id}.csv`);
+  fs.writeFileSync(
+    file,
+    `${columns.join(",")}\n${columns.map(() => "x").join(",")}\n`,
+  );
+  return file;
+}
+
+test("validateAccept: offline blocks (UsageError) when the CSV satisfies no linkage key", async () => {
+  // The default terms (from sampleToken) need ssn/last name/dob/etc.; a CSV with
+  // only first_name can complete no key, so the pre-flight aborts before the
+  // prompt rather than running a silent empty exchange.
+  const options = testOptions();
+  const input = writeInputCSV(["first_name"]);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded, input },
+        options,
+        log: silentLog,
+      }),
+    ).rejects.toThrow(/cannot satisfy any of the invitation's linkage keys/);
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: offline warns but proceeds when the CSV satisfies only some keys", async () => {
+  // last/first name + dob satisfy the name+dob keys but not the ssn keys, so the
+  // pre-flight warns (naming the unsatisfied fields) and the acceptance proceeds.
+  const options = testOptions();
+  const input = writeInputCSV(["last_name", "first_name", "dob"]);
+  const log = getLogger("accept-partial-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options,
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].includes(
+            "cannot satisfy all of the invitation's linkage fields",
+          ),
+      ),
+    ).toBe(true);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(input, { force: true });
+  }
+});
+
+// --- reconciling a pre-existing config ---------------------------------------
 
 /** Write a config whose linkage terms agree with the invitation's by default
  *  (same default terms, identity aside), so a test perturbs only what it means
