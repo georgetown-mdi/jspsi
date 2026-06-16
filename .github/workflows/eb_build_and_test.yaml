@@ -38,9 +38,12 @@ on:
         value: ${{jobs.build-and-test.outputs.artifactName}}
 
 # Cancel a superseded PR run when a newer commit lands on the same PR/branch.
-# Keyed on github.workflow so a deploy's workflow_call reuse (where the top-level
-# caller is eb_deploy.yaml, not this file) lands in a different group and is never
-# cancelled by a concurrent pull_request run of this workflow.
+# The group expression isolates PR runs from deploy runs: github.head_ref is
+# set on pull_request events (the PR source branch) and empty on workflow_call
+# and push events, so the || github.ref fallback produces a refs/heads/... ref
+# for the deploy leg -- distinct from any PR branch value. The two event types
+# therefore land in different groups; a deploy's reused build step is never
+# cancelled by a concurrent PR run of this workflow.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
