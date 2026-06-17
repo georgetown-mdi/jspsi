@@ -165,6 +165,46 @@ test("throws a UsageError on malformed YAML in config file", () => {
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
 });
 
+// A YAML parse failure embeds a snippet of the offending source in its message,
+// which can carry an inline credential; loadConfig must report only the path.
+// Mirrors the accept-side guard in accept.test.ts ("validateAccept: a
+// malformed-YAML config does not echo an inline credential"). Two distinct parse
+// failures reach the catch by different routes: a syntax error throws a
+// YAMLParseError that reproduces the malformed line, while an unresolved alias
+// throws a plain ReferenceError (not a YAMLError) that echoes the alias name --
+// the path-only guard must close both.
+test.each([
+  [
+    "syntax error (tab indentation on a password line)",
+    (secret: string) =>
+      `connection:\n  channel: sftp\n  server:\n\t  password: ${secret}\n`,
+  ],
+  [
+    "unresolved alias naming the credential",
+    (secret: string) =>
+      `connection:\n  channel: sftp\n  server:\n    password: *${secret}\n`,
+  ],
+])(
+  "a malformed-YAML config does not echo an inline credential: %s",
+  (_, mk) => {
+    const SECRET = "S3cr3tSFTPPassw0rd";
+    fs.writeFileSync(configFile, mk(SECRET));
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    let caught: unknown;
+    try {
+      loadConfig(baseOptions());
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    // Still a usage error pointing the operator at the config path to fix.
+    expect((caught as Error).message).toContain(configFile);
+    expect((caught as Error).message).toContain("could not be parsed as YAML");
+    // The credential must not appear anywhere in the surfaced message.
+    expect((caught as Error).message).not.toContain(SECRET);
+  },
+);
+
 test("throws a UsageError when config file fails schema validation", () => {
   fs.writeFileSync(
     configFile,

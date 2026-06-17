@@ -255,9 +255,22 @@ export function loadConfig(options: ExchangeOptions): {
 } & ExchangeDataSpec {
   const log = getLogger("exchange");
 
-  let rawConfig: unknown;
+  // Read and parse in two steps with distinct error handling. The fs read can
+  // only fail with an errno (ENOENT, EACCES, EISDIR): its message is path +
+  // errno with no config-source content, so it is safe to surface and helps the
+  // operator. The YAML parse, by contrast, embeds a snippet of the offending
+  // source in its message -- a syntax error reproduces the malformed line, an
+  // unresolved-alias ReferenceError echoes the alias name -- which can carry an
+  // inline connection credential (server.password / privateKey /
+  // privateKeyPassphrase, legitimately held in a 0600 config). That snippet must
+  // never reach an error string or a log, so every parse failure reports the
+  // path only (fail closed -- we do not enumerate the parser's error taxonomy).
+  // Either way this is invalid caller configuration: a UsageError (CLI exit 64),
+  // not a transport failure (69). (The accept side guards the same hazard at
+  // accept.ts:376-393.)
+  let source: string;
   try {
-    rawConfig = YAML.parse(fs.readFileSync(options.configFile, "utf8"));
+    source = fs.readFileSync(options.configFile, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT")
       throw Object.assign(
@@ -267,12 +280,17 @@ export function loadConfig(options: ExchangeOptions): {
         ),
         { code: "ENOENT" },
       );
-    // A non-ENOENT failure here is a malformed or unreadable local config
-    // (invalid YAML, EACCES, EISDIR): invalid caller configuration the operator
-    // must fix, so a UsageError (CLI exit 64), not a transport failure (69).
     throw new UsageError(
-      `config file ${options.configFile} could not be read or parsed: ` +
+      `config file ${options.configFile} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  let rawConfig: unknown;
+  try {
+    rawConfig = YAML.parse(source);
+  } catch {
+    throw new UsageError(
+      `config file ${options.configFile} could not be parsed as YAML`,
     );
   }
 
