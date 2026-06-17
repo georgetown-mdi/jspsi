@@ -75,13 +75,15 @@ async function waitFor(
 }
 
 // A freshly-created, exclusively-owned rendezvous directory under the served
-// root, for tests that stand up their own connections. The shared `sftp`
-// namespace is reused by the persistent serverConn/clientConn across the first
-// tests; a test that opens a new exchange on that same path can trip the
-// directory-exclusivity guard on a stray message or lock file a prior test's
-// still-settling poll/close left behind -- a window the restricted-crypto
-// native-sshd profile widens via its slower handshake (board item 200576628).
-// Giving each such test its own mkdtemp directory isolates it from that residue.
+// root, for tests that stand up their own connections. The persistent
+// serverConn/clientConn reuse the shared `sftp` namespace across the first
+// tests and stop() without close(): stop() halts only the next poll, so a
+// mid-flight list() can straddle the test boundary and read a later exchange's
+// files as foreign, and a lock a prior rendezvous left behind (swept only by
+// close()) outlives the test. On a shared path either residue trips a test's
+// directory-exclusivity guard -- a window the restricted-crypto native-sshd
+// profile widens via its slower handshake (board item 200576628). A dedicated
+// mkdtemp directory per such test removes the sharing in both directions.
 // Returns the remote path to connect to and records the host directory for
 // teardown in afterAll, so the per-test directories do not pile up under the
 // served root over the run.
