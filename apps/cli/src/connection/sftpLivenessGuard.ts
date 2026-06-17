@@ -64,10 +64,11 @@ import {
  * tight latency budget. It sits well above any legitimate operation -- a normal
  * listing, an exclusive lock-file create, a metadata rename/delete/exists, and
  * each chunk of a healthy transfer all complete in well under a second -- at
- * roughly three times the SSH stack's
- * 20 s connection-establishment unresponsiveness threshold (ssh2's default
- * `readyTimeout`, also this project's `serverConnectTimeoutMs`), so a transiently
- * slow but live server is not cut off; yet more than an order of magnitude below
+ * roughly twice this project's 30 s per-attempt connect bound
+ * (`serverConnectTimeoutMs`, applied as ssh2's `readyTimeout` even when the
+ * operator leaves it unset; ssh2's own default `readyTimeout` is 20 s), so a
+ * transiently slow but live server is not cut off; yet more than an order of
+ * magnitude below
  * the one-hour peer-inactivity budget, so a withheld response fails the exchange
  * in a minute rather than after an hour. Applied as an idle window it never
  * rejects a slow-but-progressing large transfer, only one that stops sending.

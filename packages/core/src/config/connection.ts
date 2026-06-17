@@ -423,11 +423,31 @@ export interface SharedOptions {
    * positive). For channels that retry (e.g. `sftp` and `filedrop`), this limit
    * applies to each attempt individually, not to the total across all attempts.
    * Retry delays between attempts are not counted against this budget.
+   *
+   * Stays optional despite the schema applying {@link DEFAULT_SERVER_CONNECT_TIMEOUT_MS}
+   * as a `.default()`: this type is both the caller-supplied input shape (where
+   * the field may be omitted) and the parsed output, and an entirely omitted
+   * `options` block leaves it `undefined` regardless of the field default. The
+   * `z.ZodType<SharedOptions>` annotation therefore does not narrow it to a
+   * required `number`; consumers treat it as possibly-unset and apply the same
+   * constant at the connect sites (see fileSyncConnection).
    */
   serverConnectTimeoutMs?: number;
   /** Maximum reconnect attempts before giving up; default: 3. */
   maxReconnectAttempts?: number;
 }
+
+/**
+ * Default per-attempt connect timeout (30000 ms) applied to
+ * {@link SharedOptions.serverConnectTimeoutMs} when the operator leaves it
+ * unset. Applied at the schema boundary (so the parsed config carries the value
+ * uniformly across channels) and reused as the fallback at the SFTP and filedrop
+ * connect sites for a config built without an `options` block at all, so the
+ * documented 30000 ms per-attempt deadline always holds rather than the `sftp`
+ * path silently falling back to ssh2's shorter (~20s) internal `readyTimeout`.
+ * See docs/EXCHANGE_REFERENCE.md and docs/spec/CHANNEL_SECURITY.md.
+ */
+export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
 
 const sharedOptionsFields = {
   // positive, not nonnegative: peerTimeoutMs is the per-await liveness budget,
@@ -438,8 +458,17 @@ const sharedOptionsFields = {
   // positive for the same reason: a zero serverConnectTimeoutMs is not a
   // meaningful "no timeout" -- it times out the filedrop local-FS connect probe
   // immediately and disables ssh2's connect readyTimeout (armed only when > 0).
-  // The CLI's --connection-timeout already rejects zero.
-  serverConnectTimeoutMs: z.int().positive().optional(),
+  // The CLI's --connection-timeout already rejects zero. Defaulted (not just
+  // optional) so an unset value resolves to DEFAULT_SERVER_CONNECT_TIMEOUT_MS at
+  // the schema boundary -- the documented 30000 ms deadline -- carried uniformly
+  // for sftp and filedrop instead of leaving the sftp path on ssh2's ~20s
+  // default. The default fires only when the options object is present but the
+  // field is absent; an entirely omitted options block is covered by the same
+  // constant at the connect sites in fileSyncConnection.
+  serverConnectTimeoutMs: z
+    .int()
+    .positive()
+    .default(DEFAULT_SERVER_CONNECT_TIMEOUT_MS),
   // nonnegative, NOT positive: zero is meaningful here -- "connect once, do not
   // reconnect" -- so it stays a valid value.
   maxReconnectAttempts: z.int().nonnegative().optional(),

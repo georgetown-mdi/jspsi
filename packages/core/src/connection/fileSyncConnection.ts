@@ -14,6 +14,7 @@ import {
   verifyHostKeyFingerprint,
   keyTypeFromBlob,
 } from "../utils/sshHostKey";
+import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS } from "../config/connection";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -1139,7 +1140,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
       await this.client.connect({
         path: dirPath,
-        connectTimeoutMs: config.options?.serverConnectTimeoutMs,
+        // ?? covers a config built without an options block at all (the schema
+        // default only fires when options is present); LocalFSClient applies the
+        // same 30000 ms as its own fallback, so the value is supplied explicitly
+        // here rather than relied on downstream.
+        connectTimeoutMs:
+          config.options?.serverConnectTimeoutMs ??
+          DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
         maxReconnectAttempts: config.options?.maxReconnectAttempts ?? 3,
       });
       this.path = dirPath;
@@ -1399,9 +1406,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (config.server.privateKeyPassphrase !== undefined)
       connectOptions["passphrase"] = config.server.privateKeyPassphrase;
     // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout, not a
-    // Promise.race wrapper -- the per-attempt deadline is equivalent.
-    if (config.options?.serverConnectTimeoutMs !== undefined)
-      connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
+    // Promise.race wrapper -- the per-attempt deadline is equivalent. Always set:
+    // the schema defaults the field to DEFAULT_SERVER_CONNECT_TIMEOUT_MS, and the
+    // ?? fallback covers a config built without an options block at all, so an
+    // unset value gets the documented 30000 ms deadline rather than dropping to
+    // ssh2's shorter (~20s) internal default.
+    connectOptions["readyTimeout"] =
+      config.options?.serverConnectTimeoutMs ??
+      DEFAULT_SERVER_CONNECT_TIMEOUT_MS;
     return connectOptions;
   }
 
