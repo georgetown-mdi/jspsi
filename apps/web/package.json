@@ -16,7 +16,8 @@
     "test": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "test:integration:browser": "vitest run --project integration --project browser"
   },
   "keywords": [
     "private set intersection",

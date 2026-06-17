@@ -94,10 +94,11 @@ jobs:
       # Docker; integration hits the HTTP/SSE routes in node, browser drives
       # Chromium). Running both projects in ONE vitest process lets that setup
       # start the server once and the second project reuse it, rather than two
-      # invocations each paying a full cold start -- so keep them combined.
-      # Splitting back into separate test:integration + test:browser steps
-      # reintroduces the second cold start. vitest still reports per project/file,
-      # so a failure names the suite that broke.
+      # invocations each paying a full cold start -- so keep them combined via the
+      # dedicated test:integration:browser script (which names both projects
+      # explicitly). Splitting back into separate test:integration + test:browser
+      # steps reintroduces the second cold start. vitest still reports per
+      # project/file, so a failure names the suite that broke.
       #
       # The integration project gates the web deploy on the app's own behavior
       # (independent of the CLI, whose tests live in release.yaml); the browser
@@ -108,7 +109,7 @@ jobs:
       # regression would otherwise ship unnoticed. Both run on the PR gate and this
       # workflow's push/deploy path, so the deploy artifact is gated on them too.
       - name: Web integration and browser tests
-        run: npm run test:browser -w apps/web -- --project integration
+        run: npm run test:integration:browser -w apps/web
       - name: Package for Elastic Beanstalk
         run: |
           cp -a apps/web/deploy/aws_eb/. apps/web/.output
