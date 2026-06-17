@@ -294,6 +294,8 @@ linkage_terms:
         description: "Partner agency case identifier"
 ```
 
+A party that declares it receives no output (`output.expects_output: false`) may not list `payload.receive` columns: it cannot receive payload for matched records it never gets, so the combination is rejected at parse and compatibility time. A non-receiving party may still `send` payload.
+
 ---
 
 ## Connection
@@ -333,7 +335,7 @@ connection:
 *Required:* yes (webrtc and sftp only)  
 *Applies to:* `webrtc`, `sftp`
 
-The primary server for the exchange. For WebRTC this is the PeerJS peer coordination server; for SFTP this is the SFTP host. A URL may be supplied as a convenience and will be decomposed into its component fields; the component fields are the authoritative form.
+The primary server for the exchange. For WebRTC this is the PeerJS peer coordination server; for SFTP this is the SFTP host. A URL may be supplied as a convenience and will be decomposed into its component fields; the component fields are the authoritative form. The component fields are percent-decoded from the URL form, so author a reserved or non-ASCII character percent-encoded in the URL (for example a space as `%20`); it is stored decoded.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
