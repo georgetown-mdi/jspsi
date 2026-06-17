@@ -34,6 +34,19 @@ log.setLevel(log.levels.DEBUG);
 // both come from the running server rather than a fixed path. ensureNamespace
 // creates the host directory before any party connects, since the connection
 // does not create remote directories.
+//
+// SFTP_PATH is a SHARED namespace: the persistent serverConn/clientConn
+// rendezvous here across the first tests, and the raw-op tests target it for
+// non-exchange file operations. That sharing stays safe only while nothing
+// drops a foreign file into it during a persistent-pair poll -- an unexpected
+// file observed by poll() trips the directory-exclusivity guard ("must be
+// dedicated to a single exchange"), the residue/straddle flake of board items
+// 200576628 and 201583776. So, for any future test: one that stands up its own
+// exchange MUST use freshRendezvous() (below), never SFTP_PATH; and nothing may
+// plant into SFTP_PATH while serverConn/clientConn may still be polling it (the
+// "message deliverable" window). Re-introducing shared-namespace exchange use
+// re-opens that flake -- this is why the self-connecting tests each get their
+// own mkdtemp directory.
 const srv = sftpServer();
 const NS = "sftp";
 const SFTP_LOCAL_DIRECTORY = localPath(srv, NS);
