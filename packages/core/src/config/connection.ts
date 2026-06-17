@@ -423,6 +423,14 @@ export interface SharedOptions {
    * positive). For channels that retry (e.g. `sftp` and `filedrop`), this limit
    * applies to each attempt individually, not to the total across all attempts.
    * Retry delays between attempts are not counted against this budget.
+   *
+   * Stays optional despite the schema applying {@link DEFAULT_SERVER_CONNECT_TIMEOUT_MS}
+   * as a `.default()`: this type is both the caller-supplied input shape (where
+   * the field may be omitted) and the parsed output, and an entirely omitted
+   * `options` block leaves it `undefined` regardless of the field default. The
+   * `z.ZodType<SharedOptions>` annotation therefore does not narrow it to a
+   * required `number`; consumers treat it as possibly-unset and apply the same
+   * constant at the connect sites (see fileSyncConnection).
    */
   serverConnectTimeoutMs?: number;
   /** Maximum reconnect attempts before giving up; default: 3. */
