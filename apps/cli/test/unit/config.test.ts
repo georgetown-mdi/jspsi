@@ -14,6 +14,7 @@ import {
   diffLinkageTerms,
   formatReconcileDiffs,
   loadConfigLinkageSource,
+  persistHostKeyFingerprint,
   saveConfig,
 } from "../../src/config";
 import type {
@@ -273,6 +274,102 @@ test("saveConfig strips sharedSecret/expires and does not mutate the caller's sp
     // The strip runs on a clone; the caller's spec is untouched.
     expect(spec.authentication?.sharedSecret).toBe(token);
     expect(spec.authentication?.expires).toBe("2028-01-01T00:00:00.000Z");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- persistHostKeyFingerprint -----------------------------------------------
+
+const FP_A = "SHA256:" + "A".repeat(43);
+const FP_B = "SHA256:" + "B".repeat(42) + "E";
+
+test("persistHostKeyFingerprint adds the pin and preserves comments and other fields", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "# hand-authored config",
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org # the drop",
+        "    username: alice",
+        "",
+      ].join("\n"),
+    );
+    persistHostKeyFingerprint(configPath, FP_A);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("host_key_fingerprint");
+    expect(raw).toContain(FP_A);
+    // The in-place document edit keeps the operator's comments and other fields.
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    expect(raw).toContain("username: alice");
+    const parsed = YAML.parse(raw) as {
+      connection: { server: { host_key_fingerprint: string } };
+    };
+    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_A);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re-pin)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org",
+        `    host_key_fingerprint: ${FP_A}`,
+        "",
+      ].join("\n"),
+    );
+    persistHostKeyFingerprint(configPath, FP_B);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain(FP_B);
+    expect(raw).not.toContain(FP_A);
+    const parsed = YAML.parse(raw) as {
+      connection: { server: { host_key_fingerprint: string } };
+    };
+    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistHostKeyFingerprint writes the config owner-read-only (0600)", () => {
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistHostKeyFingerprint(configPath, FP_A);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistHostKeyFingerprint throws (not silently) on a malformed config", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // A clearly invalid mapping (a value with a bare ':' block-mapping conflict).
+    fs.writeFileSync(configPath, "connection:\n  - a\n  b: c\n");
+    expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(
+      UsageError,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

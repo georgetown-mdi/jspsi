@@ -207,6 +207,10 @@ const ACCEPT_CSV =
 async function runOnlineRoundTrip(params: {
   url: string;
   assertPersistedConnection: (spec: ExchangeSpec) => void;
+  // The server's host-key fingerprint, supplied for the sftp transport so the
+  // built connection is pinned -- the no-pin default is fail-closed, and an
+  // sftp:// URL cannot carry the pin. Omitted for filedrop (no host key).
+  hostKeyFingerprint?: string;
 }): Promise<void> {
   const { url, assertPersistedConnection } = params;
 
@@ -235,6 +239,15 @@ async function runOnlineRoundTrip(params: {
   });
   expect(inviteReady.mode).toBe("online");
   if (inviteReady.mode !== "online") return;
+  // Pin the host key on the built sftp connection (the URL cannot carry it), so
+  // the connection passes the now-fail-closed host-key check. The pin also lands
+  // in the persisted config, since runOnlineBootstrap saves this same connection.
+  if (
+    params.hostKeyFingerprint !== undefined &&
+    inviteReady.connection.channel === "sftp"
+  )
+    inviteReady.connection.server.hostKeyFingerprint =
+      params.hostKeyFingerprint;
 
   // Accept validation decodes that same invitation (so token.sharedSecret is the
   // one the inviter minted) and builds the acceptor's connection from the URL. No
@@ -253,6 +266,12 @@ async function runOnlineRoundTrip(params: {
   expect(acceptReady.mode).toBe("online");
   if (acceptReady.mode !== "online") return;
   expect(acceptReady.reuseExistingConfig).toBe(false);
+  if (
+    params.hostKeyFingerprint !== undefined &&
+    acceptReady.connection.channel === "sftp"
+  )
+    acceptReady.connection.server.hostKeyFingerprint =
+      params.hostKeyFingerprint;
 
   // Run both online wirings concurrently: the live authenticated handshake over
   // the shared rendezvous, then the PSI exchange, then the saveConfig hook. This
@@ -737,9 +756,12 @@ describe("sftp", () => {
 
       await runOnlineRoundTrip({
         url,
+        hostKeyFingerprint: srv.hostKeyFingerprint,
         assertPersistedConnection: (spec) => {
           expect(spec.connection.channel).toBe("sftp");
           const server = (spec.connection as SFTPConnectionConfig).server;
+          // The first-use pin is persisted into the saved config.
+          expect(server.hostKeyFingerprint).toBe(srv.hostKeyFingerprint);
           // host/port/path/credentials were all carried from the URL through
           // connectionFromURL into the persisted config (saveConfig keeps inline
           // connection credentials, protected at 0600, and strips only the shared

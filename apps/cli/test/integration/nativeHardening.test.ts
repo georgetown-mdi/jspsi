@@ -55,6 +55,11 @@ allowlistOnly(
           port: srv.port,
           username: intruder,
           privateKey: srv.usera.privateKey,
+          // Pin the host key so the connection passes host-key verification and
+          // reaches authentication, where the allowlist rejects the intruder --
+          // without the pin the no-pin fail-closed default would reject it first,
+          // testing the wrong thing.
+          hostKeyFingerprint: srv.hostKeyFingerprint,
           path: remotePath(srv, "allowlist-reject"),
         },
         // A single connect attempt (maxReconnectAttempts is the retry count, so

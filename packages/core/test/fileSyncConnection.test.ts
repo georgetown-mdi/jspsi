@@ -25,6 +25,7 @@ import {
   TransportOperationStalledError,
 } from "../src/errors";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
+import { computeHostKeyFingerprint } from "../src/utils/sshHostKey";
 import {
   fromEventConnection,
   ConnectionError,
@@ -609,15 +610,151 @@ test("providerOptions cannot override the private key passphrase", async () => {
 });
 
 test("providerOptions cannot disable host-key verification", async () => {
-  // hostVerifier/hostHash are the ssh2 host-key-verification settings; a map
-  // that tries to install an always-accept verifier must be dropped, not honored.
+  // hostVerifier/hostHash are the ssh2 host-key-verification settings; a map that
+  // tries to install an always-accept verifier must be dropped. With no pin, core
+  // installs its OWN fail-closed verifier (the no-pin default is fail-closed), so
+  // the captured hostVerifier is core's, not the injected one -- invoking it
+  // refuses (verify(false)), proving the injected `() => true` was dropped rather
+  // than honored. hostHash is dropped outright.
   const opts = await captureSftpConnectOptions({
     channel: "sftp",
-    server: { host: "sftp.example.org" },
+    server: { host: "sftp.example.org" }, // no pin -> fail-closed verifier
     providerOptions: { hostVerifier: () => true, hostHash: "md5" },
   });
-  expect(opts["hostVerifier"]).toBeUndefined();
   expect(opts["hostHash"]).toBeUndefined();
+  expect(typeof opts["hostVerifier"]).toBe("function");
+  const verifier = opts["hostVerifier"] as (
+    keyBlob: Buffer,
+    verify: (permitted: boolean) => void,
+  ) => void;
+  const permitted = await new Promise<boolean>((resolve) => {
+    // A minimal well-formed blob (length-prefixed "test" key type); the
+    // fail-closed verifier refuses it regardless of content.
+    verifier(Buffer.from([0, 0, 0, 4, 116, 101, 115, 116]), resolve);
+  });
+  expect(permitted).toBe(false);
+});
+
+// --- host-key verification (enforce / fail-closed / probe) -------------------
+
+// A raw OpenSSH ssh-ed25519 host-key blob: uint32 len + "ssh-ed25519" + uint32
+// len + 32 key bytes. keyTypeFromBlob reads "ssh-ed25519"; computeHostKeyFingerprint
+// hashes the whole blob.
+function ed25519Blob(fill = 7): Buffer {
+  const type = Buffer.from("ssh-ed25519");
+  const key = Buffer.alloc(32, fill);
+  const buf = Buffer.alloc(4 + type.length + 4 + key.length);
+  buf.writeUInt32BE(type.length, 0);
+  type.copy(buf, 4);
+  buf.writeUInt32BE(key.length, 4 + type.length);
+  key.copy(buf, 4 + type.length + 4);
+  return buf;
+}
+
+// A mock client whose connect() drives the configured hostVerifier with
+// `keyBlob` (as ssh2 would), then resolves if the verifier permitted the key or
+// rejects with ssh2's host-denied message if it refused -- so open()/probe see a
+// realistic connect outcome.
+function makeHostKeyMockClient(keyBlob: Buffer): FileTransportClient {
+  const { client } = makeMockClient();
+  client.connect = (options: Record<string, unknown>) => {
+    const verifier = options["hostVerifier"] as
+      | ((blob: Buffer, verify: (permitted: boolean) => void) => void)
+      | undefined;
+    return new Promise<void>((resolve, reject) => {
+      if (verifier === undefined) {
+        resolve();
+        return;
+      }
+      verifier(keyBlob, (permitted: boolean) => {
+        if (permitted) resolve();
+        else reject(new Error("Host denied (verification failed)"));
+      });
+    });
+  };
+  return client;
+}
+
+test("open (sftp) with a matching pin verifies and connects", async () => {
+  const blob = ed25519Blob();
+  const pin = await computeHostKeyFingerprint(new Uint8Array(blob));
+  const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
+    verbose: -1,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: { host: "sftp.example.org", hostKeyFingerprint: pin },
+  });
+  expect(conn.connected).toBe(true);
+});
+
+test("open (sftp) with a mismatched pin fails closed and names the re-pin recovery", async () => {
+  // Pin the fingerprint of a DIFFERENT key, so the presented blob mismatches.
+  const other = ed25519Blob(1);
+  const pin = await computeHostKeyFingerprint(new Uint8Array(other));
+  const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob(2)), {
+    verbose: -1,
+  });
+  await expect(
+    conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org", hostKeyFingerprint: pin },
+    }),
+  ).rejects.toThrow(/SFTP host-key verification failed/);
+  await expect(
+    conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org", hostKeyFingerprint: pin },
+    }),
+    // The re-pin recovery: verify out-of-band, then set the new value or clear
+    // the field and re-establish trust; a changed key is never auto-accepted.
+  ).rejects.toThrow(/A changed key is never auto-accepted/);
+  expect(conn.connected).toBe(false);
+});
+
+test("open (sftp) with no pin fails closed (the no-pin default)", async () => {
+  // The no-pin default is now fail-closed (was warn-and-proceed): core refuses
+  // the connection and the error surfaces the presented fingerprint to pin.
+  const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob()), {
+    verbose: -1,
+  });
+  await expect(
+    conn.open({ channel: "sftp", server: { host: "sftp.example.org" } }),
+  ).rejects.toThrow(/no host_key_fingerprint is pinned/);
+  expect(conn.connected).toBe(false);
+});
+
+test("probeHostKeyFingerprint returns the presented key without authenticating", async () => {
+  const blob = ed25519Blob();
+  const expected = await computeHostKeyFingerprint(new Uint8Array(blob));
+  // The probe's verifier always refuses, so the mock connect rejects; the probe
+  // swallows that and returns what it captured. A password is set to prove the
+  // probe never reaches auth (the refusal precedes it).
+  const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
+    verbose: -1,
+  });
+  const presented = await conn.probeHostKeyFingerprint({
+    channel: "sftp",
+    server: { host: "sftp.example.org", password: "secret" },
+  });
+  expect(presented.fingerprint).toBe(expected);
+  expect(presented.keyType).toBe("ssh-ed25519");
+  expect(conn.connected).toBe(false);
+});
+
+test("probeHostKeyFingerprint throws when the host presents no key", async () => {
+  // A connect that fails before presenting a key (here, a no-verifier resolve)
+  // leaves nothing captured, so the probe throws rather than returning a bogus
+  // fingerprint.
+  const { client } = makeMockClient();
+  client.connect = async () => {}; // resolves without invoking the verifier
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  await expect(
+    conn.probeHostKeyFingerprint({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+    }),
+  ).rejects.toThrow(/could not determine the server's host key/);
 });
 
 test("providerOptions cannot redirect the connection via sock or authHandler", async () => {
