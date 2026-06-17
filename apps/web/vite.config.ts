@@ -82,15 +82,14 @@ export default defineConfig((_configEnv) => {
             globalSetup: ["./test/devServer/globalSetup.ts"],
             browser: {
               // invitedPSI opens a real WebRTC DataConnection between two
-              // same-machine peers. Chromium otherwise obfuscates host ICE
-              // candidates as `.local` mDNS names, which do not resolve in
-              // containers/CI (no mDNS responder), and the dev-container egress
-              // firewall blocks the external STUN/TURN that would supply
-              // server-reflexive candidates instead -- so with no usable
-              // candidate the connection never opens and the exchange hangs.
-              // Disabling the mDNS obfuscation exposes the real loopback host
-              // candidate, so the peers connect directly with no external
-              // network (hermetic). Test browser only -- no effect on the dev
+              // same-machine peers that configure no STUN/TURN (hermetic -- see
+              // invitedPSI.test.ts), so a loopback host candidate is the only way
+              // they can connect. Chromium otherwise obfuscates host candidates
+              // as `.local` mDNS names that do not resolve in containers/CI (no
+              // mDNS responder), leaving no usable candidate -- the connection
+              // never opens and the exchange hangs. Disabling the mDNS
+              // obfuscation exposes the real loopback host candidate so the peers
+              // connect directly. Test browser only -- no effect on the dev
               // server or `npm run build`.
               provider: playwright({
                 launchOptions: {
