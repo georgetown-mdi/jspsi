@@ -950,12 +950,15 @@ export function assessLinkageSatisfiability(
   // The set of field names that are BOTH declared and producible. A key element
   // referencing a name absent from this set is unsatisfiable -- whether the field
   // is declared-but-unproducible (in `unsatisfied`) or not declared at all. The
-  // latter matters: the schema does not require a key element's `field` to name a
-  // declared linkage field, and at exchange time an undeclared reference resolves
-  // to no values (buildStandardizedDataset only builds declared fields, so
-  // getField returns undefined and the key collapses to null). Counting such a
-  // key satisfiable would let an incoherent or hostile terms set defeat the block
-  // and run to the silent-empty result this pre-flight exists to prevent.
+  // latter is now rejected upstream by LinkageTermsSchema's referential-integrity
+  // refine (a key element `field` must name a declared linkage field), so a
+  // schema-validated terms set cannot reach here with an undeclared reference;
+  // this filter is kept as defense-in-depth for any terms not built through that
+  // schema, since at exchange time an undeclared reference resolves to no values
+  // (buildStandardizedDataset only builds declared fields, so getField returns
+  // undefined and the key collapses to null) and counting such a key satisfiable
+  // would let an incoherent terms set defeat the block and run to the
+  // silent-empty result this pre-flight exists to prevent.
   const producibleNames = new Set(
     terms.linkageFields
       .map((f) => f.name)

@@ -469,6 +469,10 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * - Within each linkage key, the effective element identifier (`element.name`
  *   if present, otherwise `element.field`) must be unique so that `swap`
  *   references are unambiguous.
+ * - Every linkage-key element `field` must name a declared linkage field (a
+ *   member of `linkageFields[].name`); a dangling reference is rejected.
+ * - Every `swap` target must match an element identifier (`element.name` if
+ *   present, otherwise `element.field`) present within that same linkage key.
  *
  * TODO: versioning compatibility rules (migration paths between semver
  * versions).
@@ -582,6 +586,52 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         message:
           "element identifiers (name if present, otherwise field) must be " +
           "unique within each linkage key",
+        path: ["linkageKeys"],
+      },
+    )
+    // Referential integrity, element field -> declared linkage field. Every
+    // key element's `field` must name a member of linkageFields[].name. A
+    // dangling field reference parses cleanly but resolves to no values at
+    // exchange time (buildStandardizedDataset builds only declared fields, so
+    // getField returns undefined and the key collapses to null), producing a
+    // silent empty/missed-match result byte-indistinguishable from a
+    // legitimately empty intersection. Enforce it once here so no consumer ever
+    // sees a dangling reference. The message names no partner-controlled value:
+    // the parse-error path is left unsanitized (see protocolSetup and the test
+    // pinning it), so the offending element is located by its issue `path`, not
+    // by echoing its raw field string.
+    .refine(
+      (a) => {
+        const declared = new Set(a.linkageFields.map((f) => f.name));
+        return a.linkageKeys.every((key) =>
+          key.elements.every((el) => declared.has(el.field)),
+        );
+      },
+      {
+        message:
+          "each linkage key element must reference a declared linkage field " +
+          "(a name in linkageFields)",
+        path: ["linkageKeys"],
+      },
+    )
+    // Referential integrity, swap target -> element within the same key. Each
+    // `swap` entry must match an element identifier (name if present, otherwise
+    // field) present in that same key, matching the within-key resolution the
+    // LinkageKey doc comment describes. A dangling swap target silently no-ops
+    // at exchange time. Element identity uses `el.name ?? el.field`, the same
+    // expression as the element-identifier-uniqueness refine above, so the two
+    // checks agree. As above, the message echoes no partner-controlled value.
+    .refine(
+      (a) =>
+        a.linkageKeys.every((key) => {
+          if (key.swap === undefined) return true;
+          const ids = new Set(key.elements.map((el) => el.name ?? el.field));
+          return key.swap.every((target) => ids.has(target));
+        }),
+      {
+        message:
+          "each linkage key swap target must match an element identifier " +
+          "(name if present, otherwise field) within the same key",
         path: ["linkageKeys"],
       },
     );
