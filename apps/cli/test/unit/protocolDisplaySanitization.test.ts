@@ -86,11 +86,9 @@ import { runProtocol } from "../../src/protocol";
 const minimalPrepared = {} as unknown as PreparedExchange;
 
 // runProtocol constructs a real FileSyncConnection, which logs through the
-// (un-mocked) getLoggerForVerbosity -- notably the unpinned-host-key WARN every
-// sftp open() emits. Run it under withCapturedLogs so that connection-level
-// chatter is captured rather than leaked to the suite output; runProtocol's own
-// logs still reach mockState through the mocked getLogger. The host-key
-// warning's content is covered by core's fileSyncConnection tests, and the
+// (un-mocked) getLoggerForVerbosity. Run it under withCapturedLogs so that
+// connection-level chatter is captured rather than leaked to the suite output;
+// runProtocol's own logs still reach mockState through the mocked getLogger. The
 // failure-path rejection propagates unchanged (withCapturedLogs rethrows), so
 // callers still assert `.rejects`.
 function runProtocolCapturingConnLogs(
