@@ -172,6 +172,17 @@ If you are writing a constant value, a byte/wire layout, an HKDF info string or 
 
 Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
 
+## Changelog
+
+`CHANGELOG.md` is the release-notes seed for the people outside this repository who consume PSI-Link -- an operator or deployer deciding whether and how to upgrade, and a security or compliance reviewer vetting a release. It is not a second copy of the git history. Before adding an entry, ask: who reads this, and why do they act on it?
+
+- Add an entry only when a change is visible to one of those readers: a new command, flag, or config field; a changed default, behavior, exit code, or wire or on-disk format; a breaking change; a user-perceptible performance or resource-usage change; or a security-relevant change.
+- Do not add an entry for a change no outside reader acts on -- an internal refactor, a test, CI, or tooling change, a `@psilink/core` API reshape (the apps are its only consumer and move with it in the same change), or a documentation edit. That is what the git history is for. The test is the observable surface, not which package changed: when a refactor or a `@psilink/core` change also alters a default, behavior, exit code, or wire or on-disk format, the observable part still gets an entry.
+- State the observable change in the reader's terms, in one or two lines: what changed, and what they must do or can now rely on. Put the rationale, threat model, wire format, and test coverage in `docs/`, `docs/spec/`, the pull request, and the commit body, and point to the doc with a trailing `See docs/...`.
+- Altitude tell: if an entry needs an implementation locator -- a source function, a file path inside the codebase, an HKDF label, a test name -- to make its point, it is at the wrong layer; that detail belongs in `docs/spec/` or the pull request. The operator's own surface (flag names, config keys, channel names, exit codes, and user-typed file names like `.psilink.key`) is the right vocabulary, not a violation.
+- Put a security-relevant change a reader would act on in the `### Security` group, subject to the same reader test. While PSI-Link is pre-release, that means the headline changes -- a new encryption or authentication step, a new disclosure surface -- not every internal hardening; an obscure control change no operator or reviewer acts on yet can be dropped. After the first release, lower that bar and record security-relevant changes more exhaustively, since a downstream operator or auditor may then depend on a specific control going from one state to another.
+- Group entries under Added / Changed / Deprecated / Removed / Fixed / Security in the `[Unreleased]` section, and prefix a breaking change with `BREAKING:`. Use Deprecated for a still-supported surface announced for removal -- name the replacement.
+
 ## Commit Messages
 
 - Imperative mood, present tense: "Fix key rotation after failed exchange", not "Fixed ..." or "Fixes ...".
@@ -184,7 +195,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 2. Keep pull requests focused - one logical change per PR.
 3. Ensure typecheck, lint, format, and the relevant tests pass before marking the PR ready for review (CI enforces all four). Record what you ran and the coverage you added in the PR's Test plan, and resolve every line of the template Checklist.
 4. Changes within the security-review scope -- cryptographic code, the channel-security controls, credential or disclosure surfaces, or a security-relevant dependency -- require explicit security review before merging (see [Dependency Policy](#dependency-policy) for the full enumeration).
-5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
+5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Add a `CHANGELOG.md` entry when the change is visible to an operator or a reviewer - see [Changelog](#changelog).
 6. A maintainer will review and merge. Force-pushes to `main` are not permitted.
 
 ### Pull Request Description
