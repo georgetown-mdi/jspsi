@@ -47,7 +47,8 @@ New tests cover: <the specific behaviors verified, or n/a -- reason>
 <!--
 Pre-merge obligations CI does not verify. Resolve every line: check it when done OR when genuinely not applicable -- a checked box means "resolved", and the trailing clause says which. Checking n/a items too keeps the PR-list progress badge honest (it counts only checked boxes); never leave a box unchecked to mean n/a. Every n/a MUST carry a reason tied to this diff; a bare "n/a" does not count. Do not delete lines here.
   done:  - [x] CHANGELOG.md [Unreleased] updated -- added under Fixed
-  n/a:   - [x] CHANGELOG.md [Unreleased] updated -- n/a: internal refactor, no user-facing change
+  n/a:   - [x] CHANGELOG.md [Unreleased] updated -- n/a: internal refactor, no operator- or reviewer-visible change
+A CHANGELOG entry is needed only when the change is visible to an operator/deployer or a security reviewer (a command, flag, config field, default, behavior, exit code, wire or on-disk format, breaking change, or security change). Mark it n/a for an internal refactor, a test/CI/tooling change, a @psilink/core API reshape, or a doc-only edit. See CONTRIBUTING.md, Changelog.
 -->
 
 - [ ] Docs: enumerated `docs/` and `docs/spec/` and updated affected pages or added new ones at the appropriate level of detail for the document tier (`/docs` high level + design; `/docs/spec` low level + details) -- <which pages, or n/a: no documented behavior changed>
