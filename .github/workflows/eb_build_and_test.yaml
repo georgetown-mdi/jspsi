@@ -59,6 +59,15 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Bound the job: this is the one CI job that drives a real browser and a live
+    # WebRTC exchange through a spawned dev server -- workloads that can wedge in
+    # ways the suite's own 60s timeouts do not all catch (a stuck browser or
+    # teardown, a stalled data channel). Without this the default 6h timeout
+    # applies, and since eb_deploy.yaml gates its deploy on this job via
+    # workflow_call, a hang would also stall a production deploy. 30 min sits far
+    # above a normal run (install + builds + tests + browser provisioning) yet
+    # cuts a true hang short.
+    timeout-minutes: 30
     outputs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
     steps:
