@@ -36,37 +36,49 @@ export async function ensureNamespace(
   return dir;
 }
 
-/** Auth fields for a party, spread into a connection's `server` block. */
+/**
+ * Auth fields for a party, spread into a connection's `server` block. Carries the
+ * server's host-key fingerprint so the connection is pinned -- with the no-pin
+ * default fail-closed, an unpinned conformance connection would be refused.
+ */
 export interface ServerAuth {
   username: string;
   password?: string;
   privateKey?: string;
+  hostKeyFingerprint: string;
 }
 
 /**
  * The connection auth for a party using the backend's default method: password
  * where the backend offers it (the in-process default), otherwise the private
  * key (the native sshd backend, which authenticates by public key). The bulk of
- * the suite uses this so it runs unchanged on either backend.
+ * the suite uses this so it runs unchanged on either backend. Always includes
+ * the server's host-key pin.
  */
 export function serverAuth(cred: SftpPartyCredentials): ServerAuth {
+  const pin = { hostKeyFingerprint: cred.hostKeyFingerprint };
   if (cred.password !== undefined)
-    return { username: cred.username, password: cred.password };
+    return { username: cred.username, password: cred.password, ...pin };
   if (cred.privateKey !== undefined)
-    return { username: cred.username, privateKey: cred.privateKey };
+    return { username: cred.username, privateKey: cred.privateKey, ...pin };
   throw new Error("backend party has neither a password nor a private key");
 }
 
 /**
  * Explicit public-key connection auth for a party. Used by the dedicated
  * public-key leg, which is tagged in-process only; the in-process backend
- * surfaces a private key for both parties.
+ * surfaces a private key for both parties. Includes the server's host-key pin.
  */
 export function publicKeyAuth(cred: SftpPartyCredentials): {
   username: string;
   privateKey: string;
+  hostKeyFingerprint: string;
 } {
   if (cred.privateKey === undefined)
     throw new Error("backend party has no private key for public-key auth");
-  return { username: cred.username, privateKey: cred.privateKey };
+  return {
+    username: cred.username,
+    privateKey: cred.privateKey,
+    hostKeyFingerprint: cred.hostKeyFingerprint,
+  };
 }

@@ -22,12 +22,19 @@ import {
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
+import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
 // path can be driven to that hand-off without opening a transport. Hoisted above
 // the imports by vitest; only the @path-resolution handler test below invokes the
 // mock -- the other handler tests exit on an argument error before reaching it.
 vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
+
+// First-use host-key trust runs in the connect path before runProtocol; stub it
+// out (its own behavior is covered in hostKeyTrust.test.ts) so the handler tests
+// reach the runProtocol hand-off without a real probe over the fake URL, and
+// assert the handler wires it with the right persistence mode.
+vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
 
 let existsSyncSpy: MockInstance;
 
@@ -472,6 +479,72 @@ test("handler hands the resolved credential to the exchange while persisting not
     expect(connToRunProtocol?.server.password).toBe("s3cret");
     // No --save, so nothing is written here.
     expect(fs.existsSync(path.join(dir, "psilink.yaml"))).toBe(false);
+    // The handler wires first-use host-key trust on the unsaved (ephemeral) path:
+    // it prompts on a TTY and fails closed otherwise (covered in hostKeyTrust.test.ts).
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "sftp" }),
+      expect.objectContaining({ persistence: { mode: "ephemeral" } }),
+    );
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler with --save carries the first-use pin into the written config", async () => {
+  // The save-with-config path: establishHostKeyTrust mutates the ORIGINAL
+  // connection in memory (emulated by the mock here), and the handler must carry
+  // that mutated object into buildSaveSpec -> saveConfig so the confirmed pin
+  // lands on disk. Guards the buildSaveSpec(connection) object choice against a
+  // refactor that would persist the unmutated clone and silently re-prompt every
+  // run.
+  const FP = "SHA256:" + "C".repeat(43);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerosave-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    const configFile = path.join(dir, "psilink.yaml");
+
+    // Emulate just the real establishHostKeyTrust mutation (its own behavior is
+    // covered in hostKeyTrust.test.ts); the persistence wiring is what's tested.
+    vi.mocked(establishHostKeyTrust).mockImplementationOnce((async (
+      conn: SFTPConnectionConfig,
+    ) => {
+      conn.server.hostKeyFingerprint = FP;
+    }) as never);
+    // --save with no partner save-intent: finalizeBootstrap writes the config
+    // alone (no shared secret, no key file).
+    vi.mocked(runProtocol).mockImplementationOnce((async () => ({
+      bootstrap: { partnerSaveIntent: false },
+    })) as never);
+
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      save: true,
+      "config-file": configFile,
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+    } as unknown as Arguments);
+
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "sftp" }),
+      expect.objectContaining({
+        persistence: { mode: "save-with-config", configPath: configFile },
+      }),
+    );
+    // The mutated connection flowed through buildSaveSpec -> saveConfig.
+    expect(fs.readFileSync(configFile, "utf8")).toContain(FP);
   } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

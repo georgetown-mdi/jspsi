@@ -479,6 +479,52 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
   writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
 }
 
+/**
+ * Write (or overwrite) `connection.server.host_key_fingerprint` in an existing
+ * `psilink.yaml`, used to persist a host-key pin established interactively on
+ * first use. Unlike {@link saveConfig}, which re-serializes the whole spec, this
+ * edits the file in place through the YAML document model so the operator's
+ * comments, key order, and formatting survive -- the config is a hand-authored,
+ * commented file, and a first-use pin should add one field, not rewrite it.
+ *
+ * The pin is a non-secret public fingerprint, but the file is rewritten with the
+ * same owner-only permissions {@link saveConfig} uses (a config may carry an SFTP
+ * credential). The fingerprint key is written snake_case to match the on-disk
+ * convention. Throws if the file cannot be read or parsed -- the caller has just
+ * loaded the same file, so a failure here is unexpected and must not be silently
+ * swallowed (it would leave the operator believing the pin was saved).
+ */
+export function persistHostKeyFingerprint(
+  configPath: string,
+  fingerprint: string,
+): void {
+  const doc = YAML.parseDocument(fs.readFileSync(configPath, "utf8"));
+  if (doc.errors.length > 0)
+    throw new UsageError(
+      `config file ${configPath} could not be parsed to persist the host-key ` +
+        `fingerprint: ${doc.errors[0]?.message ?? "invalid YAML"}`,
+    );
+  // setIn creates the connection/server path nodes if absent; for an sftp config
+  // loaded by the exchange command they already exist, so this updates the one
+  // field. snake_case path matches the written convention (see saveConfig). A
+  // config that parses but whose `connection`/`server` is a scalar or sequence
+  // (not a mapping) makes setIn throw a raw YAML error; surface it as the
+  // UsageError this function's contract promises (mapped to exit 64) rather than
+  // an opaque library stack trace. On the exchange call path the schema load has
+  // already rejected such a shape, so this guards a hand-edit between load and
+  // write, or a future caller that skips validation.
+  try {
+    doc.setIn(["connection", "server", "host_key_fingerprint"], fingerprint);
+  } catch (err) {
+    throw new UsageError(
+      `config file ${configPath} could not be updated to persist the host-key ` +
+        `fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
+        `connection.server must be a mapping.`,
+    );
+  }
+  writeFileOwnerOnly(configPath, doc.toString());
+}
+
 // --- Config reader -----------------------------------------------------------
 
 /**

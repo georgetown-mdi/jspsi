@@ -41,6 +41,41 @@ import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
+// View an ssh2 hostVerifier `keyBlob` (a Node Buffer) as a Uint8Array over the
+// same bytes, the input type the sshHostKey primitives take. A Buffer is a
+// Uint8Array view onto a (possibly shared, pooled) ArrayBuffer, so the byteOffset
+// and byteLength must be carried through -- a bare `new Uint8Array(buf.buffer)`
+// would read the whole backing pool, not just this key. Shared by all three
+// host-key verifiers (enforce, fail-closed, capture).
+const hostKeyBlob = (keyBlob: Buffer): Uint8Array<ArrayBuffer> =>
+  new Uint8Array(
+    keyBlob.buffer as ArrayBuffer,
+    keyBlob.byteOffset,
+    keyBlob.byteLength,
+  );
+
+// Deliver an ssh2 hostVerifier verdict defensively. Our verifiers return
+// `undefined` (the void async IIFE), so ssh2 parks the handshake and waits for
+// this callback. If the handshake is torn down for an UNRELATED reason while our
+// async check is still pending -- ssh2's readyTimeout firing, or a socket error,
+// during the host-key hash/compare -- ssh2 has already destructed its protocol by
+// the time we call verify(); a late verify() then throws against the dead
+// protocol. The connection is already aborted, so the verdict is moot; swallow
+// the throw, because an escaped one would reject the void-ed IIFE and surface as
+// an unhandled promise rejection (a flaky test or stray process-level rejection),
+// never a wrong verdict. Shared by all three verifiers (enforce, fail-closed,
+// capture).
+const settleVerify = (
+  verify: (permitted: boolean) => void,
+  permitted: boolean,
+): void => {
+  try {
+    verify(permitted);
+  } catch {
+    // Handshake already torn down; the verdict can no longer be delivered.
+  }
+};
+
 // Extracts the declared byte count from a message filename by reading the last
 // `-`-delimited segment before `.json`. Parsing is right-anchored so an id
 // containing hyphens (a UUID, or a configured peer id) cannot corrupt the
@@ -613,6 +648,31 @@ const getDefaultOptions = (): Options => {
   };
 };
 
+/**
+ * The host key a server presented on the SFTP channel, as observed by
+ * {@link FileSyncConnection.probeHostKeyFingerprint}. Both fields are public
+ * (a host key and its fingerprint are not secret): the CLI surfaces them to the
+ * operator on a first-use trust prompt and persists `fingerprint` as the pin.
+ */
+export interface PresentedHostKey {
+  /**
+   * OpenSSH SHA256 fingerprint of the presented key, e.g. `SHA256:abc...xyz`,
+   * byte-identical to what `ssh-keygen -lf` prints and what
+   * `connection.server.host_key_fingerprint` pins.
+   */
+  fingerprint: string;
+  /**
+   * SSH key-type string decoded from the presented blob, e.g. `ssh-ed25519`.
+   * `(unknown)` when the blob is malformed (see {@link keyTypeFromBlob}).
+   *
+   * Server-controlled and stored UNsanitized: route it through
+   * {@link sanitizeForDisplay} before showing it to an operator (terminal, log),
+   * as a hostile server can put control/BIDI bytes in the key type. The sibling
+   * `fingerprint` is base64 and needs no escaping.
+   */
+  keyType: string;
+}
+
 export interface FileInfo {
   name: string;
   // Retained for downstream transport consumers; no longer used by the
@@ -1087,107 +1147,94 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.path = config.server.path ?? "";
       if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
 
-      // Apply the operator's opaque providerOptions FIRST, through a
-      // default-deny allowlist (see SFTP_PROVIDER_OPTIONS_ALLOWLIST), then assign
-      // psilink's own fields below. The security-critical options -- host,
-      // credentials, host-key verification, and the psilink-managed readyTimeout
-      // -- are therefore assigned AFTER providerOptions and always win, so a
-      // providerOptions entry can never override them even if the allowlist were
-      // ever loosened.
-      const connectOptions: Record<string, unknown> = {};
-      this.applyProviderOptions(connectOptions, config.providerOptions);
+      const connectOptions = this.buildSftpConnectOptions(config);
 
-      connectOptions["host"] = config.server.host;
-      connectOptions["maxReconnectAttempts"] =
-        config.options?.maxReconnectAttempts ?? 3;
-      if (config.server.port !== undefined)
-        connectOptions["port"] = config.server.port;
-      if (config.server.username !== undefined)
-        connectOptions["username"] = config.server.username;
-      if (config.server.password !== undefined)
-        connectOptions["password"] = config.server.password;
-      if (config.server.privateKey !== undefined)
-        connectOptions["privateKey"] = config.server.privateKey;
-      if (config.server.privateKeyPassphrase !== undefined)
-        connectOptions["passphrase"] = config.server.privateKeyPassphrase;
-      // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout,
-      // not a Promise.race wrapper — the per-attempt deadline is equivalent.
-      if (config.options?.serverConnectTimeoutMs !== undefined)
-        connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
-
-      // Host-key verification. The hostVerifier is set AFTER providerOptions so
-      // a providerOptions entry (already dropped by the allowlist) cannot win even
-      // if the allowlist were ever loosened. Verification applies to the CLI sftp
-      // channel only -- the browser/proxy SFTP path and filedrop do not run ssh2's
-      // hostVerifier.
+      // Host-key verification, installed AFTER providerOptions (which the
+      // allowlist already strips of hostVerifier/hostHash) so a providerOptions
+      // entry can never win even if the allowlist were loosened. Applies to the
+      // CLI sftp channel only -- the browser/proxy SFTP path and filedrop do not
+      // run ssh2's hostVerifier.
       //
-      // mismatchDetails captures the human-readable mismatch message from inside
-      // the async hostVerifier callback so the enclosing catch block can re-throw
-      // with the detail rather than the opaque "Host denied (verification failed)"
-      // message from ssh2. It is set before verify(false) is called, ensuring it
-      // is populated by the time the rejection propagates from this.client.connect().
+      // mismatchDetails captures the human-readable failure from inside the async
+      // hostVerifier callback so the enclosing catch block can re-throw with the
+      // detail rather than ssh2's opaque "Host denied (verification failed)". It
+      // is set before verify(false), so it is populated by the time the rejection
+      // propagates from this.client.connect().
       let mismatchDetails: string | undefined;
-      if (config.server.hostKeyFingerprint !== undefined) {
-        const pin = config.server.hostKeyFingerprint;
+      const pin = config.server.hostKeyFingerprint;
+      if (pin !== undefined) {
         connectOptions["hostVerifier"] = (
           keyBlob: Buffer,
           verify: (permitted: boolean) => void,
         ): void => {
           void (async () => {
             try {
-              const blob = new Uint8Array(
-                keyBlob.buffer as ArrayBuffer,
-                keyBlob.byteOffset,
-                keyBlob.byteLength,
-              );
-              const match = await verifyHostKeyFingerprint(blob, pin);
-              if (match) {
-                verify(true);
+              const blob = hostKeyBlob(keyBlob);
+              if (await verifyHostKeyFingerprint(blob, pin)) {
+                settleVerify(verify, true);
               } else {
-                // This re-hashes the blob that verifyHostKeyFingerprint already
-                // hashed -- deliberately. It runs only on the mismatch branch,
-                // which tears down the connection, so the extra digest is free;
-                // keeping it here preserves verifyHostKeyFingerprint's narrow
-                // boolean (constant-time compare) contract rather than widening
-                // it to return the digest for one terminal-path caller.
+                // Re-hash on the mismatch branch (which tears the connection down
+                // anyway) rather than widen verifyHostKeyFingerprint's narrow
+                // constant-time-boolean contract to return the digest.
                 const presented = await computeHostKeyFingerprint(blob);
-                // keyTypeFromBlob decodes UTF-8 bytes straight from the
-                // server-controlled key blob, so -- like host and path below --
-                // it is escaped before reaching the error message (which is
-                // logged and shown to the operator). The presented fingerprint
+                // keyTypeFromBlob decodes UTF-8 straight from the
+                // server-controlled blob, so it is escaped and quoted before it
+                // reaches the operator-facing message; the presented fingerprint
                 // is base64 and the pin is format-validated, so neither needs it.
-                // It is also quoted as `of type '...'` so a printable-ASCII value
-                // that survives sanitizeForDisplay (which strips control/bidi/
-                // homoglyph bytes but not quotes) reads as the type field rather
-                // than masquerading as surrounding prose.
                 const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
+                // A changed key is never auto-accepted (the ssh model): the
+                // recovery is to verify out-of-band, then re-pin deliberately --
+                // either set the new value or clear the field and re-establish
+                // trust on first use interactively.
                 mismatchDetails =
                   `the server presented a host key of type '${keyType}' with ` +
                   `fingerprint ${presented}, which does not match the pinned ` +
-                  `fingerprint ${pin}. This may be a legitimate key rotation or an active ` +
-                  `attack -- only the server administrator can disambiguate. ` +
-                  `If the key was rotated, obtain the new fingerprint from the ` +
-                  `server administrator out-of-band and update ` +
-                  `connection.server.host_key_fingerprint.`;
-                verify(false);
+                  `fingerprint ${pin}. This may be a legitimate key rotation or ` +
+                  `an active attack -- only the server administrator can ` +
+                  `disambiguate. If the key was rotated, verify the new ` +
+                  `fingerprint out-of-band, then either set ` +
+                  `connection.server.host_key_fingerprint to it or remove that ` +
+                  `field and re-run interactively to re-establish trust on ` +
+                  `first use. A changed key is never auto-accepted.`;
+                settleVerify(verify, false);
               }
             } catch (err) {
-              mismatchDetails =
-                `failed to verify host key: ` +
-                (err instanceof Error ? err.message : String(err));
-              verify(false);
+              mismatchDetails = `failed to verify host key: ` + errMessage(err);
+              settleVerify(verify, false);
             }
           })();
         };
       } else {
-        this.log.warn(
-          `[${this.role}] SFTP server identity is NOT verified: ` +
-            `no host_key_fingerprint is pinned for ` +
-            `${sanitizeForDisplay(config.server.host)}. ` +
-            `A host-key man-in-the-middle attack cannot be detected. ` +
-            `Set connection.server.host_key_fingerprint to the server's ` +
-            `SSH host-key fingerprint to enable verification.`,
-        );
+        // No pin: fail closed (replaces the former warn-and-proceed). The CLI's
+        // first-use flow normally pins the key before open(), so this path is the
+        // backstop for a direct/library caller and the default posture for an
+        // unpinned config. The presented fingerprint is surfaced so a caller can
+        // verify it out-of-band and pin it.
+        connectOptions["hostVerifier"] = (
+          keyBlob: Buffer,
+          verify: (permitted: boolean) => void,
+        ): void => {
+          void (async () => {
+            try {
+              const blob = hostKeyBlob(keyBlob);
+              const presented = await computeHostKeyFingerprint(blob);
+              const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
+              mismatchDetails =
+                `no host_key_fingerprint is pinned for ` +
+                `${sanitizeForDisplay(config.server.host)}, so the server's ` +
+                `identity cannot be verified and the connection is refused. The ` +
+                `server presented a host key of type '${keyType}' with ` +
+                `fingerprint ${presented}; verify it out-of-band and set ` +
+                `connection.server.host_key_fingerprint to pin it.`;
+              settleVerify(verify, false);
+            } catch (err) {
+              mismatchDetails =
+                `no host_key_fingerprint is pinned and the presented host key ` +
+                `could not be read (${errMessage(err)}); refusing to proceed.`;
+              settleVerify(verify, false);
+            }
+          })();
+        };
       }
 
       const portString =
@@ -1319,6 +1366,130 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       }
     }
     return Object.keys(filtered).length > 0 ? filtered : undefined;
+  }
+
+  /**
+   * Build the ssh2-sftp-client connect options for an sftp config, EXCEPT the
+   * `hostVerifier` (the caller installs the verifier appropriate to its path:
+   * enforce, fail-closed, or capture). The operator's opaque providerOptions are
+   * applied FIRST through the default-deny allowlist, then psilink's own
+   * security-critical fields -- host, credentials, the managed readyTimeout --
+   * are assigned AFTER and always win, so a providerOptions entry can never
+   * override them even if the allowlist were loosened. Shared by {@link open}
+   * and {@link probeHostKeyFingerprint} so the probe negotiates with the exact
+   * same options (and therefore the same host-key type) the real connect uses.
+   */
+  private buildSftpConnectOptions(
+    config: SFTPConnectionConfig,
+  ): Record<string, unknown> {
+    const connectOptions: Record<string, unknown> = {};
+    this.applyProviderOptions(connectOptions, config.providerOptions);
+
+    connectOptions["host"] = config.server.host;
+    connectOptions["maxReconnectAttempts"] =
+      config.options?.maxReconnectAttempts ?? 3;
+    if (config.server.port !== undefined)
+      connectOptions["port"] = config.server.port;
+    if (config.server.username !== undefined)
+      connectOptions["username"] = config.server.username;
+    if (config.server.password !== undefined)
+      connectOptions["password"] = config.server.password;
+    if (config.server.privateKey !== undefined)
+      connectOptions["privateKey"] = config.server.privateKey;
+    if (config.server.privateKeyPassphrase !== undefined)
+      connectOptions["passphrase"] = config.server.privateKeyPassphrase;
+    // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout, not a
+    // Promise.race wrapper -- the per-attempt deadline is equivalent.
+    if (config.options?.serverConnectTimeoutMs !== undefined)
+      connectOptions["readyTimeout"] = config.options.serverConnectTimeoutMs;
+    return connectOptions;
+  }
+
+  /**
+   * Connect only far enough to observe the server's presented host key, then
+   * REFUSE the connection -- the ssh-keyscan analogue used to establish a
+   * first-use pin. The installed hostVerifier records the presented
+   * fingerprint/key-type and immediately calls `verify(false)`, so the handshake
+   * aborts at host-key verification, BEFORE any credential is presented to the
+   * (still-unverified) server, and without ever waiting on a user prompt inside
+   * the handshake (which would race ssh2's `readyTimeout`). The caller then
+   * decides whether to trust and pin the returned fingerprint out of band; the
+   * subsequent real {@link open} re-verifies it, so a key swapped between this
+   * probe and that connect is still caught.
+   *
+   * Uses the raw (unbounded) transport: the verifier rejects as soon as the key
+   * is presented, so there is no withheld-callback window for the peer-inactivity
+   * budget to guard, and the connect is already bounded by ssh2's readyTimeout.
+   *
+   * @throws if the connect resolves without the verifier firing (no key was
+   *   observed), or rejects for a reason other than the deliberate refusal.
+   */
+  async probeHostKeyFingerprint(
+    config: SFTPConnectionConfig,
+  ): Promise<PresentedHostKey> {
+    const connectOptions = this.buildSftpConnectOptions(config);
+    let captured: PresentedHostKey | undefined;
+    let captureError: unknown;
+    let connectError: unknown;
+    connectOptions["hostVerifier"] = (
+      keyBlob: Buffer,
+      verify: (permitted: boolean) => void,
+    ): void => {
+      void (async () => {
+        try {
+          const blob = hostKeyBlob(keyBlob);
+          captured = {
+            fingerprint: await computeHostKeyFingerprint(blob),
+            keyType: keyTypeFromBlob(blob),
+          };
+        } catch (err) {
+          captureError = err;
+        }
+        // Always refuse: this connection exists only to read the host key, never
+        // to authenticate. The refusal surfaces as the expected connect rejection
+        // below, from which `captured` is returned. settleVerify guards a late
+        // refusal: if the handshake was already torn down (e.g. readyTimeout)
+        // while computeHostKeyFingerprint was awaiting, verify(false) would throw
+        // against the dead protocol and reject this void-ed IIFE.
+        settleVerify(verify, false);
+      })();
+    };
+
+    try {
+      await this.rawClient.connect(connectOptions);
+    } catch (err) {
+      // A rejection is expected when the verifier fired: verify(false) aborts the
+      // handshake, from which the captured key is returned below. Record the
+      // cause ONLY when no key was read -- a genuine connect failure (e.g. an
+      // unreachable host) -- so it is surfaced rather than masked behind the
+      // generic "presented no key" message.
+      if (captured === undefined) connectError = err;
+    } finally {
+      // verify(false) already tears the handshake down, but end() is the explicit
+      // teardown; run it on every path (the success return included) so the probe
+      // never leaves a client open.
+      await this.rawClient.end().catch(() => {});
+    }
+
+    if (captured !== undefined) return captured;
+    if (captureError !== undefined)
+      throw new Error(
+        `failed to read the server's host key: ${errMessage(captureError)}`,
+      );
+    // The connect rejected before the verifier ever fired -- the host key was
+    // never presented. Preserve the original cause so the operator can tell an
+    // unreachable host from any other SSH failure.
+    if (connectError !== undefined)
+      throw new Error(
+        `could not read the server's host key: ${errMessage(connectError)}`,
+        { cause: connectError },
+      );
+    // The connect resolved without the verifier firing: a completed connection
+    // that presented no host key (not expected for SSH).
+    throw new Error(
+      `could not determine the server's host key: the connection did not ` +
+        `present one before completing`,
+    );
   }
 
   async cleanup() {

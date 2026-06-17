@@ -193,6 +193,14 @@ connection:
   path: /mnt/sftp-share/exchanges/agency-a-agency-b
 ```
 
+### SFTP host-key trust
+
+Every command that opens an SFTP connection -- `psilink exchange`, an online `psilink invite`/`accept`, and a zero-setup exchange -- verifies the server's SSH host key before sending any credential, so a man-in-the-middle or a substituted server is detected rather than trusted. You can pin the key out-of-band by setting `connection.server.host_key_fingerprint` to the server's OpenSSH SHA256 fingerprint (the value `ssh-keygen -lf` prints; `@path` is supported). If you cannot obtain it out-of-band, the first interactive run establishes it on first use, the way `ssh` does:
+
+- The first time you connect to an unpinned SFTP server from an interactive terminal, the command shows the presented host key's fingerprint and asks you to confirm. On confirmation it records the fingerprint and connects; every later run then verifies it silently. Verify the fingerprint against the server's published value if you can before confirming. Where the command writes a configuration -- `exchange` (into the existing `psilink.yaml`, preserving your comments), the online `invite`/`accept`, and a zero-setup run with `--save` -- the pin is saved there; a zero-setup run without `--save` trusts the key for that one exchange only (like `ssh` to a host you do not add to `known_hosts`).
+- A run with no terminal -- an automated or scheduled run, or one piping its input CSV through stdin -- does not prompt and does not silently accept: it fails closed with an error telling you to run once interactively to pin the key, or to set `host_key_fingerprint` yourself. So pin the key (out-of-band or via one interactive run) before scheduling unattended exchanges.
+- If the server legitimately rotates its host key, a later run fails with a mismatch error rather than silently trusting the new key. Verify the new fingerprint out-of-band, then re-pin deliberately: set `host_key_fingerprint` to the new value, or remove it from `psilink.yaml` and run once interactively to confirm and re-pin (the same as removing a changed host from `~/.ssh/known_hosts`).
+
 ## Recovery
 
 ### Key lifecycle

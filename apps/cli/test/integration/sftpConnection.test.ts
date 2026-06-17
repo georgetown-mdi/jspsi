@@ -619,3 +619,59 @@ inProcessOnly(
     }
   },
 );
+
+// --- host-key verification over real SFTP ------------------------------------
+
+test("an unpinned connection fails closed over real SFTP (the no-pin default)", async () => {
+  const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+    verbose: -1,
+  });
+  conn.on("error", () => {});
+  // Spell out the credentials and OMIT the host-key pin (serverAuth would add
+  // it), so this exercises the no-pin path: core refuses the connection before
+  // authenticating and the error names the missing pin.
+  const auth =
+    srv.usera.password !== undefined
+      ? { password: srv.usera.password }
+      : { privateKey: srv.usera.privateKey };
+  await expect(
+    conn.open({
+      channel: "sftp",
+      server: {
+        host: srv.host,
+        port: srv.port,
+        username: srv.usera.username,
+        ...auth,
+        path: SFTP_PATH,
+      },
+      // One attempt: a host-key refusal is terminal, so retrying only slows it.
+      options: { maxReconnectAttempts: 0 },
+    }),
+  ).rejects.toThrow(/no host_key_fingerprint is pinned/);
+  await conn.close().catch(() => {});
+});
+
+test("probeHostKeyFingerprint returns the server's real fingerprint without authenticating", async () => {
+  const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+    verbose: -1,
+  });
+  // Credentials are present (as in production: first-use establishes the host
+  // key, not the credentials) but never used -- the probe refuses at host-key
+  // verification, before auth. The host key is presented during the KEX that
+  // precedes auth, so the fingerprint the probe learns equals the pin the suite
+  // computed for this server; the pin itself is omitted, which is the point.
+  const auth =
+    srv.usera.password !== undefined
+      ? { password: srv.usera.password }
+      : { privateKey: srv.usera.privateKey };
+  const presented = await conn.probeHostKeyFingerprint({
+    channel: "sftp",
+    server: {
+      host: srv.host,
+      port: srv.port,
+      username: srv.usera.username,
+      ...auth,
+    },
+  });
+  expect(presented.fingerprint).toBe(srv.hostKeyFingerprint);
+});

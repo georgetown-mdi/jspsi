@@ -1,4 +1,3 @@
-import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 import type { Argv, Arguments } from "yargs";
@@ -39,6 +38,10 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
+import {
+  establishHostKeyTrust,
+  type HostKeyPersistence,
+} from "../hostKeyTrust";
 import {
   durationFlagSeconds,
   LOG_LEVELS,
@@ -559,6 +562,30 @@ export async function runOnlineBootstrap(params: {
     keyFilePath: params.keyPath,
   };
 
+  // Establish first-use SSH host-key trust before connecting, on the ORIGINAL
+  // params.connection so the pin reaches both the live connect (via the clone
+  // below) and the persisted config. A pinned connection is a no-op; an unpinned
+  // one prompts on a TTY (online invite/accept are interactive) and fails closed
+  // otherwise. When reusing a pre-existing config the post-handshake hook does
+  // not re-write it, so the pin is written in place now (write-now); a fresh
+  // config instead carries the mutation into its saveConfig (save-with-config).
+  //
+  // On the fresh (save-with-config) path the pin is persisted ONLY by that
+  // post-handshake saveConfig, so a handshake or exchange failure before the hook
+  // fires leaves the confirmed pin unwritten and the next attempt re-prompts.
+  // That is consistent with this bootstrap's all-or-nothing semantics: a fresh
+  // setup that does not reach acceptance leaves no config behind at all, so
+  // re-confirming the host key on retry is expected, not a regression (and the
+  // re-prompt still fails closed, so trust is never silently downgraded).
+  const hostKeyPersistence: HostKeyPersistence = params.reuseExistingConfig
+    ? { mode: "write-now", configPath: params.configPath }
+    : { mode: "save-with-config", configPath: params.configPath };
+  await establishHostKeyTrust(params.connection, {
+    verbosity: params.verbosity,
+    loggerName: params.loggerName,
+    persistence: hostKeyPersistence,
+  });
+
   // Resolve `@path` credential refs for the live connection only. params.connection
   // keeps the `@path` so the saveConfig in the hook below persists the reference,
   // not the secret -- the @path is re-resolved at the next `psilink exchange`'s
@@ -731,37 +758,6 @@ export function logOnlineBootstrapOutcome(
       `your connection and linkage settings before running a recurring ` +
       `'psilink exchange'. Keep the key file private.`,
   );
-}
-
-// --- Confirmation prompt -----------------------------------------------------
-
-/**
- * Prompt the user to confirm on the terminal, returning true only on an
- * explicit yes. Anything else (including EOF or a non-interactive stdin)
- * defaults to no. Prompts on stderr so stdout stays reserved for exchange
- * results.
- */
-export async function promptConfirm(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-  try {
-    // `rl.question()` never settles when stdin reaches EOF (a closed or
-    // piped-empty stdin) -- a long-standing readline/promises behavior
-    // (nodejs/node#53497). Race it against the interface's "close" event (which
-    // does fire on EOF) so a closed stdin deterministically resolves to "no"
-    // instead of leaving the promise pending -- which today exits silently via
-    // event-loop drain and would deadlock outright if any handle were open here.
-    const answer = await new Promise<string>((resolve) => {
-      rl.once("close", () => resolve(""));
-      void rl.question(`${question} [y/N] `).then(resolve, () => resolve(""));
-    });
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 // --- Command execution -------------------------------------------------------

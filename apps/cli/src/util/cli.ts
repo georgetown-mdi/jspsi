@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import util from "node:util";
+import readline from "node:readline/promises";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 
@@ -397,4 +398,35 @@ export function writeOutput(
     for (const row of rows) out.write(row.join(",") + "\n");
     out.end();
   });
+}
+
+// --- Confirmation prompt -----------------------------------------------------
+
+/**
+ * Prompt the user to confirm on the terminal, returning true only on an
+ * explicit yes. Anything else (including EOF or a non-interactive stdin)
+ * defaults to no. Prompts on stderr so stdout stays reserved for exchange
+ * results.
+ */
+export async function promptConfirm(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+  try {
+    // `rl.question()` never settles when stdin reaches EOF (a closed or
+    // piped-empty stdin) -- a long-standing readline/promises behavior
+    // (nodejs/node#53497). Race it against the interface's "close" event (which
+    // does fire on EOF) so a closed stdin deterministically resolves to "no"
+    // instead of leaving the promise pending -- which today exits silently via
+    // event-loop drain and would deadlock outright if any handle were open here.
+    const answer = await new Promise<string>((resolve) => {
+      rl.once("close", () => resolve(""));
+      void rl.question(`${question} [y/N] `).then(resolve, () => resolve(""));
+    });
+    const normalized = answer.trim().toLowerCase();
+    return normalized === "y" || normalized === "yes";
+  } finally {
+    rl.close();
+  }
 }

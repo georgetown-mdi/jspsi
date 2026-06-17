@@ -6,9 +6,26 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { computeHostKeyFingerprint } from "@psilink/core";
+
 import type { SftpServerHandle, SftpTestServer } from "./types";
 
 const execFileAsync = promisify(execFile);
+
+// The OpenSSH SHA256 host-key fingerprint from a `.pub` line ("ssh-ed25519
+// <base64-blob> comment"): the base64 blob is the SSH wire-format public key,
+// the exact bytes ssh2's hostVerifier hashes, so this equals the value the
+// production verifier pins. The suite pins it because the no-pin default is
+// fail-closed.
+async function hostKeyFingerprintFromPub(pubPath: string): Promise<string> {
+  const pub = await fsp.readFile(pubPath, "utf8");
+  const blobB64 = pub.trim().split(/\s+/)[1];
+  if (blobB64 === undefined)
+    throw new Error(`malformed host public key at ${pubPath}`);
+  return computeHostKeyFingerprint(
+    new Uint8Array(Buffer.from(blobB64, "base64")),
+  );
+}
 
 // Where the system OpenSSH server lives. internal-sftp is built into sshd, so no
 // separate binary is needed. macOS and the Ubuntu CI runners ship sshd at
@@ -378,6 +395,10 @@ export async function startNativeSshdServer(
       fsp.readFile(`${userbKeyPath}.pub`, "utf8"),
     ]);
 
+    const hostKeyFingerprint = await hostKeyFingerprintFromPub(
+      `${hostKeyPath}.pub`,
+    );
+
     const authorizedKeysPath = path.join(workDir, "authorized_keys");
     // One key per line with an explicit separator, rather than relying on
     // ssh-keygen's .pub files always carrying a trailing newline.
@@ -506,8 +527,9 @@ export async function startNativeSshdServer(
       port: boundPort,
       backingDir,
       remoteRoot,
-      usera: { username: osUser, privateKey: useraPriv },
-      userb: { username: osUser, privateKey: userbPriv },
+      hostKeyFingerprint,
+      usera: { username: osUser, privateKey: useraPriv, hostKeyFingerprint },
+      userb: { username: osUser, privateKey: userbPriv, hostKeyFingerprint },
     };
     return {
       handle,

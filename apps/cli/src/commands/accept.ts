@@ -30,7 +30,7 @@ import {
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import { configureLogFile } from "../util/cli";
+import { configureLogFile, promptConfirm } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
@@ -45,7 +45,6 @@ import {
   looksLikeUrl,
   parseCommonBootstrapArgs,
   prepareForOnlineExchange,
-  promptConfirm,
   runOnlineBootstrap,
   runOrExit,
   type CommonBootstrapOptions,

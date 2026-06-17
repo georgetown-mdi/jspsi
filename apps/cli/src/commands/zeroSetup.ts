@@ -30,6 +30,7 @@ import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
+import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   configureLogFile,
   exitWithError,
@@ -573,6 +574,19 @@ export async function handler(argv: Arguments): Promise<void> {
     let prepared: PreparedExchange;
     try {
       connection = createConnection(server, options);
+      // Establish first-use SSH host-key trust on the ORIGINAL `connection`
+      // (before the clone below), so the pin reaches both the live connect and,
+      // under --save, the persisted config (finalizeBootstrap saves this same
+      // object). A pinned connection is a no-op; an unpinned one prompts on a TTY
+      // and fails closed otherwise. With --save the pin is saved with the config;
+      // without it the key is trusted for this one-off exchange only.
+      await establishHostKeyTrust(connection, {
+        verbosity,
+        loggerName: "psilink",
+        persistence: options.save
+          ? { mode: "save-with-config", configPath: options.configFile }
+          : { mode: "ephemeral" },
+      });
       // `connection` keeps any `@path` credential ref so finalizeBootstrap's save
       // persists the reference, not the secret; `liveConnection` resolves it for
       // the exchange itself. A missing or unreadable `@path` file is a UsageError

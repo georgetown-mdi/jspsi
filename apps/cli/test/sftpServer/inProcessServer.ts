@@ -6,6 +6,8 @@ import path from "node:path";
 import ssh2 from "ssh2";
 import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 
+import { computeHostKeyFingerprint } from "@psilink/core";
+
 import type {
   InProcessSftpServer,
   SftpFaultInjection,
@@ -235,20 +237,30 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     });
   });
 
+  // The OpenSSH SHA256 fingerprint of the server's host key, computed over the
+  // SSH wire-format public-key blob (getPublicSSH()) -- the exact bytes ssh2's
+  // hostVerifier receives -- so it equals what the production verifier pins.
+  const hostKeyFingerprint = await computeHostKeyFingerprint(
+    new Uint8Array(publicKeyOf(hostKey).data),
+  );
+
   const handle: SftpServerHandle = {
     host: "127.0.0.1",
     port,
     backingDir,
     remoteRoot: REMOTE_ROOT,
+    hostKeyFingerprint,
     usera: {
       username: parties.usera.username,
       password: parties.usera.password,
       privateKey: parties.usera.key.private,
+      hostKeyFingerprint,
     },
     userb: {
       username: parties.userb.username,
       password: parties.userb.password,
       privateKey: parties.userb.key.private,
+      hostKeyFingerprint,
     },
   };
 

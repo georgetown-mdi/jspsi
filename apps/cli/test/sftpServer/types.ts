@@ -20,6 +20,14 @@ export interface SftpPartyCredentials {
   password?: string;
   /** OpenSSH private key (PEM), when the backend authenticates by public key. */
   privateKey?: string;
+  /**
+   * The server's OpenSSH SHA256 host-key fingerprint (server-wide, identical for
+   * both parties), copied onto each party so the shared `serverAuth`/
+   * `publicKeyAuth` helpers spread it into the connection `server` block and the
+   * suite's connections are pinned. Pinning is required since the no-pin default
+   * is fail-closed; see {@link SftpServerHandle.hostKeyFingerprint}.
+   */
+  hostKeyFingerprint: string;
 }
 
 /**
@@ -35,6 +43,13 @@ export interface SftpServerHandle {
   /** The two distinct parties sharing one rendezvous directory. */
   usera: SftpPartyCredentials;
   userb: SftpPartyCredentials;
+  /**
+   * The server's OpenSSH SHA256 host-key fingerprint (`SHA256:...`), the value a
+   * client pins as `connection.server.host_key_fingerprint`. Exposed so the
+   * suite can pin the server it connects to: with the no-pin default now
+   * fail-closed, every conformance connection must pin this.
+   */
+  hostKeyFingerprint: string;
   /**
    * Host filesystem root the server serves. Tests create their namespace
    * subdirectory, plant out-of-band files, and clean up directly under it.

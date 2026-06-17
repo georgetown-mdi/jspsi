@@ -21,6 +21,7 @@ import {
   DEFAULT_CONFIG_PATH,
 } from "../config";
 import { expandTilde } from "../fileUtils";
+import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   loadKeyFile,
   checkKeyFileExpiry,
@@ -617,6 +618,24 @@ export async function handler(argv: Arguments): Promise<void> {
     );
 
     announceRetainMode(connection, log);
+
+    // Establish SSH host-key trust before any exchange work: on an unpinned sftp
+    // config this prompts and pins on first interactive use, and fails closed
+    // (no prompt, no auto-accept) on a non-interactive run. It is a no-op for a
+    // pinned config or a non-sftp channel. Runs before dataset prep so a
+    // non-interactive no-pin run fails fast; a UsageError (non-TTY, or a declined
+    // prompt) maps to exit 64, a probe transport failure to 69.
+    try {
+      await establishHostKeyTrust(connection, {
+        verbosity,
+        loggerName: "exchange",
+        // The config is already on disk and exchange does not re-write it, so a
+        // first-use pin is written in place now.
+        persistence: { mode: "write-now", configPath: options.configFile },
+      });
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    }
 
     let identity: string;
     if (options.identity) {
