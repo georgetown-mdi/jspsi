@@ -147,6 +147,44 @@ test("parses shared options including maxReconnectAttempts on an SFTP config", (
   expect(result.data.options?.maxReconnectAttempts).toBe(5);
 });
 
+test("an unset server_connect_timeout_ms defaults to 30000 at the schema boundary", () => {
+  // The documented 30000 ms per-attempt connect default is applied by the schema,
+  // so a config whose options omit the field still carries it -- the contract the
+  // JSDoc and EXCHANGE_REFERENCE.md advertise. The default fires whenever the
+  // options object is present (here alongside another field).
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { pollIntervalMs: 100 },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.serverConnectTimeoutMs).toBe(30000);
+});
+
+test("an unset server_connect_timeout_ms defaults to 30000 on a filedrop config", () => {
+  // Same default on the other file-sync channel, applied uniformly.
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+    options: { pollIntervalMs: 100 },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.serverConnectTimeoutMs).toBe(30000);
+});
+
+test("an explicit server_connect_timeout_ms passes through unchanged", () => {
+  // Teeth for the default tests: an explicit value (distinct from 30000) is not
+  // overridden by the default.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { server_connect_timeout_ms: 5000 },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.serverConnectTimeoutMs).toBe(5000);
+});
+
 test("peer_timeout_ms of zero is rejected", () => {
   // peerTimeoutMs is the per-await peer-inactivity liveness budget; a zero would
   // fire every transport await immediately and disable the liveness control. The

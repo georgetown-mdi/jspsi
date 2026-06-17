@@ -902,15 +902,38 @@ test("providerOptions cannot override the psilink-managed readyTimeout", async (
 });
 
 test("providerOptions cannot supply readyTimeout when the config omits a connect timeout", async () => {
-  // Symmetric to the case above: with no serverConnectTimeoutMs the allowlist
-  // drops a providerOptions readyTimeout rather than letting it populate the
-  // connect option, so the connection falls back to ssh2's own default.
+  // Symmetric to the case above: the allowlist drops a providerOptions
+  // readyTimeout rather than letting it populate the connect option. With no
+  // serverConnectTimeoutMs the connection then falls back to psilink's documented
+  // 30000 ms default (supplied at the connect site even for a config carrying no
+  // options block), NOT to the dropped providerOptions value or ssh2's default.
   const opts = await captureSftpConnectOptions({
     channel: "sftp",
     server: { host: "sftp.example.org" },
     providerOptions: { readyTimeout: 1 },
   });
-  expect(opts["readyTimeout"]).toBeUndefined();
+  expect(opts["readyTimeout"]).toBe(30_000);
+});
+
+test("an unset connect timeout applies the documented default readyTimeout", async () => {
+  // The schema default fires only when an options block is present; this config
+  // omits options entirely, so the connect-site fallback is what supplies the
+  // documented 30000 ms per-attempt deadline rather than dropping to ssh2's
+  // shorter internal default.
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+  });
+  expect(opts["readyTimeout"]).toBe(30_000);
+});
+
+test("an explicit connect timeout is used verbatim for readyTimeout", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { serverConnectTimeoutMs: 12_345 },
+  });
+  expect(opts["readyTimeout"]).toBe(12_345);
 });
 
 test("a benign providerOptions transport option still applies", async () => {
@@ -1036,6 +1059,35 @@ test("open sets path and marks connected for filedrop config", async () => {
   await conn.open({ channel: "filedrop", path: "/mnt/share/drop" });
   expect(conn.connected).toBe(true);
   expect(conn.path).toBe("/mnt/share/drop");
+});
+
+test("filedrop connect uses the documented default connectTimeoutMs when unset", async () => {
+  // No options block, so the connect-site fallback supplies the documented
+  // 30000 ms per-attempt deadline rather than passing undefined down to
+  // LocalFSClient's own fallback.
+  const { client } = makeMockClient();
+  let captured: Record<string, unknown> | undefined;
+  client.connect = async (options: Record<string, unknown>) => {
+    captured = options;
+  };
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  await conn.open({ channel: "filedrop", path: "/mnt/share/drop" });
+  expect(captured?.["connectTimeoutMs"]).toBe(30_000);
+});
+
+test("filedrop connect passes an explicit connectTimeoutMs verbatim", async () => {
+  const { client } = makeMockClient();
+  let captured: Record<string, unknown> | undefined;
+  client.connect = async (options: Record<string, unknown>) => {
+    captured = options;
+  };
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  await conn.open({
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+    options: { serverConnectTimeoutMs: 7_000 },
+  });
+  expect(captured?.["connectTimeoutMs"]).toBe(7_000);
 });
 
 test("open strips trailing slash from filedrop path", async () => {
