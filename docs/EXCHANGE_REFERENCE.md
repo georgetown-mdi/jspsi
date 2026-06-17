@@ -195,7 +195,7 @@ The table above is the complete set of constraints. Constraints not listed for a
 
 An ordered list of linkage keys applied in sequence from most to least precise. Each round of the PSI protocol matches only records not yet resolved in a prior round. Each element references a linkage field by name and may optionally specify transformations applied to that field's canonical value before it is concatenated into the key.
 
-The name of each linkage key must be unique. The elements within any linkage must either reference a unique linkage field or have an alias that is unique.
+The name of each linkage key must be unique. The elements within any linkage must either reference a unique linkage field or have an alias that is unique. Each element's `field` must name a declared linkage field (a `name` from `linkage_terms.linkage_fields`); a key that references an undeclared field is rejected when the terms are decoded, rather than silently collapsing to an empty key at exchange time.
 
 ```yaml
 linkage_terms:
@@ -255,7 +255,7 @@ Each step in a `transform` array applies one function from the cleaning and stan
 
 #### Swapped keys
 
-When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. Element names are matched first against element `name` values, then against `field` names. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency.
+When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. Element names are matched first against element `name` values, then against `field` names. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency. Each `swap` target must resolve to an element of the same key by this rule; a target matching no element in its key is rejected when the terms are decoded, rather than silently doing nothing at exchange time.
 
 ### `linkage_terms.legal_agreement`
 

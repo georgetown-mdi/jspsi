@@ -50,13 +50,15 @@ test("parses a complete valid set of terms", () => {
       },
       { name: "dateOfBirth", type: "dateOfBirth" },
       { name: "ssn", type: "ssn" },
+      { name: "firstName", type: "firstName" },
     ],
     linkageKeys: [
       {
-        name: "SSN4 + Last Name + DOB",
+        name: "SSN4 + Last Name + First Name + DOB",
         elements: [
           { field: "ssn4" },
           { field: "lastName" },
+          { field: "firstName" },
           { field: "dateOfBirth" },
         ],
         swap: ["firstName", "lastName"],
@@ -80,7 +82,7 @@ test("parses a complete valid set of terms", () => {
   });
 
   expect(result.algorithm).toBe("psi-c");
-  expect(result.linkageFields).toHaveLength(4);
+  expect(result.linkageFields).toHaveLength(5);
   expect(result.linkageKeys).toHaveLength(2);
   expect(result.legalAgreement?.reference).toBe("MOU-2025-0042");
   expect(result.legalAgreement?.purpose).toBe(
@@ -310,6 +312,109 @@ test("same field used twice with distinct names is valid", () => {
           { field: "dateOfBirth" },
         ],
         swap: ["name1", "name2"],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
+// ─── referential integrity: element fields and swap targets ──────────────────
+// Linkage terms are partner-controlled, so an incoherent set (a key element
+// naming an undeclared field, or a swap target matching no element in its key)
+// must be rejected at decode rather than collapsing the affected key to a
+// silent, undiagnosable empty result at exchange time.
+
+test("an element field not declared in linkageFields is rejected", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+    linkageKeys: [{ name: "Dangling", elements: [{ field: "lastName" }] }],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/declared linkage field/);
+});
+
+test("a swap target matching no element in its key is rejected", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "lastName", type: "lastName" },
+    ],
+    linkageKeys: [
+      {
+        name: "Bad swap",
+        elements: [{ field: "ssn" }, { field: "lastName" }],
+        // "firstName" is a declared-elsewhere idea but no element of this key,
+        // so the swap target resolves to nothing.
+        swap: ["ssn", "firstName"],
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/swap target/);
+});
+
+test("a swap resolving via element field names validates", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      { name: "firstName", type: "firstName" },
+      { name: "lastName", type: "lastName" },
+    ],
+    linkageKeys: [
+      {
+        name: "Swap by field",
+        elements: [{ field: "firstName" }, { field: "lastName" }],
+        swap: ["firstName", "lastName"],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
+test("a swap resolving via an element name alias and a field both validate", () => {
+  // One target resolves via an element `name` alias, the other via `field`;
+  // both resolution forms must be accepted within the same swap.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      { name: "firstName", type: "firstName" },
+      { name: "lastName", type: "lastName" },
+    ],
+    linkageKeys: [
+      {
+        name: "Swap by alias and field",
+        elements: [
+          { field: "firstName", name: "given" },
+          { field: "lastName" },
+        ],
+        swap: ["given", "lastName"],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
+test("a duplicate element field with distinct name aliases still validates", () => {
+  // The same field may appear twice when each occurrence carries a distinct
+  // `name`; the new referential-integrity checks must not regress the existing
+  // element-identifier-uniqueness rule, and a swap may target the aliases.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [{ name: "phone", type: "phoneNumber" }],
+    linkageKeys: [
+      {
+        name: "Two phones",
+        elements: [
+          { field: "phone", name: "home" },
+          { field: "phone", name: "work" },
+        ],
+        swap: ["home", "work"],
       },
     ],
   });
@@ -959,7 +1064,15 @@ test("accepts linkageFields at exactly the maximum count", () => {
     name: `f${i}`,
     type: "ssn",
   }));
-  expect(() => parseLinkageTerms({ ...base, linkageFields })).not.toThrow();
+  // The key must reference a declared field, so point it at one of the f* names
+  // rather than base's "ssn", which this override does not declare.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields,
+      linkageKeys: [{ name: "K", elements: [{ field: "f0" }] }],
+    }),
+  ).not.toThrow();
 });
 
 test("rejects more linkageFields than the maximum count", () => {
