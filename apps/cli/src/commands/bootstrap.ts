@@ -569,6 +569,14 @@ export async function runOnlineBootstrap(params: {
   // otherwise. When reusing a pre-existing config the post-handshake hook does
   // not re-write it, so the pin is written in place now (write-now); a fresh
   // config instead carries the mutation into its saveConfig (save-with-config).
+  //
+  // On the fresh (save-with-config) path the pin is persisted ONLY by that
+  // post-handshake saveConfig, so a handshake or exchange failure before the hook
+  // fires leaves the confirmed pin unwritten and the next attempt re-prompts.
+  // That is consistent with this bootstrap's all-or-nothing semantics: a fresh
+  // setup that does not reach acceptance leaves no config behind at all, so
+  // re-confirming the host key on retry is expected, not a regression (and the
+  // re-prompt still fails closed, so trust is never silently downgraded).
   const hostKeyPersistence: HostKeyPersistence = params.reuseExistingConfig
     ? { mode: "write-now", configPath: params.configPath }
     : { mode: "save-with-config", configPath: params.configPath };

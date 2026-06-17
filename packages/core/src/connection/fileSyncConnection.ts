@@ -1408,6 +1408,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const connectOptions = this.buildSftpConnectOptions(config);
     let captured: PresentedHostKey | undefined;
     let captureError: unknown;
+    let connectError: unknown;
     connectOptions["hostVerifier"] = (
       keyBlob: Buffer,
       verify: (permitted: boolean) => void,
@@ -1431,19 +1432,35 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     try {
       await this.rawClient.connect(connectOptions);
-    } catch {
-      // Expected: verify(false) aborts the handshake. Swallow the rejection and
-      // return what the verifier captured. A non-host-key connect failure (e.g.
-      // the host is unreachable) leaves `captured` undefined and falls through to
-      // the throw below, so it is not silently masked.
-      if (captured !== undefined) return captured;
+    } catch (err) {
+      // A rejection is expected when the verifier fired: verify(false) aborts the
+      // handshake, from which the captured key is returned below. Record the
+      // cause ONLY when no key was read -- a genuine connect failure (e.g. an
+      // unreachable host) -- so it is surfaced rather than masked behind the
+      // generic "presented no key" message.
+      if (captured === undefined) connectError = err;
+    } finally {
+      // verify(false) already tears the handshake down, but end() is the explicit
+      // teardown; run it on every path (the success return included) so the probe
+      // never leaves a client open.
+      await this.rawClient.end().catch(() => {});
     }
-    // The connect resolved (or rejected) without the verifier capturing a key.
-    await this.rawClient.end().catch(() => {});
+
+    if (captured !== undefined) return captured;
     if (captureError !== undefined)
       throw new Error(
         `failed to read the server's host key: ${errMessage(captureError)}`,
       );
+    // The connect rejected before the verifier ever fired -- the host key was
+    // never presented. Preserve the original cause so the operator can tell an
+    // unreachable host from any other SSH failure.
+    if (connectError !== undefined)
+      throw new Error(
+        `could not read the server's host key: ${errMessage(connectError)}`,
+        { cause: connectError },
+      );
+    // The connect resolved without the verifier firing: a completed connection
+    // that presented no host key (not expected for SSH).
     throw new Error(
       `could not determine the server's host key: the connection did not ` +
         `present one before completing`,

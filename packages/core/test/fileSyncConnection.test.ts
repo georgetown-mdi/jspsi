@@ -757,6 +757,24 @@ test("probeHostKeyFingerprint throws when the host presents no key", async () =>
   ).rejects.toThrow(/could not determine the server's host key/);
 });
 
+test("probeHostKeyFingerprint surfaces the connect failure cause when no key is presented", async () => {
+  // A connect that REJECTS before the verifier fires (e.g. an unreachable host)
+  // must propagate the original cause rather than collapse to the generic
+  // "presented no key" message, so the operator can tell an unreachable host
+  // from any other SSH failure.
+  const { client } = makeMockClient();
+  const cause = new Error("connect ECONNREFUSED 10.0.0.1:22");
+  client.connect = () => Promise.reject(cause);
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const run = conn.probeHostKeyFingerprint({
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+  });
+  await expect(run).rejects.toThrow(/could not read the server's host key/);
+  await expect(run).rejects.toThrow(/ECONNREFUSED/);
+  await expect(run).rejects.toHaveProperty("cause", cause);
+});
+
 test("providerOptions cannot redirect the connection via sock or authHandler", async () => {
   // sock replaces the TCP connection without touching `host`; authHandler can
   // re-supply every credential. Both are dropped by the default-deny allowlist.
