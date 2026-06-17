@@ -499,10 +499,13 @@ export function persistHostKeyFingerprint(
   fingerprint: string,
 ): void {
   const doc = YAML.parseDocument(fs.readFileSync(configPath, "utf8"));
+  // doc.errors carry a snippet of the offending source, which can include an
+  // inline connection credential, so report the path only (fail closed) rather
+  // than echoing the message. See loadConfig in commands/exchange.ts.
   if (doc.errors.length > 0)
     throw new UsageError(
-      `config file ${configPath} could not be parsed to persist the host-key ` +
-        `fingerprint: ${doc.errors[0]?.message ?? "invalid YAML"}`,
+      `config file ${configPath} could not be parsed as YAML to persist the ` +
+        `host-key fingerprint`,
     );
   // setIn creates the connection/server path nodes if absent; for an sftp config
   // loaded by the exchange command they already exist, so this updates the one
@@ -565,14 +568,27 @@ export interface ConfigLinkageSource {
 export function loadConfigLinkageSource(
   configPath: string,
 ): ConfigLinkageSource | undefined {
-  let raw: unknown;
+  // Read and parse in two steps. A filesystem read failure carries only a path
+  // and errno, safe to surface (ENOENT means no config, not an error here); a
+  // YAML parse failure embeds a snippet of the offending source, which can carry
+  // an inline connection credential, so it reports the path only (fail closed).
+  // See loadConfig in commands/exchange.ts for the same hazard and treatment.
+  let source: string;
   try {
-    raw = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    source = fs.readFileSync(configPath, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw new UsageError(
-      `config file ${configPath} could not be read or parsed: ` +
+      `config file ${configPath} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
+    );
+  }
+  let raw: unknown;
+  try {
+    raw = YAML.parse(source);
+  } catch {
+    throw new UsageError(
+      `config file ${configPath} could not be parsed as YAML`,
     );
   }
 

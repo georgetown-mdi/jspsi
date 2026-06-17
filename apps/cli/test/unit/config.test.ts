@@ -375,6 +375,32 @@ test("persistHostKeyFingerprint throws (not silently) on a malformed config", ()
   }
 });
 
+test("persistHostKeyFingerprint does not echo an inline credential on a malformed config", () => {
+  // parseDocument collects a syntax error in doc.errors, whose message embeds a
+  // snippet of the offending source; the path-only guard must not echo it, or an
+  // inline credential near the malformed line leaks into the (logged) error.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      `connection:\n  server:\n\t  password: ${SECRET}\n`,
+    );
+    let caught: unknown;
+    try {
+      persistHostKeyFingerprint(configPath, FP_A);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain("could not be parsed as YAML");
+    expect((caught as Error).message).not.toContain(SECRET);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
   // A config that PARSES but whose connection is a scalar (not a mapping) makes
   // YAML's setIn throw a raw library error; the function must surface it as the
@@ -859,12 +885,45 @@ test("loadConfigLinkageSource rejects malformed YAML", () => {
     fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
     expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
     expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "could not be read or parsed",
+      "could not be parsed as YAML",
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A YAML parse failure embeds a snippet of the offending source in its message,
+// which can carry an inline credential; the path-only guard must close both a
+// syntax error (a YAMLParseError reproducing the malformed line) and an
+// unresolved alias (a plain ReferenceError echoing the alias name). Mirrors the
+// exchange-side guard (exchange.test.ts).
+test.each([
+  ["syntax error (tab indentation)", (s: string) => `\t  password: ${s}\n`],
+  ["unresolved alias", (s: string) => `connection:\n  password: *${s}\n`],
+])(
+  "loadConfigLinkageSource does not echo an inline credential: %s",
+  (_, mk) => {
+    const SECRET = "S3cr3tSFTPPassw0rd";
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+    try {
+      const configPath = path.join(dir, "psilink.yaml");
+      fs.writeFileSync(configPath, mk(SECRET));
+      let caught: unknown;
+      try {
+        loadConfigLinkageSource(configPath);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(
+        "could not be parsed as YAML",
+      );
+      expect((caught as Error).message).not.toContain(SECRET);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));

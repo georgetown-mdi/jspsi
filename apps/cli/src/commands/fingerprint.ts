@@ -120,11 +120,11 @@ export function readConfigHints(
   let raw: unknown;
   try {
     raw = YAML.parse(text);
-  } catch (err: unknown) {
-    throw new UsageError(
-      `config file ${target} is not valid YAML: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
+  } catch {
+    // A YAML parse failure embeds a snippet of the offending source, which can
+    // carry an inline connection credential, so report the path only (fail
+    // closed). See loadConfig in commands/exchange.ts for the same hazard.
+    throw new UsageError(`config file ${target} is not valid YAML`);
   }
   const root = (raw ?? {}) as Record<string, unknown>;
   const signing = (root["signing"] ?? {}) as Record<string, unknown>;
