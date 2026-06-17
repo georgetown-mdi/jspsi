@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { retryPromise, withTimeout, TimeoutError } from "@psilink/core";
+import {
+  retryPromise,
+  withTimeout,
+  TimeoutError,
+  DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+} from "@psilink/core";
 import type {
   FileInfo,
   FileTransportClient,
@@ -45,8 +50,12 @@ export class LocalFSClient implements FileTransportClient {
     if (typeof dirPath !== "string")
       throw new Error("LocalFSClient.connect: options.path is required");
 
+    // Defensive default for a direct LocalFSClient caller; the filedrop connect
+    // site in core's fileSyncConnection now always supplies this explicitly, so
+    // it shares the one source of truth rather than a drifting literal.
     const connectTimeoutMs =
-      (options["connectTimeoutMs"] as number | undefined) ?? 30_000;
+      (options["connectTimeoutMs"] as number | undefined) ??
+      DEFAULT_SERVER_CONNECT_TIMEOUT_MS;
     if (connectTimeoutMs < 0)
       throw new Error("connectTimeoutMs must be non-negative");
     const maxReconnects =
