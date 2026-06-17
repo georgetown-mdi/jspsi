@@ -74,6 +74,19 @@ async function waitFor(
   throw new Error("waitFor: condition not met within timeout");
 }
 
+// A freshly-created, exclusively-owned rendezvous directory under the served
+// root, for tests that stand up their own connections. The shared `sftp`
+// namespace is reused by the persistent serverConn/clientConn across the first
+// tests; a test that opens a new exchange on that same path can trip the
+// directory-exclusivity guard on a stray message or lock file a prior test's
+// still-settling poll/close left behind -- a window the restricted-crypto
+// native-sshd profile widens via its slower handshake (board item 200576628).
+// Giving each such test its own mkdtemp directory isolates it from that residue.
+async function freshRendezvous(): Promise<{ remote: string; local: string }> {
+  const local = await fs.mkdtemp(path.join(srv.backingDir, "sftp-"));
+  return { remote: remotePath(srv, path.basename(local)), local };
+}
+
 const serverSFTP = new SSH2SFTPClientAdapter();
 const serverConn = new FileSyncConnection(serverSFTP, { verbose: -1 });
 const clientSFTP = new SSH2SFTPClientAdapter();
@@ -203,7 +216,7 @@ test("public-key authentication connects and runs a rendezvous", async () => {
     throw new Error(String(err));
   });
 
-  await cleanServer();
+  const { remote } = await freshRendezvous();
   try {
     await Promise.all([
       keyServerConn.open({
@@ -212,7 +225,7 @@ test("public-key authentication connects and runs a rendezvous", async () => {
           host: srv.host,
           port: srv.port,
           ...publicKeyAuth(srv.usera),
-          path: SFTP_PATH,
+          path: remote,
         },
       }),
       keyClientConn.open({
@@ -221,7 +234,7 @@ test("public-key authentication connects and runs a rendezvous", async () => {
           host: srv.host,
           port: srv.port,
           ...publicKeyAuth(srv.userb),
-          path: SFTP_PATH,
+          path: remote,
         },
       }),
     ]);
@@ -243,7 +256,6 @@ test("public-key authentication connects and runs a rendezvous", async () => {
     keyServerConn.stop();
   } finally {
     await Promise.all([keyServerConn.close(), keyClientConn.close()]);
-    await cleanServer();
   }
 });
 
@@ -260,9 +272,10 @@ test("terminal frame is received when sender closes before receiver polls", asyn
   const receiverSFTP = new SSH2SFTPClientAdapter();
   const receiverConn = new FileSyncConnection(receiverSFTP, { verbose: -1 });
 
+  const { remote } = await freshRendezvous();
   const base = {
     channel: "sftp" as const,
-    server: { host: srv.host, port: srv.port, path: SFTP_PATH },
+    server: { host: srv.host, port: srv.port, path: remote },
   };
 
   await Promise.all([
