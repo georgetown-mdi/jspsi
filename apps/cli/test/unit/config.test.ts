@@ -375,6 +375,46 @@ test("persistHostKeyFingerprint throws (not silently) on a malformed config", ()
   }
 });
 
+test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
+  // A config that PARSES but whose connection is a scalar (not a mapping) makes
+  // YAML's setIn throw a raw library error; the function must surface it as the
+  // actionable UsageError its contract promises, not an opaque stack trace, and
+  // must leave the original file untouched (the throw precedes the write).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, "connection: sftp\n");
+    expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(
+      UsageError,
+    );
+    expect(fs.readFileSync(configPath, "utf8")).toBe("connection: sftp\n");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", () => {
+  // The SHA256 fingerprint alphabet includes '+' and '/'; the serializer must
+  // quote as needed so the value re-parses byte-for-byte -- a mis-quoted pin
+  // would later fail to match and refuse every connection.
+  const FP_SPECIAL = "SHA256:" + "a/b+c" + "D".repeat(38);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistHostKeyFingerprint(configPath, FP_SPECIAL);
+    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: { server: { host_key_fingerprint: string } };
+    };
+    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_SPECIAL);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("saveConfig round-trips provider_options verbatim in both directions", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {

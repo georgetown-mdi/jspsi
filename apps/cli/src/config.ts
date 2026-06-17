@@ -506,8 +506,22 @@ export function persistHostKeyFingerprint(
     );
   // setIn creates the connection/server path nodes if absent; for an sftp config
   // loaded by the exchange command they already exist, so this updates the one
-  // field. snake_case path matches the written convention (see saveConfig).
-  doc.setIn(["connection", "server", "host_key_fingerprint"], fingerprint);
+  // field. snake_case path matches the written convention (see saveConfig). A
+  // config that parses but whose `connection`/`server` is a scalar or sequence
+  // (not a mapping) makes setIn throw a raw YAML error; surface it as the
+  // UsageError this function's contract promises (mapped to exit 64) rather than
+  // an opaque library stack trace. On the exchange call path the schema load has
+  // already rejected such a shape, so this guards a hand-edit between load and
+  // write, or a future caller that skips validation.
+  try {
+    doc.setIn(["connection", "server", "host_key_fingerprint"], fingerprint);
+  } catch (err) {
+    throw new UsageError(
+      `config file ${configPath} could not be updated to persist the host-key ` +
+        `fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
+        `connection.server must be a mapping.`,
+    );
+  }
   writeFileOwnerOnly(configPath, doc.toString());
 }
 

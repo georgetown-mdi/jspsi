@@ -490,3 +490,63 @@ test("handler hands the resolved credential to the exchange while persisting not
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("handler with --save carries the first-use pin into the written config", async () => {
+  // The save-with-config path: establishHostKeyTrust mutates the ORIGINAL
+  // connection in memory (emulated by the mock here), and the handler must carry
+  // that mutated object into buildSaveSpec -> saveConfig so the confirmed pin
+  // lands on disk. Guards the buildSaveSpec(connection) object choice against a
+  // refactor that would persist the unmutated clone and silently re-prompt every
+  // run.
+  const FP = "SHA256:" + "C".repeat(43);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerosave-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    const configFile = path.join(dir, "psilink.yaml");
+
+    // Emulate just the real establishHostKeyTrust mutation (its own behavior is
+    // covered in hostKeyTrust.test.ts); the persistence wiring is what's tested.
+    vi.mocked(establishHostKeyTrust).mockImplementationOnce((async (
+      conn: SFTPConnectionConfig,
+    ) => {
+      conn.server.hostKeyFingerprint = FP;
+    }) as never);
+    // --save with no partner save-intent: finalizeBootstrap writes the config
+    // alone (no shared secret, no key file).
+    vi.mocked(runProtocol).mockImplementationOnce((async () => ({
+      bootstrap: { partnerSaveIntent: false },
+    })) as never);
+
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      save: true,
+      "config-file": configFile,
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+    } as unknown as Arguments);
+
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "sftp" }),
+      expect.objectContaining({
+        persistence: { mode: "save-with-config", configPath: configFile },
+      }),
+    );
+    // The mutated connection flowed through buildSaveSpec -> saveConfig.
+    expect(fs.readFileSync(configFile, "utf8")).toContain(FP);
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
