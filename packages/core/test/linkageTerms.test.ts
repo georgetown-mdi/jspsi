@@ -1080,7 +1080,16 @@ test("rejects more linkageFields than the maximum count", () => {
     { length: MAX_LINKAGE_ENTRIES + 1 },
     (_, i) => ({ name: `f${i}`, type: "ssn" }),
   );
-  expect(() => parseLinkageTerms({ ...base, linkageFields })).toThrow(ZodError);
+  // Point the key at a declared field so the rejection is the count bound alone,
+  // not base's "ssn" reference (undeclared under this override) tripping the
+  // referential-integrity refine.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields,
+      linkageKeys: [{ name: "K", elements: [{ field: "f0" }] }],
+    }),
+  ).toThrow(ZodError);
 });
 
 test("rejects an over-long constraint exclude value", () => {
@@ -1099,9 +1108,18 @@ test("rejects an over-long constraint exclude value", () => {
 });
 
 test("rejects an over-long linkage key swap reference", () => {
+  // Declare both element fields so the rest of the fixture is coherent; the
+  // rejection is then about the swap entry alone. An over-long swap value trips
+  // the swap-entry length bound and, being un-matchable to any element, the
+  // swap-target referential check too -- both are intrinsic to the over-long
+  // value under test.
   expect(() =>
     parseLinkageTerms({
       ...base,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "ssn4", type: "ssn4" },
+      ],
       linkageKeys: [
         {
           name: "SSN",
@@ -1116,6 +1134,8 @@ test("rejects an over-long linkage key swap reference", () => {
 test("rejects an over-long allowedCharacters constraint", () => {
   // A run of one character is a valid (if redundant) regex character class, so it
   // passes the class-validity refine and the rejection is the length bound alone.
+  // The key references firstName so base's "ssn" reference does not dangle under
+  // this override and trip the referential-integrity refine.
   expect(() =>
     parseLinkageTerms({
       ...base,
@@ -1126,6 +1146,7 @@ test("rejects an over-long allowedCharacters constraint", () => {
           constraints: { allowedCharacters: "a".repeat(MAX_NAME_LENGTH + 1) },
         },
       ],
+      linkageKeys: [{ name: "FN", elements: [{ field: "firstName" }] }],
     }),
   ).toThrow(ZodError);
 });
@@ -1177,10 +1198,17 @@ test("rejects an over-long linkage key name", () => {
 });
 
 test("rejects an over-long linkage field name", () => {
+  // Declare a short field for base's key to reference so the rejection is the
+  // field-name length bound alone; the over-long-named field is unreferenced, so
+  // it does not also trip the element-field length bound or the referential
+  // refine.
   expect(() =>
     parseLinkageTerms({
       ...base,
-      linkageFields: [{ name: "x".repeat(MAX_NAME_LENGTH + 1), type: "ssn" }],
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "x".repeat(MAX_NAME_LENGTH + 1), type: "ssn" },
+      ],
     }),
   ).toThrow(ZodError);
 });
