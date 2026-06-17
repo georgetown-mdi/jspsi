@@ -34,6 +34,19 @@ log.setLevel(log.levels.DEBUG);
 // both come from the running server rather than a fixed path. ensureNamespace
 // creates the host directory before any party connects, since the connection
 // does not create remote directories.
+//
+// SFTP_PATH is a SHARED namespace: the persistent serverConn/clientConn
+// rendezvous here across the first tests, and the raw-op tests target it for
+// non-exchange file operations. That sharing stays safe only while nothing
+// drops a foreign file into it during a persistent-pair poll -- an unexpected
+// file observed by poll() trips the directory-exclusivity guard ("must be
+// dedicated to a single exchange"), the residue/straddle flake of board items
+// 200576628 and 201583776. So, for any future test: one that stands up its own
+// exchange MUST use freshRendezvous() (below), never SFTP_PATH; and nothing may
+// plant into SFTP_PATH while serverConn/clientConn may still be polling it (the
+// "message deliverable" window). Re-introducing shared-namespace exchange use
+// re-opens that flake -- this is why the self-connecting tests each get their
+// own mkdtemp directory.
 const srv = sftpServer();
 const NS = "sftp";
 const SFTP_LOCAL_DIRECTORY = localPath(srv, NS);
@@ -333,7 +346,15 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
   // put/delete/rename runs under the hood whenever a real joiner arrives second
   // in the lock tests above; this exercises the failure side, which those do
   // not.)
-  await cleanServer();
+  //
+  // Runs on its own freshRendezvous() directory, not the shared `sftp`
+  // namespace: the planted `-joining.json` sentinel and the starter's polling
+  // would otherwise outlive this test as residue/a late poll and trip another
+  // exchange's directory-exclusivity guard on the shared path -- the same
+  // cross-test residue race #161 (board item 200576628) fixed for the other
+  // self-connecting tests, which left this pair sharing SFTP_PATH (board item
+  // 201583776).
+  const remote = await freshRendezvous();
 
   const abortSFTP = new SSH2SFTPClientAdapter();
   // joinerRecoveryMs well under the peer timeout so the bounded-window abort
@@ -348,7 +369,7 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
       host: srv.host,
       port: srv.port,
       ...serverAuth(srv.usera),
-      path: SFTP_PATH,
+      path: remote,
     },
     options: { peerTimeoutMs: 8_000 },
   });
@@ -363,17 +384,19 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
   try {
     // Wait until the starter's hello has landed, then simulate the stuck joiner
     // using the already-connected serverSFTP session (a separate SFTP client, so
-    // it does not contend with the starter's own polling on abortSFTP): delete
-    // the hello and drop a sentinel from a different id in its place.
+    // it does not contend with the starter's own polling on abortSFTP; its
+    // operations take absolute paths, so it reaches this test's dedicated
+    // rendezvous): delete the hello and drop a sentinel from a different id in
+    // its place.
     await waitFor(async () =>
-      (await serverSFTP.list(SFTP_PATH)).some((f) => f.name === helloName),
+      (await serverSFTP.list(remote)).some((f) => f.name === helloName),
     );
-    await serverSFTP.safeDelete(`${SFTP_PATH}/${helloName}`);
+    await serverSFTP.safeDelete(`${remote}/${helloName}`);
     await serverSFTP.put(
       Buffer.from(
         JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
       ),
-      `${SFTP_PATH}/${sentinelName}`,
+      `${remote}/${sentinelName}`,
     );
 
     const err = await syncPromise.catch((e: unknown) => e);
@@ -387,9 +410,10 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
     // be caught over the real transport too.
     expect(err).not.toBeInstanceOf(UsageError);
   } finally {
-    await serverSFTP.safeDelete(`${SFTP_PATH}/${sentinelName}`);
+    // Best-effort sweep of the sentinel, then drain the starter via close(); the
+    // dedicated rendezvous directory itself is removed in afterAll.
+    await serverSFTP.safeDelete(`${remote}/${sentinelName}`);
     await abortConn.close();
-    await cleanServer();
   }
 });
 
