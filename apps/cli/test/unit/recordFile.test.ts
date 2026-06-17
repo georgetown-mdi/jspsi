@@ -2,7 +2,29 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// Capture writeExchangeRecord's logger so the non-fatal "audit record could not
+// be written" WARN is asserted (proving the failure is surfaced) rather than
+// leaked to the suite output. getLogger is the only @psilink/core export
+// replaced; everything else stays real.
+const logCapture = vi.hoisted(() => ({ warnings: [] as string[] }));
+
+vi.mock("@psilink/core", async (importActual) => {
+  const actual = await importActual<typeof import("@psilink/core")>();
+  return {
+    ...actual,
+    getLogger: () => ({
+      info: () => {},
+      warn: (msg: string, ...args: unknown[]) => {
+        logCapture.warnings.push([msg, ...args.map(String)].join(" "));
+      },
+      debug: () => {},
+      error: () => {},
+      trace: () => {},
+    }),
+  };
+});
 
 import {
   parseExchangeRecord,
@@ -23,6 +45,7 @@ let dir: string;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-record-test-"));
+  logCapture.warnings.length = 0;
 });
 
 afterEach(() => {
@@ -157,4 +180,11 @@ test("writeExchangeRecord is non-fatal when the destination is unwritable", () =
     ),
   ).not.toThrow();
   expect(fs.existsSync(recordFilePath)).toBe(false);
+  // The non-fatal failure is surfaced as a WARN (asserting it both proves the
+  // diagnostic fired and keeps it off the suite output).
+  expect(
+    logCapture.warnings.some((m) =>
+      m.includes("the audit record could not be written"),
+    ),
+  ).toBe(true);
 });

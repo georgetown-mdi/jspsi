@@ -77,12 +77,27 @@ vi.mock("../../src/connection/ssh2SftpAdapter", () => ({
 }));
 
 import { FileSyncConnection } from "@psilink/core";
+import { withCapturedLogs } from "@psilink/core/testing";
 
 import { runProtocol } from "../../src/protocol";
 
 // runExchange/buildOutputTable are never reached on these failure paths, so the
 // prepared value is unused.
 const minimalPrepared = {} as unknown as PreparedExchange;
+
+// runProtocol constructs a real FileSyncConnection, which logs through the
+// (un-mocked) getLoggerForVerbosity -- notably the unpinned-host-key WARN every
+// sftp open() emits. Run it under withCapturedLogs so that connection-level
+// chatter is captured rather than leaked to the suite output; runProtocol's own
+// logs still reach mockState through the mocked getLogger. The host-key
+// warning's content is covered by core's fileSyncConnection tests, and the
+// failure-path rejection propagates unchanged (withCapturedLogs rethrows), so
+// callers still assert `.rejects`.
+function runProtocolCapturingConnLogs(
+  ...args: Parameters<typeof runProtocol>
+): Promise<void> {
+  return withCapturedLogs(() => runProtocol(...args)).then(() => {});
+}
 
 function sftpConfig(host: string) {
   return {
@@ -116,7 +131,7 @@ test("routes a partner-controlled SFTP host through sanitizeForDisplay before lo
   const hostileHost = "\x1b[31mevil.example‮com";
 
   await expect(
-    runProtocol(
+    runProtocolCapturingConnLogs(
       sftpConfig(hostileHost),
       null,
       minimalPrepared,
@@ -142,7 +157,7 @@ test("leaves an ordinary printable SFTP host unchanged", async () => {
   };
 
   await expect(
-    runProtocol(
+    runProtocolCapturingConnLogs(
       sftpConfig("sftp.example.com"),
       null,
       minimalPrepared,
@@ -212,7 +227,7 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the clean
 
   try {
     await expect(
-      runProtocol(
+      runProtocolCapturingConnLogs(
         sftpConfig("sftp.example.com"),
         null,
         minimalPrepared,
@@ -252,7 +267,7 @@ test("leaves an ordinary close error message intact (only control bytes are esca
 
   try {
     await expect(
-      runProtocol(
+      runProtocolCapturingConnLogs(
         sftpConfig("sftp.example.com"),
         null,
         minimalPrepared,
@@ -285,7 +300,7 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the opene
 
   try {
     await expect(
-      runProtocol(
+      runProtocolCapturingConnLogs(
         sftpConfig("sftp.example.com"),
         null,
         minimalPrepared,
