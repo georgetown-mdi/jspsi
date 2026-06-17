@@ -255,7 +255,7 @@ Each step in a `transform` array applies one function from the cleaning and stan
 
 #### Swapped keys
 
-When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. Element names are matched first against element `name` values, then against `field` names. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency. Each `swap` target must resolve to an element of the same key by this rule; a target matching no element in its key is rejected when the terms are decoded, rather than silently doing nothing at exchange time.
+When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. A `swap` target names an element by that element's effective identifier: its `name` if it declares one, otherwise its `field`. An element that declares a `name` is referenced by that `name`, not by its `field`. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency. Each `swap` target must resolve to an element of the same key by this rule; a target matching no element in its key is rejected when the terms are decoded, rather than silently doing nothing at exchange time.
 
 ### `linkage_terms.legal_agreement`
 
