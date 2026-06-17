@@ -54,6 +54,28 @@ const hostKeyBlob = (keyBlob: Buffer): Uint8Array<ArrayBuffer> =>
     keyBlob.byteLength,
   );
 
+// Deliver an ssh2 hostVerifier verdict defensively. Our verifiers return
+// `undefined` (the void async IIFE), so ssh2 parks the handshake and waits for
+// this callback. If the handshake is torn down for an UNRELATED reason while our
+// async check is still pending -- ssh2's readyTimeout firing, or a socket error,
+// during the host-key hash/compare -- ssh2 has already destructed its protocol by
+// the time we call verify(); a late verify() then throws against the dead
+// protocol. The connection is already aborted, so the verdict is moot; swallow
+// the throw, because an escaped one would reject the void-ed IIFE and surface as
+// an unhandled promise rejection (a flaky test or stray process-level rejection),
+// never a wrong verdict. Shared by all three verifiers (enforce, fail-closed,
+// capture).
+const settleVerify = (
+  verify: (permitted: boolean) => void,
+  permitted: boolean,
+): void => {
+  try {
+    verify(permitted);
+  } catch {
+    // Handshake already torn down; the verdict can no longer be delivered.
+  }
+};
+
 // Extracts the declared byte count from a message filename by reading the last
 // `-`-delimited segment before `.json`. Parsing is right-anchored so an id
 // containing hyphens (a UUID, or a configured peer id) cannot corrupt the
@@ -1149,7 +1171,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             try {
               const blob = hostKeyBlob(keyBlob);
               if (await verifyHostKeyFingerprint(blob, pin)) {
-                verify(true);
+                settleVerify(verify, true);
               } else {
                 // Re-hash on the mismatch branch (which tears the connection down
                 // anyway) rather than widen verifyHostKeyFingerprint's narrow
@@ -1174,11 +1196,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                   `connection.server.host_key_fingerprint to it or remove that ` +
                   `field and re-run interactively to re-establish trust on ` +
                   `first use. A changed key is never auto-accepted.`;
-                verify(false);
+                settleVerify(verify, false);
               }
             } catch (err) {
               mismatchDetails = `failed to verify host key: ` + errMessage(err);
-              verify(false);
+              settleVerify(verify, false);
             }
           })();
         };
@@ -1204,12 +1226,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 `server presented a host key of type '${keyType}' with ` +
                 `fingerprint ${presented}; verify it out-of-band and set ` +
                 `connection.server.host_key_fingerprint to pin it.`;
-              verify(false);
+              settleVerify(verify, false);
             } catch (err) {
               mismatchDetails =
                 `no host_key_fingerprint is pinned and the presented host key ` +
                 `could not be read (${errMessage(err)}); refusing to proceed.`;
-              verify(false);
+              settleVerify(verify, false);
             }
           })();
         };
@@ -1425,8 +1447,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         }
         // Always refuse: this connection exists only to read the host key, never
         // to authenticate. The refusal surfaces as the expected connect rejection
-        // below, from which `captured` is returned.
-        verify(false);
+        // below, from which `captured` is returned. settleVerify guards a late
+        // refusal: if the handshake was already torn down (e.g. readyTimeout)
+        // while computeHostKeyFingerprint was awaiting, verify(false) would throw
+        // against the dead protocol and reject this void-ed IIFE.
+        settleVerify(verify, false);
       })();
     };
 

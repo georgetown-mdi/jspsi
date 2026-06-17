@@ -775,6 +775,77 @@ test("probeHostKeyFingerprint surfaces the connect failure cause when no key is 
   await expect(run).rejects.toHaveProperty("cause", cause);
 });
 
+test("probeHostKeyFingerprint reports a fingerprint-computation failure distinctly", async () => {
+  // The capture branch fires when computeHostKeyFingerprint rejects (e.g. crypto
+  // .subtle unavailable in a hardened runtime) -- distinct from a server that
+  // presented no key. It must surface as "failed to read", carrying the cause,
+  // not collapse to the generic "did not present one" message.
+  const blob = ed25519Blob();
+  const origDigest = crypto.subtle.digest;
+  crypto.subtle.digest = (() =>
+    Promise.reject(
+      new Error("subtle digest unavailable"),
+    )) as typeof crypto.subtle.digest;
+  try {
+    const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
+      verbose: -1,
+    });
+    await expect(
+      conn.probeHostKeyFingerprint({
+        channel: "sftp",
+        server: { host: "sftp.example.org" },
+      }),
+    ).rejects.toThrow(/failed to read the server's host key/);
+  } finally {
+    crypto.subtle.digest = origDigest;
+  }
+});
+
+test("probeHostKeyFingerprint swallows a late verify() throw on a torn-down handshake", async () => {
+  // The competing-rejection race: connect() rejects on its own (as readyTimeout
+  // would) while the verifier's async fingerprint hash is still pending, and the
+  // eventual verify() throws because ssh2 already destructed its protocol.
+  // settleVerify must swallow that so the void-ed verifier IIFE never rejects --
+  // otherwise it surfaces as a stray unhandled rejection (a flaky failure).
+  const blob = ed25519Blob();
+  const { client } = makeMockClient();
+  client.connect = (options: Record<string, unknown>) => {
+    const verifier = options["hostVerifier"] as (
+      b: Buffer,
+      v: (permitted: boolean) => void,
+    ) => void;
+    return new Promise<void>((_resolve, reject) => {
+      // Kick off the async verifier (its hash is now pending), then reject the
+      // connect independently and make the eventual verify() throw, as a
+      // destructed ssh2 protocol would.
+      verifier(blob, () => {
+        throw new Error("protocol._destruct is not a function");
+      });
+      reject(new Error("Timed out while waiting for handshake"));
+    });
+  };
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+
+  const rejections: unknown[] = [];
+  const onUnhandled = (err: unknown): void => {
+    rejections.push(err);
+  };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await expect(
+      conn.probeHostKeyFingerprint({
+        channel: "sftp",
+        server: { host: "sftp.example.org" },
+      }),
+    ).rejects.toThrow(/could not read the server's host key/);
+    // Let the late verifier IIFE run its (now guarded) verify(false).
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  expect(rejections).toEqual([]);
+});
+
 test("providerOptions cannot redirect the connection via sock or authHandler", async () => {
   // sock replaces the TCP connection without touching `host`; authHandler can
   // re-supply every credential. Both are dropped by the default-deny allowlist.
