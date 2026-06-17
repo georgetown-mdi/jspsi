@@ -177,6 +177,22 @@ The responder confirms first (in msg2); the initiator verifies `responder_confir
 
 **Test vectors and interoperability.** The key-schedule mix chain above is faithful Noise NNpsk0, but the overall handshake is pinned by psilink's own checked-in known-answer vector (`packages/core/test/vectors/kex-vectors.json`) rather than being wire-compatible with generic Noise. Two things diverge from a stock Noise NNpsk0 session: the protocol name differs (so the initial `h` differs), and instead of Noise `Split()` the session key uses a custom KDF over `ck || h` with an added explicit confirmation round. So no end-to-end Noise vector corresponds. What does correspond is the underlying machinery, cross-checked against its published references in `packages/core/test/kex.test.ts`: the X25519 Diffie-Hellman against [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748) section 6.1, and the Noise chaining HKDF against [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) test case 3. The vectors fix the pre-shared secret and both ephemeral private keys and record, for all four `(initiator, responder)` request-encryption flag combinations, the handshake hash, session key, and both confirmation tags (the chaining key and confirmation key are flag-independent and recorded once); they are reproduced by the independent generator at `packages/core/test/vectors/generate-kex-vectors.mjs`.
 
+## WebRTC rendezvous peer-id derivation
+
+The WebRTC transport meets its peer with no coordination backend: both web parties derive their PeerJS rendezvous peer ids deterministically from the invitation's 32-byte shared secret, so each side computes the other's id locally and they rendezvous on the PeerJS signaling broker without exchanging an id out of band. This precedes and is independent of the X25519 handshake above -- it places the two parties on the same WebRTC connection, over which the handshake then runs.
+
+The derivation is HKDF-SHA-256 over the decoded 32-byte shared secret as input keying material, with a 32-byte zero salt (matching the application `hkdfDerive` above) and a role-separated info string:
+
+```
+inviter_info  = "psilink-webrtc-peerid-v1:inviter"
+acceptor_info = "psilink-webrtc-peerid-v1:acceptor"
+peer_id       = hex(HKDF-SHA-256(ikm = secret, salt = 0x00 * 32, info = role_info, 32)[0..15])
+```
+
+The peer id is the first 16 bytes of the HKDF output, encoded as lowercase hex. Hex (not base64url) is used because the PeerJS client rejects an id with a leading, trailing, or doubled `-` or `_`, which base64url output can contain. The inviter listens on its derived id (`inviter_info`) and the acceptor dials it.
+
+This is a cross-implementation contract: a future CLI WebRTC transport must compute the same ids from the same shared secret to rendezvous with a web peer (see [`cli-webrtc-stack.md`](../notes/cli-webrtc-stack.md)). The `psilink-webrtc-peerid-v1:` labels are disjoint from every other domain-separation label in the system.
+
 ## See also
 
 - [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) - exchange agreement format that parameterizes the protocol described here

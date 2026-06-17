@@ -50,3 +50,4 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Branch names shouldn't use '/'.
 - Don't use chip to raise issues -- ask directly.
 - When you document a change, route the detail by tier: if you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or a "would only need revisiting if..." design rationale, it belongs in `docs/spec/` -- regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational.
+- `CHANGELOG.md` is reader-facing release notes, not a commit log: an entry only for an observable change an operator/deployer or security reviewer acts on -- none for refactors, tests/CI, `@psilink/core` reshapes, or doc-only edits. Full rule: `CONTRIBUTING.md`, Changelog.

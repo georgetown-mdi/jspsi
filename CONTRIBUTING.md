@@ -172,6 +172,15 @@ If you are writing a constant value, a byte/wire layout, an HKDF info string or 
 
 Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
 
+## Changelog
+
+`CHANGELOG.md` is reader-facing release notes for whoever runs or vets PSI-Link from outside this repo -- an operator deciding whether to upgrade, or a security reviewer -- not a second copy of the git history. For each change, ask who reads it and why they act on it.
+
+- Add an entry for an observable change a reader acts on: a command, flag, or config field; a changed default, behavior, exit code, or wire/on-disk format; a breaking change; a perceptible performance change; a security-relevant change.
+- Skip what no reader acts on: internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes (the apps are its only consumer), and doc-only edits. If a refactor also changes one of the above, the observable part still gets an entry.
+- One or two lines per entry, stating the observable change; push rationale and wire detail to `docs/`, `docs/spec/`, or the PR and link it with a trailing `See docs/...`.
+- Group under Added / Changed / Deprecated / Removed / Fixed / Security; prefix a breaking change `BREAKING:`. Pre-release, keep security entries to the headline changes; record them more exhaustively after release.
+
 ## Commit Messages
 
 - Imperative mood, present tense: "Fix key rotation after failed exchange", not "Fixed ..." or "Fixes ...".
@@ -184,7 +193,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 2. Keep pull requests focused - one logical change per PR.
 3. Ensure typecheck, lint, format, and the relevant tests pass before marking the PR ready for review (CI enforces all four). Record what you ran and the coverage you added in the PR's Test plan, and resolve every line of the template Checklist.
 4. Changes within the security-review scope -- cryptographic code, the channel-security controls, credential or disclosure surfaces, or a security-relevant dependency -- require explicit security review before merging (see [Dependency Policy](#dependency-policy) for the full enumeration).
-5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Update `CHANGELOG.md` with a line in the `[Unreleased]` section.
+5. Update documentation when behavior changes - see [Documentation](#documentation) for which tier. Add a `CHANGELOG.md` entry when the change is visible to an operator or a reviewer - see [Changelog](#changelog).
 6. A maintainer will review and merge. Force-pushes to `main` are not permitted.
 
 ### Pull Request Description
