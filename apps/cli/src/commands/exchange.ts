@@ -626,7 +626,13 @@ export async function handler(argv: Arguments): Promise<void> {
     // non-interactive no-pin run fails fast; a UsageError (non-TTY, or a declined
     // prompt) maps to exit 64, a probe transport failure to 69.
     try {
-      await establishHostKeyTrust(connection, options.configFile, verbosity);
+      await establishHostKeyTrust(connection, {
+        verbosity,
+        loggerName: "exchange",
+        // The config is already on disk and exchange does not re-write it, so a
+        // first-use pin is written in place now.
+        persistence: { mode: "write-now", configPath: options.configFile },
+      });
     } catch (err) {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }

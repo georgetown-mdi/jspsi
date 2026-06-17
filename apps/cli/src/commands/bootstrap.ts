@@ -39,6 +39,10 @@ import { detectFileConflicts } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import {
+  establishHostKeyTrust,
+  type HostKeyPersistence,
+} from "../hostKeyTrust";
+import {
   durationFlagSeconds,
   LOG_LEVELS,
   MAX_TIMEOUT_SECONDS,
@@ -557,6 +561,22 @@ export async function runOnlineBootstrap(params: {
     expires: params.expires,
     keyFilePath: params.keyPath,
   };
+
+  // Establish first-use SSH host-key trust before connecting, on the ORIGINAL
+  // params.connection so the pin reaches both the live connect (via the clone
+  // below) and the persisted config. A pinned connection is a no-op; an unpinned
+  // one prompts on a TTY (online invite/accept are interactive) and fails closed
+  // otherwise. When reusing a pre-existing config the post-handshake hook does
+  // not re-write it, so the pin is written in place now (write-now); a fresh
+  // config instead carries the mutation into its saveConfig (save-with-config).
+  const hostKeyPersistence: HostKeyPersistence = params.reuseExistingConfig
+    ? { mode: "write-now", configPath: params.configPath }
+    : { mode: "save-with-config", configPath: params.configPath };
+  await establishHostKeyTrust(params.connection, {
+    verbosity: params.verbosity,
+    loggerName: params.loggerName,
+    persistence: hostKeyPersistence,
+  });
 
   // Resolve `@path` credential refs for the live connection only. params.connection
   // keeps the `@path` so the saveConfig in the hook below persists the reference,

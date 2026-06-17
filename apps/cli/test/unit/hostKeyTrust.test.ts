@@ -1,8 +1,15 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, expect, test } from "vitest";
 import { UsageError } from "@psilink/core";
-import type { ConnectionConfig } from "@psilink/core";
+import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
 
-import { establishHostKeyTrust } from "../../src/hostKeyTrust";
+import {
+  establishHostKeyTrust,
+  type HostKeyTrustDeps,
+} from "../../src/hostKeyTrust";
 
 // establishHostKeyTrust gates the interactive prompt on stdin being a TTY. The
 // tests drive that flag deterministically and restore it afterward; the
@@ -12,44 +19,206 @@ afterEach(() => {
   process.stdin.isTTY = originalIsTTY;
 });
 
-test("is a no-op for a non-sftp channel (no host key to establish)", async () => {
-  const conn: ConnectionConfig = { channel: "filedrop", path: "/mnt/share" };
-  // Resolves without throwing or touching the network, even non-interactively.
-  process.stdin.isTTY = false;
-  await expect(
-    establishHostKeyTrust(conn, "psilink.yaml", 0),
-  ).resolves.toBeUndefined();
-});
+const FP = "SHA256:" + "A".repeat(43);
 
-test("is a no-op when a host_key_fingerprint is already pinned", async () => {
-  const conn: ConnectionConfig = {
+function sftpConn(pin?: string): ConnectionConfig {
+  return {
     channel: "sftp",
     server: {
       host: "sftp.example.org",
-      hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+      ...(pin !== undefined ? { hostKeyFingerprint: pin } : {}),
     },
   };
-  // A pinned connection enforces in core; first-use does nothing here, so even a
-  // non-interactive run proceeds (it does not fail closed).
-  process.stdin.isTTY = false;
+}
+
+// Injectable probe/confirm so the prompt glue is exercised without a live server
+// or a real TTY read. Records whether each was called.
+function makeDeps(opts: {
+  confirm: boolean;
+  keyType?: string;
+}): HostKeyTrustDeps & { probeCalls: number; confirmCalls: number } {
+  const state = { probeCalls: 0, confirmCalls: 0 };
+  return {
+    probe: (): Promise<PresentedHostKey> => {
+      state.probeCalls++;
+      return Promise.resolve({
+        fingerprint: FP,
+        keyType: opts.keyType ?? "ssh-ed25519",
+      });
+    },
+    confirm: (): Promise<boolean> => {
+      state.confirmCalls++;
+      return Promise.resolve(opts.confirm);
+    },
+    get probeCalls() {
+      return state.probeCalls;
+    },
+    get confirmCalls() {
+      return state.confirmCalls;
+    },
+  };
+}
+
+test("is a no-op for a non-sftp channel (no host key to establish)", async () => {
+  const conn: ConnectionConfig = { channel: "filedrop", path: "/mnt/share" };
+  const deps = makeDeps({ confirm: true });
+  process.stdin.isTTY = false; // even non-interactively, a no-op resolves
   await expect(
-    establishHostKeyTrust(conn, "psilink.yaml", 0),
+    establishHostKeyTrust(
+      conn,
+      {
+        verbosity: 0,
+        loggerName: "exchange",
+        persistence: { mode: "ephemeral" },
+      },
+      deps,
+    ),
   ).resolves.toBeUndefined();
+  expect(deps.probeCalls).toBe(0);
 });
 
-test("fails closed (no prompt, no auto-accept) on a non-interactive unpinned sftp run, naming the recovery", async () => {
-  const conn: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-  };
+test("is a no-op when a host_key_fingerprint is already pinned", async () => {
+  const conn = sftpConn(FP);
+  const deps = makeDeps({ confirm: true });
   process.stdin.isTTY = false;
-  const result = establishHostKeyTrust(conn, "/etc/psilink.yaml", 0);
-  await expect(result).rejects.toBeInstanceOf(UsageError);
-  // The error names both recovery routes: run interactively to pin, or set
-  // host_key_fingerprint out-of-band. It must NOT have auto-accepted (the pin is
-  // still unset).
-  await expect(result).rejects.toThrow(/interactive/i);
-  await expect(result).rejects.toThrow(/host_key_fingerprint/);
+  await establishHostKeyTrust(
+    conn,
+    {
+      verbosity: 0,
+      loggerName: "accept",
+      persistence: { mode: "save-with-config", configPath: "psilink.yaml" },
+    },
+    deps,
+  );
+  expect(deps.probeCalls).toBe(0); // pinned -> never probes or prompts
+});
+
+test("fails closed on a non-interactive unpinned run (save-with-config), naming the recovery", async () => {
+  const conn = sftpConn();
+  const deps = makeDeps({ confirm: true });
+  process.stdin.isTTY = false;
+  const run = establishHostKeyTrust(
+    conn,
+    {
+      verbosity: 0,
+      loggerName: "accept",
+      persistence: {
+        mode: "save-with-config",
+        configPath: "/etc/psilink.yaml",
+      },
+    },
+    deps,
+  );
+  await expect(run).rejects.toBeInstanceOf(UsageError);
+  await expect(run).rejects.toThrow(/interactive/i);
+  await expect(run).rejects.toThrow(/host_key_fingerprint/);
+  await expect(run).rejects.toThrow(/\/etc\/psilink\.yaml/);
+  expect(deps.probeCalls).toBe(0); // never probes or auto-accepts
   if (conn.channel === "sftp")
     expect(conn.server.hostKeyFingerprint).toBeUndefined();
+});
+
+test("fails closed on a non-interactive unpinned ephemeral run, with the out-of-band recovery", async () => {
+  const conn = sftpConn();
+  const deps = makeDeps({ confirm: true });
+  process.stdin.isTTY = false;
+  const run = establishHostKeyTrust(
+    conn,
+    { verbosity: 0, loggerName: "psilink", persistence: { mode: "ephemeral" } },
+    deps,
+  );
+  await expect(run).rejects.toBeInstanceOf(UsageError);
+  await expect(run).rejects.toThrow(/interactive/i);
+  // No config path to name; it points at pinning out-of-band in a saved config.
+  await expect(run).rejects.toThrow(/out-of-band|saved configuration/i);
+  expect(deps.probeCalls).toBe(0);
+});
+
+test("interactive confirm (save-with-config) pins in memory and writes no file", async () => {
+  const conn = sftpConn();
+  const deps = makeDeps({ confirm: true });
+  process.stdin.isTTY = true;
+  await establishHostKeyTrust(
+    conn,
+    {
+      verbosity: -1,
+      loggerName: "accept",
+      // configPath points at a path that does NOT exist: save-with-config must
+      // not write it (the caller's saveConfig persists the mutation later).
+      persistence: {
+        mode: "save-with-config",
+        configPath: "/nonexistent/psilink.yaml",
+      },
+    },
+    deps,
+  );
+  expect(deps.probeCalls).toBe(1);
+  expect(deps.confirmCalls).toBe(1);
+  // The in-memory connection now carries the confirmed pin (so open() enforces).
+  if (conn.channel === "sftp") expect(conn.server.hostKeyFingerprint).toBe(FP);
+});
+
+test("interactive confirm (write-now) pins in memory and writes the config in place", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-hkt-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: sftp.example.org\n",
+    );
+    const conn = sftpConn();
+    const deps = makeDeps({ confirm: true });
+    process.stdin.isTTY = true;
+    await establishHostKeyTrust(
+      conn,
+      {
+        verbosity: -1,
+        loggerName: "exchange",
+        persistence: { mode: "write-now", configPath },
+      },
+      deps,
+    );
+    if (conn.channel === "sftp")
+      expect(conn.server.hostKeyFingerprint).toBe(FP);
+    expect(fs.readFileSync(configPath, "utf8")).toContain(FP);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("declining the prompt aborts and leaves the connection unpinned", async () => {
+  const conn = sftpConn();
+  const deps = makeDeps({ confirm: false });
+  process.stdin.isTTY = true;
+  await expect(
+    establishHostKeyTrust(
+      conn,
+      {
+        verbosity: -1,
+        loggerName: "exchange",
+        persistence: { mode: "ephemeral" },
+      },
+      deps,
+    ),
+  ).rejects.toThrow(/not trusted/);
+  if (conn.channel === "sftp")
+    expect(conn.server.hostKeyFingerprint).toBeUndefined();
+});
+
+test("escapes a control-laden key type in the prompt path (no throw)", async () => {
+  // A hostile keyType must not break the flow; sanitizeForDisplay handles it in
+  // the warn message. Confirming still pins the (safe, base64) fingerprint.
+  const conn = sftpConn();
+  const deps = makeDeps({ confirm: true, keyType: "ssh-\x1b[31mevil" });
+  process.stdin.isTTY = true;
+  await establishHostKeyTrust(
+    conn,
+    {
+      verbosity: -1,
+      loggerName: "psilink",
+      persistence: { mode: "ephemeral" },
+    },
+    deps,
+  );
+  if (conn.channel === "sftp") expect(conn.server.hostKeyFingerprint).toBe(FP);
 });

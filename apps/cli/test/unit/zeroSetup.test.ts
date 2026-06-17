@@ -22,12 +22,19 @@ import {
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
+import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
 // path can be driven to that hand-off without opening a transport. Hoisted above
 // the imports by vitest; only the @path-resolution handler test below invokes the
 // mock -- the other handler tests exit on an argument error before reaching it.
 vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
+
+// First-use host-key trust runs in the connect path before runProtocol; stub it
+// out (its own behavior is covered in hostKeyTrust.test.ts) so the handler tests
+// reach the runProtocol hand-off without a real probe over the fake URL, and
+// assert the handler wires it with the right persistence mode.
+vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
 
 let existsSyncSpy: MockInstance;
 
@@ -472,6 +479,12 @@ test("handler hands the resolved credential to the exchange while persisting not
     expect(connToRunProtocol?.server.password).toBe("s3cret");
     // No --save, so nothing is written here.
     expect(fs.existsSync(path.join(dir, "psilink.yaml"))).toBe(false);
+    // The handler wires first-use host-key trust on the unsaved (ephemeral) path:
+    // it prompts on a TTY and fails closed otherwise (covered in hostKeyTrust.test.ts).
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "sftp" }),
+      expect.objectContaining({ persistence: { mode: "ephemeral" } }),
+    );
   } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

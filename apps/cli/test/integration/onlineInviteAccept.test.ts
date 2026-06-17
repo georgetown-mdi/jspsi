@@ -239,9 +239,13 @@ async function runOnlineRoundTrip(params: {
   });
   expect(inviteReady.mode).toBe("online");
   if (inviteReady.mode !== "online") return;
-  // Pin the host key on the built sftp connection (the URL cannot carry it), so
-  // the connection passes the now-fail-closed host-key check. The pin also lands
-  // in the persisted config, since runOnlineBootstrap saves this same connection.
+  // Pre-pin the host key on the built sftp connection, standing in for an
+  // operator who pinned it out-of-band (the sftp:// URL cannot carry it). With a
+  // pin present, runOnlineBootstrap's first-use establishHostKeyTrust is a no-op
+  // and the connection proceeds; the pin lands in the persisted config too, since
+  // runOnlineBootstrap saves this same connection. The unpinned first-use path is
+  // covered separately (the fail-closed test below and the hostKeyTrust unit
+  // tests).
   if (
     params.hostKeyFingerprint !== undefined &&
     inviteReady.connection.channel === "sftp"
@@ -266,6 +270,7 @@ async function runOnlineRoundTrip(params: {
   expect(acceptReady.mode).toBe("online");
   if (acceptReady.mode !== "online") return;
   expect(acceptReady.reuseExistingConfig).toBe(false);
+  // Same pre-pin (out-of-band) on the acceptor side; see the inviter note above.
   if (
     params.hostKeyFingerprint !== undefined &&
     acceptReady.connection.channel === "sftp"
@@ -775,5 +780,72 @@ describe("sftp", () => {
       });
     },
     90_000,
+  );
+
+  inProcessOnly(
+    "sftp: a non-interactive online accept over an unpinned server fails closed before any handshake",
+    async () => {
+      const serverPath = `${SFTP_PATH_ROOT}/failclosed`;
+      const url = `sftp://${srv.usera.username}:${srv.usera.password}@${srv.host}:${srv.port}${serverPath}`;
+
+      const inviteInput = path.join(work, "fc-invite.csv");
+      fs.writeFileSync(inviteInput, INVITE_CSV);
+      const acceptInput = path.join(work, "fc-accept.csv");
+      fs.writeFileSync(acceptInput, ACCEPT_CSV);
+      const acceptOptions = testOptions("fc-accept");
+
+      // Mint an invitation and build the acceptor's connection (the no-network
+      // validate half); the acceptor's connection carries NO host_key_fingerprint.
+      const inviteReady = await validateInvite({
+        resolved: resolveInvitePositionals([
+          url,
+          inviteInput,
+          path.join(work, "fc-invite-out.csv"),
+        ]),
+        options: testOptions("fc-invite"),
+        acceptTimeout: PEER_TIMEOUT_SECONDS,
+        log,
+      });
+      expect(inviteReady.mode).toBe("online");
+      if (inviteReady.mode !== "online") return;
+      const acceptReady = await validateAccept({
+        resolved: resolveAcceptPositionals([
+          url,
+          inviteReady.invitation,
+          acceptInput,
+          path.join(work, "fc-accept-out.csv"),
+        ]),
+        options: acceptOptions,
+        log,
+      });
+      expect(acceptReady.mode).toBe("online");
+      if (acceptReady.mode !== "online") return;
+
+      // No pin and a non-interactive run: runOnlineBootstrap fails closed at
+      // first-use trust, BEFORE the probe or any handshake (so no inviter peer is
+      // needed). This proves the online path is wired to establishHostKeyTrust;
+      // the prompt/persist behavior itself is covered by the hostKeyTrust unit
+      // tests.
+      await expect(
+        runOnlineBootstrap({
+          connection: acceptReady.connection,
+          dataSpec: acceptReady.dataSpec,
+          prepared: acceptReady.prepared,
+          sharedSecret: acceptReady.token.sharedSecret,
+          expires: acceptReady.token.expires,
+          keyPath: acceptOptions.keyFile,
+          configPath: acceptOptions.configFile,
+          output: acceptReady.output,
+          verbosity: 0,
+          loggerName: "accept",
+          reuseExistingConfig: acceptReady.reuseExistingConfig,
+        }),
+      ).rejects.toThrow(/host_key_fingerprint|interactive/i);
+
+      // Failing closed before the handshake persists nothing on the acceptor.
+      expect(fs.existsSync(acceptOptions.configFile)).toBe(false);
+      expect(fs.existsSync(acceptOptions.keyFile)).toBe(false);
+    },
+    30_000,
   );
 });

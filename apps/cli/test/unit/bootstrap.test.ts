@@ -757,7 +757,14 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
     const params = onlineBootstrapParams(configPath);
     const connection: SFTPConnectionConfig = {
       channel: "sftp",
-      server: { host: "sftp.example.org", password: `@${pwFile}` },
+      server: {
+        host: "sftp.example.org",
+        password: `@${pwFile}`,
+        // Pinned (as if established out-of-band or on a prior first-use run), so
+        // runOnlineBootstrap's first-use host-key step is a no-op and this test
+        // exercises only the credential-resolution seam.
+        hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+      },
     };
     await runOnlineBootstrap({ ...params, connection });
 
