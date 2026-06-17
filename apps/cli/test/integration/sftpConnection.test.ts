@@ -82,10 +82,22 @@ async function waitFor(
 // still-settling poll/close left behind -- a window the restricted-crypto
 // native-sshd profile widens via its slower handshake (board item 200576628).
 // Giving each such test its own mkdtemp directory isolates it from that residue.
-async function freshRendezvous(): Promise<{ remote: string; local: string }> {
+// Returns the remote path to connect to and records the host directory for
+// teardown in afterAll, so the per-test directories do not pile up under the
+// served root over the run.
+const rendezvousDirs: string[] = [];
+
+async function freshRendezvous(): Promise<string> {
   const local = await fs.mkdtemp(path.join(srv.backingDir, "sftp-"));
-  return { remote: remotePath(srv, path.basename(local)), local };
+  rendezvousDirs.push(local);
+  return remotePath(srv, path.basename(local));
 }
+
+afterAll(async () => {
+  await Promise.all(
+    rendezvousDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
+});
 
 const serverSFTP = new SSH2SFTPClientAdapter();
 const serverConn = new FileSyncConnection(serverSFTP, { verbose: -1 });
@@ -216,7 +228,7 @@ test("public-key authentication connects and runs a rendezvous", async () => {
     throw new Error(String(err));
   });
 
-  const { remote } = await freshRendezvous();
+  const remote = await freshRendezvous();
   try {
     await Promise.all([
       keyServerConn.open({
@@ -272,7 +284,7 @@ test("terminal frame is received when sender closes before receiver polls", asyn
   const receiverSFTP = new SSH2SFTPClientAdapter();
   const receiverConn = new FileSyncConnection(receiverSFTP, { verbose: -1 });
 
-  const { remote } = await freshRendezvous();
+  const remote = await freshRendezvous();
   const base = {
     channel: "sftp" as const,
     server: { host: srv.host, port: srv.port, path: remote },
