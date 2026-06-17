@@ -78,12 +78,17 @@ export async function establishHostKeyTrust(
   );
   const presented = await probe.probeHostKeyFingerprint(connection);
 
+  // presented.keyType is decoded straight from the server-controlled key blob,
+  // so escape it before it reaches the operator's terminal/log (the same
+  // treatment fileSyncConnection's verifiers give keyTypeFromBlob). The
+  // fingerprint is base64 and the host is already escaped above.
   log.warn(
     `The authenticity of host ${host} cannot be established: no ` +
-      `host_key_fingerprint is pinned. It presented a ${presented.keyType} ` +
-      `host key with fingerprint ${presented.fingerprint}. Verify this matches ` +
-      `the server's published fingerprint out-of-band if you can; confirming ` +
-      `pins it for every future connection.`,
+      `host_key_fingerprint is pinned. It presented a ` +
+      `${sanitizeForDisplay(presented.keyType)} host key with fingerprint ` +
+      `${presented.fingerprint}. Verify this matches the server's published ` +
+      `fingerprint out-of-band if you can; confirming pins it for every future ` +
+      `connection.`,
   );
   const trusted = await promptConfirm(
     `Trust this host key and pin it for future connections to ${host}?`,

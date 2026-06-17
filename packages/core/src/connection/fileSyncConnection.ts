@@ -642,6 +642,11 @@ export interface PresentedHostKey {
   /**
    * SSH key-type string decoded from the presented blob, e.g. `ssh-ed25519`.
    * `(unknown)` when the blob is malformed (see {@link keyTypeFromBlob}).
+   *
+   * Server-controlled and stored UNsanitized: route it through
+   * {@link sanitizeForDisplay} before showing it to an operator (terminal, log),
+   * as a hostile server can put control/BIDI bytes in the key type. The sibling
+   * `fingerprint` is base64 and needs no escaping.
    */
   keyType: string;
 }
