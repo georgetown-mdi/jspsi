@@ -78,6 +78,27 @@ test("loadKeyFile throws when expires is not a valid ISO 8601 datetime", () => {
   expect(() => loadKeyFile(keyPath)).toThrow();
 });
 
+test("loadKeyFile does not echo file content on an invalid-JSON key file", () => {
+  // The key file holds the shared secret. A JSON parse failure must report
+  // path-only: Node's JSON.parse echoes a snippet of the source start in its
+  // message (here exactly the leading 10 chars), so a file that begins with the
+  // secret would otherwise leak it. The 10-char marker leads the file so the old
+  // (content-echoing) path would surface it; the guard must not.
+  const keyPath = path.join(dir, ".psilink.key");
+  const MARKER = "LEAKME1234";
+  fs.writeFileSync(keyPath, `${MARKER} not json`);
+  let caught: unknown;
+  try {
+    loadKeyFile(keyPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(keyPath);
+  expect((caught as Error).message).toContain("malformed");
+  expect((caught as Error).message).not.toContain(MARKER);
+});
+
 // --- saveKeyFile -------------------------------------------------------------
 
 test("saveKeyFile writes a file that loadKeyFile can read back", () => {

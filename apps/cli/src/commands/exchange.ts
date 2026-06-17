@@ -365,7 +365,12 @@ export function loadConfig(options: ExchangeOptions): {
   } catch (err) {
     // A malformed existing key file is bad input the operator must fix or
     // re-provision (exit 64), the same classification saveKeyFile gives a
-    // malformed token on write -- not a transport failure (69).
+    // malformed token on write -- not a transport failure (69). loadKeyFile
+    // already raises a complete, leak-safe UsageError for an invalid-JSON key
+    // file; pass it through rather than re-wrapping (which would echo it twice).
+    // A schema failure (a raw ZodError, naming the field not its value) or an
+    // errno is reclassified here.
+    if (err instanceof UsageError) throw err;
     throw new UsageError(
       `key file at ${options.keyFile} is malformed: ` +
         (err instanceof Error ? err.message : String(err)),

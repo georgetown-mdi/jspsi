@@ -58,6 +58,27 @@ test("loadSigningIdentity throws UsageError on invalid JSON", () => {
   expect(() => loadSigningIdentity(idPath)).toThrow(UsageError);
 });
 
+test("loadSigningIdentity does not echo file content on an invalid-JSON file", () => {
+  // The identity file holds the Ed25519 private key. A JSON parse failure must
+  // report path-only: Node's JSON.parse echoes a snippet of the source start in
+  // its message (here exactly the leading 10 chars), so a file that begins with
+  // the key would otherwise leak it. The 10-char marker leads the file so the old
+  // (content-echoing) path would surface it; the guard must not.
+  const idPath = path.join(dir, "leaky.json");
+  const MARKER = "LEAKME1234";
+  fs.writeFileSync(idPath, `${MARKER} not json`, { mode: 0o600 });
+  let caught: unknown;
+  try {
+    loadSigningIdentity(idPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(idPath);
+  expect((caught as Error).message).toContain("could not be parsed as JSON");
+  expect((caught as Error).message).not.toContain(MARKER);
+});
+
 test("loadSigningIdentity throws UsageError on a malformed identity", () => {
   const idPath = path.join(dir, "malformed.json");
   fs.writeFileSync(idPath, JSON.stringify({ version: "wrong" }), {
