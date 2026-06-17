@@ -136,10 +136,20 @@ beforeAll(async () => {
   const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
   const acceptorId = await deriveRendezvousPeerId(sharedSecret, "acceptor");
 
+  // Hermetic ICE: both peers run in one browser on one machine, so a loopback
+  // host candidate is all they need. Configure no STUN/TURN, so the exchange
+  // contacts no external server (PeerJS's default config would otherwise reach
+  // public Google STUN, and on a runner with open egress Chromium would probe
+  // it). This makes the loopback host candidate the only one available, which is
+  // exactly why the browser project disables Chromium's mDNS host-candidate
+  // obfuscation (see vite.config.ts); without that the candidate is an
+  // unresolvable `.local` name and the connection cannot open. Production
+  // configures real STUN for cross-network peers (src/psi/rendezvous.ts).
   const inviterPeer = new Peer(inviterId, {
     host: addressInfo.address,
     path: "/api/",
     port: addressInfo.port,
+    config: { iceServers: [] },
   });
   await peerOpened(inviterPeer);
 
@@ -173,6 +183,7 @@ beforeAll(async () => {
     host: addressInfo.address,
     path: "/api/",
     port: addressInfo.port,
+    config: { iceServers: [] }, // hermetic ICE -- see inviterPeer above
   });
   const acceptorConn: DataConnection = await new Promise<DataConnection>(
     (resolve, reject) => {

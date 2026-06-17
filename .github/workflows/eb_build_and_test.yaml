@@ -59,6 +59,15 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Bound the job: this is the one CI job that drives a real browser and a live
+    # WebRTC exchange through a spawned dev server -- workloads that can wedge in
+    # ways the suite's own 60s timeouts do not all catch (a stuck browser or
+    # teardown, a stalled data channel). Without this the default 6h timeout
+    # applies, and since eb_deploy.yaml gates its deploy on this job via
+    # workflow_call, a hang would also stall a production deploy. 30 min sits far
+    # above a normal run (install + builds + tests + browser provisioning) yet
+    # cuts a true hang short.
+    timeout-minutes: 30
     outputs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
     steps:
@@ -79,13 +88,37 @@ jobs:
       # a web-unit regression gives a clear failure signal of its own.
       - name: Web unit tests
         run: npm run test:unit -w apps/web
-      # Web integration tests gate the web deploy on the app's own behavior,
-      # independent of the CLI (whose tests live in release.yaml). The suite is
-      # self-managing -- a vitest globalSetup spawns the dev server, waits for
-      # readiness, and tears it down -- and needs no Docker (it runs in the node
-      # environment and hits the HTTP/SSE routes), so a stock runner suffices.
-      - name: Web integration tests
-        run: npm run test:integration -w apps/web
+      # The browser project (below) drives real Chromium; the stock ubuntu-latest
+      # runner ships none, so provision it and the apt libraries it links against
+      # here, before that project runs. --with-deps installs those apt libraries;
+      # on Node 26 this needs playwright >= 1.60 (earlier versions hang extracting
+      # the browser archive, microsoft/playwright#40724) -- the lockfile pins
+      # >= 1.61, so do not downgrade. (The dev container provisions Chromium
+      # separately and is maintained independently.)
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      # Integration and browser tests both stand up the web dev server through a
+      # shared, self-managing vitest globalSetup (it spawns the server, waits for
+      # readiness, reuses a running one, and tears it down -- no manual step and no
+      # Docker; integration hits the HTTP/SSE routes in node, browser drives
+      # Chromium). Running both projects in ONE vitest process lets that setup
+      # start the server once and the second project reuse it, rather than two
+      # invocations each paying a full cold start -- so keep them combined via the
+      # dedicated test:integration:browser script (which names both projects
+      # explicitly). Splitting back into separate test:integration + test:browser
+      # steps reintroduces the second cold start. vitest still reports per
+      # project/file, so a failure names the suite that broke.
+      #
+      # The integration project gates the web deploy on the app's own behavior
+      # (independent of the CLI, whose tests live in release.yaml); the browser
+      # project covers the security-relevant accept-screen controls (the consent
+      # gate over the PII exchange and the decode-error escaping) plus the live PSI
+      # exchange and cross-implementation vectors -- behavior no other CI job
+      # covers, since it needs a DOM the node projects lack, so a browser-only
+      # regression would otherwise ship unnoticed. Both run on the PR gate and this
+      # workflow's push/deploy path, so the deploy artifact is gated on them too.
+      - name: Web integration and browser tests
+        run: npm run test:integration:browser -w apps/web
       - name: Package for Elastic Beanstalk
         run: |
           cp -a apps/web/deploy/aws_eb/. apps/web/.output

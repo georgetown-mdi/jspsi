@@ -81,7 +81,21 @@ export default defineConfig((_configEnv) => {
             // second one. The server-less vector suites pay a reuse-aware probe.
             globalSetup: ["./test/devServer/globalSetup.ts"],
             browser: {
-              provider: playwright(),
+              // invitedPSI opens a real WebRTC DataConnection between two
+              // same-machine peers that configure no STUN/TURN (hermetic -- see
+              // invitedPSI.test.ts), so a loopback host candidate is the only way
+              // they can connect. Chromium otherwise obfuscates host candidates
+              // as `.local` mDNS names that do not resolve in containers/CI (no
+              // mDNS responder), leaving no usable candidate -- the connection
+              // never opens and the exchange hangs. Disabling the mDNS
+              // obfuscation exposes the real loopback host candidate so the peers
+              // connect directly. Test browser only -- no effect on the dev
+              // server or `npm run build`.
+              provider: playwright({
+                launchOptions: {
+                  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+                },
+              }),
               headless: true,
               enabled: true,
               instances: [{ browser: "chromium" }],
