@@ -50,6 +50,11 @@ export * from "./standardization";
 export { loadCSVFile } from "./file";
 
 export { inferDateFormat } from "./utils/date.js";
+export {
+  computeHostKeyFingerprint,
+  verifyHostKeyFingerprint,
+  keyTypeFromBlob,
+} from "./utils/sshHostKey.js";
 export * from "./exchange";
 export * from "./exchangeRecord";
 export * from "./payloadExchange";

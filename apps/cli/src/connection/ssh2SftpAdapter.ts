@@ -301,6 +301,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       () => this.client.connect(connectOptions),
       maxReconnects,
       1_000,
+      // Host-key verification failure is terminal: the server is actively
+      // presenting a different or unknown key, so retrying the key exchange
+      // against the same server changes nothing. ssh2's "Host denied
+      // (verification failed)" is wrapped by ssh2-sftp-client as a new Error
+      // with the same message (prefixed with the listener context); match on the
+      // stable message fragment from kex.js rather than a code that is not set
+      // on the error object.
+      (err) => !(err instanceof Error && err.message.includes("Host denied")),
     );
 
     const internals = this.client as unknown as Ssh2SftpClientInternals;

@@ -108,6 +108,9 @@ test("parses a full WebRTC connection with stun, turn, and role", () => {
 });
 
 test("parses a full SFTP connection with private key auth", () => {
+  // SHA256: followed by 43 unpadded standard base64 chars; all-A is valid
+  // (A is in both [A-Za-z0-9+/] for positions 1-42 and [AEIMQUYcgkosw048] for 43).
+  const validPin = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   const result = parseConnectionConfig({
     channel: "sftp",
     server: {
@@ -117,7 +120,7 @@ test("parses a full SFTP connection with private key auth", () => {
       username: "psilink",
       privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
       privateKeyPassphrase: "hunter2",
-      hostKeyFingerprint: "SHA256:abc",
+      hostKeyFingerprint: validPin,
     },
     options: { pollIntervalMs: 5000 },
   });
@@ -125,6 +128,7 @@ test("parses a full SFTP connection with private key auth", () => {
   if (result.channel !== "sftp") return;
   expect(result.server.privateKey).toBeDefined();
   expect(result.server.privateKeyPassphrase).toBeDefined();
+  expect(result.server.hostKeyFingerprint).toBe(validPin);
 });
 
 test("parses shared options including maxReconnectAttempts on an SFTP config", () => {
@@ -382,13 +386,89 @@ test("SFTP server with certificate but no privateKey is rejected", () => {
   expect(messages.some((m) => m.includes("certificate"))).toBe(true);
 });
 
-test("SFTP server with certificate and privateKey together is valid", () => {
+test("SFTP server with certificate and privateKey together is rejected (not yet supported)", () => {
+  // certificate is not yet supported regardless of whether privateKey is present.
   const result = safeParseConnectionConfig({
     channel: "sftp",
     server: {
       host: "sftp.example.org",
       privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
       certificate: "/run/secrets/id_cert",
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("certificate"))).toBe(true);
+});
+
+// --- SFTPServer: host_key_fingerprint format ---------------------------------
+
+test("SFTP server with valid host_key_fingerprint is accepted", () => {
+  // Standard base64, SHA256: prefix, 43 characters (42 wide + 1 constrained).
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint:
+        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
+test("SFTP host_key_fingerprint missing SHA256: prefix is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("SHA256:"))).toBe(true);
+});
+
+test("SFTP host_key_fingerprint that looks like a signing partner_fingerprint is rejected with a named-confusion message", () => {
+  // A signing partner_fingerprint is 43 base64url chars (no prefix). The error
+  // message should name the confusion so the operator knows which type to use.
+  const signingShape = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 43 base64url chars (all-A)
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: { host: "sftp.example.org", host_key_fingerprint: signingShape },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("partner_fingerprint"))).toBe(true);
+});
+
+test("SFTP host_key_fingerprint with base64url chars (- or _) is rejected", () => {
+  // Standard base64 uses + and /; base64url uses - and _. A value with - or _
+  // does not have the signing-fingerprint shape (no prefix + 43 chars) but is
+  // still a bad format.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint:
+        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_",
+    },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("SFTP host_key_fingerprint as an @-file reference passes parse (format-checked after resolution)", () => {
+  // The @path cannot match the SHA256: format; the format check is deferred to
+  // @-file resolution, so the literal @path must survive parse like password
+  // and private_key do. Rejecting it here would make @-file support unusable.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint: "@/run/secrets/host-fingerprint",
     },
   });
   expect(result.success).toBe(true);
@@ -496,21 +576,32 @@ test("parses snake_case keys from disk", () => {
 });
 
 test("parses snake_case SFTP server keys from disk", () => {
+  const validPin = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   const result = parseConnectionConfig({
     channel: "sftp",
     server: {
       host: "sftp.example.org",
       private_key: "-----BEGIN OPENSSH PRIVATE KEY-----",
       private_key_passphrase: "hunter2",
-      host_key_fingerprint: "SHA256:abc",
-      known_hosts: "/etc/ssh/known_hosts",
+      host_key_fingerprint: validPin,
     },
   });
   if (result.channel !== "sftp") return;
   expect(result.server.privateKey).toBeDefined();
   expect(result.server.privateKeyPassphrase).toBeDefined();
-  expect(result.server.hostKeyFingerprint).toBe("SHA256:abc");
-  expect(result.server.knownHosts).toBe("/etc/ssh/known_hosts");
+  expect(result.server.hostKeyFingerprint).toBe(validPin);
+});
+
+test("known_hosts is rejected at parse time (use host_key_fingerprint instead)", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: { host: "sftp.example.org", known_hosts: "/etc/ssh/known_hosts" },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("known_hosts"))).toBe(true);
+  expect(messages.some((m) => m.includes("host_key_fingerprint"))).toBe(true);
 });
 
 // --- FileSyncOptions: peerId refines -----------------------------------------
