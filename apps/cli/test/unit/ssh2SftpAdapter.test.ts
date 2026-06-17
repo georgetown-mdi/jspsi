@@ -21,6 +21,24 @@ import {
   SFTP_STALL_DEADLINE_MS,
 } from "../../src/connection/sftpLivenessGuard";
 
+// Models ssh2-sftp-client exposing the underlying ssh2 Client (which carries
+// setNoDelay) on `.client`. connect() calls setNoDelay(true) on it to disable
+// Nagle; a mock that omits it makes connect() warn that setNoDelay is
+// unavailable on every successful connect. Provide a no-op so the faithful mock
+// matches the real client and that warning does not fire.
+const noDelayClient = () => ({ setNoDelay: () => {} });
+
+// Replaces the adapter's logger with a warn-swallowing stub. The deadline /
+// idle-window tests advance past SFTP_SLOW_OPERATION_WARNING_MS (30 s) on the
+// way to the 60 s deadline, so the non-fatal slow-operation warning fires
+// incidentally; this keeps it off the console. That warning's content is
+// asserted by the "slow-operation warning" describe block, so suppressing it
+// here loses no coverage (this.log.warn is the adapter's only WARN sink).
+function stubAdapterLog(adapter: SSH2SFTPClientAdapter): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (adapter as any).log = { warn: vi.fn() };
+}
+
 // --- connect retry -----------------------------------------------------------
 
 describe("connect retry", () => {
@@ -43,6 +61,7 @@ describe("connect retry", () => {
       connect: vi.fn().mockImplementation(async () => {
         if (++calls < 3) throw new Error("connection refused");
       }),
+      client: noDelayClient(),
     };
 
     try {
@@ -104,6 +123,7 @@ describe("connect retry", () => {
         .mockImplementation(async (opts: Record<string, unknown>) => {
           capturedOptions = opts;
         }),
+      client: noDelayClient(),
     };
 
     // 0 retries = 1 total attempt.
@@ -127,6 +147,7 @@ describe("connect retry", () => {
       // session property itself is present, so the bare null check would pass.
       sftp: { open: vi.fn(), close: vi.fn(), opendir: vi.fn() },
       connect: vi.fn().mockResolvedValue(undefined),
+      client: noDelayClient(),
     };
     await expect(
       adapter.connect({ host: "sftp.example.org", maxReconnectAttempts: 0 }),
@@ -533,6 +554,7 @@ describe("createExclusive", () => {
     // forever. The whole-operation deadline must fail it with the typed error.
     vi.useFakeTimers();
     try {
+      stubAdapterLog(adapter);
       mockOpen.mockImplementation(() => {
         // Deliberately never invokes the callback.
       });
@@ -555,6 +577,7 @@ describe("createExclusive", () => {
     // was created.
     vi.useFakeTimers();
     try {
+      stubAdapterLog(adapter);
       mockClose.mockImplementation(() => {
         // Deliberately never invokes the callback.
       });
@@ -782,6 +805,7 @@ describe("capped get", () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         get: vi.fn().mockImplementation(() => new Promise<Writable>(() => {})),
@@ -805,6 +829,7 @@ describe("capped get", () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
       let resolveGet!: (s: Writable) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
@@ -838,6 +863,7 @@ describe("capped get", () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         get: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -1389,6 +1415,7 @@ describe("bounded list", () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
       let readdirCalls = 0;
       let closeCalls = 0;
       const sftp = {
@@ -1434,6 +1461,7 @@ describe("bounded list", () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
       let closeCalls = 0;
       const sftp = {
         opendir: (_path: string, cb: (err: Error | null, h: Buffer) => void) =>
@@ -1659,6 +1687,7 @@ describe("fatal wrapper-error guard", () => {
     (adapter as any).client = {
       sftp: wrapper,
       connect: vi.fn().mockResolvedValue(undefined),
+      client: noDelayClient(),
     };
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     expect(wrapper.listenerCount("error")).toBe(1);
@@ -1671,6 +1700,7 @@ describe("fatal wrapper-error guard", () => {
     (adapter as any).client = {
       sftp: wrapper,
       connect: vi.fn().mockResolvedValue(undefined),
+      client: noDelayClient(),
     };
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     // Node throws on an 'error' event only when there are zero listeners; the
@@ -1687,6 +1717,7 @@ describe("fatal wrapper-error guard", () => {
     (adapter as any).client = {
       sftp: wrapper,
       connect: vi.fn().mockResolvedValue(undefined),
+      client: noDelayClient(),
     };
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
@@ -1702,6 +1733,7 @@ describe("fatal wrapper-error guard", () => {
     const client = {
       sftp: first as EventEmitter,
       connect: vi.fn().mockResolvedValue(undefined),
+      client: noDelayClient(),
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = client;
@@ -1728,6 +1760,7 @@ describe("fatal wrapper-error guard", () => {
     (adapter as any).client = {
       sftp: wrapper,
       connect: vi.fn().mockResolvedValue(undefined),
+      client: noDelayClient(),
     };
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     wrapper.emit("error", new Error("Malformed NAME packet"));
@@ -1777,6 +1810,7 @@ describe("fatal wrapper-error guard", () => {
       rename,
       exists,
       get,
+      client: noDelayClient(),
     };
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
     wrapper.emit("error", new Error("Malformed DATA packet"));

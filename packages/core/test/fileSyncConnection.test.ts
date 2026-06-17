@@ -234,12 +234,20 @@ test("emit('error', ...) with an attached listener is delivered and not buffered
   expect(conn.takeBufferedError()).toBeUndefined();
 });
 
-test("only the most recent buffered error is retained", () => {
+test("only the most recent buffered error is retained", async () => {
   const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  conn.emit("error", new Error("first"));
-  conn.emit("error", new Error("second"));
-  expect((conn.takeBufferedError() as Error).message).toBe("second");
+  // The second unhandled error supersedes the buffered first and emits a WARN
+  // naming the superseded one; capture it (proving the supersede path fired) so
+  // it does not leak to the suite output, mirroring the sibling escaping test.
+  const [, logs] = await withCapturedLogs(async () => {
+    const conn = new FileSyncConnection(client, { verbose: -1 });
+    conn.emit("error", new Error("first"));
+    conn.emit("error", new Error("second"));
+    expect((conn.takeBufferedError() as Error).message).toBe("second");
+  });
+  expect(
+    logs.some((l) => l.message.includes("superseding earlier buffered error")),
+  ).toBe(true);
 });
 
 test("the superseding-buffered-error warn escapes control/ANSI bytes in the prior error", async () => {
@@ -262,40 +270,67 @@ test("the superseding-buffered-error warn escapes control/ANSI bytes in the prio
   expect(warn!.message).toContain("\\x1b");
 });
 
-test("re-emitting the same buffered error does not create a self-referential cause cycle", () => {
+test("re-emitting the same buffered error does not create a self-referential cause cycle", async () => {
   // Regression guard: when an unhandled error is buffered and then the same
   // Error reference is emitted again, the cause-chain branch must NOT assign
   // `err.cause = err`. A self-cycle would loop any downstream walker.
   const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
   const err = new Error("repeated");
-  conn.emit("error", err);
-  conn.emit("error", err);
-  expect(conn.takeBufferedError()).toBe(err);
-  expect(err.cause).toBeUndefined();
+  // The re-emit still supersedes the buffered error and emits the WARN naming
+  // it -- the cause-cycle guard only suppresses the cause mutation, not the log
+  // -- so capture the WARN here too rather than let it leak.
+  const [, logs] = await withCapturedLogs(async () => {
+    const conn = new FileSyncConnection(client, { verbose: -1 });
+    conn.emit("error", err);
+    conn.emit("error", err);
+    expect(conn.takeBufferedError()).toBe(err);
+    expect(err.cause).toBeUndefined();
+  });
+  expect(
+    logs.some((l) => l.message.includes("superseding earlier buffered error")),
+  ).toBe(true);
 });
 
 // --- open (sftp) -------------------------------------------------------------
 
 test("open connects and sets path from sftp config", async () => {
   const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({
-    channel: "sftp",
-    server: { host: "sftp.example.org", path: "/exchanges" },
+  let conn!: FileSyncConnection;
+  // Opening an sftp target with no host_key_fingerprint pinned warns that the
+  // server identity is unverified. This test owns the assertion that the warning
+  // fires (proving intent); the other unpinned-open tests below suppress the
+  // same incidental WARN through the same capture rather than re-asserting it.
+  const [, logs] = await withCapturedLogs(async () => {
+    conn = new FileSyncConnection(client, { verbose: -1 });
+    await conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org", path: "/exchanges" },
+    });
   });
   expect(conn.connected).toBe(true);
   expect(conn.path).toBe("/exchanges");
+  expect(
+    logs.some((l) =>
+      l.message.includes(
+        "SFTP server identity is NOT verified: no host_key_fingerprint is pinned",
+      ),
+    ),
+  ).toBe(true);
 });
 
 test("open maps peerTimeoutMs to timeToLive for sftp config", async () => {
   const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
+  let conn!: FileSyncConnection;
   const before = Date.now();
-  await conn.open({
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { peerTimeoutMs: 60_000 },
+  // Capture suppresses the incidental unpinned-host-key WARN (asserted by the
+  // "open connects and sets path" test above); this test is about timeToLive.
+  await withCapturedLogs(async () => {
+    conn = new FileSyncConnection(client, { verbose: -1 });
+    await conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { peerTimeoutMs: 60_000 },
+    });
   });
   const after = Date.now();
   const ttl = conn.options.timeToLive!.getTime();
@@ -305,11 +340,15 @@ test("open maps peerTimeoutMs to timeToLive for sftp config", async () => {
 
 test("open maps pollIntervalMs to pollingFrequency for sftp config", async () => {
   const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { pollIntervalMs: 15_000 },
+  let conn!: FileSyncConnection;
+  // Capture suppresses the incidental unpinned-host-key WARN (see above).
+  await withCapturedLogs(async () => {
+    conn = new FileSyncConnection(client, { verbose: -1 });
+    await conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { pollIntervalMs: 15_000 },
+    });
   });
   expect(conn.options.pollingFrequency).toBe(15_000);
 });
@@ -320,14 +359,18 @@ test("open preserves constructor timeToLive and stores config peerTimeoutMs when
   // close() can read peerTimeoutMs from it for a fresh drain deadline.
   const { client } = makeMockClient();
   const constructorTtl = new Date(Date.now() + 9_999_999);
-  const conn = new FileSyncConnection(client, {
-    verbose: -1,
-    timeToLive: constructorTtl,
-  });
-  await conn.open({
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { peerTimeoutMs: 30_000 },
+  let conn!: FileSyncConnection;
+  // Capture suppresses the incidental unpinned-host-key WARN (see above).
+  await withCapturedLogs(async () => {
+    conn = new FileSyncConnection(client, {
+      verbose: -1,
+      timeToLive: constructorTtl,
+    });
+    await conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { peerTimeoutMs: 30_000 },
+    });
   });
   expect(conn.options.timeToLive).toBe(constructorTtl);
   expect(
@@ -345,13 +388,17 @@ test("open preserves constructor timeToLive and leaves peerTimeoutMs undefined w
   // to DEFAULT_PEER_TIMEOUT_MS for the drain deadline.
   const { client } = makeMockClient();
   const constructorTtl = new Date(Date.now() + 9_999_999);
-  const conn = new FileSyncConnection(client, {
-    verbose: -1,
-    timeToLive: constructorTtl,
-  });
-  await conn.open({
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
+  let conn!: FileSyncConnection;
+  // Capture suppresses the incidental unpinned-host-key WARN (see above).
+  await withCapturedLogs(async () => {
+    conn = new FileSyncConnection(client, {
+      verbose: -1,
+      timeToLive: constructorTtl,
+    });
+    await conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+    });
   });
   expect(conn.options.timeToLive).toBe(constructorTtl);
   expect(
@@ -368,12 +415,16 @@ test("open derives timeToLive from config peerTimeoutMs when no constructor time
   // -> timeToLive is computed as Date.now() + peerTimeoutMs. The config is
   // stored as a private field so close() can read peerTimeoutMs from it.
   const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
+  let conn!: FileSyncConnection;
   const before = Date.now();
-  await conn.open({
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { peerTimeoutMs: 45_000 },
+  // Capture suppresses the incidental unpinned-host-key WARN (see above).
+  await withCapturedLogs(async () => {
+    conn = new FileSyncConnection(client, { verbose: -1 });
+    await conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { peerTimeoutMs: 45_000 },
+    });
   });
   const after = Date.now();
   const ttl = conn.options.timeToLive!.getTime();
@@ -411,7 +462,9 @@ test("open (sftp): the connect debug log records only that a username is set, no
         const conn = new FileSyncConnection(client, { verbose: 1 });
         await conn.open(config);
       },
-      (level) => level === "DEBUG",
+      // Also claim WARN so the incidental unpinned-host-key WARN this unpinned
+      // open() emits is captured here rather than leaking past the DEBUG filter.
+      (level) => level === "DEBUG" || level === "WARN",
     );
     const debugLines = logs.map((l) => l.message).join("\n");
     // The connect line was captured (guards against a level-setup mistake that
@@ -451,7 +504,9 @@ test("open (sftp): the connect debug log escapes control bytes in the host and p
         const conn = new FileSyncConnection(client, { verbose: 1 });
         await conn.open(config);
       },
-      (level) => level === "DEBUG",
+      // Also claim WARN so the incidental unpinned-host-key WARN this unpinned
+      // open() emits is captured here rather than leaking past the DEBUG filter.
+      (level) => level === "DEBUG" || level === "WARN",
     );
     const connectLine = logs
       .map((l) => l.message)
@@ -529,7 +584,9 @@ test("synchronize: the 'synchronizing at path' info log escapes control bytes in
         await conn.open(config);
         await conn.synchronize().catch(() => {});
       },
-      (level) => level === "INFO",
+      // Also claim WARN so the incidental unpinned-host-key WARN the open() above
+      // emits is captured here rather than leaking past the INFO filter.
+      (level) => level === "INFO" || level === "WARN",
     );
     const syncLine = logs
       .map((l) => l.message)
@@ -548,6 +605,15 @@ test("synchronize: the 'synchronizing at path' info log escapes control bytes in
 // Capture the options object an sftp open() passes to client.connect, so the
 // allowlist tests can assert exactly what reaches ssh2-sftp-client. The mock's
 // connect is a no-op; here it records its single argument instead.
+//
+// The connection is constructed inside withCapturedLogs so its logger binds to
+// the interceptor: open() emits a WARN for each dropped providerOptions key,
+// plus the unpinned-host-key warning, and capturing them here keeps the
+// allowlist option-assertion tests below from leaking that noise to the suite
+// output. The "a dropped providerOptions key / algorithms sub-key is logged"
+// tests wrap this helper in their own capture to assert those WARNs -- the
+// shared interceptor delivers each WARN to that outer capture too, so
+// suppressing here does not hide them from the tests that prove they fire.
 async function captureSftpConnectOptions(
   config: SFTPConnectionConfig,
 ): Promise<Record<string, unknown>> {
@@ -556,8 +622,10 @@ async function captureSftpConnectOptions(
   client.connect = async (options: Record<string, unknown>) => {
     captured = options;
   };
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open(config);
+  await withCapturedLogs(async () => {
+    const conn = new FileSyncConnection(client, { verbose: -1 });
+    await conn.open(config);
+  });
   if (captured === undefined) throw new Error("client.connect was not called");
   return captured;
 }
@@ -696,13 +764,23 @@ test("providerOptions algorithms with no allowed sub-keys is dropped entirely", 
 
 test("providerOptions algorithms that is not an object of categories is dropped", async () => {
   // A malformed algorithms value (here a bare string) is not an object of
-  // algorithm categories, so it is dropped rather than forwarded to ssh2.
-  const opts = await captureSftpConnectOptions({
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    providerOptions: { algorithms: "aes256-gcm@openssh.com" },
+  // algorithm categories, so it is dropped rather than forwarded to ssh2. This
+  // branch's warn is distinct from the per-key drop loop (which the dropped-key
+  // tests pin), so capture and assert it here -- the helper's inner capture tees
+  // each WARN to this outer one too.
+  const [, logs] = await withCapturedLogs(async () => {
+    const opts = await captureSftpConnectOptions({
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      providerOptions: { algorithms: "aes256-gcm@openssh.com" },
+    });
+    expect(opts["algorithms"]).toBeUndefined();
   });
-  expect(opts["algorithms"]).toBeUndefined();
+  expect(
+    logs.some((l) =>
+      l.message.includes("expected an object of algorithm categories"),
+    ),
+  ).toBe(true);
 });
 
 test("providerOptions algorithms accepts ssh2's append/prepend/remove object form", async () => {

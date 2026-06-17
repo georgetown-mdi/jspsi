@@ -35,9 +35,34 @@ vi.mock("../../src/psi/peerMessageConnection.js", () => ({
 vi.mock("../../src/psi/authenticateExchange.js", () => ({
   authenticateExchange: vi.fn(),
 }));
+// Captured log output from the mock getLogger handed to exchangeLifecycle.
+// Hoisted so the vi.mock factory (lifted above imports) can close over it.
+const logCapture = vi.hoisted(() => ({
+  errors: [] as Array<string>,
+  warnings: [] as Array<string>,
+}));
+
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, runExchange: vi.fn() };
+  return {
+    ...actual,
+    runExchange: vi.fn(),
+    // The module-level `log = getLogger("exchangeLifecycle")` is created at
+    // import time, so withCapturedLogs cannot reach it; replace getLogger
+    // instead. This routes the lifecycle's teardown / early-disconnect ERROR
+    // lines into logCapture (asserted by the negative-path tests below) rather
+    // than letting them leak to stderr. The logger is informational only --
+    // replacing it does not affect the lifecycle's control flow.
+    getLogger: () => ({
+      info: () => {},
+      warn: (msg: string, ...args: Array<unknown>) =>
+        logCapture.warnings.push([msg, ...args.map(String)].join(" ")),
+      error: (msg: string, ...args: Array<unknown>) =>
+        logCapture.errors.push([msg, ...args.map(String)].join(" ")),
+      debug: () => {},
+      trace: () => {},
+    }),
+  };
 });
 
 const mockedOpen = vi.mocked(openPeerMessageConnection);
@@ -136,6 +161,8 @@ const OUTPUTS = {
 
 afterEach(() => {
   vi.clearAllMocks();
+  logCapture.errors.length = 0;
+  logCapture.warnings.length = 0;
 });
 
 describe("runExchangeLifecycle", () => {
@@ -342,6 +369,13 @@ describe("runExchangeLifecycle", () => {
     // success state survives and neither alert is shown (F2).
     expect(s.onResult).toHaveBeenCalledWith(OUTPUTS);
     expect(s.onError).not.toHaveBeenCalled();
+    // The swallowed teardown failure is still logged (capturing it proves the
+    // diagnostic fired and keeps it off the test output).
+    expect(
+      logCapture.errors.some((e) =>
+        e.includes("teardown: closing the connection failed"),
+      ),
+    ).toBe(true);
   });
 
   test("drops the broker on the first inbound frame, armed before the open await", async () => {
@@ -393,6 +427,55 @@ describe("runExchangeLifecycle", () => {
 
     expect(s.onResult).toHaveBeenCalled();
     expect(s.onError).not.toHaveBeenCalled();
+    // The run (and its teardown) drains on microtasks during the tick above, so
+    // the one-shot throwing disconnect is consumed by teardown's peer.disconnect
+    // -- and the swallowed failure is logged rather than leaked to stderr.
+    expect(
+      logCapture.errors.some((e) =>
+        e.includes("teardown: disconnecting the peer failed"),
+      ),
+    ).toBe(true);
+  });
+
+  test("a throw in the early broker disconnect is swallowed and logged", async () => {
+    // Holding the open await pending keeps the run parked with the first-frame
+    // data listener attached (teardown has not run), so a throwing peer.disconnect
+    // on the first frame exercises the early-broker catch -- the distinct ERROR
+    // sink from the teardown-disconnect path above, and the only one no other
+    // test reaches. The throw must not fail the exchange, and it must be logged
+    // (captured here) rather than leaked.
+    const peer = new FakePeer();
+    peer.disconnect.mockImplementationOnce(() => {
+      throw new Error("disconnect boom");
+    });
+    const { acquired, conn } = makeResources({ peer });
+    const opened = deferred<MessageConnection>();
+    mockedOpen.mockReturnValue(opened.promise);
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    const run = runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+    // Park on the still-pending open await with the data listener attached, then
+    // deliver the first frame so dropBrokerOnFirstFrame runs and throws.
+    await tick();
+    conn.emit("data", "first frame");
+
+    // Finish opening so the run completes cleanly despite the early throw.
+    opened.resolve(makeFakeMc().mc);
+    await run;
+
+    expect(s.onResult).toHaveBeenCalled();
+    expect(s.onError).not.toHaveBeenCalled();
+    expect(
+      logCapture.errors.some((e) =>
+        e.includes("early broker disconnect failed"),
+      ),
+    ).toBe(true);
   });
 
   test("abort mid-run closes the connection, the run rejects, teardown runs once, no alert", async () => {
