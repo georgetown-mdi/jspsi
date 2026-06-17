@@ -129,9 +129,10 @@ dev`, and otherwise starts and stops its own.
 npm run test:browser -w apps/web    # auto-starts, waits for, and stops the dev server
 ```
 
-It is not part of CI; run it locally when changing the web PSI exchange, the
-cross-implementation vectors, or a web UI component it covers (such as the accept
-consent gate).
+It runs in CI as part of the web build-and-test gate (`eb_build_and_test.yaml`),
+which provisions Chromium on the runner; run it locally too when changing the web
+PSI exchange, the cross-implementation vectors, or a web UI component it covers
+(such as the accept consent gate).
 
 ## Code Conventions
 

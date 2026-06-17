@@ -86,6 +86,28 @@ jobs:
       # environment and hits the HTTP/SSE routes), so a stock runner suffices.
       - name: Web integration tests
         run: npm run test:integration -w apps/web
+      # Web browser tests run in real Chromium via Playwright: the web PSI
+      # exchange, the cross-implementation record-vector checks, and the
+      # security-relevant accept-screen controls (the consent gate over the PII
+      # exchange and the decode-error escaping). No other CI job covers these --
+      # they need a DOM the node-based unit and integration projects do not have,
+      # so a browser-only regression would otherwise ship unnoticed. The browser
+      # project is self-managing like the integration one above (a vitest
+      # globalSetup spawns the dev server, waits for readiness, reuses a running
+      # one, and tears it down), so no manual dev-server step is needed. Runs on
+      # both the PR gate and this workflow's push/deploy path, so the deploy
+      # artifact is gated on browser behavior too.
+      #
+      # The stock ubuntu-latest runner ships no browser, so provision Chromium
+      # and the apt libraries it links against here (the dev container does this
+      # separately and is maintained independently). --with-deps installs those
+      # apt libraries; on Node 26 this needs playwright >= 1.60 (earlier versions
+      # hang extracting the browser archive, microsoft/playwright#40724) -- the
+      # lockfile pins >= 1.61, so do not downgrade.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Web browser tests
+        run: npm run test:browser -w apps/web
       - name: Package for Elastic Beanstalk
         run: |
           cp -a apps/web/deploy/aws_eb/. apps/web/.output
