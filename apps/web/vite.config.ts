@@ -33,6 +33,47 @@ const srcAliases = {
   "@": path.resolve(__dirname, "src"),
 };
 
+// The PeerJS signaling server attaches its WebSocket `upgrade` handler only when
+// the /api/peerjs route module first runs usePeerServer() -- triggered by an HTTP
+// GET to /api/peerjs/id|peers. The real client dials the signaling WebSocket with
+// an explicit, pre-derived id, so it never makes that GET; the upgrade then goes
+// unhandled and surfaces to the peer as "Lost connection to server." Warm the id
+// endpoint at dev-server startup to load the module and attach the handler before
+// any peer connects. Mirrors test/devServer/globalSetup's warmPeerSignaling (kept
+// separate: that one bootstraps the test harness, this one fixes a plain
+// `npm run dev`). Retries until the route answers text/plain, since Vite compiles
+// the route module lazily and the first hits may fall through to the SPA fallback.
+async function warmPeerSignaling(port: number): Promise<void> {
+  const url = `http://127.0.0.1:${port}/api/peerjs/id`;
+  const deadline = Date.now() + 60_000;
+  const perAttemptMs = 2_000;
+  for (;;) {
+    // Bound each attempt so a hung in-flight request cannot stall the loop past
+    // the outer deadline (the deadline is only re-checked between attempts).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), perAttemptMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      const ready =
+        res.ok && !!res.headers.get("content-type")?.includes("text/plain");
+      // Release the socket: we read only status/headers, never the body. Left
+      // unconsumed, undici holds the socket open until GC, and the SPA-fallback
+      // retries (before the route module compiles) hit this path repeatedly.
+      await res.body?.cancel();
+      if (ready) return;
+    } catch {
+      // Server still coming up, or this attempt aborted; retry.
+    } finally {
+      clearTimeout(timer);
+    }
+    if (Date.now() >= deadline) {
+      logLibrary.warn("peer signaling warm-up did not complete within 60s");
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 export default defineConfig((_configEnv) => {
   // Vitest evaluates this config but starts no dev/preview server, so the server
   // snagger plugins below have no httpServer to capture (the hook would just warn
@@ -123,6 +164,26 @@ export default defineConfig((_configEnv) => {
               configureServer(server: ViteDevServer) {
                 if (server.httpServer) {
                   registerServer(server.httpServer);
+                  // Once listening, warm the signaling module so its WebSocket
+                  // `upgrade` handler is attached before any peer dials it (see
+                  // warmPeerSignaling). Read the actual bound port: Vite does not
+                  // set strictPort, so if config.PORT is occupied it auto-
+                  // increments, and config.PORT would then warm the wrong port,
+                  // leaving the handler unattached.
+                  server.httpServer.once("listening", () => {
+                    const address = server.httpServer?.address();
+                    // The dev server binds TCP (host + port above), so address is
+                    // an AddressInfo. If it is ever a string (unix socket) or
+                    // null, a TCP warm cannot reach it -- warn and skip rather
+                    // than silently warming the wrong port.
+                    if (typeof address !== "object" || address === null) {
+                      logLibrary.warn(
+                        "dev server bound a non-TCP address; skipping signaling warm-up",
+                      );
+                      return;
+                    }
+                    void warmPeerSignaling(address.port);
+                  });
                 } else {
                   console.warn("http server is undefined");
                 }

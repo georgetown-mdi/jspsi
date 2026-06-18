@@ -183,6 +183,14 @@ export default async function setup({
     if (child.pid === undefined || child.exitCode !== null)
       return Promise.resolve();
     const pid = child.pid;
+    // Re-ref the child while we wait for it to exit. It was unref'd at spawn so a
+    // never-reached teardown would not pin the process; but here we are actively
+    // awaiting its exit, and on the setup-failure path (this fn runs from the
+    // catch below) vitest holds no other ref'd handle. Without the ref, the event
+    // loop would drain and the process would exit 0 mid-await -- before the child
+    // is killed and before the setup error is re-thrown -- turning a failed setup
+    // into a silent pass. The child's exit releases the ref.
+    child.ref();
     return new Promise<void>((resolveStop) => {
       const timer = setTimeout(() => {
         try {
