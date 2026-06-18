@@ -46,10 +46,10 @@ export function loadSigningIdentity(
   // Read and parse in two steps. A filesystem read failure carries only a path
   // and errno (no file content), safe to surface. A JSON parse failure can echo
   // a snippet of the source, and this file holds the Ed25519 private key, so it
-  // reports the path only (fail closed). Node's JSON.parse currently truncates
-  // its snippet, but we do not rely on the parser's error shape over a credential
-  // file. parseSigningIdentity's schema error names paths and types, never the
-  // key value, so it is kept. (Mirrors the config readers; see loadConfig in
+  // reports the path only (fail closed) -- suppressing the parser's message
+  // entirely rather than relying on how much of the source it includes.
+  // parseSigningIdentity's schema error names paths and types, never the key
+  // value, so it is kept. (Mirrors the config readers; see loadConfig in
   // commands/exchange.ts.)
   let source: string;
   try {

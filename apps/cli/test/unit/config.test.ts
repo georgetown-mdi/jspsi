@@ -401,6 +401,38 @@ test("persistHostKeyFingerprint does not echo an inline credential on a malforme
   }
 });
 
+test("persistHostKeyFingerprint does not echo an inline credential via an unresolved alias", () => {
+  // parseDocument defers alias resolution, so an unresolved alias leaves
+  // doc.errors empty and setIn succeeds; the failure surfaces only when
+  // doc.toString() materializes the document, throwing an error whose message
+  // echoes the alias token. The path-only guard at serialization must not echo
+  // it, or an inline credential written as an alias leaks into the error.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      `connection:\n  server:\n    password: *${SECRET}\n`,
+    );
+    let caught: unknown;
+    try {
+      persistHostKeyFingerprint(configPath, FP_A);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain(
+      "could not be serialized as YAML",
+    );
+    expect((caught as Error).message).not.toContain(SECRET);
+    // The original file is left untouched (the throw precedes the write).
+    expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
   // A config that PARSES but whose connection is a scalar (not a mapping) makes
   // YAML's setIn throw a raw library error; the function must surface it as the

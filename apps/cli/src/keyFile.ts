@@ -46,11 +46,11 @@ export function loadKeyFile(
   // Read and parse in two steps. A read failure (other than ENOENT) propagates
   // its errno -- a path plus error code, no file content. A JSON parse failure
   // can echo a snippet of the source, and this file holds the shared secret, so
-  // it fails closed with a self-contained, leak-safe UsageError. Node's
-  // JSON.parse currently truncates its snippet, but we do not rely on the
-  // parser's error shape over a credential file. The KeyFileSchema error below
-  // names the field and its format rule, never the value, so it is left to
-  // propagate. (Mirrors the config readers; see loadConfig in commands/exchange.ts.)
+  // it fails closed with a self-contained, leak-safe UsageError -- suppressing
+  // the parser's message entirely rather than relying on how much of the source
+  // it includes. The KeyFileSchema error below names the field and its format
+  // rule, never the value, so it is left to propagate. (Mirrors the config
+  // readers; see loadConfig in commands/exchange.ts.)
   let source: string;
   try {
     source = fs.readFileSync(keyFilePath, "utf8");

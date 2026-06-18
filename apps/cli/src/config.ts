@@ -501,7 +501,9 @@ export function persistHostKeyFingerprint(
   const doc = YAML.parseDocument(fs.readFileSync(configPath, "utf8"));
   // doc.errors carry a snippet of the offending source, which can include an
   // inline connection credential, so report the path only (fail closed) rather
-  // than echoing the message. See loadConfig in commands/exchange.ts.
+  // than echoing the message. See loadConfig in commands/exchange.ts. This catches
+  // syntax errors; an unresolved alias is caught at toString() below, since
+  // parseDocument defers alias resolution and leaves doc.errors empty for it.
   if (doc.errors.length > 0)
     throw new UsageError(
       `config file ${configPath} could not be parsed as YAML to persist the ` +
@@ -525,7 +527,20 @@ export function persistHostKeyFingerprint(
         `connection.server must be a mapping.`,
     );
   }
-  writeFileOwnerOnly(configPath, doc.toString());
+  // doc.toString() resolves aliases as it serializes; an unresolved alias (one
+  // whose anchor was never defined) throws here, and its message echoes the alias
+  // token -- which can be an inline credential. Report path-only (fail closed),
+  // never the message. parseDocument left this case out of doc.errors above.
+  let serialized: string;
+  try {
+    serialized = doc.toString();
+  } catch {
+    throw new UsageError(
+      `config file ${configPath} could not be serialized as YAML to persist ` +
+        `the host-key fingerprint`,
+    );
+  }
+  writeFileOwnerOnly(configPath, serialized);
 }
 
 // --- Config reader -----------------------------------------------------------
