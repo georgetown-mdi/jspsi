@@ -74,6 +74,9 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       // returned untouched (not aborted) so co-resident WebSocket servers --
       // notably Vite HMR at `/` -- can handle them.
       if (!this.socketServer.shouldHandle(req)) return;
+      // Bail if the socket was already torn down between the event and here;
+      // handleUpgrade would otherwise write the handshake to a dead socket.
+      if (socket.destroyed) return;
       this.socketServer.handleUpgrade(req, socket, head, (ws) => {
         this.socketServer.emit("connection", ws, req);
       });
