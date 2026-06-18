@@ -52,14 +52,32 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const path = this.config.path;
     this.path = `${path}${path.endsWith("/") ? "" : "/"}${WS_PATH}`;
 
+    // Attach to the shared HTTP server via `noServer` + a path-scoped `upgrade`
+    // listener rather than passing `server` to `ws`. Given `{ server, path }`,
+    // `ws` installs its own `upgrade` listener that calls `abortHandshake(socket,
+    // 400)` on every upgrade whose path does not match -- including Vite's HMR
+    // socket at `/`. On the shared dev server that tears HMR down (the socket
+    // 101s, then `ws` destroys it) and Vite drops into a reconnect/full-reload
+    // loop. Routing upgrades ourselves and ignoring non-matching paths leaves
+    // them for the other `upgrade` listeners (Vite's HMR handler).
     const options: WebSocket.ServerOptions = {
       path: this.path,
-      server,
+      noServer: true,
     };
 
     this.socketServer = config.createWebSocketServer
       ? config.createWebSocketServer(options)
       : new Server(options);
+
+    server.on("upgrade", (req, socket, head) => {
+      // shouldHandle() applies the `path` option above. Unmatched upgrades are
+      // returned untouched (not aborted) so co-resident WebSocket servers --
+      // notably Vite HMR at `/` -- can handle them.
+      if (!this.socketServer.shouldHandle(req)) return;
+      this.socketServer.handleUpgrade(req, socket, head, (ws) => {
+        this.socketServer.emit("connection", ws, req);
+      });
+    });
 
     this.socketServer.on("connection", (socket, req) => {
       this._onSocketConnection(socket, req);
