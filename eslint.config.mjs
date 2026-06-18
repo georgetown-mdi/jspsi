@@ -58,7 +58,7 @@ export default tseslint.config(
           selector:
             "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
           message:
-            "Parse operator/credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveYaml / parseSensitiveYamlDocument); raw YAML.parse leaks source into errors and stderr. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
+            "Parse operator/credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and stderr. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
         {
           selector:
