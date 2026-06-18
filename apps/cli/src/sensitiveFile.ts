@@ -61,16 +61,23 @@ export function parseSensitiveYaml(source: string, fileLabel: string): unknown {
 }
 
 /**
- * Parse a YAML {@link Document} for in-place editing (preserving comments and
- * key order), for the host-key-pin write that must not rewrite the whole file.
- * Guards both the syntax-error (doc.errors) and the deferred-alias channels; the
- * returned document must be serialized via {@link serializeSensitiveYamlDocument}
- * so the alias channel stays closed at materialization too.
+ * Parse, edit, and re-serialize a YAML {@link Document} in one step, for an
+ * in-place edit that preserves comments and key order (the host-key-pin write,
+ * which must not rewrite the whole file). The live {@link Document} never leaves
+ * this module: the caller's `edit` callback receives it to mutate (e.g. `setIn`)
+ * and returns nothing, so a caller cannot accidentally `toJS()`/`toString()`/
+ * `JSON.stringify` it back into an error elsewhere -- the one leak channel the
+ * ESLint ban cannot see (a method call on a Document instance, not on the YAML
+ * namespace). Guards the syntax-error channel (doc.errors, before the edit) and
+ * the deferred-alias channel (the alias surfaces only when toString materializes
+ * the document, after the edit). An error the `edit` callback itself throws
+ * propagates unchanged.
  */
-export function parseSensitiveYamlDocument(
+export function editSensitiveYamlDocument(
   source: string,
   fileLabel: string,
-): Document {
+  edit: (doc: Document) => void,
+): string {
   let doc: Document;
   try {
     doc = YAML.parseDocument(source, SAFE_YAML_OPTIONS);
@@ -78,19 +85,7 @@ export function parseSensitiveYamlDocument(
     throw yamlParseFailure(fileLabel);
   }
   if (doc.errors.length > 0) throw yamlParseFailure(fileLabel);
-  return doc;
-}
-
-/**
- * Serialize a {@link Document} parsed by {@link parseSensitiveYamlDocument}.
- * doc.toString() resolves aliases as it serializes; an unresolved alias throws
- * here with the alias token in its message (channel 2), so a failure reports the
- * path only.
- */
-export function serializeSensitiveYamlDocument(
-  doc: Document,
-  fileLabel: string,
-): string {
+  edit(doc);
   try {
     return doc.toString();
   } catch {

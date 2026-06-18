@@ -3,8 +3,7 @@ import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import {
   parseSensitiveYaml,
-  parseSensitiveYamlDocument,
-  serializeSensitiveYamlDocument,
+  editSensitiveYamlDocument,
   parseSensitiveJson,
 } from "../../src/sensitiveFile";
 
@@ -31,15 +30,12 @@ const throwingChannels: Array<[string, () => unknown]> = [
     () => parseSensitiveYaml(`password: *${SECRET}\n`, LABEL),
   ],
   [
-    "parseDocument syntax error collected in doc.errors",
-    () => parseSensitiveYamlDocument(`a:\n\tb: ${SECRET}\n`, LABEL),
+    "editYamlDocument syntax error collected in doc.errors (before edit)",
+    () => editSensitiveYamlDocument(`a:\n\tb: ${SECRET}\n`, LABEL, () => {}),
   ],
   [
-    "parseDocument unresolved alias surfacing at serialization",
-    () => {
-      const doc = parseSensitiveYamlDocument(`password: *${SECRET}\n`, LABEL);
-      return serializeSensitiveYamlDocument(doc, LABEL);
-    },
+    "editYamlDocument unresolved alias surfacing at serialization (after edit)",
+    () => editSensitiveYamlDocument(`password: *${SECRET}\n`, LABEL, () => {}),
   ],
   [
     "JSON parse error on a file that leads with the secret",
