@@ -69,6 +69,13 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       ? config.createWebSocketServer(options)
       : new Server(options);
 
+    // This listener lives for the life of `server`, with no teardown -- by
+    // design, not omission. The peer server is a per-process singleton
+    // (`usePeerServer`) bound to the process-lived dev/Nitro HTTP server, so this
+    // WebSocketServer is constructed once and shares the server's lifetime; the
+    // socketServer is never closed. There is therefore no reinstantiation that
+    // would stack listeners, and no closed socketServer for a stale listener to
+    // dispatch to.
     server.on("upgrade", (req, socket, head) => {
       // shouldHandle() applies the `path` option above. Unmatched upgrades are
       // returned untouched (not aborted) so co-resident WebSocket servers --
