@@ -1,7 +1,6 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import logLibrary from "loglevel";
-import YAML from "yaml";
 import { userInfo } from "node:os";
 
 import {
@@ -30,6 +29,7 @@ import {
   type KeyFileExpiryStatus,
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
+import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import {
   configureLogFile,
@@ -255,9 +255,15 @@ export function loadConfig(options: ExchangeOptions): {
 } & ExchangeDataSpec {
   const log = getLogger("exchange");
 
-  let rawConfig: unknown;
+  // Read, then parse through the sensitive-file chokepoint. The fs read can only
+  // fail with an errno (ENOENT, EACCES, EISDIR) -- a path plus code, no config
+  // content -- so it is surfaced; ENOENT gets the create-a-config guidance. The
+  // YAML parse can echo source bytes (an inline credential), so it routes through
+  // parseSensitiveYaml, which reports path-only (see sensitiveFile.ts). Invalid
+  // caller configuration is a UsageError (exit 64), not a transport failure (69).
+  let source: string;
   try {
-    rawConfig = YAML.parse(fs.readFileSync(options.configFile, "utf8"));
+    source = fs.readFileSync(options.configFile, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT")
       throw Object.assign(
@@ -267,14 +273,15 @@ export function loadConfig(options: ExchangeOptions): {
         ),
         { code: "ENOENT" },
       );
-    // A non-ENOENT failure here is a malformed or unreadable local config
-    // (invalid YAML, EACCES, EISDIR): invalid caller configuration the operator
-    // must fix, so a UsageError (CLI exit 64), not a transport failure (69).
     throw new UsageError(
-      `config file ${options.configFile} could not be read or parsed: ` +
+      `config file ${options.configFile} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
+  const rawConfig = parseSensitiveYaml(
+    source,
+    `config file ${options.configFile}`,
+  );
 
   // Warn about and strip the runtime-injected fields from the top-level
   // `authentication` block (their values come only from the key file). Operator-
@@ -347,7 +354,12 @@ export function loadConfig(options: ExchangeOptions): {
   } catch (err) {
     // A malformed existing key file is bad input the operator must fix or
     // re-provision (exit 64), the same classification saveKeyFile gives a
-    // malformed token on write -- not a transport failure (69).
+    // malformed token on write -- not a transport failure (69). loadKeyFile
+    // already raises a complete, leak-safe UsageError for an invalid-JSON key
+    // file; pass it through rather than re-wrapping (which would echo it twice).
+    // A schema failure (a raw ZodError, naming the field not its value) or an
+    // errno is reclassified here.
+    if (err instanceof UsageError) throw err;
     throw new UsageError(
       `key file at ${options.keyFile} is malformed: ` +
         (err instanceof Error ? err.message : String(err)),

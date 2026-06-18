@@ -32,13 +32,60 @@ const CAUSE_SEPARATOR = "\ncaused by: ";
  */
 const UNREADABLE_LINK = "[unreadable error]";
 
+/** Replacement for a redacted private-key block. */
+const REDACTED_PRIVATE_KEY = "[redacted private key]";
+
+/**
+ * A PEM / OpenSSH private-key block (RSA, EC, DSA, OPENSSH, ENCRYPTED, or
+ * unlabelled), from its BEGIN marker to the next END marker, plus a fallback for
+ * a truncated block (a BEGIN with no END, e.g. a key sliced into an error). The
+ * marker `-----BEGIN ... PRIVATE KEY-----` never legitimately appears in
+ * operator-facing error or log text, so matching it carries no false-positive
+ * risk. (PGP `... PRIVATE KEY BLOCK-----` is intentionally not matched: psilink
+ * uses no PGP keys, so there is no such sink to back-stop.)
+ *
+ * The gap between BEGIN and END uses a tempered negative lookahead so it cannot
+ * cross another BEGIN marker. Without it, a long run of BEGIN markers with no END
+ * makes the lazy `[\s\S]*?` rescan to end-of-string for every match attempt --
+ * O(n^2) backtracking (catastrophic on partner-controlled error text, which this
+ * renderer is built to handle). The lookahead bounds each attempt to one block.
+ */
+const PRIVATE_KEY_BLOCK =
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:(?!-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)[\s\S])*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
+const PRIVATE_KEY_DANGLING = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*/g;
+
+/**
+ * Last-resort redaction backstop applied to each error-message link before it is
+ * shown. This is NOT the primary defense: secret-bearing files are parsed
+ * through the sensitive-file chokepoint (CLI `sensitiveFile.ts`) so a parse error
+ * never carries source, and that prevention is what callers must rely on. This
+ * only contains an UNANTICIPATED sink -- some future code path that interpolates
+ * key material into an error -- by stripping PEM / OpenSSH private-key blocks,
+ * which are unambiguous and never a legitimate part of error output.
+ *
+ * Deliberately narrow: it does NOT scrub by secret-shape (e.g. a 43-char
+ * base64url token), because the shared-secret and a host-key fingerprint share
+ * that shape and fingerprints are shown to the operator on purpose -- shape
+ * scrubbing would redact legitimate output. Bare-token containment belongs to the
+ * chokepoint, not here.
+ */
+function redactSecretsForDisplay(message: string): string {
+  return message
+    .replace(PRIVATE_KEY_BLOCK, REDACTED_PRIVATE_KEY)
+    .replace(PRIVATE_KEY_DANGLING, REDACTED_PRIVATE_KEY);
+}
+
 /**
  * Render an arbitrary thrown value as operator-safe display text: its own
  * message followed by each chained `cause` message, every link passed through
  * {@link sanitizeForDisplay} so partner- or server-controlled bytes embedded in
  * any link -- control characters, the ESC that drives ANSI sequences, CR/LF
  * usable for log-line spoofing, bidi overrides, zero-width and confusable
- * characters -- cannot reach a terminal, log line, or UI element.
+ * characters -- cannot reach a terminal, log line, or UI element. Each link is
+ * additionally passed through a narrow secret-redaction backstop that strips PEM
+ * / OpenSSH private-key blocks (see {@link redactSecretsForDisplay}); this is a
+ * last resort for an unanticipated sink, not the primary defense (secret-bearing
+ * files are parsed leak-safely at their source).
  *
  * This is the display-boundary seam for rendering a raw error INSTANCE to a
  * human. The transport and message layers deliberately preserve the original
@@ -110,6 +157,6 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     current = next;
   }
   return rawMessages
-    .map((message) => sanitizeForDisplay(message))
+    .map((message) => sanitizeForDisplay(redactSecretsForDisplay(message)))
     .join(CAUSE_SEPARATOR);
 }

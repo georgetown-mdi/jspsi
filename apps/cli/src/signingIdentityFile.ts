@@ -10,6 +10,7 @@ import {
 import type { SigningIdentity } from "@psilink/core";
 
 import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
+import { parseSensitiveJson } from "./sensitiveFile";
 
 // File custody for the long-lived signing identity (private key + self-signed
 // certificate). Kept in its OWN file, separate from the rotating key file
@@ -43,16 +44,23 @@ export function defaultSigningIdentityPath(): string {
 export function loadSigningIdentity(
   identityPath: string,
 ): SigningIdentity | undefined {
-  let raw: unknown;
+  // Read, then parse through the sensitive-file chokepoint. A read failure
+  // carries only a path and errno (no file content), safe to surface. The JSON
+  // parse can echo a span of the source, and this file holds the Ed25519 private
+  // key, so it routes through parseSensitiveJson, which reports path-only (see
+  // sensitiveFile.ts). parseSigningIdentity's schema error names paths and types,
+  // never the key value, so it is kept.
+  let source: string;
   try {
-    raw = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+    source = fs.readFileSync(identityPath, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw new UsageError(
-      `signing identity at ${identityPath} could not be read or parsed: ` +
+      `signing identity at ${identityPath} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
+  const raw = parseSensitiveJson(source, `signing identity at ${identityPath}`);
   let identity: SigningIdentity;
   try {
     identity = parseSigningIdentity(raw);

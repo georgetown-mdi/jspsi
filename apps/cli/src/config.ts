@@ -18,6 +18,7 @@ import {
 } from "@psilink/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
+import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
 
 /**
  * Default path for the exchange config file written by the provisioning
@@ -498,31 +499,40 @@ export function persistHostKeyFingerprint(
   configPath: string,
   fingerprint: string,
 ): void {
-  const doc = YAML.parseDocument(fs.readFileSync(configPath, "utf8"));
-  if (doc.errors.length > 0)
-    throw new UsageError(
-      `config file ${configPath} could not be parsed to persist the host-key ` +
-        `fingerprint: ${doc.errors[0]?.message ?? "invalid YAML"}`,
-    );
-  // setIn creates the connection/server path nodes if absent; for an sftp config
-  // loaded by the exchange command they already exist, so this updates the one
-  // field. snake_case path matches the written convention (see saveConfig). A
-  // config that parses but whose `connection`/`server` is a scalar or sequence
-  // (not a mapping) makes setIn throw a raw YAML error; surface it as the
-  // UsageError this function's contract promises (mapped to exit 64) rather than
-  // an opaque library stack trace. On the exchange call path the schema load has
-  // already rejected such a shape, so this guards a hand-edit between load and
-  // write, or a future caller that skips validation.
-  try {
-    doc.setIn(["connection", "server", "host_key_fingerprint"], fingerprint);
-  } catch (err) {
-    throw new UsageError(
-      `config file ${configPath} could not be updated to persist the host-key ` +
-        `fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
-        `connection.server must be a mapping.`,
-    );
-  }
-  writeFileOwnerOnly(configPath, doc.toString());
+  // Parse, edit, and re-serialize through the sensitive-file chokepoint, which
+  // closes the syntax-error, deferred-alias, and warning leak channels in one
+  // place and keeps the live document inside that module (see sensitiveFile.ts).
+  // The document model preserves the operator's comments and key order on this
+  // surgical one-field write.
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    `config file ${configPath}`,
+    (doc) => {
+      // setIn creates the connection/server path nodes if absent; for an sftp
+      // config loaded by the exchange command they already exist, so this updates
+      // the one field. snake_case path matches the written convention (see
+      // saveConfig). A config that parses but whose `connection`/`server` is a
+      // scalar or sequence (not a mapping) makes setIn throw a YAML error naming
+      // the path key (not a value), so it is safe to surface as the UsageError
+      // this function's contract promises (mapped to exit 64) rather than an
+      // opaque library stack trace. On the exchange call path the schema load has
+      // already rejected such a shape, so this guards a hand-edit between load and
+      // write, or a caller that skips validation.
+      try {
+        doc.setIn(
+          ["connection", "server", "host_key_fingerprint"],
+          fingerprint,
+        );
+      } catch (err) {
+        throw new UsageError(
+          `config file ${configPath} could not be updated to persist the ` +
+            `host-key fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
+            `connection.server must be a mapping.`,
+        );
+      }
+    },
+  );
+  writeFileOwnerOnly(configPath, serialized);
 }
 
 // --- Config reader -----------------------------------------------------------
@@ -565,16 +575,21 @@ export interface ConfigLinkageSource {
 export function loadConfigLinkageSource(
   configPath: string,
 ): ConfigLinkageSource | undefined {
-  let raw: unknown;
+  // Read, then parse through the sensitive-file chokepoint. A read failure
+  // carries only a path and errno (ENOENT means no config, not an error here); a
+  // YAML parse can echo source bytes (an inline credential), so it routes through
+  // parseSensitiveYaml, which reports path-only (see sensitiveFile.ts).
+  let source: string;
   try {
-    raw = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    source = fs.readFileSync(configPath, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw new UsageError(
-      `config file ${configPath} could not be read or parsed: ` +
+      `config file ${configPath} could not be read: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
+  const raw = parseSensitiveYaml(source, `config file ${configPath}`);
 
   // A top-level YAML mapping is required. Exclude an array (also
   // `typeof === "object"`) and a scalar explicitly, so a malformed config is

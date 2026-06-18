@@ -3,6 +3,7 @@ import { z } from "zod";
 import { SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
 
 import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
+import { parseSensitiveJson } from "./sensitiveFile";
 
 /**
  * Default path for the key file written by the provisioning commands (`invite`,
@@ -43,13 +44,20 @@ export function loadKeyFile(
   keyFilePath: string,
   opts: { warnOnPermissive?: boolean } = {},
 ): KeyFile | undefined {
-  let raw: unknown;
+  // Read, then parse through the sensitive-file chokepoint. A read failure (other
+  // than ENOENT) propagates its errno -- a path plus code, no file content. The
+  // JSON parse can echo a span of the source, and this file holds the shared
+  // secret, so it routes through parseSensitiveJson, which reports path-only (see
+  // sensitiveFile.ts). The KeyFileSchema error below names the field and its
+  // format rule, never the value, so it is left to propagate.
+  let source: string;
   try {
-    raw = JSON.parse(fs.readFileSync(keyFilePath, "utf8"));
+    source = fs.readFileSync(keyFilePath, "utf8");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw err;
   }
+  const raw = parseSensitiveJson(source, `key file at ${keyFilePath}`);
   const result = KeyFileSchema.parse(raw);
   if (opts.warnOnPermissive !== false)
     warnIfFileOverPermissive(keyFilePath, "shared secret");

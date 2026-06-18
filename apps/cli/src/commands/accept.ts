@@ -3,7 +3,6 @@ import { userInfo } from "node:os";
 
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
-import YAML from "yaml";
 
 import {
   assessLinkageSatisfiability,
@@ -29,6 +28,7 @@ import {
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
+import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { configureLogFile, promptConfirm } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
@@ -373,17 +373,21 @@ function reconcileAcceptConfig(params: {
       ? "the same URL and invitation"
       : "the same invitation";
 
-  // Parse in two steps with distinct error handling. A YAML *syntax* error from
-  // YAML.parse carries a snippet of the offending source lines in its message,
-  // which can include an inline connection credential (server.password /
-  // privateKey / privateKeyPassphrase) -- a config may legitimately hold those,
-  // protected at 0600. That snippet must never reach a log, so the YAML failure
-  // reports only the path. A schema failure from parseExchangeSpec (Zod) names
-  // field paths and issue kinds, not the offending values, so its message is
-  // safe to surface and helps the user fix the config.
+  // Parse, then validate, in two steps. The YAML parse can echo source bytes (an
+  // inline credential) and warn to stderr, so it routes through the sensitive-
+  // file chokepoint (see sensitiveFile.ts); on any parse failure this reports the
+  // path and reconciliation guidance, never the parser's message. A schema
+  // failure from parseExchangeSpec (Zod) names field paths and issue kinds, not
+  // the offending values, so its message is safe to surface (below).
   let parsed: unknown;
   try {
-    parsed = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    // The chokepoint's own path-only message is discarded by the catch below,
+    // which re-labels with reconciliation guidance; the label is passed only to
+    // keep the call signature uniform.
+    parsed = parseSensitiveYaml(
+      fs.readFileSync(configPath, "utf8"),
+      `a configuration file at ${configPath}`,
+    );
   } catch {
     throw new UsageError(
       `a configuration file already exists at ${configPath} but is not valid ` +

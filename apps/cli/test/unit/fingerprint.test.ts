@@ -406,6 +406,29 @@ test("readConfigHints throws when an explicit config file is missing", () => {
   );
 });
 
+// A YAML parse failure embeds a snippet of the offending source in its message,
+// which can carry an inline credential; the path-only guard must close both a
+// syntax error (a YAMLParseError reproducing the malformed line) and an
+// unresolved alias (a plain ReferenceError echoing the alias name). Mirrors the
+// exchange-side guard (exchange.test.ts).
+test.each([
+  ["syntax error (tab indentation)", (s: string) => `\t  password: ${s}\n`],
+  ["unresolved alias", (s: string) => `signing:\n  password: *${s}\n`],
+])("readConfigHints does not echo an inline credential: %s", (_, mk) => {
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  const cfg = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(cfg, mk(SECRET));
+  let caught: unknown;
+  try {
+    readConfigHints(cfg, true);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain("could not be parsed as YAML");
+  expect((caught as Error).message).not.toContain(SECRET);
+});
+
 test("readConfigHints reads identity and identity_file from YAML", () => {
   const cfg = path.join(dir, "psilink.yaml");
   fs.writeFileSync(
