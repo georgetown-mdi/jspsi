@@ -43,9 +43,19 @@ function coldSignalingAttempt(
       resolvePromise(ok);
     };
     const timer = setTimeout(() => finish(false), perAttemptMs);
-    ws.on("message", (data: WebSocket.RawData) =>
-      finish(data.toString().includes('"type":"OPEN"')),
-    );
+    ws.on("message", (data: WebSocket.RawData) => {
+      // Resolve only on the OPEN frame; ignore any other frame rather than
+      // treating the first message as the verdict (close/timeout cover the
+      // negative cases). Parse the type instead of substring-matching, so JSON
+      // formatting changes cannot silently make this a permanent false negative.
+      let type: unknown;
+      try {
+        type = (JSON.parse(data.toString()) as { type?: unknown }).type;
+      } catch {
+        return;
+      }
+      if (type === "OPEN") finish(true);
+    });
     ws.on("close", () => finish(false));
     ws.on("error", () => finish(false));
   });

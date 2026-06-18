@@ -66,6 +66,14 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
   // module-alias resolution.
   void nitroApp
     .localFetch("/api/peerjs/id")
+    .then(async (res) => {
+      // A non-2xx resolves normally (no rejection to .catch): surface it, since
+      // it means usePeerServer() did not attach the handler. Release the body
+      // either way -- we read neither.
+      if (!res.ok)
+        log.warn(`peer signaling warm-up returned HTTP ${res.status}`);
+      await res.body?.cancel();
+    })
     .catch((warmErr: unknown) =>
       log.warn("peer signaling warm-up failed:", warmErr),
     );

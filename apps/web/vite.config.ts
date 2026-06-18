@@ -46,9 +46,14 @@ const srcAliases = {
 async function warmPeerSignaling(port: number): Promise<void> {
   const url = `http://127.0.0.1:${port}/api/peerjs/id`;
   const deadline = Date.now() + 60_000;
+  const perAttemptMs = 2_000;
   for (;;) {
+    // Bound each attempt so a hung in-flight request cannot stall the loop past
+    // the outer deadline (the deadline is only re-checked between attempts).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), perAttemptMs);
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       const ready =
         res.ok && !!res.headers.get("content-type")?.includes("text/plain");
       // Release the socket: we read only status/headers, never the body. Left
@@ -57,7 +62,9 @@ async function warmPeerSignaling(port: number): Promise<void> {
       await res.body?.cancel();
       if (ready) return;
     } catch {
-      // Server still coming up; fall through to the deadline check and retry.
+      // Server still coming up, or this attempt aborted; retry.
+    } finally {
+      clearTimeout(timer);
     }
     if (Date.now() >= deadline) {
       logLibrary.warn("peer signaling warm-up did not complete within 60s");
@@ -165,11 +172,17 @@ export default defineConfig((_configEnv) => {
                   // leaving the handler unattached.
                   server.httpServer.once("listening", () => {
                     const address = server.httpServer?.address();
-                    const boundPort =
-                      typeof address === "object" && address
-                        ? address.port
-                        : config.PORT;
-                    void warmPeerSignaling(boundPort);
+                    // The dev server binds TCP (host + port above), so address is
+                    // an AddressInfo. If it is ever a string (unix socket) or
+                    // null, a TCP warm cannot reach it -- warn and skip rather
+                    // than silently warming the wrong port.
+                    if (typeof address !== "object" || address === null) {
+                      logLibrary.warn(
+                        "dev server bound a non-TCP address; skipping signaling warm-up",
+                      );
+                      return;
+                    }
+                    void warmPeerSignaling(address.port);
                   });
                 } else {
                   console.warn("http server is undefined");
