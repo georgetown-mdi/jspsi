@@ -28,29 +28,39 @@ import log from "loglevel";
 log.setLevel(log.levels.DEBUG);
 
 // The test SFTP server serves a fresh per-run directory; this file rendezvouses
-// in its `sftp` namespace. SFTP_LOCAL_DIRECTORY is the host directory the server
-// serves (where the oversize-read test plants its file straight onto disk), and
-// SFTP_PATH is the path the client connects to -- which differs by backend, so
-// both come from the running server rather than a fixed path. ensureNamespace
-// creates the host directory before any party connects, since the connection
-// does not create remote directories.
+// under it. SFTP_LOCAL_DIRECTORY is the host directory the server serves (where
+// the oversize-read test plants its file straight onto disk), and SFTP_PATH is
+// the matching remote path the raw-op tests connect to -- which differs by
+// backend, so both come from the running server rather than a fixed path.
+// ensureNamespace creates the host directory before any party connects, since
+// the connection does not create remote directories.
 //
-// SFTP_PATH is a SHARED namespace: the persistent serverConn/clientConn
-// rendezvous here across the first tests, and the raw-op tests target it for
-// non-exchange file operations. That sharing stays safe only while nothing
-// drops a foreign file into it during a persistent-pair poll -- an unexpected
-// file observed by poll() trips the directory-exclusivity guard ("must be
-// dedicated to a single exchange"), the residue/straddle flake of board items
-// 200576628 and 201583776. So, for any future test: one that stands up its own
-// exchange MUST use freshRendezvous() (below), never SFTP_PATH; and nothing may
-// plant into SFTP_PATH while serverConn/clientConn may still be polling it (the
-// "message deliverable" window). Re-introducing shared-namespace exchange use
-// re-opens that flake -- this is why the self-connecting tests each get their
-// own mkdtemp directory.
+// SFTP_PATH carries NO exchange rendezvous: it is used only by the raw-op tests
+// (list/get/put against planted files) and the crashed-adapter contract
+// assertions, none of which drive a poll loop on it. The persistent
+// serverConn/clientConn pair -- the only long-lived exchange in this file --
+// rendezvouses in its OWN dedicated mkdtemp directory (pairPath, created in
+// beforeAll), never SFTP_PATH. That per-exchange isolation is the root-cause
+// de-flake of board items 200576628 and 201583776: those flakes came from an
+// exchange poll straddling a test boundary (a mid-flight list() reading a later
+// test's files as foreign and tripping the directory-exclusivity guard "must be
+// dedicated to a single exchange") or a lock left behind by stop()-without-
+// close() outliving the test on a SHARED path. With every exchange confined to
+// its own directory, neither residue can reach another test. So, for any future
+// test: one that stands up its own exchange MUST use freshRendezvous() (below)
+// or its own dedicated directory, never SFTP_PATH; re-introducing shared-
+// namespace exchange use re-opens that flake.
 const srv = sftpServer();
 const NS = "sftp";
 const SFTP_LOCAL_DIRECTORY = localPath(srv, NS);
 const SFTP_PATH = remotePath(srv, NS);
+
+// The persistent serverConn/clientConn pair's dedicated rendezvous directory,
+// created fresh in beforeAll (pairLocalDir is its host path, pairPath the remote
+// path the pair connects to) so the pair never shares a namespace with the
+// raw-op tests on SFTP_PATH. See the file header.
+let pairLocalDir: string;
+let pairPath: string;
 
 // The wrapper-crash and ssh2-lifecycle contract assertions exercise the
 // in-process backend's real ssh2 wrapper and a synthetic fatal emit; the native
@@ -88,15 +98,19 @@ async function waitFor(
 }
 
 // A freshly-created, exclusively-owned rendezvous directory under the served
-// root, for tests that stand up their own connections. The persistent
-// serverConn/clientConn reuse the shared `sftp` namespace across the first
-// tests and stop() without close(): stop() halts only the next poll, so a
-// mid-flight list() can straddle the test boundary and read a later exchange's
-// files as foreign, and a lock a prior rendezvous left behind (swept only by
-// close()) outlives the test. On a shared path either residue trips a test's
+// root, for tests that stand up their own connections. Every exchange in this
+// file -- the persistent serverConn/clientConn pair included (it gets its own
+// pairPath dir in beforeAll) -- rendezvouses in such a private directory rather
+// than a shared one. The hazard this forecloses: an exchange tears down with
+// stop() (or, for the persistent pair across the first tests, desynchronize())
+// rather than close(), and stop() halts only the next poll -- so a mid-flight
+// list() can straddle the test boundary and read a later exchange's files as
+// foreign, and a lock a prior rendezvous left behind (swept only by close())
+// outlives the test. On a SHARED path either residue trips a later test's
 // directory-exclusivity guard -- a window the restricted-crypto native-sshd
-// profile widens via its slower handshake (board item 200576628). A dedicated
-// mkdtemp directory per such test removes the sharing in both directions.
+// profile widens via its slower handshake (board items 200576628 and
+// 201583776). A dedicated mkdtemp directory per exchange removes the sharing in
+// both directions.
 // Returns the remote path to connect to and records the host directory for
 // teardown in afterAll, so the per-test directories do not pile up under the
 // served root over the run.
@@ -129,6 +143,12 @@ clientConn.on("error", (err: unknown) => {
 beforeAll(async () => {
   await ensureNamespace(srv, NS);
   await cleanServer();
+  // Dedicate the persistent pair its own rendezvous directory (see file header):
+  // a fresh, exclusively-owned mkdtemp under the served root, so the pair's poll
+  // and any lock it leaves behind stay off SFTP_PATH and cannot surface in a
+  // later raw-op or contract test.
+  pairLocalDir = await fs.mkdtemp(path.join(srv.backingDir, "pair-"));
+  pairPath = remotePath(srv, path.basename(pairLocalDir));
   await Promise.all([
     serverConn.open({
       channel: "sftp",
@@ -136,7 +156,7 @@ beforeAll(async () => {
         host: srv.host,
         port: srv.port,
         ...serverAuth(srv.usera),
-        path: SFTP_PATH,
+        path: pairPath,
       },
     }),
     clientConn.open({
@@ -145,7 +165,7 @@ beforeAll(async () => {
         host: srv.host,
         port: srv.port,
         ...serverAuth(srv.userb),
-        path: SFTP_PATH,
+        path: pairPath,
       },
     }),
   ]);
@@ -154,6 +174,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all([clientConn.close(), serverConn.close()]);
   await cleanServer();
+  // Removed after close() drains/sweeps the pair's files (above), not before.
+  await fs.rm(pairLocalDir, { recursive: true, force: true });
 });
 
 // to test race condition, Promise.all is used when synchronizing
@@ -162,7 +184,7 @@ afterAll(async () => {
 test("lock synchronization with race condition", async () => {
   await Promise.all([serverConn.synchronize(), clientConn.synchronize()]);
 
-  const currentFiles = await serverSFTP.list(SFTP_PATH);
+  const currentFiles = await serverSFTP.list(pairPath);
 
   expect(serverConn.peerId).toEqual(clientConn.id);
   expect(clientConn.peerId).toEqual(serverConn.id);
@@ -182,14 +204,14 @@ test("basic synchronization", async () => {
     Buffer.from(
       JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
     ),
-    `${SFTP_PATH}/${clientConn.id}-hello.json`,
+    `${pairPath}/${clientConn.id}-hello.json`,
   );
 
   await serverConn.synchronize();
 
-  const currentFiles = await serverSFTP.list(SFTP_PATH);
+  const currentFiles = await serverSFTP.list(pairPath);
 
-  await serverSFTP.safeDelete(`${SFTP_PATH}/${serverConn.id}-hello.json`);
+  await serverSFTP.safeDelete(`${pairPath}/${serverConn.id}-hello.json`);
 
   expect(serverConn.peerId).toBe(clientConn.id);
   expect(serverConn.handshakeRole).toBe("initiator");
@@ -201,11 +223,23 @@ test("basic synchronization", async () => {
 });
 
 test("message deliverable", async () => {
+  // Stagger the rendezvous so the server arrives a tick ahead of the client (an
+  // explicit arrival order, distinct from the simultaneous Promise.all race the
+  // first test exercises), but await BOTH parties' synchronize() before any
+  // send(). The client's synchronize() was previously launched in an un-awaited
+  // setImmediate and never awaited, so under a slow handshake -- the timing-
+  // sensitive restricted-crypto native-sshd profile -- send() below could run
+  // before the client committed its peerId and throw "not synchronized" (board
+  // item 202047461, the third recurrence of this flake). Awaiting both removes
+  // that ordering race at the root: it no longer depends on the handshake
+  // landing within a tick, and the send()/poll() peerId guards stay intact.
   const serverSyncPromise = serverConn.synchronize();
-  setImmediate(async () => {
-    await clientConn.synchronize();
+  const clientSyncPromise = new Promise<void>((resolve, reject) => {
+    setImmediate(() => {
+      clientConn.synchronize().then(resolve, reject);
+    });
   });
-  await serverSyncPromise;
+  await Promise.all([serverSyncPromise, clientSyncPromise]);
 
   serverConn.start();
 
