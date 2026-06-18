@@ -8,6 +8,12 @@ import { UsageError } from "@psilink/core";
 // helpers enforce in one place is: the content of such a file must never reach
 // an error message, log, or stderr -- only the path may.
 //
+// CLI-only today (it imports nothing Node-specific, just `yaml` and core). When
+// the web app starts importing/exporting YAML configs or storing secrets in a
+// browser store, promote this module to packages/core so both apps share one
+// implementation, and extend the ESLint ban to apps/web (the YAML half is
+// already pre-staged there). See the board item for the web work.
+//
 // Centralizing matters because the parsers leak through several independent
 // channels that are easy to reintroduce one call site at a time (an ESLint rule
 // forbids the raw parsers outside this module, so a new reader must route here):
