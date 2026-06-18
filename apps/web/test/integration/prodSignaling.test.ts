@@ -27,6 +27,12 @@ import type { ChildProcess } from "node:child_process";
 // the web app before this suite runs (eb_build_and_test.yaml: "Build server"
 // precedes "Web integration and browser tests"), so this runs there; a local
 // `npm run test:integration` without a prior build skips it rather than failing.
+//
+// A non-skipped LOCAL run tests whatever `.output` currently holds: if you change
+// the startup warm and re-run without rebuilding, an OLD build still on disk makes
+// this pass green against stale code. To validate a warm change locally, rebuild
+// first (`npm run build -w apps/web`); CI always rebuilds before this suite, so it
+// is unaffected.
 const here = dirname(fileURLToPath(import.meta.url));
 // apps/web/test/integration -> apps/web is two levels up.
 const webRoot = resolve(here, "../..");
@@ -80,12 +86,20 @@ async function httpAccepts(url: string, timeoutMs: number): Promise<boolean> {
   }
 }
 
-async function waitForRoot(url: string, proc: ChildProcess): Promise<void> {
+async function waitForRoot(
+  url: string,
+  proc: ChildProcess,
+  getLaunchError: () => Error | undefined,
+): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
     // Surface an early exit (a port collision, a missing/broken build) with its
     // real cause, instead of polling a server that is never coming up until the
-    // readiness deadline and then reporting a misleading timeout.
+    // readiness deadline and then reporting a misleading timeout. A spawn/exec
+    // failure that surfaces as a child `error` event (rather than an exit) leaves
+    // exitCode/signalCode null, so also re-throw a captured launch error here.
+    const launchError = getLaunchError();
+    if (launchError) throw launchError;
     if (proc.exitCode !== null || proc.signalCode !== null)
       throw new Error(
         `production server exited before becoming ready ` +
@@ -124,8 +138,12 @@ describe.skipIf(!hasBuild)(
       child = proc;
       proc.unref();
 
+      // Capture child `error` events for the process's whole life (not just the
+      // launch tick): a persistent listener both lets waitForRoot surface a
+      // post-launch spawn/exec failure and prevents a stray child error from
+      // throwing as an unhandled EventEmitter `error` and crashing the worker.
       let launchError: Error | undefined;
-      proc.once("error", (err) => {
+      proc.on("error", (err) => {
         launchError = err;
       });
       await new Promise<void>((r) => setImmediate(r));
@@ -133,7 +151,7 @@ describe.skipIf(!hasBuild)(
 
       // Readiness is the ROOT route only -- deliberately not /api/peerjs/*, which
       // would warm signaling and defeat the test.
-      await waitForRoot(`http://127.0.0.1:${port}/`, proc);
+      await waitForRoot(`http://127.0.0.1:${port}/`, proc, () => launchError);
     }, READY_TIMEOUT_MS + 10_000);
 
     afterAll(async () => {

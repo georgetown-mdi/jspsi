@@ -72,7 +72,10 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
     .then(async (res) => {
       // A non-2xx resolves normally (no rejection to .catch): surface it, since
       // it means usePeerServer() did not attach the handler. Release the body
-      // either way -- we read neither.
+      // either way -- we read neither. Unlike the dev warm (vite.config.ts), no
+      // content-type check is needed here: the built server registers this route
+      // eagerly, so a 2xx cannot be a lazily-compiled SPA fallback the way it can
+      // under Vite.
       if (!res.ok)
         log.warn(`peer signaling warm-up returned HTTP ${res.status}`);
       await res.body?.cancel();
@@ -103,6 +106,12 @@ setupGracefulShutdown(listener, nitroApp);
 
 // Websocket support
 // https://crossws.unjs.io/adapters/node
+// Dead today: experimental.websocket is unset, so import.meta._websocket is false
+// and this block is tree-shaken out of the build. Enabling it would be UNSAFE while
+// the PeerJS signaling server shares this http server: both attach a bare
+// server.on("upgrade", ...), and PeerJS's `ws` aborts any upgrade whose path is not
+// /api/peerjs -- destroying a crossws socket mid-handshake. Coexisting would need a
+// single path-routed upgrade dispatcher, not two independent listeners.
 if (import.meta._websocket) {
   const { handleUpgrade } = wsAdapter(nitroApp.h3App.websocket);
   server.on("upgrade", handleUpgrade);
