@@ -69,7 +69,9 @@ async function httpAccepts(url: string, timeoutMs: number): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal });
+    // Release the socket: this polls every 250ms and we read neither body.
+    await res.body?.cancel();
     return true;
   } catch {
     return false;
@@ -136,7 +138,15 @@ describe.skipIf(!hasBuild)(
 
     afterAll(async () => {
       const c = child;
-      if (!c || c.pid === undefined || c.exitCode !== null) return;
+      // Already gone if it exited (exitCode) or was signalled (signalCode);
+      // checking only exitCode would miss a SIGKILLed child and kill a dead group.
+      if (
+        !c ||
+        c.pid === undefined ||
+        c.exitCode !== null ||
+        c.signalCode !== null
+      )
+        return;
       const pid = c.pid;
       // Re-ref the child (unref'd at spawn) while awaiting its exit, so the event
       // loop cannot drain mid-teardown and leave an orphaned server -- the same

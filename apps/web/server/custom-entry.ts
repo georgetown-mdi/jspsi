@@ -56,7 +56,10 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
     process.exit(1);
   }
   // Eagerly warm the PeerJS signaling route now that the HTTP server is listening
-  // (so its address resolves) and registered below. The route runs usePeerServer()
+  // (so its address resolves). registerServer at the end of this module is
+  // synchronous, so it has already run by the time this callback fires on a later
+  // tick, and usePeerServer's getHttpServer() finds the registered server. The
+  // route runs usePeerServer()
   // -- which attaches the WebSocket `upgrade` handler -- only when first requested,
   // and the real client never requests it: it dials the signaling WebSocket with
   // an explicit, pre-derived id and skips the GET /api/peerjs/id. Without this the

@@ -42,6 +42,9 @@ function coldSignalingAttempt(
       }
       resolvePromise(ok);
     };
+    // `finish` closes over `timer` but is only ever invoked asynchronously (from a
+    // ws event or this timeout), so the reference is resolved well after this
+    // line; a `const` here keeps prefer-const happy without a TDZ in practice.
     const timer = setTimeout(() => finish(false), perAttemptMs);
     ws.on("message", (data: WebSocket.RawData) => {
       // Resolve only on the OPEN frame; ignore any other frame rather than
@@ -62,8 +65,11 @@ function coldSignalingAttempt(
 }
 
 /** Poll {@link coldSignalingAttempt} until signaling answers OPEN or `deadlineMs`
- * elapses; returns whether it opened. Used by the production signaling smoke test
- * to assert the built server warms signaling at startup. */
+ * elapses; returns whether it opened. `deadlineMs` bounds when polling stops, not
+ * total runtime: an attempt in flight when it passes runs to completion, so the
+ * call can overrun by up to one attempt (`perAttemptMs`) plus the inter-attempt
+ * sleep. Used by the production signaling smoke test to assert the built server
+ * warms signaling at startup. */
 export async function waitForColdSignaling(
   port: number,
   options: { deadlineMs: number; perAttemptMs?: number },
