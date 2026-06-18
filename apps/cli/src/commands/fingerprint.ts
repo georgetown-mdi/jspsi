@@ -2,7 +2,6 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import path from "node:path";
 import logLibrary from "loglevel";
-import YAML from "yaml";
 
 import {
   computeCertificateFingerprint,
@@ -15,6 +14,7 @@ import type { SigningIdentity } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import { expandTilde, FileExistsError, writeFileAtomic } from "../fileUtils";
+import { parseSensitiveYaml } from "../sensitiveFile";
 import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
@@ -117,15 +117,10 @@ export function readConfigHints(
         (err instanceof Error ? err.message : String(err)),
     );
   }
-  let raw: unknown;
-  try {
-    raw = YAML.parse(text);
-  } catch {
-    // A YAML parse failure embeds a snippet of the offending source, which can
-    // carry an inline connection credential, so report the path only (fail
-    // closed). See loadConfig in commands/exchange.ts for the same hazard.
-    throw new UsageError(`config file ${target} is not valid YAML`);
-  }
+  // The YAML parse can echo source bytes (an inline connection credential), so it
+  // routes through the sensitive-file chokepoint, which reports path-only (see
+  // sensitiveFile.ts).
+  const raw = parseSensitiveYaml(text, `config file ${target}`);
   const root = (raw ?? {}) as Record<string, unknown>;
   const signing = (root["signing"] ?? {}) as Record<string, unknown>;
   const linkageTerms = (root["linkage_terms"] ??

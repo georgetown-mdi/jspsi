@@ -199,4 +199,72 @@ describe("sanitizeErrorForDisplay", () => {
       ),
     ).toBe("outer\ncaused by: [object Object]");
   });
+
+  describe("private-key redaction backstop", () => {
+    const KEY_BODY = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
+
+    test("redacts a PEM private-key block embedded in a message", () => {
+      const pem = `-----BEGIN PRIVATE KEY-----\n${KEY_BODY}\n-----END PRIVATE KEY-----`;
+      const out = sanitizeErrorForDisplay(
+        new Error(`could not load key: ${pem}`),
+      );
+      expect(out).toContain("[redacted private key]");
+      expect(out).not.toContain(KEY_BODY);
+    });
+
+    test("redacts OpenSSH and other labelled private-key blocks", () => {
+      const pem = `-----BEGIN OPENSSH PRIVATE KEY-----\n${KEY_BODY}\n-----END OPENSSH PRIVATE KEY-----`;
+      const out = sanitizeErrorForDisplay(new Error(pem));
+      expect(out).not.toContain(KEY_BODY);
+    });
+
+    test("redacts a PKCS#8 ENCRYPTED PRIVATE KEY block and a key with no trailing newline", () => {
+      const enc = `-----BEGIN ENCRYPTED PRIVATE KEY-----\n${KEY_BODY}\n-----END ENCRYPTED PRIVATE KEY-----`;
+      expect(sanitizeErrorForDisplay(new Error(enc))).not.toContain(KEY_BODY);
+      // No newline between the body and the END marker.
+      const tight = `-----BEGIN PRIVATE KEY-----${KEY_BODY}-----END PRIVATE KEY-----`;
+      expect(sanitizeErrorForDisplay(new Error(tight))).not.toContain(KEY_BODY);
+    });
+
+    test("returns promptly on a long run of BEGIN markers with no END (no ReDoS)", () => {
+      // The block regex must not backtrack quadratically when many BEGIN markers
+      // appear with no closing END (partner-controlled error text). A naive lazy
+      // gap regex takes seconds on this input; the tempered lookahead keeps it
+      // linear. The dangling fallback then redacts from the first marker.
+      const evil = "-----BEGIN A PRIVATE KEY-----".repeat(20000);
+      const start = Date.now();
+      const out = sanitizeErrorForDisplay(new Error(evil));
+      expect(Date.now() - start).toBeLessThan(1000);
+      expect(out).toContain("[redacted private key]");
+    });
+
+    test("redacts a truncated block (BEGIN marker with no END)", () => {
+      // A key sliced into an error mid-stream has no END marker; the dangling
+      // fallback must still strip from the BEGIN marker onward.
+      const out = sanitizeErrorForDisplay(
+        new Error(`-----BEGIN RSA PRIVATE KEY-----\n${KEY_BODY}`),
+      );
+      expect(out).toContain("[redacted private key]");
+      expect(out).not.toContain(KEY_BODY);
+    });
+
+    test("redacts a private key carried on a cause-chain link", () => {
+      const inner = new Error(
+        `-----BEGIN PRIVATE KEY-----\n${KEY_BODY}\n-----END PRIVATE KEY-----`,
+      );
+      const out = sanitizeErrorForDisplay(
+        new Error("write failed", { cause: inner }),
+      );
+      expect(out).not.toContain(KEY_BODY);
+    });
+
+    test("leaves ordinary base64url-shaped values (e.g. fingerprints) intact", () => {
+      // The backstop must NOT scrub by shape: a host-key fingerprint is shown to
+      // the operator on purpose and shares the shared-secret's character set.
+      const fingerprint = "SHA256:abcDEF0123456789_-ghijklmnopqrstuvwxyzABCD";
+      expect(
+        sanitizeErrorForDisplay(new Error(`host key ${fingerprint}`)),
+      ).toContain(fingerprint);
+    });
+  });
 });

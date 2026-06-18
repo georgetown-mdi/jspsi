@@ -279,11 +279,13 @@ test("throws a UsageError with 'does not exist' when key file is absent", () => 
   expect(() => loadConfig(baseOptions())).toThrow("does not exist");
 });
 
-test("throws a UsageError with 'malformed' when key file contains invalid JSON", () => {
+test("throws a UsageError when key file contains invalid JSON", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   fs.writeFileSync(keyFile, "not-json");
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
-  expect(() => loadConfig(baseOptions())).toThrow("malformed");
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "could not be parsed as JSON",
+  );
 });
 
 test("throws a UsageError with 'malformed' when key file fails schema validation", () => {

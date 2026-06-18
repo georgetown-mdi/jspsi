@@ -95,7 +95,7 @@ test("loadKeyFile does not echo file content on an invalid-JSON key file", () =>
   }
   expect(caught).toBeInstanceOf(UsageError);
   expect((caught as Error).message).toContain(keyPath);
-  expect((caught as Error).message).toContain("malformed");
+  expect((caught as Error).message).toContain("could not be parsed as JSON");
   expect((caught as Error).message).not.toContain(MARKER);
 });
 

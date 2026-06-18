@@ -76,6 +76,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 
 ### Security
 
+- A malformed operator config (`psilink.yaml`) or credential file (`.psilink.key`, the signing identity) no longer echoes its own contents into CLI error messages or stderr, so an inline SFTP credential, the shared secret, or a private key cannot leak from a 0600 file into logs or bug reports. Parse errors report the file path only. As a backstop, displayed errors also redact any embedded PEM/OpenSSH private-key block.
 - Recurring CLI exchanges (`sftp`/`filedrop`) are now encrypted end-to-end on the wire with an application-layer AEAD, so a directory or server administrator sees only ciphertext. See `docs/spec/CHANNEL_SECURITY.md`.
 - Web exchanges run the X25519 authenticated key exchange before any PSI data, so each party authenticates the peer and an expired or untrusted credential fails closed; a web exchange is single-use and persists no key file. Transport confidentiality on the web path is provided by DTLS -- the application-layer AEAD is not yet applied there, so the session key currently serves only to authenticate. See `docs/SECURITY_DESIGN.md`.
 - Invitation tokens carry a bounded lifetime (default 1 hour, now including web-generated ones); rotation tokens carry no expiry unless `token_max_age_days` is set. See `docs/SECURITY_DESIGN.md`.

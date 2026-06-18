@@ -10,6 +10,7 @@ import {
 import type { SigningIdentity } from "@psilink/core";
 
 import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
+import { parseSensitiveJson } from "./sensitiveFile";
 
 // File custody for the long-lived signing identity (private key + self-signed
 // certificate). Kept in its OWN file, separate from the rotating key file
@@ -43,14 +44,12 @@ export function defaultSigningIdentityPath(): string {
 export function loadSigningIdentity(
   identityPath: string,
 ): SigningIdentity | undefined {
-  // Read and parse in two steps. A filesystem read failure carries only a path
-  // and errno (no file content), safe to surface. A JSON parse failure can echo
-  // a snippet of the source, and this file holds the Ed25519 private key, so it
-  // reports the path only (fail closed) -- suppressing the parser's message
-  // entirely rather than relying on how much of the source it includes.
-  // parseSigningIdentity's schema error names paths and types, never the key
-  // value, so it is kept. (Mirrors the config readers; see loadConfig in
-  // commands/exchange.ts.)
+  // Read, then parse through the sensitive-file chokepoint. A read failure
+  // carries only a path and errno (no file content), safe to surface. The JSON
+  // parse can echo a span of the source, and this file holds the Ed25519 private
+  // key, so it routes through parseSensitiveJson, which reports path-only (see
+  // sensitiveFile.ts). parseSigningIdentity's schema error names paths and types,
+  // never the key value, so it is kept.
   let source: string;
   try {
     source = fs.readFileSync(identityPath, "utf8");
@@ -61,14 +60,7 @@ export function loadSigningIdentity(
         (err instanceof Error ? err.message : String(err)),
     );
   }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(source);
-  } catch {
-    throw new UsageError(
-      `signing identity at ${identityPath} could not be parsed as JSON`,
-    );
-  }
+  const raw = parseSensitiveJson(source, `signing identity at ${identityPath}`);
   let identity: SigningIdentity;
   try {
     identity = parseSigningIdentity(raw);

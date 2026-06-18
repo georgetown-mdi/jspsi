@@ -425,7 +425,7 @@ test.each([
     caught = err;
   }
   expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain("is not valid YAML");
+  expect((caught as Error).message).toContain("could not be parsed as YAML");
   expect((caught as Error).message).not.toContain(SECRET);
 });
 
