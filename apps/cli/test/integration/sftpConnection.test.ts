@@ -175,7 +175,10 @@ afterAll(async () => {
   await Promise.all([clientConn.close(), serverConn.close()]);
   await cleanServer();
   // Removed after close() drains/sweeps the pair's files (above), not before.
-  await fs.rm(pairLocalDir, { recursive: true, force: true });
+  // Guarded: if beforeAll threw before mkdtemp assigned it, there is nothing to
+  // remove and fs.rm(undefined) would throw a TypeError that masks the real
+  // beforeAll failure (force suppresses a missing path, not a bad argument).
+  if (pairLocalDir) await fs.rm(pairLocalDir, { recursive: true, force: true });
 });
 
 // to test race condition, Promise.all is used when synchronizing
