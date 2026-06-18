@@ -42,7 +42,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Ask the OS for a free loopback TCP port so this server never collides with
- * the shared globalSetup dev server (or anything else). */
+ * the shared globalSetup dev server (or anything else). There is a small,
+ * accepted TOCTOU window between closing this probe and the spawned server's own
+ * bind; nothing here contends for ephemeral ports (the dev server uses a fixed
+ * port), so a collision is improbable, and waitForRoot surfaces it promptly as an
+ * early-exit error rather than a confusing readiness timeout. */
 function getFreePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
     const probe = createServer();
@@ -68,9 +72,17 @@ async function httpAccepts(url: string, timeoutMs: number): Promise<boolean> {
   }
 }
 
-async function waitForRoot(url: string): Promise<void> {
+async function waitForRoot(url: string, proc: ChildProcess): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
+    // Surface an early exit (a port collision, a missing/broken build) with its
+    // real cause, instead of polling a server that is never coming up until the
+    // readiness deadline and then reporting a misleading timeout.
+    if (proc.exitCode !== null || proc.signalCode !== null)
+      throw new Error(
+        `production server exited before becoming ready ` +
+          `(code ${proc.exitCode}, signal ${proc.signalCode})`,
+      );
     if (await httpAccepts(url, 1_000)) return;
     if (Date.now() >= deadline)
       throw new Error(`production server did not answer ${url} in time`);
@@ -95,16 +107,17 @@ describe.skipIf(!hasBuild)(
         PORT: String(port),
         NITRO_HOST: "127.0.0.1",
       };
-      child = spawn("node", [prodEntry], {
+      const proc = spawn("node", [prodEntry], {
         cwd: webRoot,
         env,
         detached: true,
         stdio: "ignore",
       });
-      child.unref();
+      child = proc;
+      proc.unref();
 
       let launchError: Error | undefined;
-      child.once("error", (err) => {
+      proc.once("error", (err) => {
         launchError = err;
       });
       await new Promise<void>((r) => setImmediate(r));
@@ -112,7 +125,7 @@ describe.skipIf(!hasBuild)(
 
       // Readiness is the ROOT route only -- deliberately not /api/peerjs/*, which
       // would warm signaling and defeat the test.
-      await waitForRoot(`http://127.0.0.1:${port}/`);
+      await waitForRoot(`http://127.0.0.1:${port}/`, proc);
     }, READY_TIMEOUT_MS + 10_000);
 
     afterAll(async () => {

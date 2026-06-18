@@ -49,8 +49,13 @@ async function warmPeerSignaling(port: number): Promise<void> {
   for (;;) {
     try {
       const res = await fetch(url);
-      if (res.ok && res.headers.get("content-type")?.includes("text/plain"))
-        return;
+      const ready =
+        res.ok && !!res.headers.get("content-type")?.includes("text/plain");
+      // Release the socket: we read only status/headers, never the body. Left
+      // unconsumed, undici holds the socket open until GC, and the SPA-fallback
+      // retries (before the route module compiles) hit this path repeatedly.
+      await res.body?.cancel();
+      if (ready) return;
     } catch {
       // Server still coming up; fall through to the deadline check and retry.
     }
@@ -154,9 +159,17 @@ export default defineConfig((_configEnv) => {
                   registerServer(server.httpServer);
                   // Once listening, warm the signaling module so its WebSocket
                   // `upgrade` handler is attached before any peer dials it (see
-                  // warmPeerSignaling).
+                  // warmPeerSignaling). Read the actual bound port: Vite does not
+                  // set strictPort, so if config.PORT is occupied it auto-
+                  // increments, and config.PORT would then warm the wrong port,
+                  // leaving the handler unattached.
                   server.httpServer.once("listening", () => {
-                    void warmPeerSignaling(config.PORT);
+                    const address = server.httpServer?.address();
+                    const boundPort =
+                      typeof address === "object" && address
+                        ? address.port
+                        : config.PORT;
+                    void warmPeerSignaling(boundPort);
                   });
                 } else {
                   console.warn("http server is undefined");
