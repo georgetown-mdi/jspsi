@@ -55,6 +55,20 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
     console.error(err);
     process.exit(1);
   }
+  // Eagerly warm the PeerJS signaling route now that the HTTP server is listening
+  // (so its address resolves) and registered below. The route runs usePeerServer()
+  // -- which attaches the WebSocket `upgrade` handler -- only when first requested,
+  // and the real client never requests it: it dials the signaling WebSocket with
+  // an explicit, pre-derived id and skips the GET /api/peerjs/id. Without this the
+  // upgrade goes unhandled and the peer reports "Lost connection to server."
+  // localFetch dispatches in-process through the nitro app (no real socket), so it
+  // is independent of bind type (TCP, TLS, unix socket) and of this entry's own
+  // module-alias resolution.
+  void nitroApp
+    .localFetch("/api/peerjs/id")
+    .catch((warmErr: unknown) =>
+      log.warn("peer signaling warm-up failed:", warmErr),
+    );
   const protocol = cert && key ? "https" : "http";
   const addressInfo = listener.address() as AddressInfo;
   if (typeof addressInfo === "string") {
