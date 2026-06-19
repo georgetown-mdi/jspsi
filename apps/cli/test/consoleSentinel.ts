@@ -17,6 +17,12 @@
  * complements -- it does not replace -- the per-test `withCapturedLogs`
  * capture-and-assert.
  *
+ * Known limitations (accepted): it gates the three `console` methods, not raw
+ * `process.stdout`/`process.stderr.write`, so a library that writes a file
+ * descriptor directly is not seen; and output that lands after the file-level
+ * afterAll flush settles is not caught (see {@link flushPendingConsole}). Both
+ * are out of scope unless a real offender appears.
+ *
  * @internal -- test infrastructure, used by the integration setup file and the
  * sentinel's own unit tests.
  */
@@ -66,19 +72,37 @@ const MAX_REPORTED_VIOLATIONS = 20;
 // (so a matcher reads the literal logged text); a non-string is inspected rather
 // than `String()`-coerced, so an object records as `{ key: 'value' }` instead of
 // the useless `[object Object]` a matcher could never usefully match.
-// `breakLength: Infinity` keeps each argument on one line.
+// `breakLength: Infinity` keeps each argument on one line. `inspect` can throw on
+// a hostile arg (e.g. a custom `util.inspect.custom` hook that throws), so it is
+// guarded: this runs inside the wrapped console call, and a throw here would turn
+// a benign log into a thrown exception that fails an unrelated test and skips the
+// pass-through. A formatting failure must never do that, so fall back.
 function formatArgs(args: unknown[]): string {
   return args
-    .map((arg) =>
-      typeof arg === "string" ? arg : inspect(arg, { breakLength: Infinity }),
-    )
+    .map((arg) => {
+      if (typeof arg === "string") return arg;
+      try {
+        return inspect(arg, { breakLength: Infinity });
+      } catch {
+        return "[uninspectable]";
+      }
+    })
     .join(" ");
 }
 
+// Apply one matcher to a message. A throwing matcher (a buggy function predicate;
+// the regex form cannot throw) is treated as a non-match rather than allowed to
+// propagate: a throw out of here would crash the file-level assertClean and mask
+// every real violation, whereas counting it as non-matching keeps the gate
+// fail-safe -- the line stays un-allowlisted and the run fails loudly.
 function matchEntry(entry: ConsoleAllowEntry, message: string): boolean {
-  return entry.match instanceof RegExp
-    ? entry.match.test(message)
-    : entry.match(message);
+  try {
+    return entry.match instanceof RegExp
+      ? entry.match.test(message)
+      : entry.match(message);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -136,6 +160,11 @@ export class ConsoleSentinel {
   install(target: ConsoleLike = console): void {
     if (this.target) throw new Error("ConsoleSentinel is already installed");
     this.target = target;
+    // A fresh install is a fresh observation window: drop any lines recorded in a
+    // prior install/restore cycle so they cannot be attributed to this one. (The
+    // integration setup installs exactly once per worker; this only matters for a
+    // reused instance, e.g. a shared fixture or unit test.)
+    this.recorded.length = 0;
     for (const level of this.gatedLevels) {
       const original = target[level].bind(target) as (
         ...args: unknown[]
@@ -156,6 +185,12 @@ export class ConsoleSentinel {
     }
     this.originals.clear();
     this.target = null;
+  }
+
+  /** How many console lines have been recorded so far. Lets a caller settle
+   * trailing async output by flushing until this count stops growing. */
+  recordedCount(): number {
+    return this.recorded.length;
   }
 
   // A pure evaluation of the recorded lines against the allowlist: which lines
@@ -229,6 +264,14 @@ export class ConsoleSentinel {
  * callback (`setImmediate`) -- with the microtask queue draining automatically
  * between them -- attributes such a late line to this file rather than
  * misattributing it to the following test (or leaking it into the next file).
+ *
+ * This is one drain step, not a guarantee: output that lands more than `timerMs`
+ * after the last drain still escapes -- a finite afterAll cannot wait
+ * unboundedly. The setup file calls this in a settle loop (drain until the
+ * recorded count stops growing, up to a cap) so a teardown that emits in waves
+ * is caught; a lone line arriving past the budget is the residual gap. The
+ * sentinel's firm guarantee is for synchronous output and output within the
+ * settle budget.
  *
  * Node-only: relies on `setImmediate`, which is not in the DOM lib.
  */

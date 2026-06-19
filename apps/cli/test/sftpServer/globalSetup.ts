@@ -58,11 +58,13 @@ export default async function setup({
       `${server.handle.host}:${server.handle.port}`,
   );
   return async () => {
-    await server.stop();
     try {
+      await server.stop();
       reportDeadAllowlistEntries(sentinelSink);
     } finally {
-      // Always reclaim the temp dir, even if the advisory report throws.
+      // Always reclaim the temp dir, even if server.stop() rejects (the native
+      // chroot leg can fail to remove its root-owned jail) or the advisory report
+      // throws -- otherwise an orphaned /tmp dir leaks on every such run.
       fs.rmSync(sentinelSinkDir, { recursive: true, force: true });
     }
   };

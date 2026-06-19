@@ -231,4 +231,71 @@ describe("ConsoleSentinel", () => {
     expect(seen).toEqual(["log:still printed", "log:after restore"]);
     expect(sentinel.violations()).toHaveLength(1);
   });
+
+  it("does not throw out of the wrapped call when inspect throws", () => {
+    // A formatting failure inside the wrapper would turn a benign log into a
+    // thrown exception that fails an unrelated test and skips pass-through.
+    const hostile = {
+      [Symbol.for("nodejs.util.inspect.custom")]() {
+        throw new Error("inspect boom");
+      },
+    };
+    let passedThrough = false;
+    const fake: ConsoleLike = {
+      log: () => {},
+      warn: () => {
+        passedThrough = true;
+      },
+      error: () => {},
+    };
+    const sentinel = new ConsoleSentinel([]);
+    sentinel.install(fake);
+
+    expect(() => fake.warn("ctx", hostile)).not.toThrow();
+    expect(passedThrough).toBe(true);
+    expect(sentinel.violations()[0].message).toBe("ctx [uninspectable]");
+    sentinel.restore();
+  });
+
+  it("treats a throwing matcher as a non-match instead of crashing", () => {
+    // A buggy matcher must not crash assertClean and mask every real violation.
+    const allowlist: ConsoleAllowEntry[] = [
+      {
+        id: "throwing",
+        levels: ["warn"],
+        match: () => {
+          throw new Error("matcher boom");
+        },
+        reason: "buggy matcher",
+      },
+    ];
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel(allowlist);
+    sentinel.install(fake);
+
+    fake.warn("some line");
+
+    // The line stays un-allowlisted (fail-safe) and the matcher error does not
+    // propagate -- assertClean throws the sentinel's own error, not "matcher boom".
+    expect(() => sentinel.assertClean()).toThrowError(/un-allowlisted/);
+    expect(sentinel.unusedAllowlistIds()).toEqual(["throwing"]);
+    sentinel.restore();
+  });
+
+  it("starts a fresh observation window on re-install", () => {
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel([]);
+    sentinel.install(fake);
+    fake.warn("from the first window");
+    expect(sentinel.recordedCount()).toBe(1);
+    sentinel.restore();
+
+    sentinel.install(fake);
+    expect(sentinel.recordedCount()).toBe(0);
+    fake.warn("from the second window");
+    expect(sentinel.violations().map((v) => v.message)).toEqual([
+      "from the second window",
+    ]);
+    sentinel.restore();
+  });
 });
