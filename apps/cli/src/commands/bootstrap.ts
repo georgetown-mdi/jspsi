@@ -1164,6 +1164,12 @@ export function connectionOverridesFrom(
  * (post-override), `zero-setup` from the server URL (pre-connection). A file-sync
  * channel warns for neither flag. Shared so the wording cannot drift between the
  * two commands.
+ *
+ * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
+ * ignored options above, it is a hard error on a non-file-sync channel (the
+ * URL-driven commands reject a webrtc URL before overrides apply, and
+ * applyConnectionOverrides throws on a webrtc config), so it needs no
+ * "ignored" warning -- a warning here would falsely promise it was tolerated.
  */
 export function warnUnsupportedFileSyncFlags(
   channel: ConnectionConfig["channel"],
