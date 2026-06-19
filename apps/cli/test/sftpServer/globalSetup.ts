@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { ProvidedContext } from "vitest";
 
+import { deadAllowlistEntries } from "../consoleSentinel";
 import { INTEGRATION_CONSOLE_ALLOWLIST } from "../integration/consoleAllowlist";
 import {
   selectedBackend,
@@ -84,21 +85,13 @@ export default async function setup({
 // is advisory anyway, even a hypothetical under-count would only drop a warning,
 // never fail the run.
 function reportDeadAllowlistEntries(sink: string): void {
-  let matched: Set<string>;
+  let contents: string;
   try {
-    matched = new Set(
-      fs
-        .readFileSync(sink, "utf8")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0),
-    );
+    contents = fs.readFileSync(sink, "utf8");
   } catch {
     return;
   }
-  const dead = INTEGRATION_CONSOLE_ALLOWLIST.filter(
-    (entry) => !matched.has(entry.id),
-  );
+  const dead = deadAllowlistEntries(contents, INTEGRATION_CONSOLE_ALLOWLIST);
   if (dead.length === 0) return;
   console.warn(
     `[console-sentinel] ${dead.length} allowlist matcher(s) never fired this ` +

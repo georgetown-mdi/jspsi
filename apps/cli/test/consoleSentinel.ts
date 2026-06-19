@@ -279,3 +279,25 @@ export async function flushPendingConsole(timerMs = 25): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, timerMs));
   await new Promise((resolve) => setImmediate(resolve));
 }
+
+/**
+ * Given the raw contents of the cross-file matched-id sink (one matched id per
+ * line, appended by each worker) and the allowlist, returns the entries no
+ * worker matched -- the dead-entry candidates the suite teardown reports. Parses
+ * defensively: blank lines are dropped and each line is trimmed, so a torn or
+ * empty append cannot be mistaken for an id (it also matches the constructor's
+ * id guard, which forbids the newline/whitespace that parsing would mangle).
+ * Pure, so it is unit-tested directly; the teardown supplies the file contents.
+ */
+export function deadAllowlistEntries(
+  sinkContents: string,
+  allowlist: readonly ConsoleAllowEntry[],
+): ConsoleAllowEntry[] {
+  const matched = new Set(
+    sinkContents
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+  );
+  return allowlist.filter((entry) => !matched.has(entry.id));
+}

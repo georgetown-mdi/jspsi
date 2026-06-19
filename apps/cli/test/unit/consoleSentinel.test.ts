@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ConsoleSentinel,
+  deadAllowlistEntries,
   flushPendingConsole,
   type ConsoleAllowEntry,
   type ConsoleLike,
@@ -22,9 +23,57 @@ describe("ConsoleSentinel", () => {
 
     fake.warn("unexpected diagnostic");
 
+    expect(sentinel.violations()).toEqual([
+      { level: "warn", message: "unexpected diagnostic" },
+    ]);
     expect(() => sentinel.assertClean()).toThrowError(
       /un-allowlisted console line/,
     );
+    sentinel.restore();
+  });
+
+  it("treats a level-mismatched matcher as not accepting the line", () => {
+    // The level filter is load-bearing: an entry scoped to one level must not
+    // accept a same-text line emitted at another level, or the gate has a hole.
+    const allowlist: ConsoleAllowEntry[] = [
+      {
+        id: "error-only",
+        levels: ["error"],
+        match: /shared text/,
+        reason: "scoped to error",
+      },
+    ];
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel(allowlist);
+    sentinel.install(fake);
+
+    fake.warn("a line with shared text at warn level");
+
+    // The warn line is NOT accepted by the error-scoped matcher: it is a
+    // violation, and the matcher stays unused.
+    expect(sentinel.violations()).toEqual([
+      { level: "warn", message: "a line with shared text at warn level" },
+    ]);
+    expect(sentinel.unusedAllowlistIds()).toEqual(["error-only"]);
+    sentinel.restore();
+  });
+
+  it("credits every matcher that accepts a line, not just the first", () => {
+    // evaluate() deliberately does not short-circuit: a line covered by two
+    // matchers credits both, so neither is misreported as a dead entry.
+    const allowlist: ConsoleAllowEntry[] = [
+      { id: "first", levels: ["warn"], match: /shared/, reason: "matches" },
+      { id: "second", levels: ["warn"], match: /line/, reason: "also matches" },
+    ];
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel(allowlist);
+    sentinel.install(fake);
+
+    fake.warn("a shared line");
+
+    expect(() => sentinel.assertClean()).not.toThrow();
+    expect(sentinel.matchedAllowlistIds().sort()).toEqual(["first", "second"]);
+    expect(sentinel.unusedAllowlistIds()).toEqual([]);
     sentinel.restore();
   });
 
@@ -126,12 +175,14 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
-  it("attributes an async-late line at the afterAll flush, not before", async () => {
+  it("surfaces an async-late line at the flush, not at the synchronous boundary", async () => {
     // Models the "Global ... listener" teardown lines: emitted on an async event
-    // a tick after the test that triggered the teardown returns. A per-test
-    // assertion run synchronously at that test's end would miss it; only the
-    // file-level afterAll flush surfaces it -- attributing it to the file rather
-    // than misattributing it to whatever ran next.
+    // a tick after the test that triggered the teardown returns. This proves the
+    // flush is what catches such a line -- absent at the synchronous boundary,
+    // present after flushPendingConsole. (The file-level vs per-test SCOPING that
+    // keeps the line from being blamed on the next test is a property of the
+    // integration setup's afterAll placement, exercised by the integration run,
+    // not this unit.)
     const fake = fakeConsole();
     const sentinel = new ConsoleSentinel([]);
     sentinel.install(fake);
@@ -173,7 +224,7 @@ describe("ConsoleSentinel", () => {
             reason: "uses the y flag",
           },
         ]),
-    ).toThrow();
+    ).toThrowError(/stateful regex flag/);
   });
 
   it("rejects an id the sink round-trip would alter at construction", () => {
@@ -297,5 +348,38 @@ describe("ConsoleSentinel", () => {
       "from the second window",
     ]);
     sentinel.restore();
+  });
+});
+
+describe("deadAllowlistEntries", () => {
+  const allowlist: ConsoleAllowEntry[] = [
+    { id: "alpha", levels: ["warn"], match: /a/, reason: "a" },
+    { id: "beta", levels: ["warn"], match: /b/, reason: "b" },
+    { id: "gamma", levels: ["warn"], match: /c/, reason: "c" },
+  ];
+
+  it("reports entries whose id is absent from the sink", () => {
+    const dead = deadAllowlistEntries("alpha\n", allowlist).map((e) => e.id);
+    expect(dead).toEqual(["beta", "gamma"]);
+  });
+
+  it("reports nothing when every id is present", () => {
+    expect(deadAllowlistEntries("alpha\nbeta\ngamma\n", allowlist)).toEqual([]);
+  });
+
+  it("ignores blank lines, surrounding whitespace, and unknown ids", () => {
+    // A torn or padded append must not be mistaken for an id, and an id from a
+    // since-removed entry must not break the diff.
+    const sink = "\n  alpha  \n\n  \nbeta\nstale-removed-id\n";
+    const dead = deadAllowlistEntries(sink, allowlist).map((e) => e.id);
+    expect(dead).toEqual(["gamma"]);
+  });
+
+  it("treats empty sink contents as all entries dead", () => {
+    expect(deadAllowlistEntries("", allowlist).map((e) => e.id)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
   });
 });
