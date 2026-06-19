@@ -24,10 +24,10 @@ import type { InvitationToken } from "@psilink/core";
 // Stub the dialing exchange: this suite verifies the consent GATE -- that the
 // exchange mounts only after consent -- not the exchange itself, which would
 // pull in peerjs and the PSI WASM and set up a rendezvous. A test-controlled
-// marker keeps the assertion independent of the real Exchange's UI. (vitest
+// marker keeps the assertion independent of the real ExchangeView's UI. (vitest
 // hoists vi.mock above the imports, so the container picks up the stub.)
-vi.mock("@components/Exchange", () => ({
-  Exchange: () =>
+vi.mock("@components/ExchangeView", () => ({
+  ExchangeView: () =>
     createElement("div", { "data-testid": "exchange-mounted" }, "exchange"),
 }));
 

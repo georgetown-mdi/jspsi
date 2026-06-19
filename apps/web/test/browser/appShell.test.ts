@@ -29,8 +29,8 @@ import type { InvitationToken } from "@psilink/core";
 // rendezvous); this suite only renders the static shell and the routes' initial
 // outline. Mirrors acceptConsentGate.test.ts -- vitest hoists vi.mock above the
 // imports, so HomePage's InvitePanel and AcceptInvitation pick up the stub.
-vi.mock("@components/Exchange", () => ({
-  Exchange: () =>
+vi.mock("@components/ExchangeView", () => ({
+  ExchangeView: () =>
     createElement("div", { "data-testid": "exchange-mounted" }, "exchange"),
 }));
 

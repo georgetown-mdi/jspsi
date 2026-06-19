@@ -16,10 +16,21 @@ interface FileSelectProps extends PaperProps {
   files: Array<File>;
   setFiles: (acceptedFiles: Array<File>) => void;
   submitted: boolean;
+  /** Label for the submit button. Required (no hardcoded default) so each phase
+   * naming this dropzone -- file-acquire today, the compose/review screens next
+   * -- states its own action rather than inheriting a stale "Start". */
+  submitLabel: string;
 }
 
 export default function FileSelect(props: FileSelectProps) {
-  const { handleSubmit, files, setFiles, submitted, ...paperProps } = props;
+  const {
+    handleSubmit,
+    files,
+    setFiles,
+    submitted,
+    submitLabel,
+    ...paperProps
+  } = props;
 
   const handleDrop = (acceptedFiles: Array<File>) => {
     setFiles(acceptedFiles);
@@ -108,7 +119,7 @@ export default function FileSelect(props: FileSelectProps) {
             disabled={files.length === 0 || submitted}
             onClick={handleSubmit}
           >
-            Start
+            {submitLabel}
           </Button>
         </Group>
       </Stack>
