@@ -31,7 +31,10 @@ import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { configureLogFile, promptConfirm } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
-import { checkLinkageSatisfiability as preflightLinkageSatisfiability } from "./linkagePreflight";
+import {
+  checkLinkageSatisfiability,
+  type LinkagePreflightMessaging,
+} from "./linkagePreflight";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   addCommonBootstrapOptions,
@@ -290,7 +293,12 @@ export async function validateAccept(params: {
     // accept reads its y/N confirmation from stdin (promptConfirm), so it cannot
     // also take the CSV there: reject `-` rather than starve the prompt.
     const rows = await loadInputRows(input, { allowStdin: false });
-    checkLinkageSatisfiability(rows.columns, myTerms, log);
+    checkLinkageSatisfiability(
+      rows.columns,
+      myTerms,
+      log,
+      INVITATION_PREFLIGHT_MESSAGING,
+    );
     const { dataSpec, warnings } = buildDataSpec({
       terms: myTerms,
       identity: myIdentity,
@@ -322,7 +330,12 @@ export async function validateAccept(params: {
       ? await loadInputRows(resolved.input, { allowStdin: false })
       : undefined;
   if (rows !== undefined)
-    checkLinkageSatisfiability(rows.columns, myTerms, log);
+    checkLinkageSatisfiability(
+      rows.columns,
+      myTerms,
+      log,
+      INVITATION_PREFLIGHT_MESSAGING,
+    );
   const { dataSpec, warnings } = buildDataSpec({
     terms: myTerms,
     identity: myIdentity,
@@ -453,26 +466,17 @@ function reconcileAcceptConfig(params: {
 
 // --- Linkage preflight -------------------------------------------------------
 
-// Check that the acceptor's columns can satisfy the adopted linkage terms.
-// When no key is satisfiable, throws a UsageError (the exchange would produce
-// a silent empty result). When some keys are unsatisfiable, warns and proceeds.
-function checkLinkageSatisfiability(
-  columns: string[],
-  terms: LinkageTerms,
-  log: ReturnType<typeof getLogger>,
-): void {
-  // No standardization is passed: the acceptor adopts only the inviter's
-  // linkage terms and infers its standardization from its own CSV (default
-  // type-based pipelines, which never remap a column onto a field whose type is
-  // absent), so a purely type-based check matches the acceptor's exchange-time
-  // satisfiability exactly. The standardization argument is for the exchange
-  // path, whose committed config can carry an explicit column remapping.
-  preflightLinkageSatisfiability(columns, terms, log, {
-    source: "invitation",
-    blockRemedy:
-      "or ask your partner for an invitation with different linkage terms.",
-  });
-}
+// Accept adopts only the inviter's linkage terms and infers its standardization
+// and metadata from its own CSV (default type-based pipelines, which never remap a
+// column onto a field whose type is absent), so it passes neither override to the
+// shared check and relies on name inference -- which matches the acceptor's
+// exchange-time satisfiability exactly. The override arguments exist for the
+// exchange path, whose committed config can carry a remap or an explicit type.
+const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
+  source: "invitation",
+  blockRemedy:
+    "or ask your partner for an invitation with different linkage terms.",
+};
 
 // --- Handler -----------------------------------------------------------------
 

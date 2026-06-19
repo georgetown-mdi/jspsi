@@ -545,19 +545,16 @@ export async function prepareDataset(
   const columns = csvResult.meta.fields ?? [];
 
   // Pre-flight this run's CSV against the committed linkage terms before any
-  // exchange work, the same satisfiability gate accept applies at accept time.
-  // The recurring `exchange` path is otherwise unguarded: prepared.warnings never
-  // covers the adopt-the-inviter's-terms case (prepareForExchange warns only when
-  // an explicit standardization spec is supplied), so without this a run whose CSV
-  // no longer satisfies the agreed terms -- a swapped CSV, or one never checked at
-  // an offline accept -- would proceed to a silent empty result that is
-  // byte-indistinguishable from a real empty intersection. Only the config's
-  // explicit linkageTerms are gated: when absent, prepareForExchange derives
-  // default terms from this CSV's own columns, which it satisfies by construction.
-  // The config's standardization and metadata are fed in so the check resolves
-  // fields exactly as prepareForExchange will -- an explicit column remap or an
-  // explicit column type does not get mis-flagged (accept passes neither; see its
-  // comment).
+  // exchange work, the same satisfiability gate accept applies. This is the only
+  // place that catches it on the recurring path: prepared.warnings never covers the
+  // adopt-the-inviter's-terms case (prepareForExchange warns only on an explicit
+  // standardization spec), so a run whose CSV no longer satisfies the agreed terms
+  // -- a swapped CSV, or one never checked at an offline accept -- would otherwise
+  // reach a silent empty result indistinguishable from a real non-match. Gated on
+  // explicit linkageTerms only: the guard targets the operator's committed terms,
+  // not the default terms derived from the CSV when none are committed. The config's
+  // standardization and metadata are passed so the verdict matches what
+  // prepareForExchange resolves (accept passes neither).
   if (exchangeDataSpec.linkageTerms !== undefined)
     checkLinkageSatisfiability(
       columns,
