@@ -403,6 +403,108 @@ test("validateAccept: online does not warn about a --server-* override (it is ap
   }
 });
 
+test("validateAccept: offline warns that a connection-options override is ignored", async () => {
+  // The offline path builds the connection block from connectionFromEndpoint
+  // (placeholder or endpoint seed), which has no `options` block, so a
+  // connection-options override cannot take effect; it must be surfaced with a
+  // remedy pointing at connection.options, distinct from the server warning.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const log = getLogger("accept-offline-opt-override-warn");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions({ retainFiles: true }),
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].includes("--retain-files") &&
+          c[0].includes("connection.options"),
+      ),
+    ).toBe(true);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: offline does not warn about connection.options when no options flag is set", async () => {
+  // No connection-options flag is set, so the connection.options warning must
+  // stay silent on the offline accept path.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const log = getLogger("accept-offline-no-opt-warn");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions(),
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    expect(
+      warnSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes("connection.options"),
+      ),
+    ).toBe(false);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: online does not warn about a connection-options override (it is applied)", async () => {
+  // The online path builds the connection from the URL through
+  // applyConnectionOverrides, so a connection-options override takes effect and
+  // no ignored-override warning is emitted.
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-accept-online-opt-override-"),
+  );
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  const log = getLogger("accept-online-opt-override-nowarn");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({
+        configFile: path.join(dir, "psilink.yaml"),
+        keyFile: path.join(dir, ".psilink.key"),
+        maxReconnectAttempts: 5,
+      }),
+      log,
+    });
+    expect(ready.mode).toBe("online");
+    if (ready.mode !== "online") return;
+    expect(ready.connection.options?.maxReconnectAttempts).toBe(5);
+    expect(
+      warnSpy.mock.calls.some(
+        (c) => typeof c[0] === "string" && c[0].includes("connection.options"),
+      ),
+    ).toBe(false);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- reconciling a pre-existing config ---------------------------------------
 
 /** Write a config whose linkage terms agree with the invitation's by default

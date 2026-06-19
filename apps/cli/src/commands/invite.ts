@@ -46,6 +46,7 @@ import {
   runOnlineBootstrap,
   runOrExit,
   unsatisfiedLinkageFields,
+  warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   type CommonBootstrapOptions,
   type ResolvedDataSpec,
@@ -311,11 +312,14 @@ export async function validateInvite(params: {
     };
   }
 
-  // Offline: the server-block overrides (--server-* and --outbound-path) cannot
-  // take effect (the connection block is written as a placeholder to edit, not
-  // built from a URL), so warn rather than drop a deliberately-passed flag
-  // silently.
+  // Offline: the server-block overrides (--server-* and --outbound-path) and the
+  // connection-options overrides (timeouts, --max-reconnect-attempts, the
+  // file-sync toggles) cannot take effect (the connection block is written as a
+  // placeholder to edit, not built from a URL), so warn rather than drop a
+  // deliberately-passed flag silently. Two diagnostics: the server block and the
+  // connection.options block have distinct remedies.
   warnServerOverridesIgnoredOffline(options, log);
+  warnOptionsOverridesIgnoredOffline(options, log);
 
   // Offline. Linkage terms come from a pre-existing config when one is present
   // at the config path, and are inferred from the input file otherwise.

@@ -33,6 +33,7 @@ import {
   parseCommonBootstrapArgs,
   runOnlineBootstrap,
   runOrExit,
+  warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
   type RunnableConnectionConfig,
@@ -360,6 +361,60 @@ test("warnServerOverridesIgnoredOffline: one warning names every set flag", () =
 test("warnServerOverridesIgnoredOffline: stays silent when no override is set", () => {
   const warnings: string[] = [];
   warnServerOverridesIgnoredOffline({}, { warn: (m) => warnings.push(m) });
+  expect(warnings).toEqual([]);
+});
+
+// Each connection-OPTIONS override flag, paired with the option field that
+// carries it, so the parametrized test below proves every one is named when set
+// offline. Covers both the SharedOptions timeouts/reconnect bound and the
+// FileSyncOptions toggles -- the offline placeholder has no `options` block on
+// any channel, so the warning is not gated by channel.
+const OFFLINE_IGNORED_OPTIONS_OVERRIDES: ReadonlyArray<{
+  flag: string;
+  option: Parameters<typeof warnOptionsOverridesIgnoredOffline>[0];
+}> = [
+  { flag: "--connection-timeout", option: { connectionTimeout: 30 } },
+  { flag: "--peer-timeout", option: { peerTimeout: 60 } },
+  { flag: "--max-reconnect-attempts", option: { maxReconnectAttempts: 5 } },
+  { flag: "--lockless-rendezvous", option: { locklessRendezvous: true } },
+  { flag: "--peer-id", option: { peerId: "party-a" } },
+  { flag: "--timestamp-in-filename", option: { timestampInFilename: true } },
+  { flag: "--retain-files", option: { retainFiles: true } },
+];
+
+for (const { flag, option } of OFFLINE_IGNORED_OPTIONS_OVERRIDES)
+  test(`warnOptionsOverridesIgnoredOffline: warns naming ${flag} when set`, () => {
+    const warnings: string[] = [];
+    warnOptionsOverridesIgnoredOffline(option, {
+      warn: (m) => warnings.push(m),
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(flag);
+    expect(warnings[0]).toContain("no effect on an offline invite/accept");
+    // The remedy points at connection.options, distinct from the server-override
+    // warning's "set the connection details in that block" remedy.
+    expect(warnings[0]).toContain("connection.options");
+  });
+
+test("warnOptionsOverridesIgnoredOffline: one warning names every set flag", () => {
+  const warnings: string[] = [];
+  warnOptionsOverridesIgnoredOffline(
+    { connectionTimeout: 30, retainFiles: true, peerId: "party-a" },
+    { warn: (m) => warnings.push(m) },
+  );
+  // A single warning rather than one per flag, so the operator sees the whole
+  // ignored set at once.
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("--connection-timeout");
+  expect(warnings[0]).toContain("--retain-files");
+  expect(warnings[0]).toContain("--peer-id");
+  // An unset flag is not named.
+  expect(warnings[0]).not.toContain("--peer-timeout");
+});
+
+test("warnOptionsOverridesIgnoredOffline: stays silent when no override is set", () => {
+  const warnings: string[] = [];
+  warnOptionsOverridesIgnoredOffline({}, { warn: (m) => warnings.push(m) });
   expect(warnings).toEqual([]);
 });
 
