@@ -2,6 +2,7 @@ import { expect, test, describe } from "vitest";
 
 import {
   runPipeline,
+  resolveFieldColumns,
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
@@ -1250,6 +1251,123 @@ describe("validateStandardizationAgainstTerms", () => {
     expect(
       validateStandardizationAgainstTerms(standardization, minimalTerms),
     ).toEqual([]);
+  });
+});
+
+// --- resolveFieldColumns -----------------------------------------------------
+
+// The one binding the dataset builder, the satisfiability checker, and the
+// default-standardization derivation all consume. These pin its observable
+// resolution result directly, so a future change to the rules cannot pass while
+// silently differing from what the builder does. The two named cases below were
+// both live divergence bugs in the hand-maintained second copy this primitive
+// replaced (see #201001899).
+describe("resolveFieldColumns", () => {
+  const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
+    name,
+    type,
+    role: "linkage",
+    isPayload: false,
+  });
+
+  // ssn + lastName fields, named by their semantic type for brevity.
+  const terms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "test",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "lastName", type: "lastName" },
+    ],
+    linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+
+  test("explicit mapping preempts the type fallback even when a same-typed column is present", () => {
+    // An ssn column is present, but the explicit mapping points ssn at tax_id.
+    // The binding follows the explicit input, not the present same-typed column,
+    // so an absent tax_id leaves ssn bound to a missing column. (The live bug:
+    // honoring the present ssn column would have wrongly satisfied the field.)
+    const resolution = resolveFieldColumns(
+      terms,
+      [{ output: "ssn", input: "tax_id" }],
+      inferMetadata(["ssn", "last_name"]),
+    );
+    expect(resolution.get("ssn")?.column).toBe("tax_id");
+    expect(resolution.get("ssn")?.transform).toEqual({
+      output: "ssn",
+      input: "tax_id",
+    });
+    // lastName has no explicit mapping, so it type-falls-back to last_name.
+    expect(resolution.get("lastName")?.column).toBe("last_name");
+    expect(resolution.get("lastName")?.transform).toBeUndefined();
+  });
+
+  test("type fallback binds to the FIRST same-typed column, not any present one", () => {
+    // Two ssn-typed columns with the absent one listed first. The binding is the
+    // first match (metadata.find), so ssn binds to absent_ssn even though
+    // present_ssn is a present same-typed column -- the first-match-vs-set-
+    // membership divergence, made observable on the resolution itself.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      col("absent_ssn", "ssn"),
+      col("present_ssn", "ssn"),
+      col("last_name", "lastName"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBe("absent_ssn");
+  });
+
+  test("an explicit mapping binds to its input column", () => {
+    const resolution = resolveFieldColumns(
+      terms,
+      [{ output: "ssn", input: "ssn_src" }],
+      inferMetadata(["ssn_src", "last_name"]),
+    );
+    expect(resolution.get("ssn")?.column).toBe("ssn_src");
+  });
+
+  test("a field with neither an explicit mapping nor a same-typed column resolves to no column", () => {
+    const resolution = resolveFieldColumns(
+      terms,
+      undefined,
+      inferMetadata(["last_name"]),
+    );
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("lastName")?.column).toBe("last_name");
+  });
+
+  test("inferred metadata types the fallback by column name", () => {
+    const resolution = resolveFieldColumns(
+      terms,
+      undefined,
+      inferMetadata(["ssn", "last_name"]),
+    );
+    expect(resolution.get("ssn")?.column).toBe("ssn");
+  });
+
+  test("explicit metadata that retypes a column away unbinds its field", () => {
+    // The ssn column would infer as ssn, but explicit metadata types it `other`,
+    // so the type fallback finds no ssn column and the field resolves to nothing.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      col("ssn", "other"),
+      col("last_name", "lastName"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+  });
+
+  test("a duplicate explicit output binds to the last one", () => {
+    // Not reachable through the schema (it forbids duplicate outputs) but pinned
+    // so the builder's field map and the checker stay in agreement on the rule.
+    const resolution = resolveFieldColumns(
+      terms,
+      [
+        { output: "ssn", input: "first_src" },
+        { output: "ssn", input: "second_src" },
+      ],
+      inferMetadata(["first_src", "second_src"]),
+    );
+    expect(resolution.get("ssn")?.column).toBe("second_src");
   });
 });
 

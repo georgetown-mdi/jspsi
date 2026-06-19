@@ -1,3 +1,5 @@
+import { resolveFieldColumns } from "../standardization.js";
+
 import type {
   Standardization,
   StandardizationStep,
@@ -151,14 +153,22 @@ export function getDefaultStandardization(
   terms: LinkageTerms,
   options: DefaultStandardizationOptions = {},
 ): Standardization {
+  // Derive each field's input column from the same resolution primitive the
+  // builder and satisfiability checker use, so the default-term mapping cannot
+  // diverge from how the exchange actually binds columns. With no explicit
+  // standardization this is the pure type fallback (first metadata column of the
+  // field's type). Fields whose semantic type has no default pipeline
+  // (`identifier`/`other`) are still skipped here and fall through to the
+  // builder's own identity type-fallback at exchange time.
+  const resolution = resolveFieldColumns(terms, undefined, metadata);
   const result: Standardization = [];
 
   for (const field of terms.linkageFields) {
     const steps = stepsForType(field.type, options);
     if (steps === undefined) continue;
-    const col = metadata.find((c) => c.type === field.type);
-    if (!col) continue;
-    result.push({ output: field.name, input: col.name, steps });
+    const column = resolution.get(field.name)?.column;
+    if (column === undefined) continue;
+    result.push({ output: field.name, input: column, steps });
   }
 
   return result;
