@@ -505,6 +505,52 @@ test("validateAccept: online does not warn about a connection-options override (
   }
 });
 
+test("validateAccept: offline split-seed accept does not warn on --no-retain-files (seed forces retain on)", async () => {
+  // A split-directory endpoint seeds the connection with SPLIT_SEED_OPTIONS (the
+  // retain trio = true) and applies no override, so an explicit --no-retain-files
+  // (retainFiles === false) is dropped and the seed's retain_files: true stands.
+  // The `=== true` gate declines to warn on the negated form -- it is not an
+  // enabling override, and warning would name --retain-files for a flag the
+  // operator typed as --no-retain-files. This mirrors the online split path,
+  // which also forces retain on and warns nothing. Pins the SPLIT_SEED_OPTIONS x
+  // gate interaction the helper-level tests do not reach.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "inviter-host",
+    inboundPath: "/exchange/inviter-in",
+    outboundPath: "/exchange/inviter-out",
+  };
+  const log = getLogger("accept-offline-split-seed-no-retain");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions({ retainFiles: false }),
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    if (ready.mode !== "offline") return;
+    if (ready.connection.channel !== "sftp") throw new Error("expected sftp");
+    // The seed forces retain on despite --no-retain-files.
+    expect(ready.connection.options?.retainFiles).toBe(true);
+    // No --retain-files warning: the gate declines on the negated form.
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].includes("--retain-files") &&
+          c[0].includes("connection.options"),
+      ),
+    ).toBe(false);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(input, { force: true });
+  }
+});
+
 // --- reconciling a pre-existing config ---------------------------------------
 
 /** Write a config whose linkage terms agree with the invitation's by default

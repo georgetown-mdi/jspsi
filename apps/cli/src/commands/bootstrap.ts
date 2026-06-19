@@ -1671,10 +1671,12 @@ export function warnOptionsOverridesIgnoredOffline(
   options: OfflineIgnoredOptionsOverrides,
   log: { warn: (message: string) => void },
 ): void {
-  // Push only the flag NAME, never the override value. None of these is a
-  // secret today, but keeping the emitted message static apart from this
-  // flag-name list mirrors warnServerOverridesIgnoredOffline's discipline and
-  // forecloses leaking any future value-bearing flag added to this set.
+  // Security invariant: push only the flag NAME, never the override value. This
+  // warning reaches the terminal and any --log-file, so interpolating a value
+  // here would leak it. None of these flags is a secret today, but --peer-id is
+  // an operator-supplied free string and the set may grow, so keep the emitted
+  // message static apart from this flag-name list -- the same discipline
+  // warnServerOverridesIgnoredOffline holds for its --server-password/-key.
   const ignored: string[] = [];
   if (options.connectionTimeout !== undefined)
     ignored.push("--connection-timeout");
