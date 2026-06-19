@@ -2302,6 +2302,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     const inboundPath = this.path;
     const outboundPath = this.outbound ?? this.path;
     const split = this.outbound !== undefined;
+    // Operator-facing directory scope for entry-time logs and errors: both
+    // directories in split mode (the entry scan reads inbound and reaches into
+    // outbound for the freshness check), or just the inbound path otherwise.
+    // Mirrors sweepProtocolFiles' dirsDisplay so a split exchange names both
+    // halves consistently wherever a path appears.
+    const dirsDisplay = split
+      ? `${sanitizeForDisplay(inboundPath)} (inbound) and ` +
+        `${sanitizeForDisplay(outboundPath)} (outbound)`
+      : this.displayPath;
 
     if (this.peerId) throw new Error("already synchronized");
 
@@ -2351,7 +2360,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           "them (every message would be silently skipped)",
       );
 
-    this.log.info(`[${this.role}] synchronizing at path ${this.displayPath}`);
+    this.log.info(`[${this.role}] synchronizing at path ${dirsDisplay}`);
 
     // Reset the foreign-file snapshot up front so it is rebuilt fresh on every
     // synchronize() entry even when the list() below throws: a failed entry must
@@ -2360,7 +2369,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     let files: Array<FileInfo>;
     try {
-      files = await this.client.list(this.path);
+      files = await this.client.list(inboundPath);
     } catch (err: unknown) {
       throw err instanceof Error ? err : new Error(errMessage(err));
     }
@@ -2454,7 +2463,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
       await Promise.all(
         orphanedTempFiles.map((file) =>
-          this.client.safeDelete(`${this.path}/${file.name}`),
+          this.client.safeDelete(`${inboundPath}/${file.name}`),
         ),
       );
       orphanedTempFiles.forEach((file) => ignored.add(file.name));
@@ -2518,7 +2527,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         );
         await Promise.all(
           leftoverAbortFiles.map((file) =>
-            this.client.safeDelete(`${this.path}/${file.name}`),
+            this.client.safeDelete(`${inboundPath}/${file.name}`),
           ),
         );
         leftoverAbortFiles.forEach((file) => ignored.add(file.name));
@@ -2629,7 +2638,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // terminal usage error that now also points at the opt-in sweep.
       if (unexpectedProtocol.length > 0)
         throw new UsageError(
-          `path ${this.displayPath} must be empty except for a ` +
+          // dirsDisplay names both halves in split mode: unexpectedProtocol can
+          // carry outbound leftovers as well as inbound ones, so directing the
+          // operator at the inbound path alone would mislead.
+          `path ${dirsDisplay} must be empty except for a ` +
             "single peer hello at " +
             "the start of the protocol, but contains " +
             `${unexpectedProtocol.length} unexpected protocol file(s): ` +
