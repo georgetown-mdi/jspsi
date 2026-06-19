@@ -45,12 +45,12 @@ test("parses a complete valid set of terms", () => {
       },
       {
         name: "lastName",
-        type: "lastName",
+        type: "last_name",
         constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
       },
-      { name: "dateOfBirth", type: "dateOfBirth" },
+      { name: "dateOfBirth", type: "date_of_birth" },
       { name: "ssn", type: "ssn" },
-      { name: "firstName", type: "firstName" },
+      { name: "firstName", type: "first_name" },
     ],
     linkageKeys: [
       {
@@ -167,7 +167,7 @@ test("allowedCharacters accepts a valid character class", () => {
     linkageFields: [
       {
         name: "lastName",
-        type: "lastName",
+        type: "last_name",
         constraints: { allowedCharacters: "A-Z " },
       },
     ],
@@ -182,7 +182,7 @@ test("allowedCharacters rejects an invalid character class", () => {
     linkageFields: [
       {
         name: "lastName",
-        type: "lastName",
+        type: "last_name",
         // "z-a" is a reversed range and throws when interpolated into /[z-a]/
         constraints: { allowedCharacters: "z-a" },
       },
@@ -299,9 +299,9 @@ test("same field used twice with distinct names is valid", () => {
   const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
-      { name: "firstName", type: "firstName" },
-      { name: "lastName", type: "lastName" },
-      { name: "dateOfBirth", type: "dateOfBirth" },
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
+      { name: "dateOfBirth", type: "date_of_birth" },
     ],
     linkageKeys: [
       {
@@ -341,7 +341,7 @@ test("a swap target matching no element in its key is rejected", () => {
     ...base,
     linkageFields: [
       { name: "ssn", type: "ssn" },
-      { name: "lastName", type: "lastName" },
+      { name: "lastName", type: "last_name" },
     ],
     linkageKeys: [
       {
@@ -363,8 +363,8 @@ test("a swap resolving via element field names validates", () => {
   const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
-      { name: "firstName", type: "firstName" },
-      { name: "lastName", type: "lastName" },
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
     ],
     linkageKeys: [
       {
@@ -383,8 +383,8 @@ test("a swap resolving via an element name alias and a field both validate", () 
   const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [
-      { name: "firstName", type: "firstName" },
-      { name: "lastName", type: "lastName" },
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
     ],
     linkageKeys: [
       {
@@ -406,7 +406,7 @@ test("a duplicate element field with distinct name aliases still validates", () 
   // element-identifier-uniqueness rule, and a swap may target the aliases.
   const result = safeParseLinkageTerms({
     ...base,
-    linkageFields: [{ name: "phone", type: "phoneNumber" }],
+    linkageFields: [{ name: "phone", type: "phone_number" }],
     linkageKeys: [
       {
         name: "Two phones",
@@ -451,6 +451,111 @@ test("unknown linkage field type is rejected", () => {
   expect(result.success).toBe(false);
 });
 
+// ─── semantic-type enum values are snake_case (strict) ───────────────────────
+
+// Every user-facing semantic-type value is snake_case (matching the convention
+// for everything users write in YAML/JSON); camelizeKeys transforms object KEYS
+// only, never these VALUES, so the value the schema sees is exactly what was
+// written. The multi-word PII types and the single-word ones all parse.
+test.each([
+  "first_name",
+  "last_name",
+  "date_of_birth",
+  "phone_number",
+  "email_address",
+  "ssn",
+  "ssn4",
+] as const)('linkage field type "%s" parses', (type) => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [{ name: "f", type }],
+    linkageKeys: [{ name: "K", elements: [{ field: "f" }] }],
+  });
+  expect(result.success).toBe(true);
+});
+
+// The old camelCase spellings are rejected (strict): there are no legacy configs
+// or in-flight tokens to accept, so a single canonical snake_case vocabulary is
+// enforced on the wire rather than carrying a dual-spelling normalization shim.
+test.each([
+  "firstName",
+  "lastName",
+  "dateOfBirth",
+  "phoneNumber",
+  "emailAddress",
+] as const)('the old camelCase field type "%s" is rejected', (type) => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [{ name: "f", type }],
+    linkageKeys: [{ name: "K", elements: [{ field: "f" }] }],
+  });
+  expect(result.success).toBe(false);
+});
+
+test.each(["transpositions", "edit_distances", "adjacent_years"] as const)(
+  'fuzzy-comparison method "%s" parses',
+  (method) => {
+    const result = safeParseLinkageTerms({
+      ...base,
+      linkageKeys: [
+        {
+          name: "K",
+          elements: [{ field: "ssn", generateFuzzyComparisons: method }],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  },
+);
+
+test.each(["editDistances", "adjacentYears"] as const)(
+  'the old camelCase fuzzy-comparison method "%s" is rejected',
+  (method) => {
+    const result = safeParseLinkageTerms({
+      ...base,
+      linkageKeys: [
+        {
+          name: "K",
+          elements: [{ field: "ssn", generateFuzzyComparisons: method }],
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+  },
+);
+
+test("a rejected camelCase enum value is not echoed in the parse error", () => {
+  // These enums ride a partner-controlled invitation token (#162) and operator
+  // config that may carry secrets (#169), so the strict-rejection path must stay
+  // a static error located by issue path -- protocolSetup leaves the Zod
+  // parse-error message unsanitized, relying on the reachable issue codes
+  // (invalid discriminator, invalid enum) reporting the EXPECTED options and the
+  // schema path, not the received value. Pin that the offending camelCase value
+  // does not surface raw in the message, for both the semantic-type discriminator
+  // and the fuzzy-comparison enum.
+  const fieldResult = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [{ name: "f", type: "firstName" }],
+    linkageKeys: [{ name: "K", elements: [{ field: "f" }] }],
+  });
+  expect(fieldResult.success).toBe(false);
+  if (!fieldResult.success)
+    expect(fieldResult.error.message).not.toContain("firstName");
+
+  const fuzzyResult = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "K",
+        elements: [{ field: "ssn", generateFuzzyComparisons: "editDistances" }],
+      },
+    ],
+  });
+  expect(fuzzyResult.success).toBe(false);
+  if (!fuzzyResult.success)
+    expect(fuzzyResult.error.message).not.toContain("editDistances");
+});
+
 // ─── camelizeKeys integration ────────────────────────────────────────────────
 
 test("parses snake_case keys from disk", () => {
@@ -472,7 +577,7 @@ test("parses snake_case keys from disk", () => {
       },
       {
         name: "lastName",
-        type: "lastName",
+        type: "last_name",
         constraints: { affixes_allowed: false },
       },
     ],
@@ -480,7 +585,7 @@ test("parses snake_case keys from disk", () => {
       {
         name: "SSN + Last Name",
         elements: [
-          { field: "ssn", generate_fuzzy_comparisons: "editDistances" },
+          { field: "ssn", generate_fuzzy_comparisons: "edit_distances" },
           {
             field: "lastName",
             transform: [
@@ -518,7 +623,7 @@ test("transform params keys are normalized (params are not opaque)", () => {
     algorithm: "psi",
     output: { expects_output: true, share_with_partner: false },
     deduplicate: false,
-    linkage_fields: [{ name: "dob", type: "dateOfBirth" }],
+    linkage_fields: [{ name: "dob", type: "date_of_birth" }],
     linkage_keys: [
       {
         name: "DOB",
@@ -632,7 +737,7 @@ test("output cross-check: I expect but partner will not share is an error", () =
 test("linkage fields mismatch is an error", () => {
   const { errors } = validateCompatibility(termsA, {
     ...termsB,
-    linkageFields: [{ name: "firstName", type: "firstName" }],
+    linkageFields: [{ name: "firstName", type: "first_name" }],
   });
   expect(errors.some((e) => e.includes("linkage fields do not match"))).toBe(
     true,
@@ -645,7 +750,7 @@ test("linkage fields in different order are still compatible", () => {
       ...termsA,
       linkageFields: [
         { name: "ssn", type: "ssn" },
-        { name: "dob", type: "dateOfBirth" },
+        { name: "dob", type: "date_of_birth" },
       ],
       linkageKeys: [
         { name: "SSN+DOB", elements: [{ field: "ssn" }, { field: "dob" }] },
@@ -654,7 +759,7 @@ test("linkage fields in different order are still compatible", () => {
     {
       ...termsB,
       linkageFields: [
-        { name: "dob", type: "dateOfBirth" },
+        { name: "dob", type: "date_of_birth" },
         { name: "ssn", type: "ssn" },
       ],
       linkageKeys: [
@@ -1142,7 +1247,7 @@ test("rejects an over-long allowedCharacters constraint", () => {
       linkageFields: [
         {
           name: "firstName",
-          type: "firstName",
+          type: "first_name",
           constraints: { allowedCharacters: "a".repeat(MAX_NAME_LENGTH + 1) },
         },
       ],

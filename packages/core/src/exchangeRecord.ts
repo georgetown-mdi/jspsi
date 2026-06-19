@@ -245,7 +245,7 @@ export interface RecordLegalAgreement {
 export interface RecordLinkageField {
   /** Standardized linkage-field name (not the raw source column). */
   name: string;
-  /** Semantic PII type (e.g. "lastName", "dateOfBirth", "ssn4"). */
+  /** Semantic PII type (e.g. "last_name", "date_of_birth", "ssn4"). */
   type: string;
 }
 

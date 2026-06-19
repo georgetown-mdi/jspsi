@@ -101,9 +101,9 @@ test("snakeizeKeys is the inverse of camelizeKeys for schema keys", () => {
 
 test("only keys are rewritten; string values are left verbatim, both directions", () => {
   // The walker applies its transform to object keys only, never to values: a
-  // value that happens to look like the other casing (e.g. the `firstName` in
-  // `type: firstName`) must survive unchanged. Asserted in both directions so
-  // neither path can start transforming values undetected.
+  // value that happens to look like the other casing (e.g. the `firstName` in a
+  // `name: firstName` label) must survive unchanged. Asserted in both directions
+  // so neither path can start transforming values undetected.
   expect(camelizeKeys({ some_key: "first_name" })).toEqual({
     someKey: "first_name",
   });

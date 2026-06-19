@@ -22,11 +22,11 @@ const minimalTerms: LinkageTerms = {
   linkageFields: [
     { name: "ssn", type: "ssn" },
     { name: "ssn4", type: "ssn4" },
-    { name: "firstName", type: "firstName" },
-    { name: "lastName", type: "lastName" },
-    { name: "dateOfBirth", type: "dateOfBirth" },
-    { name: "phoneNumber", type: "phoneNumber" },
-    { name: "emailAddress", type: "emailAddress" },
+    { name: "firstName", type: "first_name" },
+    { name: "lastName", type: "last_name" },
+    { name: "dateOfBirth", type: "date_of_birth" },
+    { name: "phoneNumber", type: "phone_number" },
+    { name: "emailAddress", type: "email_address" },
   ],
   linkageKeys: [
     {
@@ -39,11 +39,11 @@ const minimalTerms: LinkageTerms = {
 const fullMetadata: ColumnMetadata[] = [
   { name: "SSN", type: "ssn", role: "linkage", isPayload: false },
   { name: "SSN4", type: "ssn4", role: "linkage", isPayload: false },
-  { name: "FIRST_NAME", type: "firstName", role: "linkage", isPayload: false },
-  { name: "LAST_NAME", type: "lastName", role: "linkage", isPayload: false },
-  { name: "DOB", type: "dateOfBirth", role: "linkage", isPayload: false },
-  { name: "PHONE", type: "phoneNumber", role: "linkage", isPayload: false },
-  { name: "EMAIL", type: "emailAddress", role: "linkage", isPayload: false },
+  { name: "FIRST_NAME", type: "first_name", role: "linkage", isPayload: false },
+  { name: "LAST_NAME", type: "last_name", role: "linkage", isPayload: false },
+  { name: "DOB", type: "date_of_birth", role: "linkage", isPayload: false },
+  { name: "PHONE", type: "phone_number", role: "linkage", isPayload: false },
+  { name: "EMAIL", type: "email_address", role: "linkage", isPayload: false },
 ];
 
 // --- getDefaultStandardization -----------------------------------------------
@@ -227,10 +227,10 @@ describe("default SSN4 pipeline", () => {
 describe("default name pipeline (firstName / lastName)", () => {
   function runFirst(input: string) {
     const [t] = getDefaultStandardization(
-      [{ name: "FN", type: "firstName", role: "linkage", isPayload: false }],
+      [{ name: "FN", type: "first_name", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "firstName", type: "firstName" }],
+        linkageFields: [{ name: "firstName", type: "first_name" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -238,10 +238,10 @@ describe("default name pipeline (firstName / lastName)", () => {
 
   function runLast(input: string) {
     const [t] = getDefaultStandardization(
-      [{ name: "LN", type: "lastName", role: "linkage", isPayload: false }],
+      [{ name: "LN", type: "last_name", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "lastName", type: "lastName" }],
+        linkageFields: [{ name: "lastName", type: "last_name" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -297,10 +297,17 @@ describe("default name pipeline (firstName / lastName)", () => {
 describe("default dateOfBirth pipeline", () => {
   function run(input: string) {
     const [t] = getDefaultStandardization(
-      [{ name: "DOB", type: "dateOfBirth", role: "linkage", isPayload: false }],
+      [
+        {
+          name: "DOB",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "dateOfBirth", type: "dateOfBirth" }],
+        linkageFields: [{ name: "dateOfBirth", type: "date_of_birth" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -340,14 +347,14 @@ describe("default phoneNumber pipeline", () => {
       [
         {
           name: "PHONE",
-          type: "phoneNumber",
+          type: "phone_number",
           role: "linkage",
           isPayload: false,
         },
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "phoneNumber", type: "phoneNumber" }],
+        linkageFields: [{ name: "phoneNumber", type: "phone_number" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -402,14 +409,14 @@ describe("default emailAddress pipeline", () => {
       [
         {
           name: "EMAIL",
-          type: "emailAddress",
+          type: "email_address",
           role: "linkage",
           isPayload: false,
         },
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "emailAddress", type: "emailAddress" }],
+        linkageFields: [{ name: "emailAddress", type: "email_address" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -579,12 +586,12 @@ describe("inferDateFormat — scanning", () => {
 describe("getDefaultStandardization — dateInputFormat option", () => {
   const dobTerms: LinkageTerms = {
     ...minimalTerms,
-    linkageFields: [{ name: "dateOfBirth", type: "dateOfBirth" }],
+    linkageFields: [{ name: "dateOfBirth", type: "date_of_birth" }],
   };
   const dobMeta = [
     {
       name: "DOB",
-      type: "dateOfBirth" as const,
+      type: "date_of_birth" as const,
       role: "linkage" as const,
       isPayload: false,
     },

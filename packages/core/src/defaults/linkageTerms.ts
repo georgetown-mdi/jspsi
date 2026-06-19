@@ -21,16 +21,16 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
     constraints: { validOnly: true },
   },
   {
-    name: "firstName",
-    type: "firstName",
+    name: "first_name",
+    type: "first_name",
     constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
   },
   {
-    name: "lastName",
-    type: "lastName",
+    name: "last_name",
+    type: "last_name",
     constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
   },
-  { name: "dateOfBirth", type: "dateOfBirth" },
+  { name: "date_of_birth", type: "date_of_birth" },
 ];
 
 /**
@@ -44,17 +44,17 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     name: "SSN + LN + DOB",
     elements: [
       { field: "ssn" },
-      { field: "lastName" },
-      { field: "dateOfBirth" },
+      { field: "last_name" },
+      { field: "date_of_birth" },
     ],
   },
   {
     name: "SSN + LN + FN1",
     elements: [
       { field: "ssn" },
-      { field: "lastName" },
+      { field: "last_name" },
       {
-        field: "firstName",
+        field: "first_name",
         transform: [{ function: "substring", params: { start: 1, length: 1 } }],
       },
     ],
@@ -64,11 +64,11 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn" },
       {
-        field: "lastName",
+        field: "last_name",
         transform: [{ function: "substring", params: { start: 1, length: 3 } }],
       },
       {
-        field: "firstName",
+        field: "first_name",
         transform: [{ function: "substring", params: { start: 1, length: 1 } }],
       },
     ],
@@ -78,10 +78,10 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn" },
       {
-        field: "lastName",
+        field: "last_name",
         transform: [{ function: "substring", params: { start: 1, length: 4 } }],
       },
-      { field: "dateOfBirth" },
+      { field: "date_of_birth" },
     ],
   },
   {
@@ -89,11 +89,11 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn" },
       {
-        field: "lastName",
+        field: "last_name",
         transform: [{ function: "substring", params: { start: 1, length: 4 } }],
       },
       {
-        field: "dateOfBirth",
+        field: "date_of_birth",
         transform: [{ function: "substring", params: { start: 1, length: 6 } }],
       },
     ],
@@ -103,10 +103,10 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn" },
       {
-        field: "lastName",
+        field: "last_name",
         transform: [{ function: "substring", params: { start: 1, length: 3 } }],
       },
-      { field: "dateOfBirth" },
+      { field: "date_of_birth" },
     ],
   },
   {
@@ -114,18 +114,18 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn" },
       {
-        field: "firstName",
+        field: "first_name",
         transform: [{ function: "substring", params: { start: 1, length: 3 } }],
       },
-      { field: "dateOfBirth" },
+      { field: "date_of_birth" },
     ],
   },
   {
     name: "SSN4 + LN + DOB",
     elements: [
       { field: "ssn4" },
-      { field: "lastName" },
-      { field: "dateOfBirth" },
+      { field: "last_name" },
+      { field: "date_of_birth" },
     ],
   },
   {
@@ -133,11 +133,11 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn4" },
       {
-        field: "lastName",
+        field: "last_name",
         transform: [{ function: "substring", params: { start: 1, length: 4 } }],
       },
       {
-        field: "dateOfBirth",
+        field: "date_of_birth",
         transform: [{ function: "substring", params: { start: 1, length: 6 } }],
       },
     ],
@@ -145,35 +145,35 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
     name: "LN + FN + DOB",
     elements: [
-      { field: "lastName" },
-      { field: "firstName" },
-      { field: "dateOfBirth" },
+      { field: "last_name" },
+      { field: "first_name" },
+      { field: "date_of_birth" },
     ],
   },
   {
     name: "swap(LN, FN) + DOB",
     elements: [
-      { field: "lastName" },
-      { field: "firstName" },
-      { field: "dateOfBirth" },
+      { field: "last_name" },
+      { field: "first_name" },
+      { field: "date_of_birth" },
     ],
-    swap: ["lastName", "firstName"],
+    swap: ["last_name", "first_name"],
   },
   {
     name: "SSN + DOB + FN",
     elements: [
       { field: "ssn" },
-      { field: "dateOfBirth" },
-      { field: "firstName" },
+      { field: "date_of_birth" },
+      { field: "first_name" },
     ],
   },
   {
     name: "SSN + FN + YOB + MOB",
     elements: [
       { field: "ssn" },
-      { field: "firstName" },
+      { field: "first_name" },
       {
-        field: "dateOfBirth",
+        field: "date_of_birth",
         transform: [{ function: "substring", params: { start: 1, length: 6 } }],
       },
     ],
@@ -183,11 +183,11 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
     elements: [
       { field: "ssn" },
       {
-        field: "firstName",
+        field: "first_name",
         transform: [{ function: "substring", params: { start: 1, length: 3 } }],
       },
       {
-        field: "dateOfBirth",
+        field: "date_of_birth",
         transform: [{ function: "substring", params: { start: 1, length: 6 } }],
       },
     ],

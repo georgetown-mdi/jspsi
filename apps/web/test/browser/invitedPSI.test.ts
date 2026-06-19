@@ -90,7 +90,7 @@ const firstNameOnlyTerms = {
   algorithm: "psi" as const,
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
-  linkageFields: [{ name: "firstName", type: "firstName" as const }],
+  linkageFields: [{ name: "firstName", type: "first_name" as const }],
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 

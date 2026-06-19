@@ -294,8 +294,8 @@ describe("generateInvitation fail-closed before mint", () => {
     // defaults, which the filtered embed terms no longer declare).
     const missingTypes = failure.unsatisfied.map((f) => f.type);
     expect(missingTypes).toContain("ssn");
-    expect(missingTypes).toContain("firstName");
-    expect(missingTypes).toContain("dateOfBirth");
+    expect(missingTypes).toContain("first_name");
+    expect(missingTypes).toContain("date_of_birth");
   });
 
   test("rejects a column-less file, not fooled by the empty-metadata all-keys fallback", async () => {
@@ -318,9 +318,9 @@ describe("generateInvitation fail-closed before mint", () => {
       expect.arrayContaining([
         "ssn",
         "ssn4",
-        "firstName",
-        "lastName",
-        "dateOfBirth",
+        "first_name",
+        "last_name",
+        "date_of_birth",
       ]),
     );
   });

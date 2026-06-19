@@ -824,8 +824,8 @@ const ssnAndNameDobTerms: LinkageTerms = {
   ...ssnOnlyTerms,
   linkageFields: [
     { name: "ssn", type: "ssn" },
-    { name: "last_name", type: "lastName" },
-    { name: "dob", type: "dateOfBirth" },
+    { name: "last_name", type: "last_name" },
+    { name: "dob", type: "date_of_birth" },
   ],
   linkageKeys: [
     { name: "SSN", elements: [{ field: "ssn" }] },

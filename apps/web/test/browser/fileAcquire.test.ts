@@ -86,8 +86,8 @@ const acceptorTerms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [
-    { name: "firstName", type: "firstName" },
-    { name: "lastName", type: "lastName" },
+    { name: "firstName", type: "first_name" },
+    { name: "lastName", type: "last_name" },
   ],
   linkageKeys: [
     { name: "first", elements: [{ field: "firstName" }] },

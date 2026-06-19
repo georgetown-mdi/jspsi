@@ -17,12 +17,12 @@ import { createMessagePipe } from "../src/connection/messageConnection";
 
 const metadata: ColumnMetadata[] = [
   { name: "id", type: "identifier", role: "identifier", isPayload: false },
-  { name: "first_name", type: "firstName", role: "linkage", isPayload: false },
-  { name: "last_name", type: "lastName", role: "linkage", isPayload: false },
+  { name: "first_name", type: "first_name", role: "linkage", isPayload: false },
+  { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
   { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
   {
     name: "date_of_birth",
-    type: "dateOfBirth",
+    type: "date_of_birth",
     role: "linkage",
     isPayload: false,
   },
@@ -39,9 +39,9 @@ const terms: LinkageTerms = {
   deduplicate: false,
   linkageFields: [
     { name: "ssn", type: "ssn" },
-    { name: "lastName", type: "lastName" },
-    { name: "firstName", type: "firstName" },
-    { name: "dateOfBirth", type: "dateOfBirth" },
+    { name: "lastName", type: "last_name" },
+    { name: "firstName", type: "first_name" },
+    { name: "dateOfBirth", type: "date_of_birth" },
   ],
   linkageKeys: [
     {

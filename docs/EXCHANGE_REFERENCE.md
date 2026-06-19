@@ -136,19 +136,19 @@ linkage_terms:
     - name: ssn4
       type: ssn4
     - name: first_name
-      type: firstName
+      type: first_name
       constraints:
         affixes_allowed: false
         allowed_characters: 'A-Z '
     - name: first_name_raw
-      type: firstName
+      type: first_name
     - name: last_name
-      type: lastName
+      type: last_name
       constraints:
         affixes_allowed: false
         allowed_characters: 'A-Z '
     - name: date_of_birth
-      type: dateOfBirth
+      type: date_of_birth
 ```
 
 #### Fields fields
@@ -165,11 +165,11 @@ linkage_terms:
 |-------|-------------|
 | `ssn` | Social Security Number (9-character string) |
 | `ssn4` | Last four digits of SSN; distinct from `ssn` because some parties only possess the last four digits |
-| `firstName` | Given name |
-| `lastName` | Family name |
-| `dateOfBirth` | Date of birth |
-| `phoneNumber` | Phone number |
-| `emailAddress` | Email address |
+| `first_name` | Given name |
+| `last_name` | Family name |
+| `date_of_birth` | Date of birth |
+| `phone_number` | Phone number |
+| `email_address` | Email address |
 
 Additional types will be added as their use case arises.
 
@@ -178,7 +178,7 @@ Additional types will be added as their use case arises.
 | Field | Type | Applies to | Description |
 |-------|------|------------|-------------|
 | `valid_only` | boolean | `ssn`, `ssn4` | Data must conform to Social Security Administration [rules](https://www.ssa.gov/kc/SSAFactSheet--IssuingSSNs.pdf) for valid SSNs |
-| `valid_only` | boolean | `dateOfBirth` | Must be a valid date |
+| `valid_only` | boolean | `date_of_birth` | Must be a valid date |
 | `exclude` | array of strings | any | Values that must not appear in the data; useful for filtering placeholder values such as `123456789` and `111111111` for SSNs |
 | `allowed_characters` | string | name fields | Regex character class; characters outside it must have been removed |
 | `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr., etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
@@ -242,7 +242,7 @@ linkage_terms:
 `linkage_terms.linkage_fields` |
 | `name` | string | no | Optional alias for this element; used when the same field appears more than once in a key, or as the target of a `swap` |
 | `transform` | array | no | Sequence of transformation steps applied to the canonical field value before concatenation into the key |
-| `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `editDistances` generates all single-character deletions up to `max_length`, matching values within one edit distance; `adjacentYears` generates dates +/- 1 year from the input. Applied after any transformation |
+| `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `edit_distances` generates all single-character deletions up to `max_length`, matching values within one edit distance; `adjacent_years` generates dates +/- 1 year from the input. Applied after any transformation |
 
 #### Transform steps
 
@@ -803,11 +803,11 @@ Optional field-level descriptions of the input dataset. If omitted, semantic typ
 metadata:
   columns:
     - name: "LAST_NAME"
-      type: lastName
+      type: last_name
       role: linkage
       description: "Legal last name as recorded at enrollment"
     - name: "DOB"
-      type: dateOfBirth
+      type: date_of_birth
       role: linkage
     - name: "CLIENT_ID"
       role: identifier

@@ -630,7 +630,7 @@
     },
     {
       "name": "count-only-psi-c",
-      "description": "A count-only psi-c exchange: both parties learn only the intersection size, so the result size is recorded (and each records its own recordsExposed count) but no association table is held or committed and no payload is exchanged. Exercises the psi-c algorithm (only a count was disclosed, not matched identifiers), a legal-agreement reference and purpose, empty sent/received payload lists, and a multi-field matching basis recorded as name + type and sorted by name. The terms also declare an unused linkage field (emailAddress) that no linkage key references; it is excluded from the matching basis, which therefore covers only the fields the keys actually matched on (dob, last, ssn4).",
+      "description": "A count-only psi-c exchange: both parties learn only the intersection size, so the result size is recorded (and each records its own recordsExposed count) but no association table is held or committed and no payload is exchanged. Exercises the psi-c algorithm (only a count was disclosed, not matched identifiers), a legal-agreement reference and purpose, empty sent/received payload lists, and a multi-field matching basis recorded as name + type and sorted by name. The terms also declare an unused linkage field (email_address) that no linkage key references; it is excluded from the matching basis, which therefore covers only the fields the keys actually matched on (dob, last, ssn4).",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -645,11 +645,11 @@
           "linkageFields": [
             {
               "name": "last",
-              "type": "lastName"
+              "type": "last_name"
             },
             {
               "name": "dob",
-              "type": "dateOfBirth"
+              "type": "date_of_birth"
             },
             {
               "name": "ssn4",
@@ -657,7 +657,7 @@
             },
             {
               "name": "email",
-              "type": "emailAddress"
+              "type": "email_address"
             }
           ],
           "linkageKeys": [
@@ -695,11 +695,11 @@
           "linkageFields": [
             {
               "name": "last",
-              "type": "lastName"
+              "type": "last_name"
             },
             {
               "name": "dob",
-              "type": "dateOfBirth"
+              "type": "date_of_birth"
             },
             {
               "name": "ssn4",
@@ -707,7 +707,7 @@
             },
             {
               "name": "email",
-              "type": "emailAddress"
+              "type": "email_address"
             }
           ],
           "linkageKeys": [
@@ -756,7 +756,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "Rt3EdyPsOqDtMWobk6yrB01Xj2-8BFPkj4YTp3erQJk",
+        "termsHash": "LIHMQ_NIHEB4G9rn6h_acyvRlHVipV-lm20PLREENW8",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -769,11 +769,11 @@
           "matchingBasis": [
             {
               "name": "dob",
-              "type": "dateOfBirth"
+              "type": "date_of_birth"
             },
             {
               "name": "last",
-              "type": "lastName"
+              "type": "last_name"
             },
             {
               "name": "ssn4",
@@ -830,11 +830,11 @@
           "linkageFields": [
             {
               "name": "last",
-              "type": "lastName"
+              "type": "last_name"
             },
             {
               "name": "dob",
-              "type": "dateOfBirth"
+              "type": "date_of_birth"
             },
             {
               "name": "ssn4",
@@ -842,7 +842,7 @@
             },
             {
               "name": "email",
-              "type": "emailAddress"
+              "type": "email_address"
             }
           ],
           "linkageKeys": [
@@ -880,11 +880,11 @@
           "linkageFields": [
             {
               "name": "last",
-              "type": "lastName"
+              "type": "last_name"
             },
             {
               "name": "dob",
-              "type": "dateOfBirth"
+              "type": "date_of_birth"
             },
             {
               "name": "ssn4",
@@ -892,7 +892,7 @@
             },
             {
               "name": "email",
-              "type": "emailAddress"
+              "type": "email_address"
             }
           ],
           "linkageKeys": [
@@ -941,7 +941,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "w-H2Ogdyts874nfndU6DT49Hrw0gnObMyZH5VfgHTyU",
+        "termsHash": "9flvqQVHa-jz3rqlB7LOt9Amu3_K7DXX_Gfl04_yhnY",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -954,11 +954,11 @@
           "matchingBasis": [
             {
               "name": "dob",
-              "type": "dateOfBirth"
+              "type": "date_of_birth"
             },
             {
               "name": "last",
-              "type": "lastName"
+              "type": "last_name"
             },
             {
               "name": "ssn4",

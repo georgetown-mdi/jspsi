@@ -41,7 +41,7 @@ const baseTerms: Omit<LinkageTerms, "identity"> = {
   algorithm: "psi",
   deduplicate: false,
   output: { expectsOutput: true, shareWithPartner: true },
-  linkageFields: [{ name: "firstName", type: "firstName" }],
+  linkageFields: [{ name: "firstName", type: "first_name" }],
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 

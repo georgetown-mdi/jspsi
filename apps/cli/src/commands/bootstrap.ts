@@ -841,7 +841,7 @@ export function buildDataSpec(args: {
   const metadata = inferMetadata(rows.columns);
   const linkageTerms = terms ?? getDefaultLinkageTerms(identity, metadata);
 
-  const dobCol = metadata.find((c) => c.type === "dateOfBirth");
+  const dobCol = metadata.find((c) => c.type === "date_of_birth");
   const dateInputFormat =
     dobCol !== undefined
       ? inferDateFormat(rows.rawRows.map((r) => r[dobCol.name] ?? ""))

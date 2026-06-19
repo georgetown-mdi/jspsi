@@ -98,12 +98,12 @@ export type PsiRole = z.infer<typeof PsiRoleSchema>;
 export const SEMANTIC_TYPES = [
   "ssn",
   "ssn4",
-  "firstName",
-  "lastName",
-  "dateOfBirth",
+  "first_name",
+  "last_name",
+  "date_of_birth",
   "identifier",
-  "phoneNumber",
-  "emailAddress",
+  "phone_number",
+  "email_address",
   "other",
 ] as const;
 

@@ -179,17 +179,17 @@ const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
 
 interface FirstNameField {
   name: string;
-  type: "firstName";
+  type: "first_name";
   constraints?: NameConstraints;
 }
 interface LastNameField {
   name: string;
-  type: "lastName";
+  type: "last_name";
   constraints?: NameConstraints;
 }
 interface DateOfBirthField {
   name: string;
-  type: "dateOfBirth";
+  type: "date_of_birth";
   constraints?: DateConstraints;
 }
 interface SsnField {
@@ -208,12 +208,12 @@ interface Ssn4Field {
 }
 interface PhoneNumberField {
   name: string;
-  type: "phoneNumber";
+  type: "phone_number";
   constraints?: AnyConstraints;
 }
 interface EmailAddressField {
   name: string;
-  type: "emailAddress";
+  type: "email_address";
   constraints?: AnyConstraints;
 }
 
@@ -236,15 +236,15 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
   "type",
   [
     z.object({
-      type: z.literal("firstName"),
+      type: z.literal("first_name"),
       ...linkageFieldBase(NameConstraintsSchema),
     }),
     z.object({
-      type: z.literal("lastName"),
+      type: z.literal("last_name"),
       ...linkageFieldBase(NameConstraintsSchema),
     }),
     z.object({
-      type: z.literal("dateOfBirth"),
+      type: z.literal("date_of_birth"),
       ...linkageFieldBase(DateConstraintsSchema),
     }),
     z.object({
@@ -256,11 +256,11 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
       ...linkageFieldBase(SSNConstraintsSchema),
     }),
     z.object({
-      type: z.literal("phoneNumber"),
+      type: z.literal("phone_number"),
       ...linkageFieldBase(AnyConstraintsSchema),
     }),
     z.object({
-      type: z.literal("emailAddress"),
+      type: z.literal("email_address"),
       ...linkageFieldBase(AnyConstraintsSchema),
     }),
   ],
@@ -270,11 +270,11 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
 
 type GenerateFuzzyComparisons =
   | "transpositions"
-  | "editDistances"
-  | "adjacentYears";
+  | "edit_distances"
+  | "adjacent_years";
 
 const GenerateFuzzyComparisonsSchema: z.ZodType<GenerateFuzzyComparisons> =
-  z.enum(["transpositions", "editDistances", "adjacentYears"]);
+  z.enum(["transpositions", "edit_distances", "adjacent_years"]);
 
 /**
  * A single step in a linkage key element transform. Uses the same function
@@ -312,9 +312,9 @@ export interface LinkageKeyElement {
   /**
    * Expands a single value into multiple candidates before hashing.
    * - `transpositions`: all two-digit transpositions.
-   * - `editDistances`: all single-character deletions up to the constraint
+   * - `edit_distances`: all single-character deletions up to the constraint
    *   `maxLength`.
-   * - `adjacentYears`: +/- 1 year from the date.
+   * - `adjacent_years`: +/- 1 year from the date.
    */
   generateFuzzyComparisons?: GenerateFuzzyComparisons;
   /**

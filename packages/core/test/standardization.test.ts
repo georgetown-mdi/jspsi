@@ -930,8 +930,8 @@ const minimalTerms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
   linkageFields: [
-    { name: "last_name", type: "lastName" },
-    { name: "date_of_birth", type: "dateOfBirth" },
+    { name: "last_name", type: "last_name" },
+    { name: "date_of_birth", type: "date_of_birth" },
   ],
   linkageKeys: [
     {
@@ -955,7 +955,7 @@ describe("buildStandardizedDataset", () => {
     const metadata: ColumnMetadata[] = [
       {
         name: "LAST_NAME",
-        type: "lastName",
+        type: "last_name",
         role: "linkage",
         isPayload: false,
       },
@@ -971,8 +971,8 @@ describe("buildStandardizedDataset", () => {
 
   test("metadata fallback resolves uncovered linkage fields", () => {
     const metadata: ColumnMetadata[] = [
-      { name: "LN", type: "lastName", role: "linkage", isPayload: false },
-      { name: "DOB", type: "dateOfBirth", role: "linkage", isPayload: false },
+      { name: "LN", type: "last_name", role: "linkage", isPayload: false },
+      { name: "DOB", type: "date_of_birth", role: "linkage", isPayload: false },
     ];
     const dataset = buildStandardizedDataset(
       undefined,
@@ -1280,7 +1280,7 @@ describe("resolveFieldColumns", () => {
     deduplicate: false,
     linkageFields: [
       { name: "ssn", type: "ssn" },
-      { name: "lastName", type: "lastName" },
+      { name: "lastName", type: "last_name" },
     ],
     linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
   };
@@ -1313,7 +1313,7 @@ describe("resolveFieldColumns", () => {
     const resolution = resolveFieldColumns(terms, undefined, [
       col("absent_ssn", "ssn"),
       col("present_ssn", "ssn"),
-      col("last_name", "lastName"),
+      col("last_name", "last_name"),
     ]);
     expect(resolution.get("ssn")?.column).toBe("absent_ssn");
   });
@@ -1351,7 +1351,7 @@ describe("resolveFieldColumns", () => {
     // so the type fallback finds no ssn column and the field resolves to nothing.
     const resolution = resolveFieldColumns(terms, undefined, [
       col("ssn", "other"),
-      col("last_name", "lastName"),
+      col("last_name", "last_name"),
     ]);
     expect(resolution.get("ssn")?.column).toBeUndefined();
   });
@@ -1373,7 +1373,7 @@ describe("resolveFieldColumns", () => {
 
 // --- unsatisfiedLinkageFields ------------------------------------------------
 
-// Fixture: columns that cover firstName, lastName, dateOfBirth, ssn.
+// Fixture: columns that cover first_name, last_name, date_of_birth, ssn.
 const FULL_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
 const fullTerms = getDefaultLinkageTerms(
   "Agency A",
@@ -1386,18 +1386,18 @@ describe("unsatisfiedLinkageFields", () => {
   });
 
   test("names the fields whose type no input column provides", () => {
-    // Only first_name is present; lastName, dateOfBirth, and ssn cannot be
+    // Only first_name is present; last_name, date_of_birth, and ssn cannot be
     // produced.
     const unsatisfied = unsatisfiedLinkageFields(["first_name"], fullTerms);
     const names = unsatisfied.map((f) => f.name).sort();
-    expect(names).toContain("lastName");
-    expect(names).toContain("dateOfBirth");
+    expect(names).toContain("last_name");
+    expect(names).toContain("date_of_birth");
     expect(names).toContain("ssn");
-    expect(names).not.toContain("firstName");
+    expect(names).not.toContain("first_name");
   });
 
   test("a column of the right type but different name still satisfies", () => {
-    // `fname` and `dob` are aliases inferred as firstName / dateOfBirth.
+    // `fname` and `dob` are aliases inferred as first_name / date_of_birth.
     const unsatisfied = unsatisfiedLinkageFields(
       ["fname", "lname", "dob", "ssn"],
       fullTerms,
@@ -1449,17 +1449,22 @@ describe("unsatisfiedLinkageFields", () => {
       unsatisfiedLinkageFields(columns, fullTerms, undefined, [
         {
           name: "first_name",
-          type: "firstName",
+          type: "first_name",
           role: "linkage",
           isPayload: false,
         },
         {
           name: "last_name",
-          type: "lastName",
+          type: "last_name",
           role: "linkage",
           isPayload: false,
         },
-        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        {
+          name: "dob",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
         { name: "tax_id", type: "ssn", role: "linkage", isPayload: false },
       ]),
     ).toEqual([]);
@@ -1477,17 +1482,22 @@ describe("unsatisfiedLinkageFields", () => {
       [
         {
           name: "first_name",
-          type: "firstName",
+          type: "first_name",
           role: "linkage",
           isPayload: false,
         },
         {
           name: "last_name",
-          type: "lastName",
+          type: "last_name",
           role: "linkage",
           isPayload: false,
         },
-        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        {
+          name: "dob",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
         { name: "ssn", type: "other", role: "payload", isPayload: true },
       ],
     );
@@ -1507,17 +1517,22 @@ describe("unsatisfiedLinkageFields", () => {
       [
         {
           name: "first_name",
-          type: "firstName",
+          type: "first_name",
           role: "linkage",
           isPayload: false,
         },
         {
           name: "last_name",
-          type: "lastName",
+          type: "last_name",
           role: "linkage",
           isPayload: false,
         },
-        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        {
+          name: "dob",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
         { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
       ],
     );
@@ -1538,17 +1553,22 @@ describe("unsatisfiedLinkageFields", () => {
       [
         {
           name: "first_name",
-          type: "firstName",
+          type: "first_name",
           role: "linkage",
           isPayload: false,
         },
         {
           name: "last_name",
-          type: "lastName",
+          type: "last_name",
           role: "linkage",
           isPayload: false,
         },
-        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        {
+          name: "dob",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
         { name: "absent_ssn", type: "ssn", role: "linkage", isPayload: false },
         { name: "present_ssn", type: "ssn", role: "linkage", isPayload: false },
       ],
@@ -1569,7 +1589,7 @@ describe("assessLinkageSatisfiability", () => {
 
   test("an input covering no complete key reports zero satisfiable keys (the block signal)", () => {
     // Only first_name is present. Every default key has at least one other
-    // required field (ssn, lastName, or dateOfBirth), so no key can match and
+    // required field (ssn, last_name, or date_of_birth), so no key can match and
     // the exchange should be blocked rather than run to a silent empty result.
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
       ["first_name"],
@@ -1578,8 +1598,8 @@ describe("assessLinkageSatisfiability", () => {
     expect(satisfiableKeyCount).toBe(0);
     const names = unsatisfied.map((f) => f.name);
     expect(names).toContain("ssn");
-    expect(names).toContain("lastName");
-    expect(names).toContain("dateOfBirth");
+    expect(names).toContain("last_name");
+    expect(names).toContain("date_of_birth");
   });
 
   test("an input missing one field keeps the keys that do not need it (partial, warn)", () => {
@@ -1615,7 +1635,7 @@ describe("assessLinkageSatisfiability", () => {
   test("a swap key is assessed by its element fields, so an absent swapped field excludes it", () => {
     // The default terms include "swap(LN, FN) + DOB". swap only permutes which
     // slot holds which field at receive time; it does not change which fields the
-    // key needs. With firstName absent, the swap key references an unproducible
+    // key needs. With first_name absent, the swap key references an unproducible
     // field and must be excluded from the satisfiable count, identically to the
     // non-swap LN+FN+DOB key.
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
@@ -1623,8 +1643,8 @@ describe("assessLinkageSatisfiability", () => {
       allKeyTerms,
     );
     const unsatNames = new Set(unsatisfied.map((f) => f.name));
-    expect(unsatNames.has("firstName")).toBe(true);
-    // ssn+lastName+dob keys survive, so this is a partial (warn) case, proving the
+    expect(unsatNames.has("first_name")).toBe(true);
+    // ssn+last_name+dob keys survive, so this is a partial (warn) case, proving the
     // swap key's exclusion is not just the whole set collapsing to zero.
     expect(satisfiableKeyCount).toBeGreaterThan(0);
     expect(satisfiableKeyCount).toBeLessThan(allKeyTerms.linkageKeys.length);
@@ -1632,7 +1652,7 @@ describe("assessLinkageSatisfiability", () => {
     expect(swapKey).toBeDefined();
     if (swapKey === undefined) return;
     // The detector reads e.field on the stored (unswapped) elements; the swap key
-    // needs firstName, which is unsatisfiable, so it is correctly excluded.
+    // needs first_name, which is unsatisfiable, so it is correctly excluded.
     expect(swapKey.elements.some((e) => unsatNames.has(e.field))).toBe(true);
   });
 
@@ -1675,7 +1695,7 @@ describe("assessLinkageSatisfiability", () => {
       inferMetadata(FULL_COLUMNS),
     );
     const firstNameField = base.linkageFields.find(
-      (f) => f.name === "firstName",
+      (f) => f.name === "first_name",
     );
     expect(firstNameField).toBeDefined();
     if (firstNameField === undefined) return;
@@ -1724,7 +1744,7 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
     deduplicate: false,
     linkageFields: [
       { name: "ssn", type: "ssn" },
-      { name: "lastname", type: "lastName" },
+      { name: "lastname", type: "last_name" },
     ],
     linkageKeys: [
       { name: "SSN", elements: [{ field: "ssn" }] },
@@ -1752,13 +1772,13 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
     {
       name: "explicit metadata types a non-inferring column as ssn",
       columns: ["tax_id", "last_name"],
-      metadata: [col("tax_id", "ssn"), col("last_name", "lastName")],
+      metadata: [col("tax_id", "ssn"), col("last_name", "last_name")],
       expected: 2,
     },
     {
       name: "explicit metadata retypes the ssn column away",
       columns: ["ssn", "last_name"],
-      metadata: [col("ssn", "other"), col("last_name", "lastName")],
+      metadata: [col("ssn", "other"), col("last_name", "last_name")],
       expected: 1,
     },
     {
@@ -1767,7 +1787,7 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
       metadata: [
         col("absent_ssn", "ssn"),
         col("present_ssn", "ssn"),
-        col("last_name", "lastName"),
+        col("last_name", "last_name"),
       ],
       expected: 1,
     },

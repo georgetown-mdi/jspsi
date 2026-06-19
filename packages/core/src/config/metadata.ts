@@ -63,19 +63,19 @@ const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
   },
   { type: "ssn4", aliases: [], role: "linkage", isPayload: false },
   {
-    type: "firstName",
+    type: "first_name",
     aliases: ["first_name", "fname"],
     role: "linkage",
     isPayload: false,
   },
   {
-    type: "lastName",
+    type: "last_name",
     aliases: ["last_name", "lname"],
     role: "linkage",
     isPayload: false,
   },
   {
-    type: "dateOfBirth",
+    type: "date_of_birth",
     aliases: ["date_of_birth", "dob"],
     role: "linkage",
     isPayload: false,
@@ -86,13 +86,13 @@ const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
    */
   { type: "identifier", aliases: ["id"], role: "identifier", isPayload: true },
   {
-    type: "phoneNumber",
+    type: "phone_number",
     aliases: ["phone_number", "phone"],
     role: "linkage",
     isPayload: false,
   },
   {
-    type: "emailAddress",
+    type: "email_address",
     aliases: ["email_address", "email"],
     role: "linkage",
     isPayload: false,

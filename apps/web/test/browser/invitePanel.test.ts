@@ -101,7 +101,7 @@ const terms: LinkageTerms = {
   algorithm: "psi",
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
-  linkageFields: [{ name: "firstName", type: "firstName" }],
+  linkageFields: [{ name: "firstName", type: "first_name" }],
   linkageKeys: [{ name: "first", elements: [{ field: "firstName" }] }],
 };
 
@@ -211,7 +211,7 @@ describe("InvitePanel compose screen", () => {
           kind: "unlinkable",
           unsatisfied: [
             { name: "ssn", type: "ssn" },
-            { name: "firstName", type: "firstName" },
+            { name: "firstName", type: "first_name" },
           ],
         }),
       );
@@ -222,7 +222,7 @@ describe("InvitePanel compose screen", () => {
       .element(page.getByText("This file cannot be linked"))
       .toBeInTheDocument();
     expect(document.body.textContent).toContain("ssn (ssn)");
-    expect(document.body.textContent).toContain("firstName (firstName)");
+    expect(document.body.textContent).toContain("firstName (first_name)");
     // No exchange screen: nothing was minted, so nothing dials.
     expect(page.getByTestId("exchange-view").query()).toBeNull();
   });
