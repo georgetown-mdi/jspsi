@@ -5,7 +5,7 @@ import { Writable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
-import { loadCSVFile, UsageError } from "@psilink/core";
+import { loadCSVFile, MAX_RECONNECT_ATTEMPTS, UsageError } from "@psilink/core";
 
 import {
   durationFlagSeconds,
@@ -202,14 +202,60 @@ test("nonNegativeIntFlag: a nonnegative integer is returned unchanged", () => {
       "max-reconnect-attempts",
     ),
   ).toBe(0);
-  // MAX_SAFE_INTEGER is the inclusive upper boundary z.int() accepts, so the
-  // CLI guard accepts it too -- the two agree at the boundary, not just below it.
+  // With no ceiling argument the only upper bound is the safe-integer range, so
+  // MAX_SAFE_INTEGER (the inclusive boundary z.int() accepts) passes through. A
+  // product ceiling is opt-in via the third argument, exercised separately below.
   expect(
     nonNegativeIntFlag(
       argv({ "max-reconnect-attempts": Number.MAX_SAFE_INTEGER }),
       "max-reconnect-attempts",
     ),
   ).toBe(Number.MAX_SAFE_INTEGER);
+});
+
+test("nonNegativeIntFlag: a value at or below the ceiling passes through", () => {
+  // The ceiling is inclusive: exactly MAX_RECONNECT_ATTEMPTS is accepted, the
+  // largest in-range value, so it behaves exactly as a smaller value does.
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": 3 }),
+      "max-reconnect-attempts",
+      MAX_RECONNECT_ATTEMPTS,
+    ),
+  ).toBe(3);
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": MAX_RECONNECT_ATTEMPTS }),
+      "max-reconnect-attempts",
+      MAX_RECONNECT_ATTEMPTS,
+    ),
+  ).toBe(MAX_RECONNECT_ATTEMPTS);
+});
+
+test("nonNegativeIntFlag: a value above the ceiling is a flag-named usage error stating the maximum", () => {
+  // The footgun this closes: a fat-fingered count near MAX_SAFE_INTEGER would
+  // otherwise be accepted and turn into a linear self-inflicted connect hang. One
+  // past the ceiling is rejected at parse (exit 64) with the flag named, the bare
+  // count maximum stated (no time unit), and the offending value echoed.
+  const justOver = MAX_RECONNECT_ATTEMPTS + 1;
+  // One invocation covers both the type and the message: capture the thrown
+  // error, assert it is the flag-named UsageError, then assert its wording.
+  let caught: unknown;
+  try {
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": justOver }),
+      "max-reconnect-attempts",
+      MAX_RECONNECT_ATTEMPTS,
+    );
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as UsageError).message;
+  expect(message).toContain("--max-reconnect-attempts");
+  expect(message).toContain("must not exceed");
+  expect(message).toContain(String(MAX_RECONNECT_ATTEMPTS));
+  expect(message).toContain(String(justOver));
 });
 
 test("nonNegativeIntFlag: an absent flag is undefined", () => {

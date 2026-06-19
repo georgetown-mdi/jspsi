@@ -106,12 +106,23 @@ export function durationFlagSeconds(
  * `--max-reconnect-attempts -1`, `2.5`, or `abc` through to be caught only later
  * and as a runtime fault rather than a usage error. `Number.isSafeInteger`
  * mirrors the schema's `z.int().nonnegative()` on the same field
- * (`maxReconnectAttempts`) exactly -- `z.int()` likewise rejects a non-integer,
- * `NaN`, and a value outside the safe-integer range -- so the CLI boundary and
- * the merged-options re-validation agree, and the operator gets a flag-named
- * message instead of a raw schema-error dump. `NaN` (the non-numeric case) is a
- * `number`, so it falls to the `isSafeInteger` check; the `typeof` guard is
- * purely defensive, for a future caller (or a test) that passes a non-number.
+ * (`maxReconnectAttempts`) -- `z.int()` likewise rejects a non-integer, `NaN`,
+ * and a value outside the safe-integer range -- so the CLI boundary and the
+ * merged-options re-validation agree, and the operator gets a flag-named message
+ * instead of a raw schema-error dump. `NaN` (the non-numeric case) is a `number`,
+ * so it falls to the `isSafeInteger` check; the `typeof` guard is purely
+ * defensive, for a future caller (or a test) that passes a non-number.
+ *
+ * `maxValue`, when given, is an inclusive upper sanity ceiling layered on top of
+ * the type/sign/range rejection -- the count-flag counterpart of
+ * {@link durationFlagSeconds}'s `maxSeconds`. The caller passes the schema's own
+ * ceiling (`MAX_RECONNECT_ATTEMPTS`) so the parse guard and the schema `.max()`
+ * agree at the boundary, not just below it; an over-ceiling value is rejected
+ * with the same flag-named {@link UsageError} (exit 64). The message states a bare
+ * count with no time unit: the value is a count of attempts, not a duration, even
+ * though `MAX_RECONNECT_ATTEMPTS` is itself derived from a wall-clock quantity
+ * (see its definition in `@psilink/core`). Omit `maxValue` for a flag with no
+ * product ceiling, where the safe-integer range is the only bound.
  *
  * Route only non-secret count flags through this helper: a rejected value is
  * echoed verbatim in the usage error (`got <value>`), and
@@ -122,12 +133,20 @@ export function durationFlagSeconds(
 export function nonNegativeIntFlag(
   argv: Arguments,
   name: string,
+  maxValue?: number,
 ): number | undefined {
   const raw = singleValue(argv, name);
   if (raw === undefined) return undefined;
   if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0)
     throw new UsageError(
       `--${name} must be a non-negative whole number; got ${String(raw)}`,
+    );
+  // The sanity ceiling is the last check, layered on top of the type/sign/range
+  // rejection above (a value reaching here is a non-negative safe integer), the
+  // same way durationFlagSeconds applies MAX_TIMEOUT_SECONDS after parseDurationFlag.
+  if (maxValue !== undefined && raw > maxValue)
+    throw new UsageError(
+      `--${name} must not exceed ${maxValue}; got ${String(raw)}`,
     );
   return raw;
 }

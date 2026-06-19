@@ -500,6 +500,37 @@ export interface SharedOptions {
  */
 export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
 
+/**
+ * Upper bound on {@link SharedOptions.maxReconnectAttempts}: 604800 attempts.
+ * Derived, not arbitrary -- it is the connect-retry phase's existing wall-clock
+ * ceiling expressed as a count. The connect-retry loop (`retryPromise` at every
+ * connect site) spaces attempts with a fixed 1-second inter-attempt delay --
+ * `maxReconnectAttempts` delays across `maxReconnectAttempts + 1` attempts -- so
+ * against an endpoint that refuses fast the attempts themselves are ~instant and
+ * the wall clock is essentially the delay total, about `maxReconnectAttempts`
+ * seconds. The largest count whose delay total stays within the CLI's 7-day
+ * timeout ceiling (`MAX_TIMEOUT_SECONDS` = 604800 s, the sanity cap the duration
+ * flags already enforce) is therefore `604800 s / 1 s = 604800`. Bounding the
+ * count here bounds the fast-fail connect phase to that same ~7-day wall clock
+ * the timeouts speak, instead of letting a fat-fingered value near
+ * `Number.MAX_SAFE_INTEGER` become a linear self-inflicted hang against an
+ * endpoint that refuses fast (ECONNREFUSED on sftp, EACCES/ENOENT on filedrop --
+ * exactly the fast transients the retry budget exists to ride out).
+ *
+ * This bounds a proxy: it caps the count, which equals wall-clock only at the
+ * 1-second inter-attempt floor (the fast-fail case this footgun is about). It
+ * does NOT tightly bound a slow-but-answering endpoint, whose attempts each run
+ * up to `serverConnectTimeoutMs`; that case is already held per-attempt by
+ * `serverConnectTimeoutMs` and is left to a wall-clock deadline should it ever
+ * prove to matter. Defined in core (not the CLI, where `MAX_TIMEOUT_SECONDS`
+ * lives) because both validation boundaries that must agree on this field consume
+ * it -- the schema `.max()` below and the CLI's `nonNegativeIntFlag` parse guard,
+ * which imports it -- and core cannot import from the CLI. An over-ceiling value
+ * is rejected with a flag-named `UsageError` (exit 64) whether it arrives from
+ * `psilink.yaml` or `--max-reconnect-attempts`. See docs/spec/CHANNEL_SECURITY.md.
+ */
+export const MAX_RECONNECT_ATTEMPTS = 7 * 24 * 60 * 60;
+
 const sharedOptionsFields = {
   // positive, not nonnegative: peerTimeoutMs is the per-await liveness budget,
   // so a zero would fire every transport await immediately and disable the
@@ -521,8 +552,17 @@ const sharedOptionsFields = {
     .positive()
     .default(DEFAULT_SERVER_CONNECT_TIMEOUT_MS),
   // nonnegative, NOT positive: zero is meaningful here -- "connect once, do not
-  // reconnect" -- so it stays a valid value.
-  maxReconnectAttempts: z.int().nonnegative().optional(),
+  // reconnect" -- so it stays a valid value. Capped above by
+  // MAX_RECONNECT_ATTEMPTS: the connect-retry loop paces at a fixed 1s floor, so
+  // an unbounded count is a wall-clock self-DoS; the cap bounds it to the same
+  // 7-day ceiling the timeout flags enforce (see MAX_RECONNECT_ATTEMPTS). The CLI
+  // boundary (nonNegativeIntFlag) applies the same ceiling, so the parse guard
+  // and this merged-options re-validation agree, as they do on the floor.
+  maxReconnectAttempts: z
+    .int()
+    .nonnegative()
+    .max(MAX_RECONNECT_ATTEMPTS)
+    .optional(),
 };
 
 const SharedOptionsSchema: z.ZodType<SharedOptions> =

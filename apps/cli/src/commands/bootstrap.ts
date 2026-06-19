@@ -15,6 +15,7 @@ import {
   MAX_ENDPOINT_PATH_LENGTH,
   normalizeFiledropPath,
   sanitizeErrorForDisplay,
+  MAX_RECONNECT_ATTEMPTS,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -1305,7 +1306,11 @@ export function parseCommonBootstrapArgs(
       MAX_TIMEOUT_SECONDS,
     ),
     peerTimeout: durationFlagSeconds(argv, "peer-timeout", MAX_TIMEOUT_SECONDS),
-    maxReconnectAttempts: nonNegativeIntFlag(argv, "max-reconnect-attempts"),
+    maxReconnectAttempts: nonNegativeIntFlag(
+      argv,
+      "max-reconnect-attempts",
+      MAX_RECONNECT_ATTEMPTS,
+    ),
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
     peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
