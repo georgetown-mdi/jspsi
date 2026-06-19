@@ -1,4 +1,12 @@
-import { Badge, Group, List, Stack, Text, Title } from "@mantine/core";
+import {
+  Badge,
+  Group,
+  List,
+  Stack,
+  Text,
+  Title,
+  VisuallyHidden,
+} from "@mantine/core";
 
 import { summarizeInvitation } from "@psi/invitationSummary";
 
@@ -105,9 +113,15 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
                     as their own element, with the fixed "runs as" copy as static
                     JSX text between two core-derived values -- never folded into
                     a partner-controlled param line -- so the note cannot be
-                    impersonated by text placed inside a param value. */}
+                    impersonated by text placed inside a param value. The
+                    italic styling marks it as a system note visually; the
+                    VisuallyHidden lead-in carries that same provenance to a
+                    screen reader (a partner controls only param-value text, so
+                    it cannot inject this element), since italics are not
+                    announced. */}
                 {transform.coercions?.map((coercion, ci) => (
                   <Text key={ci} size="xs" c="dimmed" pl="md" fs="italic">
+                    <VisuallyHidden>Runtime note: </VisuallyHidden>
                     {coercion.param} runs as {coercion.runsAs}
                   </Text>
                 ))}

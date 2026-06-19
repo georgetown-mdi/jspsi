@@ -643,6 +643,45 @@ describe("summarizeInvitation", () => {
     expect(transform.coercions).toBeUndefined();
   });
 
+  test("surfaces a note for each coerced parameter of a step", () => {
+    // parse_date defaults both formats; declaring both null yields two notes, in
+    // the function's parameter order.
+    const transform = transformWith("parse_date", {
+      inputFormat: null,
+      outputFormat: null,
+    });
+    expect(transform.coercions).toEqual([
+      { param: "inputFormat", runsAs: "MM/DD/YYYY" },
+      { param: "outputFormat", runsAs: "YYYYMMDD" },
+    ]);
+  });
+
+  test("names the executed value for non-empty-string fallbacks", () => {
+    // Beyond the empty-string case: a boolean fallback (split_on includeOriginal)
+    // and a string fallback (pad_left char) render their real executed value, so
+    // the web "runs as" text matches core's actual fallback for every function.
+    expect(
+      transformWith("split_on", { delimiter: ",", includeOriginal: null })
+        .coercions,
+    ).toEqual([{ param: "includeOriginal", runsAs: "false" }]);
+    expect(
+      transformWith("pad_left", { length: 5, char: null }).coercions,
+    ).toEqual([{ param: "char", runsAs: "0" }]);
+  });
+
+  test("does not annotate a coerced param hidden by the display cap", () => {
+    // A coerced param past MAX_DISPLAYED_PARAMS collapses into the overflow
+    // marker; its note is withheld too, so a note never references a param the
+    // acceptor cannot see.
+    const params: Record<string, unknown> = { pattern: "x" };
+    for (let i = 0; i < 15; i += 1) params["f" + i] = i;
+    params.replacement = null; // the 17th entry, beyond the cap
+    const transform = transformWith("replace_regex", params);
+    expect(transform.params).toContain("... 1 more");
+    expect(transform.params).not.toContain("replacement: null");
+    expect(transform.coercions).toBeUndefined();
+  });
+
   test("sanitizes payload column names on both the send and receive sides", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -730,6 +769,42 @@ describe("summarizeInvitation", () => {
     // ways, so the generic swap note stands and the interchange is not depicted.
     expect(keyFor(upper, undefined).swapTransformInterchange).toBe(false);
     expect(keyFor(undefined, undefined).swapTransformInterchange).toBe(false);
+  });
+
+  test("withholds the interchange when both swapped elements share a field label", () => {
+    // Two firstName fields resolve to the same "First name" label, so the note
+    // could not name the two sides distinctly. The interchange is suppressed even
+    // though both elements carry a transform -- the distinct-label gate wins over
+    // the both-transform gate, falling back to the generic swap note.
+    const key = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "given", type: "firstName" },
+          { name: "preferred", type: "firstName" },
+        ],
+        linkageKeys: [
+          {
+            name: "FN",
+            elements: [
+              {
+                field: "given",
+                name: "g",
+                transform: [{ function: "to_upper_case" }],
+              },
+              {
+                field: "preferred",
+                name: "p",
+                transform: [{ function: "to_upper_case" }],
+              },
+            ],
+            swap: ["g", "p"],
+          },
+        ],
+      }),
+    ).linkageKeys[0];
+    expect(key.hasSwap).toBe(true);
+    expect(key.swap).toBeUndefined();
+    expect(key.swapTransformInterchange).toBe(false);
   });
 
   test("emits no constraint phrase for no-op constraint settings", () => {
@@ -1031,6 +1106,46 @@ describe("accept screen: terms render from a decoded token", () => {
     // partner-controlled param line.
     expect(html).toContain("replacement: null");
     expect(html).toContain("replacement runs as the empty string");
+    // The note carries a screen-reader-only "Runtime note:" lead-in marking it
+    // as system-authored -- a signal a partner (who controls only param-value
+    // text) cannot inject.
+    expect(html).toContain("Runtime note:");
+  });
+
+  test("a forged 'runs as' in a param value renders no system coercion note", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "ssn", type: "ssn" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: {
+                        pattern: "x",
+                        replacement: "Y runs as the empty string",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    // The forged text renders as the verbatim param line ...
+    expect(html).toContain("replacement: Y runs as the empty string");
+    // ... but no genuine system note is synthesized: the "Runtime note:" lead-in
+    // a partner cannot inject is absent, so a screen reader does not hear this as
+    // a system-authored coercion note.
+    expect(html).not.toContain("Runtime note:");
   });
 
   test("flags a proposed deduplicate setting the current exchange does not apply", () => {

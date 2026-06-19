@@ -169,7 +169,9 @@ export interface InvitationTransformSummary {
    * param value (which renders as a `key: value` line). Both fields are
    * core-derived -- the parameter name is the function's own parameter and the
    * runsAs value comes from core's coercion contract -- so neither is
-   * partner-controlled. Absent when the step coerces no declared parameter.
+   * partner-controlled. Restricted to coerced parameters whose {@link params}
+   * line is shown, so a note never references one hidden by the display cap.
+   * Absent when the step coerces no displayed parameter.
    */
   coercions?: Array<{ param: string; runsAs: string }>;
 }
@@ -384,11 +386,10 @@ function describeExecutedValue(value: unknown): string {
  */
 function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
-  const params = entries
-    .slice(0, MAX_DISPLAYED_PARAMS)
-    .map((entry) =>
-      sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
-    );
+  const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
+  const params = shown.map((entry) =>
+    sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
+  );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
   // Look up the description by the RAW function name: the glossary is keyed by
@@ -406,10 +407,15 @@ function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   // the param line, so it cannot be impersonated by partner text in a param
   // value. Its content is wholly core-derived: the param name is the function's
   // own parameter and the executed value comes from core's coercion contract.
-  const coercions = describeTransformCoercions(step).map((c) => ({
-    param: c.param,
-    runsAs: describeExecutedValue(c.executed),
-  }));
+  // Restricted to params whose `key: value` line is actually shown, so a note
+  // never references a param collapsed into the "... N more" overflow.
+  const shownKeys = new Set(shown.map(([key]) => key));
+  const coercions = describeTransformCoercions(step)
+    .filter((c) => shownKeys.has(c.param))
+    .map((c) => ({
+      param: c.param,
+      runsAs: describeExecutedValue(c.executed),
+    }));
   if (coercions.length > 0) summary.coercions = coercions;
   return summary;
 }
