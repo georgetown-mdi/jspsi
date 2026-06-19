@@ -1,0 +1,48 @@
+.header {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  padding-top: var(--mantine-spacing-sm);
+  padding-bottom: var(--mantine-spacing-sm);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: var(--mantine-font-size-lg);
+  color: var(--mantine-color-text);
+  text-decoration: none;
+}
+
+.brand:hover {
+  text-decoration: underline;
+}
+
+.main {
+  padding-top: var(--mantine-spacing-lg);
+  padding-bottom: var(--mantine-spacing-lg);
+}
+
+.footer {
+  border-top: 1px solid var(--mantine-color-default-border);
+  margin-top: var(--mantine-spacing-xl);
+  padding-top: var(--mantine-spacing-md);
+  padding-bottom: var(--mantine-spacing-md);
+}
+
+/* The skip link sits first in the tab order but is pulled off-screen until it
+   takes focus, when it snaps into the top-left corner -- the standard
+   keyboard-only "skip to content" affordance, done in CSS so it needs no JS and
+   works under SSR. */
+.skipLink {
+  position: absolute;
+  top: -3rem;
+  left: var(--mantine-spacing-sm);
+  z-index: 1000;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  background-color: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.skipLink:focus {
+  top: var(--mantine-spacing-sm);
+}

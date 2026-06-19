@@ -176,7 +176,7 @@ export function InvitationTerms({
   const summary = summarizeInvitation(token);
   return (
     <Stack gap="sm">
-      <Title order={3} ref={headingRef} tabIndex={-1}>
+      <Title order={2} ref={headingRef} tabIndex={-1}>
         Invitation from {summary.invitingParty}
       </Title>
       <Text size="sm" c="dimmed">

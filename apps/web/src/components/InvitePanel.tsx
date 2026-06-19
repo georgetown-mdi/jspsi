@@ -158,7 +158,7 @@ export function InvitePanel() {
 
   return (
     <Paper>
-      <Text size="md">Invite someone to join you in a data exchange</Text>
+      <Title order={2}>Invite someone to join you in a data exchange</Title>
       <form
         onSubmit={(e) => {
           e.preventDefault();

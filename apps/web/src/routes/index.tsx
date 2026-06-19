@@ -1,20 +1,7 @@
-import { Container, Group } from "@mantine/core";
 import { createFileRoute } from "@tanstack/react-router";
 
-import AcceptForm from "@components/AcceptForm";
-import { InvitePanel } from "@components/InvitePanel";
+import { HomePage } from "@components/HomePage";
 
 export const Route = createFileRoute("/")({
-  component: Home,
+  component: HomePage,
 });
-
-function Home() {
-  return (
-    <Container>
-      <Group justify="space-between" align="flex-start" grow mt="md">
-        <InvitePanel />
-        <AcceptForm />
-      </Group>
-    </Container>
-  );
-}

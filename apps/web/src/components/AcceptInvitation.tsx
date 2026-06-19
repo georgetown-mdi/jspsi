@@ -108,9 +108,9 @@ export function AcceptInvitation() {
     ) : undefined;
 
   return (
-    <Container size="sm" mt="md">
+    <Container size="lg">
       <Paper>
-        <Title order={2}>Accept an invitation</Title>
+        <Title order={1}>Accept an invitation</Title>
         <AcceptInvitationPanel
           decode={decode}
           headingRef={readyHeadingRef}
