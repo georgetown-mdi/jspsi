@@ -855,6 +855,53 @@ test("loadConfigLinkageSource round-trips an explicit standardization block", ()
   }
 });
 
+test("loadConfigLinkageSource round-trips an explicit metadata block", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    const metadata = [
+      {
+        name: "tax_id",
+        type: "ssn" as const,
+        role: "linkage" as const,
+        isPayload: false,
+      },
+    ];
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+      metadata,
+    });
+    // saveConfig writes is_payload; loadConfigLinkageSource camelizes it back.
+    expect(loadConfigLinkageSource(configPath)?.metadata).toEqual(metadata);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource rejects a config with an invalid metadata block", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // Valid linkage_terms (so the metadata branch is reached) plus a metadata
+    // entry with an unknown semantic type.
+    const yaml = YAML.stringify({
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+      metadata: [
+        { name: "X", type: "not_a_type", role: "linkage", isPayload: false },
+      ],
+    });
+    fs.writeFileSync(configPath, yaml);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "invalid metadata",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {

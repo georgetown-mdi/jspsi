@@ -3,6 +3,7 @@ import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import type {
   Standardization,
   StandardizationStep,
+  StandardizationTransformation,
 } from "./config/standardization.js";
 import type {
   LinkageField,
@@ -698,17 +699,100 @@ export class StandardizedDataset {
   }
 }
 
+// --- Column resolution -------------------------------------------------------
+
 /**
- * Build a {@link StandardizedDataset} from:
+ * How one declared linkage field resolves to an input column -- the single
+ * binding the dataset builder and the satisfiability checker both consume, so
+ * the two can no longer encode the resolution rules independently and drift (the
+ * detector-vs-runtime divergence class). Produced by {@link resolveFieldColumns}.
  *
- * 1. Explicit `standardizing` transformations (when provided).
- * 2. Identity transformations for linkage fields not covered by an explicit
- *    transformation, resolved by matching the field's semantic type against
- *    column metadata.
+ * @internal The return shape of an internal resolution primitive; exported only
+ * because it is {@link resolveFieldColumns}'s return type, not as a supported
+ * entry point.
+ */
+export interface FieldColumnResolution {
+  /**
+   * The input column the field binds to, regardless of whether that column is
+   * present in the data, or `undefined` when no column resolves the field. The
+   * builder reads rows from this column (an absent column yields no values); a
+   * presence-only consumer (the satisfiability checker) treats the field as
+   * producible exactly when this is defined AND present in the input columns.
+   */
+  column: string | undefined;
+  /**
+   * The explicit standardization transformation that bound the field, when the
+   * binding came from one; `undefined` for a semantic-type-fallback binding. The
+   * builder takes its `steps`; presence-only consumers ignore it.
+   */
+  transform: StandardizationTransformation | undefined;
+}
+
+/**
+ * Resolve every declared linkage field to the input column an exchange would
+ * bind it to, encoding the column-to-field resolution rules in ONE place so the
+ * dataset builder ({@link buildStandardizedDataset}), the satisfiability checker
+ * ({@link unsatisfiedLinkageFields}), and the default-standardization derivation
+ * (`getDefaultStandardization`) cannot drift apart.
  *
- * Linkage fields that cannot be resolved by either mechanism are absent from
- * the dataset; records referencing those fields are excluded from the
- * corresponding linkage keys.
+ * The rules, per field:
+ *
+ * 1. Explicit standardization preempts the type fallback: if `standardization`
+ *    carries a transformation whose `output` is the field name, the field binds
+ *    to that transformation's `input` column -- whether or not the column is
+ *    present in the data. (When two transformations name the same output the
+ *    last wins, matching the builder's field map and the checker's old mapping.)
+ * 2. Type fallback: otherwise the field binds to the FIRST `metadata` column of
+ *    its semantic type (`metadata.find(c => c.type === field.type)`), or to
+ *    nothing when no such column exists. First-match -- not "any same-typed
+ *    column" -- because the exchange reads exactly that column.
+ *
+ * Binding is independent of whether the bound column is present in the input:
+ * the builder reads rows from the column and a presence-only consumer layers the
+ * presence test on top. `metadata` is the resolved metadata the caller already
+ * chose (an explicit block or `inferMetadata`); under inferred metadata every
+ * column is present, so the presence test only bites under an explicit block.
+ *
+ * @internal Shared primitive for the resolution's three in-package consumers
+ * (builder, satisfiability checker, default-standardization derivation);
+ * exported for those cross-module imports, not as a supported entry point. The
+ * web and CLI paths consume {@link assessLinkageSatisfiability} /
+ * {@link unsatisfiedLinkageFields}, not this directly.
+ */
+export function resolveFieldColumns(
+  terms: LinkageTerms,
+  standardization: Standardization | undefined,
+  metadata: ColumnMetadata[],
+): Map<string, FieldColumnResolution> {
+  // Field output -> its explicit transformation; last wins on a duplicate output,
+  // matching both the builder's StandardizedDataset field map and the checker's
+  // former explicitInput map (the schema forbids duplicates, so this only differs
+  // for terms not built through it).
+  const explicit = new Map<string, StandardizationTransformation>();
+  for (const t of standardization ?? []) explicit.set(t.output, t);
+
+  const resolution = new Map<string, FieldColumnResolution>();
+  for (const field of terms.linkageFields) {
+    const transform = explicit.get(field.name);
+    if (transform !== undefined) {
+      resolution.set(field.name, { column: transform.input, transform });
+      continue;
+    }
+    const col = metadata.find((c) => c.type === field.type);
+    resolution.set(field.name, { column: col?.name, transform: undefined });
+  }
+  return resolution;
+}
+
+/**
+ * Build a {@link StandardizedDataset} for the linkage fields in `terms`, binding
+ * each field to an input column via {@link resolveFieldColumns}: an explicit
+ * standardization transformation when one names the field (its steps run on the
+ * bound column), otherwise the identity transformation over the first metadata
+ * column of the field's semantic type.
+ *
+ * Linkage fields that resolve to no column are absent from the dataset; records
+ * referencing those fields are excluded from the corresponding linkage keys.
  */
 export function buildStandardizedDataset(
   standardization: Standardization | undefined,
@@ -716,22 +800,22 @@ export function buildStandardizedDataset(
   metadata: ColumnMetadata[],
   terms: LinkageTerms,
 ): StandardizedDataset {
+  const resolution = resolveFieldColumns(terms, standardization, metadata);
   const fields: StandardizedField[] = [];
-  const covered = new Set<string>();
-
-  for (const t of standardization ?? []) {
-    fields.push(
-      new StandardizedField(t.output, t.input, t.steps ?? [], rawRows),
-    );
-    covered.add(t.output);
-  }
 
   for (const field of terms.linkageFields) {
-    if (covered.has(field.name)) continue;
-    const col = metadata.find((c) => c.type === field.type);
-    if (!col) continue;
-    // Identity transformation: pass the raw column value through unchanged.
-    fields.push(new StandardizedField(field.name, col.name, [], rawRows));
+    const resolved = resolution.get(field.name);
+    if (resolved === undefined || resolved.column === undefined) continue;
+    // Explicit binding carries its own steps; a type-fallback binding is the
+    // identity transformation (pass the raw column value through unchanged).
+    fields.push(
+      new StandardizedField(
+        field.name,
+        resolved.column,
+        resolved.transform?.steps ?? [],
+        rawRows,
+      ),
+    );
   }
 
   return new StandardizedDataset(fields);
@@ -952,24 +1036,24 @@ export function validateStandardizationAgainstTerms(
 }
 
 /**
- * The linkage fields in `terms` that the input `columns` cannot satisfy
- * through the available data standardizations. Mirrors the column-to-field
- * resolution in {@link buildStandardizedDataset}: a field is producible when
+ * The linkage fields in `terms` that the input `columns` cannot satisfy through
+ * the available data standardizations. The verdict is derived from the same
+ * {@link resolveFieldColumns} binding the exchange's {@link buildStandardizedDataset}
+ * uses: a field is producible exactly when the shared resolution bound it to a
+ * column that is present in `columns`. The checker no longer re-derives the
+ * binding itself, so it cannot diverge from the runtime -- the HIGH-severity
+ * direction (a field the builder cannot produce but the checker passes) is
+ * impossible by construction.
  *
- * 1. the spec carries an explicit `standardization` for it whose source input
- *    column is present (the explicit mapping preempts the type fallback), OR
- * 2. the field has NO explicit standardization and the input has a column of a
- *    matching semantic type -- taken from `metadata` when supplied, else inferred
- *    from the column names.
+ * Because the binding is shared, the resolution rules apply unchanged: an
+ * explicit standardization preempts the type fallback (a field whose explicit
+ * source column is absent is unsatisfiable even when a same-typed column exists),
+ * and the type fallback binds to the FIRST metadata column of the field's type.
+ * An empty result means every configured field can be produced; a non-empty
+ * result names the fields that cannot.
  *
- * An explicit standardization preempts the type fallback: a field whose
- * explicit source column is absent is unsatisfiable even when a same-typed
- * column is present -- the exchange would bind it to the missing column and
- * emit no values. An empty result means every configured field can be
- * produced; a non-empty result names the fields that cannot.
- *
- * Pass `metadata` to mirror an exchange that runs from an explicit metadata
- * block (`prepareForExchange` resolves the type fallback against
+ * Pass `metadata` to match an exchange that runs from an explicit metadata block
+ * (`prepareForExchange` resolves the type fallback against
  * `metadata ?? inferMetadata`); omit it to fall back to name-based inference, the
  * accept-path default.
  */
@@ -980,27 +1064,18 @@ export function unsatisfiedLinkageFields(
   metadata?: ColumnMetadata[],
 ): LinkageField[] {
   const present = new Set(columns);
-  const metadataColumns = metadata ?? inferMetadata(columns);
-  // Field name -> the input column its explicit standardization reads. A field
-  // present here is resolved by the explicit transformation (which preempts the
-  // type fallback), so it is producible iff that column exists; a field absent
-  // here falls back to semantic-type coverage.
-  const explicitInput = new Map(
-    (standardization ?? []).map((t) => [t.output, t.input]),
+  const resolution = resolveFieldColumns(
+    terms,
+    standardization,
+    metadata ?? inferMetadata(columns),
   );
+  // A field is producible iff the shared resolution bound it to a column present
+  // in the input. The binding rules (explicit-preempts-fallback, first-match type
+  // fallback) live in resolveFieldColumns, not here, so this verdict cannot drift
+  // from the builder's.
   return terms.linkageFields.filter((f) => {
-    const mapped = explicitInput.get(f.name);
-    if (mapped !== undefined) return !present.has(mapped);
-    // Type fallback: mirror getDefaultStandardization / buildStandardizedDataset,
-    // which bind the field to the FIRST metadata column of its type and read that
-    // column from the rows. Producible iff such a column exists AND is present in
-    // the input. First-match selection (not "any same-typed column is present")
-    // matters when explicit metadata lists an absent same-typed column ahead of a
-    // present one: the exchange binds the absent one and emits nothing, so a set of
-    // present types would wrongly report the field satisfiable. For inferred
-    // metadata every column is present, so the presence check never fires.
-    const col = metadataColumns.find((c) => c.type === f.type);
-    return col === undefined || !present.has(col.name);
+    const column = resolution.get(f.name)?.column;
+    return column === undefined || !present.has(column);
   });
 }
 

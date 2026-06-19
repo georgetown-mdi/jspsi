@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { SEMANTIC_TYPES } from "../types";
+import { camelizeKeys } from "../utils/camelizeKeys.js";
 
 import type { SemanticType } from "../types";
 
@@ -31,6 +32,17 @@ const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
 export type Metadata = Array<ColumnMetadata>;
 
 export const MetadataSchema = z.array(ColumnMetadataSchema);
+
+/**
+ * Non-throwing parse of a raw value as {@link Metadata}. Snake_case keys (the
+ * on-disk form, e.g. `is_payload`) are converted to camelCase before validation,
+ * so a `metadata` block read straight from a YAML/JSON config can be passed
+ * directly -- mirroring {@link safeParseLinkageTerms} and
+ * {@link safeParseExchangeSpec}. Returns a Zod `SafeParseReturnType`.
+ */
+export function safeParseMetadata(raw: unknown) {
+  return MetadataSchema.safeParse(camelizeKeys(raw));
+}
 
 // ─── Metadata Inference ──────────────────────────────────────────────────────
 interface TypeMeta {

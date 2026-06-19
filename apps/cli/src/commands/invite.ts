@@ -328,10 +328,16 @@ export async function validateInvite(params: {
       // unsatisfiable fields rather than minting an invitation the input cannot
       // honor.
       const rows = await loadInputRows(resolved.input, { allowStdin: true });
+      // Pass the config's explicit standardization AND metadata so the columns
+      // resolve to linkage fields exactly as the eventual exchange does: metadata
+      // retypes columns for the type fallback, so without it a config that types a
+      // column explicitly (or types an inferred one away) would be checked against
+      // name inference and could mint an invitation the exchange cannot satisfy.
       const unsatisfied = unsatisfiedLinkageFields(
         rows.columns,
         configTerms,
         configSource.standardization,
+        configSource.metadata,
       );
       if (unsatisfied.length > 0)
         throw new UsageError(

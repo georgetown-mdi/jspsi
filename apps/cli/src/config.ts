@@ -5,6 +5,7 @@ import type {
   ConnectionConfig,
   ExchangeSpec,
   LinkageTerms,
+  Metadata,
   Standardization,
 } from "@psilink/core";
 import {
@@ -12,6 +13,7 @@ import {
   CanonicalEncodingError,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
+  safeParseMetadata,
   snakeizeKeys,
   StandardizationSchema,
   UsageError,
@@ -540,15 +542,24 @@ export function persistHostKeyFingerprint(
 /**
  * The portion of a pre-existing config that `invite` uses as the source for an
  * invitation: the linkage terms (which the invitation carries) and the explicit
- * data standardization, if any (which the config-vs-input reconciliation honors
- * so an input column the standardization maps to a linkage field counts as
- * satisfying it). Metadata and the connection block are intentionally omitted --
- * `invite` does not use them.
+ * data standardization and metadata, if any (which the config-vs-input
+ * reconciliation honors so it resolves columns to linkage fields exactly as the
+ * eventual exchange does). The connection block is intentionally omitted --
+ * `invite` does not use it.
  */
 export interface ConfigLinkageSource {
   linkageTerms: LinkageTerms;
   /** The config's explicit `standardization` block, absent when not present. */
   standardization?: Standardization;
+  /**
+   * The config's explicit `metadata` block, absent when not present. Forwarded
+   * to the satisfiability check so it resolves the type fallback against the same
+   * column types the exchange does -- without it, a config that retypes a column
+   * (e.g. names a non-standard column as an `ssn`, or types an inferred column
+   * away) would be checked against name inference and could mint an invitation
+   * for an input the exchange cannot actually satisfy.
+   */
+  metadata?: Metadata;
 }
 
 /**
@@ -645,5 +656,27 @@ export function loadConfigLinkageSource(
     standardization = stdResult.data;
   }
 
-  return { linkageTerms: result.data, standardization };
+  // The explicit metadata is optional. safeParseMetadata camelizes the on-disk
+  // snake_case keys (e.g. `is_payload`) before validating, like linkage_terms
+  // above. An invalid block is surfaced as a usage error rather than silently
+  // dropped, so the satisfiability check cannot fall back to name inference on a
+  // config the operator believes types its columns explicitly.
+  const rawMetadata = obj["metadata"];
+  let metadata: Metadata | undefined;
+  if (rawMetadata !== undefined) {
+    const metaResult = safeParseMetadata(rawMetadata);
+    if (!metaResult.success)
+      throw new UsageError(
+        `config file ${configPath} has invalid metadata: ` +
+          metaResult.error.issues
+            .map((i) => {
+              const at = i.path.length > 0 ? `${i.path.join(".")}: ` : "";
+              return `${at}${i.message}`;
+            })
+            .join("; "),
+      );
+    metadata = metaResult.data;
+  }
+
+  return { linkageTerms: result.data, standardization, metadata };
 }

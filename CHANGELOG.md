@@ -72,6 +72,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - Repeating a single-value flag (for example `--server-port`) is now a clean usage error (exit 64) instead of misbehaving. See `docs/CLI.md`.
 - A malformed message from a peer is reported as a protocol error instead of crashing, and a failed exchange surfaces its original cause instead of a generic connection error.
 - The acceptor at accept time, and a recurring `psilink exchange` run, are warned -- or the run is blocked (exit 64) -- when the CSV cannot satisfy the configured linkage terms, instead of silently producing an empty result. See `docs/CLI.md`.
+- `psilink invite` now reconciles an input CSV against a config's explicit `metadata`, resolving columns to linkage fields exactly as the exchange will, instead of falling back to column-name inference. A config that types a non-standard column explicitly is no longer wrongly rejected at invite time, and a CSV the config's metadata cannot satisfy is now caught when the invitation is generated rather than only at the exchange. See `docs/CLI.md`.
 - Linkage terms that pair `output.expects_output: false` with `payload.receive` columns are rejected as incoherent at parse time. See `docs/EXCHANGE_REFERENCE.md`.
 - Linkage terms that reference an undeclared linkage field, or whose `swap` names no element in its key, are rejected as incoherent at decode, instead of silently collapsing the affected key to an empty result. See `docs/EXCHANGE_REFERENCE.md`.
 
