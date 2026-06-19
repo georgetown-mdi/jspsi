@@ -43,6 +43,64 @@ const FUZZY_COMPARISON_LABELS: Record<
 };
 
 /**
+ * Plain-language description of what each transform function does to matching,
+ * keyed by the function name core recognizes. The acceptor sees these alongside
+ * the function name and its parameters so a non-expert can understand the
+ * matching consequence of each declared transform, not just read its name. Each
+ * entry names the consequence where there is one (e.g. `coalesce` can create
+ * matches that would not otherwise occur), rather than restating the name.
+ *
+ * Keyed by the function's raw name (the schema-validated `snake_case` value the
+ * cleaning library dispatches on), so the lookup is an exact match against what
+ * core executes. A partner-declared name that core does not recognize has no
+ * entry and falls back to the bare sanitized name; the glossary is asserted to
+ * cover every name in core's `STANDARDIZATION_FUNCTION_NAMES` (see the coverage
+ * test), so a function added to core cannot ship here without a description.
+ *
+ * Exported so the coverage test can assert its key set equals core's
+ * {@link STANDARDIZATION_FUNCTION_NAMES} in both directions -- catching a core
+ * function with no entry here and a stale entry for a function core dropped.
+ */
+export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
+  remove_non_ascii:
+    "Removes non-ASCII characters (accents, emoji, symbols) before matching, so values differing only in those characters can match.",
+  replace_separators_with_spaces:
+    "Turns hyphens, apostrophes, ampersands, slashes, and underscores into spaces before matching.",
+  squash_spaces:
+    "Collapses runs of spaces into a single space before matching.",
+  remove_punctuation: "Removes punctuation and symbols before matching.",
+  remove_dashes: "Removes hyphens before matching.",
+  trim_whitespace: "Removes leading and trailing spaces before matching.",
+  to_upper_case:
+    "Upper-cases the value before matching, so values differing only in letter case can match.",
+  to_lower_case:
+    "Lower-cases the value before matching, so values differing only in letter case can match.",
+  remove_accents:
+    "Strips accents and diacritics before matching, so accented and unaccented spellings can match.",
+  remove_affixes:
+    "Removes name titles and suffixes (Mr., Dr., Jr., III) before matching.",
+  substring:
+    "Matches on only a fixed slice of the value (a character range), not the whole value.",
+  parse_date:
+    "Reformats the date to a canonical form before matching, so dates written in different formats can match.",
+  pad_left:
+    "Left-pads the value to a fixed length before matching (e.g. zero-filling a short identifier).",
+  phonetic:
+    "Matches on a sound-alike phonetic code rather than the literal spelling, so names that sound alike can match.",
+  null_if: "Treats listed values as empty, dropping them from matching.",
+  replace_regex:
+    "Rewrites the parts of the value matching a pattern before matching.",
+  extract_regex:
+    "Matches on only the part of the value a pattern captures; a value with no match is dropped.",
+  filter_regex:
+    "Drops values that do not match a pattern, removing them from matching.",
+  split_on:
+    "Splits the value into several candidates, each able to match independently.",
+  coalesce:
+    "Substitutes a fallback value for an empty field, which can create matches that would not otherwise occur.",
+};
+
+/**
  * Whether today's PSI exchange actually applies the inviter's `deduplicate`
  * setting and per-element `generateFuzzyComparisons`. Both are surfaced on the
  * consent screen under the terms-as-proposed model, but the run does not yet
@@ -93,6 +151,13 @@ export interface InvitationTransformSummary {
    * record cannot flood the screen. Empty when the step declares no parameters.
    */
   params: Array<string>;
+  /**
+   * Plain-language description of what this function does to matching, from
+   * {@link TRANSFORM_FUNCTION_GLOSSARY}. Fixed copy keyed by the recognized
+   * function name (not partner-controlled), so it is safe to render verbatim.
+   * Absent when the declared function name is one core does not recognize.
+   */
+  description?: string;
 }
 
 /**
@@ -289,7 +354,18 @@ function summarizeTransform(step: TransformStep): InvitationTransformSummary {
     );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
-  return { function: sanitizeForDisplay(step.function), params };
+  // Look up the description by the RAW function name: the glossary is keyed by
+  // the name core dispatches on, so a match means this is that known function.
+  // The hasOwn guard (not a bare index) is what makes the absent case visible to
+  // the type system -- the function name is partner-controlled and may name no
+  // entry, which the Record index signature alone would silently type as string.
+  const summary: InvitationTransformSummary = {
+    function: sanitizeForDisplay(step.function),
+    params,
+  };
+  if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
+    summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
+  return summary;
 }
 
 /**

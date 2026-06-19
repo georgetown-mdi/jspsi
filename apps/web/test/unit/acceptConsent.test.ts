@@ -5,13 +5,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { MantineProvider } from "@mantine/core";
 
-import { generateSharedSecret } from "@psilink/core";
+import {
+  STANDARDIZATION_FUNCTION_NAMES,
+  generateSharedSecret,
+} from "@psilink/core";
 
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
 import { InvitationTerms } from "@components/InvitationTerms";
 
+import {
+  TRANSFORM_FUNCTION_GLOSSARY,
+  summarizeInvitation,
+} from "@psi/invitationSummary";
 import { commitAcceptance } from "@psi/acceptConsent";
-import { summarizeInvitation } from "@psi/invitationSummary";
 
 import type { ReactElement } from "react";
 
@@ -327,11 +333,15 @@ describe("summarizeInvitation", () => {
       ),
     ).toBe(true);
 
-    // A transform is flagged, and its (sanitized) function name surfaces on the
-    // element it applies to.
+    // A transform is flagged, and its (sanitized) function name and
+    // plain-language description surface on the element it applies to.
     expect(transformed.hasNonDefaultRule).toBe(true);
     expect(transformed.elements[1].transforms).toEqual([
-      { function: "substring", params: ["start: 1", "length: 1"] },
+      {
+        function: "substring",
+        params: ["start: 1", "length: 1"],
+        description: TRANSFORM_FUNCTION_GLOSSARY["substring"],
+      },
     ]);
 
     // A swap is flagged, and resolves to the swapped elements' field labels.
@@ -468,6 +478,51 @@ describe("summarizeInvitation", () => {
     expect(fuzzyLabelFor("transpositions")).toBe("two-digit transpositions");
     expect(fuzzyLabelFor("editDistances")).toBe("single-character edits");
     expect(fuzzyLabelFor("adjacentYears")).toBe("adjacent years");
+  });
+
+  // The summary surfaced for a transform declaring `fn`.
+  const transformFor = (fn: string) =>
+    summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "ssn", transform: [{ function: fn }] }],
+          },
+        ],
+      }),
+    ).linkageKeys[0].elements[0].transforms[0];
+
+  test("the transform glossary stays in sync with core's function set", () => {
+    // Two-directional: every function core recognizes has a description, and the
+    // glossary carries no entry for a function core does not (a stale key). A new
+    // core function therefore cannot ship without a consent-screen description,
+    // and a removed one cannot leave dead copy behind.
+    expect(Object.keys(TRANSFORM_FUNCTION_GLOSSARY).sort()).toEqual(
+      [...STANDARDIZATION_FUNCTION_NAMES].sort(),
+    );
+  });
+
+  test("describes a transform's matching effect alongside its name", () => {
+    // coalesce is the headline match-widening case: its description must name the
+    // consequence (it can create matches that would not otherwise occur), not
+    // restate the name.
+    const coalesce = transformFor("coalesce");
+    expect(coalesce.function).toBe("coalesce");
+    expect(coalesce.description).toBe(TRANSFORM_FUNCTION_GLOSSARY["coalesce"]);
+    expect(coalesce.description).toMatch(/matches that would not otherwise/i);
+
+    // A normalizing function is described too, so every step carries context.
+    expect(transformFor("to_upper_case").description).toMatch(/case/i);
+  });
+
+  test("omits a description for a function name core does not recognize", () => {
+    // A partner-declared name with no core match falls back to the bare
+    // (sanitized) name with no description, rather than a misleading one.
+    const unknown = transformFor("not_a_real_function");
+    expect(unknown.function).toBe("not_a_real_function");
+    expect(unknown.description).toBeUndefined();
   });
 
   test("renders transform parameter values of every type", () => {

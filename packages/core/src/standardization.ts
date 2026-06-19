@@ -424,6 +424,20 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   split_on: splitOnFactory,
 };
 
+/**
+ * The names of every standardization function the library recognizes, including
+ * `coalesce` -- which {@link compileStep} handles specially, outside
+ * {@link STANDARDIZING_FUNCTIONS}. Exported as the single source of truth for
+ * "which function names core knows": {@link validateStandardizationAgainstTerms}
+ * checks against it, and the web consent screen's plain-language glossary asserts
+ * it covers every name here, so a function added to core cannot ship without a
+ * consent-screen description silently falling through to a bare name.
+ */
+export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
+  ...Object.keys(STANDARDIZING_FUNCTIONS),
+  "coalesce",
+];
+
 // --- Step compilation --------------------------------------------------------
 
 type CompiledStep =
@@ -854,10 +868,7 @@ export function validateStandardizationAgainstTerms(
       );
     }
     for (const step of t.steps ?? []) {
-      if (
-        step.function !== "coalesce" &&
-        !(step.function in STANDARDIZING_FUNCTIONS)
-      ) {
+      if (!STANDARDIZATION_FUNCTION_NAMES.includes(step.function)) {
         errors.push(
           `unknown standardization function "${step.function}" in ` +
             `transformation for "${t.output}"`,

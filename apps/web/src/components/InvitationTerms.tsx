@@ -86,6 +86,15 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
                 <Text size="xs" c="dimmed">
                   transformed ({transform.function})
                 </Text>
+                {/* Plain-language description of the function's matching effect.
+                    Fixed copy keyed by the recognized function name (not
+                    partner-controlled), so it renders verbatim; absent for a
+                    function name core does not recognize. */}
+                {transform.description !== undefined && (
+                  <Text size="xs" c="dimmed" pl="md" fs="italic">
+                    {transform.description}
+                  </Text>
+                )}
                 {transform.params.map((param, pi) => (
                   <Text key={pi} size="xs" c="dimmed" pl="md">
                     {param}
