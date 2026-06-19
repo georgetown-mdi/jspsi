@@ -21,6 +21,11 @@ export default defineConfig({
           // chdir in one file could corrupt a concurrently-running sibling's cwd.
           // Forks gives each file its own process, the isolation safety needs.
           pool: "forks",
+          // Installs the standing console sentinel in every integration file's
+          // worker: it wraps console directly and fails the file at afterAll on
+          // any un-allowlisted console.log/warn/error (the inverse of blanket
+          // silencing). Scoped to this project, so the unit project is unaffected.
+          setupFiles: ["./test/integration/consoleSentinel.setup.ts"],
           // Starts the SFTP test server (the in-process backend by default, or
           // the native sshd backend when PSILINK_SFTP_BACKEND=native) before the
           // suite and stops it after, handing the conformance tests its
