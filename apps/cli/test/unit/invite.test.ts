@@ -12,7 +12,7 @@ import {
   inferMetadata,
   UsageError,
 } from "@psilink/core";
-import type { LinkageTerms, Standardization } from "@psilink/core";
+import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
 import {
   handler as inviteHandler,
@@ -254,12 +254,13 @@ function defaultTerms(): LinkageTerms {
 }
 
 // A pre-existing config carrying `terms` (and optionally an explicit
-// `standardization`) is written to a temp dir; the helper returns the paths so a
-// test can point its options at them. The connection is a placeholder -- invite
-// does not use it.
+// `standardization` and/or `metadata`) is written to a temp dir; the helper
+// returns the paths so a test can point its options at them. The connection is a
+// placeholder -- invite does not use it.
 function withConfig(
   terms: LinkageTerms,
   standardization?: Standardization,
+  metadata?: Metadata,
 ): { dir: string; configPath: string; keyPath: string } {
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-cfg-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -267,6 +268,7 @@ function withConfig(
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkageTerms: terms,
     ...(standardization !== undefined && { standardization }),
+    ...(metadata !== undefined && { metadata }),
   });
   return { dir, configPath, keyPath: path.join(dir, ".psilink.key") };
 }
@@ -350,6 +352,38 @@ test("validateInvite: a config's explicit standardization lets an otherwise-unsa
       steps: [{ function: "trim_whitespace" }],
     },
   ]);
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,tax_id");
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config's explicit metadata lets an otherwise-unsatisfying input pass", async () => {
+  const terms = defaultTerms();
+  // The config's metadata types tax_id as ssn; the input carries tax_id, which
+  // name inference would type as an identifier (not ssn). Without honoring the
+  // config metadata the ssn field would look unsatisfiable and invite would
+  // refuse, even though the exchange (which uses the metadata) can produce it.
+  const metadata: Metadata = [
+    {
+      name: "first_name",
+      type: "firstName",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "last_name", type: "lastName", role: "linkage", isPayload: false },
+    { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+    { name: "tax_id", type: "ssn", role: "linkage", isPayload: false },
+  ];
+  const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,tax_id");
     const ready = await validateInvite({

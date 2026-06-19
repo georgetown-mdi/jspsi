@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 
-import { inferMetadata, ALIAS_TYPE_META_MAP } from "../src/config/metadata";
+import {
+  inferMetadata,
+  ALIAS_TYPE_META_MAP,
+  safeParseMetadata,
+} from "../src/config/metadata";
 
 // ─── inferMetadata: linkage columns ──────────────────────────────────────────
 
@@ -152,4 +156,35 @@ test("ALIAS_TYPE_META_MAP entries have type, role, and isPayload", () => {
 test("ALIAS_TYPE_META_MAP identifier entry has role identifier, not linkage", () => {
   const entry = ALIAS_TYPE_META_MAP["identifier"];
   expect(entry.role).toBe("identifier");
+});
+
+// ─── safeParseMetadata ────────────────────────────────────────────────────────
+
+test("safeParseMetadata camelizes the on-disk snake_case keys", () => {
+  // The form saveConfig writes (is_payload, not isPayload).
+  const result = safeParseMetadata([
+    { name: "SSN", type: "ssn", role: "linkage", is_payload: false },
+  ]);
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data[0]).toEqual({
+    name: "SSN",
+    type: "ssn",
+    role: "linkage",
+    isPayload: false,
+  });
+});
+
+test("safeParseMetadata also accepts the camelCase form", () => {
+  const result = safeParseMetadata([
+    { name: "SSN", type: "ssn", role: "linkage", isPayload: false },
+  ]);
+  expect(result.success).toBe(true);
+});
+
+test("safeParseMetadata fails on an invalid semantic type", () => {
+  const result = safeParseMetadata([
+    { name: "X", type: "not_a_type", role: "linkage", is_payload: false },
+  ]);
+  expect(result.success).toBe(false);
 });
