@@ -583,8 +583,8 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
-  // The displayed parameter lines for one transform step.
-  const paramsFor = (fn: string, params: Record<string, unknown>) =>
+  // The display summary for a single transform step.
+  const transformWith = (fn: string, params: Record<string, unknown>) =>
     summarizeInvitation(
       makeToken({
         linkageFields: [{ name: "ssn", type: "ssn" }],
@@ -595,31 +595,52 @@ describe("summarizeInvitation", () => {
           },
         ],
       }),
-    ).linkageKeys[0].elements[0].transforms[0].params;
+    ).linkageKeys[0].elements[0].transforms[0];
 
   test("annotates a coerced parameter with the value the function actually runs", () => {
     // The headline case: replace_regex replacement: null executes as the empty
-    // string, so the line shows both the declared null and what runs.
-    const params = paramsFor("replace_regex", {
+    // string. The param line stays verbatim and the executed value is surfaced
+    // as a separate coercion note (not folded into the partner-controlled line).
+    const transform = transformWith("replace_regex", {
       pattern: "x",
       replacement: null,
     });
-    expect(params).toContain("replacement: null (runs as the empty string)");
-    // The pattern, which the function does not coerce, is shown verbatim.
-    expect(params).toContain("pattern: x");
+    expect(transform.params).toEqual(["pattern: x", "replacement: null"]);
+    expect(transform.coercions).toEqual([
+      { param: "replacement", runsAs: "the empty string" },
+    ]);
   });
 
   test("shows an un-coerced parameter verbatim, even when declared null", () => {
-    // A declared, non-null value is applied as written -- no coerced rendering.
-    expect(
-      paramsFor("replace_regex", { pattern: "x", replacement: "Y" }),
-    ).toEqual(["pattern: x", "replacement: Y"]);
+    // A declared, non-null value is applied as written -- no coercion note.
+    const real = transformWith("replace_regex", {
+      pattern: "x",
+      replacement: "Y",
+    });
+    expect(real.params).toEqual(["pattern: x", "replacement: Y"]);
+    expect(real.coercions).toBeUndefined();
     // The coercion is per-parameter: replace_regex coerces `replacement` but not
-    // `pattern`, so a null pattern keeps its literal "null" and gains no blanket
-    // "(empty)" annotation where that would be wrong.
-    expect(paramsFor("replace_regex", { pattern: null })).toEqual([
-      "pattern: null",
+    // `pattern`, so a null pattern keeps its literal "null" and gains no note
+    // where a blanket "(empty)" rendering would be wrong.
+    const nullPattern = transformWith("replace_regex", { pattern: null });
+    expect(nullPattern.params).toEqual(["pattern: null"]);
+    expect(nullPattern.coercions).toBeUndefined();
+  });
+
+  test("a forged 'runs as' in a partner param value does not become a coercion note", () => {
+    // A malicious inviter placing the annotation's literal text inside a param
+    // VALUE stays a verbatim `key: value` line and yields no coercion note: the
+    // genuine note is a separate element built only from core's table, so it
+    // cannot be impersonated by partner-controlled param content.
+    const transform = transformWith("replace_regex", {
+      pattern: "x",
+      replacement: "Y runs as the empty string",
+    });
+    expect(transform.params).toEqual([
+      "pattern: x",
+      "replacement: Y runs as the empty string",
     ]);
+    expect(transform.coercions).toBeUndefined();
   });
 
   test("sanitizes payload column names on both the send and receive sides", () => {
@@ -1004,9 +1025,12 @@ describe("accept screen: terms render from a decoded token", () => {
         }),
       },
     });
-    // The declared null and what the function actually runs both reach the
-    // screen, so the consent term cannot misstate the match.
-    expect(html).toContain("replacement: null (runs as the empty string)");
+    // The declared null reaches the screen verbatim, and what the function
+    // actually runs is surfaced as a separate note, so the consent term cannot
+    // misstate the match yet the executed value is not folded into the
+    // partner-controlled param line.
+    expect(html).toContain("replacement: null");
+    expect(html).toContain("replacement runs as the empty string");
   });
 
   test("flags a proposed deduplicate setting the current exchange does not apply", () => {

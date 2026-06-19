@@ -100,6 +100,17 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
                     {param}
                   </Text>
                 ))}
+                {/* Runtime-coercion notes for params the function overrides
+                    (e.g. replacement: null runs as the empty string). Rendered
+                    as their own element, with the fixed "runs as" copy as static
+                    JSX text between two core-derived values -- never folded into
+                    a partner-controlled param line -- so the note cannot be
+                    impersonated by text placed inside a param value. */}
+                {transform.coercions?.map((coercion, ci) => (
+                  <Text key={ci} size="xs" c="dimmed" pl="md" fs="italic">
+                    {coercion.param} runs as {coercion.runsAs}
+                  </Text>
+                ))}
               </Stack>
             ))}
           </Stack>

@@ -149,10 +149,8 @@ export interface InvitationTransformSummary {
    * entry marks any overflow). sanitizeForDisplay bounds each entry's length and
    * the count is capped, so an arbitrarily large partner-supplied `params`
    * record cannot flood the screen. Empty when the step declares no parameters.
-   * A parameter core coerces before applying carries a trailing "(runs as ...)"
-   * annotation naming the executed value, so a declared value the function
-   * overrides (e.g. `replacement: null` running as the empty string) is not
-   * surfaced as the match rule alone; un-coerced parameters are shown verbatim.
+   * Each parameter is shown verbatim; a parameter core coerces before applying
+   * is clarified separately in {@link coercions}, not folded into its line.
    */
   params: Array<string>;
   /**
@@ -162,6 +160,18 @@ export interface InvitationTransformSummary {
    * Absent when the declared function name is one core does not recognize.
    */
   description?: string;
+  /**
+   * Parameters this function coerces before applying, each naming the parameter
+   * and the value it actually runs as (e.g. `replacement` runs as the empty
+   * string for `replace_regex` `replacement: null`). Carried apart from
+   * {@link params}, and rendered as its own element rather than folded into the
+   * param line, so this note is not impersonable by partner text placed inside a
+   * param value (which renders as a `key: value` line). Both fields are
+   * core-derived -- the parameter name is the function's own parameter and the
+   * runsAs value comes from core's coercion contract -- so neither is
+   * partner-controlled. Absent when the step coerces no declared parameter.
+   */
+  coercions?: Array<{ param: string; runsAs: string }>;
 }
 
 /**
@@ -374,27 +384,11 @@ function describeExecutedValue(value: unknown): string {
  */
 function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
-  // The coercion of each param core overrides before applying (e.g.
-  // replace_regex replacement: null runs as the empty string), so a declared
-  // value the function overrides is shown with what actually executes rather
-  // than alone. Driven by core's behavior; a param absent here is shown verbatim.
-  // Keyed by the whole coercion so a `.get()` hit narrows to a defined value
-  // (the executed value is itself typed `unknown` and could legitimately be any
-  // value, so `.has()` + `.get()` would not narrow it).
-  const coercionByParam = new Map(
-    describeTransformCoercions(step).map((c) => [c.param, c]),
-  );
-  const params = entries.slice(0, MAX_DISPLAYED_PARAMS).map(([key, value]) => {
-    const declared = `${key}: ${describeParamValue(value)}`;
-    // The executed annotation is fixed core copy, not partner-controlled; the
-    // whole line is still sanitized as a unit so the declared half stays escaped.
-    const coercion = coercionByParam.get(key);
-    if (coercion !== undefined)
-      return sanitizeForDisplay(
-        `${declared} (runs as ${describeExecutedValue(coercion.executed)})`,
-      );
-    return sanitizeForDisplay(declared);
-  });
+  const params = entries
+    .slice(0, MAX_DISPLAYED_PARAMS)
+    .map((entry) =>
+      sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
+    );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
   // Look up the description by the RAW function name: the glossary is keyed by
@@ -408,6 +402,15 @@ function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   };
   if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
     summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
+  // Surface each runtime-coerced param as its own note rather than folded into
+  // the param line, so it cannot be impersonated by partner text in a param
+  // value. Its content is wholly core-derived: the param name is the function's
+  // own parameter and the executed value comes from core's coercion contract.
+  const coercions = describeTransformCoercions(step).map((c) => ({
+    param: c.param,
+    runsAs: describeExecutedValue(c.executed),
+  }));
+  if (coercions.length > 0) summary.coercions = coercions;
   return summary;
 }
 
