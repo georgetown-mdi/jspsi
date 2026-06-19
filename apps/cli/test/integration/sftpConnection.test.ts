@@ -785,6 +785,117 @@ test("a wrong pinned host-key fingerprint is rejected before auth over real SFTP
   );
 });
 
+inProcessOnly(
+  "the host-key probe and verify(false) rejections strand no Client listener",
+  async () => {
+    // CONTRACT ASSERTION for the "no leaked event listeners" half of the teardown
+    // re-verification (board item 202393052): the first-use host-key probe and both
+    // verify(false) host-key rejections (the pinned-mismatch enforce path and the
+    // no-pin fail-closed default) tear the raw transport down OUTSIDE
+    // ssh2-sftp-client's own end() (the probe ends explicitly after a host-denied
+    // connect; an open() rejection never reaches a session), so each must leave the
+    // underlying ssh2 Client with no stranded 'error'/'end'/'close' handler. (The
+    // other half -- a late verify() against a destructed protocol cannot escape
+    // settleVerify into an unhandled rejection -- is pinned deterministically by the
+    // core unit test "probeHostKeyFingerprint swallows a late verify() throw on a
+    // torn-down handshake".)
+    //
+    // ssh2-sftp-client's constructor attaches exactly three permanent "global"
+    // listeners to its ssh2 Client -- one each for 'error'/'end'/'close', gated by
+    // globalListener (node_modules/ssh2-sftp-client/src/index.js; #189 routes them
+    // through the adapter's logger instead of the console). Every per-operation
+    // listener it adds (addTempListeners in connect()/end()/each op) is removed in the
+    // same promise's .finally(). So after any connect-then-teardown the Client must
+    // carry exactly those three and nothing more; a count above the fresh-construction
+    // baseline means a teardown path leaked a handler. The exact-count check is a
+    // deliberate upgrade tripwire, like the wrapper-listener assertions above: if a
+    // future ssh2-sftp-client stops removing a temp listener, the count climbs and
+    // this fails RED rather than regressing the routing silently.
+
+    // Reach the underlying ssh2 Client the way ssh2-sftp-client stores it (this.client)
+    // through the adapter's own client field -- the same internal coupling the
+    // wrapper-listener assertions above reach this.sftp through.
+    const clientOf = (adapter: SSH2SFTPClientAdapter): EventEmitter =>
+      (adapter as unknown as { client: { client: EventEmitter } }).client
+        .client;
+    const counts = (c: EventEmitter) => ({
+      error: c.listenerCount("error"),
+      end: c.listenerCount("end"),
+      close: c.listenerCount("close"),
+    });
+
+    // Baseline: a freshly constructed, never-connected adapter carries the
+    // constructor's three global listeners and nothing else.
+    const baseline = counts(clientOf(new SSH2SFTPClientAdapter()));
+    expect(baseline).toEqual({ error: 1, end: 1, close: 1 });
+
+    const auth = serverAuth(srv.usera);
+
+    // Path 1 -- the first-use probe: connect far enough to read the host key, refuse
+    // at verification, then end(). The pin in `auth` is irrelevant here (the probe
+    // installs its own capture verifier and always refuses); the teardown rides the
+    // host-denied connect rejection plus the explicit end().
+    const probeAdapter = new SSH2SFTPClientAdapter();
+    const probeConn = new FileSyncConnection(probeAdapter, { verbose: -1 });
+    await probeConn.probeHostKeyFingerprint({
+      channel: "sftp",
+      server: { host: srv.host, port: srv.port, ...auth },
+    });
+    expect(counts(clientOf(probeAdapter))).toEqual(baseline);
+
+    // Path 2 -- the pinned-mismatch enforce path: a wrong pin makes the enforce
+    // verifier refuse, so open() rejects before reaching a session and -- unlike the
+    // probe -- without an explicit end(). It must still strand no listener.
+    const openAdapter = new SSH2SFTPClientAdapter();
+    const openConn = new FileSyncConnection(openAdapter, { verbose: -1 });
+    openConn.on("error", () => {});
+    await expect(
+      openConn.open({
+        channel: "sftp",
+        server: {
+          host: srv.host,
+          port: srv.port,
+          ...auth,
+          hostKeyFingerprint: wrongFingerprint(auth.hostKeyFingerprint),
+          path: SFTP_PATH,
+        },
+        options: { maxReconnectAttempts: 0 },
+      }),
+    ).rejects.toThrow(/SFTP host-key verification failed/);
+    expect(counts(clientOf(openAdapter))).toEqual(baseline);
+    await openConn.close().catch(() => {});
+
+    // Path 3 -- the no-pin fail-closed path: the DEFAULT posture for an unpinned
+    // config drives a different verifier closure that also ends in verify(false).
+    // It tears down identically to Path 2 today, but it is the security-critical
+    // default, so it earns its own tripwire against a future change that lets only
+    // the no-pin verifier diverge (e.g. drops its settleVerify). Omit the pin (and
+    // hence serverAuth, which would add it) so this exercises the no-pin branch.
+    const noPinAuth =
+      srv.usera.password !== undefined
+        ? { password: srv.usera.password }
+        : { privateKey: srv.usera.privateKey };
+    const noPinAdapter = new SSH2SFTPClientAdapter();
+    const noPinConn = new FileSyncConnection(noPinAdapter, { verbose: -1 });
+    noPinConn.on("error", () => {});
+    await expect(
+      noPinConn.open({
+        channel: "sftp",
+        server: {
+          host: srv.host,
+          port: srv.port,
+          username: srv.usera.username,
+          ...noPinAuth,
+          path: SFTP_PATH,
+        },
+        options: { maxReconnectAttempts: 0 },
+      }),
+    ).rejects.toThrow(/no host_key_fingerprint is pinned/);
+    expect(counts(clientOf(noPinAdapter))).toEqual(baseline);
+    await noPinConn.close().catch(() => {});
+  },
+);
+
 test("the server's real pinned fingerprint connects over real SFTP", async () => {
   // Companion to the wrong-pin test above: pinning the server's ACTUAL host-key
   // fingerprint must connect. This proves the negative case fails because the pin
