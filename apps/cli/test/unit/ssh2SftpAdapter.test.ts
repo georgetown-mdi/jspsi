@@ -1860,3 +1860,86 @@ describe("fatal wrapper-error guard", () => {
     expect(del).not.toHaveBeenCalled();
   });
 });
+
+// --- out-of-band ssh2 Client event routing -----------------------------------
+
+describe("out-of-band client event callbacks", () => {
+  // The adapter passes explicit error/end/close callbacks to the
+  // ssh2-sftp-client constructor so the library's globalListener routes an
+  // out-of-band ssh2 Client event to the project logger instead of its default
+  // console.error/console.log. The library stores those callbacks on the client
+  // as `eventCallbacks` (the same 2nd-positional-arg coupling the "Upgrading the
+  // SFTP Stack" checklist tracks); invoke them directly to pin the routing and
+  // -- security-relevant -- the escaping of the server-controlled error message.
+  function eventCallbacks(adapter: SSH2SFTPClientAdapter): {
+    error: (err: unknown) => void;
+    end: () => void;
+    close: () => void;
+  } {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (adapter as any).client.eventCallbacks;
+  }
+
+  test("an out-of-band client error logs at error level with the message escaped", () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const error = vi.fn();
+    const trace = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { error, trace };
+
+    // A hostile SSH_MSG_DISCONNECT description: ANSI escape + bidi override +
+    // newline. ssh2 reads it straight off the wire onto err.message, so logging
+    // it raw would let a hostile server spoof a log line or smuggle a terminal
+    // escape into an operator's console or --log-file.
+    eventCallbacks(adapter).error(new Error("\x1b[31mbad‮\nFORGED"));
+
+    expect(error).toHaveBeenCalledTimes(1);
+    const line = error.mock.calls[0][0] as string;
+    // The escaped form is present; the raw control/ANSI/bidi/newline bytes are
+    // gone. Teeth: dropping sanitizeForDisplay surfaces the raw bytes here.
+    expect(line).toContain("\\x1b[31mbad\\u202e\\x0aFORGED");
+    expect(line).not.toContain("\x1b");
+    expect(line).not.toContain("‮");
+    expect(line).not.toContain("\n");
+    expect(trace).not.toHaveBeenCalled();
+  });
+
+  test("a private-key block in an out-of-band client error is redacted", () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const error = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { error, trace: vi.fn() };
+
+    // Defense in depth: should a future ssh2 path ever interpolate key material
+    // into a Client-level error, sanitizeErrorForDisplay's redaction backstop
+    // must strip the PEM block before it can persist to a --log-file -- not merely
+    // escape it (plain escaping would leave the key bytes readable). Teeth:
+    // routing through sanitizeForDisplay instead of sanitizeErrorForDisplay fails
+    // this.
+    eventCallbacks(adapter).error(
+      new Error(
+        "auth failed: -----BEGIN OPENSSH PRIVATE KEY-----\n" +
+          "SECRETKEYBYTES\n-----END OPENSSH PRIVATE KEY-----",
+      ),
+    );
+
+    const line = error.mock.calls[0][0] as string;
+    expect(line).toContain("[redacted private key]");
+    expect(line).not.toContain("SECRETKEYBYTES");
+    expect(line).not.toContain("BEGIN OPENSSH");
+  });
+
+  test("out-of-band end and close events log at trace level, not error", () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const error = vi.fn();
+    const trace = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { error, trace };
+
+    eventCallbacks(adapter).end();
+    eventCallbacks(adapter).close();
+
+    expect(trace).toHaveBeenCalledTimes(2);
+    expect(error).not.toHaveBeenCalled();
+  });
+});
