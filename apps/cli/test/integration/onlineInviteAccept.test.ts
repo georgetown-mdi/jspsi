@@ -993,6 +993,24 @@ describe("sftp", () => {
             (spec.connection as SFTPConnectionConfig).server.hostKeyFingerprint,
           ).toBe(srv.hostKeyFingerprint);
         }
+
+        // Every secret-bearing artifact this first-use run wrote is owner-only
+        // (0600): the saved configs carry the inline SFTP password threaded
+        // through the URL (alongside the just-pinned fingerprint), and the key
+        // files hold the rotated shared secret. They are written via
+        // writeFileOwnerOnly / saveKeyFile precisely so group/other cannot read
+        // them; pin that here too, so the first-use persist path is not merely
+        // assumed to inherit the sibling round-trip's permission guarantee.
+        // POSIX-only: writeFileOwnerOnly uses ACLs on Windows, where the mode bits
+        // do not reflect it.
+        if (process.platform !== "win32")
+          for (const f of [
+            inviteOptions.configFile,
+            acceptOptions.configFile,
+            inviteOptions.keyFile,
+            acceptOptions.keyFile,
+          ])
+            expect(fs.statSync(f).mode & 0o077).toBe(0);
       } finally {
         process.stdin.isTTY = originalIsTTY;
         // Restore the decline default so no later test inherits an auto-confirm.
