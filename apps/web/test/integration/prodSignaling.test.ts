@@ -6,7 +6,10 @@ import { spawn } from "node:child_process";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { waitForColdSignaling } from "../devServer/signalingProbe";
+import {
+  probeUnmatchedUpgrade,
+  waitForColdSignaling,
+} from "../devServer/signalingProbe";
 
 import type { ChildProcess } from "node:child_process";
 
@@ -41,6 +44,7 @@ const hasBuild = existsSync(prodEntry);
 
 const READY_TIMEOUT_MS = 30_000;
 const COLD_PROBE_DEADLINE_MS = 20_000;
+const UNMATCHED_PROBE_MS = 3_000;
 const STOP_TIMEOUT_MS = 5_000;
 
 function sleep(ms: number): Promise<void> {
@@ -201,6 +205,21 @@ describe.skipIf(!hasBuild)(
         expect(opened).toBe(true);
       },
       COLD_PROBE_DEADLINE_MS + 10_000,
+    );
+
+    // Regression guard: the signaling listener is the only `upgrade` listener on
+    // the production server, so an upgrade to any non-/api/peerjs path must be
+    // closed rather than left open -- Node does not auto-destroy an unhandled
+    // upgrade once a listener exists, and no socket timeout reaps it, so leaving
+    // it open is an unauthenticated socket-leak/DoS. Verified to fail (the socket
+    // hangs) against the pre-fix routing that simply returned on a path miss.
+    test(
+      "an upgrade to a non-signaling path is rejected, not left to leak a socket",
+      async () => {
+        const closed = await probeUnmatchedUpgrade(port, UNMATCHED_PROBE_MS);
+        expect(closed).toBe(true);
+      },
+      UNMATCHED_PROBE_MS + 10_000,
     );
   },
 );

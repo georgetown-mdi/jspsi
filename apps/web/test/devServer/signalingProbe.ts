@@ -82,3 +82,38 @@ export async function waitForColdSignaling(
     await new Promise((r) => setTimeout(r, 500));
   }
 }
+
+/** Dial a websocket upgrade at a NON-signaling path. On the production server the
+ * PeerJS listener is the only `upgrade` listener, so a non-matching upgrade must
+ * be closed -- otherwise the socket is left open with no timeout to reap it (an
+ * unauthenticated FD/socket-exhaustion vector). Resolves true if the server
+ * closes/rejects the connection within `timeoutMs` (the wanted behavior), false
+ * if it is instead left hanging -- no close, no error -- which is the leak, or if
+ * the server unexpectedly completes the handshake on a non-signaling path. */
+export function probeUnmatchedUpgrade(
+  port: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/not-the-signaling-path`);
+    let settled = false;
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ws.terminate();
+      } catch {
+        // already gone
+      }
+      resolvePromise(closed);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    // A non-signaling path must never 101; treat an unexpected open as a failure
+    // to reject. A server-side destroy surfaces as error and/or close -- both mean
+    // the upgrade was rejected rather than leaked.
+    ws.on("open", () => finish(false));
+    ws.on("close", () => finish(true));
+    ws.on("error", () => finish(true));
+  });
+}

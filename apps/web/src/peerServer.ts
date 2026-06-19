@@ -1,5 +1,3 @@
-import { lazy } from "@utils/lazy";
-
 import { CreatePeerServerWSOnly } from "@peerjs-server/index";
 
 import { getServer as getHttpServer } from "./httpServer";
@@ -51,4 +49,14 @@ function createPeerServer(): PeerServerInstance {
   });
 }
 
-export const usePeerServer = lazy(createPeerServer);
+// Memoize on globalThis, not in module scope. In dev, Vite can re-evaluate this
+// server module on HMR; a module-scoped memo would reset and build a second peer
+// server, stacking another `upgrade` listener (and its timers) on the long-lived
+// dev HTTP server. A global keeps it to one instance per process.
+declare global {
+  var peerServerInstance: PeerServerInstance | undefined;
+}
+
+export function usePeerServer(): PeerServerInstance {
+  return (globalThis.peerServerInstance ??= createPeerServer());
+}

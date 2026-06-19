@@ -52,14 +52,52 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const path = this.config.path;
     this.path = `${path}${path.endsWith("/") ? "" : "/"}${WS_PATH}`;
 
+    // Attach to the shared HTTP server via `noServer` + a path-scoped `upgrade`
+    // listener rather than passing `server` to `ws`. Given `{ server, path }`,
+    // `ws` installs its own `upgrade` listener that calls `abortHandshake(socket,
+    // 400)` on every upgrade whose path does not match -- including Vite's HMR
+    // socket at `/`. On the shared dev server that tears HMR down (the socket
+    // 101s, then `ws` destroys it) and Vite drops into a reconnect/full-reload
+    // loop. Routing upgrades ourselves and ignoring non-matching paths leaves
+    // them for the other `upgrade` listeners (Vite's HMR handler).
     const options: WebSocket.ServerOptions = {
       path: this.path,
-      server,
+      noServer: true,
     };
 
     this.socketServer = config.createWebSocketServer
       ? config.createWebSocketServer(options)
       : new Server(options);
+
+    // This listener lives for the life of `server`, with no teardown -- by
+    // design, not omission. The peer server is a per-process singleton
+    // (`usePeerServer`) bound to the process-lived dev/Nitro HTTP server, so this
+    // WebSocketServer is constructed once and shares the server's lifetime; the
+    // socketServer is never closed. There is therefore no reinstantiation that
+    // would stack listeners, and no closed socketServer for a stale listener to
+    // dispatch to.
+    server.on("upgrade", (req, socket, head) => {
+      if (!this.socketServer.shouldHandle(req)) {
+        // Not our path (shouldHandle() applies the `path` option above). Leave it
+        // for a co-resident `upgrade` listener -- e.g. Vite HMR at `/` in dev. But
+        // when we are the ONLY upgrade listener (the production server, where
+        // nothing else will answer) close it rather than leak an open socket:
+        // Node will not auto-destroy an unhandled upgrade once any `upgrade`
+        // listener exists, and no socket timeout reaps it. This restores the
+        // prompt reject the old `{ server, path }` wiring did, without clobbering
+        // co-resident listeners.
+        if (server.listenerCount("upgrade") === 1 && !socket.destroyed) {
+          socket.destroy();
+        }
+        return;
+      }
+      // Bail if the socket was already torn down between the event and here;
+      // handleUpgrade would otherwise write the handshake to a dead socket.
+      if (socket.destroyed) return;
+      this.socketServer.handleUpgrade(req, socket, head, (ws) => {
+        this.socketServer.emit("connection", ws, req);
+      });
+    });
 
     this.socketServer.on("connection", (socket, req) => {
       this._onSocketConnection(socket, req);
