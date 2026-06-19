@@ -241,6 +241,18 @@ export function InvitePanel() {
                 value={state.value}
                 onChange={(e) => handleChange(e.target.value)}
                 onBlur={handleBlur}
+                onKeyDown={(e) => {
+                  // The compose screen has no <form> element (so FileSelect's
+                  // submit button, which defaults to type=submit, cannot double-
+                  // fire), so restore Enter-to-submit on the name field by hand.
+                  // Skip Enter mid-IME-composition, which only commits the
+                  // candidate text. The submit no-ops without a file (the handler
+                  // guards on one), matching the disabled Generate button.
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void form.handleSubmit();
+                  }
+                }}
                 error={
                   // Show the required-name error once the user has left the field
                   // (isBlurred) or attempted a submit (submissionAttempts) -- not

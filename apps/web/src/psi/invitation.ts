@@ -297,12 +297,15 @@ export async function generateInvitation(params: {
 
   // Block a file that satisfies no linkage key, mirroring the acceptor pre-flight
   // (FileAcquire): with zero satisfiable keys the exchange would emit no key
-  // strings and yield a silent empty result. Assess against the FULL default
-  // terms (every default field declared) rather than the filtered `linkageTerms`,
-  // so a zero-key block can name the field types the file lacks -- the filtered
-  // set no longer declares the dropped fields. The count here equals
-  // linkageTerms.linkageKeys.length, since the metadata filter above and this
-  // type-based detector agree on which default keys survive.
+  // strings and yield a silent empty result. Gate on the detector's
+  // satisfiableKeyCount, NOT on linkageTerms.linkageKeys.length: the two agree for
+  // a file with columns, but getDefaultLinkageTerms falls back to ALL keys when
+  // its metadata is empty (a column-less file), so the embedded set's key count
+  // would be non-zero there and miss the block, while the detector counts actual
+  // column producibility and correctly reports zero. Assess against the FULL
+  // default terms (every default field declared) rather than the filtered
+  // `linkageTerms`, so the block can name the field types the file lacks -- the
+  // filtered set no longer declares the dropped fields.
   const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
     columns,
     getDefaultLinkageTerms(inviterName),

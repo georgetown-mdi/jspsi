@@ -297,6 +297,33 @@ describe("generateInvitation fail-closed before mint", () => {
     expect(missingTypes).toContain("firstName");
     expect(missingTypes).toContain("dateOfBirth");
   });
+
+  test("rejects a column-less file, not fooled by the empty-metadata all-keys fallback", async () => {
+    // The subtle case the block must catch: with no columns, getDefaultLinkageTerms
+    // falls back to ALL keys (its metadata is empty), so the embedded set's key
+    // count is non-zero -- but the satisfiability detector counts zero producible
+    // keys, and that is what the block gates on. So an empty CSV is refused, and
+    // every default field is named as unproducible.
+    const err: unknown = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(""),
+      location,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(InvitationFileError);
+    const failure = (err as InvitationFileError).failure;
+    expect(failure.kind).toBe("unlinkable");
+    if (failure.kind !== "unlinkable") throw new Error("unreachable");
+    expect(failure.unsatisfied.map((f) => f.type)).toEqual(
+      expect.arrayContaining([
+        "ssn",
+        "ssn4",
+        "firstName",
+        "lastName",
+        "dateOfBirth",
+      ]),
+    );
+  });
 });
 
 describe("generateInvitation expiry", () => {

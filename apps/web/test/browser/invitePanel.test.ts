@@ -36,8 +36,14 @@ vi.mock("@psi/invitation", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    generateInvitation: (params: { inviterName: string; file: unknown }) =>
-      gen.impl?.(params),
+    generateInvitation: (params: { inviterName: string; file: unknown }) => {
+      // Fail loudly rather than return undefined: a test that triggers compose
+      // without setting gen.impl should get a clear error here, not a confusing
+      // downstream `undefined is not a Promise`.
+      if (gen.impl === undefined)
+        throw new Error("invitePanel test: gen.impl was not set");
+      return gen.impl(params);
+    },
   };
 });
 
