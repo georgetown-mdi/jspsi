@@ -22,11 +22,11 @@ const minimalTerms: LinkageTerms = {
   linkageFields: [
     { name: "ssn", type: "ssn" },
     { name: "ssn4", type: "ssn4" },
-    { name: "firstName", type: "first_name" },
-    { name: "lastName", type: "last_name" },
-    { name: "dateOfBirth", type: "date_of_birth" },
-    { name: "phoneNumber", type: "phone_number" },
-    { name: "emailAddress", type: "email_address" },
+    { name: "first_name", type: "first_name" },
+    { name: "last_name", type: "last_name" },
+    { name: "date_of_birth", type: "date_of_birth" },
+    { name: "phone_number", type: "phone_number" },
+    { name: "email_address", type: "email_address" },
   ],
   linkageKeys: [
     {
@@ -59,20 +59,20 @@ describe("getDefaultStandardization — structure", () => {
     const outputs = result.map((t) => t.output);
     expect(outputs).toContain("ssn");
     expect(outputs).toContain("ssn4");
-    expect(outputs).toContain("firstName");
-    expect(outputs).toContain("lastName");
-    expect(outputs).toContain("dateOfBirth");
-    expect(outputs).toContain("phoneNumber");
-    expect(outputs).toContain("emailAddress");
+    expect(outputs).toContain("first_name");
+    expect(outputs).toContain("last_name");
+    expect(outputs).toContain("date_of_birth");
+    expect(outputs).toContain("phone_number");
+    expect(outputs).toContain("email_address");
   });
 
   test("input names come from metadata column names", () => {
     const result = getDefaultStandardization(fullMetadata, minimalTerms);
     const byOutput = Object.fromEntries(result.map((t) => [t.output, t.input]));
     expect(byOutput["ssn"]).toBe("SSN");
-    expect(byOutput["firstName"]).toBe("FIRST_NAME");
-    expect(byOutput["lastName"]).toBe("LAST_NAME");
-    expect(byOutput["dateOfBirth"]).toBe("DOB");
+    expect(byOutput["first_name"]).toBe("FIRST_NAME");
+    expect(byOutput["last_name"]).toBe("LAST_NAME");
+    expect(byOutput["date_of_birth"]).toBe("DOB");
   });
 
   test("skips linkage fields whose type is absent from metadata", () => {
@@ -224,13 +224,13 @@ describe("default SSN4 pipeline", () => {
 
 // --- Name pipelines ----------------------------------------------------------
 
-describe("default name pipeline (firstName / lastName)", () => {
+describe("default name pipeline (first_name / last_name)", () => {
   function runFirst(input: string) {
     const [t] = getDefaultStandardization(
       [{ name: "FN", type: "first_name", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "firstName", type: "first_name" }],
+        linkageFields: [{ name: "first_name", type: "first_name" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -241,7 +241,7 @@ describe("default name pipeline (firstName / lastName)", () => {
       [{ name: "LN", type: "last_name", role: "linkage", isPayload: false }],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "lastName", type: "last_name" }],
+        linkageFields: [{ name: "last_name", type: "last_name" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -287,14 +287,14 @@ describe("default name pipeline (firstName / lastName)", () => {
     expect(runFirst("Dr.")).toBeNull();
   });
 
-  test("firstName and lastName use the same pipeline", () => {
+  test("first_name and last_name use the same pipeline", () => {
     expect(runFirst("O'Brien-Smith")).toBe(runLast("O'Brien-Smith"));
   });
 });
 
 // --- Date of birth pipeline --------------------------------------------------
 
-describe("default dateOfBirth pipeline", () => {
+describe("default date_of_birth pipeline", () => {
   function run(input: string) {
     const [t] = getDefaultStandardization(
       [
@@ -307,7 +307,7 @@ describe("default dateOfBirth pipeline", () => {
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "dateOfBirth", type: "date_of_birth" }],
+        linkageFields: [{ name: "date_of_birth", type: "date_of_birth" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -341,7 +341,7 @@ describe("default dateOfBirth pipeline", () => {
 
 // --- Phone number pipeline ---------------------------------------------------
 
-describe("default phoneNumber pipeline", () => {
+describe("default phone_number pipeline", () => {
   function run(input: string) {
     const [t] = getDefaultStandardization(
       [
@@ -354,7 +354,7 @@ describe("default phoneNumber pipeline", () => {
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "phoneNumber", type: "phone_number" }],
+        linkageFields: [{ name: "phone_number", type: "phone_number" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -403,7 +403,7 @@ describe("default phoneNumber pipeline", () => {
 
 // --- Email address pipeline --------------------------------------------------
 
-describe("default emailAddress pipeline", () => {
+describe("default email_address pipeline", () => {
   function run(input: string) {
     const [t] = getDefaultStandardization(
       [
@@ -416,7 +416,7 @@ describe("default emailAddress pipeline", () => {
       ],
       {
         ...minimalTerms,
-        linkageFields: [{ name: "emailAddress", type: "email_address" }],
+        linkageFields: [{ name: "email_address", type: "email_address" }],
       },
     );
     return runPipeline(input, t.steps!);
@@ -586,7 +586,7 @@ describe("inferDateFormat — scanning", () => {
 describe("getDefaultStandardization — dateInputFormat option", () => {
   const dobTerms: LinkageTerms = {
     ...minimalTerms,
-    linkageFields: [{ name: "dateOfBirth", type: "date_of_birth" }],
+    linkageFields: [{ name: "date_of_birth", type: "date_of_birth" }],
   };
   const dobMeta = [
     {
