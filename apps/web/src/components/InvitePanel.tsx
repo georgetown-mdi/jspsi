@@ -146,9 +146,18 @@ export function InvitePanel() {
     onSubmit: async ({ value }) => {
       setError(undefined);
       const inviterName = value.inviterName.trim();
-      // Defensive: the Generate button is disabled until a file is selected, so
-      // there is normally one here. Bail rather than mint a fileless invitation.
-      if (filesRef.current.length === 0) return;
+      // The Generate button is disabled until a file is selected, but pressing
+      // Enter in the name field can still submit; surface the missing file rather
+      // than silently doing nothing, so a keyboard user is not left guessing.
+      if (filesRef.current.length === 0) {
+        setError({
+          title: "Choose a data file",
+          message:
+            "Select your CSV file before generating the invitation -- its " +
+            "columns set the invitation's matching rules.",
+        });
+        return;
+      }
       const file = filesRef.current[0];
       try {
         // A fresh secret each time, so generating again supersedes any prior

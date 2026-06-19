@@ -262,4 +262,24 @@ describe("InvitePanel compose screen", () => {
     expect(document.body.textContent).not.toContain("zod boom");
     expect(page.getByTestId("exchange-view").query()).toBeNull();
   });
+
+  test("pressing Enter with no file selected prompts for a file, mints nothing", async () => {
+    const calls: Array<unknown> = [];
+    gen.impl = (params) => {
+      calls.push(params);
+      return Promise.resolve(generated);
+    };
+    mount();
+    // Name entered, but no file selected: the Generate button stays disabled, and
+    // Enter on the name field must say so rather than silently doing nothing.
+    await userEvent.fill(page.getByRole("textbox"), "County Health Dept");
+    await userEvent.keyboard("{Enter}");
+
+    await expect
+      .element(page.getByText("Choose a data file"))
+      .toBeInTheDocument();
+    // No invitation was generated and no exchange screen appeared.
+    expect(calls).toHaveLength(0);
+    expect(page.getByTestId("exchange-view").query()).toBeNull();
+  });
 });
