@@ -504,13 +504,16 @@ export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
  * Upper bound on {@link SharedOptions.maxReconnectAttempts}: 604800 attempts.
  * Derived, not arbitrary -- it is the connect-retry phase's existing wall-clock
  * ceiling expressed as a count. The connect-retry loop (`retryPromise` at every
- * connect site) paces attempts at a fixed 1-second floor, so the number of
- * attempts that fit within the CLI's 7-day timeout ceiling
- * (`MAX_TIMEOUT_SECONDS`, the sanity cap the duration flags already enforce) is
- * `604800 s / 1 s = 604800`. Bounding the count here therefore bounds the
- * fast-fail connect phase to that same ~7-day wall clock the timeouts speak,
- * instead of letting a fat-fingered value near `Number.MAX_SAFE_INTEGER` become a
- * linear self-inflicted hang (about N seconds at the 1-second floor) against an
+ * connect site) spaces attempts with a fixed 1-second inter-attempt delay --
+ * `maxReconnectAttempts` delays across `maxReconnectAttempts + 1` attempts -- so
+ * against an endpoint that refuses fast the attempts themselves are ~instant and
+ * the wall clock is essentially the delay total, about `maxReconnectAttempts`
+ * seconds. The largest count whose delay total stays within the CLI's 7-day
+ * timeout ceiling (`MAX_TIMEOUT_SECONDS` = 604800 s, the sanity cap the duration
+ * flags already enforce) is therefore `604800 s / 1 s = 604800`. Bounding the
+ * count here bounds the fast-fail connect phase to that same ~7-day wall clock
+ * the timeouts speak, instead of letting a fat-fingered value near
+ * `Number.MAX_SAFE_INTEGER` become a linear self-inflicted hang against an
  * endpoint that refuses fast (ECONNREFUSED on sftp, EACCES/ENOENT on filedrop --
  * exactly the fast transients the retry budget exists to ride out).
  *
