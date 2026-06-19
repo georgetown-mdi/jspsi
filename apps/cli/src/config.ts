@@ -14,6 +14,7 @@ import {
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
   safeParseMetadata,
+  sanitizeForDisplay,
   snakeizeKeys,
   StandardizationSchema,
   UsageError,
@@ -540,18 +541,21 @@ export function persistHostKeyFingerprint(
       // Read the channel discriminant off the parsed document (not a
       // schema-loaded spec) and reject anything but sftp before the write, so
       // the function -- not its caller -- holds the sftp-only invariant. The
-      // channel is a non-secret discriminant, so echoing it is consistent with
-      // the channel-mismatch errors elsewhere (e.g. protocol.ts); a missing or
-      // non-scalar channel is reported generically rather than echoed.
-      // getIn does not resolve aliases, so an alias-spelled channel (or an
-      // aliased connection block) reads as a non-string node and is rejected
+      // channel is a non-secret discriminant; echo it (sanitized for display,
+      // as the rest of this trust flow treats config-derived values -- see
+      // hostKeyTrust.ts) so the operator sees which channel was rejected. A
+      // missing or non-scalar channel is reported generically rather than
+      // echoed. getIn does not resolve aliases, so an alias-spelled channel (or
+      // an aliased connection block) reads as a non-string node and is rejected
       // even when it would resolve to sftp -- the safe direction (refuse, not
       // mis-pin), and not a form a hand-authored config uses. Resolving it
       // would mean materializing the document, which this module avoids.
       const channel = doc.getIn(["connection", "channel"]);
       if (channel !== "sftp") {
         const found =
-          typeof channel === "string" ? `"${channel}"` : "absent or non-scalar";
+          typeof channel === "string"
+            ? `"${sanitizeForDisplay(channel)}"`
+            : "absent or non-scalar";
         throw new UsageError(
           `config file ${configPath} has a non-sftp connection.channel ` +
             `(${found}); a host-key fingerprint is an sftp-only pin and must ` +

@@ -589,6 +589,39 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
   }
 });
 
+test("persistHostKeyFingerprint sanitizes the echoed channel for display", () => {
+  // The rejected channel is echoed so the operator sees what was wrong, but it
+  // is operator-authored config text that can carry control bytes -- an ESC that
+  // drives an ANSI sequence, or a newline usable for log-line spoofing. The
+  // error is display-bound (it reaches a terminal/log), so the channel is run
+  // through sanitizeForDisplay and emitted escaped, never raw.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
+    const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
+    fs.writeFileSync(configPath, source);
+    let caught: unknown;
+    try {
+      persistHostKeyFingerprint(configPath, FP_A);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    const message = (caught as Error).message;
+    // The raw control bytes never reach the message ...
+    expect(message).not.toContain("\u001b");
+    expect(message).not.toContain("\n");
+    // ... they are shown as visible escapes instead.
+    expect(message).toContain("\\x1b");
+    expect(message).toContain("\\x0a");
+    // The file is left untouched (the throw precedes the write).
+    expect(fs.readFileSync(configPath, "utf8")).toBe(source);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", () => {
   // The SHA256 fingerprint alphabet includes '+' and '/'; the serializer must
   // quote as needed so the value re-parses byte-for-byte -- a mis-quoted pin
