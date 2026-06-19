@@ -11,6 +11,8 @@ import {
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
+  MAX_ENDPOINT_HOST_LENGTH,
+  MAX_ENDPOINT_PATH_LENGTH,
   normalizeFiledropPath,
   sanitizeErrorForDisplay,
   UsageError,
@@ -527,6 +529,128 @@ export function connectionFromEndpoint(
       return { connection, seeded: true };
     }
   }
+}
+
+// --- connection -> endpoint (producer) --------------------------------------
+
+/**
+ * Build the credential-free {@link ConnectionEndpoint} an online invitation
+ * carries, from the connection the inviter is actually using (the
+ * {@link connectionFromURL} result, with any `--server-*`/`--outbound-path`
+ * overrides already applied). This is the producer inverse of
+ * {@link connectionFromEndpoint}: it copies only the public locator
+ * (host/port/path, or the split inbound/outbound pair) and NEVER a credential --
+ * the endpoint type has no field for a password, private key, key-file path, or
+ * username, and the strict endpoint schema rejects one besides, so credential
+ * material cannot ride along by construction (the security invariant this task
+ * exists to honor on the producer side).
+ *
+ * The split inbound/outbound pair is emitted VERBATIM -- the inviter's own
+ * inbound stays inbound, its outbound stays outbound. The mirror swap that makes
+ * the two parties images of each other lives solely at the accept-side
+ * {@link connectionFromEndpoint}; swapping here too would double-swap and undo
+ * it. A shared (single-`path`) connection emits a single `path` as before.
+ * Guarding on `inboundPath` is enough to read `outboundPath`: the connection
+ * reaching here is built and schema-validated, whose both-or-neither refine
+ * rejects a half pair, so the pair is always whole (the same invariant
+ * {@link connectionFromEndpoint} relies on the other direction -- `outboundPath`
+ * is statically `string | undefined` but is never undefined once `inboundPath`
+ * is set).
+ *
+ * Scoped to the file-sync channels by the {@link RunnableConnectionConfig}
+ * parameter: a webrtc locator is the follow-up's producer (item 202482411,
+ * blocked on the CLI gaining a webrtc transport), so webrtc never reaches here.
+ *
+ * `port` is carried only when it is a reachable 1-65535 value. Port 0 is the one
+ * port the connection schema permits but the endpoint schema rejects (it is an
+ * OS-assigned ephemeral port, never a connect target), so it is dropped rather
+ * than emitted as a locator the partner could not dial -- and rather than
+ * failing the whole invite when the endpoint is encoded. Mirrors
+ * `webrtcEndpointFromLocation`'s port guard in the web inviter.
+ *
+ * A host or path longer than the endpoint schema allows
+ * ({@link MAX_ENDPOINT_HOST_LENGTH} / {@link MAX_ENDPOINT_PATH_LENGTH}) is the
+ * other connection-permits / endpoint-rejects mismatch (the connection schema
+ * bounds neither by length). It is degenerate inviter input -- a real hostname
+ * is <= 253 and a path <= PATH_MAX -- and is rejected here as a
+ * {@link UsageError} naming the field, rather than dropped (truncating a locator
+ * would change where the partner connects) or left to surface as an opaque
+ * ZodError at encode.
+ *
+ * @internal exported for testing
+ */
+export function endpointFromConnection(
+  connection: RunnableConnectionConfig,
+): ConnectionEndpoint {
+  // Keep a port only when it is a reachable 1-65535 value the endpoint schema
+  // accepts; drop port 0 (see the doc comment) so encoding never fails on it.
+  const reachablePort = (port: number | undefined): number | undefined =>
+    port !== undefined && Number.isInteger(port) && port >= 1 && port <= 65535
+      ? port
+      : undefined;
+
+  // Reject a locator longer than the endpoint schema permits with a clear,
+  // field-named UsageError, rather than letting encodeInvitation reject it as an
+  // opaque ZodError downstream (see the doc comment). A no-op for an unset field,
+  // so each branch may check every locator field and only the present ones fire.
+  const requireFits = (
+    label: string,
+    value: string | undefined,
+    max: number,
+  ): void => {
+    if (value !== undefined && value.length > max)
+      throw new UsageError(
+        `${label} is too long to carry in an invitation connection endpoint ` +
+          `(${value.length} > ${max} characters)`,
+      );
+  };
+
+  if (connection.channel === "sftp") {
+    const { server } = connection;
+    requireFits("connection host", server.host, MAX_ENDPOINT_HOST_LENGTH);
+    requireFits("connection path", server.path, MAX_ENDPOINT_PATH_LENGTH);
+    requireFits("inbound_path", server.inboundPath, MAX_ENDPOINT_PATH_LENGTH);
+    requireFits("outbound_path", server.outboundPath, MAX_ENDPOINT_PATH_LENGTH);
+    if (server.inboundPath !== undefined)
+      // Split-directory connection: emit the inviter's pair verbatim (the
+      // acceptor mirror-swaps it at connectionFromEndpoint; do not pre-swap).
+      return {
+        channel: "sftp",
+        host: server.host,
+        port: reachablePort(server.port),
+        inboundPath: server.inboundPath,
+        outboundPath: server.outboundPath,
+      };
+    return {
+      channel: "sftp",
+      host: server.host,
+      port: reachablePort(server.port),
+      // Shared mode: the inviter's remote working directory (omitted for a
+      // bare-host connection, which uses the server's default directory).
+      path: server.path,
+    };
+  }
+
+  // filedrop: the locator is the directory only -- no host/port/credentials.
+  requireFits("connection path", connection.path, MAX_ENDPOINT_PATH_LENGTH);
+  requireFits("inbound_path", connection.inboundPath, MAX_ENDPOINT_PATH_LENGTH);
+  requireFits(
+    "outbound_path",
+    connection.outboundPath,
+    MAX_ENDPOINT_PATH_LENGTH,
+  );
+  if (connection.inboundPath !== undefined)
+    // Split-directory connection: emit the pair verbatim (swapped by the
+    // acceptor, as in the sftp branch above).
+    return {
+      channel: "filedrop",
+      inboundPath: connection.inboundPath,
+      outboundPath: connection.outboundPath,
+    };
+  return {
+    channel: "filedrop",
+    path: connection.path,
+  };
 }
 
 // --- shared secret --------------------------------------------------------------

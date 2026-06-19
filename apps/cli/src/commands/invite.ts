@@ -34,6 +34,7 @@ import {
   connectionFromEndpoint,
   connectionFromURL,
   connectionOverridesFrom,
+  endpointFromConnection,
   DEFAULT_ACCEPT_TIMEOUT_SECONDS,
   expiresFromNow,
   generateSharedSecret,
@@ -285,6 +286,13 @@ export async function validateInvite(params: {
       linkageTerms: dataSpec.linkageTerms,
       sharedSecret,
       expires,
+      // Embed the credential-free locator for the connection this invite is
+      // using, so the acceptor seeds its connection block from it (the same path
+      // web-originated invitations exercise) rather than reconstructing it by
+      // hand. Derived from the post-override `connection`, so a `--server-port`
+      // or `--outbound-path` override is reflected; carries no credentials by
+      // construction (see endpointFromConnection).
+      connectionEndpoint: endpointFromConnection(connection),
     });
     // prepareForOnlineExchange can throw; run it here, before the token print in
     // the caller's commit step, so a failure never follows disclosure.
