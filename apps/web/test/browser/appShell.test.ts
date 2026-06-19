@@ -194,12 +194,14 @@ function mountThemed(node: ReactNode) {
 // global stylesheet that defines the --mantine-scale the value multiplies by --
 // without it the computed value is invalid/empty, but the inline value still
 // distinguishes the named widths. Tracks the named scale, not a pixel snapshot.
-function containerWidth(el: Element | null | undefined): string {
+function containerWidth(label: string, el: Element | null | undefined): string {
   const width =
     el instanceof HTMLElement
       ? el.style.getPropertyValue("--container-size").trim()
       : "";
-  expect(width).not.toBe("");
+  // Name the element in the assertion: four call sites read different elements,
+  // so a missing one must say which rather than surface an opaque empty string.
+  expect(width, `${label} container --container-size`).not.toBe("");
   return width;
 }
 
@@ -239,15 +241,19 @@ describe("content width seam", () => {
       await expect.element(page.getByText("page content")).toBeInTheDocument();
 
       const header = containerWidth(
+        "header",
         document.querySelector("header")?.firstElementChild,
       );
       const main = containerWidth(
+        "main",
         document.querySelector("main")?.firstElementChild,
       );
       const sameSize = containerWidth(
+        "ref-same",
         document.querySelector('[data-testid="ref-same"]')?.firstElementChild,
       );
       const otherSize = containerWidth(
+        "ref-other",
         document.querySelector('[data-testid="ref-other"]')?.firstElementChild,
       );
 

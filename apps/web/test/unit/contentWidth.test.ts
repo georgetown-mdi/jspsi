@@ -20,9 +20,20 @@ describe("resolveContentWidth", () => {
     ).toBe("lg");
   });
 
-  test("uses the deepest match that declares a width", () => {
-    // A leaf that declares none inherits the nearest ancestor that does, so a
-    // shared layout route can set a default its leaves narrow from.
+  test("uses the deepest match when several declare a width", () => {
+    // The leaf wins over an ancestor that also declares one, so a leaf route can
+    // narrow from a width a shared layout route sets.
+    expect(
+      resolveContentWidth([
+        { staticData: { contentWidth: "xl" } },
+        { staticData: { contentWidth: "lg" } },
+      ]),
+    ).toBe("lg");
+  });
+
+  test("falls back to an ancestor's width when the leaf declares none", () => {
+    // A leaf that declares nothing inherits the nearest ancestor that does, so a
+    // shared layout route can set a default its leaves keep.
     expect(
       resolveContentWidth([
         { staticData: { contentWidth: "lg" } },
