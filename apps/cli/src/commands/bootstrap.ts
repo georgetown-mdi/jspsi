@@ -625,17 +625,20 @@ export function applyEndpointSplitDirectories(
   // mandatory for a split directory; merge it over any URL-derived options rather
   // than replacing them, so a --connection-timeout etc. set on the URL survives.
   const options: FileSyncOptions = { ...result.options, ...SPLIT_SEED_OPTIONS };
+  // Place the swapped pair per the URL's channel. Explicit per-channel branches
+  // (matching diffConnectionAgainstTarget) rather than a bare else, so a future
+  // RunnableConnectionConfig channel falls through to fail the schema validation
+  // below instead of silently writing filedrop-shaped fields onto it.
   if (result.channel === "sftp") {
     delete result.server.path;
     result.server.inboundPath = inboundPath;
     result.server.outboundPath = outboundPath;
-    result.options = options;
-  } else {
+  } else if (result.channel === "filedrop") {
     delete result.path;
     result.inboundPath = inboundPath;
     result.outboundPath = outboundPath;
-    result.options = options;
   }
+  result.options = options;
 
   // The grafted split form carries invariants the plain shared connection does
   // not (a filedrop pair must be absolute; the pair is set together and differs).
