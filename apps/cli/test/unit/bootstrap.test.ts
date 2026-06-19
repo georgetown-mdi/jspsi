@@ -220,8 +220,8 @@ test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL"
 
 test("connectionFromURL: --outbound-path splits an sftp URL path into inbound/outbound", () => {
   const target = connectionFromURL(new URL("sftp://host/drop-in"), {
-    retainFiles: true,
-    outboundPath: "/drop-out",
+    options: { retainFiles: true },
+    server: { outboundPath: "/drop-out" },
   });
   expect(target.channel).toBe("sftp");
   if (target.channel !== "sftp") return;
@@ -232,8 +232,8 @@ test("connectionFromURL: --outbound-path splits an sftp URL path into inbound/ou
 
 test("connectionFromURL: --outbound-path splits a filedrop URL directory", () => {
   const target = connectionFromURL(new URL("file:///mnt/share/in"), {
-    retainFiles: true,
-    outboundPath: "/mnt/share/out",
+    options: { retainFiles: true },
+    server: { outboundPath: "/mnt/share/out" },
   });
   expect(target.channel).toBe("filedrop");
   if (target.channel !== "filedrop") return;
@@ -934,7 +934,7 @@ test("applyEndpointSplitDirectories: preserves URL-derived options under the ret
   // A --connection-timeout carried on the URL connection must survive the merge:
   // the retain trio is layered over the existing options, not substituted for it.
   const urlConnection = connectionFromURL(new URL("sftp://host/in"), {
-    connectionTimeout: 45,
+    options: { connectionTimeout: 45 },
   });
   const endpoint: ConnectionEndpoint = {
     channel: "sftp",
@@ -1054,9 +1054,11 @@ test("endpointFromConnection: no credential rides along on the emitted endpoint"
   // the endpoint must carry only the public locator. This is the producer side of
   // the invitation's no-credentials invariant.
   const connection = connectionFromURL(new URL("sftp://host:2200/drop"), {
-    serverUsername: "alice",
-    serverPassword: "hunter2",
-    serverPrivateKey: "@/home/alice/.ssh/id_ed25519",
+    server: {
+      username: "alice",
+      password: "hunter2",
+      privateKey: "@/home/alice/.ssh/id_ed25519",
+    },
   });
   const endpoint = endpointFromConnection(connection);
   expect(Object.keys(endpoint).sort()).toEqual([
@@ -1103,8 +1105,8 @@ test.each(["sftp", "filedrop"] as const)(
         ? new URL("sftp://host/inviter-in")
         : new URL("file:///inviter-in");
     const connection = connectionFromURL(url, {
-      outboundPath: "/inviter-out",
-      retainFiles: true,
+      options: { retainFiles: true },
+      server: { outboundPath: "/inviter-out" },
     });
     const endpoint = endpointFromConnection(connection);
     if (endpoint.channel !== channel) throw new Error(`expected ${channel}`);
@@ -1119,8 +1121,8 @@ test("endpointFromConnection -> connectionFromEndpoint round-trips a split pair 
   // acceptor's single swap site lands the inviter's outbound on the acceptor's
   // inbound (item 202418344's dormant consumer, now exercised by the producer).
   const connection = connectionFromURL(new URL("file:///inviter-in"), {
-    outboundPath: "/inviter-out",
-    retainFiles: true,
+    options: { retainFiles: true },
+    server: { outboundPath: "/inviter-out" },
   });
   const endpoint = endpointFromConnection(connection);
   const { connection: seeded } = connectionFromEndpoint(endpoint);
@@ -1153,8 +1155,8 @@ test("endpointFromConnection: an over-long path is a clean usage error", () => {
 test("endpointFromConnection: an over-long split outbound_path is a clean usage error", () => {
   // The split pair is bounded too; --outbound-path supplies the outbound half.
   const connection = connectionFromURL(new URL("file:///inviter-in"), {
-    outboundPath: `/${"o".repeat(4097)}`,
-    retainFiles: true,
+    options: { retainFiles: true },
+    server: { outboundPath: `/${"o".repeat(4097)}` },
   });
   expect(() => endpointFromConnection(connection)).toThrow(/outbound_path/);
 });

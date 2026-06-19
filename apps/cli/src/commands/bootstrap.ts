@@ -1471,24 +1471,35 @@ export type ConnectionOverrideOptions = Pick<
   | "outboundPath"
 >;
 
-/** Map the parsed common options to the connection-override shape. */
+/**
+ * Map the parsed (flat) common options to the structured connection-override
+ * shape, fanning the `server-*`/`--outbound-path` flags into the server
+ * sub-group and the timeout/toggle flags into the options sub-group. The
+ * synthesized `extra.peerTimeout` (from `--accept-timeout` on the online invite
+ * path) belongs to the options sub-group and takes precedence over the parsed
+ * `--peer-timeout`.
+ */
 export function connectionOverridesFrom(
   options: ConnectionOverrideOptions,
   extra: { peerTimeout?: number } = {},
 ): ConnectionOverrides {
   return {
-    connectionTimeout: options.connectionTimeout,
-    peerTimeout: extra.peerTimeout ?? options.peerTimeout,
-    maxReconnectAttempts: options.maxReconnectAttempts,
-    serverUsername: options.serverUsername,
-    serverPassword: options.serverPassword,
-    serverPrivateKey: options.serverPrivateKey,
-    serverPort: options.serverPort,
-    locklessRendezvous: options.locklessRendezvous,
-    peerId: options.peerId,
-    timestampInFilename: options.timestampInFilename,
-    retainFiles: options.retainFiles,
-    outboundPath: options.outboundPath,
+    server: {
+      username: options.serverUsername,
+      password: options.serverPassword,
+      privateKey: options.serverPrivateKey,
+      port: options.serverPort,
+      outboundPath: options.outboundPath,
+    },
+    options: {
+      connectionTimeout: options.connectionTimeout,
+      peerTimeout: extra.peerTimeout ?? options.peerTimeout,
+      maxReconnectAttempts: options.maxReconnectAttempts,
+      locklessRendezvous: options.locklessRendezvous,
+      peerId: options.peerId,
+      timestampInFilename: options.timestampInFilename,
+      retainFiles: options.retainFiles,
+    },
   };
 }
 

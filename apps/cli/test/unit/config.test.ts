@@ -37,27 +37,33 @@ const baseWebRTC: ConnectionConfig = {
 // --- timeout / reconnect overrides -------------------------------------------
 
 test("peerTimeout is converted to peerTimeoutMs in milliseconds", () => {
-  const result = applyConnectionOverrides(baseSFTP, { peerTimeout: 30 });
+  const result = applyConnectionOverrides(baseSFTP, {
+    options: { peerTimeout: 30 },
+  });
   expect(result.options?.peerTimeoutMs).toBe(30_000);
 });
 
 test("connectionTimeout is converted to serverConnectTimeoutMs in milliseconds", () => {
-  const result = applyConnectionOverrides(baseSFTP, { connectionTimeout: 10 });
+  const result = applyConnectionOverrides(baseSFTP, {
+    options: { connectionTimeout: 10 },
+  });
   expect(result.options?.serverConnectTimeoutMs).toBe(10_000);
 });
 
 test("maxReconnectAttempts is passed through unchanged", () => {
   const result = applyConnectionOverrides(baseSFTP, {
-    maxReconnectAttempts: 5,
+    options: { maxReconnectAttempts: 5 },
   });
   expect(result.options?.maxReconnectAttempts).toBe(5);
 });
 
 test("multiple timeout overrides are merged into options", () => {
   const result = applyConnectionOverrides(baseSFTP, {
-    peerTimeout: 60,
-    connectionTimeout: 15,
-    maxReconnectAttempts: 2,
+    options: {
+      peerTimeout: 60,
+      connectionTimeout: 15,
+      maxReconnectAttempts: 2,
+    },
   });
   expect(result.options?.peerTimeoutMs).toBe(60_000);
   expect(result.options?.serverConnectTimeoutMs).toBe(15_000);
@@ -71,7 +77,7 @@ test("existing options are preserved when adding timeout overrides", () => {
     options: { pollIntervalMs: 5000 },
   };
   const result = applyConnectionOverrides(base, {
-    peerTimeout: 20,
+    options: { peerTimeout: 20 },
   }) as SFTPConnectionConfig;
   expect(result.options?.pollIntervalMs).toBe(5000);
   expect(result.options?.peerTimeoutMs).toBe(20_000);
@@ -86,20 +92,20 @@ test("a non-positive peerTimeout override is rejected with a UsageError", () => 
   // peerTimeout 0 -> peerTimeoutMs 0, which violates the schema's positivity
   // floor. The CLI duration parser already rejects this upstream; the schema
   // re-parse closes the same hole for any non-CLI override path.
-  expect(() => applyConnectionOverrides(baseSFTP, { peerTimeout: 0 })).toThrow(
-    UsageError,
-  );
-  expect(() => applyConnectionOverrides(baseSFTP, { peerTimeout: -1 })).toThrow(
-    UsageError,
-  );
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { options: { peerTimeout: 0 } }),
+  ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { options: { peerTimeout: -1 } }),
+  ).toThrow(UsageError);
 });
 
 test("a non-positive connectionTimeout override is rejected with a UsageError", () => {
   expect(() =>
-    applyConnectionOverrides(baseSFTP, { connectionTimeout: 0 }),
+    applyConnectionOverrides(baseSFTP, { options: { connectionTimeout: 0 } }),
   ).toThrow(UsageError);
   expect(() =>
-    applyConnectionOverrides(baseSFTP, { connectionTimeout: -1 }),
+    applyConnectionOverrides(baseSFTP, { options: { connectionTimeout: -1 } }),
   ).toThrow(UsageError);
 });
 
@@ -108,15 +114,14 @@ test("maxReconnectAttempts 0 passes re-validation (nonnegative, not positive)", 
   // schema floor is nonnegative, not positive -- so the new re-validation path
   // must accept it rather than reject it alongside the non-positive timeouts.
   const result = applyConnectionOverrides(baseSFTP, {
-    maxReconnectAttempts: 0,
+    options: { maxReconnectAttempts: 0 },
   });
   expect(result.options?.maxReconnectAttempts).toBe(0);
 });
 
 test("a valid timeout override still passes through unchanged on webrtc", () => {
   const result = applyConnectionOverrides(baseWebRTC, {
-    peerTimeout: 30,
-    connectionTimeout: 15,
+    options: { peerTimeout: 30, connectionTimeout: 15 },
   });
   expect(result.options?.peerTimeoutMs).toBe(30_000);
   expect(result.options?.serverConnectTimeoutMs).toBe(15_000);
@@ -127,7 +132,7 @@ test("a non-positive timeout override is rejected on webrtc too", () => {
   // timeout block's own re-validation. FileSyncOptionsSchema is a safe superset
   // for a webrtc SharedOptions object (its FileSync-only refines cannot fire).
   expect(() =>
-    applyConnectionOverrides(baseWebRTC, { peerTimeout: 0 }),
+    applyConnectionOverrides(baseWebRTC, { options: { peerTimeout: 0 } }),
   ).toThrow(UsageError);
 });
 
@@ -142,12 +147,16 @@ test("the two override blocks agree on a non-positive peerTimeoutMs floor", () =
   };
   // Reached via the FileSync-field block (overriding peerId triggers its re-parse).
   expect(() =>
-    applyConnectionOverrides(withBadPeerTimeout, { peerId: "agency-a" }),
+    applyConnectionOverrides(withBadPeerTimeout, {
+      options: { peerId: "agency-a" },
+    }),
   ).toThrow(UsageError);
   // Reached via the timeout block (overriding connectionTimeout leaves the
   // invalid peerTimeoutMs in the merged options).
   expect(() =>
-    applyConnectionOverrides(withBadPeerTimeout, { connectionTimeout: 10 }),
+    applyConnectionOverrides(withBadPeerTimeout, {
+      options: { connectionTimeout: 10 },
+    }),
   ).toThrow(UsageError);
 });
 
@@ -155,14 +164,16 @@ test("the two override blocks agree on a non-positive peerTimeoutMs floor", () =
 
 test("serverUsername overrides the connection username", () => {
   const result = applyConnectionOverrides(baseSFTP, {
-    serverUsername: "alice",
+    server: { username: "alice" },
   });
   if (result.channel !== "sftp") return;
   expect(result.server.username).toBe("alice");
 });
 
 test("serverPort overrides the connection port", () => {
-  const result = applyConnectionOverrides(baseSFTP, { serverPort: 2222 });
+  const result = applyConnectionOverrides(baseSFTP, {
+    server: { port: 2222 },
+  });
   if (result.channel !== "sftp") return;
   expect(result.server.port).toBe(2222);
 });
@@ -179,7 +190,10 @@ test("the input connection object is not mutated", () => {
     channel: "sftp",
     server: { host: "sftp.example.org" },
   };
-  applyConnectionOverrides(input, { peerTimeout: 10, serverUsername: "bob" });
+  applyConnectionOverrides(input, {
+    options: { peerTimeout: 10 },
+    server: { username: "bob" },
+  });
   expect(input.options).toBeUndefined();
   if (input.channel !== "sftp") return;
   expect(input.server.username).toBeUndefined();
@@ -193,7 +207,9 @@ test("peerId override accepted when timestampInFilename is already set in config
     server: { host: "sftp.example.org" },
     options: { timestampInFilename: true },
   };
-  const result = applyConnectionOverrides(base, { peerId: "agency-a" });
+  const result = applyConnectionOverrides(base, {
+    options: { peerId: "agency-a" },
+  });
   if (result.channel !== "sftp") return;
   expect(result.options?.peerId).toBe("agency-a");
 });
@@ -205,17 +221,17 @@ test("peerId 'temp' is rejected by applyConnectionOverrides", () => {
     options: { timestampInFilename: true },
   };
   // Invalid option combinations are usage errors (CLI exit 64), not exit 69.
-  expect(() => applyConnectionOverrides(base, { peerId: "temp" })).toThrow(
-    UsageError,
-  );
-  expect(() => applyConnectionOverrides(base, { peerId: "temp" })).toThrow(
-    "reserved",
-  );
+  expect(() =>
+    applyConnectionOverrides(base, { options: { peerId: "temp" } }),
+  ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(base, { options: { peerId: "temp" } }),
+  ).toThrow("reserved");
 });
 
 test("peerId without timestampInFilename is rejected by applyConnectionOverrides", () => {
   expect(() =>
-    applyConnectionOverrides(baseSFTP, { peerId: "agency-a" }),
+    applyConnectionOverrides(baseSFTP, { options: { peerId: "agency-a" } }),
   ).toThrow("timestamp_in_filename");
 });
 
@@ -224,9 +240,9 @@ test("peerId without timestampInFilename is rejected on filedrop too", () => {
     channel: "filedrop",
     path: "/mnt/share",
   };
-  expect(() => applyConnectionOverrides(base, { peerId: "agency-a" })).toThrow(
-    "timestamp_in_filename",
-  );
+  expect(() =>
+    applyConnectionOverrides(base, { options: { peerId: "agency-a" } }),
+  ).toThrow("timestamp_in_filename");
 });
 
 test("empty peerId is rejected by applyConnectionOverrides", () => {
@@ -235,13 +251,17 @@ test("empty peerId is rejected by applyConnectionOverrides", () => {
     server: { host: "sftp.example.org" },
     options: { timestampInFilename: true },
   };
-  expect(() => applyConnectionOverrides(base, { peerId: "" })).toThrow();
+  expect(() =>
+    applyConnectionOverrides(base, { options: { peerId: "" } }),
+  ).toThrow();
 });
 
 // --- retainFiles implication --------------------------------------------------
 
 test("retainFiles: true with unset lockless and timestamp implies both true", () => {
-  const result = applyConnectionOverrides(baseSFTP, { retainFiles: true });
+  const result = applyConnectionOverrides(baseSFTP, {
+    options: { retainFiles: true },
+  });
   if (result.channel !== "sftp") return;
   expect(result.options?.retainFiles).toBe(true);
   expect(result.options?.locklessRendezvous).toBe(true);
@@ -254,7 +274,9 @@ test("retainFiles: true preserves an already-set locklessRendezvous: true", () =
     server: { host: "sftp.example.org" },
     options: { locklessRendezvous: true, timestampInFilename: true },
   };
-  const result = applyConnectionOverrides(base, { retainFiles: true });
+  const result = applyConnectionOverrides(base, {
+    options: { retainFiles: true },
+  });
   if (result.channel !== "sftp") return;
   expect(result.options?.locklessRendezvous).toBe(true);
 });
@@ -262,14 +284,12 @@ test("retainFiles: true preserves an already-set locklessRendezvous: true", () =
 test("retainFiles: true with explicit locklessRendezvous: false throws", () => {
   expect(() =>
     applyConnectionOverrides(baseSFTP, {
-      retainFiles: true,
-      locklessRendezvous: false,
+      options: { retainFiles: true, locklessRendezvous: false },
     }),
   ).toThrow(UsageError);
   expect(() =>
     applyConnectionOverrides(baseSFTP, {
-      retainFiles: true,
-      locklessRendezvous: false,
+      options: { retainFiles: true, locklessRendezvous: false },
     }),
   ).toThrow("lockless_rendezvous");
 });
@@ -288,8 +308,8 @@ const baseFiledrop: ConnectionConfig = {
 
 test("outboundPath splits an sftp shared path into inbound/outbound", () => {
   const result = applyConnectionOverrides(baseSFTPWithPath, {
-    retainFiles: true,
-    outboundPath: "/drop/out",
+    options: { retainFiles: true },
+    server: { outboundPath: "/drop/out" },
   });
   if (result.channel !== "sftp") return;
   expect(result.server.inboundPath).toBe("/drop/in");
@@ -301,8 +321,8 @@ test("outboundPath splits an sftp shared path into inbound/outbound", () => {
 
 test("outboundPath splits a filedrop shared path into inbound/outbound", () => {
   const result = applyConnectionOverrides(baseFiledrop, {
-    retainFiles: true,
-    outboundPath: "/mnt/share/out",
+    options: { retainFiles: true },
+    server: { outboundPath: "/mnt/share/out" },
   });
   if (result.channel !== "filedrop") return;
   expect(result.inboundPath).toBe("/mnt/share/in");
@@ -322,7 +342,7 @@ test("outboundPath overrides only the outbound on an already-split config", () =
     },
   };
   const result = applyConnectionOverrides(base, {
-    outboundPath: "/mnt/share/new-out",
+    server: { outboundPath: "/mnt/share/new-out" },
   });
   if (result.channel !== "filedrop") return;
   expect(result.inboundPath).toBe("/mnt/share/in");
@@ -332,15 +352,22 @@ test("outboundPath overrides only the outbound on an already-split config", () =
 
 test("outboundPath without retain mode is rejected naming --retain-files", () => {
   expect(() =>
-    applyConnectionOverrides(baseSFTPWithPath, { outboundPath: "/drop/out" }),
+    applyConnectionOverrides(baseSFTPWithPath, {
+      server: { outboundPath: "/drop/out" },
+    }),
   ).toThrow(UsageError);
   expect(() =>
-    applyConnectionOverrides(baseSFTPWithPath, { outboundPath: "/drop/out" }),
+    applyConnectionOverrides(baseSFTPWithPath, {
+      server: { outboundPath: "/drop/out" },
+    }),
   ).toThrow("--retain-files");
 });
 
 test("outboundPath equal to the inbound path is rejected", () => {
-  const overrides = { retainFiles: true, outboundPath: "/mnt/share/in" };
+  const overrides = {
+    options: { retainFiles: true },
+    server: { outboundPath: "/mnt/share/in" },
+  };
   expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
     UsageError,
   );
@@ -350,7 +377,10 @@ test("outboundPath equal to the inbound path is rejected", () => {
 });
 
 test("a relative filedrop outbound path is rejected (filedrop requires absolute)", () => {
-  const overrides = { retainFiles: true, outboundPath: "relative/out" };
+  const overrides = {
+    options: { retainFiles: true },
+    server: { outboundPath: "relative/out" },
+  };
   expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
     UsageError,
   );
@@ -361,8 +391,8 @@ test("a relative filedrop outbound path is rejected (filedrop requires absolute)
 
 test("a relative sftp outbound path is allowed (sftp permits relative paths)", () => {
   const result = applyConnectionOverrides(baseSFTPWithPath, {
-    retainFiles: true,
-    outboundPath: "outgoing",
+    options: { retainFiles: true },
+    server: { outboundPath: "outgoing" },
   });
   if (result.channel !== "sftp") return;
   expect(result.server.inboundPath).toBe("/drop/in");
@@ -373,8 +403,8 @@ test("outboundPath on an sftp login-home (no inbound path) is rejected as set-to
   // baseSFTP has no server.path, so the inbound half is unset; a split needs both.
   expect(() =>
     applyConnectionOverrides(baseSFTP, {
-      retainFiles: true,
-      outboundPath: "/drop/out",
+      options: { retainFiles: true },
+      server: { outboundPath: "/drop/out" },
     }),
   ).toThrow("set together");
 });
@@ -385,7 +415,7 @@ test("outboundPath on a webrtc connection is rejected", () => {
     server: { host: "peer.example.org" },
   };
   expect(() =>
-    applyConnectionOverrides(webrtc, { outboundPath: "/out" }),
+    applyConnectionOverrides(webrtc, { server: { outboundPath: "/out" } }),
   ).toThrow("sftp and filedrop");
 });
 

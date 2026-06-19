@@ -32,18 +32,24 @@ import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
  */
 export const DEFAULT_CONFIG_PATH = "./psilink.yaml";
 
-export interface ConnectionOverrides {
-  connectionTimeout?: number;
-  peerTimeout?: number;
-  maxReconnectAttempts?: number;
-  serverUsername?: string;
-  serverPassword?: string;
-  serverPrivateKey?: string;
-  serverPort?: number;
-  locklessRendezvous?: boolean;
-  peerId?: string;
-  retainFiles?: boolean;
-  timestampInFilename?: boolean;
+/**
+ * The server/credential overrides {@link applyConnectionOverrides} writes into a
+ * connection's `connection.server` block (host/port/credentials) and its
+ * channel directory paths -- WHERE the rendezvous is and HOW to authenticate to
+ * it. This is one half of the {@link ConnectionOverrides} seam, mirroring the
+ * config schema's `server` + path fields as distinct from the tuning/toggle
+ * {@link ConnectionOptionsOverrides} that land in `connection.options`.
+ *
+ * Named "server", not "locator": this set is credential-BEARING
+ * (username/password/private-key), so it is deliberately NOT the credential-free
+ * `ConnectionEndpoint` "locator" an invitation may carry -- the same "server"
+ * label {@link OfflineIgnoredServerOverrides} uses for exactly this set.
+ */
+export interface ConnectionServerOverrides {
+  username?: string;
+  password?: string;
+  privateKey?: string;
+  port?: number;
   /**
    * Outbound (self-written) directory for a split-directory exchange. When set,
    * the connection's single shared directory (the server URL/positional path, or
@@ -55,21 +61,60 @@ export interface ConnectionOverrides {
   outboundPath?: string;
 }
 
+/**
+ * The tuning/toggle overrides {@link applyConnectionOverrides} writes into a
+ * connection's `connection.options` block: the SharedOptions timeouts/reconnect
+ * bound applied on every channel (`connectionTimeout`, `peerTimeout`,
+ * `maxReconnectAttempts`) and the FileSyncOptions toggles gated to the file-sync
+ * channels (`locklessRendezvous`, `peerId`, `retainFiles`,
+ * `timestampInFilename`). `connectionTimeout`/`peerTimeout` are in seconds here;
+ * the apply step scales them to the schema's milliseconds. This is the
+ * `connection.options` half of the {@link ConnectionOverrides} seam, as distinct
+ * from the server/credential {@link ConnectionServerOverrides}.
+ */
+export interface ConnectionOptionsOverrides {
+  connectionTimeout?: number;
+  peerTimeout?: number;
+  maxReconnectAttempts?: number;
+  locklessRendezvous?: boolean;
+  peerId?: string;
+  retainFiles?: boolean;
+  timestampInFilename?: boolean;
+}
+
+/**
+ * CLI overrides applied to a base connection by {@link applyConnectionOverrides},
+ * split along the same seam the config schema keeps: the server/credential set
+ * (plus directory paths) that lands in `connection.server`
+ * ({@link ConnectionServerOverrides}), and the tuning/toggle set that lands in
+ * `connection.options` ({@link ConnectionOptionsOverrides}). Each sub-group is
+ * optional and itself sparse; an absent group (or field) applies no override.
+ */
+export interface ConnectionOverrides {
+  server?: ConnectionServerOverrides;
+  options?: ConnectionOptionsOverrides;
+}
+
 export function applyConnectionOverrides(
   connection: ConnectionConfig,
   overrides: ConnectionOverrides,
 ): ConnectionConfig {
   const result = structuredClone(connection);
+  // The override seam: the server/credential sub-group feeds connection.server
+  // and the directory paths; the options sub-group feeds connection.options.
+  // Default each to empty so an absent group simply applies nothing.
+  const { server: serverOverrides = {}, options: optionsOverrides = {} } =
+    overrides;
 
   if (result.channel === "sftp") {
     const { server } = result;
-    if (overrides.serverUsername !== undefined)
-      server.username = overrides.serverUsername;
-    if (overrides.serverPassword !== undefined)
-      server.password = overrides.serverPassword;
-    if (overrides.serverPrivateKey !== undefined)
-      server.privateKey = overrides.serverPrivateKey;
-    if (overrides.serverPort !== undefined) server.port = overrides.serverPort;
+    if (serverOverrides.username !== undefined)
+      server.username = serverOverrides.username;
+    if (serverOverrides.password !== undefined)
+      server.password = serverOverrides.password;
+    if (serverOverrides.privateKey !== undefined)
+      server.privateKey = serverOverrides.privateKey;
+    if (serverOverrides.port !== undefined) server.port = serverOverrides.port;
   }
 
   // Tracks whether any override merged into result.options, so the single
@@ -78,20 +123,20 @@ export function applyConnectionOverrides(
   let optionsModified = false;
 
   if (
-    overrides.peerTimeout !== undefined ||
-    overrides.connectionTimeout !== undefined ||
-    overrides.maxReconnectAttempts !== undefined
+    optionsOverrides.peerTimeout !== undefined ||
+    optionsOverrides.connectionTimeout !== undefined ||
+    optionsOverrides.maxReconnectAttempts !== undefined
   ) {
     result.options = {
       ...result.options,
-      ...(overrides.peerTimeout !== undefined && {
-        peerTimeoutMs: overrides.peerTimeout * 1000,
+      ...(optionsOverrides.peerTimeout !== undefined && {
+        peerTimeoutMs: optionsOverrides.peerTimeout * 1000,
       }),
-      ...(overrides.connectionTimeout !== undefined && {
-        serverConnectTimeoutMs: overrides.connectionTimeout * 1000,
+      ...(optionsOverrides.connectionTimeout !== undefined && {
+        serverConnectTimeoutMs: optionsOverrides.connectionTimeout * 1000,
       }),
-      ...(overrides.maxReconnectAttempts !== undefined && {
-        maxReconnectAttempts: overrides.maxReconnectAttempts,
+      ...(optionsOverrides.maxReconnectAttempts !== undefined && {
+        maxReconnectAttempts: optionsOverrides.maxReconnectAttempts,
       }),
     };
     optionsModified = true;
@@ -103,24 +148,24 @@ export function applyConnectionOverrides(
   // SharedOptions that apply to all channels including webrtc.
   if (
     (result.channel === "sftp" || result.channel === "filedrop") &&
-    (overrides.locklessRendezvous !== undefined ||
-      overrides.peerId !== undefined ||
-      overrides.retainFiles !== undefined ||
-      overrides.timestampInFilename !== undefined)
+    (optionsOverrides.locklessRendezvous !== undefined ||
+      optionsOverrides.peerId !== undefined ||
+      optionsOverrides.retainFiles !== undefined ||
+      optionsOverrides.timestampInFilename !== undefined)
   ) {
     result.options = {
       ...result.options,
-      ...(overrides.locklessRendezvous !== undefined && {
-        locklessRendezvous: overrides.locklessRendezvous,
+      ...(optionsOverrides.locklessRendezvous !== undefined && {
+        locklessRendezvous: optionsOverrides.locklessRendezvous,
       }),
-      ...(overrides.peerId !== undefined && {
-        peerId: overrides.peerId,
+      ...(optionsOverrides.peerId !== undefined && {
+        peerId: optionsOverrides.peerId,
       }),
-      ...(overrides.retainFiles !== undefined && {
-        retainFiles: overrides.retainFiles,
+      ...(optionsOverrides.retainFiles !== undefined && {
+        retainFiles: optionsOverrides.retainFiles,
       }),
-      ...(overrides.timestampInFilename !== undefined && {
-        timestampInFilename: overrides.timestampInFilename,
+      ...(optionsOverrides.timestampInFilename !== undefined && {
+        timestampInFilename: optionsOverrides.timestampInFilename,
       }),
     };
 
@@ -172,17 +217,17 @@ export function applyConnectionOverrides(
   // outbound. Applied here, the single chokepoint every bootstrap command routes
   // its connection through, so the four commands share one mapping rather than
   // re-deriving it per command. Only the file-sync channels carry a directory.
-  if (overrides.outboundPath !== undefined) {
+  if (serverOverrides.outboundPath !== undefined) {
     if (result.channel === "sftp") {
       const { server } = result;
       // An already-split config (inbound set) keeps its inbound; a shared config
       // contributes its `path`. The single `path` cannot coexist with the pair.
       server.inboundPath = server.inboundPath ?? server.path;
-      server.outboundPath = overrides.outboundPath;
+      server.outboundPath = serverOverrides.outboundPath;
       delete server.path;
     } else if (result.channel === "filedrop") {
       result.inboundPath = result.inboundPath ?? result.path;
-      result.outboundPath = overrides.outboundPath;
+      result.outboundPath = serverOverrides.outboundPath;
       delete result.path;
     } else {
       // webrtc has no directory, so the flag is meaningless there. Only
