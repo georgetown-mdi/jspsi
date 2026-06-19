@@ -439,6 +439,15 @@ test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec
     // ... never camelCase.
     expect(raw).not.toContain("linkageFields");
     expect(raw).not.toContain("expectsOutput");
+    // Semantic-type VALUES are snake_case too, and stay snake_case across the
+    // round-trip: camelizeKeys/snakeizeKeys transform keys only, so the value is
+    // byte-stable iff it is already snake_case in memory (approach (b)). A
+    // camelCase value (e.g. firstName) here would mean an enum value leaked onto
+    // disk off-convention.
+    expect(raw).toContain("type: first_name");
+    expect(raw).toContain("type: date_of_birth");
+    expect(raw).not.toContain("firstName");
+    expect(raw).not.toContain("dateOfBirth");
     // The writer is the inverse of the reader's camelizeKeys: parsing the
     // written file reproduces the original spec exactly.
     expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);

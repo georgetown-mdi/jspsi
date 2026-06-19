@@ -50,8 +50,8 @@ const baseTerms: LinkageTerms = {
   deduplicate: false,
   linkageFields: [
     { name: "ssn", type: "ssn" },
-    { name: "last_name", type: "lastName" },
-    { name: "dob", type: "dateOfBirth" },
+    { name: "last_name", type: "last_name" },
+    { name: "dob", type: "date_of_birth" },
   ],
   linkageKeys: [
     {
@@ -211,7 +211,7 @@ describe("summarizeInvitation", () => {
         linkageFields: [
           {
             name: "first_name",
-            type: "firstName",
+            type: "first_name",
             constraints: { allowedCharacters: "A-Z" + BEL },
           },
         ],
@@ -289,9 +289,9 @@ describe("summarizeInvitation", () => {
       makeToken({
         linkageFields: [
           { name: "ssn", type: "ssn" },
-          { name: "first_name", type: "firstName" },
-          { name: "last_name", type: "lastName" },
-          { name: "dob", type: "dateOfBirth" },
+          { name: "first_name", type: "first_name" },
+          { name: "last_name", type: "last_name" },
+          { name: "dob", type: "date_of_birth" },
         ],
         linkageKeys: [
           { name: "plain", elements: [{ field: "ssn" }, { field: "dob" }] },
@@ -315,7 +315,7 @@ describe("summarizeInvitation", () => {
           {
             name: "fuzzy",
             elements: [
-              { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+              { field: "dob", generateFuzzyComparisons: "adjacent_years" },
             ],
           },
         ],
@@ -359,7 +359,7 @@ describe("summarizeInvitation", () => {
   test("flags a swap but withholds field labels when they would not distinguish the two elements", () => {
     const summary = summarizeInvitation(
       makeToken({
-        linkageFields: [{ name: "first_name", type: "firstName" }],
+        linkageFields: [{ name: "first_name", type: "first_name" }],
         linkageKeys: [
           {
             // Two elements of the same type, distinguished only by alias: the
@@ -399,15 +399,15 @@ describe("summarizeInvitation", () => {
       makeToken({
         linkageFields: [
           // Two firstName fields with no constraints render identically.
-          { name: "given_name", type: "firstName" },
-          { name: "preferred_name", type: "firstName" },
+          { name: "given_name", type: "first_name" },
+          { name: "preferred_name", type: "first_name" },
           // A third firstName field whose constraints differ stays distinct.
           {
             name: "legal_name",
-            type: "firstName",
+            type: "first_name",
             constraints: { allowedCharacters: "A-Z " },
           },
-          { name: "dob", type: "dateOfBirth" },
+          { name: "dob", type: "date_of_birth" },
         ],
         linkageKeys: [{ name: "FN", elements: [{ field: "given_name" }] }],
       }),
@@ -436,10 +436,10 @@ describe("summarizeInvitation", () => {
           },
           {
             name: "first_name",
-            type: "firstName",
+            type: "first_name",
             constraints: { affixesAllowed: false, allowedCharacters: "A-Z " },
           },
-          { name: "dob", type: "dateOfBirth" },
+          { name: "dob", type: "date_of_birth" },
         ],
         linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
       }),
@@ -465,7 +465,7 @@ describe("summarizeInvitation", () => {
     ) =>
       summarizeInvitation(
         makeToken({
-          linkageFields: [{ name: "dob", type: "dateOfBirth" }],
+          linkageFields: [{ name: "dob", type: "date_of_birth" }],
           linkageKeys: [
             {
               name: "K",
@@ -478,8 +478,8 @@ describe("summarizeInvitation", () => {
     // All three enum values map to a distinct plain-language label, so a typo
     // or swapped entry in the lookup cannot ship unnoticed.
     expect(fuzzyLabelFor("transpositions")).toBe("two-digit transpositions");
-    expect(fuzzyLabelFor("editDistances")).toBe("single-character edits");
-    expect(fuzzyLabelFor("adjacentYears")).toBe("adjacent years");
+    expect(fuzzyLabelFor("edit_distances")).toBe("single-character edits");
+    expect(fuzzyLabelFor("adjacent_years")).toBe("adjacent years");
   });
 
   // The summary surfaced for a transform declaring `fn`.
@@ -734,8 +734,8 @@ describe("summarizeInvitation", () => {
       summarizeInvitation(
         makeToken({
           linkageFields: [
-            { name: "first_name", type: "firstName" },
-            { name: "last_name", type: "lastName" },
+            { name: "first_name", type: "first_name" },
+            { name: "last_name", type: "last_name" },
           ],
           linkageKeys: [
             {
@@ -781,8 +781,8 @@ describe("summarizeInvitation", () => {
     const key = summarizeInvitation(
       makeToken({
         linkageFields: [
-          { name: "given", type: "firstName" },
-          { name: "preferred", type: "firstName" },
+          { name: "given", type: "first_name" },
+          { name: "preferred", type: "first_name" },
         ],
         linkageKeys: [
           {
@@ -817,7 +817,7 @@ describe("summarizeInvitation", () => {
           // neither should produce a phrase (only the opposite direction does).
           {
             name: "first_name",
-            type: "firstName",
+            type: "first_name",
             constraints: { affixesAllowed: true },
           },
           { name: "ssn", type: "ssn", constraints: { validOnly: false } },
@@ -835,12 +835,12 @@ describe("summarizeInvitation", () => {
     const summary = summarizeInvitation(
       makeToken({
         deduplicate: true,
-        linkageFields: [{ name: "dob", type: "dateOfBirth" }],
+        linkageFields: [{ name: "dob", type: "date_of_birth" }],
         linkageKeys: [
           {
             name: "K",
             elements: [
-              { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+              { field: "dob", generateFuzzyComparisons: "adjacent_years" },
             ],
           },
         ],
@@ -904,11 +904,11 @@ describe("accept screen: terms render from a decoded token", () => {
           linkageFields: [
             {
               name: "first_name",
-              type: "firstName",
+              type: "first_name",
               constraints: { allowedCharacters: "A-Z " },
             },
-            { name: "last_name", type: "lastName" },
-            { name: "dob", type: "dateOfBirth" },
+            { name: "last_name", type: "last_name" },
+            { name: "dob", type: "date_of_birth" },
           ],
           linkageKeys: [
             {
@@ -920,7 +920,7 @@ describe("accept screen: terms render from a decoded token", () => {
                     { function: "substring", params: { start: 1, length: 1 } },
                   ],
                 },
-                { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+                { field: "dob", generateFuzzyComparisons: "adjacent_years" },
               ],
             },
             {
@@ -961,7 +961,7 @@ describe("accept screen: terms render from a decoded token", () => {
       decode: {
         status: "ready",
         invitation: makeInvitation({
-          linkageFields: [{ name: "first_name", type: "firstName" }],
+          linkageFields: [{ name: "first_name", type: "first_name" }],
           linkageKeys: [
             {
               name: "alias swap",
@@ -999,7 +999,7 @@ describe("accept screen: terms render from a decoded token", () => {
         invitation: makeInvitation({
           linkageFields: [
             { name: "ssn", type: "ssn" },
-            { name: "dob", type: "dateOfBirth" },
+            { name: "dob", type: "date_of_birth" },
           ],
           linkageKeys: [
             {
@@ -1009,7 +1009,7 @@ describe("accept screen: terms render from a decoded token", () => {
             {
               name: "fuzzy key",
               elements: [
-                { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+                { field: "dob", generateFuzzyComparisons: "adjacent_years" },
               ],
             },
           ],
@@ -1172,12 +1172,12 @@ describe("accept screen: terms render from a decoded token", () => {
       decode: {
         status: "ready",
         invitation: makeInvitation({
-          linkageFields: [{ name: "dob", type: "dateOfBirth" }],
+          linkageFields: [{ name: "dob", type: "date_of_birth" }],
           linkageKeys: [
             {
               name: "DOB",
               elements: [
-                { field: "dob", generateFuzzyComparisons: "adjacentYears" },
+                { field: "dob", generateFuzzyComparisons: "adjacent_years" },
               ],
             },
           ],
@@ -1194,8 +1194,8 @@ describe("accept screen: terms render from a decoded token", () => {
         status: "ready",
         invitation: makeInvitation({
           linkageFields: [
-            { name: "first_name", type: "firstName" },
-            { name: "last_name", type: "lastName" },
+            { name: "first_name", type: "first_name" },
+            { name: "last_name", type: "last_name" },
           ],
           linkageKeys: [
             {
@@ -1228,8 +1228,8 @@ describe("accept screen: terms render from a decoded token", () => {
         status: "ready",
         invitation: makeInvitation({
           linkageFields: [
-            { name: "first_name", type: "firstName" },
-            { name: "last_name", type: "lastName" },
+            { name: "first_name", type: "first_name" },
+            { name: "last_name", type: "last_name" },
           ],
           linkageKeys: [
             {

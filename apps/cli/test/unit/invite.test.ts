@@ -433,7 +433,7 @@ test("validateInvite: a config plus a disagreeing input fails naming the unsatis
       log: silentLog,
     });
     await expect(promise).rejects.toBeInstanceOf(UsageError);
-    await expect(promise).rejects.toThrow(/lastName/);
+    await expect(promise).rejects.toThrow(/last_name/);
     await expect(promise).rejects.toThrow(/cannot satisfy/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -475,12 +475,12 @@ test("validateInvite: a config's explicit metadata lets an otherwise-unsatisfyin
   const metadata: Metadata = [
     {
       name: "first_name",
-      type: "firstName",
+      type: "first_name",
       role: "linkage",
       isPayload: false,
     },
-    { name: "last_name", type: "lastName", role: "linkage", isPayload: false },
-    { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+    { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+    { name: "dob", type: "date_of_birth", role: "linkage", isPayload: false },
     { name: "tax_id", type: "ssn", role: "linkage", isPayload: false },
   ];
   const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);

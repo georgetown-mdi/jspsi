@@ -88,7 +88,8 @@ export function camelizeKeys(value: unknown): unknown {
  * uses, so a write-then-read round-trips unchanged. Both directions are produced
  * from the one {@link transformKeysDeep} walker, so the opaque-value skip cannot
  * diverge between them. Only keys are rewritten; string values (e.g. the
- * `firstName` in `type: firstName`) are left verbatim, matching the read path.
+ * `firstName` in a `name: firstName` label) are left verbatim, matching the read
+ * path.
  *
  * It is not a general camelCase inverse -- an embedded acronym such as `URL`
  * would snakeize to `u_r_l` -- but no such key occurs in the schema. Used by the

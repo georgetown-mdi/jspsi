@@ -26,7 +26,7 @@ const firstNameTerms = {
   date: "2026-01-01",
   algorithm: "psi" as const,
   deduplicate: false,
-  linkageFields: [{ name: "firstName", type: "firstName" as const }],
+  linkageFields: [{ name: "firstName", type: "first_name" as const }],
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
@@ -114,10 +114,10 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(init.record.governance.algorithm).toBe("psi");
   expect(resp.record.governance.algorithm).toBe("psi");
   expect(init.record.governance.matchingBasis).toEqual([
-    { name: "firstName", type: "firstName" },
+    { name: "firstName", type: "first_name" },
   ]);
   expect(resp.record.governance.matchingBasis).toEqual([
-    { name: "firstName", type: "firstName" },
+    { name: "firstName", type: "first_name" },
   ]);
   expect("legalAgreement" in init.record.governance).toBe(false);
   expect(init.record.governance.payloadSent).toEqual([]);

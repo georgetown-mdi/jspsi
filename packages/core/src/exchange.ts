@@ -125,7 +125,7 @@ export function prepareForExchange(
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
-    const dobCol = metadata.find((c) => c.type === "dateOfBirth");
+    const dobCol = metadata.find((c) => c.type === "date_of_birth");
     if (dobCol !== undefined) {
       dateInputFormat = inferDateFormat(
         rawRows.map((row) => row[dobCol.name] ?? ""),

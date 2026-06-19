@@ -77,7 +77,7 @@ const acceptorTerms: LinkageTerms = {
   algorithm: "psi",
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
-  linkageFields: [{ name: "firstName", type: "firstName" }],
+  linkageFields: [{ name: "firstName", type: "first_name" }],
   linkageKeys: [{ name: "first", elements: [{ field: "firstName" }] }],
 };
 

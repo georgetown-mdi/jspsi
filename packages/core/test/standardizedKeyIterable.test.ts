@@ -31,11 +31,11 @@ const rawRows: ReadonlyArray<Record<string, string>> = [
 
 const metadata: ColumnMetadata[] = [
   { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
-  { name: "last_name", type: "lastName", role: "linkage", isPayload: false },
-  { name: "first_name", type: "firstName", role: "linkage", isPayload: false },
+  { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+  { name: "first_name", type: "first_name", role: "linkage", isPayload: false },
   {
     name: "date_of_birth",
-    type: "dateOfBirth",
+    type: "date_of_birth",
     role: "linkage",
     isPayload: false,
   },
@@ -50,9 +50,9 @@ const terms: LinkageTerms = {
   deduplicate: false,
   linkageFields: [
     { name: "ssn", type: "ssn" },
-    { name: "lastName", type: "lastName" },
-    { name: "firstName", type: "firstName" },
-    { name: "dateOfBirth", type: "dateOfBirth" },
+    { name: "lastName", type: "last_name" },
+    { name: "firstName", type: "first_name" },
+    { name: "dateOfBirth", type: "date_of_birth" },
   ],
   linkageKeys: [
     {
@@ -169,7 +169,7 @@ describe("StandardizedKeyIterable — field absent from dataset", () => {
     ...terms,
     linkageFields: [
       ...terms.linkageFields,
-      { name: "phoneNumber", type: "phoneNumber" },
+      { name: "phoneNumber", type: "phone_number" },
     ],
     linkageKeys: [
       {

@@ -54,6 +54,12 @@ interface TypeMeta {
 
 type TypeMetaMapped = Omit<TypeMeta, "aliases">;
 
+// Each multi-word type lists both its snake_case spelling and its no-separator
+// spelling (e.g. `first_name` and `firstname`) so a single-token column export
+// still infers. The no-separator form is explicit because the map builder keys
+// on `type.toLowerCase()`, which now equals the snake_case type itself -- it no
+// longer yields the no-separator key as a side effect, as it did when the type
+// values were camelCase.
 const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
   {
     type: "ssn",
@@ -63,20 +69,20 @@ const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
   },
   { type: "ssn4", aliases: [], role: "linkage", isPayload: false },
   {
-    type: "firstName",
-    aliases: ["first_name", "fname"],
+    type: "first_name",
+    aliases: ["first_name", "firstname", "fname"],
     role: "linkage",
     isPayload: false,
   },
   {
-    type: "lastName",
-    aliases: ["last_name", "lname"],
+    type: "last_name",
+    aliases: ["last_name", "lastname", "lname"],
     role: "linkage",
     isPayload: false,
   },
   {
-    type: "dateOfBirth",
-    aliases: ["date_of_birth", "dob"],
+    type: "date_of_birth",
+    aliases: ["date_of_birth", "dateofbirth", "dob"],
     role: "linkage",
     isPayload: false,
   },
@@ -86,14 +92,14 @@ const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
    */
   { type: "identifier", aliases: ["id"], role: "identifier", isPayload: true },
   {
-    type: "phoneNumber",
-    aliases: ["phone_number", "phone"],
+    type: "phone_number",
+    aliases: ["phone_number", "phonenumber", "phone"],
     role: "linkage",
     isPayload: false,
   },
   {
-    type: "emailAddress",
-    aliases: ["email_address", "email"],
+    type: "email_address",
+    aliases: ["email_address", "emailaddress", "email"],
     role: "linkage",
     isPayload: false,
   },

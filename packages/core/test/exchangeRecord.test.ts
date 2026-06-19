@@ -89,8 +89,8 @@ const termsWithGovernance: LinkageTerms = {
   ...termsA,
   algorithm: "psi",
   linkageFields: [
-    { name: "ln", type: "lastName" },
-    { name: "dob", type: "dateOfBirth" },
+    { name: "ln", type: "last_name" },
+    { name: "dob", type: "date_of_birth" },
     { name: "ssn4", type: "ssn4" },
   ],
   linkageKeys: [
@@ -455,8 +455,8 @@ describe("governance metadata", () => {
       // Standardized name + semantic type per field, sorted by name (dob < ln <
       // ssn4), regardless of the order they were declared in.
       matchingBasis: [
-        { name: "dob", type: "dateOfBirth" },
-        { name: "ln", type: "lastName" },
+        { name: "dob", type: "date_of_birth" },
+        { name: "ln", type: "last_name" },
         { name: "ssn4", type: "ssn4" },
       ],
       payloadSent: [
@@ -486,7 +486,7 @@ describe("governance metadata", () => {
       ...termsA,
       linkageFields: [
         { name: "ssn", type: "ssn" },
-        { name: "email", type: "emailAddress" },
+        { name: "email", type: "email_address" },
       ],
       linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
     };

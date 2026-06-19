@@ -99,7 +99,7 @@ const EMAIL_ADDRESS_STEPS: StandardizationStep[] = [
 
 export interface DefaultStandardizationOptions {
   /**
-   * Input date format for the `dateOfBirth` pipeline, passed as `inputFormat`
+   * Input date format for the `date_of_birth` pipeline, passed as `inputFormat`
    * to `parse_date`. Defaults to `"MM/DD/YYYY"` when omitted. Pair with
    * {@link inferDateFormat} to detect the format automatically.
    */
@@ -115,15 +115,15 @@ function stepsForType(
       return SSN_STEPS;
     case "ssn4":
       return SSN4_STEPS;
-    case "firstName":
+    case "first_name":
       return NAME_STEPS;
-    case "lastName":
+    case "last_name":
       return NAME_STEPS;
-    case "dateOfBirth":
+    case "date_of_birth":
       return dateOfBirthSteps(opts.dateInputFormat ?? "MM/DD/YYYY");
-    case "phoneNumber":
+    case "phone_number":
       return PHONE_NUMBER_STEPS;
-    case "emailAddress":
+    case "email_address":
       return EMAIL_ADDRESS_STEPS;
     default:
       return undefined;
@@ -144,7 +144,7 @@ function stepsForType(
  * and is appropriate when the user has not provided explicit standardization
  * configuration.
  *
- * **Date format**: the `dateOfBirth` pipeline uses `options.dateInputFormat`
+ * **Date format**: the `date_of_birth` pipeline uses `options.dateInputFormat`
  * when provided, otherwise defaults to `"MM/DD/YYYY"`. Pair with
  * {@link inferDateFormat} to detect the format automatically from column data.
  */

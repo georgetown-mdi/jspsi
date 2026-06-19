@@ -108,8 +108,8 @@ describe("acceptorExchangeDataSpec", () => {
     output: { expectsOutput: true, shareWithPartner: true },
     deduplicate: false,
     linkageFields: [
-      { name: "lastName", type: "lastName" },
-      { name: "dateOfBirth", type: "dateOfBirth" },
+      { name: "lastName", type: "last_name" },
+      { name: "dateOfBirth", type: "date_of_birth" },
     ],
     linkageKeys: [
       {
@@ -171,9 +171,9 @@ describe("acceptorExchangeDataSpec", () => {
     expect(prepared.metadata.map((m) => m.name)).toEqual(fields);
     expect(prepared.metadata.map((m) => m.type)).toEqual([
       "ssn",
-      "firstName",
-      "lastName",
-      "dateOfBirth",
+      "first_name",
+      "last_name",
+      "date_of_birth",
     ]);
   });
 });

@@ -139,8 +139,8 @@ test("round-trips full linkage terms including all fields", async () => {
     linkageTerms: {
       ...baseTerms,
       linkageFields: [
-        { name: "firstName", type: "firstName" },
-        { name: "dob", type: "dateOfBirth" },
+        { name: "firstName", type: "first_name" },
+        { name: "dob", type: "date_of_birth" },
       ],
       linkageKeys: [
         {
@@ -878,11 +878,11 @@ test("decodes a large but legitimate invitation at the upper end of real size", 
   const linkageFields = [
     { name: "ssn", type: "ssn" as const },
     { name: "ssn4", type: "ssn4" as const },
-    { name: "firstName", type: "firstName" as const },
-    { name: "lastName", type: "lastName" as const },
-    { name: "dateOfBirth", type: "dateOfBirth" as const },
-    { name: "phone", type: "phoneNumber" as const },
-    { name: "email", type: "emailAddress" as const },
+    { name: "firstName", type: "first_name" as const },
+    { name: "lastName", type: "last_name" as const },
+    { name: "dateOfBirth", type: "date_of_birth" as const },
+    { name: "phone", type: "phone_number" as const },
+    { name: "email", type: "email_address" as const },
   ];
   const linkageKeys = Array.from({ length: 30 }, (_, i) => ({
     name: `Key ${i}`,

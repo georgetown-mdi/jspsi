@@ -90,19 +90,28 @@ test("original column name casing is preserved", () => {
 // ─── inferMetadata: alias resolution ─────────────────────────────────────────
 
 test.each([
-  ["first_name", "firstName"],
-  ["fname", "firstName"],
-  ["last_name", "lastName"],
-  ["lname", "lastName"],
-  ["date_of_birth", "dateOfBirth"],
-  ["dob", "dateOfBirth"],
+  ["first_name", "first_name"],
+  ["fname", "first_name"],
+  ["last_name", "last_name"],
+  ["lname", "last_name"],
+  ["date_of_birth", "date_of_birth"],
+  ["dob", "date_of_birth"],
   ["social_security_number", "ssn"],
   ["social", "ssn"],
-  ["phone_number", "phoneNumber"],
-  ["phone", "phoneNumber"],
-  ["email_address", "emailAddress"],
-  ["email", "emailAddress"],
+  ["phone_number", "phone_number"],
+  ["phone", "phone_number"],
+  ["email_address", "email_address"],
+  ["email", "email_address"],
   ["id", "identifier"],
+  // No-separator spellings: a single-token column export still infers. Pinned
+  // because the map builder keys on `type.toLowerCase()`, which equals the
+  // snake_case type and so no longer yields the no-separator key as a side
+  // effect -- these must stay explicit aliases.
+  ["firstname", "first_name"],
+  ["lastname", "last_name"],
+  ["dateofbirth", "date_of_birth"],
+  ["phonenumber", "phone_number"],
+  ["emailaddress", "email_address"],
 ] as const)('alias "%s" resolves to type "%s"', (alias, expectedType) => {
   const [col] = inferMetadata([alias]);
   expect(col.type).toBe(expectedType);
@@ -112,9 +121,9 @@ test.each([
 
 test.each([
   ["SSN", "ssn"],
-  ["FIRST_NAME", "firstName"],
-  ["Email", "emailAddress"],
-  ["DOB", "dateOfBirth"],
+  ["FIRST_NAME", "first_name"],
+  ["Email", "email_address"],
+  ["DOB", "date_of_birth"],
 ] as const)(
   'column name "%s" is matched case-insensitively',
   (name, expectedType) => {
@@ -138,7 +147,7 @@ test("known and unknown columns are inferred correctly in a single call", () => 
     isPayload: true,
   });
   expect(result[2]).toMatchObject({
-    type: "firstName",
+    type: "first_name",
     role: "linkage",
     isPayload: false,
   });
@@ -187,4 +196,55 @@ test("safeParseMetadata fails on an invalid semantic type", () => {
     { name: "X", type: "not_a_type", role: "linkage", is_payload: false },
   ]);
   expect(result.success).toBe(false);
+});
+
+// The metadata `type` shares the semantic-type enum with linkage fields, so it
+// accepts the same snake_case values -- including the single-word identifier and
+// other that are not linkage-field types -- and rejects the old camelCase ones.
+test.each([
+  "ssn",
+  "ssn4",
+  "first_name",
+  "last_name",
+  "date_of_birth",
+  "identifier",
+  "phone_number",
+  "email_address",
+  "other",
+] as const)('safeParseMetadata accepts semantic type "%s"', (type) => {
+  const result = safeParseMetadata([
+    { name: "c", type, role: "linkage", is_payload: false },
+  ]);
+  expect(result.success).toBe(true);
+});
+
+test.each([
+  "firstName",
+  "lastName",
+  "dateOfBirth",
+  "phoneNumber",
+  "emailAddress",
+] as const)('safeParseMetadata rejects the old camelCase type "%s"', (type) => {
+  const result = safeParseMetadata([
+    { name: "c", type, role: "linkage", is_payload: false },
+  ]);
+  expect(result.success).toBe(false);
+});
+
+test("a rejected metadata type is not echoed in the parse error", () => {
+  // The metadata `type` is a z.enum(SEMANTIC_TYPES) reached by the operator-config
+  // path (loadConfigLinkageSource), which relays the Zod issue message verbatim.
+  // Like the linkage-terms discriminator, the z.enum mismatch reports only the
+  // expected options and the issue path, never the received value -- pin that so
+  // an offending value carrying control/ANSI/bidi bytes cannot leak through.
+  const evil = "\x1b[31mfirstName\x1b[0m‮";
+  const result = safeParseMetadata([
+    { name: "c", type: evil, role: "linkage", is_payload: false },
+  ]);
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.message).not.toContain("firstName");
+    expect(result.error.message).not.toContain("\x1b");
+    expect(result.error.message).not.toContain("‮");
+  }
 });

@@ -17,13 +17,13 @@ import type {
  * acceptor deciding whether to consent, and it cannot carry an injection.
  */
 const FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
-  firstName: "First name",
-  lastName: "Last name",
-  dateOfBirth: "Date of birth",
+  first_name: "First name",
+  last_name: "Last name",
+  date_of_birth: "Date of birth",
   ssn: "Social Security number",
   ssn4: "Last 4 of Social Security number",
-  phoneNumber: "Phone number",
-  emailAddress: "Email address",
+  phone_number: "Phone number",
+  email_address: "Email address",
 };
 
 /**
@@ -38,8 +38,8 @@ const FUZZY_COMPARISON_LABELS: Record<
   string
 > = {
   transpositions: "two-digit transpositions",
-  editDistances: "single-character edits",
-  adjacentYears: "adjacent years",
+  edit_distances: "single-character edits",
+  adjacent_years: "adjacent years",
 };
 
 /**
@@ -517,7 +517,7 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
 
   // Collapse fields that are identical for display -- same semantic-type label
   // and same constraint phrases -- so several fields of one type (the schema
-  // permits, e.g., a maiden and a current name both typed `firstName`) do not
+  // permits, e.g., a maiden and a current name both typed `first_name`) do not
   // list the same line twice with nothing to tell them apart (the field `name`
   // that would distinguish them is partner-controlled and deliberately not
   // shown). Fields whose constraints differ stay distinct, since the constraint
