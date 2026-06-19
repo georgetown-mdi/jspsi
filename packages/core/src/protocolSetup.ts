@@ -77,10 +77,17 @@ const hostKeyField = z
   .unknown()
   .optional()
   .transform((raw): HostKeyAdvertisementParse => {
-    // An absent field arrives as `undefined` (JSON has no `undefined`, so a key
-    // present on the wire is never `undefined` here) -- the benign no-host-key
-    // case, not malformed.
-    if (raw === undefined) return { value: undefined, malformed: false };
+    // No advertisement to classify: an omitted field arrives as `undefined`, and
+    // an explicit `null` (JSON's representation of "no value") is treated the
+    // same. Both are the benign no-host-key case, not a malformed attempt to
+    // advertise one -- a conforming party that observed no host key omits the
+    // field entirely (see the send-side spread in exchangeTerms), so neither
+    // shape carries a host key an operator should be warned about.
+    if (raw === undefined || raw === null)
+      return { value: undefined, malformed: false };
+    // Present and non-null but failing validation (wrong shape or over-bound) is
+    // a genuine malformed advertisement, reachable only from a non-conforming or
+    // future-versioned peer.
     const parsed = hostKeyAdvertisement.safeParse(raw);
     return parsed.success
       ? { value: parsed.data, malformed: false }

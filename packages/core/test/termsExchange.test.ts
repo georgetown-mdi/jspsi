@@ -175,6 +175,21 @@ test("responder flags a present-but-malformed partner hostKey without aborting",
   expect(result.partnerHostKeyMalformed).toBe(true);
 });
 
+test("a null partner hostKey is treated as absent, not malformed", async () => {
+  // A conforming party omits the field when it observed no host key; an explicit
+  // `null` is JSON's "no value" form, so it is classified as a genuine absence
+  // (the benign no-host-key path) rather than a malformed advertisement -- the
+  // malformed flag stays false so no spurious diagnostic fires.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB);
+  await connA.send({ linkageTerms: termsA, hostKey: null });
+  await connA.receive(); // drain the responder's terms + proceed (msg 2)
+  await connA.send({ decision: "proceed" }); // msg 3
+  const result = await responder;
+  expect(result.partnerHostKey).toBeUndefined();
+  expect(result.partnerHostKeyMalformed).toBe(false);
+});
+
 test("initiator flags a present-but-malformed partner hostKey without aborting", async () => {
   // The mirror of the responder case: a malformed advertisement on the
   // responder's message 2 is detected by the initiator. Drive the responder by
