@@ -158,10 +158,19 @@ test("mixing a single path with the inbound/outbound pair is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-test("setting only one half of the inbound/outbound pair is rejected", () => {
+test("setting only the inbound half of the pair is rejected", () => {
   const result = safeParseConnectionConfig({
     channel: "filedrop",
     inbound_path: "/mnt/in",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+});
+
+test("setting only the outbound half of the pair is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    outbound_path: "/mnt/out",
     options: splitOptions,
   });
   expect(result.success).toBe(false);

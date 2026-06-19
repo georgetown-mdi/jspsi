@@ -1237,7 +1237,24 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const outboundDir = split
         ? stripTrailingSlash(config.server.outboundPath!)
         : inboundDir;
-      if (split && inboundDir === outboundDir)
+      // Distinctness check for split mode. The stored paths above keep their
+      // exact form (only a single trailing slash stripped, unchanged from shared
+      // mode), but the comparison normalizes a COPY more thoroughly -- collapse
+      // repeated slashes, drop a leading "./", strip all trailing slashes -- so a
+      // textual near-miss like "in" vs "in//" or "./in" vs "in" is caught
+      // instead of silently collapsing split mode into one directory. This cannot
+      // catch every server-side equivalence: a relative path and the absolute
+      // path it resolves to under the login home are indistinguishable here (the
+      // home is unknown client-side), so that residual is the operator's
+      // responsibility (see docs/EXCHANGE_REFERENCE.md). The schema's
+      // byte-identical reject is the coarser first line; this is the runtime
+      // backstop, the sftp twin of filedrop's normalizeFiledropPath check.
+      const sameSftpDir = (a: string, b: string): boolean => {
+        const norm = (p: string): string =>
+          p.replace(/^\.\//, "").replace(/\/+/g, "/").replace(/\/+$/, "");
+        return norm(a) === norm(b);
+      };
+      if (split && sameSftpDir(inboundDir, outboundDir))
         throw new UsageError(
           "sftp inbound and outbound directories resolve to the same " +
             "directory; they must be distinct",
@@ -2326,6 +2343,23 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // exactly one at a time); a concurrent re-sync during a close() window is
     // out of scope and not reachable in production.
     this.abortController = new AbortController();
+
+    // Library-level defense-in-depth, sibling to the two retain guards below: a
+    // configured outbound directory requires retain mode (the config schema
+    // rejects split-without-retain). A direct library consumer that sets
+    // `this.outbound` without retainFiles would otherwise reach a lock/delete
+    // path with two directories, where the lock branch's joining sentinel is
+    // written to inbound while the hello is written to outbound -- a
+    // cross-directory rename that is not atomic. Make that combination
+    // unreachable here, where the other mode guards already live, so it never
+    // depends on how `outbound` was set. (retain then forces lockless and
+    // timestamp via the two guards below, so this one check suffices.)
+    if (this.outbound !== undefined && !this.options.retainFiles)
+      throw new UsageError(
+        "a separate outbound directory requires retain mode: without it the " +
+          "rendezvous can take a lock/delete path that renames across the two " +
+          "directories, which is not atomic",
+      );
 
     // Library-level defense-in-depth: the schema refine and CLI imply cover the
     // config/CLI entry points, but a direct library consumer that constructs

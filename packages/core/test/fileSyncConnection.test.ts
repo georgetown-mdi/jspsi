@@ -9684,3 +9684,63 @@ test("split directories: a full retain-mode exchange between two bridged parties
   expect(namesIn("/a2b").length).toBeGreaterThan(0);
   expect(namesIn("/b2a").length).toBeGreaterThan(0);
 });
+
+test("synchronize() (split): a configured outbound without retain mode is rejected", async () => {
+  // Library-level defense-in-depth: the config schema rejects split-without-
+  // retain, but a direct caller that sets conn.outbound without retainFiles must
+  // still be stopped before reaching a lock/delete path that would rename across
+  // the two directories.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    timeToLive: new Date(Date.now() + 1_000),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    // retainFiles intentionally omitted (defaults to false)
+  });
+  conn.connected = true;
+  conn.path = "/in";
+  conn.outbound = "/out";
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("open() (split filedrop) rejects inbound/outbound that normalize to one directory", async () => {
+  // The schema rejects only byte-identical pairs; "/x" and "/x/" normalize to the
+  // same directory and must be caught at open() so split mode does not silently
+  // collapse into a shared directory.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const config: FileDropConnectionConfig = {
+    channel: "filedrop",
+    inboundPath: "/x",
+    outboundPath: "/x/",
+    options: {
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+    },
+  };
+
+  await expect(conn.open(config)).rejects.toBeInstanceOf(UsageError);
+});
+
+test("open() (split sftp) rejects inbound/outbound that normalize to one directory", async () => {
+  // SFTP runtime backstop: "in" and "in//" resolve to the same directory and are
+  // caught before any connect, even though the schema accepts the distinct
+  // strings. Thrown before the SSH connect, so the mock client is never dialed.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const config: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "h", inboundPath: "in", outboundPath: "in//" },
+    options: {
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+    },
+  };
+
+  await expect(conn.open(config)).rejects.toBeInstanceOf(UsageError);
+});
