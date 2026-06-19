@@ -64,52 +64,11 @@ vi.mock("@psi/exchangeLifecycle", () => ({
   },
 }));
 
-// Stub the acquire phase: capture the props ExchangeView forwards to it and
-// expose a button that hands a bundle up via onAcquired. This is the seam the
-// "no file-acquire state" criterion turns on -- the file state lives here, not in
-// ExchangeView, which only reacts to the handoff.
-const acquire = vi.hoisted(() => ({
-  lastProps: undefined as
-    | { linkageTerms?: LinkageTerms; onAcquired: (b: unknown) => void }
-    | undefined,
-}));
-vi.mock("@components/FileAcquire", () => ({
-  default: (props: {
-    linkageTerms?: LinkageTerms;
-    onWarning: (alert: { title: string; message: string } | undefined) => void;
-    onAcquired: (b: unknown) => void;
-  }) => {
-    acquire.lastProps = props;
-    // Two buttons stand in for the real acquire phase: "warn" raises the
-    // partial-coverage advisory the acceptor pre-flight would, and "acquire"
-    // hands up the bundle. A test clicks "warn" then "acquire" to exercise the
-    // warning surviving (or being cleared) across the run it owns.
-    return createElement(
-      "div",
-      null,
-      createElement(
-        "button",
-        {
-          "data-testid": "warn",
-          onClick: () =>
-            props.onWarning({
-              title: "Partial CSV coverage",
-              message: "some keys inactive",
-            }),
-        },
-        "warn",
-      ),
-      createElement(
-        "button",
-        {
-          "data-testid": "acquire",
-          onClick: () => props.onAcquired({ rawRows: [], columns: [] }),
-        },
-        "acquire",
-      ),
-    );
-  },
-}));
+// The acceptor now arrives pre-acquired (its CSV was parsed and pre-flighted on
+// the review screen) and dials only on its explicit Start, so ExchangeView renders
+// no FileAcquire of its own -- there is no acquire seam to stub here. A
+// partial-coverage advisory rides in as the `initialWarning` config field instead
+// of being raised by a stubbed acquire phase.
 
 const acceptorTerms: LinkageTerms = {
   version: "1.0.0",
@@ -138,7 +97,10 @@ function inviterConfig(sharedSecret: string): ExchangeConfig {
   };
 }
 
-function acceptorConfig(sharedSecret: string): ExchangeConfig {
+function acceptorConfig(
+  sharedSecret: string,
+  initialWarning?: { title: string; message: string },
+): ExchangeConfig {
   return {
     role: "acceptor",
     partyName: "Acceptor",
@@ -150,6 +112,10 @@ function acceptorConfig(sharedSecret: string): ExchangeConfig {
       path: "/api/",
     },
     linkageTerms: acceptorTerms,
+    // Pre-acquired on the review screen: the acceptor renders no file prompt and
+    // dials only on Start.
+    acquired: { rawRows: [], columns: [] },
+    ...(initialWarning ? { initialWarning } : {}),
   };
 }
 
@@ -185,7 +151,6 @@ afterEach(() => {
   container?.remove();
   root = undefined;
   container = undefined;
-  acquire.lastProps = undefined;
   lifecycle.calls = [];
   lifecycle.outcome = "none";
   consoleErrorSpy?.mockRestore();
@@ -200,46 +165,44 @@ describe("ExchangeView Start->run wiring", () => {
     render(inviterConfig("secret-a"));
 
     // The inviter chose its file at compose time, so the run begins on mount with
-    // no acquire phase and no file input of its own -- the bundle is pre-supplied.
+    // no Start press and no file input of its own -- the bundle is pre-supplied.
     await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
     expect(lifecycle.calls[0].exchangeRole).toBe("responder");
     expect(lifecycle.calls[0].sharedSecret).toBe("secret-a");
-    expect(acquire.lastProps).toBeUndefined();
     expect(container.querySelector('input[type="file"]')).toBeNull();
   });
 
-  test("acceptor delegates file acquisition and starts no run until a bundle arrives", async () => {
+  test("acceptor arrives pre-acquired and dials nothing before Start", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     render(acceptorConfig("secret-a"));
 
-    // It renders the acquire seam and the pre-start status, holding no file input
-    // of its own, and forwards the adopted terms down for the pre-flight.
+    // It shows the pre-start status and a Start button, holds no file input of its
+    // own (the file was chosen on the review screen), and -- crucially -- has NOT
+    // dialed: no run begins until the user presses Start.
     await expect.element(page.getByText("Before start")).toBeInTheDocument();
-    expect(acquire.lastProps).toBeDefined();
-    expect(typeof acquire.lastProps?.onAcquired).toBe("function");
-    expect(acquire.lastProps?.linkageTerms).toBe(acceptorTerms);
+    await expect
+      .element(page.getByRole("button", { name: "Start" }))
+      .toBeInTheDocument();
     expect(container.querySelector('input[type="file"]')).toBeNull();
-    // Crucially, ExchangeView never parses or pre-flights on its own: no run
-    // begins until the acquire phase hands up a bundle.
     expect(lifecycle.calls).toHaveLength(0);
   });
 
-  test("acceptor runs once per mount as the initiator (one-exchange-per-mount)", async () => {
+  test("acceptor dials once as the initiator when Start is pressed", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     render(acceptorConfig("secret-a"));
 
-    await userEvent.click(page.getByTestId("acquire"));
+    await userEvent.click(page.getByRole("button", { name: "Start" }));
     expect(lifecycle.calls).toHaveLength(1);
     expect(lifecycle.calls[0].exchangeRole).toBe("initiator");
     expect(lifecycle.calls[0].sharedSecret).toBe("secret-a");
 
-    // A second handoff on the same mount is refused by the re-entry guard.
-    await userEvent.click(page.getByTestId("acquire"));
-    expect(lifecycle.calls).toHaveLength(1);
+    // The Start button hides once the run is underway, so it cannot start a
+    // second racing run on the same mount (a fresh run comes from a fresh mount).
+    expect(page.getByRole("button", { name: "Start" }).query()).toBeNull();
   });
 
   test("a new secret remounts, aborting the old run and arming a fresh one", async () => {
@@ -264,19 +227,23 @@ describe("ExchangeView Start->run wiring", () => {
     expect(lifecycle.calls[1].signal).not.toBe(firstSignal);
   });
 
+  const warning = {
+    title: "Partial CSV coverage",
+    message: "some keys inactive",
+  };
+
   test("keeps a partial-coverage warning when the run succeeds", async () => {
     setOutcome("success");
-    render(acceptorConfig("secret-a"));
-
-    // The acquire phase raised the partial-coverage advisory before handing off.
-    await userEvent.click(page.getByTestId("warn"));
+    // The review screen's pre-flight raised the advisory; it rides in as
+    // initialWarning and shows before the run even starts.
+    render(acceptorConfig("secret-a", warning));
     await expect
       .element(page.getByText("Partial CSV coverage"))
       .toBeInTheDocument();
 
     // The run succeeds: the advisory must stay, explaining why the match count
     // may be lower, and no failure alert appears.
-    await userEvent.click(page.getByTestId("acquire"));
+    await userEvent.click(page.getByRole("button", { name: "Start" }));
     await expect.element(page.getByText("Done")).toBeInTheDocument();
     expect(document.body.textContent).toContain("Partial CSV coverage");
     expect(document.body.textContent).not.toContain("Exchange failed");
@@ -287,16 +254,14 @@ describe("ExchangeView Start->run wiring", () => {
     // one expected line so the assertion output stays clean.
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     setOutcome("failure");
-    render(acceptorConfig("secret-a"));
-
-    await userEvent.click(page.getByTestId("warn"));
+    render(acceptorConfig("secret-a", warning));
     await expect
       .element(page.getByText("Partial CSV coverage"))
       .toBeInTheDocument();
 
     // The run fails: the advisory is cleared so it cannot read as the cause
     // beside the failure alert.
-    await userEvent.click(page.getByTestId("acquire"));
+    await userEvent.click(page.getByRole("button", { name: "Start" }));
     await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Partial CSV coverage");
   });

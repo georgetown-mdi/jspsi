@@ -10,16 +10,24 @@ import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
 import { ExchangeView } from "@components/ExchangeView";
 
+import type { AcquiredBundle, AlertContent } from "@components/FileAcquire";
 import type { DecodeState } from "@components/AcceptInvitationPanel";
 
 /**
  * The accept route's container: it decodes the invitation from the URL fragment,
- * holds the consent state, and gates the dialing {@link ExchangeView} behind
- * explicit consent. Kept as a component (rather than inline in the route file) so
- * it can be mounted and driven in a browser test without the router.
+ * holds the consent state, and runs the review screen (terms + consent gate + CSV
+ * drop) before transitioning in-route to the shared {@link ExchangeView}. Kept as
+ * a component (rather than inline in the route file) so it can be mounted and
+ * driven in a browser test without the router.
  *
- * The content width (a narrower single-column reading width) is declared by the
- * route and supplied by the shell's container, so this page renders only its
+ * The transition is gated on consent: the review screen's "Accept and continue"
+ * is disabled until consent and a name are given, and on a satisfiable file the
+ * acquire handler re-checks {@link commitAcceptance} before mounting the exchange
+ * screen -- so no rendezvous, key exchange, or PSI frame can be set up before
+ * consent, and the dialing exchange waits for the user's explicit Start there.
+ *
+ * The content width (the wider reading width the dense terms want) is declared by
+ * the route and supplied by the shell's container, so this page renders only its
  * content -- no `Container` of its own.
  */
 export function AcceptInvitation() {
@@ -28,10 +36,22 @@ export function AcceptInvitation() {
   // affirmatively checks this and provides a name (see commitAcceptance).
   const [consented, setConsented] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
-  // The name, committed by an explicit "Accept and continue". Once set it seeds
-  // the in-flight exchange and the consent controls are replaced by the running
-  // ExchangeView, so the value that seeds it cannot drift.
-  const [confirmedName, setConfirmedName] = useState<string>();
+  // The committed acceptance: the name to record and the CSV the review screen
+  // parsed and pre-flighted. Set only after consent + a satisfiable file, its
+  // presence is the in-route transition to the exchange screen.
+  const [accepted, setAccepted] = useState<{
+    name: string;
+    acquired: AcquiredBundle;
+  }>();
+  // The review-screen error (a CSV read failure or a zero-coverage pre-flight
+  // block): on a block nothing is handed off, so the user stays on the review
+  // screen to choose another file.
+  const [acquireError, setAcquireError] = useState<AlertContent>();
+  // The partial-coverage advisory the pre-flight raises, carried to the exchange
+  // screen so it stays visible through the run (ExchangeView keeps it on success
+  // and clears it on a run failure). Set alongside the handoff on partial
+  // coverage; cleared by the pre-flight at the start of each attempt.
+  const [acquireWarning, setAcquireWarning] = useState<AlertContent>();
 
   useEffect(() => {
     // The token is the URL fragment minus the leading "#".
@@ -82,52 +102,54 @@ export function AcceptInvitation() {
     else if (decode.status === "error") errorRef.current?.focus();
   }, [decode.status]);
 
-  const handleAccept = () => {
+  const handleAcquired = (bundle: AcquiredBundle) => {
     // The authoritative consent gate: no name is committed -- and so no
     // ExchangeView mounts and nothing is dialed -- unless the user has consented
-    // and named themselves.
+    // and named themselves. The acquire phase already gates its submit on the
+    // same check (submitDisabled), but re-check here so the security-relevant
+    // invariant does not rest on the disabled state alone.
     const name = commitAcceptance({ consented, name: acceptorName });
     if (name === undefined) return;
-    // Only confirmedName seeds the exchange; the acceptorName field unmounts with
-    // the consent controls on the next render, so writing the trimmed value back
-    // to it would be unobservable.
-    setConfirmedName(name);
+    setAccepted({ name, acquired: bundle });
   };
-
-  const exchange =
-    decode.status === "ready" && confirmedName !== undefined ? (
-      // Keyed by the secret so it never persists across a different invitation;
-      // the consent controls are unmounted while it runs, so the exchange
-      // completes rather than being torn down by an edit. Reload the page to
-      // start over.
-      <ExchangeView
-        key={decode.invitation.token.sharedSecret}
-        role="acceptor"
-        partyName={confirmedName}
-        sharedSecret={decode.invitation.token.sharedSecret}
-        expires={decode.invitation.token.expires}
-        endpoint={decode.invitation.endpoint}
-        linkageTerms={decode.invitation.token.linkageTerms}
-      />
-    ) : undefined;
 
   return (
     <Paper>
       {/* A generic page h1 rather than the party-specific "Invitation from X"
-          (which is the terms section's h2 below): it must read sensibly in the
-          pending and error states too, where no party name is decoded yet. */}
+          (which is the terms section's h2 on the review screen): it must read
+          sensibly in the pending, error, and exchange states too. */}
       <Title order={1}>Accept an invitation</Title>
-      <AcceptInvitationPanel
-        decode={decode}
-        headingRef={readyHeadingRef}
-        errorRef={errorRef}
-        consented={consented}
-        onConsentedChange={setConsented}
-        acceptorName={acceptorName}
-        onAcceptorNameChange={setAcceptorName}
-        onAccept={handleAccept}
-        exchange={exchange}
-      />
+      {decode.status === "ready" && accepted !== undefined ? (
+        // The exchange screen: the acceptor arrives pre-acquired (the parsed CSV)
+        // and dials only on the explicit Start ExchangeView renders. Keyed by the
+        // secret so it never persists across a different invitation. Reload the
+        // page to start over.
+        <ExchangeView
+          key={decode.invitation.token.sharedSecret}
+          role="acceptor"
+          partyName={accepted.name}
+          sharedSecret={decode.invitation.token.sharedSecret}
+          expires={decode.invitation.token.expires}
+          endpoint={decode.invitation.endpoint}
+          linkageTerms={decode.invitation.token.linkageTerms}
+          acquired={accepted.acquired}
+          initialWarning={acquireWarning}
+        />
+      ) : (
+        <AcceptInvitationPanel
+          decode={decode}
+          headingRef={readyHeadingRef}
+          errorRef={errorRef}
+          consented={consented}
+          onConsentedChange={setConsented}
+          acceptorName={acceptorName}
+          onAcceptorNameChange={setAcceptorName}
+          error={acquireError}
+          onAcquireError={setAcquireError}
+          onAcquireWarning={setAcquireWarning}
+          onAcquired={handleAcquired}
+        />
+      )}
     </Paper>
   );
 }

@@ -51,7 +51,7 @@ describe("resolveContentWidth", () => {
 
   test("defaults to the wide width", () => {
     // The home route's width and the bare-wordmark fallback; the accept route
-    // opts into a narrower one.
+    // opts into a wider one ("xxl") for its dense terms.
     expect(DEFAULT_CONTENT_WIDTH).toBe("xl");
   });
 });

@@ -116,7 +116,9 @@ function renderPanel(
       onConsentedChange: () => {},
       acceptorName: "",
       onAcceptorNameChange: () => {},
-      onAccept: () => {},
+      onAcquireError: () => {},
+      onAcquireWarning: () => {},
+      onAcquired: () => {},
       ...overrides,
     }),
   );
@@ -1245,7 +1247,7 @@ describe("accept screen: terms render from a decoded token", () => {
 });
 
 describe("accept screen: the consent gate", () => {
-  test("offers a consent action, disabled until consent and a name are given", () => {
+  test("offers a consent action the gate keeps disabled without consent", () => {
     const html = renderPanel({
       decode: { status: "ready", invitation: makeInvitation() },
       consented: false,
@@ -1253,33 +1255,26 @@ describe("accept screen: the consent gate", () => {
     });
     expect(html).toContain(CONSENT_LABEL);
     expect(html).toContain(ACCEPT_BUTTON);
-    // Without consent the affirmative action is disabled, so the exchange cannot
-    // be started. Match the real `disabled` HTML attribute (whitespace-led, then
-    // `=`/`>`), not Mantine's `data-disabled`, so the assertion tracks the
-    // button's actual disabled state rather than a data attribute.
+    // Without consent the affirmative action is disabled, so nothing is parsed or
+    // dialed. (It is also gated on a chosen file, which a static render cannot
+    // supply, so the enabled state -- consent + name + file -- is exercised in
+    // test/browser/acceptConsentGate.test.ts.) Match the real `disabled` HTML
+    // attribute (whitespace-led, then `=`/`>`), not Mantine's `data-disabled`, so
+    // the assertion tracks the button's actual disabled state.
     expect(html).toMatch(/<button[^>]*\sdisabled[=>]/);
   });
 
-  test("enables the consent action once consented and named", () => {
+  test("offers the consent controls and a file drop, not an exchange", () => {
+    // The review screen presents the gate (consent label + name) and the
+    // "Accept and continue" action that selects and pre-flights a file; the
+    // dialing exchange is a separate screen the route swaps in only after a
+    // satisfiable acceptance (covered in the browser test).
     const html = renderPanel({
       decode: { status: "ready", invitation: makeInvitation() },
-      consented: true,
-      acceptorName: "Dana",
     });
+    expect(html).toContain(CONSENT_LABEL);
     expect(html).toContain(ACCEPT_BUTTON);
-    expect(html).not.toMatch(/<button[^>]*\sdisabled[=>]/);
-  });
-
-  test("the exchange replaces the consent controls only once it is supplied", () => {
-    const html = renderPanel({
-      decode: { status: "ready", invitation: makeInvitation() },
-      exchange: createElement("div", null, "EXCHANGE-STARTED"),
-    });
-    expect(html).toContain("EXCHANGE-STARTED");
-    // The exchange (which dials) appears in place of the consent controls; the
-    // route supplies it only after commitAcceptance succeeds.
-    expect(html).not.toContain(CONSENT_LABEL);
-    expect(html).not.toContain(ACCEPT_BUTTON);
+    expect(html).toContain("choose your data file");
   });
 });
 

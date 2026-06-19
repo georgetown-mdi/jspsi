@@ -32,6 +32,12 @@ export interface AcquiredBundle {
 export interface FileAcquireProps {
   /** Label for the submit button (FileSelect no longer hardcodes "Start"). */
   submitLabel: string;
+  /** Hold the submit button disabled until an external precondition is met,
+   * forwarded to {@link FileSelect}. The accept review screen passes its consent
+   * gate here, so the file cannot be parsed (let alone handed off) before the
+   * user has consented and named themselves. Omitted (the exchange's own Start
+   * has no such gate) defaults to enabled once a file is chosen. */
+  submitDisabled?: boolean;
   /** The adopted linkage terms the acceptor's CSV must satisfy before any
    * connection. Present for the acceptor -- it triggers the pre-flight -- and
    * undefined for the inviter, which is the source of the terms and runs no
@@ -69,7 +75,14 @@ export interface FileAcquireProps {
  * has already settled, so the two controllers never need to be one.
  */
 export default function FileAcquire(props: FileAcquireProps) {
-  const { submitLabel, linkageTerms, onError, onWarning, onAcquired } = props;
+  const {
+    submitLabel,
+    submitDisabled,
+    linkageTerms,
+    onError,
+    onWarning,
+    onAcquired,
+  } = props;
 
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
@@ -196,6 +209,7 @@ export default function FileAcquire(props: FileAcquireProps) {
   return (
     <FileSelect
       submitLabel={submitLabel}
+      submitDisabled={submitDisabled}
       handleSubmit={handleSubmit}
       submitted={submitted}
       files={files}
