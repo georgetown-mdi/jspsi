@@ -97,11 +97,10 @@ afterEach(() => {
 });
 
 // The shell's structural guarantees, asserted on whichever route is mounted: a
-// single banner header, footer, and <main> landmark, plus a skip link whose
-// fragment resolves to that main landmark.
+// single banner header and <main> landmark, plus a skip link whose fragment
+// resolves to that main landmark.
 function expectShell() {
   expect(document.querySelectorAll("header").length).toBe(1);
-  expect(document.querySelectorAll("footer").length).toBe(1);
 
   const mains = document.querySelectorAll("main");
   expect(mains.length).toBe(1);

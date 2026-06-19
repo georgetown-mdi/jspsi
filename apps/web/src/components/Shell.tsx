@@ -1,4 +1,4 @@
-import { Container, Text } from "@mantine/core";
+import { Container } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
 import classes from "./Shell.module.css";
@@ -11,20 +11,19 @@ const MAIN_CONTENT_ID = "main-content";
 
 /**
  * The application shell shared by every route: a "skip to content" link, a
- * banner header whose product wordmark links home, the single `<main>` landmark
- * routes render their page into, and a footer. Mounted once in the root route
- * around the router `Outlet`, so each route supplies only its own page content
- * and its own single `<h1>`.
+ * banner header whose product wordmark links home, and the single `<main>`
+ * landmark routes render their page into. Mounted once in the root route around
+ * the router `Outlet`, so each route supplies only its own page content and its
+ * own single `<h1>`.
  *
- * The wrapper is a flex column at least the viewport tall with the main region
- * flexing to fill, so the footer rests at the bottom on short pages.
- *
- * Built as a plain flex layout rather than Mantine's AppShell, whose responsive
+ * Built as a plain layout rather than Mantine's AppShell, whose responsive
  * navbar/aside machinery is unneeded for a single header link; revisit that
  * choice if the planned IA restructure adds real navigation or nested layouts.
  */
 export function Shell({ children }: { children: ReactNode }) {
   return (
+    // position: relative (in the stylesheet) anchors the absolutely positioned
+    // skip link's containing block here rather than to an arbitrary ancestor.
     <div className={classes.shell}>
       {/* First focusable element in the document, so a keyboard or screen-reader
           user can jump past the header straight to the page content. Visually
@@ -57,20 +56,6 @@ export function Shell({ children }: { children: ReactNode }) {
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={classes.main}>
         {children}
       </main>
-      <footer className={classes.footer}>
-        <Container size="xl">
-          {/* Role-neutral: the shell renders on both the invite and accept
-              routes, so this avoids the sharer-only "share it over a trusted
-              channel" framing (that inviter-specific guidance lives inline in
-              InvitePanel). Not c="dimmed": this is a confidentiality note, and
-              the dimmed gray falls below the 4.5:1 text-contrast bar on the
-              light background. */}
-          <Text size="xs">
-            Invitations carry a one-time secret. Keep them confidential and
-            never post them publicly.
-          </Text>
-        </Container>
-      </footer>
     </div>
   );
 }
