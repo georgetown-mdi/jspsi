@@ -1,4 +1,4 @@
-import { sanitizeForDisplay } from "@psilink/core";
+import { describeTransformCoercions, sanitizeForDisplay } from "@psilink/core";
 
 import type {
   Algorithm,
@@ -149,6 +149,10 @@ export interface InvitationTransformSummary {
    * entry marks any overflow). sanitizeForDisplay bounds each entry's length and
    * the count is capped, so an arbitrarily large partner-supplied `params`
    * record cannot flood the screen. Empty when the step declares no parameters.
+   * A parameter core coerces before applying carries a trailing "(runs as ...)"
+   * annotation naming the executed value, so a declared value the function
+   * overrides (e.g. `replacement: null` running as the empty string) is not
+   * surfaced as the match rule alone; un-coerced parameters are shown verbatim.
    */
   params: Array<string>;
   /**
@@ -352,6 +356,17 @@ function describeParamValue(value: unknown): string {
 }
 
 /**
+ * Render the value a coerced parameter actually executes as, from core's
+ * coercion contract. The empty string is a real executed value (e.g.
+ * `replace_regex` `replacement: null`), so name it rather than render a blank
+ * that would read as "nothing shown".
+ */
+function describeExecutedValue(value: unknown): string {
+  if (value === "") return "the empty string";
+  return describeParamValue(value);
+}
+
+/**
  * Reduce one transform step to its display summary: the sanitized function name
  * and a bounded, sanitized `key: value` view of its parameters. Each entry is
  * sanitized as a whole (so a parameter key or value cannot carry control, bidi,
@@ -359,11 +374,23 @@ function describeParamValue(value: unknown): string {
  */
 function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
-  const params = entries
-    .slice(0, MAX_DISPLAYED_PARAMS)
-    .map((entry) =>
-      sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
-    );
+  // The executed value of each param core coerces before applying (e.g.
+  // replace_regex replacement: null runs as the empty string), so a declared
+  // value the function overrides is shown with what actually executes rather
+  // than alone. Driven by core's behavior; a param absent here is shown verbatim.
+  const executedByParam = new Map(
+    describeTransformCoercions(step).map((c) => [c.param, c.executed]),
+  );
+  const params = entries.slice(0, MAX_DISPLAYED_PARAMS).map(([key, value]) => {
+    const declared = `${key}: ${describeParamValue(value)}`;
+    // The executed annotation is fixed core copy, not partner-controlled; the
+    // whole line is still sanitized as a unit so the declared half stays escaped.
+    if (executedByParam.has(key))
+      return sanitizeForDisplay(
+        `${declared} (runs as ${describeExecutedValue(executedByParam.get(key))})`,
+      );
+    return sanitizeForDisplay(declared);
+  });
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
   // Look up the description by the RAW function name: the glossary is keyed by

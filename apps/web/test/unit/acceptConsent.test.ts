@@ -583,6 +583,45 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
+  // The displayed parameter lines for one transform step.
+  const paramsFor = (fn: string, params: Record<string, unknown>) =>
+    summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "ssn", transform: [{ function: fn, params }] }],
+          },
+        ],
+      }),
+    ).linkageKeys[0].elements[0].transforms[0].params;
+
+  test("annotates a coerced parameter with the value the function actually runs", () => {
+    // The headline case: replace_regex replacement: null executes as the empty
+    // string, so the line shows both the declared null and what runs.
+    const params = paramsFor("replace_regex", {
+      pattern: "x",
+      replacement: null,
+    });
+    expect(params).toContain("replacement: null (runs as the empty string)");
+    // The pattern, which the function does not coerce, is shown verbatim.
+    expect(params).toContain("pattern: x");
+  });
+
+  test("shows an un-coerced parameter verbatim, even when declared null", () => {
+    // A declared, non-null value is applied as written -- no coerced rendering.
+    expect(
+      paramsFor("replace_regex", { pattern: "x", replacement: "Y" }),
+    ).toEqual(["pattern: x", "replacement: Y"]);
+    // The coercion is per-parameter: replace_regex coerces `replacement` but not
+    // `pattern`, so a null pattern keeps its literal "null" and gains no blanket
+    // "(empty)" annotation where that would be wrong.
+    expect(paramsFor("replace_regex", { pattern: null })).toEqual([
+      "pattern: null",
+    ]);
+  });
+
   test("sanitizes payload column names on both the send and receive sides", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -938,6 +977,36 @@ describe("accept screen: terms render from a decoded token", () => {
     });
     // 16 parameters render, then the overflow marker for the remaining 4.
     expect(html).toContain("... 4 more");
+  });
+
+  test("renders the runtime-coercion annotation for a coerced parameter", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "ssn", type: "ssn" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: { pattern: "x", replacement: null },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    // The declared null and what the function actually runs both reach the
+    // screen, so the consent term cannot misstate the match.
+    expect(html).toContain("replacement: null (runs as the empty string)");
   });
 
   test("flags a proposed deduplicate setting the current exchange does not apply", () => {

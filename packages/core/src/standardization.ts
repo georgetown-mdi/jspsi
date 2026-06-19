@@ -438,6 +438,73 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
   "coalesce",
 ];
 
+// --- Runtime-coercion contract -----------------------------------------------
+
+/**
+ * Per-function table of parameters a standardization function replaces with a
+ * fixed fallback when the declared value is nullish, keyed by the camelCase
+ * param name (params arrive camelCased). Each factory reads its param as
+ * `(params.x ?? <fallback>)`, so a declared `null` runs as <fallback> -- the
+ * headline case being `replace_regex` `replacement: null`, which executes as the
+ * empty string. These are the only param coercions that make a declared term
+ * differ from the executed one in a way worth surfacing; NFC normalization of a
+ * present value is excluded, as it does not change the human-readable value, and
+ * a function or param absent here applies its declared value as written.
+ *
+ * Hand-listed but pinned to the real factory behavior by a test (a declared-null
+ * run must equal a declared-fallback run), and kept beside
+ * {@link STANDARDIZING_FUNCTIONS} so the two are edited together. The one drift
+ * this table cannot catch structurally -- a newly added function that coerces a
+ * param yet gets no entry here -- closes when a function's param resolution is
+ * shared with this table directly rather than duplicated.
+ */
+const TRANSFORM_PARAM_FALLBACKS: Record<string, Record<string, unknown>> = {
+  replace_regex: { replacement: "" },
+  parse_date: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+  pad_left: { char: "0" },
+  phonetic: { algorithm: "soundex" },
+  split_on: { includeOriginal: false },
+};
+
+/**
+ * One parameter whose declared value a transform function replaces at match
+ * time, paired with the value it actually uses.
+ */
+export interface TransformParamCoercion {
+  /** The camelCase parameter name. */
+  param: string;
+  /** The value the function applies in place of the declared (nullish) one. */
+  executed: unknown;
+}
+
+/**
+ * The parameters of `step` whose DECLARED value the function coerces before
+ * applying it -- today, the params a function defaults when they are declared
+ * `null` (e.g. `replace_regex` `replacement: null` runs as the empty string).
+ * Only params that are BOTH present on `step` AND coerced are returned, so a
+ * caller can annotate exactly those and show every other declared param
+ * verbatim; a param declared with a real value, an absent param, an
+ * un-coerced param, and an unrecognized function name all yield nothing. Lets a
+ * consent display state what executes off core's actual behavior, rather than a
+ * web-side guess that could misstate a function it does not coerce.
+ */
+export function describeTransformCoercions(
+  step: TransformStep,
+): TransformParamCoercion[] {
+  const fallbacks = TRANSFORM_PARAM_FALLBACKS[step.function];
+  if (fallbacks === undefined) return [];
+  const params = step.params ?? {};
+  const coercions: TransformParamCoercion[] = [];
+  for (const [param, executed] of Object.entries(fallbacks)) {
+    // Only a declared, nullish param diverges: a declared real value is applied
+    // as written, and an absent param has no displayed term to annotate.
+    const declared = params[param];
+    if (param in params && (declared === null || declared === undefined))
+      coercions.push({ param, executed });
+  }
+  return coercions;
+}
+
 // --- Step compilation --------------------------------------------------------
 
 type CompiledStep =

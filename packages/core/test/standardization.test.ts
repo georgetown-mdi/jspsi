@@ -5,6 +5,7 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  describeTransformCoercions,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
   StandardizedField,
@@ -1475,5 +1476,118 @@ describe("StandardizationSchema", () => {
       { output: "last_name", input: "LAST_NAME" },
     ];
     expect(() => StandardizationSchema.parse(raw)).toThrow();
+  });
+});
+
+describe("describeTransformCoercions", () => {
+  // Each row is a param the descriptor claims a function coerces from a declared
+  // `null` to `executed`, plus the other params and an input needed to run the
+  // function. The behavior assertion below proves the claim against the real
+  // factory; keep this list in step with TRANSFORM_PARAM_FALLBACKS.
+  const coercingCases: Array<{
+    fn: string;
+    param: string;
+    executed: unknown;
+    otherParams: Record<string, unknown>;
+    input: string;
+  }> = [
+    {
+      fn: "replace_regex",
+      param: "replacement",
+      executed: "",
+      otherParams: { pattern: "x" },
+      input: "axbx",
+    },
+    {
+      fn: "parse_date",
+      param: "inputFormat",
+      executed: "MM/DD/YYYY",
+      otherParams: {},
+      input: "01/02/2020",
+    },
+    {
+      fn: "parse_date",
+      param: "outputFormat",
+      executed: "YYYYMMDD",
+      otherParams: { inputFormat: "MM/DD/YYYY" },
+      input: "01/02/2020",
+    },
+    {
+      fn: "pad_left",
+      param: "char",
+      executed: "0",
+      otherParams: { length: 5 },
+      input: "12",
+    },
+    {
+      fn: "phonetic",
+      param: "algorithm",
+      executed: "soundex",
+      otherParams: {},
+      input: "Smith",
+    },
+    {
+      fn: "split_on",
+      param: "includeOriginal",
+      executed: false,
+      otherParams: { delimiter: "," },
+      input: "a,b",
+    },
+  ];
+
+  test.each(coercingCases)(
+    "$fn declares the executed value for a coerced $param and matches the factory",
+    ({ fn, param, executed, otherParams, input }) => {
+      // The descriptor reports the coercion for a declared-null param ...
+      expect(
+        describeTransformCoercions({
+          function: fn,
+          params: { ...otherParams, [param]: null },
+        }),
+      ).toContainEqual({ param, executed });
+
+      // ... and that claim holds against the real factory: declaring the param
+      // null produces the same result as declaring it as the claimed executed
+      // value, so the descriptor cannot drift from what core runs.
+      const withNull = runPipeline(input, [
+        { function: fn, params: { ...otherParams, [param]: null } },
+      ]);
+      const withExecuted = runPipeline(input, [
+        { function: fn, params: { ...otherParams, [param]: executed } },
+      ]);
+      expect(withNull).toEqual(withExecuted);
+    },
+  );
+
+  test("does not report a param declared with a real value", () => {
+    // A declared, non-null replacement is applied verbatim, so nothing is
+    // coerced -- the screen must show it as written, not as the empty-string
+    // default.
+    expect(
+      describeTransformCoercions({
+        function: "replace_regex",
+        params: { pattern: "x", replacement: "Y" },
+      }),
+    ).toEqual([]);
+  });
+
+  test("does not report a param the function does not coerce", () => {
+    // `pattern` carries no fallback (it is used as authored), so even a token
+    // that somehow declared it null is not annotated as coerced.
+    expect(
+      describeTransformCoercions({
+        function: "replace_regex",
+        params: { pattern: null },
+      }),
+    ).toEqual([]);
+  });
+
+  test("reports nothing for a function with no coerced params", () => {
+    expect(describeTransformCoercions({ function: "to_upper_case" })).toEqual(
+      [],
+    );
+    expect(
+      describeTransformCoercions({ function: "not_a_real_function" }),
+    ).toEqual([]);
   });
 });
