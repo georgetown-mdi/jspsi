@@ -109,8 +109,9 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
     // "\x1b[31m..." cannot inject terminal control/ANSI sequences or deceptive
     // Unicode.
     return (
-      "a connection endpoint may carry only a credential-free locator " +
-      "(channel plus host/port/path); every other field is rejected so that no " +
+      "a connection endpoint may carry only a credential-free locator (channel " +
+      "plus host/port/path, or an inbound_path/outbound_path pair for a split " +
+      "file-sync directory); every other field is rejected so that no " +
       "credential or server-identity material (such as a password, private " +
       "key, or host-key fingerprint) can ride along. Remove unexpected " +
       "field(s): " +

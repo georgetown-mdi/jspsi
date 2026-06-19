@@ -495,6 +495,16 @@ export function connectionFromEndpoint(
         };
         return { connection, seeded: true };
       }
+      if (endpoint.path === undefined)
+        // Unreachable for a decoded endpoint: the schema requires a filedrop
+        // endpoint to name a directory in one form (path, or the split pair
+        // handled above), but `path` is optional in the type, so guard a caller
+        // that bypasses decode with a clear error here rather than letting an
+        // undefined path reach connection.ts as an opaque schema failure.
+        throw new Error(
+          "filedrop endpoint has neither a path nor a split " +
+            "inbound_path/outbound_path pair",
+        );
       const connection: FileDropConnectionConfig = {
         channel: "filedrop",
         path: endpoint.path,

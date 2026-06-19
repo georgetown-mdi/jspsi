@@ -781,6 +781,16 @@ test.each(["sftp", "filedrop"] as const)(
   },
 );
 
+test("connectionFromEndpoint: throws on a filedrop endpoint naming no directory", () => {
+  // The endpoint schema forbids a filedrop endpoint with neither a path nor a
+  // split pair, but `path` is optional in the type, so a caller that bypasses
+  // decode can construct one. The guard fails clearly at the swap site rather
+  // than letting an undefined path surface as an opaque downstream schema error.
+  expect(() => connectionFromEndpoint({ channel: "filedrop" })).toThrow(
+    /neither a path nor a split/,
+  );
+});
+
 test("connectionFromEndpoint: the split swap is applied exactly once (no double-swap)", () => {
   // A double application would land the inviter's inbound back on the acceptor's
   // inbound. Asserting the acceptor's inbound is the inviter's OUTBOUND proves a
