@@ -497,9 +497,13 @@ export function describeTransformCoercions(
   const coercions: TransformParamCoercion[] = [];
   for (const [param, executed] of Object.entries(fallbacks)) {
     // Only a declared, nullish param diverges: a declared real value is applied
-    // as written, and an absent param has no displayed term to annotate.
+    // as written, and an absent param has no displayed term to annotate. Own-
+    // property check (Object.hasOwn, not `in`) so a name reachable only on the
+    // prototype chain is never read as a declared param -- keeping the reported
+    // coercion partner-independent even against a polluted Object.prototype.
+    if (!Object.hasOwn(params, param)) continue;
     const declared = params[param];
-    if (param in params && (declared === null || declared === undefined))
+    if (declared === null || declared === undefined)
       coercions.push({ param, executed });
   }
   return coercions;
