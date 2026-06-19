@@ -543,6 +543,11 @@ export function persistHostKeyFingerprint(
       // channel is a non-secret discriminant, so echoing it is consistent with
       // the channel-mismatch errors elsewhere (e.g. protocol.ts); a missing or
       // non-scalar channel is reported generically rather than echoed.
+      // getIn does not resolve aliases, so an alias-spelled channel (or an
+      // aliased connection block) reads as a non-string node and is rejected
+      // even when it would resolve to sftp -- the safe direction (refuse, not
+      // mis-pin), and not a form a hand-authored config uses. Resolving it
+      // would mean materializing the document, which this module avoids.
       const channel = doc.getIn(["connection", "channel"]);
       if (channel !== "sftp") {
         const found =
