@@ -1,0 +1,69 @@
+/* Shell styling lives in a CSS module (the repo's only one) because the skip
+   link's off-screen-until-focused reveal, the focus rings, and the brand hover
+   are pseudo-state styles that Mantine props and inline styles cannot express.
+   Everything else reuses Mantine's design tokens (the spacing and color CSS
+   vars) and Mantine components (Container) rather than re-inventing them. */
+
+/* position: relative anchors the absolutely positioned skip link's containing
+   block here, rather than to whichever ancestor happens to be positioned. */
+.shell {
+  position: relative;
+}
+
+.header {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  padding-top: var(--mantine-spacing-sm);
+  padding-bottom: var(--mantine-spacing-sm);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: var(--mantine-font-size-lg);
+  color: var(--mantine-color-text);
+  text-decoration: none;
+}
+
+.brand:hover {
+  text-decoration: underline;
+}
+
+.main {
+  padding-top: var(--mantine-spacing-lg);
+  padding-bottom: var(--mantine-spacing-lg);
+}
+
+/* main only ever receives focus from the skip link (it is tabIndex -1, so it is
+   not in the tab order otherwise); give that landing a visible indicator. The
+   text color is used (not the primary) so the outline clears the 3:1 non-text
+   contrast bar in both color schemes -- the cyan primary is only ~2.8:1 on the
+   light background. The offset is negative so the outline sits inside the
+   full-width region rather than overflowing the viewport. */
+.main:focus {
+  outline: 2px solid var(--mantine-color-text);
+  outline-offset: -2px;
+}
+
+/* The skip link sits first in the tab order but is pulled off-screen until it
+   takes focus, when it snaps into the top-left corner -- the standard
+   keyboard-only "skip to content" affordance, done in CSS so it needs no JS and
+   works under SSR. */
+.skipLink {
+  position: absolute;
+  top: -3rem;
+  left: var(--mantine-spacing-sm);
+  z-index: 1000;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  background-color: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.skipLink:focus {
+  top: var(--mantine-spacing-sm);
+  /* An explicit, sufficiently contrasting focus ring: the link is a raw <a>, so
+     it does not inherit Mantine's component focus styles and would otherwise
+     rely on the UA default alone. */
+  outline: 2px solid var(--mantine-color-text);
+  outline-offset: 2px;
+}

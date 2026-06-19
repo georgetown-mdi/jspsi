@@ -17,6 +17,7 @@ import {
 
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { NotFound } from "@components/NotFound";
+import { Shell } from "@components/Shell";
 import { mantineTheme } from "@theme";
 import { seo } from "@utils/seo";
 
@@ -68,14 +69,16 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <Outlet />
+      <Shell>
+        <Outlet />
+      </Shell>
     </RootDocument>
   );
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html {...mantineHtmlProps}>
+    <html lang="en" {...mantineHtmlProps}>
       <head>
         <HeadContent />
         <ColorSchemeScript />

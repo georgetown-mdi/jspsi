@@ -1,7 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 
-import { Button, Center, Paper, Stack, Text, Textarea } from "@mantine/core";
+import { Button, Center, Paper, Stack, Textarea, Title } from "@mantine/core";
 
 /**
  * Peel the encoded invitation token out of what the user pasted. A deep-link URL
@@ -39,7 +39,7 @@ export default function AcceptForm() {
 
   return (
     <Paper>
-      <Text size="md">Accept an invitation you were sent</Text>
+      <Title order={2}>Accept an invitation you were sent</Title>
       <form
         onSubmit={(e) => {
           e.preventDefault();

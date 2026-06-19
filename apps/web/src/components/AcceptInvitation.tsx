@@ -108,9 +108,15 @@ export function AcceptInvitation() {
     ) : undefined;
 
   return (
-    <Container size="sm" mt="md">
+    // Single-column reading width ("lg"): narrower than the home route on
+    // purpose, so the dense linkage terms sit at a legible measure rather than
+    // running the full two-column width.
+    <Container size="lg">
       <Paper>
-        <Title order={2}>Accept an invitation</Title>
+        {/* A generic page h1 rather than the party-specific "Invitation from X"
+            (which is the terms section's h2 below): it must read sensibly in the
+            pending and error states too, where no party name is decoded yet. */}
+        <Title order={1}>Accept an invitation</Title>
         <AcceptInvitationPanel
           decode={decode}
           headingRef={readyHeadingRef}
