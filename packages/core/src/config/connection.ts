@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
+import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -928,7 +929,11 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         m.outboundPath === undefined
       )
         return true;
-      return m.inboundPath !== m.outboundPath;
+      // Reject not only byte-identical paths but any pair that resolves to the
+      // same directory (redundant slashes, "." segments, trailing slash), using
+      // the very rule each channel's open() applies -- so the schema and the
+      // live connection agree on what counts as a distinct outbound directory.
+      return !pathsResolveToSameDir(m.inboundPath, m.outboundPath);
     },
     { message: "inbound_path and outbound_path must differ" },
   )

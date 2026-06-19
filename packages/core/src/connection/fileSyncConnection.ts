@@ -7,6 +7,7 @@ import {
 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
+import { pathsResolveToSameDir } from "../utils/pathCompare";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
 import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import {
@@ -126,32 +127,6 @@ export function normalizeFiledropPath(rawPath: string): string {
   const normalized = rawPath.replace(/\\/g, "/");
   const stripped = normalized.replace(/\/+$/, "");
   return /^[A-Za-z]:$/.test(stripped) ? stripped + "/" : stripped || "/";
-}
-
-// True when two configured directory paths resolve to the SAME directory, for
-// the split-mode distinctness check ONLY -- never for the path used on disk,
-// which keeps its own per-channel form (normalizeFiledropPath / a single
-// trailing-slash strip). Normalizes copies textually: fold backslashes, then
-// drop empty and "." segments (collapsing repeated, leading "./", interior
-// "/./", and trailing slashes alike) while preserving the absolute-vs-relative
-// distinction. Pure string work so it stays browser-safe (no node:path).
-//
-// It deliberately does NOT resolve ".." (unsafe across a symlink, and rare in a
-// configured directory), fold case (Windows filesystems are case-insensitive),
-// or expand a relative path against an SFTP login home -- none of those can be
-// settled client-side. So it only ever UNDER-collapses: it never reports two
-// genuinely distinct directories as the same (no false rejection), but a config
-// that hits one of those residuals can still slip through, which is the
-// operator's responsibility (documented in docs/EXCHANGE_REFERENCE.md). Both
-// channels' open() distinctness checks share this one rule.
-function pathsResolveToSameDir(a: string, b: string): boolean {
-  const norm = (p: string): string => {
-    const folded = p.replace(/\\/g, "/");
-    const absolute = folded.startsWith("/");
-    const segments = folded.split("/").filter((s) => s !== "" && s !== ".");
-    return (absolute ? "/" : "") + segments.join("/");
-  };
-  return norm(a) === norm(b);
 }
 
 // Builds the acknowledgment-marker name for the file `<originalName>.json`:

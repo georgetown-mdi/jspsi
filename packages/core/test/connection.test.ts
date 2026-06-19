@@ -194,19 +194,35 @@ test("setting only one half of the pair is rejected for sftp, naming the constra
   ).toBe(true);
 });
 
-test("schema accepts a filedrop pair differing only by a trailing slash (caught at open(), not here)", () => {
-  // The schema differ check is byte-identical, so "/x" and "/x/" parse cleanly;
-  // the same-directory collision is the open()-time runtime backstop's job.
-  // Pinning the schema-accept keeps that backstop from silently becoming dead
-  // code if the schema were ever tightened to normalize.
-  const result = safeParseConnectionConfig({
-    channel: "filedrop",
-    inbound_path: "/x",
-    outbound_path: "/x/",
-    options: splitOptions,
-  });
-  expect(result.success).toBe(true);
-});
+// The schema rejects not only byte-identical paths but any split pair that
+// resolves to one directory, using the same rule open() applies -- so a config
+// that would collapse to a single directory fails to parse rather than parsing
+// "valid" and only failing later at connect time. Each case asserts the "must
+// differ" refine is the one that fires (not, say, a half-pair backstop).
+test.each([
+  ["a trailing slash (filedrop)", "filedrop", "/x", "/x/"],
+  ["a redundant interior slash (filedrop)", "filedrop", "/a//in", "/a/in"],
+  ['a "." segment (filedrop)', "filedrop", "/a/./in", "/a/in"],
+  ['a "." segment (sftp)', "sftp", "in/./x", "in/x"],
+])(
+  "split pair resolving to one directory via %s is rejected",
+  (_label, channel, inbound_path, outbound_path) => {
+    const result = safeParseConnectionConfig(
+      channel === "sftp"
+        ? {
+            channel,
+            server: { host: "h", inbound_path, outbound_path },
+            options: splitOptions,
+          }
+        : { channel, inbound_path, outbound_path, options: splitOptions },
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.some((i) => i.message.includes("must differ")),
+    ).toBe(true);
+  },
+);
 
 test("file-drop connection with neither path nor the pair is rejected", () => {
   const result = safeParseConnectionConfig({ channel: "filedrop" });
