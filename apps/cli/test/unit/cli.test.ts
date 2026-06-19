@@ -11,6 +11,7 @@ import {
   durationFlagSeconds,
   exitWithError,
   MAX_TIMEOUT_SECONDS,
+  nonNegativeIntFlag,
   openInputSource,
   parseOrExit,
   singleValue,
@@ -182,6 +183,61 @@ test("durationFlagSeconds: the existing rejections precede the ceiling check", (
       MAX_TIMEOUT_SECONDS,
     ),
   ).toThrow(/greater than zero/);
+});
+
+// --- nonNegativeIntFlag ------------------------------------------------------
+
+test("nonNegativeIntFlag: a nonnegative integer is returned unchanged", () => {
+  // The schema floor on maxReconnectAttempts is nonnegative (not positive), so 0
+  // ("connect once, do not reconnect") is valid and must pass through.
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": 3 }),
+      "max-reconnect-attempts",
+    ),
+  ).toBe(3);
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": 0 }),
+      "max-reconnect-attempts",
+    ),
+  ).toBe(0);
+});
+
+test("nonNegativeIntFlag: an absent flag is undefined", () => {
+  expect(
+    nonNegativeIntFlag(argv({}), "max-reconnect-attempts"),
+  ).toBeUndefined();
+});
+
+test("nonNegativeIntFlag: a negative, a fraction, and NaN are flag-named usage errors", () => {
+  // yargs type:"number" coerces a non-numeric token to NaN and applies no
+  // integer or sign constraint; each of these reaches here as a number the
+  // schema floor would reject, so the flag-named UsageError catches it at the
+  // CLI boundary (exit 64) rather than deep in connection setup (exit 69).
+  for (const bad of [-1, 2.5, Number.NaN]) {
+    expect(() =>
+      nonNegativeIntFlag(
+        argv({ "max-reconnect-attempts": bad }),
+        "max-reconnect-attempts",
+      ),
+    ).toThrow(UsageError);
+    expect(() =>
+      nonNegativeIntFlag(
+        argv({ "max-reconnect-attempts": bad }),
+        "max-reconnect-attempts",
+      ),
+    ).toThrow("--max-reconnect-attempts");
+  }
+});
+
+test("nonNegativeIntFlag: a repeated flag is rejected before the value check", () => {
+  expect(() =>
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": [1, 2] }),
+      "max-reconnect-attempts",
+    ),
+  ).toThrow("--max-reconnect-attempts may be given only once");
 });
 
 // --- parseOrExit -------------------------------------------------------------

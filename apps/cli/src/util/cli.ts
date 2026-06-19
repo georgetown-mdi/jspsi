@@ -93,6 +93,37 @@ export function durationFlagSeconds(
 }
 
 /**
+ * Read a count-valued CLI option (a nonnegative whole number) from parsed
+ * `Arguments` and return it as a number (or `undefined` when the flag is
+ * absent). Rejects a repeat (via {@link singleValue}) and any value that is not
+ * an integer >= 0 -- a negative, a fraction, or a non-numeric token -- with a
+ * flag-named {@link UsageError} (exit 64), before the value reaches the
+ * connection options.
+ *
+ * This is the count-flag analogue of {@link durationFlagSeconds}: yargs
+ * `type: "number"` coerces a non-numeric value to `NaN` and applies no integer
+ * or sign constraint, so a bare `argv[name] as number` would let
+ * `--max-reconnect-attempts -1`, `2.5`, or `abc` through to be caught only
+ * later and as a runtime fault rather than a usage error. Enforcing the floor
+ * here keeps the CLI boundary aligned with the schema's `z.int().nonnegative()`
+ * on the same field (`maxReconnectAttempts`) and yields a flag-named message
+ * instead of a raw schema-error dump. `NaN` fails the `Number.isInteger` test,
+ * so the non-numeric case is covered without a separate branch.
+ */
+export function nonNegativeIntFlag(
+  argv: Arguments,
+  name: string,
+): number | undefined {
+  const raw = singleValue(argv, name);
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0)
+    throw new UsageError(
+      `--${name} must be a non-negative whole number; got ${String(raw)}`,
+    );
+  return raw;
+}
+
+/**
  * Run a pre-logger parse step, mapping a {@link UsageError} it throws to a clean
  * stderr message and exit 64. A bootstrap-style command resolves its log level
  * and reads every option before the logger exists, so a usage error there (a
