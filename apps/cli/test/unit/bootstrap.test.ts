@@ -19,6 +19,7 @@ import type {
 } from "@psilink/core";
 
 import {
+  applyEndpointSplitDirectories,
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
@@ -806,6 +807,129 @@ test("connectionFromEndpoint: the split swap is applied exactly once (no double-
   if (connection.channel !== "filedrop") throw new Error("expected filedrop");
   expect(connection.inboundPath).toBe(endpoint.outboundPath);
   expect(connection.inboundPath).not.toBe(endpoint.inboundPath);
+});
+
+// --- applyEndpointSplitDirectories (online accept merge) ---------------------
+
+test("applyEndpointSplitDirectories: grafts a split sftp endpoint onto the URL connection, keeping host/credentials", () => {
+  // The acceptor's URL carries the reachable host + credentials; the endpoint
+  // carries the inviter's split pair. The merged connection reaches the host the
+  // URL names with the URL's credentials, but reads/writes the mirror-swapped
+  // directories (inviter outbound -> acceptor inbound) the endpoint conveys.
+  const urlConnection = connectionFromURL(
+    new URL("sftp://alice:secret@reach-host:2200/ignored-url-path"),
+    {},
+  );
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "inviter-host",
+    port: 22,
+    inboundPath: "/exchange/inviter-in",
+    outboundPath: "/exchange/inviter-out",
+  };
+  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+    urlConnection,
+    endpoint,
+  );
+  expect(appliedSplitDirectories).toBe(true);
+  if (connection.channel !== "sftp") throw new Error("expected sftp");
+  // Host/port/credentials are the URL's, never the endpoint's.
+  expect(connection.server.host).toBe("reach-host");
+  expect(connection.server.port).toBe(2200);
+  expect(connection.server.username).toBe("alice");
+  expect(connection.server.password).toBe("secret");
+  // Mirror-swapped pair from the endpoint; the URL's single path is dropped.
+  expect(connection.server.inboundPath).toBe("/exchange/inviter-out");
+  expect(connection.server.outboundPath).toBe("/exchange/inviter-in");
+  expect(connection.server.path).toBeUndefined();
+  // The retain trio a split exchange requires is seeded.
+  expect(connection.options?.retainFiles).toBe(true);
+  expect(connection.options?.locklessRendezvous).toBe(true);
+  expect(connection.options?.timestampInFilename).toBe(true);
+});
+
+test("applyEndpointSplitDirectories: grafts a split filedrop endpoint onto a filedrop URL", () => {
+  const urlConnection = connectionFromURL(new URL("file:///mnt/ignored"), {});
+  const endpoint: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/from-inviter",
+    outboundPath: "/mnt/share/to-inviter",
+  };
+  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+    urlConnection,
+    endpoint,
+  );
+  expect(appliedSplitDirectories).toBe(true);
+  if (connection.channel !== "filedrop") throw new Error("expected filedrop");
+  expect(connection.inboundPath).toBe("/mnt/share/to-inviter");
+  expect(connection.outboundPath).toBe("/mnt/share/from-inviter");
+  expect(connection.path).toBeUndefined();
+  expect(connection.options?.retainFiles).toBe(true);
+});
+
+test("applyEndpointSplitDirectories: preserves URL-derived options under the retain trio", () => {
+  // A --connection-timeout carried on the URL connection must survive the merge:
+  // the retain trio is layered over the existing options, not substituted for it.
+  const urlConnection = connectionFromURL(new URL("sftp://host/in"), {
+    connectionTimeout: 45,
+  });
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "host",
+    inboundPath: "/a",
+    outboundPath: "/b",
+  };
+  const { connection } = applyEndpointSplitDirectories(urlConnection, endpoint);
+  expect(connection.options?.serverConnectTimeoutMs).toBe(45_000);
+  expect(connection.options?.retainFiles).toBe(true);
+});
+
+test("applyEndpointSplitDirectories: a non-split endpoint is a no-op", () => {
+  const urlConnection = connectionFromURL(new URL("sftp://host/drop"), {});
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "inviter-host",
+    path: "/inviter/drop",
+  };
+  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+    urlConnection,
+    endpoint,
+  );
+  expect(appliedSplitDirectories).toBe(false);
+  expect(connection).toBe(urlConnection);
+});
+
+test.each([
+  ["no endpoint", undefined],
+  [
+    "a webrtc endpoint",
+    { channel: "webrtc", host: "peer.example.org", path: "/psi" },
+  ],
+] as const)(
+  "applyEndpointSplitDirectories: %s leaves the URL connection unchanged",
+  (_label, endpoint) => {
+    const urlConnection = connectionFromURL(new URL("sftp://host/drop"), {});
+    const { connection, appliedSplitDirectories } =
+      applyEndpointSplitDirectories(urlConnection, endpoint);
+    expect(appliedSplitDirectories).toBe(false);
+    expect(connection).toBe(urlConnection);
+  },
+);
+
+test("applyEndpointSplitDirectories: rejects a degenerate (relative-path) filedrop endpoint", () => {
+  // The endpoint schema permits relative filedrop paths (it defers the
+  // absolute-path rule to the acceptor's own config), so the grafted connection
+  // can violate it. Validation fails it here, before any network activity, with
+  // the schema's own message rather than an opaque connect-time error.
+  const urlConnection = connectionFromURL(new URL("file:///mnt/ignored"), {});
+  const endpoint: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "relative/in",
+    outboundPath: "relative/out",
+  };
+  expect(() => applyEndpointSplitDirectories(urlConnection, endpoint)).toThrow(
+    UsageError,
+  );
 });
 
 // --- endpointFromConnection --------------------------------------------------

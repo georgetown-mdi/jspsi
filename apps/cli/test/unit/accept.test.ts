@@ -13,6 +13,7 @@ import {
 } from "@psilink/core";
 import type {
   ConnectionConfig,
+  ConnectionEndpoint,
   InvitationToken,
   LinkageTerms,
 } from "@psilink/core";
@@ -52,12 +53,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function sampleToken(expires?: string): InvitationToken {
+function sampleToken(
+  expires?: string,
+  connectionEndpoint?: ConnectionEndpoint,
+): InvitationToken {
   return {
     version: "1",
     linkageTerms: getDefaultLinkageTerms("Inviter Org"),
     sharedSecret: generateSharedSecret(),
     expires,
+    connectionEndpoint,
   };
 }
 
@@ -567,6 +572,142 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
   } finally {
     warnSpy.mockRestore();
     infoSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- online accept: invitation-endpoint split directories --------------------
+
+// A CSV the default linkage terms can fully satisfy, so the online path reaches
+// prepareForOnlineExchange without a satisfiability abort. Returns a temp dir
+// holding the input, config, and key paths (the caller removes the dir).
+function onlineSplitFixture(): {
+  dir: string;
+  input: string;
+  configFile: string;
+  keyFile: string;
+} {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-split-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  return {
+    dir,
+    input,
+    configFile: path.join(dir, "psilink.yaml"),
+    keyFile: path.join(dir, ".psilink.key"),
+  };
+}
+
+test("validateAccept: online auto-applies a split endpoint's mirror-swapped directories", async () => {
+  const { dir, input, configFile, keyFile } = onlineSplitFixture();
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "inviter-host",
+    inboundPath: "/exchange/inviter-in",
+    outboundPath: "/exchange/inviter-out",
+  };
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        // Credentials + reachable host come from the acceptor's own URL.
+        url: new URL("sftp://acceptor:pw@reach-host/ignored-url-path"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({ configFile, keyFile }),
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("online");
+    if (ready.mode !== "online") return;
+    const { connection } = ready;
+    if (connection.channel !== "sftp") throw new Error("expected sftp");
+    expect(connection.server.host).toBe("reach-host");
+    expect(connection.server.username).toBe("acceptor");
+    // Mirror-swapped from the endpoint (inviter outbound -> acceptor inbound);
+    // the URL's single path is dropped in favor of the split pair.
+    expect(connection.server.inboundPath).toBe("/exchange/inviter-out");
+    expect(connection.server.outboundPath).toBe("/exchange/inviter-in");
+    expect(connection.server.path).toBeUndefined();
+    expect(connection.options?.retainFiles).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateAccept: online --outbound-path overrides the endpoint's split pair", async () => {
+  const { dir, input, configFile, keyFile } = onlineSplitFixture();
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "inviter-host",
+    inboundPath: "/exchange/inviter-in",
+    outboundPath: "/exchange/inviter-out",
+  };
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://reach-host/my-inbound"),
+        invitation: encoded,
+        input,
+      },
+      // Explicit --outbound-path (with the retain mode a split requires) wins:
+      // the URL path is the inbound and the flag is the outbound, never the
+      // endpoint's swapped pair.
+      options: testOptions({
+        configFile,
+        keyFile,
+        outboundPath: "/my-outbound",
+        retainFiles: true,
+      }),
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("online");
+    if (ready.mode !== "online") return;
+    const { connection } = ready;
+    if (connection.channel !== "sftp") throw new Error("expected sftp");
+    expect(connection.server.inboundPath).toBe("/my-inbound");
+    expect(connection.server.outboundPath).toBe("/my-outbound");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateAccept: online is unchanged by a non-split invitation endpoint", async () => {
+  const { dir, input, configFile, keyFile } = onlineSplitFixture();
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "inviter-host",
+    path: "/inviter/drop",
+  };
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://reach-host/url-drop"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({ configFile, keyFile }),
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("online");
+    if (ready.mode !== "online") return;
+    const { connection } = ready;
+    if (connection.channel !== "sftp") throw new Error("expected sftp");
+    // The connection is exactly what the URL builds: a single shared path, no
+    // split pair, no seeded retain mode.
+    expect(connection.server.path).toBe("/url-drop");
+    expect(connection.server.inboundPath).toBeUndefined();
+    expect(connection.server.outboundPath).toBeUndefined();
+    expect(connection.options?.retainFiles).toBeUndefined();
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
