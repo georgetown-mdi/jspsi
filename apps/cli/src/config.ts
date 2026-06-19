@@ -529,11 +529,22 @@ export function diffLinkageTerms(
 /**
  * Render a list of {@link ReconcileDiff} as an indented, human-readable block
  * for a reconciliation error message.
+ *
+ * The rendered values are escaped through {@link sanitizeForDisplay}: both sides
+ * can carry partner-controlled, attacker-shaped strings -- the invitation's
+ * linkage field/key names, and (for an online split accept) the inviter's own
+ * `inbound_path`/`outbound_path` from the connection endpoint -- and this block
+ * is printed to the acceptor's terminal before acceptance, so an unescaped value
+ * could inject control/ANSI sequences or spoof a log line. The `field` is a
+ * static, code-built path, so it is left as is. Ordinary values pass through
+ * unchanged.
  */
 export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
   return diffs
     .map(
-      (d) => `  - ${d.field}: existing ${d.existing} vs required ${d.incoming}`,
+      (d) =>
+        `  - ${d.field}: existing ${sanitizeForDisplay(d.existing)} vs ` +
+        `required ${sanitizeForDisplay(d.incoming)}`,
     )
     .join("\n");
 }

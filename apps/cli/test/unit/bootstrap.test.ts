@@ -916,6 +916,35 @@ test.each([
   },
 );
 
+test("applyEndpointSplitDirectories: a channel-mismatched endpoint places the roles per the URL's channel", () => {
+  // A bridged acceptor may reach the rendezvous over a different channel than the
+  // inviter advertises (see FILE_SYNC.md). The resulting connection's channel is
+  // the URL's, and the swapped path strings land where that channel keeps them --
+  // here a filedrop endpoint's roles graft onto an sftp URL's `server.*`, with
+  // the host/credentials still the URL's.
+  const urlConnection = connectionFromURL(
+    new URL("sftp://alice@reach-host/ignored"),
+    {},
+  );
+  const endpoint: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/inviter-in",
+    outboundPath: "/mnt/inviter-out",
+  };
+  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+    urlConnection,
+    endpoint,
+  );
+  expect(appliedSplitDirectories).toBe(true);
+  expect(connection.channel).toBe("sftp");
+  if (connection.channel !== "sftp") return;
+  expect(connection.server.host).toBe("reach-host");
+  expect(connection.server.username).toBe("alice");
+  // Mirror-swapped from the filedrop endpoint, placed under the sftp `server`.
+  expect(connection.server.inboundPath).toBe("/mnt/inviter-out");
+  expect(connection.server.outboundPath).toBe("/mnt/inviter-in");
+});
+
 test("applyEndpointSplitDirectories: rejects a degenerate (relative-path) filedrop endpoint", () => {
   // The endpoint schema permits relative filedrop paths (it defers the
   // absolute-path rule to the acceptor's own config), so the grafted connection
