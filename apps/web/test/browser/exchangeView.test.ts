@@ -122,8 +122,20 @@ const acceptorTerms: LinkageTerms = {
   linkageKeys: [{ name: "first", elements: [{ field: "firstName" }] }],
 };
 
+// The inviter's terms come from its own file at compose time (identity is its own
+// name); the acceptor adopts the inviter's terms. The values differ only in
+// identity here -- enough to tell the two configs apart.
+const inviterTerms: LinkageTerms = { ...acceptorTerms, identity: "Inviter" };
+
 function inviterConfig(sharedSecret: string): ExchangeConfig {
-  return { role: "inviter", partyName: "Inviter", sharedSecret };
+  return {
+    role: "inviter",
+    partyName: "Inviter",
+    sharedSecret,
+    linkageTerms: inviterTerms,
+    // Pre-acquired at compose time: the inviter does not prompt for a file again.
+    acquired: { rawRows: [], columns: [] },
+  };
 }
 
 function acceptorConfig(sharedSecret: string): ExchangeConfig {
@@ -181,58 +193,40 @@ afterEach(() => {
 });
 
 describe("ExchangeView Start->run wiring", () => {
-  test("delegates file acquisition and starts no run until a bundle arrives", async () => {
+  test("inviter auto-starts from its pre-acquired bundle, with no file prompt", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     render(inviterConfig("secret-a"));
 
+    // The inviter chose its file at compose time, so the run begins on mount with
+    // no acquire phase and no file input of its own -- the bundle is pre-supplied.
+    await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
+    expect(lifecycle.calls[0].exchangeRole).toBe("responder");
+    expect(lifecycle.calls[0].sharedSecret).toBe("secret-a");
+    expect(acquire.lastProps).toBeUndefined();
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  test("acceptor delegates file acquisition and starts no run until a bundle arrives", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    render(acceptorConfig("secret-a"));
+
     // It renders the acquire seam and the pre-start status, holding no file input
-    // of its own.
+    // of its own, and forwards the adopted terms down for the pre-flight.
     await expect.element(page.getByText("Before start")).toBeInTheDocument();
     expect(acquire.lastProps).toBeDefined();
     expect(typeof acquire.lastProps?.onAcquired).toBe("function");
+    expect(acquire.lastProps?.linkageTerms).toBe(acceptorTerms);
     expect(container.querySelector('input[type="file"]')).toBeNull();
     // Crucially, ExchangeView never parses or pre-flights on its own: no run
     // begins until the acquire phase hands up a bundle.
     expect(lifecycle.calls).toHaveLength(0);
   });
 
-  test("forwards the acceptor's adopted terms, none for the inviter", async () => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    render(inviterConfig("secret-a"));
-    // The inviter is the source of the terms, so it pre-flights nothing.
-    await vi.waitFor(() => expect(acquire.lastProps).toBeDefined());
-    expect(acquire.lastProps?.linkageTerms).toBeUndefined();
-
-    render(acceptorConfig("secret-b"));
-    // The acceptor forwards the adopted terms down for the pre-flight; the run
-    // owner does not pre-flight itself.
-    await vi.waitFor(() =>
-      expect(acquire.lastProps?.linkageTerms).toBe(acceptorTerms),
-    );
-  });
-
-  test("runs once per mount as the role's handshake side (one-exchange-per-mount)", async () => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    render(inviterConfig("secret-a"));
-
-    await userEvent.click(page.getByTestId("acquire"));
-    expect(lifecycle.calls).toHaveLength(1);
-    expect(lifecycle.calls[0].exchangeRole).toBe("responder");
-    expect(lifecycle.calls[0].sharedSecret).toBe("secret-a");
-
-    // A second handoff on the same mount is refused by the re-entry guard.
-    await userEvent.click(page.getByTestId("acquire"));
-    expect(lifecycle.calls).toHaveLength(1);
-  });
-
-  test("acceptor runs as the initiator", async () => {
+  test("acceptor runs once per mount as the initiator (one-exchange-per-mount)", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -241,6 +235,11 @@ describe("ExchangeView Start->run wiring", () => {
     await userEvent.click(page.getByTestId("acquire"));
     expect(lifecycle.calls).toHaveLength(1);
     expect(lifecycle.calls[0].exchangeRole).toBe("initiator");
+    expect(lifecycle.calls[0].sharedSecret).toBe("secret-a");
+
+    // A second handoff on the same mount is refused by the re-entry guard.
+    await userEvent.click(page.getByTestId("acquire"));
+    expect(lifecycle.calls).toHaveLength(1);
   });
 
   test("a new secret remounts, aborting the old run and arming a fresh one", async () => {
@@ -249,20 +248,18 @@ describe("ExchangeView Start->run wiring", () => {
     root = createRoot(container);
     render(inviterConfig("secret-a"));
 
-    await userEvent.click(page.getByTestId("acquire"));
-    expect(lifecycle.calls).toHaveLength(1);
+    // The inviter auto-starts on mount.
+    await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
     const firstSignal = lifecycle.calls[0].signal;
     expect(firstSignal.aborted).toBe(false);
 
     // Regenerate: a new secret keys a fresh ExchangeView. The old subtree
-    // unmounts, aborting its in-flight controller, and the new mount's guard is
-    // reset so the next handoff starts a fresh run. The unmount cleanup is a
-    // passive effect, so wait for the abort rather than reading it synchronously.
+    // unmounts, aborting its in-flight controller, and the new mount auto-starts a
+    // fresh run. The unmount cleanup is a passive effect, so wait for the abort.
     render(inviterConfig("secret-b"));
     await vi.waitFor(() => expect(firstSignal.aborted).toBe(true));
 
-    await userEvent.click(page.getByTestId("acquire"));
-    expect(lifecycle.calls).toHaveLength(2);
+    await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(2));
     expect(lifecycle.calls[1].sharedSecret).toBe("secret-b");
     expect(lifecycle.calls[1].signal).not.toBe(firstSignal);
   });

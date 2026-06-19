@@ -55,11 +55,15 @@ import type {
  * guards; it is optional because the {@link InvitationToken} marks `expires`
  * optional, though every web-generated invitation now carries one.
  *
- * The acceptor additionally carries the inviter's `linkageTerms` from the
- * decoded invitation: it adopts those as the terms governing the run (the same
- * terms the consent screen displayed), rather than inferring a default from its
- * own CSV. The inviter is the source of the terms and infers its own from its
- * CSV, so it carries none here.
+ * Both roles carry the run's `linkageTerms`, but acquire them differently. The
+ * acceptor adopts the inviter's terms from the decoded invitation (the same terms
+ * the consent screen displayed), substituting its own identity, and acquires its
+ * CSV here via {@link FileAcquire}. The inviter is the SOURCE of the terms: it
+ * derived them from its file at invite time and embedded exactly them in the
+ * token, so it carries that same `linkageTerms` object (no re-derivation) along
+ * with the already-parsed CSV (`acquired`). Because the inviter's file was chosen
+ * at compose time, it is not prompted for one again -- the exchange starts
+ * straight from `acquired`.
  */
 export type ExchangeConfig =
   | {
@@ -67,6 +71,14 @@ export type ExchangeConfig =
       partyName: string;
       sharedSecret: string;
       expires?: string;
+      /** The linkage terms embedded in the invitation, reused verbatim so the
+       * inviter runs on the very terms the acceptor adopts (its identity is
+       * already this party's name). */
+      linkageTerms: LinkageTerms;
+      /** The CSV parsed at compose time, fed straight into the exchange: no
+       * re-parse, and no second file prompt (the inviter renders no
+       * {@link FileAcquire}). */
+      acquired: AcquiredBundle;
     }
   | {
       role: "acceptor";
@@ -151,9 +163,19 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // Drives the lifecycle's AbortSignal. A useEffect cleanup aborts it on unmount,
   // so the owner tears down any in-flight wait or exchange and every owner-driven
-  // seam stops firing (no setState after unmount).
+  // seam stops firing (no setState after unmount). The cleanup also clears the
+  // ref: a real unmount discards the instance anyway, but under React StrictMode's
+  // mount/unmount/mount the inviter auto-start effect below re-runs, and a stale
+  // aborted controller left in the ref would trip its re-entry guard and the real
+  // run would never start.
   const abortRef = useRef<AbortController | undefined>(undefined);
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      abortRef.current = undefined;
+    },
+    [],
+  );
 
   // Revoke this exchange's object URLs when the component unmounts (or before a
   // replacement set is stored): createObjectURL keeps each Blob alive until it is
@@ -170,10 +192,13 @@ export function ExchangeView(config: ExchangeConfig) {
     };
   }, [outputs]);
 
-  // Start the connection lifecycle from the file-acquire phase's already-loaded,
-  // already-checked CSV. The acquire phase only hands off a file known to satisfy
-  // at least one linkage key, so an unsatisfiable file never reaches here:
-  // nothing is dialed and the connecting UI does not mount.
+  // Start the connection lifecycle from an already-loaded, already-checked CSV:
+  // the acceptor's FileAcquire hands one up on Start, and the inviter's is the
+  // bundle parsed at compose time (config.acquired), fed straight in by the mount
+  // effect below. Both sources guarantee at least one satisfiable linkage key --
+  // the acceptor via its pre-flight, the inviter via generateInvitation's
+  // fail-closed block -- so an unsatisfiable file never reaches here: nothing is
+  // dialed and the connecting UI does not mount.
   const handleStart = (bundle: AcquiredBundle) => {
     // Guard against re-entry: once an exchange is in flight its AbortController is
     // stored here, and starting a second would orphan the first's signal and race
@@ -245,16 +270,18 @@ export function ExchangeView(config: ExchangeConfig) {
       // surface as an unhandled rejection -- the real `await psi` still throws.
       void psi.catch(() => undefined);
 
-      // The acceptor adopts the inviter's linkage terms (the same terms shown
-      // on the consent screen), so the run is governed by the terms the user
-      // consented to rather than a default inferred from the acceptor's CSV
-      // columns. The inviter is the source of the terms and infers its own from
-      // its CSV. Either party's metadata, standardization, and payloads still
-      // derive from its own CSV -- only the acceptor's linkage terms are adopted.
+      // Both roles run on the invitation's linkage terms, so the exchange links
+      // on exactly what the acceptor consented to. The acceptor adopts the
+      // inviter's terms with its own identity substituted; the inviter passes the
+      // very terms it derived from its file and embedded in the token (their
+      // identity is already this party's name), so the two sides carry an
+      // identical fields/keys set and the terms-compatibility handshake agrees.
+      // Either party's metadata, standardization, and payloads still derive from
+      // its own CSV -- only the linkage terms are pinned to the invitation.
       const dataSpec: ExchangeDataSpec =
         config.role === "acceptor"
           ? acceptorExchangeDataSpec(config.linkageTerms, partyName)
-          : {};
+          : { linkageTerms: config.linkageTerms };
       const prepared = prepareForExchange(
         dataSpec,
         partyName,
@@ -369,6 +396,16 @@ export function ExchangeView(config: ExchangeConfig) {
     });
   };
 
+  // The inviter acquired its CSV at compose time, so it never prompts again:
+  // start the exchange immediately from the pre-acquired bundle (the acceptor
+  // renders FileAcquire below and starts on the user's Start instead). Runs once
+  // per mount -- ExchangeView is keyed by the secret, so a fresh exchange is a
+  // fresh mount, and handleStart's re-entry guard plus the StrictMode-safe abort
+  // cleanup above keep a double-invoked effect from racing two runs.
+  useEffect(() => {
+    if (config.role === "inviter") handleStart(config.acquired);
+  }, []);
+
   return (
     <Stack>
       {errorAlert && (
@@ -405,15 +442,18 @@ export function ExchangeView(config: ExchangeConfig) {
           openingFileName={outputs?.record?.openingFileName}
         />
       </Group>
-      <FileAcquire
-        submitLabel="Start"
-        linkageTerms={
-          config.role === "acceptor" ? config.linkageTerms : undefined
-        }
-        onError={setErrorAlert}
-        onWarning={setWarningAlert}
-        onAcquired={handleStart}
-      />
+      {config.role === "acceptor" && (
+        // Acceptor only: it picks and pre-flights its own CSV here. The inviter
+        // arrives with its file already parsed (config.acquired) and auto-starts,
+        // so it renders no file prompt.
+        <FileAcquire
+          submitLabel="Start"
+          linkageTerms={config.linkageTerms}
+          onError={setErrorAlert}
+          onWarning={setWarningAlert}
+          onAcquired={handleStart}
+        />
+      )}
     </Stack>
   );
 }

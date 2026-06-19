@@ -1,0 +1,285 @@
+/// <reference types="@vitest/browser-playwright/context" />
+
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { page, userEvent } from "vitest/browser";
+
+import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+
+import { MantineProvider } from "@mantine/core";
+
+import { InvitationFileError } from "@psi/invitation";
+
+import { InvitePanel } from "@components/InvitePanel";
+
+import type { Root } from "react-dom/client";
+
+import type { ExchangeConfig } from "@components/ExchangeView";
+import type { GeneratedInvitation } from "@psi/invitation";
+import type { LinkageTerms } from "@psilink/core";
+
+// Drive generateInvitation from the test: each case sets `gen.impl`. The real
+// module (and its InvitationFileError class, so `instanceof` in InvitePanel and
+// here refer to the same class) is preserved; only the entry point is swapped.
+const gen = vi.hoisted(() => ({
+  impl: undefined as
+    | ((params: {
+        inviterName: string;
+        file: unknown;
+      }) => Promise<GeneratedInvitation>)
+    | undefined,
+}));
+vi.mock("@psi/invitation", async (importOriginal) => {
+  // Keep every real export (notably InvitationFileError, so `instanceof` in
+  // InvitePanel and here refer to the same class) and swap only the entry point.
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    generateInvitation: (params: { inviterName: string; file: unknown }) => {
+      // Fail loudly rather than return undefined: a test that triggers compose
+      // without setting gen.impl should get a clear error here, not a confusing
+      // downstream `undefined is not a Promise`.
+      if (gen.impl === undefined)
+        throw new Error("invitePanel test: gen.impl was not set");
+      return gen.impl(params);
+    },
+  };
+});
+
+// Capture the props InvitePanel hands the exchange screen: this is the seam the
+// "reuses the embedded terms and parsed rows" criterion turns on -- the inviter's
+// run is configured entirely from what generateInvitation returned.
+const exchange = vi.hoisted(() => ({
+  lastProps: undefined as ExchangeConfig | undefined,
+}));
+vi.mock("@components/ExchangeView", () => ({
+  ExchangeView: (props: ExchangeConfig) => {
+    exchange.lastProps = props;
+    return createElement("div", { "data-testid": "exchange-view" }, "exchange");
+  },
+}));
+
+// Stand in for the Mantine dropzone: a button to seed a file and a Generate
+// button wired to InvitePanel's submit, gated on a file being present exactly as
+// the real FileSelect gates it.
+vi.mock("@components/FileSelect", () => ({
+  default: (props: {
+    submitLabel: string;
+    submitted: boolean;
+    files: Array<File>;
+    handleSubmit: () => void;
+    setFiles: (files: Array<File>) => void;
+  }) =>
+    createElement(
+      "div",
+      null,
+      createElement(
+        "button",
+        {
+          "data-testid": "select-file",
+          onClick: () => props.setFiles([new File(["c\n1\n"], "data.csv")]),
+        },
+        "select",
+      ),
+      createElement(
+        "button",
+        {
+          "data-testid": "generate",
+          disabled: props.files.length === 0 || props.submitted,
+          onClick: props.handleSubmit,
+        },
+        props.submitLabel,
+      ),
+    ),
+}));
+
+const terms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "County Health Dept",
+  date: "2026-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [{ name: "firstName", type: "firstName" }],
+  linkageKeys: [{ name: "first", elements: [{ field: "firstName" }] }],
+};
+
+const generated: GeneratedInvitation = {
+  encoded: "ENCODED_TOKEN",
+  deepLink: "https://example.org/accept#ENCODED_TOKEN",
+  sharedSecret: "SECRET",
+  expires: "2099-01-01T00:00:00.000Z",
+  linkageTerms: terms,
+  rawRows: [{ first_name: "Alice" }],
+  columns: ["first_name"],
+};
+
+let container: HTMLElement | undefined;
+let root: Root | undefined;
+let consoleErrorSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+function mount() {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  root.render(createElement(MantineProvider, null, createElement(InvitePanel)));
+}
+
+// Enter a name, select a file, then click Generate -- the full compose action.
+async function compose(name = "County Health Dept") {
+  await userEvent.fill(page.getByRole("textbox"), name);
+  await userEvent.click(page.getByTestId("select-file"));
+  await userEvent.click(page.getByTestId("generate"));
+}
+
+afterEach(() => {
+  root?.unmount();
+  container?.remove();
+  root = undefined;
+  container = undefined;
+  exchange.lastProps = undefined;
+  gen.impl = undefined;
+  consoleErrorSpy?.mockRestore();
+  consoleErrorSpy = undefined;
+});
+
+describe("InvitePanel compose screen", () => {
+  test("Advanced options is a focusable, keyboard-reachable disabled control", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    mount();
+
+    const advanced = page.getByText("Advanced options");
+    await expect.element(advanced).toBeInTheDocument();
+    const el = advanced.element() as HTMLElement;
+    // A real control (button), marked disabled via aria (not the native
+    // `disabled` attribute, which would drop it from the tab order) so it stays
+    // focusable and announced.
+    expect(el.tagName).toBe("BUTTON");
+    expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(el.hasAttribute("disabled")).toBe(false);
+    // It can actually take focus (not inert text).
+    el.focus();
+    expect(document.activeElement).toBe(el);
+  });
+
+  test("on success, transitions to the exchange screen carrying terms, rows, secret", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    mount();
+    await compose();
+
+    // The share artifacts are presented on the exchange screen.
+    await expect
+      .element(page.getByText("Share this invitation"))
+      .toBeInTheDocument();
+    expect(document.body.textContent).toContain(generated.deepLink);
+    expect(document.body.textContent).toContain(generated.encoded);
+
+    // The inviter's run is configured from the returned invitation: the SAME
+    // embedded terms object and the SAME parsed rows/columns (no re-derivation,
+    // no re-parse), plus the secret and expiry.
+    const props = exchange.lastProps;
+    expect(props?.role).toBe("inviter");
+    expect(props?.partyName).toBe("County Health Dept");
+    expect(props?.sharedSecret).toBe(generated.sharedSecret);
+    expect(props?.expires).toBe(generated.expires);
+    if (props?.role !== "inviter") throw new Error("expected inviter config");
+    expect(props.linkageTerms).toBe(generated.linkageTerms);
+    expect(props.acquired.rawRows).toBe(generated.rawRows);
+    expect(props.acquired.columns).toBe(generated.columns);
+  });
+
+  test("forwards the entered name and the selected file to generateInvitation", async () => {
+    const calls: Array<{ inviterName: string; file: unknown }> = [];
+    gen.impl = (params) => {
+      calls.push(params);
+      return Promise.resolve(generated);
+    };
+    mount();
+    await compose("  Dr. Jane  ");
+
+    expect(calls).toHaveLength(1);
+    // The name is trimmed before it becomes the inviter identity.
+    expect(calls[0].inviterName).toBe("Dr. Jane");
+    expect(calls[0].file).toBeInstanceOf(File);
+  });
+
+  test("an unlinkable file blocks before any exchange, naming the missing fields", async () => {
+    gen.impl = () =>
+      Promise.reject(
+        new InvitationFileError({
+          kind: "unlinkable",
+          unsatisfied: [
+            { name: "ssn", type: "ssn" },
+            { name: "firstName", type: "firstName" },
+          ],
+        }),
+      );
+    mount();
+    await compose();
+
+    await expect
+      .element(page.getByText("This file cannot be linked"))
+      .toBeInTheDocument();
+    expect(document.body.textContent).toContain("ssn (ssn)");
+    expect(document.body.textContent).toContain("firstName (firstName)");
+    // No exchange screen: nothing was minted, so nothing dials.
+    expect(page.getByTestId("exchange-view").query()).toBeNull();
+  });
+
+  test("an unreadable file surfaces a read error and no exchange", async () => {
+    gen.impl = () =>
+      Promise.reject(
+        new InvitationFileError({
+          kind: "unreadable",
+          cause: new Error("the file could not be parsed"),
+        }),
+      );
+    mount();
+    await compose();
+
+    await expect
+      .element(page.getByText("Could not read your file"))
+      .toBeInTheDocument();
+    expect(document.body.textContent).toContain("the file could not be parsed");
+    expect(page.getByTestId("exchange-view").query()).toBeNull();
+  });
+
+  test("an internal failure shows a fixed message and logs only the error type", async () => {
+    // The dev-gated console.error carries only the error name; swallow it so the
+    // assertion output stays clean.
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    gen.impl = () => Promise.reject(new Error("zod boom"));
+    mount();
+    await compose();
+
+    await expect
+      .element(
+        page.getByText("Could not generate the invitation. Please try again."),
+      )
+      .toBeInTheDocument();
+    // The raw error text is not echoed into the secret-bearing flow.
+    expect(document.body.textContent).not.toContain("zod boom");
+    expect(page.getByTestId("exchange-view").query()).toBeNull();
+  });
+
+  test("pressing Enter with no file selected prompts for a file, mints nothing", async () => {
+    const calls: Array<unknown> = [];
+    gen.impl = (params) => {
+      calls.push(params);
+      return Promise.resolve(generated);
+    };
+    mount();
+    // Name entered, but no file selected: the Generate button stays disabled, and
+    // Enter on the name field must say so rather than silently doing nothing.
+    await userEvent.fill(page.getByRole("textbox"), "County Health Dept");
+    await userEvent.keyboard("{Enter}");
+
+    await expect
+      .element(page.getByText("Choose a data file"))
+      .toBeInTheDocument();
+    // No invitation was generated and no exchange screen appeared.
+    expect(calls).toHaveLength(0);
+    expect(page.getByTestId("exchange-view").query()).toBeNull();
+  });
+});
