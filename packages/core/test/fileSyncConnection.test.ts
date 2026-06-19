@@ -9670,10 +9670,21 @@ test("split directories: a full retain-mode exchange between two bridged parties
     !n.endsWith("-hello.json");
 
   // A's three messages live only in its outbound; B's acks live only in its
-  // outbound. Nothing crossed directories and no in-flight temp leaked.
+  // outbound. Nothing crossed directories in EITHER direction, and no in-flight
+  // temp leaked.
   expect(namesIn("/a2b").filter(isAMessage)).toHaveLength(3);
+  // B's outbound holds B's acks: the rendezvous ack of A's hello plus one per
+  // message (3) = 4. None of A's messages are there.
   expect(namesIn("/b2a").filter((n) => n.endsWith("-ack.json")).length).toBe(4);
   expect(namesIn("/b2a").filter(isAMessage)).toHaveLength(0);
+  // Symmetric no-cross invariant: every file in a directory was written by the
+  // party whose OUTBOUND it is, so it carries that party's id prefix -- a write
+  // that leaked into the peer's directory (e.g. an ack mis-routed to inbound)
+  // would show up here as a wrong-prefixed name. A's own rendezvous ack of B's
+  // hello (party-a-...-ack.json) correctly lives in A's outbound, so an
+  // ack-absence check would be wrong; the prefix invariant is the right one.
+  expect(namesIn("/a2b").every((n) => n.startsWith("party-a-"))).toBe(true);
+  expect(namesIn("/b2a").every((n) => n.startsWith("party-b-"))).toBe(true);
   expect(namesIn("/a2b").every((n) => !n.endsWith(".tmp"))).toBe(true);
   expect(namesIn("/b2a").every((n) => !n.endsWith(".tmp"))).toBe(true);
 
@@ -9726,11 +9737,16 @@ test("open() (split filedrop) rejects inbound/outbound that normalize to one dir
   await expect(conn.open(config)).rejects.toBeInstanceOf(UsageError);
 });
 
-test("open() (split sftp) rejects inbound/outbound that normalize to one directory", async () => {
+test("open() (split sftp) rejects a same-directory pair BEFORE dialing the server", async () => {
   // SFTP runtime backstop: "in" and "in//" resolve to the same directory and are
-  // caught before any connect, even though the schema accepts the distinct
-  // strings. Thrown before the SSH connect, so the mock client is never dialed.
+  // caught even though the schema accepts the distinct strings. The check must
+  // run before the SSH connect -- a same-directory misconfig must not cause a
+  // real dial -- so spy on connect and assert it never fired.
   const { client } = makeMockClient();
+  let dialed = false;
+  client.connect = async () => {
+    dialed = true;
+  };
   const conn = new FileSyncConnection(client, { verbose: -1 });
   const config: SFTPConnectionConfig = {
     channel: "sftp",
@@ -9743,4 +9759,34 @@ test("open() (split sftp) rejects inbound/outbound that normalize to one directo
   };
 
   await expect(conn.open(config)).rejects.toBeInstanceOf(UsageError);
+  expect(dialed).toBe(false);
 });
+
+// Textual same-directory pairs that the byte-identical schema check accepts but
+// open()'s pathsResolveToSameDir must reject, on both channels. Covers the
+// previously-leaking internal-slash and "." cases (filedrop normalizeFiledropPath
+// stripped only trailing slashes; the old sftp check stripped only one leading
+// "./").
+const SAME_DIR_PAIRS: Array<[string, string]> = [
+  ["/a/in", "/a//in"], // internal repeated slash
+  ["/a/in", "/a/./in"], // interior "." segment
+  ["/a/in", "/a/in/"], // trailing slash
+];
+for (const [a, b] of SAME_DIR_PAIRS) {
+  test(`open() (split filedrop) rejects "${a}" vs "${b}" as the same directory`, async () => {
+    const { client } = makeMockClient();
+    const conn = new FileSyncConnection(client, { verbose: -1 });
+    await expect(
+      conn.open({
+        channel: "filedrop",
+        inboundPath: a,
+        outboundPath: b,
+        options: {
+          locklessRendezvous: true,
+          timestampInFilename: true,
+          retainFiles: true,
+        },
+      }),
+    ).rejects.toBeInstanceOf(UsageError);
+  });
+}

@@ -176,6 +176,38 @@ test("setting only the outbound half of the pair is rejected", () => {
   expect(result.success).toBe(false);
 });
 
+test("setting only one half of the pair is rejected for sftp, naming the constraint", () => {
+  // sftp has no "filedrop requires a directory" backstop (login-home is a valid
+  // shared mode), so the half-pair refine is the ONLY rule that can fire here --
+  // this isolates it (the filedrop half-pair tests above also satisfy the
+  // requires-a-directory rule, so they do not, on their own, prove the half-pair
+  // refine fires). Assert the message so the right refine is pinned.
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: { host: "h", inbound_path: "in" },
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) => i.message.includes("set together")),
+  ).toBe(true);
+});
+
+test("schema accepts a filedrop pair differing only by a trailing slash (caught at open(), not here)", () => {
+  // The schema differ check is byte-identical, so "/x" and "/x/" parse cleanly;
+  // the same-directory collision is the open()-time runtime backstop's job.
+  // Pinning the schema-accept keeps that backstop from silently becoming dead
+  // code if the schema were ever tightened to normalize.
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    inbound_path: "/x",
+    outbound_path: "/x/",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(true);
+});
+
 test("file-drop connection with neither path nor the pair is rejected", () => {
   const result = safeParseConnectionConfig({ channel: "filedrop" });
   expect(result.success).toBe(false);

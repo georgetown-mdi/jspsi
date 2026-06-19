@@ -128,6 +128,32 @@ export function normalizeFiledropPath(rawPath: string): string {
   return /^[A-Za-z]:$/.test(stripped) ? stripped + "/" : stripped || "/";
 }
 
+// True when two configured directory paths resolve to the SAME directory, for
+// the split-mode distinctness check ONLY -- never for the path used on disk,
+// which keeps its own per-channel form (normalizeFiledropPath / a single
+// trailing-slash strip). Normalizes copies textually: fold backslashes, then
+// drop empty and "." segments (collapsing repeated, leading "./", interior
+// "/./", and trailing slashes alike) while preserving the absolute-vs-relative
+// distinction. Pure string work so it stays browser-safe (no node:path).
+//
+// It deliberately does NOT resolve ".." (unsafe across a symlink, and rare in a
+// configured directory), fold case (Windows filesystems are case-insensitive),
+// or expand a relative path against an SFTP login home -- none of those can be
+// settled client-side. So it only ever UNDER-collapses: it never reports two
+// genuinely distinct directories as the same (no false rejection), but a config
+// that hits one of those residuals can still slip through, which is the
+// operator's responsibility (documented in docs/EXCHANGE_REFERENCE.md). Both
+// channels' open() distinctness checks share this one rule.
+function pathsResolveToSameDir(a: string, b: string): boolean {
+  const norm = (p: string): string => {
+    const folded = p.replace(/\\/g, "/");
+    const absolute = folded.startsWith("/");
+    const segments = folded.split("/").filter((s) => s !== "" && s !== ".");
+    return (absolute ? "/" : "") + segments.join("/");
+  };
+  return norm(a) === norm(b);
+}
+
 // Builds the acknowledgment-marker name for the file `<originalName>.json`:
 // `<writerId>-<originalName>-ack.json`. The marker is the single construct that
 // signals "I durably received your file" on transports that cannot delete --
@@ -1180,10 +1206,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         ? normalizeFiledropPath(config.outboundPath!)
         : inboundDir;
       // Defense-in-depth beyond the schema's byte-identical reject: two paths
-      // that normalize to the same directory (e.g. "/x" and "/x/") would
-      // silently collapse split mode into a shared directory, defeating the
-      // separate-audit-trail purpose; reject the normalized collision too.
-      if (split && inboundDir === outboundDir)
+      // that resolve to the same directory (e.g. "/x" vs "/x/", "/x//y" vs
+      // "/x/y", "/x/./y" vs "/x/y") would silently collapse split mode into a
+      // shared directory, defeating the separate-audit-trail purpose; reject the
+      // normalized collision too. See pathsResolveToSameDir for the textual cases
+      // it catches and the residuals (.. , Windows case) it cannot.
+      if (split && pathsResolveToSameDir(inboundDir, outboundDir))
         throw new UsageError(
           "filedrop inbound and outbound directories resolve to the same " +
             "directory after normalization; they must be distinct",
@@ -1239,22 +1267,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         : inboundDir;
       // Distinctness check for split mode. The stored paths above keep their
       // exact form (only a single trailing slash stripped, unchanged from shared
-      // mode), but the comparison normalizes a COPY more thoroughly -- collapse
-      // repeated slashes, drop a leading "./", strip all trailing slashes -- so a
-      // textual near-miss like "in" vs "in//" or "./in" vs "in" is caught
-      // instead of silently collapsing split mode into one directory. This cannot
-      // catch every server-side equivalence: a relative path and the absolute
-      // path it resolves to under the login home are indistinguishable here (the
-      // home is unknown client-side), so that residual is the operator's
+      // mode); the comparison normalizes copies via pathsResolveToSameDir, the
+      // same rule filedrop uses, so textual near-misses ("in" vs "in//", "./in"
+      // vs "in", "a/./in" vs "a/in") are caught instead of silently collapsing
+      // split mode into one directory. It cannot settle every server-side
+      // equivalence -- a relative path and the absolute path it expands to under
+      // the (client-side-unknown) login home are indistinguishable, as are ".."
+      // segments across a symlink -- so that residual is the operator's
       // responsibility (see docs/EXCHANGE_REFERENCE.md). The schema's
       // byte-identical reject is the coarser first line; this is the runtime
-      // backstop, the sftp twin of filedrop's normalizeFiledropPath check.
-      const sameSftpDir = (a: string, b: string): boolean => {
-        const norm = (p: string): string =>
-          p.replace(/^\.\//, "").replace(/\/+/g, "/").replace(/\/+$/, "");
-        return norm(a) === norm(b);
-      };
-      if (split && sameSftpDir(inboundDir, outboundDir))
+      // backstop. The check runs BEFORE buildSftpConnectOptions/connect below, so
+      // a same-directory split is refused without ever dialing the server.
+      if (split && pathsResolveToSameDir(inboundDir, outboundDir))
         throw new UsageError(
           "sftp inbound and outbound directories resolve to the same " +
             "directory; they must be distinct",
