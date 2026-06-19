@@ -678,6 +678,21 @@ test.each([
     name: "a filedrop endpoint with only outbound_path (a half pair)",
     bad: { channel: "filedrop", outboundPath: "/out" },
   },
+  {
+    name: "an sftp endpoint whose split halves are identical",
+    bad: { channel: "sftp", host: "h", inboundPath: "/x", outboundPath: "/x" },
+  },
+  {
+    name: "a filedrop endpoint whose split halves are identical",
+    bad: { channel: "filedrop", inboundPath: "/x", outboundPath: "/x" },
+  },
+  {
+    // Distinctness uses the same pathsResolveToSameDir rule as connection.ts, so
+    // halves that differ only by a trailing slash resolve to one directory and
+    // are rejected -- the swap would otherwise hand the acceptor an equal pair.
+    name: "a filedrop endpoint whose split halves differ only by a trailing slash",
+    bad: { channel: "filedrop", inboundPath: "/x", outboundPath: "/x/" },
+  },
 ])("rejects $name", async ({ bad }) => {
   const encoded = await encodeRaw({ ...baseToken, connectionEndpoint: bad });
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);

@@ -3,6 +3,7 @@ import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
+import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -185,10 +186,12 @@ const SFTPEndpointSchema = z.strictObject(
     path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     // The split-directory pair (the inviter's own inbound/outbound directories),
     // mirror-swapped by the acceptor. Non-empty like `path`; the directory-mode
-    // refines on ConnectionEndpointSchema enforce both-or-neither and mutual
-    // exclusion with `path`. Path SEMANTICS (absolute, the two distinct) stay
-    // deferred to connection.ts on the acceptor's final config, exactly as the
-    // single-`path` form defers them.
+    // refines on ConnectionEndpointSchema enforce both-or-neither, mutual
+    // exclusion with `path`, and that the two differ. Only the absolute-path rule
+    // stays deferred to connection.ts on the acceptor's final config -- it is a
+    // per-party property (the acceptor remaps the inviter's paths), so the
+    // inviter's absoluteness is not meaningful to the acceptor, exactly as the
+    // single-`path` form defers it.
     inboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     outboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     // No `username` (or other identity/auth field) by design: those are not
@@ -205,12 +208,13 @@ const SFTPEndpointSchema = z.strictObject(
 // Deliberate: a file-drop endpoint carries the inviter's own mount path, which
 // the acceptor remaps to its local mount before use, so the inviter's path being
 // absolute is not meaningful to the acceptor. The acceptor's final connection
-// config is re-validated by connection.ts (which does enforce absolute, and that
-// the two split directories differ), so a bad path is caught where it matters;
-// coupling this schema to that path validator would only duplicate the rule. The
-// endpoint's security invariant is "no credentials", not "absolute path". `path`
-// is optional (it was required before the split pair existed); the
-// directory-mode refines on ConnectionEndpointSchema require exactly one form.
+// config is re-validated by connection.ts (which enforces absolute), so a bad
+// absolute path is caught where it matters; duplicating that per-party rule here
+// would be meaningless once the acceptor remaps the path. The endpoint's security
+// invariant is "no credentials", not "absolute path". (Distinctness of the split
+// halves, unlike absoluteness, survives the swap, so it IS enforced here by the
+// directory-mode refines.) `path` is optional (it was required before the split
+// pair existed); those refines require exactly one form.
 const FileDropEndpointSchema = z.strictObject(
   {
     channel: z.literal("filedrop"),
@@ -259,6 +263,28 @@ const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> = z
       message:
         "inbound_path and outbound_path must be set together; a split " +
         "directory endpoint needs both halves",
+    },
+  )
+  // The two halves must differ. Unlike absoluteness (a per-party property the
+  // acceptor remaps, left to connection.ts), distinctness survives the mirror
+  // swap -- equal inviter halves yield equal acceptor halves -- so enforcing it
+  // here fails a malformed split at decode rather than later at the acceptor's
+  // exchange load. Same rule and function (pathsResolveToSameDir) connection.ts
+  // applies to the final config, so the endpoint and the connection agree.
+  .refine(
+    (endpoint) => {
+      const m = endpointDirMode(endpoint);
+      if (
+        m === undefined ||
+        m.inboundPath === undefined ||
+        m.outboundPath === undefined
+      )
+        return true;
+      return !pathsResolveToSameDir(m.inboundPath, m.outboundPath);
+    },
+    {
+      message:
+        "inbound_path and outbound_path on a connection endpoint must differ",
     },
   )
   // A directory is named in one form or the other, never both.
