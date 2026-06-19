@@ -1450,11 +1450,11 @@ export function warnConnectionOverridesIgnoredOffline(
   if (ignored.length === 0) return;
   log.warn(
     `${ignored.join(", ")} ${ignored.length === 1 ? "has" : "have"} no effect ` +
-      "on an offline invite/accept: the connection block is written as a " +
-      "placeholder to edit, not built from a URL. Set the connection details " +
-      "directly in that block -- the server host/port/credentials, or the " +
-      "inbound_path/outbound_path split directory -- before running " +
-      "'psilink exchange', or pass these flags on an online invite/accept, the " +
-      "zero-setup exchange, or 'psilink exchange'.",
+      "on an offline invite/accept: the connection block is written for you to " +
+      "edit (a placeholder, or seeded from the invitation endpoint), not built " +
+      "from a URL. Set the connection details directly in that block -- the " +
+      "server host/port/credentials, or the inbound_path/outbound_path split " +
+      "directory -- before running 'psilink exchange', or pass these flags on " +
+      "an online invite/accept, the zero-setup exchange, or 'psilink exchange'.",
   );
 }
