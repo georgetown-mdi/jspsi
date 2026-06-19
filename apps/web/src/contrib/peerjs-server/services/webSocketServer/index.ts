@@ -77,10 +77,20 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     // would stack listeners, and no closed socketServer for a stale listener to
     // dispatch to.
     server.on("upgrade", (req, socket, head) => {
-      // shouldHandle() applies the `path` option above. Unmatched upgrades are
-      // returned untouched (not aborted) so co-resident WebSocket servers --
-      // notably Vite HMR at `/` -- can handle them.
-      if (!this.socketServer.shouldHandle(req)) return;
+      if (!this.socketServer.shouldHandle(req)) {
+        // Not our path (shouldHandle() applies the `path` option above). Leave it
+        // for a co-resident `upgrade` listener -- e.g. Vite HMR at `/` in dev. But
+        // when we are the ONLY upgrade listener (the production server, where
+        // nothing else will answer) close it rather than leak an open socket:
+        // Node will not auto-destroy an unhandled upgrade once any `upgrade`
+        // listener exists, and no socket timeout reaps it. This restores the
+        // prompt reject the old `{ server, path }` wiring did, without clobbering
+        // co-resident listeners.
+        if (server.listenerCount("upgrade") === 1 && !socket.destroyed) {
+          socket.destroy();
+        }
+        return;
+      }
       // Bail if the socket was already torn down between the event and here;
       // handleUpgrade would otherwise write the handshake to a dead socket.
       if (socket.destroyed) return;

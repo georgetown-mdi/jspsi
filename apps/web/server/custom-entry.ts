@@ -107,11 +107,14 @@ setupGracefulShutdown(listener, nitroApp);
 // Websocket support
 // https://crossws.unjs.io/adapters/node
 // Dead today: experimental.websocket is unset, so import.meta._websocket is false
-// and this block is tree-shaken out of the build. Enabling it would be UNSAFE while
-// the PeerJS signaling server shares this http server: both attach a bare
-// server.on("upgrade", ...), and PeerJS's `ws` aborts any upgrade whose path is not
-// /api/peerjs -- destroying a crossws socket mid-handshake. Coexisting would need a
-// single path-routed upgrade dispatcher, not two independent listeners.
+// and this block is tree-shaken out of the build. Enabling it would still be UNSAFE
+// while the PeerJS signaling server shares this http server: crossws's node adapter
+// attaches a bare server.on("upgrade", ...) that does not path-check, so it would
+// grab PeerJS's /api/peerjs upgrades too. (PeerJS now path-routes its own upgrades
+// and only closes a non-matching one when it is the sole upgrade listener, so it no
+// longer aborts a foreign socket itself -- but two independent, non-cooperating
+// upgrade listeners still mis-route.) Coexisting would need a single path-routed
+// upgrade dispatcher, not two independent listeners.
 if (import.meta._websocket) {
   const { handleUpgrade } = wsAdapter(nitroApp.h3App.websocket);
   server.on("upgrade", handleUpgrade);
