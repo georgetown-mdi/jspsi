@@ -51,8 +51,10 @@ export default function FileSelect(props: FileSelectProps) {
                     "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))",
                   borderColor:
                     "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))",
-                  color:
-                    "light-dark(var(--mantine-color-gray-5), var(--mantine-color-dark-3))",
+                  // Accessible muted text on the disabled surface (gray-0 light
+                  // / dark-6 dark): the dimmed token clears 4.5:1 there, where
+                  // the prior gray-5/dark-3 sat at ~2:1.
+                  color: "var(--mantine-color-dimmed)",
                 },
               }
             : {})}
