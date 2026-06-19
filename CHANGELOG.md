@@ -65,6 +65,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - An unset `server_connect_timeout_ms` now applies the documented 30000 ms per-attempt connect deadline on both `sftp` and `filedrop`, instead of letting an `sftp` connect fall back to ssh2's shorter internal default. See `docs/EXCHANGE_REFERENCE.md`.
 - The SFTP adapter retries a transient `rename` failure instead of aborting on an intermittent server error. See `docs/spec/FILE_SYNC.md`.
 - SFTP exchanges are faster: the client disables Nagle's algorithm on its socket, removing per-round-trip delayed-ACK stalls.
+- The SFTP adapter no longer prints ssh2-sftp-client's default `Global ... listener` lines straight to the console (visible during first-use host-key trust setup); the underlying ssh2 client's out-of-band error/end/close events now route through the project logger and respect `--log-level`.
 - The CLI percent-decodes a server URL's host, path, and credentials, so `sftp://user@host/my%20drop` targets `my drop`; a malformed percent-escape is a usage error (exit 64). See `docs/CLI.md`.
 - `connection.provider_options` keys are passed to the transport library verbatim (for example ssh2's `readyTimeout`) instead of being case-rewritten. See `docs/EXCHANGE_REFERENCE.md`.
 - `@path` references resolve only in credential and opaque-options fields; a free-text field beginning with a literal `@` is kept verbatim. See `docs/EXCHANGE_REFERENCE.md`.

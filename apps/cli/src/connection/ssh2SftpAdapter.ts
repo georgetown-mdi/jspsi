@@ -13,6 +13,7 @@ import {
   TransportOperationStalledError,
   getLoggerForVerbosity,
   retryPromise,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
@@ -135,8 +136,41 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * the bound cannot be widened by an operator.
    */
   constructor(options: { verbosity?: number; stallDeadlineMs?: number } = {}) {
-    this.client = new Ssh2SftpClient();
     this.log = getLoggerForVerbosity("sftp-adapter", options.verbosity ?? 1);
+    // ssh2-sftp-client's bare constructor installs default callbacks that
+    // console.error/console.log the underlying ssh2 Client's error/end/close
+    // events whenever they fire OUTSIDE a high-level operation it initiated --
+    // its globalListener gate runs them only while the matching
+    // endCalled/*Handled flag is still false. The host-key first-use probe and
+    // the verify(false) rejection tear the raw transport down without going
+    // through the client's end(), so their bare end/close land on those console
+    // defaults as cosmetic "Global ... listener" lines that bypass the project
+    // logger and leak past the integration suite's log-level controls. Route the
+    // three to this adapter's logger instead. The callbacks are purely
+    // observational: the handled-flag bookkeeping and this.sftp cleanup run
+    // inside globalListener regardless of the callback, so this redirects only
+    // where the diagnostic goes, never control flow. An unhandled client error
+    // escaped the adapter's own fatal-error listener and connect retry, so it
+    // stays at error (the console.error default's severity); its message is
+    // server-controlled (an SSH_MSG_DISCONNECT description rides through on
+    // err.message), so it is rendered through sanitizeErrorForDisplay before
+    // logging -- the operator-facing seam that escapes the bytes (neutralizing
+    // ANSI/bidi/newline log injection) and applies the PEM/key redaction
+    // backstop -- now that it can reach a --log-file. end/close are benign
+    // out-of-band lifecycle signals -- expected on the host-key probe and
+    // verify(false) rejection teardown -- so they go to trace, below the DEBUG
+    // the integration suite's noisiest file enables, surfacing only at -vvv.
+    this.client = new Ssh2SftpClient("sftp", {
+      error: (err: unknown) =>
+        this.log.error(
+          `ssh2 client error outside an operation: ` +
+            sanitizeErrorForDisplay(err),
+        ),
+      end: () =>
+        this.log.trace("ssh2 client connection ended outside an operation"),
+      close: () =>
+        this.log.trace("ssh2 client connection closed outside an operation"),
+    });
     this.stallDeadlineMs = options.stallDeadlineMs ?? SFTP_STALL_DEADLINE_MS;
   }
 
