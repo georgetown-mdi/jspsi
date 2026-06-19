@@ -1,12 +1,28 @@
 import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  assessLinkageSatisfiability,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
+  inferMetadata,
+  loadCSVFile,
 } from "@psilink/core";
 
-import type { InvitationToken, WebRTCEndpoint } from "@psilink/core";
+import type {
+  InvitationToken,
+  LinkageField,
+  LinkageTerms,
+  WebRTCEndpoint,
+} from "@psilink/core";
+
+/**
+ * The CSV input {@link generateInvitation} parses: exactly what core's
+ * {@link loadCSVFile} accepts (a browser `File` in production; a Node readable
+ * stream in tests). Derived from `loadCSVFile`'s own signature rather than
+ * importing papaparse's `LocalFile` directly, so this module takes on no
+ * dependency papaparse beyond the one core already owns. */
+export type InvitationCSVInput = Parameters<typeof loadCSVFile>[0];
 
 /**
  * Path a PeerJS client dials this app's signaling server at. Matches the dial
@@ -42,8 +58,18 @@ export interface InvitationLocation {
   port: string;
 }
 
-/** A generated invitation in the two forms the inviter shares; both carry the
- * same encoded token, so they decode identically. */
+/**
+ * The result of composing an invitation from the inviter's file: the shareable
+ * artifacts the inviter sends out-of-band ({@link encoded} / {@link deepLink}),
+ * the secret and expiry that drive the rendezvous, and -- because the inviter
+ * runs its own half of the exchange right after -- the linkage terms embedded in
+ * the token plus the exact parsed rows those terms were derived from.
+ *
+ * {@link encoded} and {@link deepLink} carry the same token and so decode
+ * identically; {@link linkageTerms}, {@link rawRows}, and {@link columns} are
+ * local data the inviter reuses to run the exchange and are NEVER shared (only the
+ * terms ride inside the encoded token).
+ */
 export interface GeneratedInvitation {
   /** The encoded invitation string -- the bare-string copy artifact. */
   encoded: string;
@@ -71,6 +97,68 @@ export interface GeneratedInvitation {
    * mints a bounded lifetime onto every invitation.
    */
   expires: string;
+  /**
+   * The linkage terms embedded in the token, derived from the inviter's file
+   * (inferred metadata -> default terms filtered to the keys the columns can
+   * satisfy). Returned so the inviter's own exchange reuses THIS object verbatim
+   * rather than re-deriving from the file: the embedded terms and the terms the
+   * inviter's exchange runs on must be one and the same, or the partner adopts a
+   * set that diverges from the inviter's and the terms-compatibility handshake
+   * fails (the bug this flow fixes). Local: present inside `encoded` too, but
+   * surfaced here so the exchange need not re-decode it.
+   */
+  linkageTerms: LinkageTerms;
+  /**
+   * The parsed CSV rows {@link linkageTerms} was derived from, returned so the
+   * inviter's exchange runs on the exact data with no re-parse and no second file
+   * prompt. Local-only: the rows are never encoded into the token or shared.
+   */
+  rawRows: Array<Record<string, string>>;
+  /** The CSV column names, paired with {@link rawRows} -- the two inputs the
+   * inviter's exchange feeds to `prepareForExchange`. Local-only. */
+  columns: Array<string>;
+}
+
+/** Why {@link generateInvitation} refused to mint an invitation for the given
+ * file. Both variants are user-actionable -- the inviter can choose another file
+ * -- and both are thrown BEFORE any shared secret is generated, so a rejected
+ * file never yields a token. Anything else {@link generateInvitation} throws (a
+ * schema/encoding error, an SSR misuse) is an internal fault, not one of these. */
+export type InvitationFileFailure =
+  | {
+      /** The CSV could not be read or parsed. */
+      kind: "unreadable";
+      /** The underlying read/parse error, for the caller to surface (sanitized)
+       * and to log. */
+      cause: unknown;
+    }
+  | {
+      /** The file's columns satisfy none of the default linkage keys, so no
+       * exchange could ever match -- the same zero-key condition the acceptor's
+       * pre-flight blocks on (`satisfiableKeyCount === 0`). */
+      kind: "unlinkable";
+      /** The default linkage fields the file cannot produce, so the caller can
+       * name the missing field types to the inviter. */
+      unsatisfied: Array<LinkageField>;
+    };
+
+/**
+ * Thrown by {@link generateInvitation} when the inviter's file cannot back an
+ * invitation, BEFORE the shared secret is minted. {@link failure} discriminates
+ * the user-actionable cause so the caller can show the right guidance; the base
+ * `message` is a fixed, non-sensitive summary suitable for a log line.
+ */
+export class InvitationFileError extends Error {
+  readonly failure: InvitationFileFailure;
+  constructor(failure: InvitationFileFailure) {
+    super(
+      failure.kind === "unreadable"
+        ? "invitation file could not be read"
+        : "invitation file satisfies no linkage keys",
+    );
+    this.name = "InvitationFileError";
+    this.failure = failure;
+  }
 }
 
 /**
@@ -108,17 +196,30 @@ export function deepLinkFor(origin: string, encoded: string): string {
 }
 
 /**
- * Generate a fresh single-use invitation: a new shared secret, the inviter's
- * linkage terms, and this app's PeerJS endpoint, encoded to a string and also
- * wrapped as a deep-link URL. Each call mints a new secret, so calling it again
- * supersedes any prior unsent invitation -- a fresh secret means a fresh derived
- * rendezvous id, and there is no expectation that one invitation supports more
- * than one exchange.
+ * Generate a fresh single-use invitation from the inviter's CSV: a new shared
+ * secret, the linkage terms derived from the file, and this app's PeerJS
+ * endpoint, encoded to a string and also wrapped as a deep-link URL. Each call
+ * mints a new secret, so calling it again supersedes any prior unsent invitation
+ * -- a fresh secret means a fresh derived rendezvous id, and there is no
+ * expectation that one invitation supports more than one exchange.
  *
- * `linkageTerms` come from {@link getDefaultLinkageTerms} keyed on the inviter's
- * name: the web app authors no explicit fields or keys (deferred to the
- * configuration-GUI roadmap item), so the defaults plus the inviter identity are
- * the real terms the acceptor reviews -- never empty or placeholder.
+ * This is the inviter's CSV-parse boundary: it parses `file` (via core's
+ * {@link loadCSVFile}), infers column metadata, and derives the linkage terms
+ * from it -- {@link getDefaultLinkageTerms} filtered to the keys the columns can
+ * satisfy -- then embeds exactly those terms in the token AND returns them with
+ * the parsed rows. The inviter's own exchange must run on this same returned
+ * `linkageTerms` object and `rawRows`/`columns`: a file is required at invite
+ * time precisely so the embedded terms (which the acceptor adopts) and the terms
+ * the inviter runs on are one and the same. The web app authors no explicit
+ * fields or keys (deferred to the configuration-GUI roadmap item); standardization
+ * is intentionally left to per-CSV inference (the proven acceptor path), so none
+ * is supplied here.
+ *
+ * Fails closed BEFORE minting the secret: a file that cannot be read/parsed, or
+ * whose columns satisfy zero linkage keys, throws an {@link InvitationFileError}
+ * (the latter mirroring the acceptor pre-flight's `satisfiableKeyCount === 0`
+ * block and naming the unproducible fields) so no token is ever produced for an
+ * unreadable or unlinkable file.
  *
  * The token carries a bounded `expires` (default {@link INVITATION_LIFETIME_SECONDS},
  * one hour) so an intercepted invitation has a finite misuse window. The acceptor
@@ -128,9 +229,15 @@ export function deepLinkFor(origin: string, encoded: string): string {
  *
  * Makes no network request: the encoded invitation is the rendezvous, so the
  * inviter never contacts a session backend (`/api/psi/*`).
+ *
+ * @throws {InvitationFileError} when the file is unreadable or unlinkable (before
+ *                               any secret is minted).
  */
 export async function generateInvitation(params: {
   inviterName: string;
+  /** The inviter's CSV; parsed here (see the function summary -- this is the
+   * parse boundary). The terms are derived from its columns. */
+  file: InvitationCSVInput;
   location: InvitationLocation;
   /**
    * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
@@ -145,6 +252,7 @@ export async function generateInvitation(params: {
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
+    file,
     location,
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
   } = params;
@@ -166,6 +274,42 @@ export async function generateInvitation(params: {
         `${MAX_INVITATION_LIFETIME_SECONDS} seconds (one year)`,
     );
 
+  // Parse the inviter's CSV here, before anything is minted, so an unreadable
+  // file aborts with no token. loadCSVFile rejects only on a read/stream error (a
+  // malformed-but-readable CSV resolves with rows); wrap that into the typed
+  // user-actionable failure.
+  let rawRows: Array<Record<string, string>>;
+  let columns: Array<string>;
+  try {
+    const csvResult = await loadCSVFile(file);
+    rawRows = csvResult.data as Array<Record<string, string>>;
+    columns = csvResult.meta.fields ?? [];
+  } catch (cause) {
+    throw new InvitationFileError({ kind: "unreadable", cause });
+  }
+
+  // Derive the terms to embed from the file's columns: inferred metadata filters
+  // the default keys to those the columns can satisfy (the same filter the
+  // inviter's own exchange would otherwise re-derive -- now computed once, here,
+  // and reused). standardization is left to CSV inference downstream.
+  const metadata = inferMetadata(columns);
+  const linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
+
+  // Block a file that satisfies no linkage key, mirroring the acceptor pre-flight
+  // (FileAcquire): with zero satisfiable keys the exchange would emit no key
+  // strings and yield a silent empty result. Assess against the FULL default
+  // terms (every default field declared) rather than the filtered `linkageTerms`,
+  // so a zero-key block can name the field types the file lacks -- the filtered
+  // set no longer declares the dropped fields. The count here equals
+  // linkageTerms.linkageKeys.length, since the metadata filter above and this
+  // type-based detector agree on which default keys survive.
+  const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+    columns,
+    getDefaultLinkageTerms(inviterName),
+  );
+  if (satisfiableKeyCount === 0)
+    throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
   // indefinitely. Measured from the current instant, so the lifetime clock starts
   // when the token is minted; the CLI mints `expires` the same way (expiresFromNow
@@ -175,7 +319,7 @@ export async function generateInvitation(params: {
   const sharedSecret = generateSharedSecret();
   const token: InvitationToken = {
     version: "1",
-    linkageTerms: getDefaultLinkageTerms(inviterName),
+    linkageTerms,
     sharedSecret,
     expires,
     connectionEndpoint: webrtcEndpointFromLocation(location),
@@ -187,5 +331,8 @@ export async function generateInvitation(params: {
     deepLink: deepLinkFor(location.origin, encoded),
     sharedSecret,
     expires,
+    linkageTerms,
+    rawRows,
+    columns,
   };
 }

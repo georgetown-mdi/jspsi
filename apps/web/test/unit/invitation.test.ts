@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -5,10 +7,13 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   decodeInvitation,
   getDefaultLinkageTerms,
+  inferMetadata,
+  validateCompatibility,
 } from "@psilink/core";
 
 import {
   ACCEPT_ROUTE_PATH,
+  InvitationFileError,
   deepLinkFor,
   generateInvitation,
   webrtcEndpointFromLocation,
@@ -23,6 +28,22 @@ const location: InvitationLocation = {
   port: "8443",
 };
 
+// A CSV carrying every default linkage column, so the file-derived terms keep all
+// the default keys -- the baseline that round-trips to the full default terms.
+const ALL_COLUMNS_CSV =
+  "ssn,ssn4,first_name,last_name,dob\n123456789,6789,Alice,Smith,1990-01-02\n";
+// A partial CSV missing ssn4 (like test_data/fake_data_{1,2}.csv): keys that
+// reference ssn4 drop out, the rest survive.
+const PARTIAL_CSV =
+  "ssn,first_name,last_name,dob\n123456789,Alice,Smith,1990-01-02\n";
+
+/** A fresh readable CSV stream. `loadCSVFile` consumes its input once, so each
+ * generateInvitation call needs its own stream; this is core's parse boundary in
+ * the browser fed a Node stream here (papaparse parses both). */
+function csvStream(content: string = ALL_COLUMNS_CSV): Readable {
+  return Readable.from(content);
+}
+
 /** Pull the encoded token out of a deep-link's fragment. */
 function tokenFromDeepLink(deepLink: string): string {
   return new URL(deepLink).hash.slice(1);
@@ -31,7 +52,11 @@ function tokenFromDeepLink(deepLink: string): string {
 describe("generateInvitation", () => {
   test("round-trips through decodeInvitation with secret, terms, and endpoint intact", async () => {
     const inviterName = "County Health Dept";
-    const { encoded } = await generateInvitation({ inviterName, location });
+    const { encoded } = await generateInvitation({
+      inviterName,
+      file: csvStream(),
+      location,
+    });
 
     const token = await decodeInvitation(encoded);
 
@@ -39,7 +64,8 @@ describe("generateInvitation", () => {
     // The secret is a base64url-encoded 32-byte value (43 chars, last in the
     // padding-constrained set); see SHARED_SECRET_REGEX in core.
     expect(token.sharedSecret).toMatch(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
-    // Real terms keyed on the inviter's name, not empty or placeholder.
+    // The file carries every default column, so the file-derived terms equal the
+    // full default set keyed on the inviter's name -- real terms, not a placeholder.
     expect(token.linkageTerms).toStrictEqual(
       getDefaultLinkageTerms(inviterName),
     );
@@ -53,9 +79,92 @@ describe("generateInvitation", () => {
     });
   });
 
+  test("derives and embeds terms filtered to the keys the file can satisfy", async () => {
+    const inviterName = "County Health Dept";
+    const result = await generateInvitation({
+      inviterName,
+      file: csvStream(PARTIAL_CSV),
+      location,
+    });
+
+    // The embedded terms are the defaults filtered to the file's columns
+    // (inferred metadata -> default terms): a CSV without ssn4 drops every
+    // ssn4-keyed combination.
+    const expected = getDefaultLinkageTerms(
+      inviterName,
+      inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+    );
+    const token = await decodeInvitation(result.encoded);
+    expect(token.linkageTerms).toStrictEqual(expected);
+    // It is genuinely filtered, not the full default set: fewer keys, and none of
+    // the dropped ssn4 keys remain.
+    expect(token.linkageTerms.linkageKeys.length).toBeGreaterThan(0);
+    expect(token.linkageTerms.linkageKeys.length).toBeLessThan(
+      getDefaultLinkageTerms(inviterName).linkageKeys.length,
+    );
+    expect(
+      token.linkageTerms.linkageKeys.some((k) =>
+        k.elements.some((e) => e.field === "ssn4"),
+      ),
+    ).toBe(false);
+
+    // The returned terms object IS the embedded one, surfaced for the inviter's
+    // own exchange to reuse verbatim (no re-derivation).
+    expect(result.linkageTerms).toStrictEqual(token.linkageTerms);
+  });
+
+  test("returns the exact parsed rows and columns the terms came from", async () => {
+    const { rawRows, columns } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(PARTIAL_CSV),
+      location,
+    });
+
+    // The inviter's exchange runs on these directly -- no re-parse, no second
+    // file prompt.
+    expect(columns).toEqual(["ssn", "first_name", "last_name", "dob"]);
+    expect(rawRows).toEqual([
+      {
+        ssn: "123456789",
+        first_name: "Alice",
+        last_name: "Smith",
+        dob: "1990-01-02",
+      },
+    ]);
+  });
+
+  test("a partial-column invitation stays terms-compatible with the acceptor it produces", async () => {
+    // The bug this flow fixes: the acceptor adopts the invitation's terms, so if
+    // the embedded set diverged from what the inviter runs, the terms-compat
+    // handshake would reject. Now the inviter both embeds and runs THESE terms,
+    // and the acceptor adopts them (its own identity substituted), so the two
+    // sides carry an identical key set.
+    const { linkageTerms } = await generateInvitation({
+      inviterName: "Inviter",
+      file: csvStream(PARTIAL_CSV),
+      location,
+    });
+    const acceptorAdopted = { ...linkageTerms, identity: "Acceptor" };
+    expect(validateCompatibility(linkageTerms, acceptorAdopted).errors).toEqual(
+      [],
+    );
+
+    // Contrast: had the invitation embedded the UNFILTERED defaults (the pre-fix
+    // behavior) while the inviter ran the file-filtered set, the key sets would
+    // differ and the handshake would reject.
+    const unfilteredAcceptor = {
+      ...getDefaultLinkageTerms("Inviter"),
+      identity: "Acceptor",
+    };
+    expect(
+      validateCompatibility(linkageTerms, unfilteredAcceptor).errors,
+    ).not.toEqual([]);
+  });
+
   test("returns the embedded shared secret so the inviter can derive its id", async () => {
     const { encoded, sharedSecret } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
     });
 
@@ -68,6 +177,7 @@ describe("generateInvitation", () => {
   test("returns the embedded expires so the inviter can arm the handshake expiry guards", async () => {
     const { encoded, expires } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
     });
 
@@ -82,8 +192,16 @@ describe("generateInvitation", () => {
 
   test("two successive generations yield different secrets (so different derived ids)", async () => {
     const inviterName = "County Health Dept";
-    const first = await generateInvitation({ inviterName, location });
-    const second = await generateInvitation({ inviterName, location });
+    const first = await generateInvitation({
+      inviterName,
+      file: csvStream(),
+      location,
+    });
+    const second = await generateInvitation({
+      inviterName,
+      file: csvStream(),
+      location,
+    });
 
     const a = await decodeInvitation(first.encoded);
     const b = await decodeInvitation(second.encoded);
@@ -95,6 +213,7 @@ describe("generateInvitation", () => {
   test("the deep-link and the bare string decode to identical tokens", async () => {
     const { encoded, deepLink } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
     });
 
@@ -107,6 +226,7 @@ describe("generateInvitation", () => {
   test("the deep-link targets the /accept route with the token in the fragment", async () => {
     const { encoded, deepLink } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
     });
 
@@ -126,10 +246,56 @@ describe("generateInvitation", () => {
     test("does not fetch when generating an invitation", async () => {
       vi.stubGlobal("fetch", vi.fn());
 
-      await generateInvitation({ inviterName: "County Health Dept", location });
+      await generateInvitation({
+        inviterName: "County Health Dept",
+        file: csvStream(),
+        location,
+      });
 
       expect(fetch).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("generateInvitation fail-closed before mint", () => {
+  test("rejects an unreadable file with an InvitationFileError (no token minted)", async () => {
+    // A stream that errors on read stands in for an unreadable file. The failure
+    // is thrown before the secret is generated, so no invitation is produced.
+    const erroring = new Readable({
+      read() {
+        this.destroy(new Error("read failed"));
+      },
+    });
+    const err: unknown = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: erroring,
+      location,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(InvitationFileError);
+    expect((err as InvitationFileError).failure.kind).toBe("unreadable");
+  });
+
+  test("rejects a file that satisfies zero linkage keys, naming the missing fields", async () => {
+    // A CSV with no linkage-typed columns: every default key references a field
+    // it cannot produce, so no key survives -- the same satisfiableKeyCount === 0
+    // block the acceptor pre-flight enforces.
+    const err: unknown = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream("notes\nhello\n"),
+      location,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(InvitationFileError);
+    const failure = (err as InvitationFileError).failure;
+    expect(failure.kind).toBe("unlinkable");
+    if (failure.kind !== "unlinkable") throw new Error("unreachable");
+    // It names the default field types the file lacks (assessed against the full
+    // defaults, which the filtered embed terms no longer declare).
+    const missingTypes = failure.unsatisfied.map((f) => f.type);
+    expect(missingTypes).toContain("ssn");
+    expect(missingTypes).toContain("firstName");
+    expect(missingTypes).toContain("dateOfBirth");
   });
 });
 
@@ -151,6 +317,7 @@ describe("generateInvitation expiry", () => {
     const before = Date.now();
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
     });
     const after = Date.now();
@@ -168,6 +335,7 @@ describe("generateInvitation expiry", () => {
     const before = Date.now();
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
       lifetimeSeconds,
     });
@@ -181,7 +349,8 @@ describe("generateInvitation expiry", () => {
 
   test("rejects a non-positive (or non-finite) lifetimeSeconds at entry, before encoding", async () => {
     // Caught here with a clear cause rather than at encodeInvitation's
-    // future-expiry backstop.
+    // future-expiry backstop. The lifetime bound is checked before the file is
+    // parsed, so a fresh valid stream is supplied but never consumed.
     for (const lifetimeSeconds of [
       0,
       -1,
@@ -191,6 +360,7 @@ describe("generateInvitation expiry", () => {
       await expect(
         generateInvitation({
           inviterName: "County Health Dept",
+          file: csvStream(),
           location,
           lifetimeSeconds,
         }),
@@ -204,6 +374,7 @@ describe("generateInvitation expiry", () => {
     await expect(
       generateInvitation({
         inviterName: "County Health Dept",
+        file: csvStream(),
         location,
         lifetimeSeconds: MAX_INVITATION_LIFETIME_SECONDS + 1,
       }),
@@ -215,6 +386,7 @@ describe("generateInvitation expiry", () => {
     const before = Date.now();
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
       lifetimeSeconds: MAX_INVITATION_LIFETIME_SECONDS,
     });
@@ -233,6 +405,7 @@ describe("generateInvitation expiry", () => {
     // measures from its own clock.
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
+      file: csvStream(),
       location,
     });
     const expiresAt = new Date(await expiresMsOf(encoded));
