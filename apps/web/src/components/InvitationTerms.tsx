@@ -112,6 +112,17 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
             : "Two of these elements may be matched in either order"}
         </Text>
       )}
+      {/* When both swapped elements carry transforms, the receiver applies each
+          element's transforms to the OTHER element's field value (the field
+          references swap, the transforms stay put), which the generic swap note
+          above does not convey. swapTransformInterchange implies swap is set. */}
+      {summary.swapTransformInterchange && summary.swap !== undefined && (
+        <Text size="xs" c="dimmed">
+          When matched in that order, the transforms shown for {summary.swap[0]}{" "}
+          are applied to {summary.swap[1]}&rsquo;s value, and those for{" "}
+          {summary.swap[1]} to {summary.swap[0]}&rsquo;s value.
+        </Text>
+      )}
     </Stack>
   );
 }

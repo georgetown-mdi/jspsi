@@ -623,6 +623,55 @@ describe("summarizeInvitation", () => {
     expect(swap?.[1]).not.toContain(BEL);
   });
 
+  test("depicts the transformed-value interchange only when both swapped elements transform", () => {
+    // The summary for a two-element key swapped on its elements, with the given
+    // transforms on each.
+    const keyFor = (
+      firstTransform: LinkageKeyElement["transform"],
+      secondTransform: LinkageKeyElement["transform"],
+    ) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [
+            { name: "first_name", type: "firstName" },
+            { name: "last_name", type: "lastName" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [
+                {
+                  field: "first_name",
+                  ...(firstTransform && { transform: firstTransform }),
+                },
+                {
+                  field: "last_name",
+                  ...(secondTransform && { transform: secondTransform }),
+                },
+              ],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      ).linkageKeys[0];
+
+    const upper: LinkageKeyElement["transform"] = [
+      { function: "to_upper_case" },
+    ];
+
+    // Both swapped elements carry a transform: on the receiver side each keeps
+    // its transforms but reads the other's field value, so the interchange is
+    // depicted, named in terms of the two resolved field labels.
+    const both = keyFor(upper, upper);
+    expect(both.swap).toEqual(["First name", "Last name"]);
+    expect(both.swapTransformInterchange).toBe(true);
+
+    // Only one side (or neither) carries a transform: nothing cross-applies both
+    // ways, so the generic swap note stands and the interchange is not depicted.
+    expect(keyFor(upper, undefined).swapTransformInterchange).toBe(false);
+    expect(keyFor(undefined, undefined).swapTransformInterchange).toBe(false);
+  });
+
   test("emits no constraint phrase for no-op constraint settings", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -927,6 +976,63 @@ describe("accept screen: terms render from a decoded token", () => {
     });
     expect(html).toContain("adjacent years");
     expect(html).toContain("(proposed; not yet applied)");
+  });
+
+  test("depicts the transform interchange for a swap whose elements both transform", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            { name: "first_name", type: "firstName" },
+            { name: "last_name", type: "lastName" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [
+                {
+                  field: "first_name",
+                  transform: [{ function: "to_upper_case" }],
+                },
+                {
+                  field: "last_name",
+                  transform: [{ function: "to_upper_case" }],
+                },
+              ],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      },
+    });
+    // The generic swap note, plus the interchange detail naming which field each
+    // element's transforms run on once the fields swap.
+    expect(html).toContain("may be matched in either order");
+    expect(html).toContain("transforms shown for First name");
+    expect(html).toContain("are applied to Last name");
+
+    // A swap whose elements carry no transforms keeps the generic note alone.
+    const plain = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            { name: "first_name", type: "firstName" },
+            { name: "last_name", type: "lastName" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [{ field: "first_name" }, { field: "last_name" }],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      },
+    });
+    expect(plain).toContain("may be matched in either order");
+    expect(plain).not.toContain("transforms shown for");
   });
 });
 

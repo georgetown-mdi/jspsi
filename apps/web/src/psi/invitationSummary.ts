@@ -208,6 +208,18 @@ export interface InvitationKeySummary {
    */
   swap?: [string, string];
   /**
+   * True when the two swapped elements (resolved in {@link swap}) BOTH carry a
+   * transform. On the receiver side a swap moves each element's field reference
+   * to the other element while its transforms stay put (see core's
+   * `swapElements`), so each element's transforms are applied to the OTHER
+   * element's field value. When both sides carry transforms the generic
+   * "matched in either order" note understates this interchange, so the renderer
+   * depicts it; implies {@link swap} is present (the interchange is named in
+   * terms of the two distinct field labels). False whenever fewer than both
+   * swapped elements carry a transform, or the labels did not resolve distinctly.
+   */
+  swapTransformInterchange: boolean;
+  /**
    * True when the key carries any non-default matching rule -- a transform, a
    * fuzzy comparison, or a swap. The visible flag that must never be silently
    * consented to.
@@ -399,25 +411,38 @@ function summarizeKey(
 
   const hasSwap = key.swap !== undefined;
   let swap: [string, string] | undefined;
+  let swapTransformInterchange = false;
   if (key.swap !== undefined) {
     // A swap names two elements by their effective identifier (element `name`
-    // if present, otherwise `field`); resolve each to its field label so the
-    // note reads in the same terms as the element list. The schema enforces
-    // that `name ?? field` is unique within a key, so this Map never drops an
-    // element. The note names the two fields only when both references resolve
-    // to distinct labels; otherwise the renderer shows a generic note (see the
-    // `swap` field doc); `swap` is left undefined, never holding a raw or
-    // sanitized identifier, since either would mislead rather than inform.
-    const labelByIdentifier = new Map(
-      key.elements.map((element) => [
-        element.name ?? element.field,
-        labelForField(element.field),
-      ]),
+    // if present, otherwise `field`); resolve each to its element so the note
+    // reads in the same field-label terms as the element list and can see
+    // whether each carries a transform. The schema enforces that `name ?? field`
+    // is unique within a key, so this Map never drops an element. The note names
+    // the two fields only when both references resolve to elements with distinct
+    // labels; otherwise the renderer shows a generic note (see the `swap` field
+    // doc); `swap` is left undefined, never holding a raw or sanitized
+    // identifier, since either would mislead rather than inform.
+    const elementByIdentifier = new Map(
+      key.elements.map((element) => [element.name ?? element.field, element]),
     );
-    const first = labelByIdentifier.get(key.swap[0]);
-    const second = labelByIdentifier.get(key.swap[1]);
-    if (first !== undefined && second !== undefined && first !== second)
-      swap = [first, second];
+    const first = elementByIdentifier.get(key.swap[0]);
+    const second = elementByIdentifier.get(key.swap[1]);
+    if (first !== undefined && second !== undefined) {
+      const firstLabel = labelForField(first.field);
+      const secondLabel = labelForField(second.field);
+      if (firstLabel !== secondLabel) {
+        swap = [firstLabel, secondLabel];
+        // Depict the transformed-value interchange only when BOTH swapped
+        // elements carry a transform: on the receiver side each element keeps
+        // its own transforms but reads the OTHER element's field value, so the
+        // transforms cross-apply. Only when both sides carry transforms does the
+        // generic "matched in either order" note understate what the receiver
+        // does; the narrow case this depiction exists for.
+        swapTransformInterchange =
+          (first.transform?.length ?? 0) > 0 &&
+          (second.transform?.length ?? 0) > 0;
+      }
+    }
   }
 
   const hasNonDefaultRule =
@@ -432,6 +457,7 @@ function summarizeKey(
     elements,
     hasSwap,
     swap,
+    swapTransformInterchange,
     hasNonDefaultRule,
   };
 }
