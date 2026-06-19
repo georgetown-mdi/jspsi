@@ -541,16 +541,30 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
   // byte-for-byte intact.
   const fixtures = [
     {
-      channel: "filedrop",
+      // A string channel is echoed verbatim so the operator sees which channel
+      // was rejected.
       source: "connection:\n  channel: filedrop\n  path: /mnt/share\n",
+      expectInMessage: '"filedrop"',
     },
     {
-      channel: "webrtc",
       source:
         "connection:\n  channel: webrtc\n  server:\n    signaling: wss://signal.example.org\n",
+      expectInMessage: '"webrtc"',
+    },
+    {
+      // No channel key at all: the guard reports it generically, never echoing
+      // `undefined`.
+      source: "connection:\n  server:\n    host: h\n",
+      expectInMessage: "absent or non-scalar",
+    },
+    {
+      // A channel that parses to a collection (here a sequence) is not a string,
+      // so it takes the same generic branch rather than being echoed.
+      source: "connection:\n  channel:\n    - sftp\n  server:\n    host: h\n",
+      expectInMessage: "absent or non-scalar",
     },
   ];
-  for (const { channel, source } of fixtures) {
+  for (const { source, expectInMessage } of fixtures) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
     try {
       const configPath = path.join(dir, "psilink.yaml");
@@ -562,7 +576,7 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
         caught = err;
       }
       expect(caught).toBeInstanceOf(UsageError);
-      expect((caught as Error).message).toContain(`"${channel}"`);
+      expect((caught as Error).message).toContain(expectInMessage);
       expect((caught as Error).message).toContain("sftp");
       // Not mutated: the bytes are exactly what the operator wrote -- no pin
       // synthesized, no server mapping fabricated on the filedrop config.
