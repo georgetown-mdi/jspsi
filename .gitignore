@@ -15,3 +15,5 @@ cosign.key
 terraform.tfvars
 scratch
 *.csv
+# Transient cold-review output (light-review / assess-review); never committed.
+review_findings.md
