@@ -46,7 +46,7 @@ import {
   runOnlineBootstrap,
   runOrExit,
   unsatisfiedLinkageFields,
-  warnLocatorOverridesIgnoredOffline,
+  warnServerOverridesIgnoredOffline,
   type CommonBootstrapOptions,
   type ResolvedDataSpec,
   type RunnableConnectionConfig,
@@ -311,11 +311,11 @@ export async function validateInvite(params: {
     };
   }
 
-  // Offline: the connection-locator overrides (--server-* and --outbound-path)
-  // cannot take effect (the connection block is written as a placeholder to edit,
-  // not built from a URL), so warn rather than drop a deliberately-passed flag
+  // Offline: the server-block overrides (--server-* and --outbound-path) cannot
+  // take effect (the connection block is written as a placeholder to edit, not
+  // built from a URL), so warn rather than drop a deliberately-passed flag
   // silently.
-  warnLocatorOverridesIgnoredOffline(options, log);
+  warnServerOverridesIgnoredOffline(options, log);
 
   // Offline. Linkage terms come from a pre-existing config when one is present
   // at the config path, and are inferred from the input file otherwise.

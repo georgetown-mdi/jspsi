@@ -32,7 +32,7 @@ import {
   parseCommonBootstrapArgs,
   runOnlineBootstrap,
   runOrExit,
-  warnLocatorOverridesIgnoredOffline,
+  warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
@@ -316,12 +316,11 @@ test("diffConnectionAgainstTarget: a split config against a shared target names 
   expect(conflicts[0].incoming).toBe("/mnt/shared");
 });
 
-// Each connection-locator override flag, paired with the option field that
-// carries it, so the parametrized test below proves every one is named when set
-// offline.
+// Each server-block override flag, paired with the option field that carries it,
+// so the parametrized test below proves every one is named when set offline.
 const OFFLINE_IGNORED_OVERRIDES: ReadonlyArray<{
   flag: string;
-  option: Parameters<typeof warnLocatorOverridesIgnoredOffline>[0];
+  option: Parameters<typeof warnServerOverridesIgnoredOffline>[0];
 }> = [
   { flag: "--server-username", option: { serverUsername: "alice" } },
   { flag: "--server-password", option: { serverPassword: "hunter2" } },
@@ -331,9 +330,9 @@ const OFFLINE_IGNORED_OVERRIDES: ReadonlyArray<{
 ];
 
 for (const { flag, option } of OFFLINE_IGNORED_OVERRIDES)
-  test(`warnLocatorOverridesIgnoredOffline: warns naming ${flag} when set`, () => {
+  test(`warnServerOverridesIgnoredOffline: warns naming ${flag} when set`, () => {
     const warnings: string[] = [];
-    warnLocatorOverridesIgnoredOffline(option, {
+    warnServerOverridesIgnoredOffline(option, {
       warn: (m) => warnings.push(m),
     });
     expect(warnings).toHaveLength(1);
@@ -341,9 +340,9 @@ for (const { flag, option } of OFFLINE_IGNORED_OVERRIDES)
     expect(warnings[0]).toContain("no effect on an offline invite/accept");
   });
 
-test("warnLocatorOverridesIgnoredOffline: one warning names every set flag", () => {
+test("warnServerOverridesIgnoredOffline: one warning names every set flag", () => {
   const warnings: string[] = [];
-  warnLocatorOverridesIgnoredOffline(
+  warnServerOverridesIgnoredOffline(
     { serverUsername: "alice", serverPort: 2222, outboundPath: "/drop/out" },
     { warn: (m) => warnings.push(m) },
   );
@@ -357,9 +356,9 @@ test("warnLocatorOverridesIgnoredOffline: one warning names every set flag", () 
   expect(warnings[0]).not.toContain("--server-password");
 });
 
-test("warnLocatorOverridesIgnoredOffline: stays silent when no override is set", () => {
+test("warnServerOverridesIgnoredOffline: stays silent when no override is set", () => {
   const warnings: string[] = [];
-  warnLocatorOverridesIgnoredOffline({}, { warn: (m) => warnings.push(m) });
+  warnServerOverridesIgnoredOffline({}, { warn: (m) => warnings.push(m) });
   expect(warnings).toEqual([]);
 });
 

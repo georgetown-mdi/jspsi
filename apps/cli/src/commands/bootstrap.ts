@@ -1403,28 +1403,31 @@ export function warnUnsupportedFileSyncFlags(
 }
 
 /**
- * The connection-locator overrides that have no effect on an OFFLINE
- * invite/accept, read by {@link warnLocatorOverridesIgnoredOffline}. A structural
- * subset of {@link CommonBootstrapOptions} (which is assignable to it) holding the
+ * The server-block overrides that have no effect on an OFFLINE invite/accept,
+ * read by {@link warnServerOverridesIgnoredOffline}. A structural subset of
+ * {@link CommonBootstrapOptions} (which is assignable to it) holding the
  * `--server-*` flags and `--outbound-path`: the overrides {@link
- * applyConnectionOverrides} writes into the connection's locator block --
- * `connection.server` (host/port/credentials) and the channel's directory paths
- * -- as opposed to `connection.options`. This is precisely the block the offline
- * placeholder stands in for: {@link connectionFromEndpoint} writes a locator stub
- * (a `REPLACE_WITH_...` host/username placeholder, or a seeded host/port/path)
- * with no `options`, so these are the overrides that would have populated a field
- * the operator edits. Despite the `--server-*` credential flags, this set is NOT
- * the credential-free public {@link ConnectionEndpoint} "locator": it carries the
- * username/password/private-key the placeholder marks for replacement.
+ * applyConnectionOverrides} writes into `connection.server` (host/port/
+ * credentials) and the channel's directory paths -- the connection's address and
+ * credentials -- as opposed to the tuning/behavior fields it writes into
+ * `connection.options`. This server block is what the offline placeholder stands
+ * in for: {@link connectionFromEndpoint} writes a `REPLACE_WITH_...` host/username
+ * stub, or a seeded host/port/path, so these are the overrides that would have
+ * populated a field the operator edits. (The set carries the
+ * username/password/private-key the placeholder marks for replacement, so it is
+ * NOT the credential-free public {@link ConnectionEndpoint}, which omits them by
+ * construction.)
  *
  * The tuning overrides (timeouts, `--max-reconnect-attempts`) and the file-sync
  * toggles (`--retain-files`, `--peer-id`, etc.) are ALSO dropped offline, but they
- * write `connection.options` -- a separate block the placeholder does not contain
- * -- so the right diagnostic for them is a differently-worded one ("set it under
+ * target the `connection.options` tuning/behavior fields, which the offline flow
+ * never populates from an override -- a split seed pre-seeds only the fixed
+ * retain-mode trio there ({@link SPLIT_SEED_OPTIONS}), never operator tuning. So
+ * the right diagnostic for them is a differently-worded one ("set it under
  * connection.options"), tracked as a follow-up, not folded in here where it would
  * blur this message's "set the connection details in that block" remedy.
  */
-export type OfflineIgnoredLocatorOverrides = Pick<
+export type OfflineIgnoredServerOverrides = Pick<
   CommonBootstrapOptions,
   | "serverUsername"
   | "serverPassword"
@@ -1434,23 +1437,22 @@ export type OfflineIgnoredLocatorOverrides = Pick<
 >;
 
 /**
- * Warn that the connection-locator overrides (`--server-username`,
- * `--server-password`, `--server-private-key`, `--server-port`, and
- * `--outbound-path`) have no effect on an OFFLINE invite/accept. Those paths
- * write a placeholder (invite) or invitation-endpoint-seeded (accept) connection
- * block for the operator to edit before `psilink exchange`, rather than building
- * a connection from a URL the way the online and zero-setup paths do -- so they
- * go through {@link connectionFromEndpoint}, which applies no connection
- * overrides, and these flags would otherwise be parsed and silently dropped. The
- * warning names exactly the flags the operator set; it is a no-op when none are
- * set. Scoped to the locator block these overrides populate (see {@link
- * OfflineIgnoredLocatorOverrides}); shared between invite and accept so the
- * wording cannot drift, and so the whole `--server-*`/`--outbound-path` set is
- * treated uniformly rather than only the one flag (`--outbound-path`) whose silent
- * loss is the most surprising.
+ * Warn that the server-block overrides (`--server-username`, `--server-password`,
+ * `--server-private-key`, `--server-port`, and `--outbound-path`) have no effect
+ * on an OFFLINE invite/accept. Those paths write a placeholder (invite) or
+ * invitation-endpoint-seeded (accept) connection block for the operator to edit
+ * before `psilink exchange`, rather than building a connection from a URL the way
+ * the online and zero-setup paths do -- so they go through {@link
+ * connectionFromEndpoint}, which applies no connection overrides, and these flags
+ * would otherwise be parsed and silently dropped. The warning names exactly the
+ * flags the operator set; it is a no-op when none are set. Scoped to the server
+ * block these overrides populate (see {@link OfflineIgnoredServerOverrides});
+ * shared between invite and accept so the wording cannot drift, and so the whole
+ * `--server-*`/`--outbound-path` set is treated uniformly rather than only the one
+ * flag (`--outbound-path`) whose silent loss is the most surprising.
  */
-export function warnLocatorOverridesIgnoredOffline(
-  options: OfflineIgnoredLocatorOverrides,
+export function warnServerOverridesIgnoredOffline(
+  options: OfflineIgnoredServerOverrides,
   log: { warn: (message: string) => void },
 ): void {
   const ignored: string[] = [];
