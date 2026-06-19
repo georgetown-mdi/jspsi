@@ -32,10 +32,22 @@ import {
 // 50 chars; a key type such as "ecdsa-sha2-nistp521" is under 30): they cap a
 // hostile partner's advertised values, mirroring the invitation decoder's
 // per-field size bounds, and the receiver sanitizes both before display.
+//
+// hostKeyField is fail-soft (`.catch(undefined)`): a malformed or over-bound
+// advertisement is read as absent rather than aborting the linkage, UNLIKE the
+// rest of the terms message and unlike `save`. This is deliberate and specific
+// to this field's contract: the reconciliation is a non-fatal advisory that only
+// warns even on a genuine fingerprint divergence (see reconcileHostKeyFingerprints),
+// so a malformed advertisement -- reachable only from a non-conforming or
+// future-versioned peer, since the field rides the AEAD and an unauthenticated
+// party cannot set it -- must degrade to "no reconciliation" rather than become a
+// terms-exchange abort that blames the (valid) linkage terms. It never affects
+// agreement, so dropping a bad value is the correct, contract-preserving outcome.
 const hostKeyAdvertisement = z.object({
   fingerprint: z.string().max(100),
   keyType: z.string().max(64),
 });
+const hostKeyField = hostKeyAdvertisement.optional().catch(undefined);
 
 // The optional `save` flag rides the terms exchange so each party advertises
 // its zero-setup `--save` intent to the other on the one round-trip both sides
@@ -47,7 +59,7 @@ const hostKeyAdvertisement = z.object({
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   save: z.boolean().optional(),
-  hostKey: hostKeyAdvertisement.optional(),
+  hostKey: hostKeyField,
 });
 
 const termsWithDecisionMessage = z.object({
@@ -55,7 +67,7 @@ const termsWithDecisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: z.array(z.string()).optional(),
   save: z.boolean().optional(),
-  hostKey: hostKeyAdvertisement.optional(),
+  hostKey: hostKeyField,
 });
 
 const decisionMessage = z.object({
@@ -93,8 +105,10 @@ export interface TermsExchangeResult {
    * The SFTP host key the partner advertised observing on its side of the
    * rendezvous (fingerprint + key type), or `undefined` when the partner
    * observed none (a file-drop or proxy path, or an exchange that did not thread
-   * an observed key in). The caller reconciles it against its own observed key
-   * (see {@link reconcileHostKeyFingerprints}); it never affects agreement.
+   * an observed key in) or advertised a malformed/over-bound value (read as
+   * absent; see the fail-soft `hostKeyField` schema). The caller reconciles it
+   * against its own observed key (see {@link reconcileHostKeyFingerprints}); it
+   * never affects agreement.
    */
   partnerHostKey: PresentedHostKey | undefined;
 }

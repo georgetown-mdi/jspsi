@@ -147,6 +147,24 @@ test("no hostKey field is put on the wire when none is observed", async () => {
   for (const frame of sent) expect("hostKey" in frame).toBe(false);
 });
 
+test("a malformed partner hostKey is read as absent, not an abort", async () => {
+  // Fail-soft contract: the reconciliation only ever warns, so a malformed or
+  // over-bound advertisement (a non-conforming or future-versioned peer) must
+  // degrade to "no reconciliation" rather than abort the linkage and blame the
+  // (valid) terms. Inject an over-bound fingerprint on the initiator's frame and
+  // drive the responder to completion by hand.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB);
+  await connA.send({
+    linkageTerms: termsA,
+    hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
+  });
+  await connA.receive(); // drain the responder's terms + proceed (msg 2)
+  await connA.send({ decision: "proceed" }); // msg 3
+  const result = await responder;
+  expect(result.partnerHostKey).toBeUndefined();
+});
+
 // --- Role determination ------------------------------------------------------
 
 test("only initiator expects output -> initiator is receiver", async () => {
