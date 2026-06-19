@@ -521,7 +521,7 @@ export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
  * `serverConnectTimeoutMs` and is left to a wall-clock deadline should it ever
  * prove to matter. Defined in core (not the CLI, where `MAX_TIMEOUT_SECONDS`
  * lives) because both validation boundaries that must agree on this field consume
- * it -- the schema floor below and the CLI's `nonNegativeIntFlag` parse guard,
+ * it -- the schema `.max()` below and the CLI's `nonNegativeIntFlag` parse guard,
  * which imports it -- and core cannot import from the CLI. An over-ceiling value
  * is rejected with a flag-named `UsageError` (exit 64) whether it arrives from
  * `psilink.yaml` or `--max-reconnect-attempts`. See docs/spec/CHANNEL_SECURITY.md.

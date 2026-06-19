@@ -238,7 +238,9 @@ test("nonNegativeIntFlag: a value above the ceiling is a flag-named usage error 
   // past the ceiling is rejected at parse (exit 64) with the flag named, the bare
   // count maximum stated (no time unit), and the offending value echoed.
   const justOver = MAX_RECONNECT_ATTEMPTS + 1;
-  let message = "";
+  // One invocation covers both the type and the message: capture the thrown
+  // error, assert it is the flag-named UsageError, then assert its wording.
+  let caught: unknown;
   try {
     nonNegativeIntFlag(
       argv({ "max-reconnect-attempts": justOver }),
@@ -246,15 +248,10 @@ test("nonNegativeIntFlag: a value above the ceiling is a flag-named usage error 
       MAX_RECONNECT_ATTEMPTS,
     );
   } catch (err) {
-    message = (err as UsageError).message;
+    caught = err;
   }
-  expect(() =>
-    nonNegativeIntFlag(
-      argv({ "max-reconnect-attempts": justOver }),
-      "max-reconnect-attempts",
-      MAX_RECONNECT_ATTEMPTS,
-    ),
-  ).toThrow(UsageError);
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as UsageError).message;
   expect(message).toContain("--max-reconnect-attempts");
   expect(message).toContain("must not exceed");
   expect(message).toContain(String(MAX_RECONNECT_ATTEMPTS));

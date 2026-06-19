@@ -561,6 +561,19 @@ test("parseCommonBootstrapArgs: a max-reconnect-attempts above the ceiling is re
   expect(parse).toThrow(String(MAX_RECONNECT_ATTEMPTS));
 });
 
+test("parseCommonBootstrapArgs: a max-reconnect-attempts at the ceiling is accepted", () => {
+  // The boundary is inclusive at the parse-site layer too (the counterpart of the
+  // timeout 7d-ceiling acceptance test below): exactly MAX_RECONNECT_ATTEMPTS, the
+  // largest in-range value, passes through unchanged rather than being rejected by
+  // an off-by-one in the ceiling the parse site hands nonNegativeIntFlag.
+  const parsed = parseCommonBootstrapArgs({
+    _: [],
+    $0: "psilink",
+    "max-reconnect-attempts": MAX_RECONNECT_ATTEMPTS,
+  } as unknown as Arguments);
+  expect(parsed.maxReconnectAttempts).toBe(MAX_RECONNECT_ATTEMPTS);
+});
+
 test("parseCommonBootstrapArgs: a connection-/peer-timeout at the 7d ceiling is accepted", () => {
   // The boundary is inclusive: exactly 7d parses to its seconds value, so the
   // largest in-range value behaves exactly as it does today.
