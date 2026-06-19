@@ -1,7 +1,10 @@
 /* A flex column at least as tall as the viewport, with the main region growing
    to fill, so the footer rests at the bottom rather than floating mid-page on
-   short routes. */
+   short routes. position: relative anchors the absolutely positioned skip link's
+   containing block here, rather than to whichever ancestor happens to be
+   positioned. */
 .shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -28,6 +31,15 @@
   flex: 1;
   padding-top: var(--mantine-spacing-lg);
   padding-bottom: var(--mantine-spacing-lg);
+}
+
+/* main only ever receives focus from the skip link (it is tabIndex -1, so it is
+   not in the tab order otherwise); give that landing a visible indicator. The
+   offset is negative so the outline sits inside the full-width region rather
+   than overflowing the viewport. */
+.main:focus {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
 }
 
 .footer {

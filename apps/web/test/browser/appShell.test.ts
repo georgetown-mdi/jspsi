@@ -171,8 +171,10 @@ describe("application shell", () => {
     skipLink()?.click();
 
     expect(window.location.hash).toBe(hashBefore);
-    expect(document.activeElement).toBe(
-      document.getElementById("main-content"),
-    );
+    const main = document.getElementById("main-content");
+    expect(document.activeElement).toBe(main);
+    // The focused landing has a visible indicator (the .main:focus outline),
+    // since main is otherwise outside the tab order.
+    expect(main && getComputedStyle(main).outlineWidth).not.toBe("0px");
   });
 });
