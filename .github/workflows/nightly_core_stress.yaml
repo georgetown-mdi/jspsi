@@ -1,0 +1,70 @@
+name: Nightly Core Stress Tests
+
+# Scheduled nightly run of the core PSI stress tier -- packages/core's `stress`
+# vitest project (npm run test:stress -w packages/core). That tier is
+# deliberately excluded from `npm run test` and from every PR gate so the
+# merge-time path stays fast; the tests exercise the seclink fork's large-dataset
+# path -- e.g. Server#createSetupMessage past the ~125k spread-argument cliff that
+# once threw "Maximum call stack size exceeded" -- which is too heavy to run on
+# every push. A nightly schedule is where that coverage belongs, catching a
+# regression in the large-N path without slowing the PR gate.
+#
+# Runs only on `schedule` and manual `workflow_dispatch` -- never on push or
+# pull_request -- so the PR gate is unaffected. It invokes the whole `stress`
+# project, so any future stress test added under test/stress/ is picked up here
+# automatically, not just today's two.
+
+on:
+  schedule:
+    # 04:17 UTC nightly. No other scheduled workflow exists in this repo, so there
+    # is no cross-job contention; the off-the-hour minute follows GitHub's guidance
+    # to avoid top-of-hour congestion on the shared scheduler. Two GitHub behaviors
+    # to know: a `schedule` trigger only fires from the workflow as it exists on the
+    # default branch, so no nightly runs until this file lands there (use the manual
+    # dispatch below to exercise it before then); and GitHub disables a scheduled
+    # workflow after ~60 days without repo activity, emailing the last committer --
+    # re-enable it from the Actions tab if a long-quiet repo needs this guard back.
+    - cron: "17 4 * * *"
+  # On-demand run, e.g. to confirm a stress fix without waiting for the schedule.
+  workflow_dispatch:
+
+# One stress run at a time per ref; do not cancel an in-flight run (it is doing
+# real, minutes-long work) -- this only guards a manual dispatch racing the
+# nightly schedule.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege: this test job only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    name: Core PSI stress tests
+    runs-on: ubuntu-latest
+    # Upper bound on a hung run. The work fits well under this: each stress test
+    # has its own 300s timeout (packages/core/vitest.config.ts), and install plus
+    # the core build add only a couple of minutes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      # Pins Node, installs from the lockfile, and builds @psilink/core so the
+      # stress tests run against the compiled fork in dist/.
+      - uses: ./.github/actions/setup
+      - name: Stress tests (core PSI)
+        run: npm run test:stress -w packages/core
+        env:
+          # Raise the createSetupMessage permutation run above the 200k local
+          # default for heavier nightly coverage past the ~125k overflow cliff.
+          # The ceiling is the stress project's 300s per-test timeout: that test
+          # is a synchronous WASM call vitest cannot interrupt, so a value large
+          # enough to push it past 300s would run to completion and only then be
+          # marked failed. At ~0.46ms/element locally, 250k (~120s) leaves margin
+          # on a slower hosted runner. Going higher (toward the 1_000_000 the task
+          # cited as an example) also needs packages/core's stress testTimeout
+          # raised; that shared-config change is out of scope for this CI job.
+          # PSI_STRESS_E2E_N (the full-round test) is intentionally left at its
+          # 25k default -- a heavier end-to-end round costs minutes and would need
+          # the same timeout raise.
+          PSI_STRESS_N: "250000"
