@@ -1405,13 +1405,15 @@ export function warnUnsupportedFileSyncFlags(
 /**
  * The connection-block overrides that have no effect on an OFFLINE invite/accept,
  * read by {@link warnConnectionOverridesIgnoredOffline}. A structural subset of
- * {@link CommonBootstrapOptions} (which is assignable to it) holding only the
- * `--server-*` credential/port flags and `--outbound-path` -- the flags that
- * shape the connection block built from a URL on the online/zero-setup paths but
- * are dropped offline. The connection/exchange tuning overrides (timeouts,
- * `--max-reconnect-attempts`) and the file-sync toggles (`--retain-files`,
- * `--peer-id`, etc.) are deliberately excluded: they configure `options`, not the
- * connection locator the offline block is a placeholder for.
+ * {@link CommonBootstrapOptions} (which is assignable to it) holding the
+ * `--server-*` credential/port flags and `--outbound-path` -- the connection
+ * locator/credential overrides this task (item 202433910) scopes to. The
+ * connection/exchange tuning overrides (timeouts, `--max-reconnect-attempts`) and
+ * the file-sync toggles (`--retain-files`, `--peer-id`, etc.) are ALSO dropped on
+ * the offline path -- they land in `connection.options`, the same block the
+ * placeholder stands in for -- so warning on them too would be a reasonable
+ * extension; it is left out of this set as a deliberate scope line, not because
+ * they take effect.
  */
 export type OfflineIgnoredConnectionOverrides = Pick<
   CommonBootstrapOptions,

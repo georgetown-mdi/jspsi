@@ -319,8 +319,10 @@ test("validateAccept: offline warns but proceeds when the CSV satisfies only som
 });
 
 test("validateAccept: offline warns that a --server-* override is ignored", async () => {
-  // The offline path seeds the connection block from the invitation endpoint (or
-  // a placeholder), so a --server-* override cannot take effect; it must be
+  // The offline path builds the connection block from connectionFromEndpoint (a
+  // placeholder here, since sampleToken carries no endpoint; or an endpoint seed
+  // when one is present -- the warning reads only `options`, so it fires the same
+  // way either way), so a --server-* override cannot take effect; it must be
   // surfaced rather than silently dropped.
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   const log = getLogger("accept-offline-override-warn");
