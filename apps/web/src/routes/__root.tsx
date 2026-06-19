@@ -16,10 +16,10 @@ import {
   mantineHtmlProps,
 } from "@mantine/core";
 
+import { cssVariablesResolver, mantineTheme } from "@theme";
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { NotFound } from "@components/NotFound";
 import { Shell } from "@components/Shell";
-import { mantineTheme } from "@theme";
 import { resolveContentWidth } from "@components/contentWidth";
 import { seo } from "@utils/seo";
 
@@ -91,7 +91,10 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         <ColorSchemeScript />
       </head>
       <body>
-        <MantineProvider theme={mantineTheme}>
+        <MantineProvider
+          theme={mantineTheme}
+          cssVariablesResolver={cssVariablesResolver}
+        >
           {children}
           <TanStackRouterDevtools position="bottom-right" />
           <Scripts />
