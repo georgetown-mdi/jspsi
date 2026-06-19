@@ -212,6 +212,8 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
           "list pins no key and would refuse every connection",
         path: ["hostKeyFingerprint"],
       });
+      // Empty list fully diagnosed above; with no entries the per-entry loop
+      // would be a no-op, so stop here rather than fall through to it.
       return;
     }
     list.forEach((entry, i) => {
