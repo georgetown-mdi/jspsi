@@ -913,6 +913,47 @@ test("endpointFromConnection -> connectionFromEndpoint round-trips a split pair 
   expect(seeded.outboundPath).toBe("/inviter-in");
 });
 
+test("endpointFromConnection: an over-long host is a clean usage error, not an opaque encode failure", () => {
+  // The connection schema bounds host only by non-emptiness; the endpoint caps it
+  // at MAX_ENDPOINT_HOST_LENGTH. A degenerate over-long host is rejected here with
+  // a field-named UsageError rather than left to throw a ZodError at encode.
+  const connection = connectionFromURL(
+    new URL(`sftp://${"a".repeat(257)}/drop`),
+    {},
+  );
+  expect(() => endpointFromConnection(connection)).toThrow(UsageError);
+  expect(() => endpointFromConnection(connection)).toThrow(/host is too long/);
+});
+
+test("endpointFromConnection: an over-long path is a clean usage error", () => {
+  const connection = connectionFromURL(
+    new URL(`sftp://host/${"p".repeat(4097)}`),
+    {},
+  );
+  expect(() => endpointFromConnection(connection)).toThrow(UsageError);
+  expect(() => endpointFromConnection(connection)).toThrow(/path is too long/);
+});
+
+test("endpointFromConnection: an over-long split outbound_path is a clean usage error", () => {
+  // The split pair is bounded too; --outbound-path supplies the outbound half.
+  const connection = connectionFromURL(new URL("file:///inviter-in"), {
+    outboundPath: `/${"o".repeat(4097)}`,
+    retainFiles: true,
+  });
+  expect(() => endpointFromConnection(connection)).toThrow(/outbound_path/);
+});
+
+test("endpointFromConnection: a host at the length limit is accepted", () => {
+  // Boundary: exactly MAX_ENDPOINT_HOST_LENGTH characters is within bounds, so the
+  // guard rejects only what the endpoint schema would, never a hair short of it.
+  const host = "a".repeat(256);
+  const endpoint = endpointFromConnection(
+    connectionFromURL(new URL(`sftp://${host}/drop`), {}),
+  );
+  if (endpoint.channel !== "sftp") throw new Error("expected sftp");
+  expect(endpoint.host).toBe(host);
+});
+
 // --- generateSharedSecret -------------------------------------------------------
 
 test("generateSharedSecret: matches the shared secret format and is non-deterministic", () => {
