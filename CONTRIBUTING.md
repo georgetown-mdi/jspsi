@@ -103,6 +103,17 @@ PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm ru
 sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli
 ```
 
+A standing console sentinel guards the CLI integration suite: it wraps `console`
+directly and fails a test file at `afterAll` on any `console.log`/`warn`/`error`
+that no allowlist matcher accepts (the inverse of blanket silencing, and the one
+check that sees third-party `console.*` which the loglevel-based
+`withCapturedLogs` cannot). If your change makes the suite emit new console
+output, the fix is to eliminate it at the source -- route it through the logger
+or assert it under `withCapturedLogs`; accept it as intended only by adding a
+matcher to the allowlist in `apps/cli/test/integration/consoleAllowlist.ts`, a
+visible edit a reviewer sees. A matcher that never fires across a run is reported
+at teardown so the allowlist cannot accumulate dead entries.
+
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
 ```sh
