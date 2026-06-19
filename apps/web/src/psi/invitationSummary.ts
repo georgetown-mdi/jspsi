@@ -63,7 +63,7 @@ const FUZZY_COMPARISON_LABELS: Record<
  */
 export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
   remove_non_ascii:
-    "Removes non-ASCII characters (accents, emoji, symbols) before matching, so values differing only in those characters can match.",
+    "Deletes every character outside the ASCII set before matching -- an accented letter, emoji, or symbol is dropped entirely, not simplified.",
   replace_separators_with_spaces:
     "Turns hyphens, apostrophes, ampersands, slashes, and underscores into spaces before matching.",
   squash_spaces:
@@ -76,7 +76,7 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
   to_lower_case:
     "Lower-cases the value before matching, so values differing only in letter case can match.",
   remove_accents:
-    "Strips accents and diacritics before matching, so accented and unaccented spellings can match.",
+    "Strips accents and diacritics but keeps the base letter before matching, so accented and unaccented spellings can match.",
   remove_affixes:
     "Removes name titles and suffixes (Mr., Dr., Jr., III) before matching.",
   substring:
@@ -374,20 +374,24 @@ function describeExecutedValue(value: unknown): string {
  */
 function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
-  // The executed value of each param core coerces before applying (e.g.
+  // The coercion of each param core overrides before applying (e.g.
   // replace_regex replacement: null runs as the empty string), so a declared
   // value the function overrides is shown with what actually executes rather
   // than alone. Driven by core's behavior; a param absent here is shown verbatim.
-  const executedByParam = new Map(
-    describeTransformCoercions(step).map((c) => [c.param, c.executed]),
+  // Keyed by the whole coercion so a `.get()` hit narrows to a defined value
+  // (the executed value is itself typed `unknown` and could legitimately be any
+  // value, so `.has()` + `.get()` would not narrow it).
+  const coercionByParam = new Map(
+    describeTransformCoercions(step).map((c) => [c.param, c]),
   );
   const params = entries.slice(0, MAX_DISPLAYED_PARAMS).map(([key, value]) => {
     const declared = `${key}: ${describeParamValue(value)}`;
     // The executed annotation is fixed core copy, not partner-controlled; the
     // whole line is still sanitized as a unit so the declared half stays escaped.
-    if (executedByParam.has(key))
+    const coercion = coercionByParam.get(key);
+    if (coercion !== undefined)
       return sanitizeForDisplay(
-        `${declared} (runs as ${describeExecutedValue(executedByParam.get(key))})`,
+        `${declared} (runs as ${describeExecutedValue(coercion.executed)})`,
       );
     return sanitizeForDisplay(declared);
   });
