@@ -18,6 +18,10 @@ const MAIN_CONTENT_ID = "main-content";
  *
  * The wrapper is a flex column at least the viewport tall with the main region
  * flexing to fill, so the footer rests at the bottom on short pages.
+ *
+ * Built as a plain flex layout rather than Mantine's AppShell, whose responsive
+ * navbar/aside machinery is unneeded for a single header link; revisit that
+ * choice if the planned IA restructure adds real navigation or nested layouts.
  */
 export function Shell({ children }: { children: ReactNode }) {
   return (
@@ -55,11 +59,15 @@ export function Shell({ children }: { children: ReactNode }) {
       </main>
       <footer className={classes.footer}>
         <Container size="xl">
-          {/* Not c="dimmed": this is a confidentiality note, and the dimmed gray
-              falls below the 4.5:1 text-contrast bar on the light background. */}
+          {/* Role-neutral: the shell renders on both the invite and accept
+              routes, so this avoids the sharer-only "share it over a trusted
+              channel" framing (that inviter-specific guidance lives inline in
+              InvitePanel). Not c="dimmed": this is a confidentiality note, and
+              the dimmed gray falls below the 4.5:1 text-contrast bar on the
+              light background. */}
           <Text size="xs">
-            Invitations carry a one-time secret. Share them only over a channel
-            you trust, and never post them publicly.
+            Invitations carry a one-time secret. Keep them confidential and
+            never post them publicly.
           </Text>
         </Container>
       </footer>
