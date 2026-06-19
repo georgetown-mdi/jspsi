@@ -1,4 +1,4 @@
-import { sanitizeForDisplay } from "@psilink/core";
+import { describeTransformCoercions, sanitizeForDisplay } from "@psilink/core";
 
 import type {
   Algorithm,
@@ -40,6 +40,64 @@ const FUZZY_COMPARISON_LABELS: Record<
   transpositions: "two-digit transpositions",
   editDistances: "single-character edits",
   adjacentYears: "adjacent years",
+};
+
+/**
+ * Plain-language description of what each transform function does to matching,
+ * keyed by the function name core recognizes. The acceptor sees these alongside
+ * the function name and its parameters so a non-expert can understand the
+ * matching consequence of each declared transform, not just read its name. Each
+ * entry names the consequence where there is one (e.g. `coalesce` can create
+ * matches that would not otherwise occur), rather than restating the name.
+ *
+ * Keyed by the function's raw name (the schema-validated `snake_case` value the
+ * cleaning library dispatches on), so the lookup is an exact match against what
+ * core executes. A partner-declared name that core does not recognize has no
+ * entry and falls back to the bare sanitized name; the glossary is asserted to
+ * cover every name in core's `STANDARDIZATION_FUNCTION_NAMES` (see the coverage
+ * test), so a function added to core cannot ship here without a description.
+ *
+ * Exported so the coverage test can assert its key set equals core's
+ * {@link STANDARDIZATION_FUNCTION_NAMES} in both directions -- catching a core
+ * function with no entry here and a stale entry for a function core dropped.
+ */
+export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
+  remove_non_ascii:
+    "Deletes every character outside the ASCII set before matching -- an accented letter, emoji, or symbol is dropped entirely, not simplified.",
+  replace_separators_with_spaces:
+    "Turns hyphens, apostrophes, ampersands, slashes, and underscores into spaces before matching.",
+  squash_spaces:
+    "Collapses runs of spaces into a single space before matching.",
+  remove_punctuation: "Removes punctuation and symbols before matching.",
+  remove_dashes: "Removes hyphens before matching.",
+  trim_whitespace: "Removes leading and trailing spaces before matching.",
+  to_upper_case:
+    "Upper-cases the value before matching, so values differing only in letter case can match.",
+  to_lower_case:
+    "Lower-cases the value before matching, so values differing only in letter case can match.",
+  remove_accents:
+    "Strips accents and diacritics but keeps the base letter before matching, so accented and unaccented spellings can match.",
+  remove_affixes:
+    "Removes name titles and suffixes (Mr., Dr., Jr., III) before matching.",
+  substring:
+    "Matches on only a fixed slice of the value (a character range), not the whole value.",
+  parse_date:
+    "Reformats the date to a canonical form before matching, so dates written in different formats can match.",
+  pad_left:
+    "Left-pads the value to a fixed length before matching (e.g. zero-filling a short identifier).",
+  phonetic:
+    "Matches on a sound-alike phonetic code rather than the literal spelling, so names that sound alike can match.",
+  null_if: "Treats listed values as empty, dropping them from matching.",
+  replace_regex:
+    "Rewrites the parts of the value matching a pattern before matching.",
+  extract_regex:
+    "Matches on only the part of the value a pattern captures; a value with no match is dropped.",
+  filter_regex:
+    "Drops values that do not match a pattern, removing them from matching.",
+  split_on:
+    "Splits the value into several candidates, each able to match independently.",
+  coalesce:
+    "Substitutes a fallback value for an empty field, which can create matches that would not otherwise occur.",
 };
 
 /**
@@ -91,8 +149,31 @@ export interface InvitationTransformSummary {
    * entry marks any overflow). sanitizeForDisplay bounds each entry's length and
    * the count is capped, so an arbitrarily large partner-supplied `params`
    * record cannot flood the screen. Empty when the step declares no parameters.
+   * Each parameter is shown verbatim; a parameter core coerces before applying
+   * is clarified separately in {@link coercions}, not folded into its line.
    */
   params: Array<string>;
+  /**
+   * Plain-language description of what this function does to matching, from
+   * {@link TRANSFORM_FUNCTION_GLOSSARY}. Fixed copy keyed by the recognized
+   * function name (not partner-controlled), so it is safe to render verbatim.
+   * Absent when the declared function name is one core does not recognize.
+   */
+  description?: string;
+  /**
+   * Parameters this function coerces before applying, each naming the parameter
+   * and the value it actually runs as (e.g. `replacement` runs as the empty
+   * string for `replace_regex` `replacement: null`). Carried apart from
+   * {@link params}, and rendered as its own element rather than folded into the
+   * param line, so this note is not impersonable by partner text placed inside a
+   * param value (which renders as a `key: value` line). Both fields are
+   * core-derived -- the parameter name is the function's own parameter and the
+   * runsAs value comes from core's coercion contract -- so neither is
+   * partner-controlled. Restricted to coerced parameters whose {@link params}
+   * line is shown, so a note never references one hidden by the display cap.
+   * Absent when the step coerces no displayed parameter.
+   */
+  coercions?: Array<{ param: string; runsAs: string }>;
 }
 
 /**
@@ -142,6 +223,18 @@ export interface InvitationKeySummary {
    * falls back to a generic swap note keyed off {@link hasSwap} instead.
    */
   swap?: [string, string];
+  /**
+   * True when the two swapped elements (resolved in {@link swap}) BOTH carry a
+   * transform. On the receiver side a swap moves each element's field reference
+   * to the other element while its transforms stay put (see core's
+   * `swapElements`), so each element's transforms are applied to the OTHER
+   * element's field value. When both sides carry transforms the generic
+   * "matched in either order" note understates this interchange, so the renderer
+   * depicts it; implies {@link swap} is present (the interchange is named in
+   * terms of the two distinct field labels). False whenever fewer than both
+   * swapped elements carry a transform, or the labels did not resolve distinctly.
+   */
+  swapTransformInterchange: boolean;
   /**
    * True when the key carries any non-default matching rule -- a transform, a
    * fuzzy comparison, or a swap. The visible flag that must never be silently
@@ -275,6 +368,17 @@ function describeParamValue(value: unknown): string {
 }
 
 /**
+ * Render the value a coerced parameter actually executes as, from core's
+ * coercion contract. The empty string is a real executed value (e.g.
+ * `replace_regex` `replacement: null`), so name it rather than render a blank
+ * that would read as "nothing shown".
+ */
+function describeExecutedValue(value: unknown): string {
+  if (value === "") return "the empty string";
+  return describeParamValue(value);
+}
+
+/**
  * Reduce one transform step to its display summary: the sanitized function name
  * and a bounded, sanitized `key: value` view of its parameters. Each entry is
  * sanitized as a whole (so a parameter key or value cannot carry control, bidi,
@@ -282,14 +386,38 @@ function describeParamValue(value: unknown): string {
  */
 function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
-  const params = entries
-    .slice(0, MAX_DISPLAYED_PARAMS)
-    .map((entry) =>
-      sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
-    );
+  const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
+  const params = shown.map((entry) =>
+    sanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
+  );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
-  return { function: sanitizeForDisplay(step.function), params };
+  // Look up the description by the RAW function name: the glossary is keyed by
+  // the name core dispatches on, so a match means this is that known function.
+  // The hasOwn guard (not a bare index) is what makes the absent case visible to
+  // the type system -- the function name is partner-controlled and may name no
+  // entry, which the Record index signature alone would silently type as string.
+  const summary: InvitationTransformSummary = {
+    function: sanitizeForDisplay(step.function),
+    params,
+  };
+  if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
+    summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
+  // Surface each runtime-coerced param as its own note rather than folded into
+  // the param line, so it cannot be impersonated by partner text in a param
+  // value. Its content is wholly core-derived: the param name is the function's
+  // own parameter and the executed value comes from core's coercion contract.
+  // Restricted to params whose `key: value` line is actually shown, so a note
+  // never references a param collapsed into the "... N more" overflow.
+  const shownKeys = new Set(shown.map(([key]) => key));
+  const coercions = describeTransformCoercions(step)
+    .filter((c) => shownKeys.has(c.param))
+    .map((c) => ({
+      param: c.param,
+      runsAs: describeExecutedValue(c.executed),
+    }));
+  if (coercions.length > 0) summary.coercions = coercions;
+  return summary;
 }
 
 /**
@@ -323,25 +451,38 @@ function summarizeKey(
 
   const hasSwap = key.swap !== undefined;
   let swap: [string, string] | undefined;
+  let swapTransformInterchange = false;
   if (key.swap !== undefined) {
     // A swap names two elements by their effective identifier (element `name`
-    // if present, otherwise `field`); resolve each to its field label so the
-    // note reads in the same terms as the element list. The schema enforces
-    // that `name ?? field` is unique within a key, so this Map never drops an
-    // element. The note names the two fields only when both references resolve
-    // to distinct labels; otherwise the renderer shows a generic note (see the
-    // `swap` field doc); `swap` is left undefined, never holding a raw or
-    // sanitized identifier, since either would mislead rather than inform.
-    const labelByIdentifier = new Map(
-      key.elements.map((element) => [
-        element.name ?? element.field,
-        labelForField(element.field),
-      ]),
+    // if present, otherwise `field`); resolve each to its element so the note
+    // reads in the same field-label terms as the element list and can see
+    // whether each carries a transform. The schema enforces that `name ?? field`
+    // is unique within a key, so this Map never drops an element. The note names
+    // the two fields only when both references resolve to elements with distinct
+    // labels; otherwise the renderer shows a generic note (see the `swap` field
+    // doc); `swap` is left undefined, never holding a raw or sanitized
+    // identifier, since either would mislead rather than inform.
+    const elementByIdentifier = new Map(
+      key.elements.map((element) => [element.name ?? element.field, element]),
     );
-    const first = labelByIdentifier.get(key.swap[0]);
-    const second = labelByIdentifier.get(key.swap[1]);
-    if (first !== undefined && second !== undefined && first !== second)
-      swap = [first, second];
+    const first = elementByIdentifier.get(key.swap[0]);
+    const second = elementByIdentifier.get(key.swap[1]);
+    if (first !== undefined && second !== undefined) {
+      const firstLabel = labelForField(first.field);
+      const secondLabel = labelForField(second.field);
+      if (firstLabel !== secondLabel) {
+        swap = [firstLabel, secondLabel];
+        // Depict the transformed-value interchange only when BOTH swapped
+        // elements carry a transform: on the receiver side each element keeps
+        // its own transforms but reads the OTHER element's field value, so the
+        // transforms cross-apply. Only when both sides carry transforms does the
+        // generic "matched in either order" note understate what the receiver
+        // does; the narrow case this depiction exists for.
+        swapTransformInterchange =
+          (first.transform?.length ?? 0) > 0 &&
+          (second.transform?.length ?? 0) > 0;
+      }
+    }
   }
 
   const hasNonDefaultRule =
@@ -356,6 +497,7 @@ function summarizeKey(
     elements,
     hasSwap,
     swap,
+    swapTransformInterchange,
     hasNonDefaultRule,
   };
 }

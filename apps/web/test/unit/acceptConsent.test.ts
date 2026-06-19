@@ -5,13 +5,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { MantineProvider } from "@mantine/core";
 
-import { generateSharedSecret } from "@psilink/core";
+import {
+  STANDARDIZATION_FUNCTION_NAMES,
+  generateSharedSecret,
+} from "@psilink/core";
 
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
 import { InvitationTerms } from "@components/InvitationTerms";
 
+import {
+  TRANSFORM_FUNCTION_GLOSSARY,
+  summarizeInvitation,
+} from "@psi/invitationSummary";
 import { commitAcceptance } from "@psi/acceptConsent";
-import { summarizeInvitation } from "@psi/invitationSummary";
 
 import type { ReactElement } from "react";
 
@@ -327,11 +333,15 @@ describe("summarizeInvitation", () => {
       ),
     ).toBe(true);
 
-    // A transform is flagged, and its (sanitized) function name surfaces on the
-    // element it applies to.
+    // A transform is flagged, and its (sanitized) function name and
+    // plain-language description surface on the element it applies to.
     expect(transformed.hasNonDefaultRule).toBe(true);
     expect(transformed.elements[1].transforms).toEqual([
-      { function: "substring", params: ["start: 1", "length: 1"] },
+      {
+        function: "substring",
+        params: ["start: 1", "length: 1"],
+        description: TRANSFORM_FUNCTION_GLOSSARY["substring"],
+      },
     ]);
 
     // A swap is flagged, and resolves to the swapped elements' field labels.
@@ -470,6 +480,51 @@ describe("summarizeInvitation", () => {
     expect(fuzzyLabelFor("adjacentYears")).toBe("adjacent years");
   });
 
+  // The summary surfaced for a transform declaring `fn`.
+  const transformFor = (fn: string) =>
+    summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "ssn", transform: [{ function: fn }] }],
+          },
+        ],
+      }),
+    ).linkageKeys[0].elements[0].transforms[0];
+
+  test("the transform glossary stays in sync with core's function set", () => {
+    // Two-directional: every function core recognizes has a description, and the
+    // glossary carries no entry for a function core does not (a stale key). A new
+    // core function therefore cannot ship without a consent-screen description,
+    // and a removed one cannot leave dead copy behind.
+    expect(Object.keys(TRANSFORM_FUNCTION_GLOSSARY).sort()).toEqual(
+      [...STANDARDIZATION_FUNCTION_NAMES].sort(),
+    );
+  });
+
+  test("describes a transform's matching effect alongside its name", () => {
+    // coalesce is the headline match-widening case: its description must name the
+    // consequence (it can create matches that would not otherwise occur), not
+    // restate the name.
+    const coalesce = transformFor("coalesce");
+    expect(coalesce.function).toBe("coalesce");
+    expect(coalesce.description).toBe(TRANSFORM_FUNCTION_GLOSSARY["coalesce"]);
+    expect(coalesce.description).toMatch(/matches that would not otherwise/i);
+
+    // A normalizing function is described too, so every step carries context.
+    expect(transformFor("to_upper_case").description).toMatch(/case/i);
+  });
+
+  test("omits a description for a function name core does not recognize", () => {
+    // A partner-declared name with no core match falls back to the bare
+    // (sanitized) name with no description, rather than a misleading one.
+    const unknown = transformFor("not_a_real_function");
+    expect(unknown.function).toBe("not_a_real_function");
+    expect(unknown.description).toBeUndefined();
+  });
+
   test("renders transform parameter values of every type", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -528,6 +583,105 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
+  // The display summary for a single transform step.
+  const transformWith = (fn: string, params: Record<string, unknown>) =>
+    summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "ssn", transform: [{ function: fn, params }] }],
+          },
+        ],
+      }),
+    ).linkageKeys[0].elements[0].transforms[0];
+
+  test("annotates a coerced parameter with the value the function actually runs", () => {
+    // The headline case: replace_regex replacement: null executes as the empty
+    // string. The param line stays verbatim and the executed value is surfaced
+    // as a separate coercion note (not folded into the partner-controlled line).
+    const transform = transformWith("replace_regex", {
+      pattern: "x",
+      replacement: null,
+    });
+    expect(transform.params).toEqual(["pattern: x", "replacement: null"]);
+    expect(transform.coercions).toEqual([
+      { param: "replacement", runsAs: "the empty string" },
+    ]);
+  });
+
+  test("shows an un-coerced parameter verbatim, even when declared null", () => {
+    // A declared, non-null value is applied as written -- no coercion note.
+    const real = transformWith("replace_regex", {
+      pattern: "x",
+      replacement: "Y",
+    });
+    expect(real.params).toEqual(["pattern: x", "replacement: Y"]);
+    expect(real.coercions).toBeUndefined();
+    // The coercion is per-parameter: replace_regex coerces `replacement` but not
+    // `pattern`, so a null pattern keeps its literal "null" and gains no note
+    // where a blanket "(empty)" rendering would be wrong.
+    const nullPattern = transformWith("replace_regex", { pattern: null });
+    expect(nullPattern.params).toEqual(["pattern: null"]);
+    expect(nullPattern.coercions).toBeUndefined();
+  });
+
+  test("a forged 'runs as' in a partner param value does not become a coercion note", () => {
+    // A malicious inviter placing the annotation's literal text inside a param
+    // VALUE stays a verbatim `key: value` line and yields no coercion note: the
+    // genuine note is a separate element built only from core's table, so it
+    // cannot be impersonated by partner-controlled param content.
+    const transform = transformWith("replace_regex", {
+      pattern: "x",
+      replacement: "Y runs as the empty string",
+    });
+    expect(transform.params).toEqual([
+      "pattern: x",
+      "replacement: Y runs as the empty string",
+    ]);
+    expect(transform.coercions).toBeUndefined();
+  });
+
+  test("surfaces a note for each coerced parameter of a step", () => {
+    // parse_date defaults both formats; declaring both null yields two notes, in
+    // the function's parameter order.
+    const transform = transformWith("parse_date", {
+      inputFormat: null,
+      outputFormat: null,
+    });
+    expect(transform.coercions).toEqual([
+      { param: "inputFormat", runsAs: "MM/DD/YYYY" },
+      { param: "outputFormat", runsAs: "YYYYMMDD" },
+    ]);
+  });
+
+  test("names the executed value for non-empty-string fallbacks", () => {
+    // Beyond the empty-string case: a boolean fallback (split_on includeOriginal)
+    // and a string fallback (pad_left char) render their real executed value, so
+    // the web "runs as" text matches core's actual fallback for every function.
+    expect(
+      transformWith("split_on", { delimiter: ",", includeOriginal: null })
+        .coercions,
+    ).toEqual([{ param: "includeOriginal", runsAs: "false" }]);
+    expect(
+      transformWith("pad_left", { length: 5, char: null }).coercions,
+    ).toEqual([{ param: "char", runsAs: "0" }]);
+  });
+
+  test("does not annotate a coerced param hidden by the display cap", () => {
+    // A coerced param past MAX_DISPLAYED_PARAMS collapses into the overflow
+    // marker; its note is withheld too, so a note never references a param the
+    // acceptor cannot see.
+    const params: Record<string, unknown> = { pattern: "x" };
+    for (let i = 0; i < 15; i += 1) params["f" + i] = i;
+    params.replacement = null; // the 17th entry, beyond the cap
+    const transform = transformWith("replace_regex", params);
+    expect(transform.params).toContain("... 1 more");
+    expect(transform.params).not.toContain("replacement: null");
+    expect(transform.coercions).toBeUndefined();
+  });
+
   test("sanitizes payload column names on both the send and receive sides", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -566,6 +720,91 @@ describe("summarizeInvitation", () => {
     expect(swap?.[0]).not.toContain(BEL);
     expect(swap?.[0]).toContain("\\x07");
     expect(swap?.[1]).not.toContain(BEL);
+  });
+
+  test("depicts the transformed-value interchange only when both swapped elements transform", () => {
+    // The summary for a two-element key swapped on its elements, with the given
+    // transforms on each.
+    const keyFor = (
+      firstTransform: LinkageKeyElement["transform"],
+      secondTransform: LinkageKeyElement["transform"],
+    ) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [
+            { name: "first_name", type: "firstName" },
+            { name: "last_name", type: "lastName" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [
+                {
+                  field: "first_name",
+                  ...(firstTransform && { transform: firstTransform }),
+                },
+                {
+                  field: "last_name",
+                  ...(secondTransform && { transform: secondTransform }),
+                },
+              ],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      ).linkageKeys[0];
+
+    const upper: LinkageKeyElement["transform"] = [
+      { function: "to_upper_case" },
+    ];
+
+    // Both swapped elements carry a transform: on the receiver side each keeps
+    // its transforms but reads the other's field value, so the interchange is
+    // depicted, named in terms of the two resolved field labels.
+    const both = keyFor(upper, upper);
+    expect(both.swap).toEqual(["First name", "Last name"]);
+    expect(both.swapTransformInterchange).toBe(true);
+
+    // Only one side (or neither) carries a transform: nothing cross-applies both
+    // ways, so the generic swap note stands and the interchange is not depicted.
+    expect(keyFor(upper, undefined).swapTransformInterchange).toBe(false);
+    expect(keyFor(undefined, undefined).swapTransformInterchange).toBe(false);
+  });
+
+  test("withholds the interchange when both swapped elements share a field label", () => {
+    // Two firstName fields resolve to the same "First name" label, so the note
+    // could not name the two sides distinctly. The interchange is suppressed even
+    // though both elements carry a transform -- the distinct-label gate wins over
+    // the both-transform gate, falling back to the generic swap note.
+    const key = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "given", type: "firstName" },
+          { name: "preferred", type: "firstName" },
+        ],
+        linkageKeys: [
+          {
+            name: "FN",
+            elements: [
+              {
+                field: "given",
+                name: "g",
+                transform: [{ function: "to_upper_case" }],
+              },
+              {
+                field: "preferred",
+                name: "p",
+                transform: [{ function: "to_upper_case" }],
+              },
+            ],
+            swap: ["g", "p"],
+          },
+        ],
+      }),
+    ).linkageKeys[0];
+    expect(key.hasSwap).toBe(true);
+    expect(key.swap).toBeUndefined();
+    expect(key.swapTransformInterchange).toBe(false);
   });
 
   test("emits no constraint phrase for no-op constraint settings", () => {
@@ -836,6 +1075,79 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(html).toContain("... 4 more");
   });
 
+  test("renders the runtime-coercion annotation for a coerced parameter", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "ssn", type: "ssn" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: { pattern: "x", replacement: null },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    // The declared null reaches the screen verbatim, and what the function
+    // actually runs is surfaced as a separate note, so the consent term cannot
+    // misstate the match yet the executed value is not folded into the
+    // partner-controlled param line.
+    expect(html).toContain("replacement: null");
+    expect(html).toContain("replacement runs as the empty string");
+    // The note carries a screen-reader-only "Runtime note:" lead-in marking it
+    // as system-authored -- a signal a partner (who controls only param-value
+    // text) cannot inject.
+    expect(html).toContain("Runtime note:");
+  });
+
+  test("a forged 'runs as' in a param value renders no system coercion note", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [{ name: "ssn", type: "ssn" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: {
+                        pattern: "x",
+                        replacement: "Y runs as the empty string",
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    });
+    // The forged text renders as the verbatim param line ...
+    expect(html).toContain("replacement: Y runs as the empty string");
+    // ... but no genuine system note is synthesized: the "Runtime note:" lead-in
+    // a partner cannot inject is absent, so a screen reader does not hear this as
+    // a system-authored coercion note.
+    expect(html).not.toContain("Runtime note:");
+  });
+
   test("flags a proposed deduplicate setting the current exchange does not apply", () => {
     const proposed = renderPanel({
       decode: {
@@ -872,6 +1184,63 @@ describe("accept screen: terms render from a decoded token", () => {
     });
     expect(html).toContain("adjacent years");
     expect(html).toContain("(proposed; not yet applied)");
+  });
+
+  test("depicts the transform interchange for a swap whose elements both transform", () => {
+    const html = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            { name: "first_name", type: "firstName" },
+            { name: "last_name", type: "lastName" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [
+                {
+                  field: "first_name",
+                  transform: [{ function: "to_upper_case" }],
+                },
+                {
+                  field: "last_name",
+                  transform: [{ function: "to_upper_case" }],
+                },
+              ],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      },
+    });
+    // The generic swap note, plus the interchange detail naming which field each
+    // element's transforms run on once the fields swap.
+    expect(html).toContain("may be matched in either order");
+    expect(html).toContain("transforms shown for First name");
+    expect(html).toContain("are applied to Last name");
+
+    // A swap whose elements carry no transforms keeps the generic note alone.
+    const plain = renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            { name: "first_name", type: "firstName" },
+            { name: "last_name", type: "lastName" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [{ field: "first_name" }, { field: "last_name" }],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      },
+    });
+    expect(plain).toContain("may be matched in either order");
+    expect(plain).not.toContain("transforms shown for");
   });
 });
 

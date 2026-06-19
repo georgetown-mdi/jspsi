@@ -1,4 +1,12 @@
-import { Badge, Group, List, Stack, Text, Title } from "@mantine/core";
+import {
+  Badge,
+  Group,
+  List,
+  Stack,
+  Text,
+  Title,
+  VisuallyHidden,
+} from "@mantine/core";
 
 import { summarizeInvitation } from "@psi/invitationSummary";
 
@@ -86,9 +94,35 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
                 <Text size="xs" c="dimmed">
                   transformed ({transform.function})
                 </Text>
+                {/* Plain-language description of the function's matching effect.
+                    Fixed copy keyed by the recognized function name (not
+                    partner-controlled), so it renders verbatim; absent for a
+                    function name core does not recognize. */}
+                {transform.description !== undefined && (
+                  <Text size="xs" c="dimmed" pl="md" fs="italic">
+                    {transform.description}
+                  </Text>
+                )}
                 {transform.params.map((param, pi) => (
                   <Text key={pi} size="xs" c="dimmed" pl="md">
                     {param}
+                  </Text>
+                ))}
+                {/* Runtime-coercion notes for params the function overrides
+                    (e.g. replacement: null runs as the empty string). Rendered
+                    as their own element, with the fixed "runs as" copy as static
+                    JSX text between two core-derived values -- never folded into
+                    a partner-controlled param line -- so the note cannot be
+                    impersonated by text placed inside a param value. The
+                    italic styling marks it as a system note visually; the
+                    VisuallyHidden lead-in carries that same provenance to a
+                    screen reader (a partner controls only param-value text, so
+                    it cannot inject this element), since italics are not
+                    announced. */}
+                {transform.coercions?.map((coercion, ci) => (
+                  <Text key={ci} size="xs" c="dimmed" pl="md" fs="italic">
+                    <VisuallyHidden>Runtime note: </VisuallyHidden>
+                    {coercion.param} runs as {coercion.runsAs}
                   </Text>
                 ))}
               </Stack>
@@ -101,6 +135,17 @@ function MatchKey({ summary }: { summary: InvitationKeySummary }) {
           {summary.swap !== undefined
             ? `${summary.swap[0]} and ${summary.swap[1]} may be matched in either order`
             : "Two of these elements may be matched in either order"}
+        </Text>
+      )}
+      {/* When both swapped elements carry transforms, the receiver applies each
+          element's transforms to the OTHER element's field value (the field
+          references swap, the transforms stay put), which the generic swap note
+          above does not convey. swapTransformInterchange implies swap is set. */}
+      {summary.swapTransformInterchange && summary.swap !== undefined && (
+        <Text size="xs" c="dimmed">
+          When matched in that order, the transforms shown for {summary.swap[0]}{" "}
+          are applied to {summary.swap[1]}&rsquo;s value, and those for{" "}
+          {summary.swap[1]} to {summary.swap[0]}&rsquo;s value.
         </Text>
       )}
     </Stack>
