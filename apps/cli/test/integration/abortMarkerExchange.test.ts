@@ -73,6 +73,7 @@ import {
   ConnectionError,
 } from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
+import { withCapturedLogs } from "@psilink/core/testing";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { saveKeyFile } from "../../src/keyFile";
@@ -130,6 +131,10 @@ interface AbortScenarioOutcome {
   reasons: unknown[];
   /** Count of `<id>-abort.json` files left in the shared directory. */
   markerCount: number;
+  /** WARN/ERROR lines the run emits -- captured so the faulting party's
+   *  intended recovery advisory is asserted rather than leaked to the suite
+   *  console (see expectFastPeerAbort). */
+  capturedLogs: string[];
 }
 
 // Drives two real runProtocol parties against a shared directory, lets the
@@ -147,24 +152,34 @@ async function runAbortScenario(
   saveKeyFile(keyA, { sharedSecret: INITIAL_SECRET });
   saveKeyFile(keyB, { sharedSecret: INITIAL_SECRET });
 
-  const [resA, resB] = await Promise.allSettled([
-    runProtocol(
-      makeConfig(),
-      { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
-      preparedFor("Party A"),
-      path.join(work, "a-out.csv"),
-      -1,
-      "abort-a",
-    ),
-    runProtocol(
-      makeConfig(),
-      { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
-      preparedFor("Party B"),
-      path.join(work, "b-out.csv"),
-      -1,
-      "abort-b",
-    ),
-  ]);
+  // The faulting party's catch emits an ERROR recovery advisory (its token
+  // rotated before the fault). Run the parties under withCapturedLogs so that
+  // intended line is captured for assertion below rather than printed to the
+  // suite console; both per-party loggers are created (by name) inside this
+  // wrapped call, so they bind to the capture's interceptor.
+  const [settled, capturedLogs] = await withCapturedLogs(
+    () =>
+      Promise.allSettled([
+        runProtocol(
+          makeConfig(),
+          { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
+          preparedFor("Party A"),
+          path.join(work, "a-out.csv"),
+          -1,
+          "abort-a",
+        ),
+        runProtocol(
+          makeConfig(),
+          { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
+          preparedFor("Party B"),
+          path.join(work, "b-out.csv"),
+          -1,
+          "abort-b",
+        ),
+      ]),
+    (level) => level === "WARN" || level === "ERROR",
+  );
+  const [resA, resB] = settled;
 
   expect(resA.status).toBe("rejected");
   expect(resB.status).toBe("rejected");
@@ -174,7 +189,11 @@ async function runAbortScenario(
     n.endsWith("-abort.json"),
   ).length;
 
-  return { reasons, markerCount };
+  return {
+    reasons,
+    markerCount,
+    capturedLogs: capturedLogs.map((l) => l.message),
+  };
 }
 
 // The shared assertions. Each side is identified positively by error TYPE: the
@@ -202,6 +221,16 @@ function expectFastPeerAbort(outcome: AbortScenarioOutcome): void {
   // The real marker write landed exactly once (the path the Buffer-wrap fix
   // repaired) and was not echoed by the waiting peer.
   expect(outcome.markerCount).toBe(1);
+
+  // Exactly one intended WARN/ERROR fired: the faulting party's recovery
+  // advisory (its token rotated before the synthetic fault, so it tells the
+  // operator to retry without re-inviting). The waiting peer's PeerAbortError is
+  // hint-tagged and emits none. Asserting the captured set proves intent and
+  // guards against a different, genuine error slipping through unsuppressed.
+  expect(outcome.capturedLogs).toHaveLength(1);
+  expect(outcome.capturedLogs[0]).toContain(
+    "The shared secret was already rotated and saved before this error.",
+  );
 }
 
 let work: string;

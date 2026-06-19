@@ -25,6 +25,7 @@ import type {
   FileDropConnectionConfig,
   SFTPConnectionConfig,
 } from "@psilink/core";
+import { withCapturedLogs } from "@psilink/core/testing";
 
 import {
   resolveInvitePositionals,
@@ -652,41 +653,52 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   // handshake must still produce neither. Both artifacts are written only after the
   // exchange completes (writeOutput / writeExchangeRecord), which an aborted
   // handshake never reaches, so this pins that nothing partial leaks on failure.
-  const [inviteOutcome, acceptOutcome] = await Promise.allSettled([
-    runOnlineBootstrap({
-      connection: inviteReady.connection,
-      dataSpec: inviteReady.dataSpec,
-      prepared: inviteReady.prepared,
-      sharedSecret: inviteReady.sharedSecret,
-      expires: inviteReady.expires,
-      keyPath: inviteOptions.keyFile,
-      configPath: inviteOptions.configFile,
-      output: inviteReady.output,
-      verbosity: 0,
-      loggerName: "invite",
-      recordOutput: resolveRecordOutput({
-        enabled: inviteOptions.record,
-        recordFile: inviteOptions.recordFile,
-      }),
-    }),
-    runOnlineBootstrap({
-      connection: acceptReady.connection,
-      dataSpec: acceptReady.dataSpec,
-      prepared: acceptReady.prepared,
-      sharedSecret: wrongSecret,
-      expires: acceptReady.token.expires,
-      keyPath: acceptOptions.keyFile,
-      configPath: acceptOptions.configFile,
-      output: acceptReady.output,
-      verbosity: 0,
-      loggerName: "accept",
-      recordOutput: resolveRecordOutput({
-        enabled: acceptOptions.record,
-        recordFile: acceptOptions.recordFile,
-      }),
-      reuseExistingConfig: acceptReady.reuseExistingConfig,
-    }),
-  ]);
+  // Both sides abort mid-handshake with their token un-rotated, so each emits a
+  // "key exchange was in progress" recovery advisory at ERROR. Run them under
+  // withCapturedLogs so those intended lines are captured for assertion below
+  // rather than leaked to the suite console. The logger names are unique to this
+  // test (the happy-path test above already created "invite"/"accept", and a
+  // logger created before the capture's interceptor is installed would bypass
+  // it -- a fresh name guarantees both loggers bind to the interceptor here).
+  const [[inviteOutcome, acceptOutcome], capturedLogs] = await withCapturedLogs(
+    () =>
+      Promise.allSettled([
+        runOnlineBootstrap({
+          connection: inviteReady.connection,
+          dataSpec: inviteReady.dataSpec,
+          prepared: inviteReady.prepared,
+          sharedSecret: inviteReady.sharedSecret,
+          expires: inviteReady.expires,
+          keyPath: inviteOptions.keyFile,
+          configPath: inviteOptions.configFile,
+          output: inviteReady.output,
+          verbosity: 0,
+          loggerName: "mismatch-invite",
+          recordOutput: resolveRecordOutput({
+            enabled: inviteOptions.record,
+            recordFile: inviteOptions.recordFile,
+          }),
+        }),
+        runOnlineBootstrap({
+          connection: acceptReady.connection,
+          dataSpec: acceptReady.dataSpec,
+          prepared: acceptReady.prepared,
+          sharedSecret: wrongSecret,
+          expires: acceptReady.token.expires,
+          keyPath: acceptOptions.keyFile,
+          configPath: acceptOptions.configFile,
+          output: acceptReady.output,
+          verbosity: 0,
+          loggerName: "mismatch-accept",
+          recordOutput: resolveRecordOutput({
+            enabled: acceptOptions.record,
+            recordFile: acceptOptions.recordFile,
+          }),
+          reuseExistingConfig: acceptReady.reuseExistingConfig,
+        }),
+      ]),
+    (level) => level === "WARN" || level === "ERROR",
+  );
 
   // The handshake aborts on both sides: neither saves the rotated key, so neither
   // fires the config-writing hook. No key, no config, on either side. Pin each
@@ -712,6 +724,18 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   // CommonBootstrapOptions, so it is checked here rather than in the helper).
   expect(fs.existsSync(inviteOut)).toBe(false);
   expect(fs.existsSync(acceptOut)).toBe(false);
+
+  // Both sides' aborted handshakes emit the "key exchange was in progress"
+  // recovery advisory at ERROR -- the only intended WARN/ERROR of this run.
+  // Asserting the captured set proves intent (each is the known advisory) and
+  // guards against a genuine, unexpected error being suppressed unseen.
+  const advisories = capturedLogs.map((l) => l.message);
+  expect(advisories).toHaveLength(2);
+  for (const message of advisories) {
+    expect(message).toContain(
+      "The key exchange was in progress when this error occurred.",
+    );
+  }
 }, 60_000);
 
 // --- Happy path: sftp ---------------------------------------------------------

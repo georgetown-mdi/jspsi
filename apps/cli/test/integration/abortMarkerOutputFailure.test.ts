@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { prepareForExchange } from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
+import { withCapturedLogs } from "@psilink/core/testing";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { saveKeyFile } from "../../src/keyFile";
@@ -84,25 +85,35 @@ test("a result-write failure after a completed exchange writes no abort marker",
   });
 
   // Party A's output path has a missing parent directory, so its writeOutput
-  // throws ENOENT after the exchange completes; Party B's path is valid.
-  const [resA, resB] = await Promise.allSettled([
-    runProtocol(
-      makeConfig(),
-      { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
-      preparedFor("Party A"),
-      path.join(work, "missing-parent", "a-out.csv"),
-      -1,
-      "noabort-a",
-    ),
-    runProtocol(
-      makeConfig(),
-      { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
-      preparedFor("Party B"),
-      path.join(work, "b-out.csv"),
-      -1,
-      "noabort-b",
-    ),
-  ]);
+  // throws ENOENT after the exchange completes; Party B's path is valid. Party
+  // A's token rotated before that local failure, so runProtocol emits a recovery
+  // advisory at ERROR; run both parties under withCapturedLogs so that intended
+  // line is captured for assertion below rather than leaked to the suite
+  // console (the per-party loggers are created by name inside this wrapped call,
+  // so they bind to the capture's interceptor).
+  const [settled, capturedLogs] = await withCapturedLogs(
+    () =>
+      Promise.allSettled([
+        runProtocol(
+          makeConfig(),
+          { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
+          preparedFor("Party A"),
+          path.join(work, "missing-parent", "a-out.csv"),
+          -1,
+          "noabort-a",
+        ),
+        runProtocol(
+          makeConfig(),
+          { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
+          preparedFor("Party B"),
+          path.join(work, "b-out.csv"),
+          -1,
+          "noabort-b",
+        ),
+      ]),
+    (level) => level === "WARN" || level === "ERROR",
+  );
+  const [resA, resB] = settled;
 
   // A failed on its local output write -- specifically the ENOENT from the
   // missing parent directory, not some masked earlier fault -- while B completed
@@ -123,4 +134,13 @@ test("a result-write failure after a completed exchange writes no abort marker",
 
   // B's result was actually written -- it was not poisoned by A's failure.
   expect(fs.existsSync(path.join(work, "b-out.csv"))).toBe(true);
+
+  // Exactly one intended WARN/ERROR fired: A's "rotated before this error"
+  // recovery advisory (its token was saved before the post-exchange output
+  // write failed). B completed cleanly and emits none. Asserting the captured
+  // set proves intent and guards against a different error slipping through.
+  expect(capturedLogs).toHaveLength(1);
+  expect(capturedLogs[0].message).toContain(
+    "The shared secret was already rotated and saved before this error.",
+  );
 }, 30_000);
