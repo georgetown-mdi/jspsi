@@ -45,6 +45,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - Online `psilink invite` states up front that the printed invitation is acceptable only while the command is waiting. See `docs/CLI.md`.
 - Terminal transport and directory errors (an over-cap frame, a contaminated directory, a stalled server) now end with a concrete next step and suppress the contradictory generic "retry without re-inviting" advisory.
 - The CLI and the web accept screen render an invitation or config validation failure as a readable one-liner instead of a raw schema-error dump.
+- The web exchange screen shows a fixed, friendly, retry-oriented message when a generic transport failure (a dropped or failed connection) ends an exchange, instead of the raw error text; the detailed error stays in the browser console for diagnosis.
 - Documentation is reorganized into `docs/` (overview) and `docs/spec/` (wire formats, byte encodings, constants); some files moved or were renamed, so links to old paths break. See `docs/spec/README.md`.
 
 ### Removed
