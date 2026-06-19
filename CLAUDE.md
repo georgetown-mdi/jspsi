@@ -46,6 +46,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - After a chain of edits, run `npm run typecheck && npm run lint && npm run format`; the LSP server often has a stale cache.
 - Typecheck, lint, and format are CI checks.
 - Project state belongs in the GitHub project and docs/, not agent memory.
+- Encode a "does not happen at runtime" claim (a line that never fires, an unreachable branch) as a check, never a comment or doc note -- prose asserting a runtime fact rots silently; a check cannot lie. Full rule and the Global-listener cautionary example: `CONTRIBUTING.md`, Code Conventions.
 - Prettier ignores markdown.
 - Branch names shouldn't use '/'.
 - Don't use chip to raise issues -- ask directly.
