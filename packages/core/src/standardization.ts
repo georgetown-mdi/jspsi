@@ -706,6 +706,10 @@ export class StandardizedDataset {
  * binding the dataset builder and the satisfiability checker both consume, so
  * the two can no longer encode the resolution rules independently and drift (the
  * detector-vs-runtime divergence class). Produced by {@link resolveFieldColumns}.
+ *
+ * @internal The return shape of an internal resolution primitive; exported only
+ * because it is {@link resolveFieldColumns}'s return type, not as a supported
+ * entry point.
  */
 export interface FieldColumnResolution {
   /**
@@ -748,6 +752,12 @@ export interface FieldColumnResolution {
  * presence test on top. `metadata` is the resolved metadata the caller already
  * chose (an explicit block or `inferMetadata`); under inferred metadata every
  * column is present, so the presence test only bites under an explicit block.
+ *
+ * @internal Shared primitive for the resolution's three in-package consumers
+ * (builder, satisfiability checker, default-standardization derivation);
+ * exported for those cross-module imports, not as a supported entry point. The
+ * web and CLI paths consume {@link assessLinkageSatisfiability} /
+ * {@link unsatisfiedLinkageFields}, not this directly.
  */
 export function resolveFieldColumns(
   terms: LinkageTerms,
