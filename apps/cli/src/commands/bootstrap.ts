@@ -203,9 +203,14 @@ function filedropPathsEqual(
   // Normalize both sides through the connection's own normalizer, so the diff's
   // verdict is exactly what the live filedrop connection would open (backslashes
   // folded to forward slashes, all trailing slashes stripped, root-like paths
-  // preserved) -- no separate equality rule to drift from it. The `undefined`
-  // branch is defensive only: a filedrop `path` is schema-required, so it does
-  // not fire on a parsed config.
+  // preserved) -- no separate equality rule to drift from it. `path` is now
+  // optional: a split-directory config (inbound_path/outbound_path) carries no
+  // `path`, so `undefined` legitimately arrives from a parsed config. The
+  // caller compares only the single `path` here; reconciling the split pair is
+  // deferred to the CLI split surface (item 201740349), which must extend
+  // diffConnectionAgainstTarget to compare inbound_path/outbound_path -- until
+  // then connectionFromURL never produces a split target, so a split incoming
+  // config cannot reach this comparison.
   const norm = (p: string | undefined): string | undefined =>
     p === undefined ? undefined : normalizeFiledropPath(p);
   return norm(a) === norm(b);

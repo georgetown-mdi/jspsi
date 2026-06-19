@@ -1366,7 +1366,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.debug(
         `[${this.role}] connecting to ` +
           `${sanitizeForDisplay(config.server.host)}${portString}` +
-          `${usernameString}, path: ${this.displayPath}`,
+          `${usernameString}, path: ${this.displayPath}` +
+          // Name the outbound directory too in split mode, so a misconfigured
+          // outbound path is diagnosable from the connect log rather than only
+          // at the first write. Mirrors the filedrop open() log above.
+          (split
+            ? ` (inbound), outbound: ${sanitizeForDisplay(outboundDir)}`
+            : ""),
       );
       try {
         await this.client.connect(connectOptions);
@@ -1625,9 +1631,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `[${this.role}] cleaning up ${this.responsibleFiles.size} file(s)` +
         `${responsibleFilesString}`,
     );
+    // responsibleFiles holds this party's own writes (hello, lock, joining, ack,
+    // message), which are all self-writes and therefore live in the OUTBOUND
+    // directory; sweep them there. cleanup() is a no-op in retain mode (the early
+    // return above), and a config-derived split connection requires retain, so in
+    // practice this only runs in shared mode (outbound === path); routing through
+    // outboundPath additionally keeps a direct-set library caller who configured a
+    // split outbound without retain mode from orphaning files in the wrong place.
     return Promise.all(
       Array.from(this.responsibleFiles).map((filename) =>
-        this.client.safeDelete(`${this.path}/${filename}`),
+        this.client.safeDelete(`${this.outboundPath}/${filename}`),
       ),
     );
   }
@@ -2090,6 +2103,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     peerHellos: Array<FileInfo>,
     unexpectedProtocol: Array<{ file: FileInfo; dir: string }>,
   ): Promise<void> {
+    // The directory scope this sweep touches, for operator-facing messages: in
+    // split mode the sweep deletes from BOTH directories (peer leftovers in
+    // inbound, this party's own leftovers in outbound), so name both; in shared
+    // mode it collapses to displayPath.
+    const dirsDisplay =
+      this.outbound === undefined
+        ? this.displayPath
+        : `${sanitizeForDisplay(inboundPath)} (inbound) and ` +
+          `${sanitizeForDisplay(this.outbound)} (outbound)`;
+
     const signals: string[] = [];
     let retainUncertain = false;
 
@@ -2179,7 +2202,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           : "a peer hello body that did not resolve within the inspection " +
             "budget (retain-uncertain)";
       throw new UsageError(
-        `path ${this.displayPath} shows a retain-mode signal ` +
+        `path ${dirsDisplay} shows a retain-mode signal ` +
           `(${reason}), so ` +
           "--sweep-exchange-files refuses to delete what may be a durable audit " +
           "transcript. Re-run with --force-retain-sweep to wipe the prior " +
@@ -2208,7 +2231,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.log.warn(
         `[${this.id}] --force-retain-sweep: permanently deleting a ` +
           `retain-mode audit transcript (${toDelete.length} protocol file(s)) ` +
-          `in ${this.displayPath}. This is destructive and ` +
+          `in ${dirsDisplay}. This is destructive and ` +
           `irreversible; the prior ` +
           "transcript will be lost. Only use --force-retain-sweep when you " +
           "intend to discard it.",
@@ -2222,7 +2245,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     this.log.info(
       `[${this.id}] sweeping ${toDelete.length} protocol file(s) at ` +
-        `${this.displayPath} (--sweep-exchange-files): ` +
+        `${dirsDisplay} (--sweep-exchange-files): ` +
         `${toDelete.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
     );
     // allSettled, not all: await every delete before reporting, so a single
@@ -2248,7 +2271,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (failures.length > 0)
       throw new Error(
         `--sweep-exchange-files failed to delete ${failures.length} of ` +
-          `${toDelete.length} protocol file(s) at ${this.displayPath}: ` +
+          `${toDelete.length} protocol file(s) at ${dirsDisplay}: ` +
           `${failures.join("; ")}. The directory may be partially swept; ` +
           "resolve the transport error and re-run.",
       );
