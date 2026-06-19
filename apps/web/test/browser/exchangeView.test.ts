@@ -29,25 +29,37 @@ vi.mock("@psi/rendezvous", () => ({
 // options (role, secret, signal) and resolve. This isolates ExchangeView's
 // Start->run wiring -- which role it runs as, that it starts once per mount, and
 // that a remount resets the controller -- from the real peer/WASM machinery,
-// which the lifecycle and live-exchange suites cover.
-const lifecycle = vi.hoisted(() => ({
-  calls: [] as Array<{
-    exchangeRole: "initiator" | "responder";
-    sharedSecret: string;
-    signal: AbortSignal;
-  }>,
-}));
+// which the lifecycle and live-exchange suites cover. `outcome` lets a test drive
+// ExchangeView's own onResult/onError handling (e.g. the warning-on-success vs
+// cleared-on-failure branch) without a real exchange: the stub fires the matching
+// callback synchronously, inside the triggering click's act() scope.
+const lifecycle = vi.hoisted(
+  (): {
+    outcome: "none" | "success" | "failure";
+    calls: Array<{
+      exchangeRole: "initiator" | "responder";
+      sharedSecret: string;
+      signal: AbortSignal;
+    }>;
+  } => ({ outcome: "none", calls: [] }),
+);
 vi.mock("@psi/exchangeLifecycle", () => ({
   runExchangeLifecycle: (options: {
     exchangeRole: "initiator" | "responder";
     sharedSecret: string;
     signal: AbortSignal;
+    onResult: (outputs: { resultsUrl: string }) => void;
+    onError: (failure: { category: string; error: unknown }) => void;
   }) => {
     lifecycle.calls.push({
       exchangeRole: options.exchangeRole,
       sharedSecret: options.sharedSecret,
       signal: options.signal,
     });
+    if (lifecycle.outcome === "success")
+      options.onResult({ resultsUrl: "blob:results" });
+    else if (lifecycle.outcome === "failure")
+      options.onError({ category: "exchange", error: new Error("transport") });
     return Promise.resolve();
   },
 }));
@@ -64,16 +76,37 @@ const acquire = vi.hoisted(() => ({
 vi.mock("@components/FileAcquire", () => ({
   default: (props: {
     linkageTerms?: LinkageTerms;
+    onWarning: (alert: { title: string; message: string } | undefined) => void;
     onAcquired: (b: unknown) => void;
   }) => {
     acquire.lastProps = props;
+    // Two buttons stand in for the real acquire phase: "warn" raises the
+    // partial-coverage advisory the acceptor pre-flight would, and "acquire"
+    // hands up the bundle. A test clicks "warn" then "acquire" to exercise the
+    // warning surviving (or being cleared) across the run it owns.
     return createElement(
-      "button",
-      {
-        "data-testid": "acquire",
-        onClick: () => props.onAcquired({ rawRows: [], columns: [] }),
-      },
-      "acquire",
+      "div",
+      null,
+      createElement(
+        "button",
+        {
+          "data-testid": "warn",
+          onClick: () =>
+            props.onWarning({
+              title: "Partial CSV coverage",
+              message: "some keys inactive",
+            }),
+        },
+        "warn",
+      ),
+      createElement(
+        "button",
+        {
+          "data-testid": "acquire",
+          onClick: () => props.onAcquired({ rawRows: [], columns: [] }),
+        },
+        "acquire",
+      ),
     );
   },
 }));
@@ -110,6 +143,10 @@ function acceptorConfig(sharedSecret: string): ExchangeConfig {
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
+// Set by a failure-path test to swallow the one expected dev-gated
+// console.error (ExchangeView's whenDiagnostic sink, on in this env) so the run
+// output stays quiet; restored in afterEach.
+let consoleErrorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 // Render ExchangeView keyed by its secret, exactly as the invite/accept screens
 // do, so a new secret remounts the subtree.
@@ -123,6 +160,14 @@ function render(config: ExchangeConfig) {
   );
 }
 
+// Set the run outcome a test wants the lifecycle stub to deliver, then mount.
+function setOutcome(outcome: "none" | "success" | "failure") {
+  lifecycle.outcome = outcome;
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+}
+
 afterEach(() => {
   root?.unmount();
   container?.remove();
@@ -130,6 +175,9 @@ afterEach(() => {
   container = undefined;
   acquire.lastProps = undefined;
   lifecycle.calls = [];
+  lifecycle.outcome = "none";
+  consoleErrorSpy?.mockRestore();
+  consoleErrorSpy = undefined;
 });
 
 describe("ExchangeView Start->run wiring", () => {
@@ -217,5 +265,42 @@ describe("ExchangeView Start->run wiring", () => {
     expect(lifecycle.calls).toHaveLength(2);
     expect(lifecycle.calls[1].sharedSecret).toBe("secret-b");
     expect(lifecycle.calls[1].signal).not.toBe(firstSignal);
+  });
+
+  test("keeps a partial-coverage warning when the run succeeds", async () => {
+    setOutcome("success");
+    render(acceptorConfig("secret-a"));
+
+    // The acquire phase raised the partial-coverage advisory before handing off.
+    await userEvent.click(page.getByTestId("warn"));
+    await expect
+      .element(page.getByText("Partial CSV coverage"))
+      .toBeInTheDocument();
+
+    // The run succeeds: the advisory must stay, explaining why the match count
+    // may be lower, and no failure alert appears.
+    await userEvent.click(page.getByTestId("acquire"));
+    await expect.element(page.getByText("Done")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("Partial CSV coverage");
+    expect(document.body.textContent).not.toContain("Exchange failed");
+  });
+
+  test("clears a partial-coverage warning when the run fails", async () => {
+    // The failure path dev-gates the raw error to console.error; swallow that
+    // one expected line so the assertion output stays clean.
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setOutcome("failure");
+    render(acceptorConfig("secret-a"));
+
+    await userEvent.click(page.getByTestId("warn"));
+    await expect
+      .element(page.getByText("Partial CSV coverage"))
+      .toBeInTheDocument();
+
+    // The run fails: the advisory is cleared so it cannot read as the cause
+    // beside the failure alert.
+    await userEvent.click(page.getByTestId("acquire"));
+    await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Partial CSV coverage");
   });
 });
