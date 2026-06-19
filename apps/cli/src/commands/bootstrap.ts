@@ -1403,19 +1403,28 @@ export function warnUnsupportedFileSyncFlags(
 }
 
 /**
- * The connection-block overrides that have no effect on an OFFLINE invite/accept,
- * read by {@link warnConnectionOverridesIgnoredOffline}. A structural subset of
- * {@link CommonBootstrapOptions} (which is assignable to it) holding the
- * `--server-*` credential/port flags and `--outbound-path` -- the connection
- * locator/credential overrides this task (item 202433910) scopes to. The
- * connection/exchange tuning overrides (timeouts, `--max-reconnect-attempts`) and
- * the file-sync toggles (`--retain-files`, `--peer-id`, etc.) are ALSO dropped on
- * the offline path -- they land in `connection.options`, the same block the
- * placeholder stands in for -- so warning on them too would be a reasonable
- * extension; it is left out of this set as a deliberate scope line, not because
- * they take effect.
+ * The connection-locator overrides that have no effect on an OFFLINE
+ * invite/accept, read by {@link warnLocatorOverridesIgnoredOffline}. A structural
+ * subset of {@link CommonBootstrapOptions} (which is assignable to it) holding the
+ * `--server-*` flags and `--outbound-path`: the overrides {@link
+ * applyConnectionOverrides} writes into the connection's locator block --
+ * `connection.server` (host/port/credentials) and the channel's directory paths
+ * -- as opposed to `connection.options`. This is precisely the block the offline
+ * placeholder stands in for: {@link connectionFromEndpoint} writes a locator stub
+ * (a `REPLACE_WITH_...` host/username placeholder, or a seeded host/port/path)
+ * with no `options`, so these are the overrides that would have populated a field
+ * the operator edits. Despite the `--server-*` credential flags, this set is NOT
+ * the credential-free public {@link ConnectionEndpoint} "locator": it carries the
+ * username/password/private-key the placeholder marks for replacement.
+ *
+ * The tuning overrides (timeouts, `--max-reconnect-attempts`) and the file-sync
+ * toggles (`--retain-files`, `--peer-id`, etc.) are ALSO dropped offline, but they
+ * write `connection.options` -- a separate block the placeholder does not contain
+ * -- so the right diagnostic for them is a differently-worded one ("set it under
+ * connection.options"), tracked as a follow-up, not folded in here where it would
+ * blur this message's "set the connection details in that block" remedy.
  */
-export type OfflineIgnoredConnectionOverrides = Pick<
+export type OfflineIgnoredLocatorOverrides = Pick<
   CommonBootstrapOptions,
   | "serverUsername"
   | "serverPassword"
@@ -1425,7 +1434,7 @@ export type OfflineIgnoredConnectionOverrides = Pick<
 >;
 
 /**
- * Warn that the connection-block overrides (`--server-username`,
+ * Warn that the connection-locator overrides (`--server-username`,
  * `--server-password`, `--server-private-key`, `--server-port`, and
  * `--outbound-path`) have no effect on an OFFLINE invite/accept. Those paths
  * write a placeholder (invite) or invitation-endpoint-seeded (accept) connection
@@ -1434,12 +1443,14 @@ export type OfflineIgnoredConnectionOverrides = Pick<
  * go through {@link connectionFromEndpoint}, which applies no connection
  * overrides, and these flags would otherwise be parsed and silently dropped. The
  * warning names exactly the flags the operator set; it is a no-op when none are
- * set. Shared between invite and accept so the wording cannot drift, and so the
- * whole `--server-*`/`--outbound-path` set is treated uniformly rather than only
- * the one flag (`--outbound-path`) whose silent loss is the most surprising.
+ * set. Scoped to the locator block these overrides populate (see {@link
+ * OfflineIgnoredLocatorOverrides}); shared between invite and accept so the
+ * wording cannot drift, and so the whole `--server-*`/`--outbound-path` set is
+ * treated uniformly rather than only the one flag (`--outbound-path`) whose silent
+ * loss is the most surprising.
  */
-export function warnConnectionOverridesIgnoredOffline(
-  options: OfflineIgnoredConnectionOverrides,
+export function warnLocatorOverridesIgnoredOffline(
+  options: OfflineIgnoredLocatorOverrides,
   log: { warn: (message: string) => void },
 ): void {
   const ignored: string[] = [];
