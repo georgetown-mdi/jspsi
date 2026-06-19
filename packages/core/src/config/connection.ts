@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
+import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 
 // --- HTTP service authentication ---------------------------------------------
 
@@ -97,8 +98,22 @@ export const HOST_KEY_FINGERPRINT_REGEX =
 export interface SFTPServer {
   host: string;
   port?: number;
-  /** Remote working directory. */
+  /** Remote working directory (shared mode). */
   path?: string;
+  /**
+   * Inbound (peer-written) remote directory for a split-directory exchange:
+   * this party reads the peer's files here and writes its own to
+   * {@link outboundPath}. Set together with `outboundPath`; mutually exclusive
+   * with `path`, and requires retain mode. Follows the same per-path rules as
+   * `path` (absolute, relative, or unset are all permitted for SFTP), except
+   * that both halves of the pair must be set.
+   */
+  inboundPath?: string;
+  /**
+   * Outbound (self-written) remote directory for a split-directory exchange;
+   * the companion to {@link inboundPath}. Must differ from it.
+   */
+  outboundPath?: string;
   username?: string;
   /** Password authentication; @-file recommended. */
   password?: string;
@@ -128,6 +143,8 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     host: z.string().min(1),
     port: z.int().min(0).max(65535).optional(),
     path: z.string().optional(),
+    inboundPath: z.string().min(1).optional(),
+    outboundPath: z.string().min(1).optional(),
     username: z.string().optional(),
     password: z.string().optional(),
     privateKey: z.string().optional(),
@@ -707,8 +724,25 @@ export interface SFTPConnectionConfig {
  */
 export interface FileDropConnectionConfig {
   channel: "filedrop";
-  /** Absolute path to the shared directory (Unix or Windows). */
-  path: string;
+  /**
+   * Absolute path to the shared directory (Unix or Windows) used in shared
+   * mode. Mutually exclusive with the {@link inboundPath}/{@link outboundPath}
+   * pair; exactly one of the two forms must be given.
+   */
+  path?: string;
+  /**
+   * Absolute path to the inbound (peer-written) directory for a split-directory
+   * exchange: this party reads the peer's files here and writes its own to
+   * {@link outboundPath}. Set together with `outboundPath`; mutually exclusive
+   * with `path`, and requires retain mode.
+   */
+  inboundPath?: string;
+  /**
+   * Absolute path to the outbound (self-written) directory for a
+   * split-directory exchange; the companion to {@link inboundPath}. Must differ
+   * from it.
+   */
+  outboundPath?: string;
   options?: FileSyncOptions;
   // No providerOptions: LocalFSClient has no underlying transport library to
   // pass opaque options to, unlike SSH2SFTPClientAdapter.
@@ -747,20 +781,61 @@ const SFTPConnectionConfigSchema = z.object({
   providerOptions: z.record(z.string(), z.unknown()).optional(),
 });
 
+// An absolute filedrop directory path: Unix/UNC-forward-slash, a Windows drive
+// letter (C:\ or C:/), or a Windows UNC (\\server\share). Shared by the single
+// `path` and both halves of the split inbound/outbound pair so all three follow
+// the identical absolute-path rule.
+const filedropPathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (p) =>
+      p.startsWith("/") || // Unix or UNC with forward slashes
+      /^[A-Za-z]:[/\\]/.test(p) || // Windows drive letter (C:\ or C:/)
+      p.startsWith("\\\\"), // Windows UNC (\\server\share)
+    { message: "path must be an absolute path" },
+  );
+
 const FileDropConnectionConfigSchema = z.object({
   channel: z.literal("filedrop"),
-  path: z
-    .string()
-    .min(1)
-    .refine(
-      (p) =>
-        p.startsWith("/") || // Unix or UNC with forward slashes
-        /^[A-Za-z]:[/\\]/.test(p) || // Windows drive letter (C:\ or C:/)
-        p.startsWith("\\\\"), // Windows UNC (\\server\share)
-      { message: "path must be an absolute path" },
-    ),
+  path: filedropPathSchema.optional(),
+  inboundPath: filedropPathSchema.optional(),
+  outboundPath: filedropPathSchema.optional(),
   options: FileSyncOptionsSchema.optional(),
 });
+
+/**
+ * Extracts the directory-mode fields for the file-based channels: the single
+ * shared directory (`path` for filedrop, `server.path` for sftp) versus the
+ * split `inboundPath`/`outboundPath` pair, plus whether retain mode is set.
+ * Returns `undefined` for webrtc, which the path-mode refines below skip.
+ * Shared so filedrop (top-level path) and sftp (path under `server`) are
+ * validated by one set of rules.
+ */
+function fileSyncPathMode(conn: ConnectionConfig):
+  | {
+      path?: string;
+      inboundPath?: string;
+      outboundPath?: string;
+      retain: boolean;
+    }
+  | undefined {
+  if (conn.channel === "filedrop")
+    return {
+      path: conn.path,
+      inboundPath: conn.inboundPath,
+      outboundPath: conn.outboundPath,
+      retain: conn.options?.retainFiles === true,
+    };
+  if (conn.channel === "sftp")
+    return {
+      path: conn.server.path,
+      inboundPath: conn.server.inboundPath,
+      outboundPath: conn.server.outboundPath,
+      retain: conn.options?.retainFiles === true,
+    };
+  return undefined;
+}
 
 export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
   .discriminatedUnion("channel", [
@@ -813,6 +888,82 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.options as FileSyncOptions | undefined)?.retainFiles
       ),
     { message: "retain_files is not valid for the webrtc channel" },
+  )
+  // File-sync directory mode (filedrop and sftp). A directory is given either
+  // as a single shared path or as a split inbound/outbound pair, never both and
+  // never just one half; a configured outbound directory (split mode) requires
+  // retain mode; and the two directories must differ. These are validated once
+  // here, against fileSyncPathMode(), so both channels obey the same rules.
+  .refine(
+    (conn) => {
+      const m = fileSyncPathMode(conn);
+      if (m === undefined) return true;
+      const hasPair =
+        m.inboundPath !== undefined || m.outboundPath !== undefined;
+      return !(m.path !== undefined && hasPair);
+    },
+    {
+      message:
+        "set either a single shared directory (path / server.path) or the " +
+        "inbound_path/outbound_path pair, not both",
+    },
+  )
+  .refine(
+    (conn) => {
+      const m = fileSyncPathMode(conn);
+      if (m === undefined) return true;
+      return (m.inboundPath !== undefined) === (m.outboundPath !== undefined);
+    },
+    {
+      message:
+        "inbound_path and outbound_path must be set together; a split " +
+        "directory needs both halves",
+    },
+  )
+  .refine(
+    (conn) => {
+      const m = fileSyncPathMode(conn);
+      if (
+        m === undefined ||
+        m.inboundPath === undefined ||
+        m.outboundPath === undefined
+      )
+        return true;
+      // Reject not only byte-identical paths but any pair that resolves to the
+      // same directory (redundant slashes, "." segments, trailing slash), using
+      // the very rule each channel's open() applies -- so the schema and the
+      // live connection agree on what counts as a distinct outbound directory.
+      return !pathsResolveToSameDir(m.inboundPath, m.outboundPath);
+    },
+    { message: "inbound_path and outbound_path must differ" },
+  )
+  .refine(
+    (conn) => {
+      const m = fileSyncPathMode(conn);
+      if (m === undefined) return true;
+      const split = m.inboundPath !== undefined && m.outboundPath !== undefined;
+      return !split || m.retain;
+    },
+    {
+      message:
+        "a separate outbound directory (inbound_path/outbound_path) requires " +
+        "retain_files: true",
+    },
+  )
+  // filedrop must name a directory in one form or the other; sftp may leave all
+  // three unset (the SFTP login-home shared directory).
+  .refine(
+    (conn) => {
+      if (conn.channel !== "filedrop") return true;
+      const split =
+        conn.inboundPath !== undefined && conn.outboundPath !== undefined;
+      return conn.path !== undefined || split;
+    },
+    {
+      message:
+        "filedrop requires a directory: set path, or both inbound_path and " +
+        "outbound_path",
+    },
   );
 
 // --- Parse -------------------------------------------------------------------

@@ -77,6 +77,168 @@ test("file-drop connection with Windows UNC path is accepted", () => {
   expect(result.channel).toBe("filedrop");
 });
 
+// --- split inbound/outbound directories --------------------------------------
+
+// A split directory requires retain mode, which transitively requires lockless
+// rendezvous and timestamped filenames; supply all three so the only thing a
+// rejection test exercises is the path-mode rule under test.
+const splitOptions = {
+  retain_files: true,
+  lockless_rendezvous: true,
+  timestamp_in_filename: true,
+};
+
+test("parses a split-directory file-drop connection", () => {
+  const result = parseConnectionConfig({
+    channel: "filedrop",
+    inbound_path: "/mnt/in",
+    outbound_path: "/mnt/out",
+    options: splitOptions,
+  });
+  expect(result.channel).toBe("filedrop");
+  if (result.channel !== "filedrop") return;
+  expect(result.inboundPath).toBe("/mnt/in");
+  expect(result.outboundPath).toBe("/mnt/out");
+  expect(result.path).toBeUndefined();
+});
+
+test("parses a split-directory SFTP connection", () => {
+  const result = parseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      inbound_path: "exchanges/in",
+      outbound_path: "exchanges/out",
+    },
+    options: splitOptions,
+  });
+  expect(result.channel).toBe("sftp");
+  if (result.channel !== "sftp") return;
+  expect(result.server.inboundPath).toBe("exchanges/in");
+  expect(result.server.outboundPath).toBe("exchanges/out");
+  expect(result.server.path).toBeUndefined();
+});
+
+test("a separate outbound directory without retain_files is rejected (filedrop)", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    inbound_path: "/mnt/in",
+    outbound_path: "/mnt/out",
+    options: { lockless_rendezvous: true, timestamp_in_filename: true },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("a separate outbound directory without retain_files is rejected (sftp)", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: { host: "h", inbound_path: "in", outbound_path: "out" },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("split connection with equal inbound and outbound paths is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    inbound_path: "/mnt/same",
+    outbound_path: "/mnt/same",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+});
+
+test("mixing a single path with the inbound/outbound pair is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    path: "/mnt/shared",
+    inbound_path: "/mnt/in",
+    outbound_path: "/mnt/out",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+});
+
+test("setting only the inbound half of the pair is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    inbound_path: "/mnt/in",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+});
+
+test("setting only the outbound half of the pair is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    outbound_path: "/mnt/out",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+});
+
+test("setting only one half of the pair is rejected for sftp, naming the constraint", () => {
+  // sftp has no "filedrop requires a directory" backstop (login-home is a valid
+  // shared mode), so the half-pair refine is the ONLY rule that can fire here --
+  // this isolates it (the filedrop half-pair tests above also satisfy the
+  // requires-a-directory rule, so they do not, on their own, prove the half-pair
+  // refine fires). Assert the message so the right refine is pinned.
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: { host: "h", inbound_path: "in" },
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) => i.message.includes("set together")),
+  ).toBe(true);
+});
+
+// The schema rejects not only byte-identical paths but any split pair that
+// resolves to one directory, using the same rule open() applies -- so a config
+// that would collapse to a single directory fails to parse rather than parsing
+// "valid" and only failing later at connect time. Each case asserts the "must
+// differ" refine is the one that fires (not, say, a half-pair backstop).
+test.each([
+  ["a trailing slash (filedrop)", "filedrop", "/x", "/x/"],
+  ["a redundant interior slash (filedrop)", "filedrop", "/a//in", "/a/in"],
+  ['a "." segment (filedrop)', "filedrop", "/a/./in", "/a/in"],
+  ['a "." segment (sftp)', "sftp", "in/./x", "in/x"],
+])(
+  "split pair resolving to one directory via %s is rejected",
+  (_label, channel, inbound_path, outbound_path) => {
+    const result = safeParseConnectionConfig(
+      channel === "sftp"
+        ? {
+            channel,
+            server: { host: "h", inbound_path, outbound_path },
+            options: splitOptions,
+          }
+        : { channel, inbound_path, outbound_path, options: splitOptions },
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.some((i) => i.message.includes("must differ")),
+    ).toBe(true);
+  },
+);
+
+test("file-drop connection with neither path nor the pair is rejected", () => {
+  const result = safeParseConnectionConfig({ channel: "filedrop" });
+  expect(result.success).toBe(false);
+});
+
+test("split file-drop connection with a relative inbound_path is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "filedrop",
+    inbound_path: "relative/in",
+    outbound_path: "/mnt/out",
+    options: splitOptions,
+  });
+  expect(result.success).toBe(false);
+});
+
 test("parses a minimal SFTP connection", () => {
   const result = parseConnectionConfig(sftpBase);
   expect(result.channel).toBe("sftp");

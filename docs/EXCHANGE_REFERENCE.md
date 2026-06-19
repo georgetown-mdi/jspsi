@@ -318,15 +318,42 @@ The communication channel for the exchange. See [COMMUNICATION.md](COMMUNICATION
 ### `connection.path`
 
 *Type:* string  
-*Required:* yes (filedrop only)  
+*Required:* filedrop only, unless the split [`inbound_path`/`outbound_path`](#connectioninbound_path--connectionoutbound_path) pair is used instead  
 *Applies to:* `filedrop`
 
-Absolute path to the shared directory on the local filesystem. Both parties must be able to read and write files in this directory. Use `file://` URLs with the CLI for zero-setup exchanges.
+Absolute path to the shared directory on the local filesystem, used in shared mode (one directory both parties read and write). Both parties must be able to read and write files in this directory. Use `file://` URLs with the CLI for zero-setup exchanges. Mutually exclusive with the `inbound_path`/`outbound_path` pair; supply exactly one of the two forms.
 
 ```yaml
 connection:
   channel: filedrop
   path: /mnt/sftp-share/exchanges/agency-a-agency-b
+```
+
+### `connection.inbound_path` / `connection.outbound_path`
+
+*Type:* string  
+*Required:* no (the split alternative to a single shared directory)  
+*Applies to:* `filedrop` (top-level) and `sftp` (under `server`, see below)
+
+A *split* configuration for deployments where the inbound and outbound folders are separate -- a managed share, or an SFTP server with distinct drop and pickup directories -- so a single shared path cannot describe the exchange. This party reads the peer's files from `inbound_path` and writes its own to `outbound_path`; the two parties' folders are bridged by the deployment (one party's outbound is the other's inbound). Each party's directory choice is its own and is not constrained by the peer's.
+
+Rules:
+
+- Set both halves together, or neither; `inbound_path` and `outbound_path` are mutually exclusive with the single `path` (filedrop) / `server.path` (sftp).
+- The two directories must differ. This is checked by the same textual normalization at config validation and again when the connection opens (both channels), so a pair that resolves to one directory fails to parse rather than only failing later at connect time: differences that are only redundant separators, `.` segments, a trailing slash, or -- for filedrop -- backslashes are caught. Equivalences that cannot be settled client-side are NOT caught and are the operator's responsibility to keep distinct: `..` segments (which may cross a symlink), case (Windows filesystems are case-insensitive), and -- for SFTP -- a relative path versus the absolute path it expands to under the login home.
+- A split configuration requires retain mode (`options.retain_files: true`), which in turn requires `lockless_rendezvous: true` and `timestamp_in_filename: true`. Retain mode is what keeps the exchange working across a one-way or delete-suppressing bridge and preserves an auditable record of what flowed each way; see [docs/spec/FILE_SYNC.md](spec/FILE_SYNC.md#split-inboundoutbound-directories).
+- filedrop paths must be absolute (as `path` is). SFTP paths may be absolute or relative, as `server.path` allows. Retain mode requires a fresh directory, which is enforced for *both* directories; an SFTP login-home is usually not empty, so pointing a split directory at it will often be rejected by that check.
+
+```yaml
+# File-drop with separate inbound and outbound folders
+connection:
+  channel: filedrop
+  inbound_path: /mnt/share/from-partner
+  outbound_path: /mnt/share/to-partner
+  options:
+    retain_files: true
+    lockless_rendezvous: true
+    timestamp_in_filename: true
 ```
 
 ### `connection.server`
@@ -341,7 +368,9 @@ The primary server for the exchange. For WebRTC this is the PeerJS peer coordina
 |-------|------|----------|-------------|
 | `host` | string | yes | Hostname or IP address |
 | `port` | integer | no | Port number; defaults to the protocol standard (443 for HTTPS/WSS, 22 for SFTP) |
-| `path` | string | no | URL path for WebRTC signaling; remote working directory for SFTP |
+| `path` | string | no | URL path for WebRTC signaling; remote working directory (shared mode) for SFTP |
+| `inbound_path` | string | SFTP only | Inbound (peer-written) remote directory for a split-directory exchange; see [`connection.inbound_path` / `connection.outbound_path`](#connectioninbound_path--connectionoutbound_path). Set with `outbound_path`; mutually exclusive with `path`; requires retain mode |
+| `outbound_path` | string | SFTP only | Outbound (self-written) remote directory for a split-directory exchange; the companion to `inbound_path` |
 | `username` | string | no | Username for server authentication |
 | `key` | string | WebRTC only | PeerJS API key for private PeerJS servers; omit when using a public server |
 
