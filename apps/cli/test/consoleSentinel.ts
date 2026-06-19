@@ -29,6 +29,8 @@
 
 import { inspect } from "node:util";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 /** A console sink the sentinel gates. */
 export type ConsoleLevel = "log" | "warn" | "error";
 
@@ -242,7 +244,16 @@ export class ConsoleSentinel {
     const { violations } = this.evaluate();
     if (violations.length === 0) return;
     const shown = violations.slice(0, MAX_REPORTED_VIOLATIONS);
-    const lines = shown.map((v) => `  [${v.level}] ${v.message}`);
+    // Escape each line at this display boundary: a recorded line is whatever
+    // reached the console, which can carry a server- or partner-controlled string
+    // (ssh2 surfaces an SSH_MSG_DISCONNECT description on err.message, for one).
+    // Rendering it raw into the thrown error -- which lands in the CI log -- would
+    // let control bytes (ANSI/bidi/newline) ride in as log injection. The raw
+    // message stays untouched for matching (sanitize only at display, never the
+    // compared value). This mirrors the production sinks' sanitizeErrorForDisplay.
+    const lines = shown.map(
+      (v) => `  [${v.level}] ${sanitizeForDisplay(v.message)}`,
+    );
     if (violations.length > shown.length) {
       lines.push(`  ... and ${violations.length - shown.length} more`);
     }

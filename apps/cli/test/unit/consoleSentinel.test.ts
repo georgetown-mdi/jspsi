@@ -333,6 +333,34 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
+  it("escapes control bytes in the failure message but matches on raw text", () => {
+    // A recorded line is whatever reached the console -- possibly a server- or
+    // partner-controlled string. The thrown error lands in the CI log, so its
+    // lines are escaped against ANSI/bidi/newline log injection; the raw message
+    // is preserved for matching (sanitize at display only).
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel([]);
+    sentinel.install(fake);
+
+    fake.error("\x1b[31mred\x1b[0m\ninjected line");
+
+    // violations() exposes the raw recorded bytes (used for matching).
+    expect(sentinel.violations()[0].message).toBe(
+      "\x1b[31mred\x1b[0m\ninjected line",
+    );
+    // The thrown message escapes the ESC and newline rather than emitting them.
+    let thrown = "";
+    try {
+      sentinel.assertClean();
+    } catch (e) {
+      thrown = (e as Error).message;
+    }
+    expect(thrown).toContain("\\x1b[31mred\\x1b[0m\\x0ainjected line");
+    expect(thrown).not.toContain("\x1b");
+    expect(thrown).not.toContain("\ninjected line");
+    sentinel.restore();
+  });
+
   it("starts a fresh observation window on re-install", () => {
     const fake = fakeConsole();
     const sentinel = new ConsoleSentinel([]);
