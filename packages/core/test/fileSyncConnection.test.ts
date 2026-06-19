@@ -9505,3 +9505,182 @@ test("synchronize() --sweep-exchange-files: a close() during the retain-signal i
   expect(err).toBeInstanceOf(ConnectionClosedError);
   expect(err).not.toBeInstanceOf(UsageError);
 });
+
+// --- split inbound/outbound directories --------------------------------------
+
+// Helper: a retain/lockless split connection placed directly into the
+// post-open, pre-rendezvous state (mirrors makeRetainConn but with distinct
+// inbound and outbound directories and without a pre-set peerId, so
+// synchronize() runs).
+function makeSplitConn(
+  client: FileTransportClient,
+  id: string,
+  inbound: string,
+  outbound: string,
+  timeToLiveMs = 1_000,
+): FileSyncConnection {
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 5,
+    timeToLive: new Date(Date.now() + timeToLiveMs),
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+    peerId: id,
+  });
+  conn.connected = true;
+  conn.path = inbound;
+  conn.outbound = outbound;
+  return conn;
+}
+
+test("synchronize() (split): a non-fresh OUTBOUND directory fails the clean-start guard", async () => {
+  // The fresh-directory enforcement applies to BOTH halves: a leftover self
+  // message in the outbound directory is a terminal usage error even though the
+  // inbound directory is clean.
+  const { client, files } = makeMockClient();
+  files.set("/out/me-20260101T000000-000-12.json", Buffer.from("x".repeat(12)));
+  const conn = makeSplitConn(client, "me", "/in", "/out");
+
+  await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+});
+
+test("synchronize() (split): an orphaned temp in the OUTBOUND directory is swept, not rejected", async () => {
+  // A crashed in-flight write (temp-<uuidv4()>.tmp) in outbound is swept at
+  // entry like the inbound one, so it never trips the clean-start guard; the
+  // rendezvous then times out only because no peer arrives.
+  const { client, files } = makeMockClient();
+  const tempName = "temp-00000000-0000-4000-8000-000000000000.tmp";
+  files.set(`/out/${tempName}`, Buffer.alloc(0));
+  const conn = makeSplitConn(client, "me", "/in", "/out", 80);
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain("timed out");
+  expect(files.has(`/out/${tempName}`)).toBe(false);
+});
+
+test("split directories: a full retain-mode exchange between two bridged parties", async () => {
+  // Acceptance integration test. Two parties each have DISTINCT inbound and
+  // outbound directories, bridged by a single in-memory store keyed by
+  // directory: A writes to "/a2b" (= B's inbound) and reads "/b2a" (= B's
+  // outbound); B is the mirror. The exchange runs rendezvous, a three-message
+  // send/ack cycle, and a clean close end to end -- every peer read coming from
+  // a party's inbound and every self write landing in its outbound.
+  const store = new Map<string, Buffer>();
+  const makeClient = (): FileTransportClient => ({
+    connect: async () => {},
+    end: async () => {},
+    list: async (dir: string): Promise<FileInfo[]> => {
+      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
+      return [...store.entries()]
+        .filter(
+          ([p]) =>
+            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
+        )
+        .map(([p, buf]) => ({
+          name: p.slice(prefix.length),
+          modifyTime: 0,
+          size: buf.length,
+        }));
+    },
+    get: async (p: string) => {
+      const data = store.get(p);
+      if (!data)
+        throw Object.assign(new Error(`${p}: not found`), { code: "ENOENT" });
+      return data as Buffer<ArrayBufferLike>;
+    },
+    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
+      if (Buffer.isBuffer(src)) store.set(dest, src);
+    },
+    delete: async (p: string) => {
+      store.delete(p);
+    },
+    safeDelete: async (p: string) => {
+      store.delete(p);
+    },
+    rename: async (from: string, to: string) => {
+      const data = store.get(from);
+      if (data === undefined) throw new Error(`${from}: no such file`);
+      store.delete(from);
+      store.set(to, data);
+    },
+    createExclusive: async () => {},
+    exists: async (p: string) => store.has(p),
+  });
+
+  const mk = (
+    id: string,
+    inbound: string,
+    outbound: string,
+  ): FileSyncConnection => {
+    const conn = new FileSyncConnection(makeClient(), {
+      pollingFrequency: 5,
+      timeToLive: new Date(Date.now() + 5_000),
+      verbose: -1,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+      retainFiles: true,
+      peerId: id,
+    });
+    conn.connected = true;
+    conn.path = inbound;
+    conn.outbound = outbound;
+    return conn;
+  };
+
+  const connA = mk("party-a", "/b2a", "/a2b");
+  const connB = mk("party-b", "/a2b", "/b2a");
+
+  await Promise.all([connA.synchronize(), connB.synchronize()]);
+  expect(connA.peerId).toBe("party-b");
+  expect(connB.peerId).toBe("party-a");
+
+  const received: unknown[] = [];
+  let resolveAll!: () => void;
+  const allReceived = new Promise<void>((r) => (resolveAll = r));
+  connB.on("data", (m) => {
+    received.push(m);
+    if (received.length === 3) resolveAll();
+  });
+
+  const sending = (async () => {
+    await connA.send({ n: 1 });
+    await connA.send({ n: 2 });
+    await connA.send({ n: 3 });
+  })();
+
+  await runPoller(connB, allReceived);
+  await sending;
+
+  expect(received).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+
+  const namesIn = (dir: string): string[] =>
+    [...store.keys()]
+      .filter((p) => p.startsWith(`${dir}/`))
+      .map((p) => p.slice(dir.length + 1));
+  const isAMessage = (n: string): boolean =>
+    n.startsWith("party-a-") &&
+    n.endsWith(".json") &&
+    !n.endsWith("-ack.json") &&
+    !n.endsWith("-hello.json");
+
+  // A's three messages live only in its outbound; B's acks live only in its
+  // outbound. Nothing crossed directories and no in-flight temp leaked.
+  expect(namesIn("/a2b").filter(isAMessage)).toHaveLength(3);
+  expect(namesIn("/b2a").filter((n) => n.endsWith("-ack.json")).length).toBe(4);
+  expect(namesIn("/b2a").filter(isAMessage)).toHaveLength(0);
+  expect(namesIn("/a2b").every((n) => !n.endsWith(".tmp"))).toBe(true);
+  expect(namesIn("/b2a").every((n) => !n.endsWith(".tmp"))).toBe(true);
+
+  // Clean close: retain mode deletes nothing, so the split transcript persists
+  // in both directories.
+  await connA.close();
+  await connB.close();
+  expect(namesIn("/a2b").length).toBeGreaterThan(0);
+  expect(namesIn("/b2a").length).toBeGreaterThan(0);
+});

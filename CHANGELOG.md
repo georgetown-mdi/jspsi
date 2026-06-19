@@ -18,6 +18,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `zero-setup` exchange: derive all connection parameters from a URL, with no configuration file, for a one-off exchange. See `docs/CLI.md`.
 - `filedrop` channel: exchange through a shared local directory where neither SFTP nor WebRTC is available. See `docs/COMMUNICATION.md`.
 - `retain_files` mode (`sftp`/`filedrop`): keep every exchange file as a durable transcript instead of deleting it on consume (`--retain-files`). See `docs/EXCHANGE_REFERENCE.md`.
+- Split inbound/outbound directories for the `sftp`/`filedrop` channels: configure `inbound_path`/`outbound_path` (instead of a single `path`/`server.path`) to read the peer's files from one directory and write your own to another, for managed shares or SFTP servers with separate drop and pickup folders. Requires retain mode. See `docs/EXCHANGE_REFERENCE.md`.
 - `psilink invite --expires-in DURATION` sets the invitation lifetime (default 1 hour). See `docs/CLI.md`.
 - `--log-file <path>` on every command that logs appends diagnostics to an owner-only file for unattended runs; a missing parent directory fails with exit 64. See `docs/CLI.md`.
 - `--save` on a zero-setup exchange provisions a persistent shared secret in-band when both parties pass it, with no separate invite round; that secret is protected only by the transport. See `docs/SECURITY_DESIGN.md`.

@@ -301,7 +301,9 @@ export function diffConnectionAgainstTarget(
       conflicts.push({
         field: "connection.path",
         existing: havePath ?? RECONCILE_UNSET,
-        incoming: target.path,
+        // target.path is undefined for a split (inbound/outbound) config; the
+        // split CLI surface (item 201740349) reconciles those paths.
+        incoming: target.path ?? RECONCILE_UNSET,
       });
   }
   // webrtc never reaches here: connectionFromURL rejects a ws/wss URL before the

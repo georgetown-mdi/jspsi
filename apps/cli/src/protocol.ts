@@ -505,8 +505,9 @@ export async function runProtocol(
         // The filedrop path is partner-seeded on an offline-accept config (it
         // comes from the invitation's filedrop endpoint, charset-unconstrained),
         // so escape it before it reaches the operator's terminal -- the filedrop
-        // twin of the SFTP host below.
-        sanitizeForDisplay(connection.path),
+        // twin of the SFTP host below. A split config has no single `path`; show
+        // the inbound directory (the CLI split surface is item 201740349).
+        sanitizeForDisplay(connection.path ?? connection.inboundPath ?? ""),
       );
     } else {
       log.info(

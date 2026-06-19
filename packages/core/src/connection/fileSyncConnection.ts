@@ -844,7 +844,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private lastAckedNNN = -1;
   connected = false;
 
+  // The inbound directory: where this party READS the peer's files (hello,
+  // messages, acks, the peer's abort marker). `path` is the inbound directory's
+  // historical name, kept because tests and callers set it directly. undefined
+  // outside an open session.
   path: string | undefined;
+  // The configured separate OUTBOUND directory (split mode), or undefined when
+  // inbound and outbound are the same shared directory. When set it requires
+  // retain mode (enforced at config validation), so only the lockless+retain
+  // code paths ever observe a value different from `path`. Public so tests can
+  // set it directly, mirroring the `path`/`connected` direct-set pattern; open()
+  // sets it from the config. See docs/spec/FILE_SYNC.md (Split directories).
+  outbound: string | undefined;
   private config: SFTPConnectionConfig | FileDropConnectionConfig | undefined;
 
   peerId: string | undefined;
@@ -947,6 +958,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // a display sink only ever runs with it set, so the fallback never shows.
   private get displayPath(): string {
     return sanitizeForDisplay(this.path ?? "");
+  }
+
+  // The directory self-written files go to: the configured outbound directory
+  // in split mode, else the inbound `path` (shared mode). undefined only outside
+  // an open session (mirrors `path`). Every self-write site (the hello, message,
+  // ack, abort-marker, and in-flight temp writes) routes through this so a
+  // configured outbound directory takes effect uniformly; peer-file reads stay
+  // on `path` (inbound). In shared mode the two coincide, preserving the
+  // single-directory behavior exactly.
+  private get outboundPath(): string | undefined {
+    return this.outbound ?? this.path;
   }
 
   constructor(client: FileTransportClient, options?: Partial<Options>) {
@@ -1143,28 +1165,85 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // default-fallback windows.
 
     if (config.channel === "filedrop") {
-      // Fold backslashes and strip trailing slashes to the on-disk form (see
-      // normalizeFiledropPath); the CLI reconcile compares paths through the same
-      // function so its verdict matches what this connection actually opens.
-      const dirPath = normalizeFiledropPath(config.path);
-      this.log.debug(
-        `[${this.role}] opening local path ${sanitizeForDisplay(dirPath)}`,
+      // Split mode (a separate outbound directory) requires both halves of the
+      // pair; the config schema rejects a half-set pair, mixing with `path`, and
+      // a split without retain mode, so by here either `path` or the full pair is
+      // present. Fold backslashes and strip trailing slashes to the on-disk form
+      // (see normalizeFiledropPath); the CLI reconcile compares paths through the
+      // same function so its verdict matches what this connection actually opens.
+      const split =
+        config.inboundPath !== undefined && config.outboundPath !== undefined;
+      const inboundDir = normalizeFiledropPath(
+        split ? config.inboundPath! : config.path!,
       );
-      await this.client.connect({
-        path: dirPath,
+      const outboundDir = split
+        ? normalizeFiledropPath(config.outboundPath!)
+        : inboundDir;
+      // Defense-in-depth beyond the schema's byte-identical reject: two paths
+      // that normalize to the same directory (e.g. "/x" and "/x/") would
+      // silently collapse split mode into a shared directory, defeating the
+      // separate-audit-trail purpose; reject the normalized collision too.
+      if (split && inboundDir === outboundDir)
+        throw new UsageError(
+          "filedrop inbound and outbound directories resolve to the same " +
+            "directory after normalization; they must be distinct",
+        );
+      this.log.debug(
+        `[${this.role}] opening local path ${sanitizeForDisplay(inboundDir)}` +
+          (split
+            ? ` (inbound) and ${sanitizeForDisplay(outboundDir)} (outbound)`
+            : ""),
+      );
+      const connectTimeoutMs =
         // ?? covers a config built without an options block at all (the schema
         // default only fires when options is present); LocalFSClient applies the
         // same 30000 ms as its own fallback, so the value is supplied explicitly
         // here rather than relied on downstream.
-        connectTimeoutMs:
-          config.options?.serverConnectTimeoutMs ??
-          DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
-        maxReconnectAttempts: config.options?.maxReconnectAttempts ?? 3,
+        config.options?.serverConnectTimeoutMs ??
+        DEFAULT_SERVER_CONNECT_TIMEOUT_MS;
+      const maxReconnectAttempts = config.options?.maxReconnectAttempts ?? 3;
+      await this.client.connect({
+        path: inboundDir,
+        connectTimeoutMs,
+        maxReconnectAttempts,
       });
-      this.path = dirPath;
+      // In split mode probe the outbound directory too, so an inaccessible
+      // write target fails fast at connect (with the access-retry the probe
+      // applies) rather than only at the first write. Safe to call connect()
+      // twice here: filedrop is always backed by LocalFSClient, whose connect()
+      // is a stateless read/write access check, not a persistent session.
+      if (split)
+        await this.client.connect({
+          path: outboundDir,
+          connectTimeoutMs,
+          maxReconnectAttempts,
+        });
+      this.path = inboundDir;
+      this.outbound = split ? outboundDir : undefined;
     } else {
-      this.path = config.server.path ?? "";
-      if (this.path.endsWith("/")) this.path = this.path.slice(0, -1);
+      // Split mode for SFTP mirrors filedrop: the schema guarantees either
+      // `server.path` (shared, possibly unset for login-home) or the full
+      // inbound/outbound pair. A single SSH session serves both directories;
+      // their existence is validated lazily at the first list/write, the same as
+      // `server.path` already is.
+      const split =
+        config.server.inboundPath !== undefined &&
+        config.server.outboundPath !== undefined;
+      const stripTrailingSlash = (p: string): string =>
+        p.endsWith("/") ? p.slice(0, -1) : p;
+      const inboundDir = stripTrailingSlash(
+        split ? config.server.inboundPath! : (config.server.path ?? ""),
+      );
+      const outboundDir = split
+        ? stripTrailingSlash(config.server.outboundPath!)
+        : inboundDir;
+      if (split && inboundDir === outboundDir)
+        throw new UsageError(
+          "sftp inbound and outbound directories resolve to the same " +
+            "directory; they must be distinct",
+        );
+      this.path = inboundDir;
+      this.outbound = split ? outboundDir : undefined;
 
       const connectOptions = this.buildSftpConnectOptions(config);
 
@@ -1576,11 +1655,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.abortDecision = new Promise<"write" | "seal">((resolve) => {
       this.resolveAbortDecision = resolve;
     });
+    // The abort marker is a self-write (`<myId>-abort.json`), so it is captured
+    // for the OUTBOUND directory; the peer reads its own `<peerId>-abort.json`
+    // from its inbound, which is this party's outbound. In shared mode this is
+    // just `path`.
+    const writeDir = this.outboundPath;
     this.abortWriteInputs =
-      this.path === undefined
+      writeDir === undefined
         ? undefined
         : {
-            path: this.path,
+            path: writeDir,
             finalName: `${this.id}${ABORT_SUFFIX}`,
             // The on-disk envelope: { version, token }. `version` is spelled out
             // to match the full-word control-body convention (locklessRendezvous
@@ -1919,6 +2003,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       }
     }
     this.path = undefined;
+    this.outbound = undefined;
     this.config = undefined;
     // Clear the role-derived abort tokens with the handshake identity they
     // derive from. close() does not clear peerId/handshakeRole today, so this is
@@ -2001,8 +2086,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // could write a file this never saw. Acceptable only because the operator
   // asserted no concurrent session by passing the flag.
   private async sweepProtocolFiles(
+    inboundPath: string,
     peerHellos: Array<FileInfo>,
-    unexpectedProtocol: Array<FileInfo>,
+    unexpectedProtocol: Array<{ file: FileInfo; dir: string }>,
   ): Promise<void> {
     const signals: string[] = [];
     let retainUncertain = false;
@@ -2013,13 +2099,15 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // peer hello, so it is already in unexpectedProtocol -- scan that set rather
     // than the raw entry listing, keeping the retain inspection in step with the
     // ignored-filtered classification (no orphaned temp or other ignored name
-    // can reach it).
-    const messageAck = unexpectedProtocol.find((file) =>
-      isRetainMessageAck(file.name),
+    // can reach it). In split mode this also catches a retain transcript leftover
+    // in THIS party's outbound directory (its own consumed-message acks), since
+    // outbound leftovers are folded into the same set.
+    const messageAck = unexpectedProtocol.find((e) =>
+      isRetainMessageAck(e.file.name),
     );
     if (messageAck)
       signals.push(
-        `a retain-mode message ack (${sanitizeForDisplay(messageAck.name)})`,
+        `a retain-mode message ack (${sanitizeForDisplay(messageAck.file.name)})`,
       );
 
     // Read peer hello bodies only when no cheaper signal has decided it already:
@@ -2043,7 +2131,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         try {
           const envelope = await readControlFileWithGate(
             this.client,
-            `${this.path}/${hello.name}`,
+            `${inboundPath}/${hello.name}`,
             inspectionDeadline,
             this.options.pollingFrequency,
             HelloEnvelopeSchema,
@@ -2100,7 +2188,13 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
     }
 
-    const toDelete = [...peerHellos, ...unexpectedProtocol];
+    // Dir-qualified so each file is deleted from the directory it was listed in
+    // (peer hellos are inbound; unexpectedProtocol carries its own dir, which is
+    // the outbound directory for a split-mode self leftover).
+    const toDelete: Array<{ name: string; dir: string }> = [
+      ...peerHellos.map((file) => ({ name: file.name, dir: inboundPath })),
+      ...unexpectedProtocol.map((e) => ({ name: e.file.name, dir: e.dir })),
+    ];
 
     // Nothing to delete (e.g. local retain mode is the only signal and the
     // directory holds no peer protocol files): return before the warning so it
@@ -2138,7 +2232,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // never a UsageError. The non-atomicity caveat above still holds: a live peer
     // could write between the listing and these deletes.
     const results = await Promise.allSettled(
-      toDelete.map((file) => this.client.delete(`${this.path}/${file.name}`)),
+      toDelete.map((entry) => this.client.delete(`${entry.dir}/${entry.name}`)),
     );
     const failures = results.flatMap((result, i) =>
       result.status === "rejected"
@@ -2175,6 +2269,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   async synchronize() {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
+
+    // Captured once, narrowed by the guard above (this.path is reset to
+    // undefined only by close(), which a single-caller synchronize() never races
+    // -- see the abortController note below). `inboundPath` is where this party
+    // reads the peer's files; `outboundPath` is where it writes its own. They
+    // coincide in shared mode; `split` is true only when a separate outbound
+    // directory is configured (which requires retain mode).
+    const inboundPath = this.path;
+    const outboundPath = this.outbound ?? this.path;
+    const split = this.outbound !== undefined;
 
     if (this.peerId) throw new Error("already synchronized");
 
@@ -2410,12 +2514,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // peer hello is counted in peerHellos, not here: on the no-sweep path the >1
     // guard (else branch below) rejects it; under --sweep-exchange-files it is
     // swept along with the first, so that guard is not reached.
-    const unexpectedProtocol = files.filter(
-      (file) =>
-        !ignored.has(file.name) &&
-        !this.isPeerHelloName(file.name) &&
-        isProtocolGrammarName(file.name),
-    );
+    // Dir-qualified so the sweep below deletes each from the directory it was
+    // listed in and no rename/delete crosses the two directories: inbound files
+    // here, outbound leftovers appended in the split block below.
+    const unexpectedProtocol: Array<{ file: FileInfo; dir: string }> = files
+      .filter(
+        (file) =>
+          !ignored.has(file.name) &&
+          !this.isPeerHelloName(file.name) &&
+          isProtocolGrammarName(file.name),
+      )
+      .map((file) => ({ file, dir: inboundPath }));
 
     // Foreign-file snapshot (always, both modes, flag or not). Cleared at entry
     // above and populated here; it deletes nothing, so it is safe in retain mode
@@ -2430,12 +2539,64 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           `${foreignFiles.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
       );
 
+    // Split mode: the OUTBOUND directory must be as fresh as the inbound one --
+    // retain mode's fresh-directory precondition applies to both halves (a stale
+    // self message or ack here would otherwise corrupt the send/ack gate). Peer
+    // files never land in outbound (the peer writes to its own outbound, which
+    // is THIS party's inbound), so every protocol-grammar file is this party's
+    // own leftover from a crashed prior session: an orphaned temp is swept like
+    // the inbound one (best-effort safeDelete), a foreign file is snapshotted
+    // and tolerated, and any other protocol file is collected as unexpected
+    // (rejected by the clean-start guard, or swept under --sweep-exchange-files)
+    // exactly as on the inbound side.
+    if (split) {
+      const outFiles = await this.client.list(outboundPath);
+      const outOrphans = outFiles.filter((file) =>
+        isProtocolTempName(file.name),
+      );
+      if (outOrphans.length > 0) {
+        this.log.info(
+          `[${this.id}] sweeping ${outOrphans.length} orphaned temp file(s) ` +
+            "left by a prior crashed exchange in the outbound directory " +
+            `${sanitizeForDisplay(outboundPath)}: ` +
+            `${outOrphans.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
+        );
+        await Promise.all(
+          outOrphans.map((file) =>
+            this.client.safeDelete(`${outboundPath}/${file.name}`),
+          ),
+        );
+      }
+      const sweptOut = new Set(outOrphans.map((file) => file.name));
+      const outForeign: FileInfo[] = [];
+      for (const file of outFiles) {
+        if (sweptOut.has(file.name)) continue;
+        if (!isProtocolGrammarName(file.name)) {
+          this.foreignFileSnapshot.add(file.name);
+          outForeign.push(file);
+        } else {
+          unexpectedProtocol.push({ file, dir: outboundPath });
+        }
+      }
+      if (outForeign.length > 0)
+        this.log.info(
+          `[${this.id}] tolerating ${outForeign.length} foreign file(s) ` +
+            `present at entry in the outbound directory ` +
+            `${sanitizeForDisplay(outboundPath)}: ` +
+            `${outForeign.map((f) => sanitizeForDisplay(f.name)).join(", ")}`,
+        );
+    }
+
     if (this.options.sweepExchangeFiles) {
       // Opt-in sweep: clear this exchange's protocol files (its own AND the
       // peer's) and rendezvous against a clean slate, after a retain-signal
       // inspection that refuses to destroy an audit transcript without
       // --force-retain-sweep. Foreign files are never swept.
-      await this.sweepProtocolFiles(peerHellos, unexpectedProtocol);
+      await this.sweepProtocolFiles(
+        inboundPath,
+        peerHellos,
+        unexpectedProtocol,
+      );
       // Every protocol file was deleted, so rendezvous proceeds as if the
       // directory held only the (untouched) foreign files.
       peerHellos = [];
@@ -2450,7 +2611,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             "the start of the protocol, but contains " +
             `${unexpectedProtocol.length} unexpected protocol file(s): ` +
             `${unexpectedProtocol
-              .map((f) => sanitizeForDisplay(f.name))
+              .map((e) => sanitizeForDisplay(e.file.name))
               .join(", ")}. A pre-existing ` +
             "lock file (-lock.json), ack marker (-ack.json), joining sentinel " +
             "(-joining.json), message, or self-hello usually means a previous " +
@@ -2475,7 +2636,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         );
     }
 
-    const helloPath = `${this.path}/${this.id}${HELLO_SUFFIX}`;
+    // This party's own hello is a self-write, so it goes to the outbound
+    // directory; the peer reads it from its inbound (which is this outbound). In
+    // shared mode outboundPath === inboundPath. The lock-mode branches that also
+    // reference helloPath only run in shared mode (split requires retain, which
+    // requires lockless), so routing it through outbound is correct there too.
+    const helloPath = `${outboundPath}/${this.id}${HELLO_SUFFIX}`;
 
     if (peerHellos.length === 1 && !this.options.locklessRendezvous) {
       /**
@@ -2826,17 +2992,19 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               if (mismatch) throw mismatch;
 
               // Acknowledge the peer's hello with a zero-length marker named
-              // after it (`<myId>-<peerHelloStem>-ack.json`). Published
-              // temp-then-rename so its final name never appears before the file
-              // exists; the peer matches it by name existence, never by reading
-              // a body.
+              // after it (`<myId>-<peerHelloStem>-ack.json`). This is a
+              // self-write, so it goes to the outbound directory (the peer reads
+              // it from its inbound); in shared mode that is the inbound path.
+              // Published temp-then-rename so its final name never appears before
+              // the file exists; the peer matches it by name existence, never by
+              // reading a body.
               const peerHelloStem = peerHello.name.slice(0, -".json".length);
               this.log.debug(
                 `[${this.role}] writing handshake ack for ` +
                   `${sanitizeForDisplay(peerHello.name)}`,
               );
-              const ackName = await this.writeAck(this.path!, peerHelloStem);
-              ackPath = `${this.path}/${ackName}`;
+              const ackName = await this.writeAck(outboundPath, peerHelloStem);
+              ackPath = `${outboundPath}/${ackName}`;
               // Track after the durable rename (delete mode only; retain never
               // sweeps) so cleanup() removes it at close(), exactly as the
               // message write in send() does. Both publish temp-then-rename, so
@@ -3478,11 +3646,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // require synchronize() to have completed first.
     if (!this.peerId) throw new Error("not synchronized");
 
+    // `path` is the inbound directory: where the peer's ack of our message (and,
+    // in delete mode, the consume-delete of our own last message) is observed.
+    // `outboundPath` is where this party WRITES its message; the two coincide in
+    // shared mode. The temp write and its atomic rename both occur within
+    // outbound, so no rename crosses the two directories.
     const path = this.path;
+    const outboundPath = this.outbound ?? path;
     // A `.tmp` extension (not `.json`) keeps this in-flight write from matching
     // a `*.json` sync-tool watch before the rename to the final name lands.
     const tempFile = `temp-${uuidv4()}.tmp`;
-    const tempPath = `${path}/${tempFile}`;
+    const tempPath = `${outboundPath}/${tempFile}`;
 
     // Wait for the EXACT message we last sent to be consumed (deleted) by the
     // peer -- this.lastSentFile -- not for any <id>-<digits>.json. Under delete
@@ -3583,7 +3757,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         JSON.stringify({ ts, seq, type, payload: data }),
       );
       const outName = this.messageFilename(payload.byteLength, seq, ts);
-      const outPath = `${path}/${outName}`;
+      const outPath = `${outboundPath}/${outName}`;
 
       this.log.trace(
         `[${this.role}] message seq=${seq}, type=${type}, ` +
@@ -3935,7 +4109,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // invariant rather than letting the scan run wild on an empty id.
     if (!this.peerId) throw new Error("not synchronized");
 
+    // `path` is the inbound directory: every peer-file read here (the listing,
+    // the message get, the peer abort-marker read) is from inbound.
+    // `outboundPath` is where this party writes its retain-mode ack of a
+    // consumed peer message; the two coincide in shared mode.
     const path = this.path;
+    const outboundPath = this.outbound ?? path;
     const peerId = this.peerId;
 
     let reachedGet = false;
@@ -4243,8 +4422,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // here; skipping the re-write saves one put+rename of a marker that
             // would otherwise overwrite itself under the same name.
             if (this.lastAckedNNN !== msgNNN) {
+              // The ack is a self-write -> outbound (the peer reads it from its
+              // inbound, which is this outbound). In shared mode this is `path`.
               const ackName = await this.writeAck(
-                path,
+                outboundPath,
                 messageFile.name.slice(0, -".json".length),
               );
               this.lastAckedNNN = msgNNN;
