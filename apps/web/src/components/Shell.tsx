@@ -1,8 +1,11 @@
 import { Container } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
+import { DEFAULT_CONTENT_WIDTH } from "@components/contentWidth";
+
 import classes from "./Shell.module.css";
 
+import type { ContainerWidth } from "@theme";
 import type { ReactNode } from "react";
 
 /** The id shared by the skip link's target and the `<main>` landmark, declared
@@ -16,11 +19,23 @@ const MAIN_CONTENT_ID = "main-content";
  * the router `Outlet`, so each route supplies only its own page content and its
  * own single `<h1>`.
  *
+ * `contentWidth` is the seam that keeps chrome and content aligned: the header
+ * and the content container both size to this one value (see
+ * {@link resolveContentWidth}), so their left/right edges line up whether a route
+ * runs wide or narrows to a single legible column. The route supplies plain
+ * content; it does not pick its own `Container` width.
+ *
  * Built as a plain layout rather than Mantine's AppShell, whose responsive
  * navbar/aside machinery is unneeded for a single header link; revisit that
  * choice if the planned IA restructure adds real navigation or nested layouts.
  */
-export function Shell({ children }: { children: ReactNode }) {
+export function Shell({
+  children,
+  contentWidth = DEFAULT_CONTENT_WIDTH,
+}: {
+  children: ReactNode;
+  contentWidth?: ContainerWidth;
+}) {
   return (
     // position: relative (in the stylesheet) anchors the absolutely positioned
     // skip link's containing block here rather than to an arbitrary ancestor.
@@ -46,15 +61,18 @@ export function Shell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <header className={classes.header}>
-        <Container size="xl">
+        <Container size={contentWidth}>
           <Link to="/" className={classes.brand}>
             PSI-Link
           </Link>
         </Container>
       </header>
-      {/* tabIndex -1 so the skip link can move focus into the landmark itself. */}
+      {/* tabIndex -1 so the skip link can move focus into the landmark itself.
+          The single <main> landmark stays full-width (the focus outline and
+          padding live on it); the content container inside it, sized to the same
+          contentWidth as the header above, is what aligns the two edges. */}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={classes.main}>
-        {children}
+        <Container size={contentWidth}>{children}</Container>
       </main>
     </div>
   );

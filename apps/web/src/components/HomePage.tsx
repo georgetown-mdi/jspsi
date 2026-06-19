@@ -1,4 +1,4 @@
-import { Container, Group, Title } from "@mantine/core";
+import { Group, Title } from "@mantine/core";
 
 import AcceptForm from "@components/AcceptForm";
 import { InvitePanel } from "@components/InvitePanel";
@@ -9,18 +9,18 @@ import { InvitePanel } from "@components/InvitePanel";
  * the two side-by-side panels. Kept as a component (rather than inline in the
  * route file) so it can be mounted in a render test, mirroring
  * {@link AcceptInvitation}.
+ *
+ * The content width (wide) is declared by the route and supplied by the shell's
+ * container, so this page renders only its content -- no `Container` of its own.
  */
 export function HomePage() {
   return (
-    // Wide ("xl"): this route lays out two panels side by side and shows the
-    // long invitation code/link, so it wants more room than the single-column
-    // reading width the accept route uses.
-    <Container size="xl">
+    <>
       <Title order={1}>Start a private data exchange</Title>
       <Group justify="space-between" align="flex-start" grow mt="md">
         <InvitePanel />
         <AcceptForm />
       </Group>
-    </Container>
+    </>
   );
 }

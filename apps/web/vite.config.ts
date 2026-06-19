@@ -30,6 +30,7 @@ const srcAliases = {
   "@util": path.resolve(__dirname, "src/util"),
   "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
   "@psi": path.resolve(__dirname, "src/psi"),
+  "@theme": path.resolve(__dirname, "src/theme"),
   "@": path.resolve(__dirname, "src"),
 };
 
