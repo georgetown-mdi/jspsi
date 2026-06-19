@@ -195,6 +195,121 @@ test("retainFiles: true with explicit locklessRendezvous: false throws", () => {
   ).toThrow("lockless_rendezvous");
 });
 
+// --- outbound-path (split inbound/outbound directory) ------------------------
+
+const baseSFTPWithPath: ConnectionConfig = {
+  channel: "sftp",
+  server: { host: "sftp.example.org", path: "/drop/in" },
+};
+
+const baseFiledrop: ConnectionConfig = {
+  channel: "filedrop",
+  path: "/mnt/share/in",
+};
+
+test("outboundPath splits an sftp shared path into inbound/outbound", () => {
+  const result = applyConnectionOverrides(baseSFTPWithPath, {
+    retainFiles: true,
+    outboundPath: "/drop/out",
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.inboundPath).toBe("/drop/in");
+  expect(result.server.outboundPath).toBe("/drop/out");
+  expect(result.server.path).toBeUndefined();
+  // --retain-files alone suffices; it implies lockless + timestamp.
+  expect(result.options?.retainFiles).toBe(true);
+});
+
+test("outboundPath splits a filedrop shared path into inbound/outbound", () => {
+  const result = applyConnectionOverrides(baseFiledrop, {
+    retainFiles: true,
+    outboundPath: "/mnt/share/out",
+  });
+  if (result.channel !== "filedrop") return;
+  expect(result.inboundPath).toBe("/mnt/share/in");
+  expect(result.outboundPath).toBe("/mnt/share/out");
+  expect(result.path).toBeUndefined();
+});
+
+test("outboundPath overrides only the outbound on an already-split config", () => {
+  const base: ConnectionConfig = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/in",
+    outboundPath: "/mnt/share/old-out",
+    options: {
+      retainFiles: true,
+      locklessRendezvous: true,
+      timestampInFilename: true,
+    },
+  };
+  const result = applyConnectionOverrides(base, {
+    outboundPath: "/mnt/share/new-out",
+  });
+  if (result.channel !== "filedrop") return;
+  expect(result.inboundPath).toBe("/mnt/share/in");
+  expect(result.outboundPath).toBe("/mnt/share/new-out");
+  expect(result.path).toBeUndefined();
+});
+
+test("outboundPath without retain mode is rejected naming --retain-files", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTPWithPath, { outboundPath: "/drop/out" }),
+  ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(baseSFTPWithPath, { outboundPath: "/drop/out" }),
+  ).toThrow("--retain-files");
+});
+
+test("outboundPath equal to the inbound path is rejected", () => {
+  const overrides = { retainFiles: true, outboundPath: "/mnt/share/in" };
+  expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
+    UsageError,
+  );
+  expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
+    "differ",
+  );
+});
+
+test("a relative filedrop outbound path is rejected (filedrop requires absolute)", () => {
+  const overrides = { retainFiles: true, outboundPath: "relative/out" };
+  expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
+    UsageError,
+  );
+  expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
+    "absolute",
+  );
+});
+
+test("a relative sftp outbound path is allowed (sftp permits relative paths)", () => {
+  const result = applyConnectionOverrides(baseSFTPWithPath, {
+    retainFiles: true,
+    outboundPath: "outgoing",
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.inboundPath).toBe("/drop/in");
+  expect(result.server.outboundPath).toBe("outgoing");
+});
+
+test("outboundPath on an sftp login-home (no inbound path) is rejected as set-together", () => {
+  // baseSFTP has no server.path, so the inbound half is unset; a split needs both.
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      retainFiles: true,
+      outboundPath: "/drop/out",
+    }),
+  ).toThrow("set together");
+});
+
+test("outboundPath on a webrtc connection is rejected", () => {
+  const webrtc: ConnectionConfig = {
+    channel: "webrtc",
+    server: { host: "peer.example.org" },
+  };
+  expect(() =>
+    applyConnectionOverrides(webrtc, { outboundPath: "/out" }),
+  ).toThrow("sftp and filedrop");
+});
+
 // --- saveConfig --------------------------------------------------------------
 
 test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec", () => {

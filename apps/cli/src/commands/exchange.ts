@@ -97,6 +97,11 @@ export function builder(cmd: Argv): Argv {
         "directory is required for each exchange and is enforced: reusing a " +
         "directory with retained files from a prior session is rejected with " +
         "an error at startup",
+      "outbound-path":
+        "use a separate outbound directory, overriding connection.outbound_path " +
+        "in the config: the config's directory becomes the inbound " +
+        "(peer-written) directory and this is the outbound (self-written) " +
+        "directory. Requires retain mode; the two directories must differ",
     },
   )
     .option("sweep-exchange-files", {

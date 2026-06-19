@@ -203,17 +203,64 @@ function filedropPathsEqual(
   // Normalize both sides through the connection's own normalizer, so the diff's
   // verdict is exactly what the live filedrop connection would open (backslashes
   // folded to forward slashes, all trailing slashes stripped, root-like paths
-  // preserved) -- no separate equality rule to drift from it. `path` is now
-  // optional: a split-directory config (inbound_path/outbound_path) carries no
-  // `path`, so `undefined` legitimately arrives from a parsed config. The
-  // caller compares only the single `path` here; reconciling the split pair is
-  // deferred to the CLI split surface (item 201740349), which must extend
-  // diffConnectionAgainstTarget to compare inbound_path/outbound_path -- until
-  // then connectionFromURL never produces a split target, so a split incoming
-  // config cannot reach this comparison.
+  // preserved) -- no separate equality rule to drift from it. Either operand may
+  // be undefined: a split-directory config (inbound_path/outbound_path) carries
+  // no `path`, and a shared config carries no inbound/outbound, so undefined
+  // legitimately arrives. pushDirectoryConflicts calls this once per locator it
+  // compares (the single `path`, or each half of the split pair).
   const norm = (p: string | undefined): string | undefined =>
     p === undefined ? undefined : normalizeFiledropPath(p);
   return norm(a) === norm(b);
+}
+
+/**
+ * Append the directory-locator conflicts for a file-sync channel. A directory is
+ * given either as a single shared path or as the split inbound/outbound pair;
+ * this compares whichever form the `target` uses, so a split target is reconciled
+ * pair-wise and a shared target by its single path (matching how the live
+ * connection resolves each). An existing config in the other form differs in the
+ * compared field (its value is unset), so a shared-vs-split mismatch is a
+ * conflict like any other. `pathsEqual` is the channel's own path comparator and
+ * `field` renders a config key to its snake_case message path. Only fields the
+ * target actually sets are compared, so a locator the target leaves unset is not
+ * a disagreement with whatever the config holds.
+ */
+function pushDirectoryConflicts(
+  conflicts: ReconcileDiff[],
+  have: { path?: string; inboundPath?: string; outboundPath?: string },
+  want: { path?: string; inboundPath?: string; outboundPath?: string },
+  pathsEqual: (a: string | undefined, b: string | undefined) => boolean,
+  field: (key: "path" | "inbound_path" | "outbound_path") => string,
+): void {
+  const split =
+    want.inboundPath !== undefined || want.outboundPath !== undefined;
+  if (split) {
+    if (
+      want.inboundPath !== undefined &&
+      !pathsEqual(have.inboundPath, want.inboundPath)
+    )
+      conflicts.push({
+        field: field("inbound_path"),
+        existing: have.inboundPath ?? RECONCILE_UNSET,
+        incoming: want.inboundPath,
+      });
+    if (
+      want.outboundPath !== undefined &&
+      !pathsEqual(have.outboundPath, want.outboundPath)
+    )
+      conflicts.push({
+        field: field("outbound_path"),
+        existing: have.outboundPath ?? RECONCILE_UNSET,
+        incoming: want.outboundPath,
+      });
+    return;
+  }
+  if (want.path !== undefined && !pathsEqual(have.path, want.path))
+    conflicts.push({
+      field: field("path"),
+      existing: have.path ?? RECONCILE_UNSET,
+      incoming: want.path,
+    });
 }
 
 /**
@@ -268,19 +315,22 @@ export function diffConnectionAgainstTarget(
     const have = (existing as SFTPConnectionConfig).server;
     const want = target.server;
 
-    // host/path -> conflict (which drop you are meeting at).
+    // host/path -> conflict (which drop you are meeting at). The directory is the
+    // single shared `server.path` or the split inbound/outbound pair, compared in
+    // whichever form the target uses.
     if (!hostsEqual(have.host, want.host))
       conflicts.push({
         field: "connection.server.host",
         existing: have.host,
         incoming: want.host,
       });
-    if (want.path !== undefined && !sftpPathsEqual(have.path, want.path))
-      conflicts.push({
-        field: "connection.server.path",
-        existing: have.path ?? RECONCILE_UNSET,
-        incoming: want.path,
-      });
+    pushDirectoryConflicts(
+      conflicts,
+      have,
+      want,
+      sftpPathsEqual,
+      (key) => `connection.server.${key}`,
+    );
 
     // port -> warn (how you reach the same host). An unset config port means the
     // SFTP default, so a target restating that default is not a divergence.
@@ -300,16 +350,16 @@ export function diffConnectionAgainstTarget(
     if (want.privateKey !== undefined && want.privateKey !== have.privateKey)
       warnings.push("private key: differs from the saved value");
   } else if (target.channel === "filedrop") {
-    // filedrop's only locator is the path -> conflict. No port/credentials apply.
-    const havePath = (existing as FileDropConnectionConfig).path;
-    if (!filedropPathsEqual(havePath, target.path))
-      conflicts.push({
-        field: "connection.path",
-        existing: havePath ?? RECONCILE_UNSET,
-        // target.path is undefined for a split (inbound/outbound) config; the
-        // split CLI surface (item 201740349) reconciles those paths.
-        incoming: target.path ?? RECONCILE_UNSET,
-      });
+    // filedrop's only locator is the directory -> conflict. No port/credentials
+    // apply. The directory is the single shared `path` or the split
+    // inbound/outbound pair, compared in whichever form the target uses.
+    pushDirectoryConflicts(
+      conflicts,
+      existing as FileDropConnectionConfig,
+      target,
+      filedropPathsEqual,
+      (key) => `connection.${key}`,
+    );
   }
   // webrtc never reaches here: connectionFromURL rejects a ws/wss URL before the
   // target is built, so `target` is only ever sftp/filedrop, and a webrtc
@@ -825,7 +875,8 @@ export type CommonBootstrapDescribeOverrides = Partial<
     | "server-private-key"
     | "peer-id"
     | "timestamp-in-filename"
-    | "retain-files",
+    | "retain-files"
+    | "outbound-path",
     string
   >
 >;
@@ -961,6 +1012,17 @@ export function addCommonBootstrapOptions(
           "deleting them after consumption. Requires --timestamp-in-filename. " +
           "Both parties must set this flag identically",
     })
+    .option("outbound-path", {
+      type: "string",
+      describe:
+        describe["outbound-path"] ??
+        "use a separate outbound directory: the URL/positional path becomes " +
+          "the inbound (peer-written) directory and this is the outbound " +
+          "(self-written) directory, for managed shares and SFTP servers with " +
+          "distinct drop and pickup folders. Requires --retain-files; the two " +
+          "directories must differ. Leave unset for a single shared directory. " +
+          "Each party sets its own directories",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -986,6 +1048,7 @@ export interface CommonBootstrapOptions {
   peerId?: string;
   timestampInFilename?: boolean;
   retainFiles?: boolean;
+  outboundPath?: string;
   record: boolean;
   recordFile?: string;
   logLevel: logLibrary.LogLevelNumbers;
@@ -1039,6 +1102,7 @@ export function parseCommonBootstrapArgs(
     peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
+    outboundPath: singleValue(argv, "outbound-path") as string | undefined,
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
@@ -1068,6 +1132,7 @@ export type ConnectionOverrideOptions = Pick<
   | "peerId"
   | "timestampInFilename"
   | "retainFiles"
+  | "outboundPath"
 >;
 
 /** Map the parsed common options to the connection-override shape. */
@@ -1087,6 +1152,7 @@ export function connectionOverridesFrom(
     peerId: options.peerId,
     timestampInFilename: options.timestampInFilename,
     retainFiles: options.retainFiles,
+    outboundPath: options.outboundPath,
   };
 }
 

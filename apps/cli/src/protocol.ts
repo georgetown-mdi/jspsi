@@ -506,7 +506,7 @@ export async function runProtocol(
         // comes from the invitation's filedrop endpoint, charset-unconstrained),
         // so escape it before it reaches the operator's terminal -- the filedrop
         // twin of the SFTP host below. A split config has no single `path`; show
-        // the inbound directory (the CLI split surface is item 201740349).
+        // the inbound directory it reads the peer's files from instead.
         sanitizeForDisplay(connection.path ?? connection.inboundPath ?? ""),
       );
     } else {

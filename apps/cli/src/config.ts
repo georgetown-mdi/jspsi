@@ -11,6 +11,7 @@ import type {
 import {
   canonicalString,
   CanonicalEncodingError,
+  safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
   safeParseMetadata,
@@ -42,6 +43,15 @@ export interface ConnectionOverrides {
   peerId?: string;
   retainFiles?: boolean;
   timestampInFilename?: boolean;
+  /**
+   * Outbound (self-written) directory for a split-directory exchange. When set,
+   * the connection's single shared directory (the server URL/positional path, or
+   * the loaded config's `path`/`server.path`) becomes the inbound (peer-written)
+   * directory and this value becomes the outbound; see
+   * {@link applyConnectionOverrides}. Requires retain mode and only applies to
+   * the file-sync channels (`sftp`, `filedrop`).
+   */
+  outboundPath?: string;
 }
 
 export function applyConnectionOverrides(
@@ -133,6 +143,64 @@ export function applyConnectionOverrides(
       // invalid caller configuration: a UsageError so the CLI exits 64, not 69.
       throw new UsageError(message);
     }
+  }
+
+  // --outbound-path: split the single shared directory into a separate inbound
+  // (peer-written) and outbound (self-written) directory. The path source -- the
+  // server URL/positional for the URL-driven commands, or the loaded config for
+  // `exchange` -- supplies the inbound directory; this override supplies the
+  // outbound. Applied here, the single chokepoint every bootstrap command routes
+  // its connection through, so the four commands share one mapping rather than
+  // re-deriving it per command. Only the file-sync channels carry a directory.
+  if (overrides.outboundPath !== undefined) {
+    if (result.channel === "sftp") {
+      const { server } = result;
+      // An already-split config (inbound set) keeps its inbound; a shared config
+      // contributes its `path`. The single `path` cannot coexist with the pair.
+      server.inboundPath = server.inboundPath ?? server.path;
+      server.outboundPath = overrides.outboundPath;
+      delete server.path;
+    } else if (result.channel === "filedrop") {
+      result.inboundPath = result.inboundPath ?? result.path;
+      result.outboundPath = overrides.outboundPath;
+      delete result.path;
+    } else {
+      // webrtc has no directory, so the flag is meaningless there. Only
+      // `exchange` can reach this -- the URL-driven commands reject a webrtc URL
+      // before overrides apply -- and its config is rejected as unsupported
+      // shortly after; surface a precise cause here first.
+      throw new UsageError(
+        "--outbound-path is only supported on the sftp and filedrop channels",
+      );
+    }
+
+    // Retain mode is a hard precondition for a split directory. Fail fast with a
+    // CLI-oriented message naming the flag, rather than letting the core schema
+    // below reject it with its config-field message. retain_files is the merged
+    // value: --retain-files (applied above) or, for `exchange`, the loaded
+    // config. The else branch above threw for webrtc, so result is a file-sync
+    // channel here; the channel test re-narrows for the options read.
+    if (
+      (result.channel === "sftp" || result.channel === "filedrop") &&
+      result.options?.retainFiles !== true
+    )
+      throw new UsageError(
+        "--outbound-path configures a separate outbound directory, which " +
+          "requires retain mode; pass --retain-files (or set retain_files: " +
+          "true in the configuration).",
+      );
+
+    // Validate the assembled split through the core schema so the remaining
+    // rejections -- an inbound equal to the outbound, a relative or unset
+    // filedrop path, the pair-set-together rule -- surface with the same messages
+    // and rules the live connection enforces, rather than being re-implemented
+    // here. The literal `@path` credential refs a connection may still carry
+    // validate cleanly as strings (resolved later, at live use).
+    const connValidation = safeParseConnectionConfig(result);
+    if (!connValidation.success)
+      throw new UsageError(
+        connValidation.error.issues.map((i) => i.message).join("; "),
+      );
   }
 
   return result;

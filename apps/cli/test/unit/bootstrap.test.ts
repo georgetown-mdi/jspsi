@@ -207,6 +207,82 @@ test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL"
   expect(warnings).toEqual([]);
 });
 
+// --- connectionFromURL + --outbound-path (split directories) -----------------
+
+test("connectionFromURL: --outbound-path splits an sftp URL path into inbound/outbound", () => {
+  const target = connectionFromURL(new URL("sftp://host/drop-in"), {
+    retainFiles: true,
+    outboundPath: "/drop-out",
+  });
+  expect(target.channel).toBe("sftp");
+  if (target.channel !== "sftp") return;
+  expect(target.server.inboundPath).toBe("/drop-in");
+  expect(target.server.outboundPath).toBe("/drop-out");
+  expect(target.server.path).toBeUndefined();
+});
+
+test("connectionFromURL: --outbound-path splits a filedrop URL directory", () => {
+  const target = connectionFromURL(new URL("file:///mnt/share/in"), {
+    retainFiles: true,
+    outboundPath: "/mnt/share/out",
+  });
+  expect(target.channel).toBe("filedrop");
+  if (target.channel !== "filedrop") return;
+  expect(target.inboundPath).toBe("/mnt/share/in");
+  expect(target.outboundPath).toBe("/mnt/share/out");
+  expect(target.path).toBeUndefined();
+});
+
+test("diffConnectionAgainstTarget: a matching split pair is no conflict", () => {
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", inboundPath: "/in", outboundPath: "/out" },
+  };
+  const existing: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", inboundPath: "/in", outboundPath: "/out" },
+  };
+  const { conflicts, warnings } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("diffConnectionAgainstTarget: a differing split half conflicts on that field", () => {
+  const target: RunnableConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", inboundPath: "/in", outboundPath: "/out" },
+  };
+  const existing: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", inboundPath: "/in", outboundPath: "/elsewhere" },
+  };
+  const { conflicts } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].field).toBe("connection.server.outbound_path");
+  expect(conflicts[0].existing).toBe("/elsewhere");
+  expect(conflicts[0].incoming).toBe("/out");
+});
+
+test("diffConnectionAgainstTarget: a shared config against a split target conflicts on both halves", () => {
+  // A shared (single-path) config and a split target describe different
+  // topologies; the existing config has neither half set, so both are conflicts.
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    inboundPath: "/mnt/in",
+    outboundPath: "/mnt/out",
+  };
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/in",
+  };
+  const { conflicts } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts.map((c) => c.field)).toEqual([
+    "connection.inbound_path",
+    "connection.outbound_path",
+  ]);
+  expect(conflicts.every((c) => c.existing === "(unset)")).toBe(true);
+});
+
 // --- redactUrlCredentials ----------------------------------------------------
 
 test("redactUrlCredentials: strips an embedded password and username", () => {
@@ -319,6 +395,25 @@ test("parseCommonBootstrapArgs: a repeated string flag is a usage error naming t
       "log-level": ["info", "debug"],
     } as unknown as Arguments),
   ).toThrow("--log-level may be given only once");
+});
+
+test("parseCommonBootstrapArgs: --outbound-path is read as a string", () => {
+  const parsed = parseCommonBootstrapArgs({
+    _: [],
+    $0: "psilink",
+    "outbound-path": "/mnt/share/to-partner",
+  } as unknown as Arguments);
+  expect(parsed.outboundPath).toBe("/mnt/share/to-partner");
+});
+
+test("parseCommonBootstrapArgs: a repeated --outbound-path is a usage error", () => {
+  expect(() =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "outbound-path": ["/a", "/b"],
+    } as unknown as Arguments),
+  ).toThrow("--outbound-path may be given only once");
 });
 
 test("parseCommonBootstrapArgs: human-readable timeouts parse to whole seconds", () => {
