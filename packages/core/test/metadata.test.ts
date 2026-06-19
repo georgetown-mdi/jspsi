@@ -103,6 +103,15 @@ test.each([
   ["email_address", "email_address"],
   ["email", "email_address"],
   ["id", "identifier"],
+  // No-separator spellings: a single-token column export still infers. Pinned
+  // because the map builder keys on `type.toLowerCase()`, which equals the
+  // snake_case type and so no longer yields the no-separator key as a side
+  // effect -- these must stay explicit aliases.
+  ["firstname", "first_name"],
+  ["lastname", "last_name"],
+  ["dateofbirth", "date_of_birth"],
+  ["phonenumber", "phone_number"],
+  ["emailaddress", "email_address"],
 ] as const)('alias "%s" resolves to type "%s"', (alias, expectedType) => {
   const [col] = inferMetadata([alias]);
   expect(col.type).toBe(expectedType);
@@ -220,4 +229,22 @@ test.each([
     { name: "c", type, role: "linkage", is_payload: false },
   ]);
   expect(result.success).toBe(false);
+});
+
+test("a rejected metadata type is not echoed in the parse error", () => {
+  // The metadata `type` is a z.enum(SEMANTIC_TYPES) reached by the operator-config
+  // path (loadConfigLinkageSource), which relays the Zod issue message verbatim.
+  // Like the linkage-terms discriminator, the z.enum mismatch reports only the
+  // expected options and the issue path, never the received value -- pin that so
+  // an offending value carrying control/ANSI/bidi bytes cannot leak through.
+  const evil = "\x1b[31mfirstName\x1b[0m‮";
+  const result = safeParseMetadata([
+    { name: "c", type: evil, role: "linkage", is_payload: false },
+  ]);
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.message).not.toContain("firstName");
+    expect(result.error.message).not.toContain("\x1b");
+    expect(result.error.message).not.toContain("‮");
+  }
 });
