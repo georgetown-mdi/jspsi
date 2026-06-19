@@ -889,9 +889,7 @@ export function validateStandardizationAgainstTerms(
  * Pass `metadata` to mirror an exchange that runs from an explicit metadata
  * block (`prepareForExchange` resolves the type fallback against
  * `metadata ?? inferMetadata`); omit it to fall back to name-based inference, the
- * accept-path default. The metadata is restricted to columns actually present in
- * `columns` first, since the exchange reads each resolved column from the rows and
- * a metadata-declared column missing from the input produces no values.
+ * accept-path default.
  */
 export function unsatisfiedLinkageFields(
   columns: string[],
@@ -900,19 +898,7 @@ export function unsatisfiedLinkageFields(
   metadata?: ColumnMetadata[],
 ): LinkageField[] {
   const present = new Set(columns);
-  // Semantic types the type fallback can draw on. An explicit `metadata` replaces
-  // name-inference (as prepareForExchange does), but is first restricted to columns
-  // present in `columns`: the fallback binds a field to a metadata column of its
-  // type and the exchange reads that column from the rows, so a metadata-declared
-  // column absent from the input yields no values and must not count as coverage --
-  // otherwise a config whose metadata describes a since-swapped CSV would mask the
-  // unsatisfiability this detects. For inferred metadata the restriction is a no-op
-  // (it is derived from `columns`).
-  const inputTypes = new Set(
-    (metadata ?? inferMetadata(columns))
-      .filter((c) => present.has(c.name))
-      .map((c) => c.type),
-  );
+  const metadataColumns = metadata ?? inferMetadata(columns);
   // Field name -> the input column its explicit standardization reads. A field
   // present here is resolved by the explicit transformation (which preempts the
   // type fallback), so it is producible iff that column exists; a field absent
@@ -923,7 +909,16 @@ export function unsatisfiedLinkageFields(
   return terms.linkageFields.filter((f) => {
     const mapped = explicitInput.get(f.name);
     if (mapped !== undefined) return !present.has(mapped);
-    return !inputTypes.has(f.type);
+    // Type fallback: mirror getDefaultStandardization / buildStandardizedDataset,
+    // which bind the field to the FIRST metadata column of its type and read that
+    // column from the rows. Producible iff such a column exists AND is present in
+    // the input. First-match selection (not "any same-typed column is present")
+    // matters when explicit metadata lists an absent same-typed column ahead of a
+    // present one: the exchange binds the absent one and emits nothing, so a set of
+    // present types would wrongly report the field satisfiable. For inferred
+    // metadata every column is present, so the presence check never fires.
+    const col = metadataColumns.find((c) => c.type === f.type);
+    return col === undefined || !present.has(col.name);
   });
 }
 

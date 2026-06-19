@@ -1401,6 +1401,38 @@ describe("unsatisfiedLinkageFields", () => {
     );
     expect(unsatisfied.map((f) => f.name)).toContain("ssn");
   });
+
+  test("an absent same-typed metadata column ordered before a present one is unsatisfiable", () => {
+    // Two ssn-typed columns, the absent one listed first. The exchange binds the
+    // field to the FIRST match (getDefaultStandardization / buildStandardizedDataset
+    // both use metadata.find) and reads that absent column, producing nothing -- so
+    // the check must follow the same first-match selection and not merely ask whether
+    // any same-typed column is present.
+    const columns = ["first_name", "last_name", "dob", "present_ssn"];
+    const unsatisfied = unsatisfiedLinkageFields(
+      columns,
+      fullTerms,
+      undefined,
+      [
+        {
+          name: "first_name",
+          type: "firstName",
+          role: "linkage",
+          isPayload: false,
+        },
+        {
+          name: "last_name",
+          type: "lastName",
+          role: "linkage",
+          isPayload: false,
+        },
+        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        { name: "absent_ssn", type: "ssn", role: "linkage", isPayload: false },
+        { name: "present_ssn", type: "ssn", role: "linkage", isPayload: false },
+      ],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
 });
 
 describe("assessLinkageSatisfiability", () => {
