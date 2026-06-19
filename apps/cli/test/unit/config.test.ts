@@ -98,6 +98,19 @@ test("a non-positive connectionTimeout override is rejected with a UsageError", 
   expect(() =>
     applyConnectionOverrides(baseSFTP, { connectionTimeout: 0 }),
   ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { connectionTimeout: -1 }),
+  ).toThrow(UsageError);
+});
+
+test("maxReconnectAttempts 0 passes re-validation (nonnegative, not positive)", () => {
+  // 0 is a valid maxReconnectAttempts ("connect once, do not reconnect") -- the
+  // schema floor is nonnegative, not positive -- so the new re-validation path
+  // must accept it rather than reject it alongside the non-positive timeouts.
+  const result = applyConnectionOverrides(baseSFTP, {
+    maxReconnectAttempts: 0,
+  });
+  expect(result.options?.maxReconnectAttempts).toBe(0);
 });
 
 test("a valid timeout override still passes through unchanged on webrtc", () => {
