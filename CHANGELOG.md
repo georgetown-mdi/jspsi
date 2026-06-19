@@ -71,7 +71,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - The key-file pre-flight now rejects a parent directory that is writable but not readable, so a key write cannot fail after the handshake has already rotated the token. See `docs/SECURITY_DESIGN.md`.
 - Repeating a single-value flag (for example `--server-port`) is now a clean usage error (exit 64) instead of misbehaving. See `docs/CLI.md`.
 - A malformed message from a peer is reported as a protocol error instead of crashing, and a failed exchange surfaces its original cause instead of a generic connection error.
-- The acceptor is warned, or the exchange blocked (exit 64), when its CSV cannot satisfy the inviter's linkage terms, instead of silently producing an empty result. See `docs/CLI.md`.
+- The acceptor at accept time, and a recurring `psilink exchange` run, are warned -- or the run is blocked (exit 64) -- when the CSV cannot satisfy the configured linkage terms, instead of silently producing an empty result. See `docs/CLI.md`.
 - Linkage terms that pair `output.expects_output: false` with `payload.receive` columns are rejected as incoherent at parse time. See `docs/EXCHANGE_REFERENCE.md`.
 - Linkage terms that reference an undeclared linkage field, or whose `swap` names no element in its key, are rejected as incoherent at decode, instead of silently collapsing the affected key to an empty result. See `docs/EXCHANGE_REFERENCE.md`.
 

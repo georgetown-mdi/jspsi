@@ -5,7 +5,6 @@ import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
 import {
-  assessLinkageSatisfiability,
   describeDecodeError,
   getLogger,
   decodeInvitation,
@@ -32,6 +31,10 @@ import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
 import { configureLogFile, promptConfirm } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
+import {
+  checkLinkageSatisfiability,
+  type LinkagePreflightMessaging,
+} from "./linkagePreflight";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   addCommonBootstrapOptions,
@@ -290,7 +293,12 @@ export async function validateAccept(params: {
     // accept reads its y/N confirmation from stdin (promptConfirm), so it cannot
     // also take the CSV there: reject `-` rather than starve the prompt.
     const rows = await loadInputRows(input, { allowStdin: false });
-    checkLinkageSatisfiability(rows.columns, myTerms, log);
+    checkLinkageSatisfiability(
+      rows.columns,
+      myTerms,
+      log,
+      INVITATION_PREFLIGHT_MESSAGING,
+    );
     const { dataSpec, warnings } = buildDataSpec({
       terms: myTerms,
       identity: myIdentity,
@@ -322,7 +330,12 @@ export async function validateAccept(params: {
       ? await loadInputRows(resolved.input, { allowStdin: false })
       : undefined;
   if (rows !== undefined)
-    checkLinkageSatisfiability(rows.columns, myTerms, log);
+    checkLinkageSatisfiability(
+      rows.columns,
+      myTerms,
+      log,
+      INVITATION_PREFLIGHT_MESSAGING,
+    );
   const { dataSpec, warnings } = buildDataSpec({
     terms: myTerms,
     identity: myIdentity,
@@ -453,62 +466,17 @@ function reconcileAcceptConfig(params: {
 
 // --- Linkage preflight -------------------------------------------------------
 
-// Check that the acceptor's columns can satisfy the adopted linkage terms.
-// When no key is satisfiable, throws a UsageError (the exchange would produce
-// a silent empty result). When some keys are unsatisfiable, warns and proceeds.
-function checkLinkageSatisfiability(
-  columns: string[],
-  terms: LinkageTerms,
-  log: ReturnType<typeof getLogger>,
-): void {
-  // No standardization is passed: the acceptor adopts only the inviter's
-  // linkage terms and infers its standardization from its own CSV (default
-  // type-based pipelines, which never remap a column onto a field whose type is
-  // absent), so a purely type-based check matches the acceptor's exchange-time
-  // satisfiability exactly. The standardization argument is for the invite path,
-  // whose config can carry an explicit column remapping.
-  const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
-    columns,
-    terms,
-  );
-  // Gate on the key count, not on `unsatisfied.length`: a key can be unsatisfiable
-  // because it references a field the terms never declare (not just a declared
-  // field the CSV lacks), in which case `unsatisfied` is empty yet keys still
-  // collapse. satisfiableKeyCount accounts for both.
-  if (satisfiableKeyCount === terms.linkageKeys.length) return;
-
-  // f.type is a schema-validated enum literal, but sanitize it like f.name so
-  // every partner-sourced token in the message crosses the display boundary. The
-  // detail is omitted when no DECLARED field is unproducible (the keys are
-  // unsatisfiable only by referencing undeclared fields), leaving the block/warn
-  // itself as the signal.
-  const detail =
-    unsatisfied.length > 0
-      ? " (unsatisfied fields: " +
-        unsatisfied
-          .map(
-            (f) =>
-              `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
-          )
-          .join(", ") +
-        ")"
-      : "";
-
-  if (satisfiableKeyCount === 0)
-    throw new UsageError(
-      "the CSV cannot satisfy any of the invitation's linkage keys" +
-        detail +
-        "; running would produce a silent empty result. Provide a CSV that " +
-        "covers the required field types, or ask your partner for an invitation " +
-        "with different linkage terms.",
-    );
-
-  log.warn(
-    "the CSV cannot satisfy all of the invitation's linkage fields" +
-      detail +
-      "; keys that require those fields will be inactive for this exchange.",
-  );
-}
+// Accept adopts only the inviter's linkage terms and infers its standardization
+// and metadata from its own CSV (default type-based pipelines, which never remap a
+// column onto a field whose type is absent), so it passes neither override to the
+// shared check and relies on name inference -- which matches the acceptor's
+// exchange-time satisfiability exactly. The override arguments exist for the
+// exchange path, whose committed config can carry a remap or an explicit type.
+const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
+  source: "invitation",
+  blockRemedy:
+    "or ask your partner for an invitation with different linkage terms.",
+};
 
 // --- Handler -----------------------------------------------------------------
 
