@@ -55,7 +55,6 @@ export {
   verifyHostKeyFingerprint,
   keyTypeFromBlob,
 } from "./utils/sshHostKey.js";
-export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 export * from "./exchange";
 export * from "./exchangeRecord";
 export * from "./payloadExchange";
