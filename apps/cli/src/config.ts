@@ -805,7 +805,13 @@ export function loadConfigLinkageSource(
             // Prefix each issue with its field path (e.g. "linkageKeys.0.name")
             // so the user can locate the offending field, mirroring accept's
             // decode-error formatting. The path is relative to linkage_terms.
-            const at = i.path.length > 0 ? `${i.path.join(".")}: ` : "";
+            // Escape each path segment through sanitizeForDisplay before joining,
+            // matching describeDecodeError's contract: harden the path components
+            // this formatter owns, relay the issue message unchanged.
+            const at =
+              i.path.length > 0
+                ? `${i.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
+                : "";
             return `${at}${i.message}`;
           })
           .join("; "),
@@ -824,7 +830,11 @@ export function loadConfigLinkageSource(
         `config file ${configPath} has invalid standardization: ` +
           stdResult.error.issues
             .map((i) => {
-              const at = i.path.length > 0 ? `${i.path.join(".")}: ` : "";
+              // Escape each path segment, like the linkage_terms branch above.
+              const at =
+                i.path.length > 0
+                  ? `${i.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
+                  : "";
               return `${at}${i.message}`;
             })
             .join("; "),
@@ -846,7 +856,11 @@ export function loadConfigLinkageSource(
         `config file ${configPath} has invalid metadata: ` +
           metaResult.error.issues
             .map((i) => {
-              const at = i.path.length > 0 ? `${i.path.join(".")}: ` : "";
+              // Escape each path segment, like the linkage_terms branch above.
+              const at =
+                i.path.length > 0
+                  ? `${i.path.map((p) => sanitizeForDisplay(String(p))).join(".")}: `
+                  : "";
               return `${at}${i.message}`;
             })
             .join("; "),

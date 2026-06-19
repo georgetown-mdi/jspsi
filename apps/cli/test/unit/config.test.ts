@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import YAML from "yaml";
 import {
   getDefaultLinkageTerms,
+  MAX_NAME_LENGTH,
   parseExchangeSpec,
   UsageError,
 } from "@psilink/core";
@@ -1270,6 +1271,74 @@ test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
     expect(() => loadConfigLinkageSource(configPath)).toThrow(
       "invalid linkage_terms",
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The three parse-error formatters route every issue-path segment through
+// sanitizeForDisplay, like describeDecodeError, so a control/ANSI or
+// deceptive-Unicode byte in a path can never reach the operator raw. No reachable
+// failure produces such a path today (the linkage schemas are non-strict, so
+// unrecognized keys are stripped before they can appear), so this drives the one
+// schema position that can carry a partner-style string into a path -- a
+// transform `params` record key, whose key schema bounds length -- with an
+// over-long key built from control and bidi-override bytes. The guard must escape
+// it; the two tests below pin both the escaping and the absence of over-escaping.
+test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issue path", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+    // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
+    // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
+    // surfaces the offending key in the issue path.
+    const badKey = "\x1b[31m‮evil" + "x".repeat(MAX_NAME_LENGTH + 10);
+    terms.linkageKeys[0].elements[0].transform = [
+      { function: "noop", params: { [badKey]: 1 } },
+    ];
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    let caught: unknown;
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    const message = (caught as Error).message;
+    expect(message).toContain("invalid linkage_terms");
+    // The fixed path prefix passes through verbatim; only the partner-style key
+    // segment is escaped.
+    expect(message).toContain("linkageKeys.0.elements.0.transform.0.params.");
+    // The raw bytes are neutralized: their escaped forms appear, never the bytes.
+    expect(message).not.toContain("\x1b");
+    expect(message).not.toContain("‮");
+    expect(message).toContain("\\x1b");
+    expect(message).toContain("\\u202e");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+    // An empty name fails the linkage-key `name` min-length, locating the issue
+    // at the schema-fixed path linkageKeys.0.name (field names + a numeric index).
+    terms.linkageKeys[0].name = "";
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    let caught: unknown;
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    // Ordinary path components survive untouched: the `.` separators and the
+    // numeric index are not over-escaped.
+    expect((caught as Error).message).toContain("linkageKeys.0.name");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
