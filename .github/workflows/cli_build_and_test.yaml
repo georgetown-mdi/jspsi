@@ -70,7 +70,7 @@ jobs:
   # `test` job above are unchanged. Integration tests import the adapter from src
   # (vitest transpiles) and consume @psilink/core from the setup action's build,
   # so no CLI build step is needed. If the added CI minutes prove too costly, trim
-  # this matrix per board-10 item 199637670.
+  # this matrix -- the three hardened profiles are independent legs.
   hardened-native:
     name: Hardened native sshd (${{ matrix.profile }})
     runs-on: ubuntu-latest
