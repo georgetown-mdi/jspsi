@@ -46,6 +46,7 @@ import {
   durationFlagSeconds,
   LOG_LEVELS,
   MAX_TIMEOUT_SECONDS,
+  nonNegativeIntFlag,
   singleValue,
   openInputSource,
 } from "../util/cli";
@@ -1032,9 +1033,7 @@ export function parseCommonBootstrapArgs(
       MAX_TIMEOUT_SECONDS,
     ),
     peerTimeout: durationFlagSeconds(argv, "peer-timeout", MAX_TIMEOUT_SECONDS),
-    maxReconnectAttempts: singleValue(argv, "max-reconnect-attempts") as
-      | number
-      | undefined,
+    maxReconnectAttempts: nonNegativeIntFlag(argv, "max-reconnect-attempts"),
     locklessRendezvous: argv["lockless-rendezvous"] as boolean | undefined,
     peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,

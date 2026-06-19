@@ -61,6 +61,11 @@ export function applyConnectionOverrides(
     if (overrides.serverPort !== undefined) server.port = overrides.serverPort;
   }
 
+  // Tracks whether any override merged into result.options, so the single
+  // re-validation below runs exactly when an override could have introduced an
+  // invalid value -- not on an untouched, already-validated config.
+  let optionsModified = false;
+
   if (
     overrides.peerTimeout !== undefined ||
     overrides.connectionTimeout !== undefined ||
@@ -78,6 +83,7 @@ export function applyConnectionOverrides(
         maxReconnectAttempts: overrides.maxReconnectAttempts,
       }),
     };
+    optionsModified = true;
   }
 
   // locklessRendezvous, peerId, retainFiles, and timestampInFilename are
@@ -118,12 +124,25 @@ export function applyConnectionOverrides(
         result.options.timestampInFilename = true;
     }
 
-    // Re-validate the merged options through FileSyncOptionsSchema so that
-    // all constraints (min length, timestampInFilename dependency, reserved
-    // values) are enforced from one place rather than mirrored here.
-    // Re-validate whenever any FileSyncOptions field is overridden, not just
-    // peerId/retainFiles, so future cross-field constraints on locklessRendezvous
-    // are not silently bypassed.
+    optionsModified = true;
+  }
+
+  // Re-validate the merged options through FileSyncOptionsSchema once, whenever
+  // any override touched them -- a SharedOptions/timeout field or a
+  // FileSyncOptions field. A single validation point keeps the schema the sole
+  // source of truth for every floor (peerTimeoutMs/serverConnectTimeoutMs
+  // positivity, peer_id min length and its timestamp_in_filename dependency,
+  // reserved values, the retain_files implications) and removes the asymmetry
+  // where the timeout merge above would otherwise trust its inputs while the
+  // FileSync merge re-parsed: neither block can now bypass a floor the schema
+  // enforces, regardless of which override path reached the value.
+  //
+  // FileSyncOptionsSchema is a safe superset for validating a webrtc
+  // SharedOptions object: each of its FileSyncOptions-only refines is guarded
+  // by that field's own presence, so none can fire on options that carry none
+  // of those fields, and the shared floors are checked identically on every
+  // channel.
+  if (optionsModified) {
     const validation = safeParseFileSyncOptions(result.options);
     if (!validation.success) {
       const message = validation.error.issues

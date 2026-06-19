@@ -11,6 +11,7 @@ import {
   durationFlagSeconds,
   exitWithError,
   MAX_TIMEOUT_SECONDS,
+  nonNegativeIntFlag,
   openInputSource,
   parseOrExit,
   singleValue,
@@ -182,6 +183,90 @@ test("durationFlagSeconds: the existing rejections precede the ceiling check", (
       MAX_TIMEOUT_SECONDS,
     ),
   ).toThrow(/greater than zero/);
+});
+
+// --- nonNegativeIntFlag ------------------------------------------------------
+
+test("nonNegativeIntFlag: a nonnegative integer is returned unchanged", () => {
+  // The schema floor on maxReconnectAttempts is nonnegative (not positive), so 0
+  // ("connect once, do not reconnect") is valid and must pass through.
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": 3 }),
+      "max-reconnect-attempts",
+    ),
+  ).toBe(3);
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": 0 }),
+      "max-reconnect-attempts",
+    ),
+  ).toBe(0);
+  // MAX_SAFE_INTEGER is the inclusive upper boundary z.int() accepts, so the
+  // CLI guard accepts it too -- the two agree at the boundary, not just below it.
+  expect(
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": Number.MAX_SAFE_INTEGER }),
+      "max-reconnect-attempts",
+    ),
+  ).toBe(Number.MAX_SAFE_INTEGER);
+});
+
+test("nonNegativeIntFlag: an absent flag is undefined", () => {
+  expect(
+    nonNegativeIntFlag(argv({}), "max-reconnect-attempts"),
+  ).toBeUndefined();
+});
+
+test("nonNegativeIntFlag: a negative, a fraction, NaN, or an unsafe magnitude are flag-named usage errors", () => {
+  // yargs type:"number" coerces a non-numeric token to NaN and applies no
+  // integer, sign, or range constraint; each of these reaches here as a number
+  // z.int().nonnegative() would reject, so the flag-named UsageError catches it
+  // at the CLI boundary (exit 64) rather than deep in connection setup (exit 69).
+  // MAX_SAFE_INTEGER + 1 is the boundary z.int() rejects: the CLI guard must
+  // reject it too (Number.isSafeInteger, not isInteger) to stay aligned rather
+  // than defer the rejection to the raw, un-flag-named schema error.
+  for (const bad of [-1, 2.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() =>
+      nonNegativeIntFlag(
+        argv({ "max-reconnect-attempts": bad }),
+        "max-reconnect-attempts",
+      ),
+    ).toThrow(UsageError);
+    expect(() =>
+      nonNegativeIntFlag(
+        argv({ "max-reconnect-attempts": bad }),
+        "max-reconnect-attempts",
+      ),
+    ).toThrow("--max-reconnect-attempts");
+  }
+});
+
+test("nonNegativeIntFlag: the rejection states the constraint and echoes the value", () => {
+  // Pin the value-rejection message so it cannot silently collapse into the
+  // repeat-flag message (which also names the flag): assert the distinguishing
+  // "non-negative whole number" wording and the echoed offending value.
+  let message = "";
+  try {
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": -1 }),
+      "max-reconnect-attempts",
+    );
+  } catch (err) {
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain("--max-reconnect-attempts");
+  expect(message).toContain("non-negative whole number");
+  expect(message).toContain("-1");
+});
+
+test("nonNegativeIntFlag: a repeated flag is rejected before the value check", () => {
+  expect(() =>
+    nonNegativeIntFlag(
+      argv({ "max-reconnect-attempts": [1, 2] }),
+      "max-reconnect-attempts",
+    ),
+  ).toThrow("--max-reconnect-attempts may be given only once");
 });
 
 // --- parseOrExit -------------------------------------------------------------

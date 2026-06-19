@@ -385,6 +385,22 @@ test("parseCommonBootstrapArgs: a connection-/peer-timeout above the 7d ceiling 
   }
 });
 
+test("parseCommonBootstrapArgs: a negative max-reconnect-attempts is a flag-named usage error", () => {
+  // Wiring coverage for the single parse site: the value flows through
+  // nonNegativeIntFlag here, so an invalid count is rejected at parse (exit 64),
+  // before any setup, rather than deferred to the later merged-options
+  // re-validation. A revert of this site to a bare `singleValue(...) as number`
+  // turns this red, which the helper's isolation tests would not catch.
+  const parse = () =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "max-reconnect-attempts": -1,
+    } as unknown as Arguments);
+  expect(parse).toThrow(UsageError);
+  expect(parse).toThrow("--max-reconnect-attempts");
+});
+
 test("parseCommonBootstrapArgs: a connection-/peer-timeout at the 7d ceiling is accepted", () => {
   // The boundary is inclusive: exactly 7d parses to its seconds value, so the
   // largest in-range value behaves exactly as it does today.
