@@ -12,6 +12,7 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import logLibrary from "loglevel";
 import YAML from "yaml";
@@ -41,8 +42,30 @@ import {
 } from "../../src/commands/bootstrap";
 import { loadKeyFile } from "../../src/keyFile";
 import { openingPathFor, resolveRecordOutput } from "../../src/recordFile";
+import { promptConfirm } from "../../src/util/cli";
 import { selectedBackend } from "../sftpServer";
 import { localPath, remotePath, sftpServer } from "../sftpServer/testContext";
+
+// Stub only promptConfirm so the first-use host-key prompt can be answered in a
+// non-interactive test run; every other util/cli export (the input-source loaders
+// the validate path uses, etc.) stays real. promptConfirm is the production
+// default behind HostKeyTrustDeps.confirm, so stubbing it supplies the same
+// first-use confirmation the hostKeyTrust unit layer injects -- here driven
+// through the live runOnlineBootstrap chain rather than a direct call.
+//
+// The stub DECLINES by default and the first-use test opts into confirming only
+// for its own run (restoring the decline default afterward). That default matters
+// because the stub is file-scoped: besides the host-key trust prompt (reached only
+// when unpinned AND interactive, which the first-use test alone arranges),
+// accept.ts also calls promptConfirm for the invitation-acceptance prompt with no
+// isTTY guard. No current test exercises that accept.ts handler path (they drive
+// validateAccept -> runOnlineBootstrap directly), so none reach it -- but an
+// always-true default would silently auto-confirm it for a future test that did.
+// Declining by default makes such a forgotten stub abort loudly instead.
+vi.mock("../../src/util/cli", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/util/cli")>();
+  return { ...actual, promptConfirm: vi.fn(async () => false) };
+});
 
 // Net-new coverage: the ONLINE invite + accept wiring, end to end, with both
 // sides on their real online code path (a live authenticated handshake, not the
@@ -802,6 +825,197 @@ describe("sftp", () => {
           expect(server.password).toBe(srv.usera.password);
         },
       });
+    },
+    90_000,
+  );
+
+  inProcessOnly(
+    "sftp: a first-use online invite + accept over an unpinned server prompts, confirms, and persists the live host key into both saved configs",
+    async () => {
+      // The seam this guards. With no pin on the built connection (an sftp:// URL
+      // cannot carry a host_key_fingerprint), runOnlineBootstrap's first-use
+      // establishHostKeyTrust fires: it probes the live server for its real host
+      // key, the operator confirms, and the captured fingerprint -- mutated into
+      // the ORIGINAL connection, which runOnlineBootstrap then clones for the live
+      // connect -- must flow through the post-handshake saveConfig and land on
+      // disk as connection.server.host_key_fingerprint. The sibling round-trip
+      // pre-pins out-of-band so establishHostKeyTrust no-ops there; this drives the
+      // composed prompt-to-saved-config chain that one deliberately skips, so a
+      // regression breaking the pin-reaches-saveConfig wiring (but not the
+      // credential, which the round-trip already threads) cannot pass CI green.
+      const tag = "firstuse";
+      // Create the served host directory before either party connects (the
+      // connection does not create remote dirs), mirroring the round-trip above.
+      await fsp.mkdir(path.join(SFTP_LOCAL_ROOT, tag), { recursive: true });
+      const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
+      // The sftp:// URL carries the inline credentials and the server path but no
+      // host key -- exactly the realistic first-use input.
+      const url = `sftp://${srv.usera.username}:${srv.usera.password}@${srv.host}:${srv.port}${serverPath}`;
+
+      const inviteInput = path.join(work, "fu-invite.csv");
+      fs.writeFileSync(inviteInput, INVITE_CSV);
+      const acceptInput = path.join(work, "fu-accept.csv");
+      fs.writeFileSync(acceptInput, ACCEPT_CSV);
+      const inviteOptions = testOptions("fu-invite");
+      const acceptOptions = testOptions("fu-accept");
+      const inviteOut = path.join(work, "fu-invite-out.csv");
+      const acceptOut = path.join(work, "fu-accept-out.csv");
+
+      // Validate builds each side's connection from the URL (the no-network half);
+      // neither carries a pin.
+      const inviteReady = await validateInvite({
+        resolved: resolveInvitePositionals([url, inviteInput, inviteOut]),
+        options: inviteOptions,
+        acceptTimeout: PEER_TIMEOUT_SECONDS,
+        log,
+      });
+      expect(inviteReady.mode).toBe("online");
+      if (inviteReady.mode !== "online") return;
+      const acceptReady = await validateAccept({
+        resolved: resolveAcceptPositionals([
+          url,
+          inviteReady.invitation,
+          acceptInput,
+          acceptOut,
+        ]),
+        options: acceptOptions,
+        log,
+      });
+      expect(acceptReady.mode).toBe("online");
+      if (acceptReady.mode !== "online") return;
+      // A fresh config will be written, so the pin lands via save-with-config (the
+      // post-handshake saveConfig), not an in-place write-now.
+      expect(acceptReady.reuseExistingConfig).toBe(false);
+
+      // Both connections enter the bootstrap UNPINNED, so a fingerprint in the
+      // saved config below can only have been captured by the live first-use
+      // probe, never a pre-seeded value -- the invariant this whole test turns on.
+      expect(inviteReady.connection.channel).toBe("sftp");
+      if (inviteReady.connection.channel === "sftp")
+        expect(
+          inviteReady.connection.server.hostKeyFingerprint,
+        ).toBeUndefined();
+      expect(acceptReady.connection.channel).toBe("sftp");
+      if (acceptReady.connection.channel === "sftp")
+        expect(
+          acceptReady.connection.server.hostKeyFingerprint,
+        ).toBeUndefined();
+
+      // Make the run interactive and answer the first-use prompt yes: isTTY gates
+      // establishHostKeyTrust's prompt (it fails closed otherwise, per the
+      // fail-closed test below), and the file-scoped promptConfirm stub (declines
+      // by default) is set to confirm for this run only -- both restored in the
+      // finally. Everything else -- the probe that reads the server's real key, the
+      // in-place mutation, the clone for the live connect, the handshake, and the
+      // post-handshake saveConfig -- runs live. Each side emits one "authenticity
+      // of host ... cannot be established" WARN carrying the presented fingerprint;
+      // capture WARNs so they are asserted rather than leaked to the suite console.
+      // The "fu-invite"/"fu-accept" logger names are unique to this test, so both
+      // bind to the capture interceptor (a logger created before it would bypass
+      // capture). The isTTY and stub mutations are set inside the try so the
+      // finally rolls both back even if a setup step throws.
+      const originalIsTTY = process.stdin.isTTY;
+      try {
+        process.stdin.isTTY = true;
+        vi.mocked(promptConfirm).mockClear();
+        vi.mocked(promptConfirm).mockResolvedValue(true);
+        const [[inviteResult, acceptResult], capturedLogs] =
+          await withCapturedLogs(
+            () =>
+              Promise.all([
+                runOnlineBootstrap({
+                  connection: inviteReady.connection,
+                  dataSpec: inviteReady.dataSpec,
+                  prepared: inviteReady.prepared,
+                  sharedSecret: inviteReady.sharedSecret,
+                  expires: inviteReady.expires,
+                  keyPath: inviteOptions.keyFile,
+                  configPath: inviteOptions.configFile,
+                  output: inviteReady.output,
+                  verbosity: 0,
+                  loggerName: "fu-invite",
+                }),
+                runOnlineBootstrap({
+                  connection: acceptReady.connection,
+                  dataSpec: acceptReady.dataSpec,
+                  prepared: acceptReady.prepared,
+                  sharedSecret: acceptReady.token.sharedSecret,
+                  expires: acceptReady.token.expires,
+                  keyPath: acceptOptions.keyFile,
+                  configPath: acceptOptions.configFile,
+                  output: acceptReady.output,
+                  verbosity: 0,
+                  loggerName: "fu-accept",
+                  reuseExistingConfig: acceptReady.reuseExistingConfig,
+                }),
+              ]),
+            (level) => level === "WARN",
+          );
+
+        // saveConfig fired on both sides (a write failure surfaces here as
+        // configWriteError rather than aborting the completed exchange).
+        expect(inviteResult.configWriteError).toBeUndefined();
+        expect(acceptResult.configWriteError).toBeUndefined();
+
+        // First-use actually fired on both sides: the prompt is reached only past
+        // the unpinned + interactive gate and the live probe, so two confirms
+        // prove the composed chain ran rather than no-opping on a present pin.
+        expect(vi.mocked(promptConfirm)).toHaveBeenCalledTimes(2);
+
+        // Two first-use authenticity notices, one per side, each carrying the live
+        // server's real fingerprint -- the captured pin observed before it reaches
+        // disk. Filter to the notices rather than asserting the total captured
+        // count: withCapturedLogs intercepts every WARN process-wide for the
+        // window, so an unrelated WARN from elsewhere would inflate a bare length
+        // check and fail this spuriously.
+        const firstUseWarnings = capturedLogs.filter((l) =>
+          l.message.includes("authenticity of host"),
+        );
+        expect(firstUseWarnings).toHaveLength(2);
+        for (const { message } of firstUseWarnings)
+          expect(message).toContain(srv.hostKeyFingerprint);
+
+        // The captured pin reached the saved config on BOTH sides and is the live
+        // server's real fingerprint: the mutation flowed original -> clone ->
+        // post-handshake saveConfig. The assertion is on the persisted config
+        // produced by the live run, not a pre-seeded value, so it fails if the
+        // captured pin does not reach saveConfig -- the wiring this test pins.
+        for (const cfg of [
+          inviteOptions.configFile,
+          acceptOptions.configFile,
+        ]) {
+          expect(fs.existsSync(cfg)).toBe(true);
+          const spec = parseExchangeSpec(
+            YAML.parse(fs.readFileSync(cfg, "utf8")),
+          );
+          expect(spec.connection.channel).toBe("sftp");
+          expect(
+            (spec.connection as SFTPConnectionConfig).server.hostKeyFingerprint,
+          ).toBe(srv.hostKeyFingerprint);
+        }
+
+        // Every secret-bearing artifact this first-use run wrote is owner-only
+        // (0600): the saved configs carry the inline SFTP password threaded
+        // through the URL (alongside the just-pinned fingerprint), and the key
+        // files hold the rotated shared secret. They are written via
+        // writeFileOwnerOnly / saveKeyFile precisely so group/other cannot read
+        // them; pin that here too, so the first-use persist path is not merely
+        // assumed to inherit the sibling round-trip's permission guarantee.
+        // POSIX-only: writeFileOwnerOnly uses ACLs on Windows, where the mode bits
+        // do not reflect it.
+        if (process.platform !== "win32")
+          for (const f of [
+            inviteOptions.configFile,
+            acceptOptions.configFile,
+            inviteOptions.keyFile,
+            acceptOptions.keyFile,
+          ])
+            expect(fs.statSync(f).mode & 0o077).toBe(0);
+      } finally {
+        process.stdin.isTTY = originalIsTTY;
+        // Restore the decline default so no later test inherits an auto-confirm.
+        vi.mocked(promptConfirm).mockResolvedValue(false);
+      }
     },
     90_000,
   );
