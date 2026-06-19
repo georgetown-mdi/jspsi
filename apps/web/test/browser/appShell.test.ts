@@ -7,7 +7,7 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
+import { Container, MantineProvider } from "@mantine/core";
 
 import {
   encodeInvitation,
@@ -18,6 +18,7 @@ import {
 import { AcceptInvitation } from "@components/AcceptInvitation";
 import { HomePage } from "@components/HomePage";
 import { Shell } from "@components/Shell";
+import { mantineTheme } from "@theme";
 
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -176,4 +177,91 @@ describe("application shell", () => {
     // since main is otherwise outside the tab order.
     expect(main && getComputedStyle(main).outlineWidth).not.toBe("0px");
   });
+});
+
+// Mount under the real app theme so the Container size scale (CONTAINER_SIZES)
+// resolves to its production widths, the way the running app does.
+function mountThemed(node: ReactNode) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  root.render(createElement(MantineProvider, { theme: mantineTheme }, node));
+}
+
+// The resolved width of a rendered Container: the --container-size custom
+// property Mantine's theme derives from the named size. The authored inline
+// value is read (not getComputedStyle), since this suite does not load Mantine's
+// global stylesheet that defines the --mantine-scale the value multiplies by --
+// without it the computed value is invalid/empty, but the inline value still
+// distinguishes the named widths. Tracks the named scale, not a pixel snapshot.
+function containerWidth(label: string, el: Element | null | undefined): string {
+  const width =
+    el instanceof HTMLElement
+      ? el.style.getPropertyValue("--container-size").trim()
+      : "";
+  // Name the element in the assertion: four call sites read different elements,
+  // so a missing one must say which rather than surface an opaque empty string.
+  expect(width, `${label} container --container-size`).not.toBe("");
+  return width;
+}
+
+describe("content width seam", () => {
+  // The header chrome and the route's content both size to the one width the
+  // route declares, so their left/right edges align; a route choosing a
+  // different width moves both together. The route-declaration -> resolved-width
+  // half is covered in test/unit/contentWidth.test.ts.
+  test.each(["lg", "xl"] as const)(
+    "sizes chrome and content to the declared %s width",
+    async (width) => {
+      const other = width === "lg" ? "xl" : "lg";
+      mountThemed(
+        createElement(
+          "div",
+          null,
+          createElement(Shell, {
+            contentWidth: width,
+            children: "page content",
+          }),
+          // Reference containers at each named size, so the assertion ties the
+          // seam to the theme's named scale without hard-coding pixel widths.
+          createElement(
+            "div",
+            { "data-testid": "ref-same" },
+            createElement(Container, { size: width }),
+          ),
+          createElement(
+            "div",
+            { "data-testid": "ref-other" },
+            createElement(Container, { size: other }),
+          ),
+        ),
+      );
+
+      // Wait for React to commit the mount before reading the rendered DOM.
+      await expect.element(page.getByText("page content")).toBeInTheDocument();
+
+      const header = containerWidth(
+        "header",
+        document.querySelector("header")?.firstElementChild,
+      );
+      const main = containerWidth(
+        "main",
+        document.querySelector("main")?.firstElementChild,
+      );
+      const sameSize = containerWidth(
+        "ref-same",
+        document.querySelector('[data-testid="ref-same"]')?.firstElementChild,
+      );
+      const otherSize = containerWidth(
+        "ref-other",
+        document.querySelector('[data-testid="ref-other"]')?.firstElementChild,
+      );
+
+      // Chrome and content resolve to one shared width: their edges align.
+      expect(header).toBe(main);
+      // ...and it is exactly the route's declared named size, not the other one.
+      expect(main).toBe(sameSize);
+      expect(sameSize).not.toBe(otherSize);
+    },
+  );
 });

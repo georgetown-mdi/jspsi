@@ -11,6 +11,8 @@ cosign.key
 .tanstack
 .output
 .vitest-attachments
+# Vitest browser-mode failure screenshots.
+__screenshots__
 *.swp
 terraform.tfvars
 scratch

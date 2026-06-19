@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Container, Paper, Title } from "@mantine/core";
+import { Paper, Title } from "@mantine/core";
 
 import { describeDecodeError } from "@psilink/core";
 
@@ -17,6 +17,10 @@ import type { DecodeState } from "@components/AcceptInvitationPanel";
  * holds the consent state, and gates the dialing {@link Exchange} behind explicit
  * consent. Kept as a component (rather than inline in the route file) so it can be
  * mounted and driven in a browser test without the router.
+ *
+ * The content width (a narrower single-column reading width) is declared by the
+ * route and supplied by the shell's container, so this page renders only its
+ * content -- no `Container` of its own.
  */
 export function AcceptInvitation() {
   const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
@@ -108,27 +112,22 @@ export function AcceptInvitation() {
     ) : undefined;
 
   return (
-    // Single-column reading width ("lg"): narrower than the home route on
-    // purpose, so the dense linkage terms sit at a legible measure rather than
-    // running the full two-column width.
-    <Container size="lg">
-      <Paper>
-        {/* A generic page h1 rather than the party-specific "Invitation from X"
-            (which is the terms section's h2 below): it must read sensibly in the
-            pending and error states too, where no party name is decoded yet. */}
-        <Title order={1}>Accept an invitation</Title>
-        <AcceptInvitationPanel
-          decode={decode}
-          headingRef={readyHeadingRef}
-          errorRef={errorRef}
-          consented={consented}
-          onConsentedChange={setConsented}
-          acceptorName={acceptorName}
-          onAcceptorNameChange={setAcceptorName}
-          onAccept={handleAccept}
-          exchange={exchange}
-        />
-      </Paper>
-    </Container>
+    <Paper>
+      {/* A generic page h1 rather than the party-specific "Invitation from X"
+          (which is the terms section's h2 below): it must read sensibly in the
+          pending and error states too, where no party name is decoded yet. */}
+      <Title order={1}>Accept an invitation</Title>
+      <AcceptInvitationPanel
+        decode={decode}
+        headingRef={readyHeadingRef}
+        errorRef={errorRef}
+        consented={consented}
+        onConsentedChange={setConsented}
+        acceptorName={acceptorName}
+        onAcceptorNameChange={setAcceptorName}
+        onAccept={handleAccept}
+        exchange={exchange}
+      />
+    </Paper>
   );
 }

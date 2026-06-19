@@ -8,7 +8,7 @@ import {
 } from "@mantine/core";
 import type { MantineThemeOverride } from "@mantine/core";
 
-const CONTAINER_SIZES: Record<string, string> = {
+const CONTAINER_SIZES = {
   xxs: rem("200px"),
   xs: rem("300px"),
   sm: rem("400px"),
@@ -17,6 +17,14 @@ const CONTAINER_SIZES: Record<string, string> = {
   xl: rem("1400px"),
   xxl: rem("1600px"),
 };
+
+/**
+ * A named content width in the {@link CONTAINER_SIZES} scale. The single
+ * vocabulary the content-width seam speaks: a route declares one of these and
+ * the shell sizes both its chrome and the route's content to it, so neither side
+ * names a raw pixel width.
+ */
+export type ContainerWidth = keyof typeof CONTAINER_SIZES;
 
 export const mantineTheme: MantineThemeOverride = createTheme({
   /** Put your mantine theme override here */
@@ -51,7 +59,7 @@ export const mantineTheme: MantineThemeOverride = createTheme({
           "--container-size": fluid
             ? "100%"
             : size !== undefined && size in CONTAINER_SIZES
-              ? CONTAINER_SIZES[size]
+              ? CONTAINER_SIZES[size as ContainerWidth]
               : rem(size),
         },
       }),
