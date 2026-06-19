@@ -40,11 +40,12 @@ afterAll(async () => {
     const sink = inject("consoleSentinelSink");
     const matched = sentinel.matchedAllowlistIds();
     if (sink) {
-      // One O_APPEND write per id, each well under PIPE_BUF, so concurrent
-      // teardowns across fork workers cannot interleave bytes within an id. (A
-      // single joined write would only stay atomic while it fit PIPE_BUF.) The
-      // reader splits on newlines and counts only known ids, so a torn line is
-      // harmless regardless.
+      // One O_APPEND write per id: Linux serializes a short append to a regular
+      // file under the inode lock (a kernel detail, not a POSIX guarantee --
+      // PIPE_BUF is the pipe/FIFO contract, not this), so concurrent teardowns
+      // across fork workers do not interleave bytes within a per-id write. The
+      // reader splits on newlines and counts only known ids, so even a torn line
+      // is harmless; the per-id writes just make that path unreachable here.
       for (const id of matched) {
         fs.appendFileSync(sink, `${id}\n`);
       }

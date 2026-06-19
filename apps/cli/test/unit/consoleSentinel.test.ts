@@ -176,19 +176,40 @@ describe("ConsoleSentinel", () => {
     ).toThrow();
   });
 
-  it("rejects an id containing a newline at construction", () => {
-    // The id is the line-delimited key in the cross-file dead-entry sink.
+  it("rejects an id the sink round-trip would alter at construction", () => {
+    // The id is the line-delimited, trim-on-read key in the dead-entry sink, so
+    // an embedded newline or surrounding whitespace (including a trailing \r,
+    // which the readback's trim strips) would corrupt the aggregation.
+    const reject = (id: string) =>
+      expect(
+        () =>
+          new ConsoleSentinel([
+            { id, levels: ["warn"], match: /whatever/, reason: "bad id" },
+          ]),
+      ).toThrowError(/single line with no surrounding whitespace/);
+    reject("bad\nid");
+    reject("trailing-cr\r");
+    reject("  leading-space");
+    // An internal space is fine: trim does not touch it and there is no newline.
     expect(
       () =>
         new ConsoleSentinel([
-          {
-            id: "bad\nid",
-            levels: ["warn"],
-            match: /whatever/,
-            reason: "newline in id",
-          },
+          { id: "ok id", levels: ["warn"], match: /whatever/, reason: "fine" },
         ]),
-    ).toThrowError(/must not contain a newline/);
+    ).not.toThrow();
+  });
+
+  it("records a non-string arg via util.inspect, not [object Object]", () => {
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel([]);
+    sentinel.install(fake);
+
+    fake.warn("context", { code: "ELEAK", count: 2 });
+
+    const [violation] = sentinel.violations();
+    expect(violation.message).toBe("context { code: 'ELEAK', count: 2 }");
+    expect(violation.message).not.toContain("[object Object]");
+    sentinel.restore();
   });
 
   it("preserves pass-through to the wrapped method", () => {

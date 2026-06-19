@@ -21,6 +21,8 @@
  * sentinel's own unit tests.
  */
 
+import { inspect } from "node:util";
+
 /** A console sink the sentinel gates. */
 export type ConsoleLevel = "log" | "warn" | "error";
 
@@ -37,9 +39,12 @@ export interface ConsoleAllowEntry {
   id: string;
   /** Console levels this entry may accept. */
   levels: readonly ConsoleLevel[];
-  /** Accepts the joined message text. Must be a flagless-or-non-stateful regex:
+  /** Accepts the joined message text. A regex must be flagless-or-non-stateful:
    * the constructor rejects the `g`/`y` flags, whose `lastIndex` would make
-   * matching depend on evaluation order. */
+   * matching depend on evaluation order. A function matcher must be a pure
+   * predicate -- no side effects, no internal state -- because the sentinel does
+   * not short-circuit: to credit every matcher that accepts a line, it evaluates
+   * each entry's `match` once per recorded line regardless of earlier matches. */
   match: RegExp | ((message: string) => boolean);
   /** Why this output is intended; shown in review and in the dead-entry report. */
   reason: string;
@@ -56,6 +61,19 @@ const ALL_LEVELS: readonly ConsoleLevel[] = ["log", "warn", "error"];
 // Cap how many offending lines the assertion error enumerates, so a test that
 // spams output produces a readable failure rather than a wall of text.
 const MAX_REPORTED_VIOLATIONS = 20;
+
+// Join console arguments into one matchable line. Strings pass through verbatim
+// (so a matcher reads the literal logged text); a non-string is inspected rather
+// than `String()`-coerced, so an object records as `{ key: 'value' }` instead of
+// the useless `[object Object]` a matcher could never usefully match.
+// `breakLength: Infinity` keeps each argument on one line.
+function formatArgs(args: unknown[]): string {
+  return args
+    .map((arg) =>
+      typeof arg === "string" ? arg : inspect(arg, { breakLength: Infinity }),
+    )
+    .join(" ");
+}
 
 function matchEntry(entry: ConsoleAllowEntry, message: string): boolean {
   return entry.match instanceof RegExp
@@ -83,12 +101,16 @@ export class ConsoleSentinel {
     options: { gatedLevels?: readonly ConsoleLevel[] } = {},
   ) {
     for (const entry of allowlist) {
-      // The id is the line-delimited key in the cross-file dead-entry sink, so a
-      // newline in it would split into phantom ids on read; reject it at the
-      // source rather than corrupt the aggregation silently.
-      if (entry.id.includes("\n")) {
+      // The id is the line-delimited key in the cross-file dead-entry sink,
+      // written as `id\n` and read back by splitting on `\n` and trimming each
+      // line. Any id the round-trip would alter -- an embedded newline (splits
+      // into phantom ids) or surrounding whitespace including a trailing `\r`
+      // (the trim strips it, so the entry always reads as dead) -- would corrupt
+      // the aggregation silently, so reject it at the source.
+      if (entry.id.includes("\n") || entry.id.trim() !== entry.id) {
         throw new Error(
-          `ConsoleAllowEntry id must not contain a newline: ` +
+          `ConsoleAllowEntry id must be a single line with no surrounding ` +
+            `whitespace (it keys the line-delimited sink): ` +
             JSON.stringify(entry.id),
         );
       }
@@ -120,7 +142,7 @@ export class ConsoleSentinel {
       ) => void;
       this.originals.set(level, original);
       target[level] = (...args: unknown[]): void => {
-        this.recorded.push({ level, message: args.map(String).join(" ") });
+        this.recorded.push({ level, message: formatArgs(args) });
         original(...args);
       };
     }
@@ -203,9 +225,10 @@ export class ConsoleSentinel {
  * ssh2-sftp-client "Global ... listener" lines fire on connection-teardown
  * events emitted asynchronously, so a teardown triggered by one test lands a
  * tick or two later -- in the NEXT test's window, or after the last test. A
- * file-level `afterAll` that flushes a macrotask and the microtask queue
- * attributes such a late line to this file rather than misattributing it to the
- * following test (or leaking it into the next file).
+ * file-level `afterAll` that waits a timer macrotask and then a check-phase
+ * callback (`setImmediate`) -- with the microtask queue draining automatically
+ * between them -- attributes such a late line to this file rather than
+ * misattributing it to the following test (or leaking it into the next file).
  *
  * Node-only: relies on `setImmediate`, which is not in the DOM lib.
  */

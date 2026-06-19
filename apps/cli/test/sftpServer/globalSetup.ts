@@ -74,6 +74,13 @@ export default async function setup({
 // kept against a known-intermittent diagnostic is a judgement call for review,
 // not a hard gate. Runs in the main process, where the sentinel is not
 // installed, so this output does not trip it.
+//
+// The sink is complete by the time this runs: vitest invokes a globalSetup
+// teardown only after the whole run finishes -- every file, including its
+// afterAll hooks, has settled -- and the per-file appends are synchronous
+// (appendFileSync), so all matched ids are on disk before this read. Because it
+// is advisory anyway, even a hypothetical under-count would only drop a warning,
+// never fail the run.
 function reportDeadAllowlistEntries(sink: string): void {
   let matched: Set<string>;
   try {
