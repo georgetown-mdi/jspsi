@@ -1004,6 +1004,67 @@ test.each([
   },
 );
 
+// The schema-validation error branches (linkage_terms / standardization /
+// metadata) interpolate the Zod issue message, which under Zod v4 names only the
+// expected literals, never the rejected input value. That is what keeps a secret
+// mistakenly placed in one of these blocks out of the error; Zod v3's enum error
+// echoed the received value ("...received '<value>'") and would have leaked it.
+// The YAML-parse leak test above does not cover this branch, so pin it directly:
+// embed a secret as an invalid enum value and assert it never reaches the message.
+// A future Zod that re-embeds the rejected value turns this red instead of
+// silently leaking. Both blocks share the one path-only interpolation; the two
+// cases cover the enum fields that would carry an attacker/operator string. The
+// standardization block has no enum/literal field, so it offers no rejected
+// VALUE a message could echo -- a case there would be vacuous, not coverage.
+// Each case also asserts the rejected FIELD path is named, so the test fails
+// loudly (rather than passing while testing nothing) if the secret ever stops
+// being the value the targeted enum rejects.
+test.each([
+  [
+    "metadata type enum",
+    (s: string) =>
+      YAML.stringify({
+        linkageTerms: getDefaultLinkageTerms("Agency A"),
+        metadata: [{ name: "X", type: s, role: "linkage", isPayload: false }],
+      }),
+    "invalid metadata",
+    "0.type",
+  ],
+  [
+    "linkage_terms algorithm enum",
+    (s: string) =>
+      YAML.stringify({
+        linkageTerms: { ...getDefaultLinkageTerms("Agency A"), algorithm: s },
+      }),
+    "invalid linkage_terms",
+    "algorithm",
+  ],
+])(
+  "loadConfigLinkageSource does not echo a secret in a schema error: %s",
+  (_, mk, expectedFragment, expectedPath) => {
+    const SECRET = "S3cr3tSFTPPassw0rd";
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+    try {
+      const configPath = path.join(dir, "psilink.yaml");
+      fs.writeFileSync(configPath, mk(SECRET));
+      let caught: unknown;
+      try {
+        loadConfigLinkageSource(configPath);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(expectedFragment);
+      // The targeted enum field is the one that rejected -- proves the secret was
+      // the rejected value, so not.toContain below is non-vacuous.
+      expect((caught as Error).message).toContain(expectedPath);
+      expect((caught as Error).message).not.toContain(SECRET);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
 test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {
