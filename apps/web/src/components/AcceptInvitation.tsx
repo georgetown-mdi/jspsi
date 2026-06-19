@@ -108,6 +108,9 @@ export function AcceptInvitation() {
     ) : undefined;
 
   return (
+    // Single-column reading width ("lg"): narrower than the home route on
+    // purpose, so the dense linkage terms sit at a legible measure rather than
+    // running the full two-column width.
     <Container size="lg">
       <Paper>
         <Title order={1}>Accept an invitation</Title>

@@ -12,6 +12,9 @@ import { InvitePanel } from "@components/InvitePanel";
  */
 export function HomePage() {
   return (
+    // Wide ("xl"): this route lays out two panels side by side and shows the
+    // long invitation code/link, so it wants more room than the single-column
+    // reading width the accept route uses.
     <Container size="xl">
       <Title order={1}>Start a private data exchange</Title>
       <Group justify="space-between" align="flex-start" grow mt="md">

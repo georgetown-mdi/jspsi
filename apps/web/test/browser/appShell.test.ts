@@ -108,9 +108,17 @@ function expectShell() {
   const main = mains[0];
   expect(main.id).toBe("main-content");
 
-  const skip = document.querySelector("a[href^='#']");
-  expect(skip?.textContent).toBe("Skip to content");
+  const skip = skipLink();
+  expect(skip).toBeTruthy();
   expect(skip?.getAttribute("href")).toBe(`#${main.id}`);
+}
+
+// The skip link located by its accessible name rather than by attribute, so the
+// lookup stays unambiguous regardless of any other anchors a page renders.
+function skipLink(): HTMLAnchorElement | undefined {
+  return Array.from(document.querySelectorAll("a")).find(
+    (anchor) => anchor.textContent === "Skip to content",
+  );
 }
 
 describe("application shell", () => {
@@ -143,5 +151,28 @@ describe("application shell", () => {
     const h1s = document.querySelectorAll("h1");
     expect(h1s.length).toBe(1);
     expect(h1s[0].textContent).toBe("Accept an invitation");
+  });
+
+  test("skip link moves focus to main without clobbering the hash", async () => {
+    // The accept route carries the invitation token in window.location.hash;
+    // activating the skip link must move focus to the main landmark without
+    // overwriting that fragment (which would break a reload or a copied link).
+    window.location.hash = await encodeAcceptToken();
+    mountInShell(createElement(AcceptInvitation));
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    const hashBefore = window.location.hash;
+    // Native click (not a Playwright click): the skip link sits off-screen until
+    // focused, and a native dispatch still drives React's onClick, which
+    // preventDefaults the fragment navigation.
+    skipLink()?.click();
+
+    expect(window.location.hash).toBe(hashBefore);
+    expect(document.activeElement).toBe(
+      document.getElementById("main-content"),
+    );
   });
 });

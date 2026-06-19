@@ -1,3 +1,12 @@
+/* A flex column at least as tall as the viewport, with the main region growing
+   to fill, so the footer rests at the bottom rather than floating mid-page on
+   short routes. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
 .header {
   border-bottom: 1px solid var(--mantine-color-default-border);
   padding-top: var(--mantine-spacing-sm);
@@ -16,6 +25,7 @@
 }
 
 .main {
+  flex: 1;
   padding-top: var(--mantine-spacing-lg);
   padding-bottom: var(--mantine-spacing-lg);
 }
