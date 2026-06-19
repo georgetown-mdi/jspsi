@@ -50,8 +50,10 @@ describe("content width seam (SSR, real router)", () => {
     expect(new Set(home).size).toBe(1);
     expect(new Set(accept).size).toBe(1);
 
-    // The seam is per-route, not a fixed width: home stays wide while accept
-    // narrows to its single-column reading width.
-    expect(remMagnitude(home[0])).toBeGreaterThan(remMagnitude(accept[0]));
+    // The seam is per-route, not a fixed width: the accept route opts into the
+    // widest named width so its dense linkage terms stay legible -- wider than the
+    // home page, which keeps the default. (This is what keeps the seam exercised
+    // by a real route: a route declaring a non-default width.)
+    expect(remMagnitude(accept[0])).toBeGreaterThan(remMagnitude(home[0]));
   });
 });

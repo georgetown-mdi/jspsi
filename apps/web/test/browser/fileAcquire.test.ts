@@ -58,6 +58,24 @@ vi.mock("@components/FileSelect", () => ({
     ),
 }));
 
+// Swap core's loadCSVFile per-test to drive the read-failure and teardown-mid-read
+// paths, which a real (always-resolving) papaparse parse cannot reach
+// deterministically. With impl unset it delegates to the real parser, so the
+// pre-flight tests below still run against real CSV parsing and satisfiability.
+const csvLoad = vi.hoisted(() => ({
+  impl: undefined as ((file: unknown) => Promise<unknown>) | undefined,
+}));
+vi.mock("@psilink/core", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    loadCSVFile: (file: unknown) =>
+      csvLoad.impl
+        ? csvLoad.impl(file)
+        : (actual.loadCSVFile as (f: unknown) => Promise<unknown>)(file),
+  };
+});
+
 // Two single-element linkage keys, one per name field, so a CSV can satisfy both,
 // one, or neither -- the three pre-flight outcomes the acceptor distinguishes.
 const acceptorTerms: LinkageTerms = {
@@ -132,6 +150,7 @@ afterEach(() => {
   root = undefined;
   container = undefined;
   harness.files = [];
+  csvLoad.impl = undefined;
 });
 
 describe("FileAcquire pre-flight parity", () => {
@@ -187,5 +206,55 @@ describe("FileAcquire pre-flight parity", () => {
       expect(errors[0].title).toBe("This file cannot be linked");
     });
     expect(spies.onAcquired).not.toHaveBeenCalled();
+  });
+});
+
+describe("FileAcquire read failure and teardown", () => {
+  test("a read failure blocks with a read-error alert and hands nothing off", async () => {
+    // loadCSVFile rejects only on a stream/read error (a malformed-but-readable
+    // CSV still resolves), so force the reject to exercise the read-failure branch.
+    csvLoad.impl = () => Promise.reject(new Error("stream exploded"));
+    const spies = makeSpies();
+    mount(acceptorTerms, spies);
+    await selectAndStart(csvFile("first_name\nAlice\n"));
+
+    await vi.waitFor(() => {
+      const errors = raised(spies.onError);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].title).toBe("Could not read your file");
+    });
+    // The read failed before the pre-flight, so nothing is handed off and no
+    // partial-coverage warning is raised.
+    expect(spies.onAcquired).not.toHaveBeenCalled();
+    expect(raised(spies.onWarning)).toEqual([]);
+  });
+
+  test("a teardown mid-read hands nothing off and raises no alert", async () => {
+    // Hold the parse open so the component unmounts while the read is in flight;
+    // the unmount-abort must then suppress the handoff once the read resolves --
+    // i.e. no callback fires into the torn-down tree (no setState after unmount).
+    let release: (value: unknown) => void = () => {};
+    csvLoad.impl = () =>
+      new Promise((resolve) => {
+        release = resolve;
+      });
+    const spies = makeSpies();
+    mount(acceptorTerms, spies);
+    await selectAndStart(csvFile("first_name,last_name\nA,B\n"));
+
+    root?.unmount();
+    root = undefined;
+    // Resolve the now-orphaned read: the aborted attempt must not call back.
+    release({
+      data: [{ first_name: "A", last_name: "B" }],
+      meta: { fields: ["first_name", "last_name"] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(spies.onAcquired).not.toHaveBeenCalled();
+    // Only the start-of-attempt clears (with undefined) were emitted; no defined
+    // alert is raised after the teardown.
+    expect(raised(spies.onError)).toEqual([]);
+    expect(raised(spies.onWarning)).toEqual([]);
   });
 });

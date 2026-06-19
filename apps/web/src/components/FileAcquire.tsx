@@ -32,10 +32,17 @@ export interface AcquiredBundle {
 export interface FileAcquireProps {
   /** Label for the submit button (FileSelect no longer hardcodes "Start"). */
   submitLabel: string;
+  /** Hold the submit button disabled until an external precondition is met,
+   * forwarded to {@link FileSelect}. The accept review screen -- the sole caller
+   * -- passes its consent gate here, so the file cannot be parsed (let alone
+   * handed off and dialed) before the user has consented and named themselves.
+   * Omitted, the button is enabled once a file is chosen. */
+  submitDisabled?: boolean;
   /** The adopted linkage terms the acceptor's CSV must satisfy before any
-   * connection. Present for the acceptor -- it triggers the pre-flight -- and
-   * undefined for the inviter, which is the source of the terms and runs no
-   * pre-flight (it infers its own terms from its CSV). */
+   * connection; supplying them triggers the satisfiability pre-flight (block on
+   * zero satisfiable keys, warn on partial). The accept review screen always
+   * passes the inviter's decoded terms; the prop stays optional so a terms-less
+   * file-acquire simply skips the pre-flight. */
   linkageTerms?: LinkageTerms;
   /** Set the shared error alert, or clear it (undefined) at the start of an
    * attempt. The run owner owns the alert state; the acquire phase only writes
@@ -69,7 +76,14 @@ export interface FileAcquireProps {
  * has already settled, so the two controllers never need to be one.
  */
 export default function FileAcquire(props: FileAcquireProps) {
-  const { submitLabel, linkageTerms, onError, onWarning, onAcquired } = props;
+  const {
+    submitLabel,
+    submitDisabled,
+    linkageTerms,
+    onError,
+    onWarning,
+    onAcquired,
+  } = props;
 
   const [files, setFiles] = useState<Array<File>>([]);
   const [submitted, setSubmitted] = useState(false);
@@ -196,6 +210,7 @@ export default function FileAcquire(props: FileAcquireProps) {
   return (
     <FileSelect
       submitLabel={submitLabel}
+      submitDisabled={submitDisabled}
       handleSubmit={handleSubmit}
       submitted={submitted}
       files={files}

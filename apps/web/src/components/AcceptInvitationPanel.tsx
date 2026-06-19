@@ -1,6 +1,5 @@
 import {
   Alert,
-  Button,
   Center,
   Checkbox,
   Divider,
@@ -12,10 +11,12 @@ import {
 
 import { commitAcceptance } from "@psi/acceptConsent";
 
+import FileAcquire from "@components/FileAcquire";
 import { InvitationTerms } from "@components/InvitationTerms";
 
-import type { ReactNode, Ref } from "react";
+import type { Ref } from "react";
 
+import type { AcquiredBundle, AlertContent } from "@components/FileAcquire";
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /** The decode/validate result: pending while it runs, an error message on a bad
@@ -26,15 +27,18 @@ export type DecodeState =
   | { status: "ready"; invitation: AcceptableInvitation };
 
 /**
- * The accept screen's presentation: a spinner while decoding, a distinct error
- * for a bad or expired invitation (with no consent action), or -- once decoded
- * -- the inviter's linkage terms followed by an explicit consent gate.
+ * The accept review screen's presentation: a spinner while decoding, a distinct
+ * error for a bad or expired invitation (with no consent action), or -- once
+ * decoded -- the inviter's linkage terms followed by the consent gate (consent
+ * checkbox, name, and a CSV drop), all before any connection.
  *
  * Stateless and effect-free so it can be rendered in isolation: the route owns
- * the decode effect and the consent state and passes them in. The exchange
- * element (which dials) is supplied only once the user has consented, via
- * `exchange`; until then the ready branch shows the consent controls, so no
- * rendezvous, key exchange, or PSI frame can be sent before consent.
+ * the decode effect and the consent state and passes them in, and owns the
+ * transition to the exchange screen (the embedded file-acquire phase hands a
+ * satisfiable bundle up via `onAcquired`). The "Accept and continue" action --
+ * {@link FileAcquire}'s submit -- is held disabled by commitAcceptance until the
+ * user has consented and named themselves, so no file is parsed and nothing dials
+ * before consent.
  */
 export function AcceptInvitationPanel({
   decode,
@@ -44,8 +48,10 @@ export function AcceptInvitationPanel({
   onConsentedChange,
   acceptorName,
   onAcceptorNameChange,
-  onAccept,
-  exchange,
+  error,
+  onAcquireError,
+  onAcquireWarning,
+  onAcquired,
 }: {
   decode: DecodeState;
   headingRef?: Ref<HTMLHeadingElement>;
@@ -54,8 +60,21 @@ export function AcceptInvitationPanel({
   onConsentedChange: (value: boolean) => void;
   acceptorName: string;
   onAcceptorNameChange: (value: string) => void;
-  onAccept: () => void;
-  exchange?: ReactNode;
+  /** The review-screen error to display beneath the consent gate: a CSV read
+   * failure or a zero-coverage pre-flight block. Cleared by the pre-flight at the
+   * start of each attempt. */
+  error?: AlertContent;
+  /** Set or clear the review-screen error; wired to the file-acquire phase's
+   * `onError`. */
+  onAcquireError: (alert: AlertContent | undefined) => void;
+  /** Set or clear the partial-coverage advisory; wired to the file-acquire
+   * phase's `onWarning`. The route carries it to the exchange screen rather than
+   * rendering it here, since a partial file still hands off and transitions. */
+  onAcquireWarning: (alert: AlertContent | undefined) => void;
+  /** Receive the parsed, satisfiable CSV; wired to the file-acquire phase's
+   * `onAcquired`. The route commits consent and transitions to the exchange
+   * screen from here. */
+  onAcquired: (bundle: AcquiredBundle) => void;
 }) {
   return (
     <>
@@ -90,42 +109,53 @@ export function AcceptInvitationPanel({
             headingRef={headingRef}
           />
           <Divider my="sm" label="Accept and exchange" labelPosition="center" />
-          {exchange ?? (
-            <Stack>
-              <Text size="sm" c="dimmed">
-                To accept your partner's proposed terms, confirm your consent,
-                enter your name, and choose your data file. Your browser
-                connects directly to your partner.
-              </Text>
-              <Checkbox
-                checked={consented}
-                onChange={(event) =>
-                  onConsentedChange(event.currentTarget.checked)
-                }
-                label="I have reviewed my partner's proposed terms and consent to this exchange"
-              />
-              <TextInput
-                value={acceptorName}
-                onChange={(event) => onAcceptorNameChange(event.target.value)}
-                withAsterisk
-                required
-                label="Your name"
-                description="Recorded in your exchange record so your partner can identify you"
-                placeholder="Your name"
-              />
-              {/* commitAcceptance is the authoritative gate, used here for the
-                  disabled state and again in the route's onAccept handler, so an
-                  exchange cannot be committed without both consent and a name. */}
-              <Button
-                disabled={
-                  commitAcceptance({ consented, name: acceptorName }) ===
-                  undefined
-                }
-                onClick={onAccept}
-              >
-                Accept and continue
-              </Button>
-            </Stack>
+          <Text size="sm" c="dimmed">
+            To accept your partner's proposed terms, confirm your consent, enter
+            your name, and choose your data file. Your browser connects directly
+            to your partner.
+          </Text>
+          <Checkbox
+            checked={consented}
+            onChange={(event) => onConsentedChange(event.currentTarget.checked)}
+            label="I have reviewed my partner's proposed terms and consent to this exchange"
+          />
+          <TextInput
+            value={acceptorName}
+            onChange={(event) => onAcceptorNameChange(event.target.value)}
+            withAsterisk
+            required
+            label="Your name"
+            description="Recorded in your exchange record so your partner can identify you"
+            placeholder="Your name"
+          />
+          {/* The file-acquire phase parses and pre-flights the chosen CSV on the
+              single "Accept and continue" action. commitAcceptance is the
+              authoritative gate, used here for the submit's disabled state and
+              again in the route's onAcquired handler, so nothing is parsed -- let
+              alone handed off and dialed -- before both consent and a name. On a
+              satisfiable file it hands the parsed bundle to onAcquired; an
+              unsatisfiable one blocks via onError and never transitions. */}
+          <FileAcquire
+            submitLabel="Accept and continue"
+            submitDisabled={
+              commitAcceptance({ consented, name: acceptorName }) === undefined
+            }
+            linkageTerms={decode.invitation.token.linkageTerms}
+            onError={onAcquireError}
+            onWarning={onAcquireWarning}
+            onAcquired={onAcquired}
+          />
+          {error && (
+            // pre-line so a read-failure message's per-cause newlines (from
+            // sanitizeErrorForDisplay) render one cause per line; the
+            // zero-coverage block message carries none.
+            <Alert
+              color="red"
+              title={error.title}
+              style={{ whiteSpace: "pre-line" }}
+            >
+              {error.message}
+            </Alert>
           )}
         </Stack>
       )}

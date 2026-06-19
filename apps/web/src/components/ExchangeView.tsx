@@ -2,7 +2,7 @@ import log from "loglevel";
 
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Group, Stack } from "@mantine/core";
+import { Alert, Button, Group, Stack } from "@mantine/core";
 
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
@@ -26,7 +26,6 @@ import { waitForIncomingConnection } from "@psi/waitForConnection";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import FileAcquire from "@components/FileAcquire";
 import { Status } from "@components/Status";
 
 import type { AcquiredBundle, AlertContent } from "@components/FileAcquire";
@@ -55,15 +54,17 @@ import type {
  * guards; it is optional because the {@link InvitationToken} marks `expires`
  * optional, though every web-generated invitation now carries one.
  *
- * Both roles carry the run's `linkageTerms`, but acquire them differently. The
- * acceptor adopts the inviter's terms from the decoded invitation (the same terms
- * the consent screen displayed), substituting its own identity, and acquires its
- * CSV here via {@link FileAcquire}. The inviter is the SOURCE of the terms: it
- * derived them from its file at invite time and embedded exactly them in the
- * token, so it carries that same `linkageTerms` object (no re-derivation) along
- * with the already-parsed CSV (`acquired`). Because the inviter's file was chosen
- * at compose time, it is not prompted for one again -- the exchange starts
- * straight from `acquired`.
+ * Both roles carry the run's `linkageTerms` and an already-parsed CSV
+ * (`acquired`), but acquire each differently. The acceptor adopts the inviter's
+ * terms from the decoded invitation (the same terms the review screen displayed),
+ * substituting its own identity, and arrives with the CSV the review screen parsed
+ * and pre-flighted -- so it renders no file prompt and dials only when the user
+ * presses Start. The inviter is the SOURCE of the terms: it derived them from its
+ * file at invite time and embedded exactly them in the token, so it carries that
+ * same `linkageTerms` object (no re-derivation) along with the CSV parsed at
+ * compose time, and -- being the responder that listens -- auto-starts with no
+ * Start press. Either way the exchange runs straight from `acquired` with no
+ * re-parse.
  */
 export type ExchangeConfig =
   | {
@@ -87,6 +88,15 @@ export type ExchangeConfig =
       expires?: string;
       endpoint: WebRTCEndpoint;
       linkageTerms: LinkageTerms;
+      /** The CSV parsed and pre-flighted on the accept review screen, fed straight
+       * into the exchange on Start: no re-parse, and no file prompt here. Mirrors
+       * the inviter's `acquired`. */
+      acquired: AcquiredBundle;
+      /** The partial-coverage advisory the review screen's pre-flight raised, if
+       * any, seeded into the warning slot so it stays visible through the run (kept
+       * on success, cleared on a run failure). Absent when the file satisfied every
+       * linkage key. */
+      initialWarning?: AlertContent;
     };
 
 const preStages: Array<StageDefinition> = [
@@ -159,7 +169,16 @@ export function ExchangeView(config: ExchangeConfig) {
   const [stageId, setStageById] = useState<string>("before start");
   const [outputs, setOutputs] = useState<ExchangeOutputs>();
   const [errorAlert, setErrorAlert] = useState<AlertContent>();
-  const [warningAlert, setWarningAlert] = useState<AlertContent>();
+  // Seeded from the acceptor's pre-flight advisory (the review screen raises it),
+  // so a partial-coverage warning persists through the run; kept on success and
+  // cleared on a run failure (see the lifecycle handlers below).
+  const [warningAlert, setWarningAlert] = useState<AlertContent | undefined>(
+    config.role === "acceptor" ? config.initialWarning : undefined,
+  );
+  // Whether the run has been started. Drives only the acceptor's Start button
+  // visibility (it hides once pressed; the inviter auto-starts and shows none);
+  // the authoritative one-run-per-mount guard is handleStart's abortRef check.
+  const [started, setStarted] = useState(false);
 
   // Drives the lifecycle's AbortSignal. A useEffect cleanup aborts it on unmount,
   // so the owner tears down any in-flight wait or exchange and every owner-driven
@@ -193,20 +212,23 @@ export function ExchangeView(config: ExchangeConfig) {
   }, [outputs]);
 
   // Start the connection lifecycle from an already-loaded, already-checked CSV:
-  // the acceptor's FileAcquire hands one up on Start, and the inviter's is the
-  // bundle parsed at compose time (config.acquired), fed straight in by the mount
-  // effect below. Both sources guarantee at least one satisfiable linkage key --
-  // the acceptor via its pre-flight, the inviter via generateInvitation's
-  // fail-closed block -- so an unsatisfiable file never reaches here: nothing is
-  // dialed and the connecting UI does not mount.
+  // both roles arrive with one in config.acquired -- the acceptor's parsed and
+  // pre-flighted on the review screen (and dialed only on the user's Start), the
+  // inviter's parsed at compose time (auto-started by the mount effect below).
+  // Both sources guarantee at least one satisfiable linkage key -- the acceptor
+  // via its pre-flight, the inviter via generateInvitation's fail-closed block --
+  // so an unsatisfiable file never reaches here: nothing is dialed and the
+  // connecting UI does not mount.
   const handleStart = (bundle: AcquiredBundle) => {
     // Guard against re-entry: once an exchange is in flight its AbortController is
     // stored here, and starting a second would orphan the first's signal and race
-    // two lifecycles on shared state. The acquire phase hands off at most once per
-    // mount, but this makes the one-exchange-per-mount invariant explicit -- a
-    // fresh exchange comes from a fresh mount (ExchangeView is keyed by the
-    // secret).
+    // two lifecycles on shared state. Start is offered at most once per mount, but
+    // this makes the one-exchange-per-mount invariant explicit -- a fresh exchange
+    // comes from a fresh mount (ExchangeView is keyed by the secret).
     if (abortRef.current) return;
+    // Hide the acceptor's Start button now that the run is underway (the inviter
+    // shows none); the abortRef guard above remains the authoritative gate.
+    setStarted(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -396,12 +418,13 @@ export function ExchangeView(config: ExchangeConfig) {
     });
   };
 
-  // The inviter acquired its CSV at compose time, so it never prompts again:
-  // start the exchange immediately from the pre-acquired bundle (the acceptor
-  // renders FileAcquire below and starts on the user's Start instead). Runs once
-  // per mount -- ExchangeView is keyed by the secret, so a fresh exchange is a
-  // fresh mount, and handleStart's re-entry guard plus the StrictMode-safe abort
-  // cleanup above keep a double-invoked effect from racing two runs.
+  // The inviter is the responder (it listens), so it starts immediately from its
+  // pre-acquired bundle with no Start press. The acceptor is the initiator: it
+  // dials only when the user presses Start (the button below), so it does NOT
+  // auto-start here. Runs once per mount -- ExchangeView is keyed by the secret,
+  // so a fresh exchange is a fresh mount, and handleStart's re-entry guard plus
+  // the StrictMode-safe abort cleanup above keep a double-invoked effect from
+  // racing two runs.
   useEffect(() => {
     if (config.role === "inviter") handleStart(config.acquired);
   }, []);
@@ -409,15 +432,12 @@ export function ExchangeView(config: ExchangeConfig) {
   return (
     <Stack>
       {errorAlert && (
-        // pre-line preserves the newline that the file-acquire phase's
-        // read-failure alert carries: FileAcquire builds that message with
-        // sanitizeErrorForDisplay, which puts a newline before each "caused by:"
-        // link (browsers collapse it otherwise) so a multi-cause error shows one
-        // cause per line, and forwards it here through onError. This module's own
-        // run-error messages carry no such newlines -- the output case is a single
-        // sanitizeForDisplay'd message and the rest are fixed strings -- but the
-        // shared slot must still render that one multi-cause case. Every message
-        // is already escaped, so the only newlines present are those separators.
+        // This slot now carries only the run lifecycle's error messages: the
+        // acceptor's file read and pre-flight errors surface on the review screen,
+        // not here. Those run-error messages are fixed strings or a single
+        // sanitizeForDisplay'd message with no embedded newlines; pre-line is kept
+        // defensively so any future multi-line message renders one line per line
+        // rather than run together.
         <Alert
           color="red"
           title={errorAlert.title}
@@ -442,17 +462,15 @@ export function ExchangeView(config: ExchangeConfig) {
           openingFileName={outputs?.record?.openingFileName}
         />
       </Group>
-      {config.role === "acceptor" && (
-        // Acceptor only: it picks and pre-flights its own CSV here. The inviter
-        // arrives with its file already parsed (config.acquired) and auto-starts,
-        // so it renders no file prompt.
-        <FileAcquire
-          submitLabel="Start"
-          linkageTerms={config.linkageTerms}
-          onError={setErrorAlert}
-          onWarning={setWarningAlert}
-          onAcquired={handleStart}
-        />
+      {config.role === "acceptor" && !started && (
+        // Acceptor only: it arrives pre-acquired (config.acquired, parsed and
+        // pre-flighted on the review screen) and dials only on this explicit
+        // Start, so nothing connects before the user presses it. The button hides
+        // once the run begins; the inviter is the responder and auto-starts, so it
+        // shows none.
+        <Group justify="center">
+          <Button onClick={() => handleStart(config.acquired)}>Start</Button>
+        </Group>
       )}
     </Stack>
   );
