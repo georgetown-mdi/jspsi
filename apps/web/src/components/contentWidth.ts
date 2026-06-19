@@ -11,7 +11,12 @@ import type { ContainerWidth } from "@theme";
  * This replaces each route choosing a `Container size` independently of the
  * shell's, which left the chrome and a narrower route's content misaligned.
  */
-declare module "@tanstack/react-router" {
+// Augment the module that DECLARES StaticDataRouteOption (router-core), not the
+// one that merely re-exports it (react-router). Augmenting the re-export happens
+// to merge today, but the base interface is empty, so if a future version
+// stopped re-exporting it the augmentation would silently become a no-op a green
+// typecheck would not catch; merging into the declaring module is robust to that.
+declare module "@tanstack/router-core" {
   interface StaticDataRouteOption {
     /** The named content width this route renders at; the shell sizes its
      * chrome to match. Omit to inherit {@link DEFAULT_CONTENT_WIDTH}. */
