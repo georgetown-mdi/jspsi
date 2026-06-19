@@ -112,6 +112,9 @@ test("each party reads back the other's advertised observed host key", async () 
   ]);
   expect(a.partnerHostKey).toEqual(hostKeyB);
   expect(b.partnerHostKey).toEqual(hostKeyA);
+  // A well-formed advertisement is not flagged malformed.
+  expect(a.partnerHostKeyMalformed).toBe(false);
+  expect(b.partnerHostKeyMalformed).toBe(false);
 });
 
 test("a party that observed no host key advertises none and reads partner's", async () => {
@@ -123,6 +126,10 @@ test("a party that observed no host key advertises none and reads partner's", as
   ]);
   expect(a.partnerHostKey).toBeUndefined();
   expect(b.partnerHostKey).toEqual(hostKeyA);
+  // A genuine absence is NOT a malformed advertisement: neither party flags it,
+  // so the benign no-host-key path stays quiet.
+  expect(a.partnerHostKeyMalformed).toBe(false);
+  expect(b.partnerHostKeyMalformed).toBe(false);
 });
 
 test("no hostKey field is put on the wire when none is observed", async () => {
@@ -147,12 +154,14 @@ test("no hostKey field is put on the wire when none is observed", async () => {
   for (const frame of sent) expect("hostKey" in frame).toBe(false);
 });
 
-test("a malformed partner hostKey is read as absent, not an abort", async () => {
+test("responder flags a present-but-malformed partner hostKey without aborting", async () => {
   // Fail-soft contract: the reconciliation only ever warns, so a malformed or
   // over-bound advertisement (a non-conforming or future-versioned peer) must
   // degrade to "no reconciliation" rather than abort the linkage and blame the
   // (valid) terms. Inject an over-bound fingerprint on the initiator's frame and
-  // drive the responder to completion by hand.
+  // drive the responder to completion by hand. The value is still dropped (read
+  // as no host key), but the present-but-malformed case is surfaced separately
+  // from a genuine absence so the CLI can log it.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB);
   await connA.send({
@@ -163,6 +172,25 @@ test("a malformed partner hostKey is read as absent, not an abort", async () => 
   await connA.send({ decision: "proceed" }); // msg 3
   const result = await responder;
   expect(result.partnerHostKey).toBeUndefined();
+  expect(result.partnerHostKeyMalformed).toBe(true);
+});
+
+test("initiator flags a present-but-malformed partner hostKey without aborting", async () => {
+  // The mirror of the responder case: a malformed advertisement on the
+  // responder's message 2 is detected by the initiator. Drive the responder by
+  // hand so the bad value can be injected on its frame.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
+  });
+  await connB.receive(); // msg 3: initiator's proceed
+  const result = await initiator;
+  expect(result.partnerHostKey).toBeUndefined();
+  expect(result.partnerHostKeyMalformed).toBe(true);
 });
 
 // --- Role determination ------------------------------------------------------

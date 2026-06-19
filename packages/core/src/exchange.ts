@@ -314,6 +314,19 @@ export interface RunExchangeOptions {
    * rather than aborting.
    */
   onHostKeyDivergence?: (message: string) => void;
+  /**
+   * Called once, after the terms exchange, when the partner's host-key
+   * advertisement was present on the wire but failed the fail-soft validation
+   * (present-but-malformed; see `exchangeTerms`'s `partnerHostKeyMalformed`). Not
+   * called when the partner advertised a well-formed key or none at all, so a
+   * benign no-host-key partner (a file-drop or proxy path) stays quiet. The
+   * malformed value is dropped either way and reconciliation is skipped for it
+   * -- this is a diagnostic-only signal, so a caller logs it at a low level (the
+   * CLI logs it at debug) rather than warning or aborting. The dropped bytes are
+   * deliberately not surfaced: they are unusable, and echoing partner-controlled
+   * content into a log is an injection risk.
+   */
+  onPartnerHostKeyMalformed?: () => void;
   verbosity?: number;
 }
 
@@ -347,15 +360,28 @@ export async function runExchange(
   const verbosity = options.verbosity ?? 0;
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
-  const { partnerTerms, warnings, partnerSaveIntent, partnerHostKey } =
-    await exchangeTerms(
-      conn,
-      handshakeRole,
-      linkageTerms,
-      options.saveIntent,
-      options.observedHostKey,
-    );
+  const {
+    partnerTerms,
+    warnings,
+    partnerSaveIntent,
+    partnerHostKey,
+    partnerHostKeyMalformed,
+  } = await exchangeTerms(
+    conn,
+    handshakeRole,
+    linkageTerms,
+    options.saveIntent,
+    options.observedHostKey,
+  );
   for (const warning of warnings) onWarning(warning);
+
+  // Surface a present-but-malformed partner advertisement as a diagnostic. The
+  // value was already dropped by the fail-soft parse (partnerHostKey is
+  // undefined), so reconciliation below is a no-op for it; this signal lets the
+  // caller distinguish a non-conforming peer from one that observed no host key.
+  // A genuine absence leaves the flag false, so the benign no-host-key path
+  // emits nothing.
+  if (partnerHostKeyMalformed) options.onPartnerHostKeyMalformed?.();
 
   // Cross-party host-key reconciliation. Both parties advertised the host key
   // they observed on the terms exchange just above; compare them, and surface a

@@ -33,7 +33,7 @@ import {
 // hostile partner's advertised values, mirroring the invitation decoder's
 // per-field size bounds, and the receiver sanitizes both before display.
 //
-// hostKeyField is fail-soft (`.catch(undefined)`): a malformed or over-bound
+// hostKeyField is fail-soft AND self-classifying. A malformed or over-bound
 // advertisement is read as absent rather than aborting the linkage, UNLIKE the
 // rest of the terms message and unlike `save`. This is deliberate and specific
 // to this field's contract: the reconciliation is a non-fatal advisory that only
@@ -43,11 +43,49 @@ import {
 // party cannot set it -- must degrade to "no reconciliation" rather than become a
 // terms-exchange abort that blames the (valid) linkage terms. It never affects
 // agreement, so dropping a bad value is the correct, contract-preserving outcome.
+//
+// The earlier bare `.optional().catch(undefined)` collapsed two cases into one
+// `undefined`: a field genuinely absent (a partner that observed no host key, a
+// file-drop or proxy path) and a field present on the wire but rejected. That
+// erased the only signal an operator could use to tell a benign no-host-key
+// partner from a non-conforming one. Instead, parse the raw field and tag it:
+// an absent field and a well-formed value both report `malformed: false` (with
+// `value` set only in the latter), while a present-but-invalid or over-bound
+// value reports `malformed: true` with no `value`. The fail-soft contract is
+// unchanged -- a malformed advertisement still yields no usable host key and
+// never aborts -- but the malformed signal now survives for the CLI to log at
+// debug (see TermsExchangeResult.partnerHostKeyMalformed).
 const hostKeyAdvertisement = z.object({
   fingerprint: z.string().max(100),
   keyType: z.string().max(64),
 });
-const hostKeyField = hostKeyAdvertisement.optional().catch(undefined);
+
+/**
+ * Classification of the partner's fail-soft `hostKey` advertisement after
+ * parsing: `value` is the validated host key, present only when the field was on
+ * the wire and well-formed; `malformed` is `true` only when the field was
+ * present but failed validation. An absent field and a well-formed value both
+ * report `malformed: false`, and `value` is `undefined` whenever `malformed` is
+ * `true`.
+ */
+interface HostKeyAdvertisementParse {
+  value: PresentedHostKey | undefined;
+  malformed: boolean;
+}
+
+const hostKeyField = z
+  .unknown()
+  .optional()
+  .transform((raw): HostKeyAdvertisementParse => {
+    // An absent field arrives as `undefined` (JSON has no `undefined`, so a key
+    // present on the wire is never `undefined` here) -- the benign no-host-key
+    // case, not malformed.
+    if (raw === undefined) return { value: undefined, malformed: false };
+    const parsed = hostKeyAdvertisement.safeParse(raw);
+    return parsed.success
+      ? { value: parsed.data, malformed: false }
+      : { value: undefined, malformed: true };
+  });
 
 // The optional `save` flag rides the terms exchange so each party advertises
 // its zero-setup `--save` intent to the other on the one round-trip both sides
@@ -108,9 +146,23 @@ export interface TermsExchangeResult {
    * an observed key in) or advertised a malformed/over-bound value (read as
    * absent; see the fail-soft `hostKeyField` schema). The caller reconciles it
    * against its own observed key (see {@link reconcileHostKeyFingerprints}); it
-   * never affects agreement.
+   * never affects agreement. When the value was dropped as malformed,
+   * {@link partnerHostKeyMalformed} is `true`, distinguishing that case from a
+   * genuine absence.
    */
   partnerHostKey: PresentedHostKey | undefined;
+  /**
+   * Whether the partner's host-key advertisement was present on the wire but
+   * failed the fail-soft validation (present-but-malformed), as distinct from
+   * being genuinely absent. `true` only for a present-but-rejected value; `false`
+   * both when the partner advertised a well-formed key and when it advertised
+   * none at all. {@link partnerHostKey} is `undefined` whenever this is `true`
+   * (the fail-soft drop). It is a diagnostic signal only -- a malformed
+   * advertisement is reachable only from a non-conforming or future-versioned
+   * peer, never affects agreement, and never aborts the exchange -- so a caller
+   * logs it at a low level (the CLI logs it at debug; see apps/cli/src/protocol.ts).
+   */
+  partnerHostKeyMalformed: boolean;
 }
 
 /**
@@ -176,6 +228,12 @@ async function sendAbort(
  * key) it omits the field, so the partner reconciles against nothing and a
  * one-sided absence is not a divergence. Like `save`, it never affects whether
  * the terms are agreed.
+ *
+ * The partner's advertisement is fail-soft: a present-but-malformed value is
+ * dropped (read as no host key) rather than aborting. That drop is reported via
+ * {@link TermsExchangeResult.partnerHostKeyMalformed} so a caller can tell a
+ * non-conforming peer from one that simply observed no host key; a genuine
+ * absence leaves the flag `false`.
  */
 export async function exchangeTerms(
   conn: MessageConnection,
@@ -256,7 +314,8 @@ export async function exchangeTerms(
       partnerTerms,
       warnings,
       partnerSaveIntent: msg.save === true,
-      partnerHostKey: msg.hostKey,
+      partnerHostKey: msg.hostKey.value,
+      partnerHostKeyMalformed: msg.hostKey.malformed,
     };
   } else {
     // Message 1: receive partner's terms. Raw receive + inline parse (rather
@@ -268,11 +327,13 @@ export async function exchangeTerms(
     let partnerTerms: LinkageTerms;
     let partnerSaveIntent = false;
     let partnerHostKey: PresentedHostKey | undefined;
+    let partnerHostKeyMalformed = false;
     let parseError: string | undefined;
     try {
       const parsed = termsMessage.parse(rawData);
       partnerSaveIntent = parsed.save === true;
-      partnerHostKey = parsed.hostKey;
+      partnerHostKey = parsed.hostKey.value;
+      partnerHostKeyMalformed = parsed.hostKey.malformed;
       partnerTerms = parseLinkageTerms(parsed.linkageTerms);
     } catch (parseErr) {
       parseError =
@@ -319,6 +380,7 @@ export async function exchangeTerms(
       warnings,
       partnerSaveIntent,
       partnerHostKey,
+      partnerHostKeyMalformed,
     };
   }
 }
