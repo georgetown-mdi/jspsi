@@ -2,6 +2,7 @@ import { ZodError } from "zod";
 import { expect, test } from "vitest";
 
 import {
+  MAX_RECONNECT_ATTEMPTS,
   SHARED_SECRET_REGEX,
   generateSharedSecret,
   parseConnectionConfig,
@@ -381,6 +382,35 @@ test("max_reconnect_attempts of zero is still accepted", () => {
   expect(result.success).toBe(true);
   if (!result.success) return;
   expect(result.data.options?.maxReconnectAttempts).toBe(0);
+});
+
+test("max_reconnect_attempts at the ceiling is accepted", () => {
+  // The ceiling is inclusive: exactly MAX_RECONNECT_ATTEMPTS, the largest in-range
+  // value, parses unchanged -- the schema floor and ceiling agree with the CLI
+  // parse guard at both ends of the range.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { max_reconnect_attempts: MAX_RECONNECT_ATTEMPTS },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.options?.maxReconnectAttempts).toBe(
+    MAX_RECONNECT_ATTEMPTS,
+  );
+});
+
+test("max_reconnect_attempts above the ceiling is rejected", () => {
+  // The footgun this closes: the field was z.int().nonnegative() with no upper
+  // bound, so a value near Number.MAX_SAFE_INTEGER was accepted and became a
+  // linear self-inflicted connect hang (~N seconds at the 1s inter-attempt floor).
+  // One past the ceiling is now rejected on the config/programmatic path, so an
+  // over-ceiling --max-reconnect-attempts override caught at the CLI boundary is
+  // also caught here by the merged-options re-validation.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { max_reconnect_attempts: MAX_RECONNECT_ATTEMPTS + 1 },
+  });
+  expect(result.success).toBe(false);
 });
 
 test("a positive peer_timeout_ms is still accepted", () => {
