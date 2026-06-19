@@ -14,7 +14,10 @@ import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
-import { StandardizationSchema } from "../src/config/standardization";
+import {
+  StandardizationSchema,
+  type Standardization,
+} from "../src/config/standardization";
 
 // --- runPipeline: string functions -------------------------------------------
 
@@ -1569,6 +1572,126 @@ describe("assessLinkageSatisfiability", () => {
     expect(unsatisfied).toEqual([]);
     expect(satisfiableKeyCount).toBe(0);
   });
+});
+
+// --- assessLinkageSatisfiability vs the real builder (differential) ----------
+
+// assessLinkageSatisfiability is a second, hand-maintained copy of the
+// column-to-field resolution buildStandardizedDataset performs at exchange time;
+// the guard is sound only while the two agree. This pins the detector's verdict
+// against an actual buildStandardizedDataset + buildKeyStrings run, so a future
+// change to the builder's resolution that the detector fails to mirror turns red
+// here rather than silently letting a silent-empty config through (the failure
+// class review caught repeatedly). Each case uses identity standardization (empty
+// steps) and a non-empty value in every present column, so a key yields a string
+// iff all its element fields resolved to a present column -- isolating the
+// resolution the detector models from the documented shape-vs-values residual
+// (whether a value survives a pipeline), which the detector deliberately ignores.
+describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
+  const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
+    name,
+    type,
+    role: "linkage",
+    isPayload: false,
+  });
+
+  // One ssn key and one lastName key, so a case can satisfy both, one, or neither.
+  const diffTerms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "lastname", type: "lastName" },
+    ],
+    linkageKeys: [
+      { name: "SSN", elements: [{ field: "ssn" }] },
+      { name: "NAME", elements: [{ field: "lastname" }] },
+    ],
+  };
+
+  const cases: Array<{
+    name: string;
+    columns: string[];
+    standardization?: Standardization;
+    metadata?: ColumnMetadata[];
+    expected: number;
+  }> = [
+    {
+      name: "inferred, both keys satisfiable",
+      columns: ["ssn", "last_name"],
+      expected: 2,
+    },
+    {
+      name: "inferred, only the name key satisfiable",
+      columns: ["last_name"],
+      expected: 1,
+    },
+    {
+      name: "explicit metadata types a non-inferring column as ssn",
+      columns: ["tax_id", "last_name"],
+      metadata: [col("tax_id", "ssn"), col("last_name", "lastName")],
+      expected: 2,
+    },
+    {
+      name: "explicit metadata retypes the ssn column away",
+      columns: ["ssn", "last_name"],
+      metadata: [col("ssn", "other"), col("last_name", "lastName")],
+      expected: 1,
+    },
+    {
+      name: "absent same-typed metadata column ordered before a present one",
+      columns: ["present_ssn", "last_name"],
+      metadata: [
+        col("absent_ssn", "ssn"),
+        col("present_ssn", "ssn"),
+        col("last_name", "lastName"),
+      ],
+      expected: 1,
+    },
+    {
+      name: "explicit standardization remaps to a present column",
+      columns: ["ssn_src", "last_name"],
+      standardization: [{ output: "ssn", input: "ssn_src" }],
+      expected: 2,
+    },
+    {
+      name: "explicit standardization remaps to an absent column",
+      columns: ["ssn", "last_name"],
+      standardization: [{ output: "ssn", input: "tax_id" }],
+      expected: 1,
+    },
+  ];
+
+  test.each(cases)(
+    "$name",
+    ({ columns, standardization, metadata, expected }) => {
+      const row = Object.fromEntries(columns.map((c) => [c, "x"]));
+      const builderMetadata = metadata ?? inferMetadata(columns);
+      const dataset = buildStandardizedDataset(
+        standardization,
+        [row],
+        builderMetadata,
+        diffTerms,
+      );
+      const produced = diffTerms.linkageKeys.filter(
+        (k) => buildKeyStrings(k, dataset, 0) !== null,
+      ).length;
+      const { satisfiableKeyCount } = assessLinkageSatisfiability(
+        columns,
+        diffTerms,
+        standardization,
+        metadata,
+      );
+      // The detector must agree with the real builder (the differential), and both
+      // must equal the hand-checked count.
+      expect(produced).toBe(expected);
+      expect(satisfiableKeyCount).toBe(expected);
+    },
+  );
 });
 
 // --- StandardizationSchema ---------------------------------------------------
