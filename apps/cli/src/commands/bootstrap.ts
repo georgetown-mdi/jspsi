@@ -1455,6 +1455,11 @@ export function warnServerOverridesIgnoredOffline(
   options: OfflineIgnoredServerOverrides,
   log: { warn: (message: string) => void },
 ): void {
+  // Security invariant: push only the flag NAME, never the override value. A
+  // --server-password / --server-private-key value may be an inline secret (or
+  // an unresolved @path), and this warning reaches the terminal and any
+  // --log-file; interpolating a value here would leak it. Keep the emitted
+  // message static apart from this flag-name list.
   const ignored: string[] = [];
   if (options.serverUsername !== undefined) ignored.push("--server-username");
   if (options.serverPassword !== undefined) ignored.push("--server-password");
