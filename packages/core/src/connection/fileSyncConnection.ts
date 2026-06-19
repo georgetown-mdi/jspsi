@@ -12,7 +12,7 @@ import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
 import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import {
   computeHostKeyFingerprint,
-  verifyHostKeyFingerprint,
+  matchHostKeyFingerprint,
   keyTypeFromBlob,
 } from "../utils/sshHostKey";
 import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS } from "../config/connection";
@@ -1285,8 +1285,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // is set before verify(false), so it is populated by the time the rejection
       // propagates from this.client.connect().
       let mismatchDetails: string | undefined;
-      const pin = config.server.hostKeyFingerprint;
-      if (pin !== undefined) {
+      // One or many pinned fingerprints, normalized to a list. A list stages a
+      // rotated host key alongside the current one during a rekey window: a key
+      // matching ANY pin is accepted. An empty list (rejected at config parse,
+      // but defended here for a direct library caller) falls through to the
+      // no-pin fail-closed path below rather than accepting any key.
+      const pins =
+        config.server.hostKeyFingerprint === undefined
+          ? []
+          : Array.isArray(config.server.hostKeyFingerprint)
+            ? config.server.hostKeyFingerprint
+            : [config.server.hostKeyFingerprint];
+      if (pins.length > 0) {
         connectOptions["hostVerifier"] = (
           keyBlob: Buffer,
           verify: (permitted: boolean) => void,
@@ -1294,42 +1304,56 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           void (async () => {
             try {
               const blob = hostKeyBlob(keyBlob);
-              if (await verifyHostKeyFingerprint(blob, pin)) {
+              const matched = await matchHostKeyFingerprint(blob, pins);
+              if (matched !== undefined) {
                 // Record the observed key for the post-handshake cross-party
-                // reconciliation (see observedHostKey). The pin matched, so the
-                // presented fingerprint equals `pin` (already canonical, format
-                // -validated) -- reuse it rather than re-hash on every connect.
+                // reconciliation (see observedHostKey). `matched` is the pin the
+                // server's key satisfied (already canonical, format-validated),
+                // so the presented fingerprint equals it -- reuse it rather than
+                // re-hash on every connect. With several pins this is the one the
+                // server actually presented, which is what the partner compares.
                 // keyTypeFromBlob is server-controlled and stored UNsanitized;
                 // the reconciliation escapes it before display.
                 this.observedHostKey = {
-                  fingerprint: pin,
+                  fingerprint: matched,
                   keyType: keyTypeFromBlob(blob),
                 };
                 settleVerify(verify, true);
               } else {
                 // Re-hash on the mismatch branch (which tears the connection down
-                // anyway) rather than widen verifyHostKeyFingerprint's narrow
-                // constant-time-boolean contract to return the digest.
+                // anyway) rather than widen matchHostKeyFingerprint's contract to
+                // also surface the digest of a non-matching key.
                 const presented = await computeHostKeyFingerprint(blob);
                 // keyTypeFromBlob decodes UTF-8 straight from the
                 // server-controlled blob, so it is escaped and quoted before it
                 // reaches the operator-facing message; the presented fingerprint
-                // is base64 and the pin is format-validated, so neither needs it.
+                // is base64 and the pins are format-validated, so neither needs
+                // it.
                 const keyType = sanitizeForDisplay(keyTypeFromBlob(blob));
+                // Name the presented fingerprint and the pinned set so the
+                // operator can see exactly what was offered against what was
+                // trusted (the singular vs. plural wording adapts to the pin
+                // count).
+                const pinnedDescription =
+                  pins.length === 1
+                    ? `the pinned fingerprint ${pins[0]}`
+                    : `any of the ${pins.length} pinned fingerprints ` +
+                      `(${pins.join(", ")})`;
                 // A changed key is never auto-accepted (the ssh model): the
                 // recovery is to verify out-of-band, then re-pin deliberately --
-                // either set the new value or clear the field and re-establish
-                // trust on first use interactively.
+                // add the new value (keeping or dropping the old), or clear the
+                // field and re-establish trust on first use interactively.
                 mismatchDetails =
                   `the server presented a host key of type '${keyType}' with ` +
-                  `fingerprint ${presented}, which does not match the pinned ` +
-                  `fingerprint ${pin}. This may be a legitimate key rotation or ` +
-                  `an active attack -- only the server administrator can ` +
+                  `fingerprint ${presented}, which does not match ` +
+                  `${pinnedDescription}. This may be a legitimate key rotation ` +
+                  `or an active attack -- only the server administrator can ` +
                   `disambiguate. If the key was rotated, verify the new ` +
-                  `fingerprint out-of-band, then either set ` +
-                  `connection.server.host_key_fingerprint to it or remove that ` +
-                  `field and re-run interactively to re-establish trust on ` +
-                  `first use. A changed key is never auto-accepted.`;
+                  `fingerprint out-of-band, then add it to ` +
+                  `connection.server.host_key_fingerprint (alongside or in ` +
+                  `place of the old) or remove that field and re-run ` +
+                  `interactively to re-establish trust on first use. A changed ` +
+                  `key is never auto-accepted.`;
                 settleVerify(verify, false);
               }
             } catch (err) {

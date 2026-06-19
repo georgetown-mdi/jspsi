@@ -396,7 +396,7 @@ SFTP requires at most one primary authentication method alongside `username`. `p
 | `password` | string | Password authentication; `@`-file recommended |
 | `private_key` | string | Path to SSH private key; `@`-file recommended |
 | `private_key_passphrase` | string | Passphrase for an encrypted private key; only valid with `private_key`; `@`-file recommended |
-| `host_key_fingerprint` | string | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 standard base64 chars>`, the `+`/`/` alphabet OpenSSH emits, not base64url). When set, the server's host key is verified before authentication and the connection is rejected if it does not match. When absent, the connection is **refused** (fail-closed): an interactive run instead establishes the pin on first use -- any command that opens the SFTP connection (`exchange`, an online `invite`/`accept`, or a zero-setup exchange) prompts with the presented fingerprint and, on confirmation, records it -- while a non-interactive run fails closed. So this field is typically pinned out-of-band or populated automatically on the first interactive run; see [CLI.md](CLI.md#sftp-host-key-trust). `@`-file supported. Applies to the CLI `sftp` channel only. |
+| `host_key_fingerprint` | string or list | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 standard base64 chars>`, the `+`/`/` alphabet OpenSSH emits, not base64url), or a non-empty list of them. When set, the server's host key is verified before authentication and the connection is rejected unless it matches one of the listed fingerprints. A list gives zero-downtime host-key rotation: pin the incoming key alongside the current one during the rekey window so either is accepted with no failed exchange in between, then drop the old entry after the cutover. When absent, the connection is **refused** (fail-closed): an interactive run instead establishes the pin on first use -- any command that opens the SFTP connection (`exchange`, an online `invite`/`accept`, or a zero-setup exchange) prompts with the presented fingerprint and, on confirmation, records it -- while a non-interactive run fails closed. So this field is typically pinned out-of-band or populated automatically on the first interactive run; see [CLI.md](CLI.md#sftp-host-key-trust). `@`-file supported (per entry). Applies to the CLI `sftp` channel only. |
 
 ```yaml
 # WebRTC example
@@ -421,6 +421,16 @@ connection:
 connection:
   channel: filedrop
   path: /mnt/sftp-share/exchanges/agency-a-agency-b
+
+# SFTP host-key rotation: pin the incoming key alongside the current one for the
+# rekey window so either is accepted, then drop the old entry after the cutover.
+connection:
+  channel: sftp
+  server:
+    host: sftp.example.org
+    host_key_fingerprint:
+      - "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s" # current
+      - "SHA256:0PNQ1x9Pe3aaFqkPq0n8Uihhi8nN2nx2nKQ0gWqXm8s" # incoming
 ```
 
 #### On-demand server provisioning

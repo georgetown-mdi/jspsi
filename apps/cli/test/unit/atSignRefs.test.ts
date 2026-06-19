@@ -246,6 +246,39 @@ test("resolveExchangeSpecRefs rejects an @path host_key_fingerprint that resolve
   expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);
 });
 
+test("resolveExchangeSpecRefs resolves each entry of a host_key_fingerprint list (literal + @path)", () => {
+  // A list mixing a literal pin and an @-file one: the literal passes through
+  // and the @path resolves to its file's contents, preserving list order.
+  const literal = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const fromFile = "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s";
+  const spec = parseSpec({
+    connection: {
+      channel: "sftp",
+      server: {
+        host: "h",
+        host_key_fingerprint: [literal, atFile("fp2", fromFile + "\n")],
+      },
+    },
+  });
+  const conn = resolveExchangeSpecRefs(spec).connection as SFTPConnectionConfig;
+  expect(conn.server.hostKeyFingerprint).toEqual([literal, fromFile]);
+});
+
+test("resolveExchangeSpecRefs rejects a host_key_fingerprint list whose @path entry is malformed", () => {
+  // One bad entry in the list must fail as a UsageError naming that reference,
+  // the same fail-closed behavior the scalar @-file form has.
+  const good = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const ref = atFile("bad-fp", "not-a-valid-fingerprint\n");
+  const spec = parseSpec({
+    connection: {
+      channel: "sftp",
+      server: { host: "h", host_key_fingerprint: [good, ref] },
+    },
+  });
+  expect(() => resolveExchangeSpecRefs(spec)).toThrow(UsageError);
+  expect(() => resolveExchangeSpecRefs(spec)).toThrow(ref);
+});
+
 test("resolveExchangeSpecRefs resolves @path turn credentials and provision auth on a webrtc connection", () => {
   const spec = parseSpec({
     connection: {

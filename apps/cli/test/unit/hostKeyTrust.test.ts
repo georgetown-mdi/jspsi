@@ -21,7 +21,7 @@ afterEach(() => {
 
 const FP = "SHA256:" + "A".repeat(43);
 
-function sftpConn(pin?: string): ConnectionConfig {
+function sftpConn(pin?: string | string[]): ConnectionConfig {
   return {
     channel: "sftp",
     server: {
@@ -91,6 +91,31 @@ test("is a no-op when a host_key_fingerprint is already pinned", async () => {
     deps,
   );
   expect(deps.probeCalls).toBe(0); // pinned -> never probes or prompts
+});
+
+test("is a no-op when a list of host_key_fingerprints is already pinned", async () => {
+  // First-use trust gates on the pin being unset (=== undefined), which is
+  // value-agnostic: a config already carrying multiple pins (a staged rotation)
+  // is just as "pinned" as one carrying a single string and must not re-prompt.
+  const conn = sftpConn([FP, "SHA256:" + "B".repeat(42) + "A"]);
+  const deps = makeDeps({ confirm: true });
+  process.stdin.isTTY = false;
+  await establishHostKeyTrust(
+    conn,
+    {
+      verbosity: 0,
+      loggerName: "accept",
+      persistence: { mode: "save-with-config", configPath: "psilink.yaml" },
+    },
+    deps,
+  );
+  expect(deps.probeCalls).toBe(0); // already pinned -> never probes or prompts
+  // The pre-existing list is left untouched (not flattened or replaced).
+  if (conn.channel === "sftp")
+    expect(conn.server.hostKeyFingerprint).toEqual([
+      FP,
+      "SHA256:" + "B".repeat(42) + "A",
+    ]);
 });
 
 test("fails closed on a non-interactive unpinned run (save-with-config), naming the recovery", async () => {

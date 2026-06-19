@@ -781,6 +781,68 @@ test("open (sftp) with a mismatched pin fails closed and names the re-pin recove
   expect(conn.connected).toBe(false);
 });
 
+test("open (sftp) with a list of pins connects when the key matches the FIRST pin", async () => {
+  const blob = ed25519Blob(7);
+  const matching = await computeHostKeyFingerprint(new Uint8Array(blob));
+  const other = await computeHostKeyFingerprint(new Uint8Array(ed25519Blob(1)));
+  const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
+    verbose: -1,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      hostKeyFingerprint: [matching, other],
+    },
+  });
+  expect(conn.connected).toBe(true);
+  // The observed key records exactly the pin the server's key satisfied.
+  expect(conn.observedHostKey).toEqual({
+    fingerprint: matching,
+    keyType: "ssh-ed25519",
+  });
+});
+
+test("open (sftp) with a list of pins connects when the key matches a LATER pin (rotation staging)", async () => {
+  // The presented key is staged as the second pin during a rekey window; the
+  // connection accepts it and records that pin as the observed key.
+  const blob = ed25519Blob(2);
+  const matching = await computeHostKeyFingerprint(new Uint8Array(blob));
+  const other = await computeHostKeyFingerprint(new Uint8Array(ed25519Blob(1)));
+  const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
+    verbose: -1,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      hostKeyFingerprint: [other, matching],
+    },
+  });
+  expect(conn.connected).toBe(true);
+  expect(conn.observedHostKey).toEqual({
+    fingerprint: matching,
+    keyType: "ssh-ed25519",
+  });
+});
+
+test("open (sftp) with a list of pins fails closed when the key matches NONE and names the set", async () => {
+  const a = await computeHostKeyFingerprint(new Uint8Array(ed25519Blob(1)));
+  const b = await computeHostKeyFingerprint(new Uint8Array(ed25519Blob(3)));
+  const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob(2)), {
+    verbose: -1,
+  });
+  await expect(
+    conn.open({
+      channel: "sftp",
+      server: { host: "sftp.example.org", hostKeyFingerprint: [a, b] },
+    }),
+    // The mismatch names the presented fingerprint and the whole pinned set.
+  ).rejects.toThrow(/does not match any of the 2 pinned fingerprints/);
+  expect(conn.connected).toBe(false);
+  expect(conn.observedHostKey).toBeUndefined();
+});
+
 test("open (sftp) with no pin fails closed (the no-pin default)", async () => {
   // The no-pin default is now fail-closed (was warn-and-proceed): core refuses
   // the connection and the error surfaces the presented fingerprint to pin.

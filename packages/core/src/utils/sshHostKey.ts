@@ -80,18 +80,67 @@ export async function computeHostKeyFingerprint(
 }
 
 /**
- * Verify that a raw SSH host-key blob matches a pinned fingerprint string.
- * Returns `true` only when the SHA-256 digest of `keyBlob` exactly equals the
- * digest encoded in `pin`, and `false` otherwise -- including when `pin` is
- * malformed (a body `atob` cannot decode), so a bad pin fails closed rather
- * than throwing. A malformed pin names no key, so refusing it is the safe
+ * Return the first fingerprint in `pins` that the raw SSH host-key blob matches,
+ * or `undefined` when it matches none. The set extension of
+ * {@link verifyHostKeyFingerprint}: the blob is hashed once and its digest
+ * compared against each pin, so a server presenting a host key matching ANY pin
+ * is accepted. This is what lets a rotated host key be staged alongside the
+ * current one during a rekey window -- pin both and either is accepted, with no
+ * failed exchange in between -- then the old entry dropped once the cutover is
+ * complete.
+ *
+ * Returns the MATCHED pin verbatim (canonical, format-validated at config
+ * parse), so the caller can record exactly which pinned key the server
+ * presented; iteration stops at the first match. A malformed pin (a body `atob`
+ * cannot decode) is skipped rather than throwing, so one bad entry fails closed
+ * (never matches) without breaking matching against the rest. Nothing secret is
+ * compared (a host key and its fingerprint are both public), so the
+ * short-circuit on the first match is not a timing concern; the per-pin compare
+ * is {@link bytesEqual} for digest-comparison hygiene.
+ *
+ * @param keyBlob - raw host-key blob from ssh2's `hostVerifier`
+ * @param pins - pinned fingerprints in OpenSSH SHA256 format
+ */
+export async function matchHostKeyFingerprint(
+  keyBlob: Uint8Array<ArrayBuffer>,
+  pins: readonly string[],
+): Promise<string | undefined> {
+  const digest = await sha256(keyBlob);
+  for (const pin of pins) {
+    let pinBytes: Uint8Array;
+    try {
+      pinBytes = fromBase64Unpadded(pin.slice("SHA256:".length));
+    } catch {
+      // A pin body atob rejects (a non-standard-base64 char, or a length it
+      // refuses) cannot match any key -- skip it rather than let the exception
+      // escape this verification primitive, so one bad entry never blocks a
+      // match against the rest.
+      continue;
+    }
+    if (
+      bytesEqual(
+        digest as Uint8Array<ArrayBuffer>,
+        pinBytes as Uint8Array<ArrayBuffer>,
+      )
+    )
+      return pin;
+  }
+  return undefined;
+}
+
+/**
+ * Verify that a raw SSH host-key blob matches a single pinned fingerprint
+ * string. Returns `true` only when the SHA-256 digest of `keyBlob` exactly
+ * equals the digest encoded in `pin`, and `false` otherwise -- including when
+ * `pin` is malformed (a body `atob` cannot decode), so a bad pin fails closed
+ * rather than throwing. A malformed pin names no key, so refusing it is the safe
  * answer for any caller that reaches this exported primitive with a value that
  * did not pass {@link HOST_KEY_FINGERPRINT_REGEX}.
  *
- * The digest comparison uses {@link bytesEqual} (constant-time over the decoded
- * bytes). Nothing secret is compared -- a host key and its fingerprint are both
- * public -- so the constant-time compare is house-style hygiene for digest
- * comparisons rather than a defense against a timing oracle.
+ * The single-pin form of {@link matchHostKeyFingerprint}; both share that one
+ * decode-and-compare implementation rather than re-deriving it -- host-key
+ * matching is a security primitive, and a silent second implementation would be
+ * the failure mode the shared-helper convention guards against.
  *
  * @param keyBlob - raw host-key blob from ssh2's `hostVerifier`
  * @param pin - pinned fingerprint in OpenSSH SHA256 format, e.g.
@@ -103,20 +152,7 @@ export async function verifyHostKeyFingerprint(
   keyBlob: Uint8Array<ArrayBuffer>,
   pin: string,
 ): Promise<boolean> {
-  const digest = await sha256(keyBlob);
-  let pinBytes: Uint8Array;
-  try {
-    pinBytes = fromBase64Unpadded(pin.slice("SHA256:".length));
-  } catch {
-    // A pin body atob rejects (a non-standard-base64 char, or a length it
-    // refuses) cannot match any key -- fail closed rather than let the
-    // exception escape this verification predicate.
-    return false;
-  }
-  return bytesEqual(
-    digest as Uint8Array<ArrayBuffer>,
-    pinBytes as Uint8Array<ArrayBuffer>,
-  );
+  return (await matchHostKeyFingerprint(keyBlob, [pin])) !== undefined;
 }
 
 /**

@@ -127,27 +127,11 @@ function resolveConnectionAtSignRefs(
       // manage it alongside other server config in a read-only secrets mount.
       // Only the LOAD resolver handles it: nothing sets the fingerprint via a
       // CLI flag or connection URL, so resolveConnectionCredentials (the save/
-      // flag resolver) correctly omits it -- dead code there would never run.
-      {
-        const fpRef = resolved.server.hostKeyFingerprint;
-        resolved.server.hostKeyFingerprint = resolveOptionalAtSignRef(fpRef);
-        // A literal fingerprint was format-validated at parse; an @-file one was
-        // not (the @path could not match the SHA256: format, so the schema
-        // skipped it). Re-validate the resolved value so a malformed secrets
-        // file fails here as a clear UsageError (exit 64) naming the reference,
-        // rather than later as a confusing host-key "mismatch" at connect time.
-        const fp = resolved.server.hostKeyFingerprint;
-        if (
-          fpRef?.startsWith("@") &&
-          fp !== undefined &&
-          !HOST_KEY_FINGERPRINT_REGEX.test(fp)
-        )
-          throw new UsageError(
-            `the @-file reference ${fpRef} resolved to a value that is not a ` +
-              `valid OpenSSH SHA256 host-key fingerprint ` +
-              `(SHA256:<43 standard base64 chars>)`,
-          );
-      }
+      // flag resolver) correctly omits it -- dead code there would never run. A
+      // single fingerprint or a list; each entry is resolved independently.
+      resolved.server.hostKeyFingerprint = resolveHostKeyFingerprintRefs(
+        resolved.server.hostKeyFingerprint,
+      );
       resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
       resolveHttpAuthAtSignRefs(resolved.proxy?.auth);
       resolveProviderOptionsAtSignRefs(resolved);
@@ -174,6 +158,38 @@ function resolveOptionalAtSignRef(
   value: string | undefined,
 ): string | undefined {
   return value === undefined ? value : resolveAtSignRef(value);
+}
+
+/**
+ * Resolve `@path` references in a host-key fingerprint field -- a single
+ * fingerprint or a non-empty list of them -- resolving each entry independently
+ * and preserving the single-vs-list shape. `undefined` passes through unchanged.
+ */
+function resolveHostKeyFingerprintRefs(
+  value: string | string[] | undefined,
+): string | string[] | undefined {
+  if (value === undefined) return value;
+  if (Array.isArray(value)) return value.map(resolveHostKeyFingerprintRef);
+  return resolveHostKeyFingerprintRef(value);
+}
+
+/**
+ * Resolve one host-key fingerprint entry. A literal value passes through (it was
+ * format-validated at parse); an @-file one is read and re-validated against
+ * {@link HOST_KEY_FINGERPRINT_REGEX}, because the literal `@path` could not match
+ * the SHA256: format so the schema skipped it. A malformed secrets file fails
+ * here as a clear {@link UsageError} (exit 64) naming the reference rather than
+ * later as a confusing host-key "mismatch" at connect time.
+ */
+function resolveHostKeyFingerprintRef(ref: string): string {
+  if (!ref.startsWith("@")) return ref;
+  const resolved = resolveAtSignRef(ref);
+  if (!HOST_KEY_FINGERPRINT_REGEX.test(resolved))
+    throw new UsageError(
+      `the @-file reference ${ref} resolved to a value that is not a valid ` +
+        `OpenSSH SHA256 host-key fingerprint (SHA256:<43 standard base64 chars>)`,
+    );
+  return resolved;
 }
 
 /** Resolve the two `@`-eligible fields of an HTTP-auth block in place. */
