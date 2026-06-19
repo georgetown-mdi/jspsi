@@ -1,0 +1,57 @@
+name: Dependency Review
+
+# Supply-chain gate for every pull request. GitHub's dependency-review-action
+# diffs the PR's dependency graph (via the Dependency Review API) and fails the
+# check when the PR introduces a dependency carrying a known security advisory at
+# or above the severity threshold below. It complements Dependabot, which only
+# opens update PRs for dependencies already present, and the manual `npm audit`
+# step in the Dependency Policy: this catches a vulnerable *new* dependency at the
+# moment it is added, as an automated PR gate. It is distinct from the CodeQL SAST
+# spike -- this gates the dependency-graph diff of a PR, not first-party code.
+#
+# Kept as its own workflow (rather than a job in static_checks.yaml) so it carries
+# a dedicated status-check name and stays focused on supply-chain review. Like
+# static_checks.yaml it is intentionally NOT path-filtered: it is a near-free,
+# always-on control -- on a PR that changes no dependency the graph diff is empty
+# and the check passes near-instantly -- and an unfiltered run avoids the
+# required-check "stays pending on a path-skip" footgun the path-scoped build
+# workflows document.
+#
+# The check reads GitHub's Dependency Review API, which requires the repository's
+# Dependency Graph feature to be enabled. That is free on public repositories
+# (georgetown-mdi/jspsi is public), so this needs no GitHub Advanced Security
+# license -- but the graph must stay enabled (default-on for public repos, yet
+# disableable since 2025-05) or the action fails closed on every PR.
+
+on:
+  pull_request:
+    branches: [main, staging]
+
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the action reads the dependency graph and the repo, and writes
+# its findings to the Actions job summary -- neither needs more than read. Posting
+# the findings as a PR comment (comment-summary-in-pr) would require
+# pull-requests: write, so that is deliberately not enabled.
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v5
+        with:
+          # Fail a PR that newly introduces a dependency with a moderate-or-higher
+          # advisory. This is effectively the only automated supply-chain PR gate
+          # (npm audit is a manual Dependency Policy step), and it fires only on
+          # what a PR adds, not the existing tree, so a strict-ish threshold adds
+          # little friction. License enforcement is left to the manual Dependency
+          # Policy review (no allow/deny list here yet).
+          fail-on-severity: moderate
