@@ -9718,9 +9718,10 @@ test("synchronize() (split): a configured outbound without retain mode is reject
 });
 
 test("open() (split filedrop) rejects inbound/outbound that normalize to one directory", async () => {
-  // The schema rejects only byte-identical pairs; "/x" and "/x/" normalize to the
-  // same directory and must be caught at open() so split mode does not silently
-  // collapse into a shared directory.
+  // open() applies the same distinctness rule the schema does, so a caller that
+  // builds a config directly and bypasses parseConnectionConfig is still guarded:
+  // "/x" and "/x/" normalize to the same directory and must be rejected so split
+  // mode does not silently collapse into a shared directory.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, { verbose: -1 });
   const config: FileDropConnectionConfig = {
@@ -9738,10 +9739,11 @@ test("open() (split filedrop) rejects inbound/outbound that normalize to one dir
 });
 
 test("open() (split sftp) rejects a same-directory pair BEFORE dialing the server", async () => {
-  // SFTP runtime backstop: "in" and "in//" resolve to the same directory and are
-  // caught even though the schema accepts the distinct strings. The check must
-  // run before the SSH connect -- a same-directory misconfig must not cause a
-  // real dial -- so spy on connect and assert it never fired.
+  // SFTP open()-time backstop for a caller that bypasses the schema: "in" and
+  // "in//" resolve to the same directory and are rejected by the same rule the
+  // schema applies. The check must run before the SSH connect -- a same-directory
+  // misconfig must not cause a real dial -- so spy on connect and assert it never
+  // fired.
   const { client } = makeMockClient();
   let dialed = false;
   client.connect = async () => {
@@ -9762,11 +9764,11 @@ test("open() (split sftp) rejects a same-directory pair BEFORE dialing the serve
   expect(dialed).toBe(false);
 });
 
-// Textual same-directory pairs that the byte-identical schema check accepts but
-// open()'s pathsResolveToSameDir must reject, on both channels. Covers the
-// previously-leaking internal-slash and "." cases (filedrop normalizeFiledropPath
-// stripped only trailing slashes; the old sftp check stripped only one leading
-// "./").
+// Textual same-directory pairs that open()'s pathsResolveToSameDir must reject
+// when a caller bypasses the schema (which now applies the identical rule).
+// Covers the internal-slash and "." cases that the stored-path normalization
+// alone does not collapse (filedrop normalizeFiledropPath strips only trailing
+// slashes; the sftp stored path strips only one trailing "/").
 const SAME_DIR_PAIRS: Array<[string, string]> = [
   ["/a/in", "/a//in"], // internal repeated slash
   ["/a/in", "/a/./in"], // interior "." segment

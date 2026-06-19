@@ -1180,12 +1180,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const outboundDir = split
         ? normalizeFiledropPath(config.outboundPath!)
         : inboundDir;
-      // Defense-in-depth beyond the schema's byte-identical reject: two paths
-      // that resolve to the same directory (e.g. "/x" vs "/x/", "/x//y" vs
-      // "/x/y", "/x/./y" vs "/x/y") would silently collapse split mode into a
-      // shared directory, defeating the separate-audit-trail purpose; reject the
-      // normalized collision too. See pathsResolveToSameDir for the textual cases
-      // it catches and the residuals (.. , Windows case) it cannot.
+      // Same distinctness rule the config schema applies (pathsResolveToSameDir),
+      // re-checked here so a caller that constructs a connection directly --
+      // bypassing the schema -- is still guarded: two paths that resolve to the
+      // same directory (e.g. "/x" vs "/x/", "/x//y" vs "/x/y", "/x/./y" vs
+      // "/x/y") would silently collapse split mode into a shared directory,
+      // defeating the separate-audit-trail purpose. See pathsResolveToSameDir for
+      // the textual cases it catches and the residuals (.. , Windows case) it
+      // cannot.
       if (split && pathsResolveToSameDir(inboundDir, outboundDir))
         throw new UsageError(
           "filedrop inbound and outbound directories resolve to the same " +
@@ -1242,18 +1244,26 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         : inboundDir;
       // Distinctness check for split mode. The stored paths above keep their
       // exact form (only a single trailing slash stripped, unchanged from shared
-      // mode); the comparison normalizes copies via pathsResolveToSameDir, the
-      // same rule filedrop uses, so textual near-misses ("in" vs "in//", "./in"
-      // vs "in", "a/./in" vs "a/in") are caught instead of silently collapsing
-      // split mode into one directory. It cannot settle every server-side
-      // equivalence -- a relative path and the absolute path it expands to under
-      // the (client-side-unknown) login home are indistinguishable, as are ".."
-      // segments across a symlink -- so that residual is the operator's
-      // responsibility (see docs/EXCHANGE_REFERENCE.md). The schema's
-      // byte-identical reject is the coarser first line; this is the runtime
-      // backstop. The check runs BEFORE buildSftpConnectOptions/connect below, so
-      // a same-directory split is refused without ever dialing the server.
-      if (split && pathsResolveToSameDir(inboundDir, outboundDir))
+      // mode); the comparison runs pathsResolveToSameDir on the raw configured
+      // paths -- the same rule, on the same inputs, that the config schema
+      // applies -- so the schema and the live connection give the same verdict,
+      // and textual near-misses ("in" vs "in//", "./in" vs "in", "a/./in" vs
+      // "a/in") are caught instead of silently collapsing split mode into one
+      // directory. It cannot settle every server-side equivalence -- a relative
+      // path and the absolute path it expands to under the (client-side-unknown)
+      // login home are indistinguishable, as are ".." segments across a symlink
+      // -- so that residual is the operator's responsibility (see
+      // docs/EXCHANGE_REFERENCE.md). Re-checked here (not only in the schema) to
+      // guard a caller that constructs a connection directly, and BEFORE
+      // buildSftpConnectOptions/connect below, so a same-directory split is
+      // refused without ever dialing the server.
+      if (
+        split &&
+        pathsResolveToSameDir(
+          config.server.inboundPath!,
+          config.server.outboundPath!,
+        )
+      )
         throw new UsageError(
           "sftp inbound and outbound directories resolve to the same " +
             "directory; they must be distinct",
