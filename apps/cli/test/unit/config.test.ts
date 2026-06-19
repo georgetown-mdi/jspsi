@@ -29,6 +29,11 @@ const baseSFTP: ConnectionConfig = {
   server: { host: "sftp.example.org" },
 };
 
+const baseWebRTC: ConnectionConfig = {
+  channel: "webrtc",
+  server: { host: "peer.example.org" },
+};
+
 // --- timeout / reconnect overrides -------------------------------------------
 
 test("peerTimeout is converted to peerTimeoutMs in milliseconds", () => {
@@ -70,6 +75,67 @@ test("existing options are preserved when adding timeout overrides", () => {
   }) as SFTPConnectionConfig;
   expect(result.options?.pollIntervalMs).toBe(5000);
   expect(result.options?.peerTimeoutMs).toBe(20_000);
+});
+
+// --- timeout override re-validation ------------------------------------------
+// The timeout-override block re-validates its merged options through the same
+// schema the FileSync-field block uses, so the peerTimeoutMs/serverConnectTimeoutMs
+// positivity floors are enforced regardless of which override path reached them.
+
+test("a non-positive peerTimeout override is rejected with a UsageError", () => {
+  // peerTimeout 0 -> peerTimeoutMs 0, which violates the schema's positivity
+  // floor. The CLI duration parser already rejects this upstream; the schema
+  // re-parse closes the same hole for any non-CLI override path.
+  expect(() => applyConnectionOverrides(baseSFTP, { peerTimeout: 0 })).toThrow(
+    UsageError,
+  );
+  expect(() => applyConnectionOverrides(baseSFTP, { peerTimeout: -1 })).toThrow(
+    UsageError,
+  );
+});
+
+test("a non-positive connectionTimeout override is rejected with a UsageError", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { connectionTimeout: 0 }),
+  ).toThrow(UsageError);
+});
+
+test("a valid timeout override still passes through unchanged on webrtc", () => {
+  const result = applyConnectionOverrides(baseWebRTC, {
+    peerTimeout: 30,
+    connectionTimeout: 15,
+  });
+  expect(result.options?.peerTimeoutMs).toBe(30_000);
+  expect(result.options?.serverConnectTimeoutMs).toBe(15_000);
+});
+
+test("a non-positive timeout override is rejected on webrtc too", () => {
+  // webrtc never reaches the FileSync-field block, so this exercises the
+  // timeout block's own re-validation. FileSyncOptionsSchema is a safe superset
+  // for a webrtc SharedOptions object (its FileSync-only refines cannot fire).
+  expect(() =>
+    applyConnectionOverrides(baseWebRTC, { peerTimeout: 0 }),
+  ).toThrow(UsageError);
+});
+
+test("the two override blocks agree on a non-positive peerTimeoutMs floor", () => {
+  // A pre-existing options block carrying an invalid (non-positive) peerTimeoutMs
+  // is rejected whether re-validation is reached via a FileSync-field override
+  // or via the timeout block -- both routes parse through the same schema.
+  const withBadPeerTimeout: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { peerTimeoutMs: 0, timestampInFilename: true },
+  };
+  // Reached via the FileSync-field block (overriding peerId triggers its re-parse).
+  expect(() =>
+    applyConnectionOverrides(withBadPeerTimeout, { peerId: "agency-a" }),
+  ).toThrow(UsageError);
+  // Reached via the timeout block (overriding connectionTimeout leaves the
+  // invalid peerTimeoutMs in the merged options).
+  expect(() =>
+    applyConnectionOverrides(withBadPeerTimeout, { connectionTimeout: 10 }),
+  ).toThrow(UsageError);
 });
 
 // --- server credential overrides ---------------------------------------------
