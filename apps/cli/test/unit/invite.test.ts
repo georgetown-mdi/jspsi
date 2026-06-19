@@ -542,6 +542,66 @@ test("validateInvite: with no config and an input file, terms are inferred and w
   }
 });
 
+// --- validateInvite: offline connection-override warning ---------------------
+
+test("validateInvite: offline warns that a --server-* override is ignored", async () => {
+  // The offline path writes a placeholder connection block, so a --server-*
+  // override cannot take effect; it must be surfaced rather than silently dropped.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-override-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const log = getLogger("invite-offline-override-warn");
+  log.setLevel("warn");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+      serverUsername: "alice",
+    }),
+    acceptTimeout: 900,
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) =>
+        typeof c[0] === "string" &&
+        c[0].includes("--server-username") &&
+        c[0].includes("no effect on an offline invite/accept"),
+    ),
+  ).toBe(true);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: online does not warn about a --server-* override (it is applied)", async () => {
+  // The online path builds the connection from the URL through
+  // applyConnectionOverrides, so the override takes effect and no ignored-override
+  // warning is emitted.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-online-override-nowarn");
+  log.setLevel("warn");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options: { ...options, serverUsername: "alice" },
+    acceptTimeout: 900,
+    log,
+  });
+  expect(ready.mode).toBe("online");
+  if (ready.mode !== "online") return;
+  if (ready.connection.channel !== "sftp") throw new Error("expected sftp");
+  expect(ready.connection.server.username).toBe("alice");
+  expect(
+    warnSpy.mock.calls.some(
+      (c) =>
+        typeof c[0] === "string" &&
+        c[0].includes("no effect on an offline invite/accept"),
+    ),
+  ).toBe(false);
+  warnSpy.mockRestore();
+});
+
 // --- validateInvite: --expires-in override -----------------------------------
 
 test("validateInvite: --expires-in sets the token's expiry to the override", async () => {

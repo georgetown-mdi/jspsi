@@ -1403,27 +1403,58 @@ export function warnUnsupportedFileSyncFlags(
 }
 
 /**
- * Warn that `--outbound-path` has no effect on an OFFLINE invite/accept. Those
- * paths write a placeholder (invite) or invitation-endpoint-seeded (accept)
- * connection block for the operator to edit before `psilink exchange`, rather
- * than building a connection from a URL the way the online and zero-setup paths
- * do -- so they go through {@link connectionFromEndpoint}, which applies no
- * connection overrides, and the flag would otherwise be parsed and silently
- * dropped. (The sibling `--server-*` overrides share this offline-blindness; this
- * warning is scoped to `--outbound-path`, whose whole purpose is the connection's
- * directory shape, so its silent loss is the most surprising.) A no-op when the
- * flag is unset. Shared so the wording cannot drift between invite and accept.
+ * The connection-block overrides that have no effect on an OFFLINE invite/accept,
+ * read by {@link warnConnectionOverridesIgnoredOffline}. A structural subset of
+ * {@link CommonBootstrapOptions} (which is assignable to it) holding only the
+ * `--server-*` credential/port flags and `--outbound-path` -- the flags that
+ * shape the connection block built from a URL on the online/zero-setup paths but
+ * are dropped offline. The connection/exchange tuning overrides (timeouts,
+ * `--max-reconnect-attempts`) and the file-sync toggles (`--retain-files`,
+ * `--peer-id`, etc.) are deliberately excluded: they configure `options`, not the
+ * connection locator the offline block is a placeholder for.
  */
-export function warnOutboundPathIgnoredOffline(
-  outboundPath: string | undefined,
+export type OfflineIgnoredConnectionOverrides = Pick<
+  CommonBootstrapOptions,
+  | "serverUsername"
+  | "serverPassword"
+  | "serverPrivateKey"
+  | "serverPort"
+  | "outboundPath"
+>;
+
+/**
+ * Warn that the connection-block overrides (`--server-username`,
+ * `--server-password`, `--server-private-key`, `--server-port`, and
+ * `--outbound-path`) have no effect on an OFFLINE invite/accept. Those paths
+ * write a placeholder (invite) or invitation-endpoint-seeded (accept) connection
+ * block for the operator to edit before `psilink exchange`, rather than building
+ * a connection from a URL the way the online and zero-setup paths do -- so they
+ * go through {@link connectionFromEndpoint}, which applies no connection
+ * overrides, and these flags would otherwise be parsed and silently dropped. The
+ * warning names exactly the flags the operator set; it is a no-op when none are
+ * set. Shared between invite and accept so the wording cannot drift, and so the
+ * whole `--server-*`/`--outbound-path` set is treated uniformly rather than only
+ * the one flag (`--outbound-path`) whose silent loss is the most surprising.
+ */
+export function warnConnectionOverridesIgnoredOffline(
+  options: OfflineIgnoredConnectionOverrides,
   log: { warn: (message: string) => void },
 ): void {
-  if (outboundPath === undefined) return;
+  const ignored: string[] = [];
+  if (options.serverUsername !== undefined) ignored.push("--server-username");
+  if (options.serverPassword !== undefined) ignored.push("--server-password");
+  if (options.serverPrivateKey !== undefined)
+    ignored.push("--server-private-key");
+  if (options.serverPort !== undefined) ignored.push("--server-port");
+  if (options.outboundPath !== undefined) ignored.push("--outbound-path");
+  if (ignored.length === 0) return;
   log.warn(
-    "--outbound-path has no effect on an offline invite/accept: the connection " +
-      "block is written as a placeholder to edit, not built from a URL. " +
-      "Configure the split directory (inbound_path/outbound_path) in that block " +
-      "before running 'psilink exchange', or pass --outbound-path on an online " +
-      "invite/accept, the zero-setup exchange, or 'psilink exchange'.",
+    `${ignored.join(", ")} ${ignored.length === 1 ? "has" : "have"} no effect ` +
+      "on an offline invite/accept: the connection block is written as a " +
+      "placeholder to edit, not built from a URL. Set the connection details " +
+      "directly in that block -- the server host/port/credentials, or the " +
+      "inbound_path/outbound_path split directory -- before running " +
+      "'psilink exchange', or pass these flags on an online invite/accept, the " +
+      "zero-setup exchange, or 'psilink exchange'.",
   );
 }
