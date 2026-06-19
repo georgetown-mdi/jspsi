@@ -418,6 +418,23 @@ test("warnOptionsOverridesIgnoredOffline: stays silent when no override is set",
   expect(warnings).toEqual([]);
 });
 
+test("warnOptionsOverridesIgnoredOffline: a negated boolean toggle (--no-*) does not warn", () => {
+  // yargs sets the negated form (--no-retain-files etc.) to `false`, the default
+  // a fresh placeholder already carries, so it is not an override that could have
+  // done something: the toggles gate on `=== true`, not presence. Mirrors
+  // warnUnsupportedFileSyncFlags's `=== true` gate on the same toggles.
+  const warnings: string[] = [];
+  warnOptionsOverridesIgnoredOffline(
+    {
+      locklessRendezvous: false,
+      retainFiles: false,
+      timestampInFilename: false,
+    },
+    { warn: (m) => warnings.push(m) },
+  );
+  expect(warnings).toEqual([]);
+});
+
 // --- redactUrlCredentials ----------------------------------------------------
 
 test("redactUrlCredentials: strips an embedded password and username", () => {

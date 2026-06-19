@@ -1681,12 +1681,18 @@ export function warnOptionsOverridesIgnoredOffline(
   if (options.peerTimeout !== undefined) ignored.push("--peer-timeout");
   if (options.maxReconnectAttempts !== undefined)
     ignored.push("--max-reconnect-attempts");
-  if (options.locklessRendezvous !== undefined)
+  // The three toggles gate on `=== true`, not presence: yargs sets the negated
+  // form (--no-retain-files etc.) to `false`, and `false` is the default a fresh
+  // placeholder already carries, so only the enabling form was an override that
+  // could have done something. This matches warnUnsupportedFileSyncFlags's
+  // `=== true` gate on the same toggles and avoids a warning that names
+  // --retain-files when the operator actually typed --no-retain-files.
+  if (options.locklessRendezvous === true)
     ignored.push("--lockless-rendezvous");
   if (options.peerId !== undefined) ignored.push("--peer-id");
-  if (options.timestampInFilename !== undefined)
+  if (options.timestampInFilename === true)
     ignored.push("--timestamp-in-filename");
-  if (options.retainFiles !== undefined) ignored.push("--retain-files");
+  if (options.retainFiles === true) ignored.push("--retain-files");
   if (ignored.length === 0) return;
   log.warn(
     `${ignored.join(", ")} ${ignored.length === 1 ? "has" : "have"} no effect ` +
