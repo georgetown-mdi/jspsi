@@ -719,6 +719,44 @@ test("open (sftp) with a matching pin verifies and connects", async () => {
   expect(conn.connected).toBe(true);
 });
 
+test("open (sftp) with a matching pin records the observed host key", async () => {
+  // The observed key is captured on the only success path (pin matched) so the
+  // orchestrator can advertise it for cross-party reconciliation (201058119).
+  const blob = ed25519Blob();
+  const pin = await computeHostKeyFingerprint(new Uint8Array(blob));
+  const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
+    verbose: -1,
+  });
+  await conn.open({
+    channel: "sftp",
+    server: { host: "sftp.example.org", hostKeyFingerprint: pin },
+  });
+  expect(conn.observedHostKey).toEqual({
+    fingerprint: pin,
+    keyType: "ssh-ed25519",
+  });
+});
+
+test("open (sftp) with no pin records no observed host key", async () => {
+  // A refused connection (no-pin fail-closed) never establishes a session, so
+  // there is nothing to advertise -- the field stays undefined.
+  const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob()), {
+    verbose: -1,
+  });
+  await expect(
+    conn.open({ channel: "sftp", server: { host: "sftp.example.org" } }),
+  ).rejects.toThrow(/no host_key_fingerprint is pinned/);
+  expect(conn.observedHostKey).toBeUndefined();
+});
+
+test("open (filedrop) records no observed host key", async () => {
+  // A file-drop makes no SSH connection, so it observes no host key.
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  await conn.open({ channel: "filedrop", path: "/mnt/share/drop" });
+  expect(conn.observedHostKey).toBeUndefined();
+});
+
 test("open (sftp) with a mismatched pin fails closed and names the re-pin recovery", async () => {
   // Pin the fingerprint of a DIFFERENT key, so the presented blob mismatches.
   const other = ed25519Blob(1);

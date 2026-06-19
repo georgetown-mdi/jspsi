@@ -15,6 +15,7 @@ import {
   exchangeBootstrapSecret,
   resolveRole,
 } from "./protocolSetup.js";
+import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import { linkViaPSI } from "./link.js";
 import {
   preparePayload,
@@ -33,6 +34,7 @@ import type {
   Prettify,
 } from "./types.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
+import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
@@ -289,6 +291,29 @@ export interface RunExchangeOptions {
    * fresh shared secret in-band (see {@link exchangeBootstrapSecret}).
    */
   saveIntent?: boolean;
+  /**
+   * This party's observed SFTP host key (fingerprint + key type), advertised in
+   * the post-handshake terms exchange so the two parties can reconcile their
+   * independent views of the server's identity (201058119). Pass it ONLY on the
+   * authenticated path -- the value is unforgeable only because it rides the
+   * AEAD-wrapped terms exchange, so a caller threading it over an unauthenticated
+   * channel would defeat the check. `undefined` (the default) advertises
+   * nothing, which is correct for any channel that observes no host key (a
+   * file-drop or proxy path) and for the web/WebRTC caller. The partner's
+   * advertised value is reconciled against this one; a divergence is reported via
+   * {@link onHostKeyDivergence}.
+   */
+  observedHostKey?: PresentedHostKey;
+  /**
+   * Called once, after the terms exchange, when the two parties' advertised SFTP
+   * host-key fingerprints diverge (see {@link reconcileHostKeyFingerprints}). The
+   * argument is a complete, display-safe warning naming both observed values.
+   * Not called when the fingerprints match, when either party observed no host
+   * key, or when {@link observedHostKey} was not supplied. The divergence is
+   * non-fatal -- the exchange continues -- so a caller surfaces it as a warning
+   * rather than aborting.
+   */
+  onHostKeyDivergence?: (message: string) => void;
   verbosity?: number;
 }
 
@@ -322,13 +347,27 @@ export async function runExchange(
   const verbosity = options.verbosity ?? 0;
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
-  const { partnerTerms, warnings, partnerSaveIntent } = await exchangeTerms(
-    conn,
-    handshakeRole,
-    linkageTerms,
-    options.saveIntent,
-  );
+  const { partnerTerms, warnings, partnerSaveIntent, partnerHostKey } =
+    await exchangeTerms(
+      conn,
+      handshakeRole,
+      linkageTerms,
+      options.saveIntent,
+      options.observedHostKey,
+    );
   for (const warning of warnings) onWarning(warning);
+
+  // Cross-party host-key reconciliation. Both parties advertised the host key
+  // they observed on the terms exchange just above; compare them, and surface a
+  // divergence (no-op when either party observed none, or when the fingerprints
+  // match -- see reconcileHostKeyFingerprints). It is advisory, like the save
+  // intent, and never aborts the exchange.
+  const hostKeyDivergence = reconcileHostKeyFingerprints(
+    options.observedHostKey,
+    partnerHostKey,
+  );
+  if (hostKeyDivergence !== undefined)
+    options.onHostKeyDivergence?.(hostKeyDivergence);
 
   // Zero-setup `--save` bootstrap. Only build a result when the caller opted in
   // (saveIntent defined), so every other exchange returns bootstrap: undefined.
