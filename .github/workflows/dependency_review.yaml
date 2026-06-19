@@ -63,12 +63,13 @@ jobs:
           # weak copyleft (LGPL, MPL) is linkage-dependent and stays a manual
           # maintainer judgement, as does any license the detector cannot resolve.
           # Each family is listed in every SPDX form it may be declared as -- the
-          # versioned `-only`/`-or-later` variants and the deprecated bare ids --
-          # so a package is caught however it spells its license; ids must be
-          # exact, and deny-licenses/allow-licenses are mutually exclusive. A
-          # dependency the detector mis-flags (an unrecognized, missing, or dual
-          # license) is exempted per-package via allow-dependencies-licenses (purl
-          # form) and falls back to the manual review; none is needed today.
+          # versioned `-only`/`-or-later` variants and the deprecated bare and `+`
+          # ids (AGPL has no `+` form) -- so a package is caught however it spells
+          # its license; ids must be exact, and deny-licenses/allow-licenses are
+          # mutually exclusive. A dependency the detector mis-flags (an
+          # unrecognized, missing, or dual license) is exempted per-package via
+          # allow-dependencies-licenses (purl form) and falls back to the manual
+          # review; none is needed today.
           # (deny-licenses has a proposed-but-unshipped deprecation,
           # actions/dependency-review-action#938; migrate to allow-licenses if it
           # lands.)
@@ -78,4 +79,5 @@ jobs:
             GPL-3.0-only, GPL-3.0-or-later,
             AGPL-1.0-only, AGPL-1.0-or-later,
             AGPL-3.0-only, AGPL-3.0-or-later,
-            GPL-1.0, GPL-2.0, GPL-3.0, AGPL-1.0, AGPL-3.0
+            GPL-1.0, GPL-1.0+, GPL-2.0, GPL-2.0+, GPL-3.0, GPL-3.0+,
+            AGPL-1.0, AGPL-3.0
