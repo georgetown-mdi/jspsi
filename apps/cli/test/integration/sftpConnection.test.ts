@@ -712,3 +712,104 @@ test("probeHostKeyFingerprint returns the server's real fingerprint without auth
   });
   expect(presented.fingerprint).toBe(srv.hostKeyFingerprint);
 });
+
+// A schema-valid OpenSSH SHA256 fingerprint that is guaranteed NOT to match the
+// server's real host key: flip one character of the real pin's base64 body to a
+// different base64 character. It keeps the SHA256: prefix and length, so it
+// passes the connection.server.host_key_fingerprint format check (which runs
+// before connect) and the LIVE verifier -- not config validation -- is what
+// rejects it, which is the whole point of the negative case below.
+function wrongFingerprint(real: string): string {
+  const prefix = "SHA256:";
+  const body = real.slice(prefix.length);
+  // Index 5 sits inside the unconstrained 42-character base64 body (not the
+  // final, value-constrained character), so any base64 substitution there leaves
+  // the fingerprint well-formed.
+  const i = 5;
+  const flipped = body[i] === "A" ? "B" : "A";
+  return `${prefix}${body.slice(0, i)}${flipped}${body.slice(i + 1)}`;
+}
+
+test("a wrong pinned host-key fingerprint is rejected before auth over real SFTP", async () => {
+  // The control under test: when connection.server.host_key_fingerprint is set,
+  // core installs an ssh2 hostVerifier that runs BEFORE authentication and aborts
+  // fail-closed on a mismatch (fileSyncConnection's enforce path). This was
+  // verified manually during security review but not pinned in CI; the regression
+  // it guards is the verifier silently un-wiring, or the rejection moving to the
+  // handshake instead of the pin check while CI stays green.
+  //
+  // Valid credentials are supplied (serverAuth), so if the verifier ever let the
+  // handshake reach userauth this connect would SUCCEED; the only thing that can
+  // fail it is the deliberately-wrong pin. ssh2 invokes the verifier at host-key
+  // verification and reaches userauth only after verify(true), so the rejection
+  // necessarily precedes auth (the probe test above pins that ordering directly,
+  // connecting with credentials present that are never sent); a failure here is
+  // therefore attributable to the host-key check, not to credentials.
+  const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+    verbose: -1,
+  });
+  conn.on("error", () => {});
+  const auth = serverAuth(srv.usera);
+  const err = await conn
+    .open({
+      channel: "sftp",
+      server: {
+        host: srv.host,
+        port: srv.port,
+        ...auth,
+        // Same server, wrong pin: well-formed SHA256, wrong digest.
+        hostKeyFingerprint: wrongFingerprint(auth.hostKeyFingerprint),
+        path: SFTP_PATH,
+      },
+      // One attempt (mirrors the no-pin test above): a host-key refusal is
+      // terminal in the adapter -- its retry predicate treats ssh2's "Host
+      // denied" as non-retryable -- so retries would only re-run the same key
+      // exchange against the same untrusted host. This test pins the live
+      // mismatch rejection; the retry classification itself is the adapter's
+      // concern and is not what this assertion exercises.
+      options: { maxReconnectAttempts: 0 },
+    })
+    .catch((e: unknown) => e);
+  await conn.close().catch(() => {});
+
+  // A rejection, not a resolved connection: catches a regression that stopped
+  // rejecting at the pin check (pinning the wrong key would then connect).
+  expect(err).toBeInstanceOf(Error);
+  // The mismatch surface specifically -- not the no-pin refusal ("no
+  // host_key_fingerprint is pinned") and not an unrelated connect/auth error --
+  // so a regression that rejected at the handshake instead of the pin check is
+  // caught.
+  expect((err as Error).message).toMatch(/SFTP host-key verification failed/);
+  expect((err as Error).message).toMatch(
+    /does not match the pinned fingerprint/,
+  );
+});
+
+test("the server's real pinned fingerprint connects over real SFTP", async () => {
+  // Companion to the wrong-pin test above: pinning the server's ACTUAL host-key
+  // fingerprint must connect. This proves the negative case fails because the pin
+  // mismatched, not because pinning refuses every connection. serverAuth pins
+  // srv.hostKeyFingerprint, the real value the suite computed for this server.
+  const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
+    verbose: -1,
+  });
+  conn.on("error", () => {});
+  const remote = await freshRendezvous();
+  try {
+    await expect(
+      conn.open({
+        channel: "sftp",
+        server: {
+          host: srv.host,
+          port: srv.port,
+          ...serverAuth(srv.usera),
+          path: remote,
+        },
+        // The correct pin matches on the first attempt, so no retry is needed.
+        options: { maxReconnectAttempts: 0 },
+      }),
+    ).resolves.toBeUndefined();
+  } finally {
+    await conn.close().catch(() => {});
+  }
+});
