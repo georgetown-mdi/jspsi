@@ -38,6 +38,7 @@ import {
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   addCommonBootstrapOptions,
+  applyEndpointSplitDirectories,
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
@@ -280,11 +281,32 @@ export async function validateAccept(params: {
     const { url, input, output } = resolved;
     // Validate the URL before reading the input file, mirroring validateInvite,
     // so a bad scheme/host fails fast without first parsing the CSV.
-    const connection = connectionFromURL(url, connectionOverridesFrom(options));
+    const urlConnection = connectionFromURL(
+      url,
+      connectionOverridesFrom(options),
+    );
+    // When the acceptor did NOT pass --outbound-path (the explicit override,
+    // which wins), a split-directory invitation endpoint seeds the mirror-swapped
+    // inbound/outbound roles and retain trio onto the URL-built connection -- the
+    // online counterpart to the offline path's connectionFromEndpoint. Host,
+    // port, and credentials stay the URL's. A non-split (or absent) endpoint is a
+    // no-op, leaving the URL connection unchanged.
+    const { connection, appliedSplitDirectories } =
+      options.outboundPath === undefined
+        ? applyEndpointSplitDirectories(urlConnection, token.connectionEndpoint)
+        : { connection: urlConnection, appliedSplitDirectories: false };
+    if (appliedSplitDirectories)
+      log.info(
+        "seeding the split inbound/outbound directories (mirror-swapped) and " +
+          "retain mode from the invitation's endpoint; the connection URL " +
+          "supplies the host, port, and credentials. Pass --outbound-path to " +
+          "override.",
+      );
     // Reconcile a pre-existing config against the invitation AND the connection
-    // the exchange will actually use (the built `connection`) before the input is
-    // read and before any network activity, so a location disagreement aborts
-    // with a diff and no acceptance is ever sent to the inviter.
+    // the exchange will actually use (the built `connection`, now possibly
+    // endpoint-influenced) before the input is read and before any network
+    // activity, so a location disagreement aborts with a diff and no acceptance
+    // is ever sent to the inviter.
     const reuseExistingConfig = reconcileAcceptConfig({
       configPath: options.configFile,
       myTerms,

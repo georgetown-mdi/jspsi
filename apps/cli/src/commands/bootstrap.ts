@@ -14,6 +14,7 @@ import {
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
   normalizeFiledropPath,
+  safeParseConnectionConfig,
   sanitizeErrorForDisplay,
   MAX_RECONNECT_ATTEMPTS,
   UsageError,
@@ -530,6 +531,128 @@ export function connectionFromEndpoint(
       return { connection, seeded: true };
     }
   }
+}
+
+/**
+ * Read the split inbound/outbound directory pair off a file-sync connection,
+ * regardless of which channel holds it (sftp keeps the pair under `server`,
+ * filedrop at the top level). Empty for a shared (single-path) or webrtc
+ * connection. Used to lift the mirror-swapped pair out of a
+ * {@link connectionFromEndpoint} result so {@link applyEndpointSplitDirectories}
+ * can graft it onto the URL-built connection without re-implementing the swap.
+ */
+function splitDirectoriesOf(connection: ConnectionConfig): {
+  inboundPath?: string;
+  outboundPath?: string;
+} {
+  if (connection.channel === "sftp")
+    return {
+      inboundPath: connection.server.inboundPath,
+      outboundPath: connection.server.outboundPath,
+    };
+  if (connection.channel === "filedrop")
+    return {
+      inboundPath: connection.inboundPath,
+      outboundPath: connection.outboundPath,
+    };
+  return {};
+}
+
+/**
+ * Result of {@link applyEndpointSplitDirectories}: the connection the online
+ * accept will use, and whether an invitation endpoint's split pair supplied its
+ * directory roles (so the caller can note the seeding before the prompt).
+ */
+export interface EndpointSplitMerge {
+  connection: RunnableConnectionConfig;
+  /** True when a split endpoint seeded the inbound/outbound roles. */
+  appliedSplitDirectories: boolean;
+}
+
+/**
+ * Seed an ONLINE acceptor's split inbound/outbound directories from the
+ * invitation's connection endpoint -- the online counterpart to what the offline
+ * accept path gets directly from {@link connectionFromEndpoint}.
+ *
+ * Online accept carries two sources of connection truth: the typed URL (with any
+ * `--server-*` overrides) gives the reachable target -- channel, host, port,
+ * credentials -- and the credential-free endpoint gives the split-directory role
+ * mapping the inviter is running. When the endpoint names a split pair, graft
+ * that pair (mirror-swapped: inviter outbound -> acceptor inbound, and vice
+ * versa) and the {@link SPLIT_SEED_OPTIONS} retain trio a split exchange requires
+ * onto the URL-built connection, so the acceptor need not retype the mirrored
+ * roles. The swap is applied by delegating to {@link connectionFromEndpoint} (the
+ * single swap site) and lifting only its directory pair out, so the direction is
+ * never re-implemented here nor double-applied.
+ *
+ * The split pair fully replaces the URL's single directory (an sftp/filedrop URL
+ * path): a split role mapping is exactly what a single URL path cannot express,
+ * and letting the URL path win for the inbound leg would break the mirror (the
+ * acceptor must read where the inviter writes). Host, port, credentials, and the
+ * channel stay the URL's -- the endpoint is credential-free, and in a bridged
+ * topology the acceptor's reachable host (and even its transport) may differ from
+ * the inviter's -- so the endpoint's path strings are placed per the URL's
+ * channel. Any URL-derived `options` (timeouts) are preserved, with the retain
+ * trio merged on top. The caller skips this entirely when `--outbound-path` was
+ * passed (that explicit override wins).
+ *
+ * A no-op (returns the URL connection unchanged, `appliedSplitDirectories:
+ * false`) when there is no endpoint, the endpoint is webrtc, or it carries a
+ * single shared `path` rather than a split pair -- so a non-split invitation
+ * leaves the online path exactly as it was.
+ *
+ * @internal exported for testing
+ */
+export function applyEndpointSplitDirectories(
+  urlConnection: RunnableConnectionConfig,
+  endpoint: ConnectionEndpoint | undefined,
+): EndpointSplitMerge {
+  if (
+    endpoint === undefined ||
+    endpoint.channel === "webrtc" ||
+    endpoint.inboundPath === undefined
+  )
+    return { connection: urlConnection, appliedSplitDirectories: false };
+
+  // connectionFromEndpoint performs the one mirror swap; take only its swapped
+  // directory pair (the inviter's host/placeholder credentials it also seeds are
+  // not used online -- those come from the acceptor's own URL).
+  const { inboundPath, outboundPath } = splitDirectoriesOf(
+    connectionFromEndpoint(endpoint).connection,
+  );
+
+  const result = structuredClone(urlConnection);
+  // Retain mode (with the lockless rendezvous + timestamped names it implies) is
+  // mandatory for a split directory; merge it over any URL-derived options rather
+  // than replacing them, so a --connection-timeout etc. set on the URL survives.
+  const options: FileSyncOptions = { ...result.options, ...SPLIT_SEED_OPTIONS };
+  // Place the swapped pair per the URL's channel. Explicit per-channel branches
+  // (matching diffConnectionAgainstTarget) rather than a bare else, so a future
+  // RunnableConnectionConfig channel falls through to fail the schema validation
+  // below instead of silently writing filedrop-shaped fields onto it.
+  if (result.channel === "sftp") {
+    delete result.server.path;
+    result.server.inboundPath = inboundPath;
+    result.server.outboundPath = outboundPath;
+  } else if (result.channel === "filedrop") {
+    delete result.path;
+    result.inboundPath = inboundPath;
+    result.outboundPath = outboundPath;
+  }
+  result.options = options;
+
+  // The grafted split form carries invariants the plain shared connection does
+  // not (a filedrop pair must be absolute; the pair is set together and differs).
+  // Validate once -- mirroring applyConnectionOverrides' --outbound-path assembly
+  // -- so a degenerate endpoint fails here, before any network activity, with the
+  // schema's own messages rather than as an opaque connect error later.
+  const validation = safeParseConnectionConfig(result);
+  if (!validation.success)
+    throw new UsageError(
+      validation.error.issues.map((i) => i.message).join("; "),
+    );
+
+  return { connection: result, appliedSplitDirectories: true };
 }
 
 // --- connection -> endpoint (producer) --------------------------------------

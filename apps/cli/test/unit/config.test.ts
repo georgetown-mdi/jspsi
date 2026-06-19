@@ -1085,6 +1085,22 @@ test("formatReconcileDiffs: renders each field with its existing and required va
   expect(rendered.split("\n")).toHaveLength(2);
 });
 
+test("formatReconcileDiffs: escapes partner-controlled values against terminal injection", () => {
+  // The incoming side can be a partner-controlled string (a linkage key name, or
+  // an inviter's split inbound_path/outbound_path from the connection endpoint),
+  // rendered to the acceptor's terminal before acceptance. A control/ANSI
+  // sequence in it must be neutralized, not passed through.
+  const rendered = formatReconcileDiffs([
+    {
+      field: "connection.server.inbound_path",
+      existing: "/safe/in",
+      incoming: "/drop\x1b[2J\x1b[31m",
+    },
+  ]);
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).toContain("\\x1b");
+});
+
 // --- loadConfigLinkageSource -------------------------------------------------
 
 test("loadConfigLinkageSource returns undefined when no file exists", () => {
