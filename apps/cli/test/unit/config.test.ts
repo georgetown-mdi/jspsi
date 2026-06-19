@@ -492,7 +492,7 @@ test("persistHostKeyFingerprint does not echo an inline credential via an unreso
     const configPath = path.join(dir, "psilink.yaml");
     fs.writeFileSync(
       configPath,
-      `connection:\n  server:\n    password: *${SECRET}\n`,
+      `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
     );
     let caught: unknown;
     try {
@@ -513,20 +513,65 @@ test("persistHostKeyFingerprint does not echo an inline credential via an unreso
 });
 
 test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
-  // A config that PARSES but whose connection is a scalar (not a mapping) makes
-  // YAML's setIn throw a raw library error; the function must surface it as the
-  // actionable UsageError its contract promises, not an opaque stack trace, and
-  // must leave the original file untouched (the throw precedes the write).
+  // A sftp config that PARSES (so it clears the channel guard) but whose
+  // connection.server is a scalar (not a mapping) makes YAML's setIn throw a raw
+  // library error; the function must surface it as the actionable UsageError its
+  // contract promises, not an opaque stack trace, and must leave the original
+  // file untouched (the throw precedes the write).
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   try {
     const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(configPath, "connection: sftp\n");
+    const original = "connection:\n  channel: sftp\n  server: nope\n";
+    fs.writeFileSync(configPath, original);
     expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(
       UsageError,
     );
-    expect(fs.readFileSync(configPath, "utf8")).toBe("connection: sftp\n");
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file untouched", () => {
+  // The host-key pin is an sftp-only concept: connection.server is the sftp
+  // shape, so persisting a fingerprint onto a filedrop (no server) or webrtc
+  // (a different server shape) config would synthesize a bogus pin and a mapping
+  // that channel's schema does not expect. The guard fails closed before any
+  // write, echoing the offending channel, so the operator's file is left
+  // byte-for-byte intact.
+  const fixtures = [
+    {
+      channel: "filedrop",
+      source: "connection:\n  channel: filedrop\n  path: /mnt/share\n",
+    },
+    {
+      channel: "webrtc",
+      source:
+        "connection:\n  channel: webrtc\n  server:\n    signaling: wss://signal.example.org\n",
+    },
+  ];
+  for (const { channel, source } of fixtures) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+    try {
+      const configPath = path.join(dir, "psilink.yaml");
+      fs.writeFileSync(configPath, source);
+      let caught: unknown;
+      try {
+        persistHostKeyFingerprint(configPath, FP_A);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(`"${channel}"`);
+      expect((caught as Error).message).toContain("sftp");
+      // Not mutated: the bytes are exactly what the operator wrote -- no pin
+      // synthesized, no server mapping fabricated on the filedrop config.
+      const after = fs.readFileSync(configPath, "utf8");
+      expect(after).toBe(source);
+      expect(after).not.toContain("host_key_fingerprint");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
 });
 

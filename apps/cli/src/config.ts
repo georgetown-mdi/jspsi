@@ -515,6 +515,14 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
  * convention. Throws if the file cannot be read or parsed -- the caller has just
  * loaded the same file, so a failure here is unexpected and must not be silently
  * swallowed (it would leave the operator believing the pin was saved).
+ *
+ * Fails closed on a non-sftp config: a host-key fingerprint is an sftp-only pin
+ * (`connection.server` is the sftp shape), so a `connection.channel` other than
+ * `sftp` is rejected with a {@link UsageError} before anything is written. The
+ * sole caller {@link establishHostKeyTrust} already no-ops off sftp, so this
+ * never fires today; it enforces the invariant at the function for a future
+ * direct caller that would otherwise synthesize a bogus pin and a `server`
+ * mapping a filedrop/webrtc schema does not expect.
  */
 export function persistHostKeyFingerprint(
   configPath: string,
@@ -529,6 +537,22 @@ export function persistHostKeyFingerprint(
     fs.readFileSync(configPath, "utf8"),
     `config file ${configPath}`,
     (doc) => {
+      // Read the channel discriminant off the parsed document (not a
+      // schema-loaded spec) and reject anything but sftp before the write, so
+      // the function -- not its caller -- holds the sftp-only invariant. The
+      // channel is a non-secret discriminant, so echoing it is consistent with
+      // the channel-mismatch errors elsewhere (e.g. protocol.ts); a missing or
+      // non-scalar channel is reported generically rather than echoed.
+      const channel = doc.getIn(["connection", "channel"]);
+      if (channel !== "sftp") {
+        const found =
+          typeof channel === "string" ? `"${channel}"` : "absent or non-scalar";
+        throw new UsageError(
+          `config file ${configPath} has a non-sftp connection.channel ` +
+            `(${found}); a host-key fingerprint is an sftp-only pin and must ` +
+            `not be written to a non-sftp config.`,
+        );
+      }
       // setIn creates the connection/server path nodes if absent; for an sftp
       // config loaded by the exchange command they already exist, so this updates
       // the one field. snake_case path matches the written convention (see
