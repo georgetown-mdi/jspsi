@@ -674,6 +674,80 @@ test("SFTP host_key_fingerprint as an @-file reference passes parse (format-chec
   expect(result.success).toBe(true);
 });
 
+test("SFTP server with a list of valid host_key_fingerprints is accepted (rotation staging)", () => {
+  // A non-empty list of canonical fingerprints: the single-value form's
+  // extension for staging a rotated key alongside the current one.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint: [
+        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
+      ],
+    },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  if (result.data.channel !== "sftp") return;
+  expect(result.data.server.hostKeyFingerprint).toEqual([
+    "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
+  ]);
+});
+
+test("SFTP host_key_fingerprint list with one malformed entry is rejected at its index", () => {
+  // The list's second entry is missing the SHA256: prefix; the issue path must
+  // point at the offending index so the operator can locate it.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint: [
+        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      ],
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const offending = result.error.issues.find((i) =>
+    i.message.includes("SHA256:"),
+  );
+  expect(offending).toBeDefined();
+  expect(offending?.path).toContain("hostKeyFingerprint");
+  expect(offending?.path).toContain(1);
+});
+
+test("SFTP host_key_fingerprint empty list is rejected (pins no key)", () => {
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: { host: "sftp.example.org", host_key_fingerprint: [] },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("at least one fingerprint"))).toBe(
+    true,
+  );
+});
+
+test("SFTP host_key_fingerprint list mixing a literal and an @-file reference passes parse", () => {
+  // Each entry is independently @-eligible: a literal is format-checked at
+  // parse, an @path is deferred to resolution, exactly as the scalar form is.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    server: {
+      host: "sftp.example.org",
+      host_key_fingerprint: [
+        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "@/run/secrets/host-fingerprint",
+      ],
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
 test("SFTP server with privateKeyPassphrase and privateKey together is valid", () => {
   const result = safeParseConnectionConfig({
     channel: "sftp",

@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import {
   computeHostKeyFingerprint,
   keyTypeFromBlob,
+  matchHostKeyFingerprint,
   verifyHostKeyFingerprint,
 } from "../src/utils/sshHostKey";
 
@@ -112,6 +113,52 @@ test("verifyHostKeyFingerprint rejects a decodable but wrong-length pin", async 
   expect(await verifyHostKeyFingerprint(blob, "SHA256:" + "A".repeat(42))).toBe(
     false,
   );
+});
+
+// --- matchHostKeyFingerprint -------------------------------------------------
+
+test("matchHostKeyFingerprint returns the matching pin when it is the only one", async () => {
+  const blob = buildEd25519Blob();
+  const pin = referenceFingerprint(blob);
+  expect(await matchHostKeyFingerprint(blob, [pin])).toBe(pin);
+});
+
+test("matchHostKeyFingerprint accepts a key matching the FIRST of several pins", async () => {
+  const blob = buildEd25519Blob();
+  const pin = referenceFingerprint(blob);
+  const other = referenceFingerprint(buildEd25519Blob());
+  expect(await matchHostKeyFingerprint(blob, [pin, other])).toBe(pin);
+});
+
+test("matchHostKeyFingerprint accepts a key matching a LATER pin (rotation staging)", async () => {
+  // The incoming key is staged as the second pin during a rekey window; the
+  // matched pin is returned verbatim regardless of its position in the list.
+  const blob = buildEd25519Blob();
+  const pin = referenceFingerprint(blob);
+  const other = referenceFingerprint(buildEd25519Blob());
+  expect(await matchHostKeyFingerprint(blob, [other, pin])).toBe(pin);
+});
+
+test("matchHostKeyFingerprint returns undefined when the key matches NO pin", async () => {
+  const blob = buildEd25519Blob();
+  const a = referenceFingerprint(buildEd25519Blob());
+  const b = referenceFingerprint(buildEd25519Blob());
+  expect(await matchHostKeyFingerprint(blob, [a, b])).toBeUndefined();
+});
+
+test("matchHostKeyFingerprint returns undefined for an empty pin list", async () => {
+  // No pins can never match a key -- the caller treats this as the no-pin
+  // fail-closed posture rather than accepting any key.
+  const blob = buildEd25519Blob();
+  expect(await matchHostKeyFingerprint(blob, [])).toBeUndefined();
+});
+
+test("matchHostKeyFingerprint skips a malformed pin and still matches a valid later one", async () => {
+  // A malformed pin (atob rejects the body) must be skipped, not throw, so one
+  // bad entry never blocks matching against the rest of the set.
+  const blob = buildEd25519Blob();
+  const pin = referenceFingerprint(blob);
+  expect(await matchHostKeyFingerprint(blob, ["SHA256:AAA-", pin])).toBe(pin);
 });
 
 // --- keyTypeFromBlob ---------------------------------------------------------

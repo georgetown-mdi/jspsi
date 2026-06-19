@@ -124,12 +124,17 @@ export interface SFTPServer {
    */
   privateKeyPassphrase?: string;
   /**
-   * Expected server host-key fingerprint in OpenSSH SHA256 format
-   * (`SHA256:<43 standard base64 chars>`). When set, every SFTP connection on
-   * the CLI `sftp` channel verifies the server presents a matching host key
-   * before authentication; a mismatch aborts the connection. @-file supported.
+   * Expected server host-key fingerprint(s) in OpenSSH SHA256 format
+   * (`SHA256:<43 standard base64 chars>`): a single fingerprint, or a non-empty
+   * list of them. When set, every SFTP connection on the CLI `sftp` channel
+   * verifies the server presents a host key matching ANY listed fingerprint
+   * before authentication; a key matching none aborts the connection. A list
+   * gives zero-downtime host-key rotation -- stage the incoming key alongside
+   * the current one during the rekey window so either is accepted with no failed
+   * exchange in between, then drop the old entry after the cutover. Each entry is
+   * validated to canonical OpenSSH SHA256 form. @-file supported (per entry).
    */
-  hostKeyFingerprint?: string;
+  hostKeyFingerprint?: string | string[];
   provision?: ServerProvision;
 }
 
@@ -154,7 +159,12 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     // silent discard. The transform at the end drops both before the output
     // reaches the SFTPServer interface type.
     certificate: z.string().optional(),
-    hostKeyFingerprint: z.string().optional(),
+    // A single fingerprint or a non-empty list (zero-downtime rotation): the
+    // base type stays loose (string or string[]) so the superRefine below can
+    // emit the canonical-format and signing-confusion messages per entry and
+    // reject an empty list with an actionable message, rather than Zod's generic
+    // union/array errors.
+    hostKeyFingerprint: z.union([z.string(), z.array(z.string())]).optional(),
     knownHosts: z.string().optional(),
     provision: ServerProvisionSchema.optional(),
   })
@@ -190,31 +200,53 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
   })
   .superRefine((s, ctx) => {
     const fp = s.hostKeyFingerprint;
-    // A literal `@path` is an @-file reference resolved after parse (see
-    // resolveConnectionAtSignRefs): the `@path` cannot match the SHA256: format,
-    // so it is exempt here and the resolved file contents are format-checked at
-    // resolution instead. The sibling @-file fields (password, privateKey) carry
-    // no format refine, so they pass parse the same way.
-    if (fp === undefined || fp.startsWith("@")) return;
-    if (SIGNING_FINGERPRINT_SHAPE.test(fp)) {
+    if (fp === undefined) return;
+    const list = Array.isArray(fp) ? fp : [fp];
+    // An empty list pins no key and would refuse every connection -- a config
+    // mistake to surface at parse, not a silent no-pin posture at connect time.
+    if (list.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "host_key_fingerprint looks like a signing partner_fingerprint " +
-          "(43 base64url characters, no prefix); SSH host-key fingerprints " +
-          "use standard base64 (+ and / not _ and -) with a SHA256: prefix, " +
-          "e.g. SHA256:abc...xyz",
+          "host_key_fingerprint must list at least one fingerprint; an empty " +
+          "list pins no key and would refuse every connection",
         path: ["hostKeyFingerprint"],
       });
-    } else if (!HOST_KEY_FINGERPRINT_REGEX.test(fp)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "host_key_fingerprint must be in OpenSSH SHA256 format: the " +
-          "SHA256: prefix followed by 43 unpadded standard base64 characters",
-        path: ["hostKeyFingerprint"],
-      });
+      return;
     }
+    list.forEach((entry, i) => {
+      // Point a list entry's issue at its index so the operator can locate the
+      // bad one; a scalar's issue stays on the field.
+      const path: (string | number)[] = Array.isArray(fp)
+        ? ["hostKeyFingerprint", i]
+        : ["hostKeyFingerprint"];
+      // A literal `@path` is an @-file reference resolved after parse (see
+      // resolveConnectionAtSignRefs): the `@path` cannot match the SHA256:
+      // format, so it is exempt here and the resolved file contents are
+      // format-checked at resolution instead. The sibling @-file fields
+      // (password, privateKey) carry no format refine, so they pass parse the
+      // same way.
+      if (entry.startsWith("@")) return;
+      if (SIGNING_FINGERPRINT_SHAPE.test(entry)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "host_key_fingerprint looks like a signing partner_fingerprint " +
+            "(43 base64url characters, no prefix); SSH host-key fingerprints " +
+            "use standard base64 (+ and / not _ and -) with a SHA256: prefix, " +
+            "e.g. SHA256:abc...xyz",
+          path,
+        });
+      } else if (!HOST_KEY_FINGERPRINT_REGEX.test(entry)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "host_key_fingerprint must be in OpenSSH SHA256 format: the " +
+            "SHA256: prefix followed by 43 unpadded standard base64 characters",
+          path,
+        });
+      }
+    });
   })
   .transform(
     // Strip the detected-but-rejected fields so the output matches SFTPServer,
