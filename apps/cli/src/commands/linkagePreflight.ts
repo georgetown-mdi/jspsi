@@ -4,7 +4,7 @@ import {
   sanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
-import type { LinkageTerms, Standardization } from "@psilink/core";
+import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
 /**
  * Source-specific wording for {@link checkLinkageSatisfiability}. The accept and
@@ -39,6 +39,11 @@ export interface LinkagePreflightMessaging {
  *   otherwise absent, so passing it keeps a remapped field from being mis-flagged.
  *   Omit (accept) to use the type-based approximation, which matches the default
  *   type-based pipelines a party infers from its own CSV.
+ * @param metadata The committed config's explicit metadata, when any: it retypes
+ *   columns for the type fallback exactly as the exchange does, so a non-standard
+ *   column name the config types explicitly is not mis-flagged, and a config whose
+ *   metadata describes a since-swapped CSV is still caught. Omit (accept) to use
+ *   name inference.
  */
 export function checkLinkageSatisfiability(
   columns: string[],
@@ -46,11 +51,13 @@ export function checkLinkageSatisfiability(
   log: ReturnType<typeof getLogger>,
   messaging: LinkagePreflightMessaging,
   standardization?: Standardization,
+  metadata?: Metadata,
 ): void {
   const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
     columns,
     terms,
     standardization,
+    metadata,
   );
   // Gate on the key count, not on `unsatisfied.length`: a key can be unsatisfiable
   // because it references a field the terms never declare (not just a declared

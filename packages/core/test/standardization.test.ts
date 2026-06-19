@@ -1317,6 +1317,90 @@ describe("unsatisfiedLinkageFields", () => {
     );
     expect(unsatisfied.map((f) => f.name)).toContain("ssn");
   });
+
+  test("explicit metadata types the fallback, satisfying a field a column name would not infer", () => {
+    // `tax_id` does not infer to ssn, but the config's metadata types it as ssn --
+    // the exchange resolves the type fallback against that metadata, so ssn is
+    // producible.
+    const columns = ["first_name", "last_name", "dob", "tax_id"];
+    expect(
+      unsatisfiedLinkageFields(columns, fullTerms, undefined, [
+        {
+          name: "first_name",
+          type: "firstName",
+          role: "linkage",
+          isPayload: false,
+        },
+        {
+          name: "last_name",
+          type: "lastName",
+          role: "linkage",
+          isPayload: false,
+        },
+        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        { name: "tax_id", type: "ssn", role: "linkage", isPayload: false },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("explicit metadata that retypes a present column away makes its field unsatisfiable", () => {
+    // The `ssn` column would infer to ssn, but the config retypes it to `other`, so
+    // the exchange produces no ssn values; the check follows the metadata, not the
+    // name, and reports ssn unsatisfiable.
+    const columns = ["first_name", "last_name", "dob", "ssn"];
+    const unsatisfied = unsatisfiedLinkageFields(
+      columns,
+      fullTerms,
+      undefined,
+      [
+        {
+          name: "first_name",
+          type: "firstName",
+          role: "linkage",
+          isPayload: false,
+        },
+        {
+          name: "last_name",
+          type: "lastName",
+          role: "linkage",
+          isPayload: false,
+        },
+        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        { name: "ssn", type: "other", role: "payload", isPayload: true },
+      ],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
+
+  test("metadata declaring a column absent from the input does not count as coverage", () => {
+    // The metadata describes an `ssn` column, but the actual input lacks it (a CSV
+    // swapped since the config was written). The exchange would read no values for
+    // that column, so the type fallback must not treat ssn as covered -- the present
+    // restriction is what prevents stale metadata from masking the gap.
+    const columns = ["first_name", "last_name", "dob"];
+    const unsatisfied = unsatisfiedLinkageFields(
+      columns,
+      fullTerms,
+      undefined,
+      [
+        {
+          name: "first_name",
+          type: "firstName",
+          role: "linkage",
+          isPayload: false,
+        },
+        {
+          name: "last_name",
+          type: "lastName",
+          role: "linkage",
+          isPayload: false,
+        },
+        { name: "dob", type: "dateOfBirth", role: "linkage", isPayload: false },
+        { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+      ],
+    );
+    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
+  });
 });
 
 describe("assessLinkageSatisfiability", () => {

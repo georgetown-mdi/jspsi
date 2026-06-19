@@ -876,22 +876,43 @@ export function validateStandardizationAgainstTerms(
  *
  * 1. the spec carries an explicit `standardization` for it whose source input
  *    column is present (the explicit mapping preempts the type fallback), OR
- * 2. the field has NO explicit standardization and the input has a column whose
- *    inferred semantic type matches the field's type.
+ * 2. the field has NO explicit standardization and the input has a column of a
+ *    matching semantic type -- taken from `metadata` when supplied, else inferred
+ *    from the column names.
  *
  * An explicit standardization preempts the type fallback: a field whose
  * explicit source column is absent is unsatisfiable even when a same-typed
  * column is present -- the exchange would bind it to the missing column and
  * emit no values. An empty result means every configured field can be
  * produced; a non-empty result names the fields that cannot.
+ *
+ * Pass `metadata` to mirror an exchange that runs from an explicit metadata
+ * block (`prepareForExchange` resolves the type fallback against
+ * `metadata ?? inferMetadata`); omit it to fall back to name-based inference, the
+ * accept-path default. The metadata is restricted to columns actually present in
+ * `columns` first, since the exchange reads each resolved column from the rows and
+ * a metadata-declared column missing from the input produces no values.
  */
 export function unsatisfiedLinkageFields(
   columns: string[],
   terms: LinkageTerms,
   standardization?: Standardization,
+  metadata?: ColumnMetadata[],
 ): LinkageField[] {
   const present = new Set(columns);
-  const inputTypes = new Set(inferMetadata(columns).map((c) => c.type));
+  // Semantic types the type fallback can draw on. An explicit `metadata` replaces
+  // name-inference (as prepareForExchange does), but is first restricted to columns
+  // present in `columns`: the fallback binds a field to a metadata column of its
+  // type and the exchange reads that column from the rows, so a metadata-declared
+  // column absent from the input yields no values and must not count as coverage --
+  // otherwise a config whose metadata describes a since-swapped CSV would mask the
+  // unsatisfiability this detects. For inferred metadata the restriction is a no-op
+  // (it is derived from `columns`).
+  const inputTypes = new Set(
+    (metadata ?? inferMetadata(columns))
+      .filter((c) => present.has(c.name))
+      .map((c) => c.type),
+  );
   // Field name -> the input column its explicit standardization reads. A field
   // present here is resolved by the explicit transformation (which preempts the
   // type fallback), so it is producible iff that column exists; a field absent
@@ -923,8 +944,8 @@ export interface LinkageSatisfiability {
 }
 
 /**
- * Assess whether an input's `columns` can satisfy `terms`, for the accept-path
- * pre-flight shared by the web acceptor and the CLI. Combines
+ * Assess whether an input's `columns` can satisfy `terms`, for the satisfiability
+ * pre-flight shared by the web acceptor and both CLI real-exchange paths. Combines
  * {@link unsatisfiedLinkageFields} (which fields cannot be produced) with the
  * downstream consequence (how many linkage keys survive): a key is satisfiable
  * only when EVERY element field is producible -- both declared in
@@ -933,6 +954,11 @@ export interface LinkageSatisfiability {
  * result -- block when {@link LinkageSatisfiability.satisfiableKeyCount} is 0,
  * warn when it is positive but below `linkageKeys.length` -- and owns its own
  * message wording and display sanitization.
+ *
+ * `standardization` and `metadata` are the spec's explicit overrides, forwarded to
+ * {@link unsatisfiedLinkageFields} so the verdict matches an exchange that runs
+ * from them (the CLI `exchange` path passes both from its committed config; the
+ * accept and web paths pass neither and rely on name inference).
  *
  * The satisfiability check is over column SHAPE, not row VALUES: a field whose
  * same-typed column exists but whose every row standardizes to empty (e.g. an
@@ -944,8 +970,14 @@ export function assessLinkageSatisfiability(
   columns: string[],
   terms: LinkageTerms,
   standardization?: Standardization,
+  metadata?: ColumnMetadata[],
 ): LinkageSatisfiability {
-  const unsatisfied = unsatisfiedLinkageFields(columns, terms, standardization);
+  const unsatisfied = unsatisfiedLinkageFields(
+    columns,
+    terms,
+    standardization,
+    metadata,
+  );
   const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
   // The set of field names that are BOTH declared and producible. A key element
   // referencing a name absent from this set is unsatisfiable -- whether the field

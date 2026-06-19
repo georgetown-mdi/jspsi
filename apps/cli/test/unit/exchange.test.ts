@@ -897,3 +897,54 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
   expect(prepared).toBeDefined();
   expect(mockState.warnings).toHaveLength(0);
 });
+
+test("prepareDataset: an explicit metadata type satisfies a column whose name does not infer to that type", async () => {
+  // patient_number does not infer to the ssn type, so without metadata the ssn key
+  // is unsatisfiable and the run blocks...
+  const input = writeInput("patient_number\n123456789\n");
+  await expect(
+    prepareDataset({ linkageTerms: ssnOnlyTerms }, "Test Party", input),
+  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+
+  // ...but the config's explicit metadata types patient_number as ssn, exactly as
+  // the exchange will, so the same CSV proceeds with no block and no warning. The
+  // check must honor the config's metadata, not name inference alone.
+  const prepared = await prepareDataset(
+    {
+      linkageTerms: ssnOnlyTerms,
+      metadata: [
+        {
+          name: "patient_number",
+          type: "ssn",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
+    },
+    "Test Party",
+    input,
+  );
+  expect(prepared).toBeDefined();
+  expect(mockState.warnings).toHaveLength(0);
+});
+
+test("prepareDataset: an explicit metadata type that retypes the column away blocks the silent-empty run", async () => {
+  // The column name `ssn` would infer to the ssn type, but the config's metadata
+  // retypes it to a non-ssn type, so at exchange time the ssn field produces no
+  // values and the key silently collapses to an empty result. Honoring the config's
+  // metadata, the guard sees no ssn-typed column and blocks rather than letting that
+  // silent-empty run through -- the exact gap name inference alone would miss.
+  const input = writeInput("ssn\n123456789\n");
+  await expect(
+    prepareDataset(
+      {
+        linkageTerms: ssnOnlyTerms,
+        metadata: [
+          { name: "ssn", type: "other", role: "payload", isPayload: true },
+        ],
+      },
+      "Test Party",
+      input,
+    ),
+  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+});

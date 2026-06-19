@@ -554,8 +554,10 @@ export async function prepareDataset(
   // byte-indistinguishable from a real empty intersection. Only the config's
   // explicit linkageTerms are gated: when absent, prepareForExchange derives
   // default terms from this CSV's own columns, which it satisfies by construction.
-  // The config's standardization is fed in so an explicit column remap that
-  // satisfies a field is not mis-flagged (accept passes none; see its comment).
+  // The config's standardization and metadata are fed in so the check resolves
+  // fields exactly as prepareForExchange will -- an explicit column remap or an
+  // explicit column type does not get mis-flagged (accept passes neither; see its
+  // comment).
   if (exchangeDataSpec.linkageTerms !== undefined)
     checkLinkageSatisfiability(
       columns,
@@ -567,6 +569,7 @@ export async function prepareDataset(
           "or re-establish the exchange with linkage terms the CSV satisfies.",
       },
       exchangeDataSpec.standardization,
+      exchangeDataSpec.metadata,
     );
 
   const prepared = prepareForExchange(
