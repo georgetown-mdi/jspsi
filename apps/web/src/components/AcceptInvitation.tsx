@@ -8,15 +8,15 @@ import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
-import { Exchange } from "@components/Exchange";
+import { ExchangeView } from "@components/ExchangeView";
 
 import type { DecodeState } from "@components/AcceptInvitationPanel";
 
 /**
  * The accept route's container: it decodes the invitation from the URL fragment,
- * holds the consent state, and gates the dialing {@link Exchange} behind explicit
- * consent. Kept as a component (rather than inline in the route file) so it can be
- * mounted and driven in a browser test without the router.
+ * holds the consent state, and gates the dialing {@link ExchangeView} behind
+ * explicit consent. Kept as a component (rather than inline in the route file) so
+ * it can be mounted and driven in a browser test without the router.
  *
  * The content width (a narrower single-column reading width) is declared by the
  * route and supplied by the shell's container, so this page renders only its
@@ -30,7 +30,7 @@ export function AcceptInvitation() {
   const [acceptorName, setAcceptorName] = useState("");
   // The name, committed by an explicit "Accept and continue". Once set it seeds
   // the in-flight exchange and the consent controls are replaced by the running
-  // Exchange, so the value that seeds it cannot drift.
+  // ExchangeView, so the value that seeds it cannot drift.
   const [confirmedName, setConfirmedName] = useState<string>();
 
   useEffect(() => {
@@ -83,9 +83,9 @@ export function AcceptInvitation() {
   }, [decode.status]);
 
   const handleAccept = () => {
-    // The authoritative consent gate: no name is committed -- and so no Exchange
-    // mounts and nothing is dialed -- unless the user has consented and named
-    // themselves.
+    // The authoritative consent gate: no name is committed -- and so no
+    // ExchangeView mounts and nothing is dialed -- unless the user has consented
+    // and named themselves.
     const name = commitAcceptance({ consented, name: acceptorName });
     if (name === undefined) return;
     // Only confirmedName seeds the exchange; the acceptorName field unmounts with
@@ -100,7 +100,7 @@ export function AcceptInvitation() {
       // the consent controls are unmounted while it runs, so the exchange
       // completes rather than being torn down by an edit. Reload the page to
       // start over.
-      <Exchange
+      <ExchangeView
         key={decode.invitation.token.sharedSecret}
         role="acceptor"
         partyName={confirmedName}

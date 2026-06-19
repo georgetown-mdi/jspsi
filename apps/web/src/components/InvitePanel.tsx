@@ -20,7 +20,7 @@ import { useForm } from "@tanstack/react-form";
 
 import { generateInvitation } from "@psi/invitation";
 
-import { Exchange } from "@components/Exchange";
+import { ExchangeView } from "@components/ExchangeView";
 
 import type { GeneratedInvitation, InvitationLocation } from "@psi/invitation";
 
@@ -256,7 +256,7 @@ export function InvitePanel() {
           </Text>
           {/* A fresh secret per invitation keys a fresh exchange, so remounting
               on regenerate (keyed by the secret) resets the file/stage state. */}
-          <Exchange
+          <ExchangeView
             key={session.invitation.sharedSecret}
             role="inviter"
             partyName={session.inviterName}

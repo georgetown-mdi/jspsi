@@ -41,7 +41,7 @@ const GENERIC_FAILURE = "key exchange authentication failed";
 const PAST_EXPIRES = "2000-01-01T00:00:00.000Z";
 const FUTURE_EXPIRES = "2999-01-01T00:00:00.000Z";
 
-/** The web handshake role assignment (Exchange.tsx): inviter -> responder,
+/** The web handshake role assignment (ExchangeView.tsx): inviter -> responder,
  * acceptor -> initiator. Both ends share `expires` when given (an invitation
  * carries one bound both peers read); omitting it models an unbounded
  * credential, leaving core's expiry guards no-op. */
