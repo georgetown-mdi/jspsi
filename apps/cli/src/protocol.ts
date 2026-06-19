@@ -815,6 +815,21 @@ export async function runProtocol(
           // and the operator disambiguates a rekey from an interception
           // out-of-band.
           onHostKeyDivergence: (msg: string) => log.warn(msg),
+          // A present-but-malformed partner host-key advertisement is dropped by
+          // the fail-soft parse, so reconciliation is silently skipped for it.
+          // Log that drop at debug -- low enough that a benign version-skew does
+          // not warn on every exchange -- so an operator can tell a
+          // non-conforming partner from one that simply observed no host key
+          // (the benign no-host-key path logs nothing here). The dropped value
+          // is deliberately not included: it is unusable, and it is
+          // partner-controlled, so echoing it into a log would be an injection
+          // risk.
+          onPartnerHostKeyMalformed: () =>
+            log.debug(
+              "partner advertised a malformed SFTP host key in the terms " +
+                "exchange; it was dropped per the fail-soft contract and " +
+                "cross-party host-key reconciliation was skipped for it",
+            ),
           onProtocolConfirmed: (partnerTerms, resolvedRole) => {
             // identity is partner-controlled free text with no consistency check
             // (a mutually-distrusting party sets it), so escape it before it
