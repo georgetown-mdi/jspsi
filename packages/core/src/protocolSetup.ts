@@ -2,6 +2,7 @@ import * as z from "zod";
 
 import type { HandshakeRole, PsiRole } from "./types";
 import type { LinkageTerms, Output } from "./config/linkageTerms";
+import type { PresentedHostKey } from "./connection/fileSyncConnection";
 import {
   parseLinkageTerms,
   validateCompatibility,
@@ -16,6 +17,38 @@ import {
 
 // --- Message schemas ---------------------------------------------------------
 
+// The optional `hostKey` advertisement rides the terms exchange so each party
+// advertises the SFTP host key it observed (fingerprint + key type) to the
+// other, for cross-party reconciliation against a one-sided interception
+// (201058119; see reconcileHostKeyFingerprints). Like `save`, it rides the
+// terms exchange rather than a dedicated round-trip because that is the one
+// bidirectional exchange both parties always perform, and -- being inside the
+// authenticated, AEAD-wrapped post-handshake channel -- the advertised value
+// cannot be forged by an unauthenticated party. It is omitted entirely by a
+// party that observed no host key (a file-drop or proxy path, or an
+// unauthenticated exchange that never threads the observed key in), so a
+// one-sided absence reconciles to no divergence. The field bounds are
+// defense-in-depth, far above any real value (a canonical SHA256 fingerprint is
+// 50 chars; a key type such as "ecdsa-sha2-nistp521" is under 30): they cap a
+// hostile partner's advertised values, mirroring the invitation decoder's
+// per-field size bounds, and the receiver sanitizes both before display.
+//
+// hostKeyField is fail-soft (`.catch(undefined)`): a malformed or over-bound
+// advertisement is read as absent rather than aborting the linkage, UNLIKE the
+// rest of the terms message and unlike `save`. This is deliberate and specific
+// to this field's contract: the reconciliation is a non-fatal advisory that only
+// warns even on a genuine fingerprint divergence (see reconcileHostKeyFingerprints),
+// so a malformed advertisement -- reachable only from a non-conforming or
+// future-versioned peer, since the field rides the AEAD and an unauthenticated
+// party cannot set it -- must degrade to "no reconciliation" rather than become a
+// terms-exchange abort that blames the (valid) linkage terms. It never affects
+// agreement, so dropping a bad value is the correct, contract-preserving outcome.
+const hostKeyAdvertisement = z.object({
+  fingerprint: z.string().max(100),
+  keyType: z.string().max(64),
+});
+const hostKeyField = hostKeyAdvertisement.optional().catch(undefined);
+
 // The optional `save` flag rides the terms exchange so each party advertises
 // its zero-setup `--save` intent to the other on the one round-trip both sides
 // always perform (see exchangeTerms). It is omitted entirely outside the
@@ -26,6 +59,7 @@ import {
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   save: z.boolean().optional(),
+  hostKey: hostKeyField,
 });
 
 const termsWithDecisionMessage = z.object({
@@ -33,6 +67,7 @@ const termsWithDecisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: z.array(z.string()).optional(),
   save: z.boolean().optional(),
+  hostKey: hostKeyField,
 });
 
 const decisionMessage = z.object({
@@ -66,6 +101,16 @@ export interface TermsExchangeResult {
    * post-exchange notice to emit; it never affects whether the terms are agreed.
    */
   partnerSaveIntent: boolean;
+  /**
+   * The SFTP host key the partner advertised observing on its side of the
+   * rendezvous (fingerprint + key type), or `undefined` when the partner
+   * observed none (a file-drop or proxy path, or an exchange that did not thread
+   * an observed key in) or advertised a malformed/over-bound value (read as
+   * absent; see the fail-soft `hostKeyField` schema). The caller reconciles it
+   * against its own observed key (see {@link reconcileHostKeyFingerprints}); it
+   * never affects agreement.
+   */
+  partnerHostKey: PresentedHostKey | undefined;
 }
 
 /**
@@ -123,20 +168,38 @@ async function sendAbort(
  * entirely, leaving the non-save (recurring/authenticated) wire format
  * unchanged. The returned {@link TermsExchangeResult.partnerSaveIntent} is the
  * partner's advertised value (absent -> `false`); it never affects agreement.
+ *
+ * When `localHostKey` is set, this party's observed SFTP host key (fingerprint +
+ * key type) is advertised on its terms message and the partner's is read back,
+ * returned as {@link TermsExchangeResult.partnerHostKey} for cross-party
+ * reconciliation (201058119). Left `undefined` (a party that observed no host
+ * key) it omits the field, so the partner reconciles against nothing and a
+ * one-sided absence is not a divergence. Like `save`, it never affects whether
+ * the terms are agreed.
  */
 export async function exchangeTerms(
   conn: MessageConnection,
   handshakeRole: HandshakeRole,
   localTerms: LinkageTerms,
   localSaveIntent?: boolean,
+  localHostKey?: PresentedHostKey,
 ): Promise<TermsExchangeResult> {
   // Spread into the outgoing terms frame only when this party is saving, so a
   // non-save exchange sends no `save` field at all.
   const saveField = localSaveIntent === true ? { save: true } : {};
+  // Likewise the observed host key: spread only when this party observed one, so
+  // a party with nothing to advertise sends no `hostKey` field at all.
+  const hostKeyField =
+    localHostKey !== undefined ? { hostKey: localHostKey } : {};
 
   if (handshakeRole === "initiator") {
-    // Message 1: send our terms (carrying our save intent when set).
-    await conn.send({ linkageTerms: localTerms, ...saveField });
+    // Message 1: send our terms (carrying our save intent and observed host key
+    // when set).
+    await conn.send({
+      linkageTerms: localTerms,
+      ...saveField,
+      ...hostKeyField,
+    });
 
     // Message 2: receive partner's terms + decision.
     const msg = await receiveParsed(conn, termsWithDecisionMessage);
@@ -189,7 +252,12 @@ export async function exchangeTerms(
     // Message 3: send our proceed decision.
     await conn.send({ decision: "proceed" });
 
-    return { partnerTerms, warnings, partnerSaveIntent: msg.save === true };
+    return {
+      partnerTerms,
+      warnings,
+      partnerSaveIntent: msg.save === true,
+      partnerHostKey: msg.hostKey,
+    };
   } else {
     // Message 1: receive partner's terms. Raw receive + inline parse (rather
     // than receiveParsed) so a malformed frame can be answered with an
@@ -199,10 +267,12 @@ export async function exchangeTerms(
 
     let partnerTerms: LinkageTerms;
     let partnerSaveIntent = false;
+    let partnerHostKey: PresentedHostKey | undefined;
     let parseError: string | undefined;
     try {
       const parsed = termsMessage.parse(rawData);
       partnerSaveIntent = parsed.save === true;
+      partnerHostKey = parsed.hostKey;
       partnerTerms = parseLinkageTerms(parsed.linkageTerms);
     } catch (parseErr) {
       parseError =
@@ -224,11 +294,13 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // Message 2: send our terms + proceed decision (carrying our save intent).
+    // Message 2: send our terms + proceed decision (carrying our save intent
+    // and observed host key).
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
       ...saveField,
+      ...hostKeyField,
     });
 
     // Message 3: receive initiator's final decision.
@@ -242,7 +314,12 @@ export async function exchangeTerms(
       );
     }
 
-    return { partnerTerms: partnerTerms!, warnings, partnerSaveIntent };
+    return {
+      partnerTerms: partnerTerms!,
+      warnings,
+      partnerSaveIntent,
+      partnerHostKey,
+    };
   }
 }
 

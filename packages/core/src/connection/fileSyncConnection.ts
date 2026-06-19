@@ -849,6 +849,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   peerId: string | undefined;
   handshakeRole: HandshakeRole | undefined;
+  // The host key the SFTP server presented on this connection, recorded by the
+  // enforcing host-key verifier when its pin check passed (the only success
+  // path that reaches a real, authenticated session). Read post-handshake by the
+  // orchestrator to advertise this party's observed fingerprint in the
+  // authenticated terms exchange for cross-party reconciliation (201058119). It
+  // stays `undefined` on every path that observes no host key -- a file-drop
+  // mount, the browser/proxy SFTP path (neither runs ssh2's hostVerifier), and a
+  // refused connection (no-pin fail-closed or a mismatch) that never establishes
+  // a session -- so a party with nothing to advertise reconciles to no
+  // divergence. Identity/connection-scoped like handshakeRole; not reset per
+  // session.
+  observedHostKey: PresentedHostKey | undefined;
   private poller: NodeJS.Timeout | undefined;
   private pollerActive: boolean;
   // Cancellation primitive threaded through every wait site (see wait() and
@@ -1178,6 +1190,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             try {
               const blob = hostKeyBlob(keyBlob);
               if (await verifyHostKeyFingerprint(blob, pin)) {
+                // Record the observed key for the post-handshake cross-party
+                // reconciliation (see observedHostKey). The pin matched, so the
+                // presented fingerprint equals `pin` (already canonical, format
+                // -validated) -- reuse it rather than re-hash on every connect.
+                // keyTypeFromBlob is server-controlled and stored UNsanitized;
+                // the reconciliation escapes it before display.
+                this.observedHostKey = {
+                  fingerprint: pin,
+                  keyType: keyTypeFromBlob(blob),
+                };
                 settleVerify(verify, true);
               } else {
                 // Re-hash on the mismatch branch (which tears the connection down

@@ -792,11 +792,28 @@ export async function runProtocol(
           psiLibrary: await PSI(),
           verbosity,
           saveIntent,
+          // Advertise the observed SFTP host key for cross-party reconciliation
+          // only when the exchange runs over the authenticated, AEAD-wrapped
+          // channel (`secure` set): the value is unforgeable solely because it
+          // rides that channel, so advertising it on the unencrypted no-auth
+          // path -- where an active MITM could rewrite it to suppress the
+          // divergence -- would defeat the check. conn.observedHostKey is itself
+          // undefined for a file-drop or the no-pin path, so this is also a no-op
+          // there. (201058119)
+          observedHostKey:
+            secure !== undefined ? conn.observedHostKey : undefined,
           onStage: (id: string) => {
             const label = stageLabels[id] ?? id;
             log.info(label.charAt(0).toLowerCase() + label.slice(1));
           },
           onWarning: (msg: string) => log.warn("terms exchange:", msg),
+          // A host-key divergence is a security signal, not a terms warning, so
+          // it gets its own un-prefixed warn line; the message is complete and
+          // display-safe (reconcileHostKeyFingerprints sanitizes both parties'
+          // server-controlled values). Non-fatal: the exchange still completes
+          // and the operator disambiguates a rekey from an interception
+          // out-of-band.
+          onHostKeyDivergence: (msg: string) => log.warn(msg),
           onProtocolConfirmed: (partnerTerms, resolvedRole) => {
             // identity is partner-controlled free text with no consistency check
             // (a mutually-distrusting party sets it), so escape it before it

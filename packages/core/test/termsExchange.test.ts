@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import { exchangeTerms, resolveRole } from "../src/protocolSetup";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
+import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 
 import {
   createMessagePipe,
@@ -90,6 +91,78 @@ test("date mismatch produces a warning but exchange proceeds", async () => {
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
   expect(a.value.warnings.some((w) => w.includes("date mismatch"))).toBe(true);
   expect(b.value.warnings.some((w) => w.includes("date mismatch"))).toBe(true);
+});
+
+// --- Observed host-key advertisement (201058119) -----------------------------
+
+const hostKeyA: PresentedHostKey = {
+  fingerprint: "SHA256:" + "a".repeat(43),
+  keyType: "ssh-ed25519",
+};
+const hostKeyB: PresentedHostKey = {
+  fingerprint: "SHA256:" + "b".repeat(43),
+  keyType: "ssh-ed25519",
+};
+
+test("each party reads back the other's advertised observed host key", async () => {
+  const [connA, connB] = makeConnections();
+  const [a, b] = await Promise.all([
+    exchangeTerms(connA, "initiator", termsA, undefined, hostKeyA),
+    exchangeTerms(connB, "responder", termsB, undefined, hostKeyB),
+  ]);
+  expect(a.partnerHostKey).toEqual(hostKeyB);
+  expect(b.partnerHostKey).toEqual(hostKeyA);
+});
+
+test("a party that observed no host key advertises none and reads partner's", async () => {
+  const [connA, connB] = makeConnections();
+  const [a, b] = await Promise.all([
+    // Initiator advertises; responder (e.g. a file-drop mount) does not.
+    exchangeTerms(connA, "initiator", termsA, undefined, hostKeyA),
+    exchangeTerms(connB, "responder", termsB),
+  ]);
+  expect(a.partnerHostKey).toBeUndefined();
+  expect(b.partnerHostKey).toEqual(hostKeyA);
+});
+
+test("no hostKey field is put on the wire when none is observed", async () => {
+  // Post-handshake placement: a party that supplies no observed key (the
+  // unauthenticated path, where the CLI withholds it) emits no `hostKey` field
+  // at all, so there is nothing for an unauthenticated peer to read as injected.
+  const [connA, connB] = makeConnections();
+  const sent: Array<Record<string, unknown>> = [];
+  const capturingA: MessageConnection = {
+    send: (m: unknown) => {
+      sent.push(m as Record<string, unknown>);
+      return connA.send(m);
+    },
+    receive: (t?: number) => connA.receive(t),
+    close: () => connA.close(),
+  };
+  await Promise.all([
+    exchangeTerms(capturingA, "initiator", termsA),
+    exchangeTerms(connB, "responder", termsB),
+  ]);
+  expect(sent.length).toBeGreaterThan(0);
+  for (const frame of sent) expect("hostKey" in frame).toBe(false);
+});
+
+test("a malformed partner hostKey is read as absent, not an abort", async () => {
+  // Fail-soft contract: the reconciliation only ever warns, so a malformed or
+  // over-bound advertisement (a non-conforming or future-versioned peer) must
+  // degrade to "no reconciliation" rather than abort the linkage and blame the
+  // (valid) terms. Inject an over-bound fingerprint on the initiator's frame and
+  // drive the responder to completion by hand.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB);
+  await connA.send({
+    linkageTerms: termsA,
+    hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
+  });
+  await connA.receive(); // drain the responder's terms + proceed (msg 2)
+  await connA.send({ decision: "proceed" }); // msg 3
+  const result = await responder;
+  expect(result.partnerHostKey).toBeUndefined();
 });
 
 // --- Role determination ------------------------------------------------------
