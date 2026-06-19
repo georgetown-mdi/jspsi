@@ -356,6 +356,15 @@ connection:
     timestamp_in_filename: true
 ```
 
+**From the CLI.** Pass `--outbound-path DIR` on the zero-setup exchange, `psilink invite`, `psilink accept`, or `psilink exchange` to configure a split directory without hand-writing the pair. The directory the command already names becomes the inbound directory -- the server URL or positional path for the zero-setup, invite, and accept commands, or the loaded config's directory for `psilink exchange` -- and `--outbound-path` becomes the outbound. It applies to both `sftp` and `filedrop` and rejects an outbound equal to the inbound, under the same rules a hand-written config is validated against. It requires retain mode: pass `--retain-files` (which implies `--lockless-rendezvous` and `--timestamp-in-filename`), or, for `psilink exchange`, have `retain_files: true` in the config it reads. Each party sets its own `--outbound-path`; it is a per-party choice, not negotiated with the peer.
+
+```sh
+# Zero-setup file-drop with split directories: read the peer's files from
+# from-partner, write your own to to-partner, retaining a transcript of both.
+psilink --retain-files --outbound-path /mnt/share/to-partner \
+  file:///mnt/share/from-partner records.csv results.csv
+```
+
 ### `connection.server`
 
 *Type:* object  

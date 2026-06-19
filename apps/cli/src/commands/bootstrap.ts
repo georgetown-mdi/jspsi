@@ -204,17 +204,83 @@ function filedropPathsEqual(
   // Normalize both sides through the connection's own normalizer, so the diff's
   // verdict is exactly what the live filedrop connection would open (backslashes
   // folded to forward slashes, all trailing slashes stripped, root-like paths
-  // preserved) -- no separate equality rule to drift from it. `path` is now
-  // optional: a split-directory config (inbound_path/outbound_path) carries no
-  // `path`, so `undefined` legitimately arrives from a parsed config. The
-  // caller compares only the single `path` here; reconciling the split pair is
-  // deferred to the CLI split surface (item 201740349), which must extend
-  // diffConnectionAgainstTarget to compare inbound_path/outbound_path -- until
-  // then connectionFromURL never produces a split target, so a split incoming
-  // config cannot reach this comparison.
+  // preserved) -- no separate equality rule to drift from it. Either operand may
+  // be undefined: a split-directory config (inbound_path/outbound_path) carries
+  // no `path`, and a shared config carries no inbound/outbound, so undefined
+  // legitimately arrives. pushDirectoryConflicts calls this once per locator it
+  // compares (the single `path`, or each half of the split pair).
   const norm = (p: string | undefined): string | undefined =>
     p === undefined ? undefined : normalizeFiledropPath(p);
   return norm(a) === norm(b);
+}
+
+/**
+ * Append the directory-locator conflicts for a file-sync channel. A directory is
+ * given either as a single shared path or as the split inbound/outbound pair;
+ * this compares whichever form the `target` uses, so a split target is reconciled
+ * pair-wise and a shared target by its single path (matching how the live
+ * connection resolves each). An existing config in the other form differs in the
+ * compared field (its value is unset), so a shared-vs-split mismatch is a
+ * conflict like any other. `pathsEqual` is the channel's own path comparator and
+ * `field` renders a config key to its snake_case message path. Only fields the
+ * target actually sets are compared, so a locator the target leaves unset is not
+ * a disagreement with whatever the config holds.
+ */
+function pushDirectoryConflicts(
+  conflicts: ReconcileDiff[],
+  have: { path?: string; inboundPath?: string; outboundPath?: string },
+  want: { path?: string; inboundPath?: string; outboundPath?: string },
+  pathsEqual: (a: string | undefined, b: string | undefined) => boolean,
+  field: (key: "path" | "inbound_path" | "outbound_path") => string,
+): void {
+  // When the existing config is in the OTHER directory form than the target, the
+  // compared field is genuinely unset on the existing side -- but a bare
+  // "(unset)" hides the locator the config DOES hold in its own form, which an
+  // operator reads as "my config names no directory at all". Annotate the unset
+  // side with that locator so the conflict shows both forms. Only invoked when
+  // the field being rendered is actually unset, so it never fires for a
+  // same-form mismatch (where the existing value is shown directly).
+  const existingHint = (): string => {
+    if (have.path !== undefined)
+      return `${RECONCILE_UNSET} (the config uses a single shared path ${have.path})`;
+    if (have.inboundPath !== undefined || have.outboundPath !== undefined)
+      return (
+        `${RECONCILE_UNSET} (the config uses a split inbound_path ` +
+        `${have.inboundPath ?? RECONCILE_UNSET}, outbound_path ` +
+        `${have.outboundPath ?? RECONCILE_UNSET})`
+      );
+    return RECONCILE_UNSET;
+  };
+
+  const split =
+    want.inboundPath !== undefined || want.outboundPath !== undefined;
+  if (split) {
+    if (
+      want.inboundPath !== undefined &&
+      !pathsEqual(have.inboundPath, want.inboundPath)
+    )
+      conflicts.push({
+        field: field("inbound_path"),
+        existing: have.inboundPath ?? existingHint(),
+        incoming: want.inboundPath,
+      });
+    if (
+      want.outboundPath !== undefined &&
+      !pathsEqual(have.outboundPath, want.outboundPath)
+    )
+      conflicts.push({
+        field: field("outbound_path"),
+        existing: have.outboundPath ?? existingHint(),
+        incoming: want.outboundPath,
+      });
+    return;
+  }
+  if (want.path !== undefined && !pathsEqual(have.path, want.path))
+    conflicts.push({
+      field: field("path"),
+      existing: have.path ?? existingHint(),
+      incoming: want.path,
+    });
 }
 
 /**
@@ -269,19 +335,22 @@ export function diffConnectionAgainstTarget(
     const have = (existing as SFTPConnectionConfig).server;
     const want = target.server;
 
-    // host/path -> conflict (which drop you are meeting at).
+    // host/path -> conflict (which drop you are meeting at). The directory is the
+    // single shared `server.path` or the split inbound/outbound pair, compared in
+    // whichever form the target uses.
     if (!hostsEqual(have.host, want.host))
       conflicts.push({
         field: "connection.server.host",
         existing: have.host,
         incoming: want.host,
       });
-    if (want.path !== undefined && !sftpPathsEqual(have.path, want.path))
-      conflicts.push({
-        field: "connection.server.path",
-        existing: have.path ?? RECONCILE_UNSET,
-        incoming: want.path,
-      });
+    pushDirectoryConflicts(
+      conflicts,
+      have,
+      want,
+      sftpPathsEqual,
+      (key) => `connection.server.${key}`,
+    );
 
     // port -> warn (how you reach the same host). An unset config port means the
     // SFTP default, so a target restating that default is not a divergence.
@@ -301,16 +370,16 @@ export function diffConnectionAgainstTarget(
     if (want.privateKey !== undefined && want.privateKey !== have.privateKey)
       warnings.push("private key: differs from the saved value");
   } else if (target.channel === "filedrop") {
-    // filedrop's only locator is the path -> conflict. No port/credentials apply.
-    const havePath = (existing as FileDropConnectionConfig).path;
-    if (!filedropPathsEqual(havePath, target.path))
-      conflicts.push({
-        field: "connection.path",
-        existing: havePath ?? RECONCILE_UNSET,
-        // target.path is undefined for a split (inbound/outbound) config; the
-        // split CLI surface (item 201740349) reconciles those paths.
-        incoming: target.path ?? RECONCILE_UNSET,
-      });
+    // filedrop's only locator is the directory -> conflict. No port/credentials
+    // apply. The directory is the single shared `path` or the split
+    // inbound/outbound pair, compared in whichever form the target uses.
+    pushDirectoryConflicts(
+      conflicts,
+      existing as FileDropConnectionConfig,
+      target,
+      filedropPathsEqual,
+      (key) => `connection.${key}`,
+    );
   }
   // webrtc never reaches here: connectionFromURL rejects a ws/wss URL before the
   // target is built, so `target` is only ever sftp/filedrop, and a webrtc
@@ -826,7 +895,8 @@ export type CommonBootstrapDescribeOverrides = Partial<
     | "server-private-key"
     | "peer-id"
     | "timestamp-in-filename"
-    | "retain-files",
+    | "retain-files"
+    | "outbound-path",
     string
   >
 >;
@@ -962,6 +1032,17 @@ export function addCommonBootstrapOptions(
           "deleting them after consumption. Requires --timestamp-in-filename. " +
           "Both parties must set this flag identically",
     })
+    .option("outbound-path", {
+      type: "string",
+      describe:
+        describe["outbound-path"] ??
+        "use a separate outbound directory: the URL/positional path becomes " +
+          "the inbound (peer-written) directory and this is the outbound " +
+          "(self-written) directory, for managed shares and SFTP servers with " +
+          "distinct drop and pickup folders. Requires --retain-files; the two " +
+          "directories must differ. Leave unset for a single shared directory. " +
+          "Each party sets its own directories",
+    })
     .option("verbose", {
       alias: "v",
       type: "count",
@@ -987,6 +1068,7 @@ export interface CommonBootstrapOptions {
   peerId?: string;
   timestampInFilename?: boolean;
   retainFiles?: boolean;
+  outboundPath?: string;
   record: boolean;
   recordFile?: string;
   logLevel: logLibrary.LogLevelNumbers;
@@ -1038,6 +1120,7 @@ export function parseCommonBootstrapArgs(
     peerId: singleValue(argv, "peer-id") as string | undefined,
     timestampInFilename: argv["timestamp-in-filename"] as boolean | undefined,
     retainFiles: argv["retain-files"] as boolean | undefined,
+    outboundPath: singleValue(argv, "outbound-path") as string | undefined,
     // yargs sets `record` to false on --no-record and true by the option's
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
@@ -1067,6 +1150,7 @@ export type ConnectionOverrideOptions = Pick<
   | "peerId"
   | "timestampInFilename"
   | "retainFiles"
+  | "outboundPath"
 >;
 
 /** Map the parsed common options to the connection-override shape. */
@@ -1086,6 +1170,7 @@ export function connectionOverridesFrom(
     peerId: options.peerId,
     timestampInFilename: options.timestampInFilename,
     retainFiles: options.retainFiles,
+    outboundPath: options.outboundPath,
   };
 }
 
@@ -1097,6 +1182,12 @@ export function connectionOverridesFrom(
  * (post-override), `zero-setup` from the server URL (pre-connection). A file-sync
  * channel warns for neither flag. Shared so the wording cannot drift between the
  * two commands.
+ *
+ * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
+ * ignored options above, it is a hard error on a non-file-sync channel (the
+ * URL-driven commands reject a webrtc URL before overrides apply, and
+ * applyConnectionOverrides throws on a webrtc config), so it needs no
+ * "ignored" warning -- a warning here would falsely promise it was tolerated.
  */
 export function warnUnsupportedFileSyncFlags(
   channel: ConnectionConfig["channel"],
@@ -1114,4 +1205,30 @@ export function warnUnsupportedFileSyncFlags(
       `--retain-files has no effect on the ${channel} channel and will be ` +
         "ignored; it is only supported on sftp and filedrop",
     );
+}
+
+/**
+ * Warn that `--outbound-path` has no effect on an OFFLINE invite/accept. Those
+ * paths write a placeholder (invite) or invitation-endpoint-seeded (accept)
+ * connection block for the operator to edit before `psilink exchange`, rather
+ * than building a connection from a URL the way the online and zero-setup paths
+ * do -- so they go through {@link connectionFromEndpoint}, which applies no
+ * connection overrides, and the flag would otherwise be parsed and silently
+ * dropped. (The sibling `--server-*` overrides share this offline-blindness; this
+ * warning is scoped to `--outbound-path`, whose whole purpose is the connection's
+ * directory shape, so its silent loss is the most surprising.) A no-op when the
+ * flag is unset. Shared so the wording cannot drift between invite and accept.
+ */
+export function warnOutboundPathIgnoredOffline(
+  outboundPath: string | undefined,
+  log: { warn: (message: string) => void },
+): void {
+  if (outboundPath === undefined) return;
+  log.warn(
+    "--outbound-path has no effect on an offline invite/accept: the connection " +
+      "block is written as a placeholder to edit, not built from a URL. " +
+      "Configure the split directory (inbound_path/outbound_path) in that block " +
+      "before running 'psilink exchange', or pass --outbound-path on an online " +
+      "invite/accept, the zero-setup exchange, or 'psilink exchange'.",
+  );
 }

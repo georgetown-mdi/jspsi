@@ -50,6 +50,7 @@ import {
   prepareForOnlineExchange,
   runOnlineBootstrap,
   runOrExit,
+  warnOutboundPathIgnoredOffline,
   type CommonBootstrapOptions,
   type ResolvedDataSpec,
   type RunnableConnectionConfig,
@@ -318,6 +319,11 @@ export async function validateAccept(params: {
       reuseExistingConfig,
     };
   }
+
+  // Offline: --outbound-path cannot take effect (the connection block is seeded
+  // from the invitation endpoint or a placeholder, not built from a URL), so
+  // warn rather than drop a deliberately-passed flag silently.
+  warnOutboundPathIgnoredOffline(options.outboundPath, log);
 
   // Offline.
   const reuseExistingConfig = reconcileAcceptConfig({
