@@ -548,6 +548,12 @@ export function connectionFromEndpoint(
  * the two parties images of each other lives solely at the accept-side
  * {@link connectionFromEndpoint}; swapping here too would double-swap and undo
  * it. A shared (single-`path`) connection emits a single `path` as before.
+ * Guarding on `inboundPath` is enough to read `outboundPath`: the connection
+ * reaching here is built and schema-validated, whose both-or-neither refine
+ * rejects a half pair, so the pair is always whole (the same invariant
+ * {@link connectionFromEndpoint} relies on the other direction -- `outboundPath`
+ * is statically `string | undefined` but is never undefined once `inboundPath`
+ * is set).
  *
  * Scoped to the file-sync channels by the {@link RunnableConnectionConfig}
  * parameter: a webrtc locator is the follow-up's producer (item 202482411,
