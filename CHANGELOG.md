@@ -27,7 +27,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `--sweep-exchange-files` (and `--force-retain-sweep`) clear protocol files left by a crashed prior run on the `sftp`/`filedrop` channels. See `docs/spec/FILE_SYNC.md`.
 - `connection.options.unexpected_files` policy (`error`/`warn`/`ignore`) for a foreign file that appears in the shared directory during an exchange; defaults to `error`, or `warn` under `retain_files`/`lockless_rendezvous`. See `docs/EXCHANGE_REFERENCE.md`.
 - `authentication.token_max_age_days`: cap the age of rotated tokens for dormant partnerships. A misspelled key in the `authentication` block is now rejected at parse time. See `docs/EXCHANGE_REFERENCE.md` and `docs/SECURITY_DESIGN.md`.
-- Invitations may carry an optional credential-free connection endpoint (a public rendezvous locator); they never carry credentials. See `docs/SECURITY_DESIGN.md`.
+- Invitations may carry an optional credential-free connection endpoint (a public rendezvous locator); they never carry credentials. For a split-directory `sftp`/`filedrop` exchange the endpoint carries the inviter's `inbound_path`/`outbound_path` pair, which the acceptor mirror-swaps (one party's outbound is the other's inbound) so both sides can keep a fixed mount layout. See `docs/SECURITY_DESIGN.md` and `docs/spec/FILE_SYNC.md`.
 - A `psilink:diagnostics` localStorage flag raises web connection-logging verbosity for one browser, without leaking the derived rendezvous ids. See `docs/DEPLOYMENT.md`.
 - `psilink invite` (offline) prints how to abandon a pending invitation before it expires: delete its key file. See `docs/CLI.md`.
 - Key file schema: a versioned JSON format for persisting the shared token and exchange metadata between sessions.
