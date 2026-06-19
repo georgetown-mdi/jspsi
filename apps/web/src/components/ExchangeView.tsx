@@ -372,10 +372,15 @@ export function ExchangeView(config: ExchangeConfig) {
   return (
     <Stack>
       {errorAlert && (
-        // pre-line preserves the newline sanitizeErrorForDisplay puts before
-        // each "caused by:" link (browsers collapse it otherwise) so a
-        // multi-cause error shows one cause per line; the message is already
-        // escaped, so the only newlines present are this module's separators.
+        // pre-line preserves the newline that the file-acquire phase's
+        // read-failure alert carries: FileAcquire builds that message with
+        // sanitizeErrorForDisplay, which puts a newline before each "caused by:"
+        // link (browsers collapse it otherwise) so a multi-cause error shows one
+        // cause per line, and forwards it here through onError. This module's own
+        // run-error messages carry no such newlines -- the output case is a single
+        // sanitizeForDisplay'd message and the rest are fixed strings -- but the
+        // shared slot must still render that one multi-cause case. Every message
+        // is already escaped, so the only newlines present are those separators.
         <Alert
           color="red"
           title={errorAlert.title}
