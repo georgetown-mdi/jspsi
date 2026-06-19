@@ -602,6 +602,94 @@ test("validateInvite: online does not warn about a --server-* override (it is ap
   warnSpy.mockRestore();
 });
 
+test("validateInvite: offline warns that a connection-options override is ignored", async () => {
+  // The offline path writes a placeholder connection block with no `options`
+  // block, so a --peer-timeout (or any connection-options) override cannot take
+  // effect; it must be surfaced, with a remedy distinct from the server warning's
+  // -- pointing at connection.options.
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-invite-opt-override-"),
+  );
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const log = getLogger("invite-offline-opt-override-warn");
+  log.setLevel("warn");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+      peerTimeout: 60,
+    }),
+    acceptTimeout: 900,
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) =>
+        typeof c[0] === "string" &&
+        c[0].includes("--peer-timeout") &&
+        c[0].includes("connection.options"),
+    ),
+  ).toBe(true);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: offline does not warn about connection.options when no options flag is set", async () => {
+  // No connection-options flag is set, so the connection.options warning must
+  // stay silent. acceptTimeout is a separate param, NOT a --peer-timeout
+  // override: it feeds peerTimeout only on the online path (via the override
+  // bag's `extra`), so an offline invite that sets it must not warn spuriously
+  // about a dropped --peer-timeout.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-no-opt-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const log = getLogger("invite-offline-no-opt-warn");
+  log.setLevel("warn");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) => typeof c[0] === "string" && c[0].includes("connection.options"),
+    ),
+  ).toBe(false);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: online does not warn about a connection-options override (it is applied)", async () => {
+  // The online path builds the connection from the URL through
+  // applyConnectionOverrides, so a connection-options override takes effect and
+  // no ignored-override warning is emitted.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-online-opt-override-nowarn");
+  log.setLevel("warn");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options: { ...options, maxReconnectAttempts: 5 },
+    acceptTimeout: 900,
+    log,
+  });
+  expect(ready.mode).toBe("online");
+  if (ready.mode !== "online") return;
+  expect(ready.connection.options?.maxReconnectAttempts).toBe(5);
+  expect(
+    warnSpy.mock.calls.some(
+      (c) => typeof c[0] === "string" && c[0].includes("connection.options"),
+    ),
+  ).toBe(false);
+  warnSpy.mockRestore();
+});
+
 // --- validateInvite: --expires-in override -----------------------------------
 
 test("validateInvite: --expires-in sets the token's expiry to the override", async () => {

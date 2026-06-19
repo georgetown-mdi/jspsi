@@ -1612,3 +1612,97 @@ export function warnServerOverridesIgnoredOffline(
       "an online invite/accept, the zero-setup exchange, or 'psilink exchange'.",
   );
 }
+
+/**
+ * The connection-OPTIONS overrides that have no effect on an OFFLINE
+ * invite/accept, read by {@link warnOptionsOverridesIgnoredOffline}. A structural
+ * subset of {@link CommonBootstrapOptions} (assignable to it) holding the
+ * tuning/toggle flags {@link applyConnectionOverrides} writes into
+ * `connection.options`: the SharedOptions timeouts/reconnect bound
+ * (`--connection-timeout`, `--peer-timeout`, `--max-reconnect-attempts`) and the
+ * file-sync toggles (`--lockless-rendezvous`, `--peer-id`, `--retain-files`,
+ * `--timestamp-in-filename`) -- HOW the exchange behaves, as opposed to the
+ * server block's WHERE/credentials that {@link OfflineIgnoredServerOverrides}
+ * covers.
+ *
+ * The offline placeholder has no `options` block on any channel (a split seed
+ * pre-seeds only the fixed retain-mode trio there, {@link SPLIT_SEED_OPTIONS},
+ * never operator tuning), so these overrides are parsed and silently dropped on
+ * the offline paths. They are the `connection.options` half deliberately scoped
+ * out of {@link OfflineIgnoredServerOverrides}: warning for them belongs
+ * in a separate, differently-worded diagnostic ("set them under
+ * connection.options") rather than folded into the server warning's "set the
+ * connection details in that block" remedy.
+ *
+ * Note the synthesized `--accept-timeout` is NOT here: it feeds the override
+ * bag's `peerTimeout` only through {@link connectionOverridesFrom}'s `extra` arg
+ * on the ONLINE invite path. This read is of the parsed `peerTimeout` field
+ * (`--peer-timeout`) directly, so an offline invite with `--accept-timeout` but
+ * no `--peer-timeout` does not warn spuriously.
+ */
+export type OfflineIgnoredOptionsOverrides = Pick<
+  CommonBootstrapOptions,
+  | "connectionTimeout"
+  | "peerTimeout"
+  | "maxReconnectAttempts"
+  | "locklessRendezvous"
+  | "peerId"
+  | "timestampInFilename"
+  | "retainFiles"
+>;
+
+/**
+ * Warn that the connection-OPTIONS overrides (`--connection-timeout`,
+ * `--peer-timeout`, `--max-reconnect-attempts`, `--lockless-rendezvous`,
+ * `--peer-id`, `--timestamp-in-filename`, `--retain-files`) have no effect on an
+ * OFFLINE invite/accept. Like the server-block overrides those paths go through
+ * {@link connectionFromEndpoint}, which applies no connection overrides, but
+ * these target `connection.options` -- a block the offline placeholder does not
+ * contain on any channel -- so they would otherwise be parsed and silently
+ * dropped. The warning names exactly the flags the operator set; it is a no-op
+ * when none are set.
+ *
+ * Kept distinct from {@link warnServerOverridesIgnoredOffline}: that one's remedy
+ * is "set the connection details in that block" (host/port/credentials/paths),
+ * whereas these land under `connection.options`, so the remedy wording points
+ * there instead. Shared between invite and accept so the wording cannot drift.
+ */
+export function warnOptionsOverridesIgnoredOffline(
+  options: OfflineIgnoredOptionsOverrides,
+  log: { warn: (message: string) => void },
+): void {
+  // Security invariant: push only the flag NAME, never the override value. This
+  // warning reaches the terminal and any --log-file, so interpolating a value
+  // here would leak it. None of these flags is a secret today, but --peer-id is
+  // an operator-supplied free string and the set may grow, so keep the emitted
+  // message static apart from this flag-name list -- the same discipline
+  // warnServerOverridesIgnoredOffline holds for its --server-password/-key.
+  const ignored: string[] = [];
+  if (options.connectionTimeout !== undefined)
+    ignored.push("--connection-timeout");
+  if (options.peerTimeout !== undefined) ignored.push("--peer-timeout");
+  if (options.maxReconnectAttempts !== undefined)
+    ignored.push("--max-reconnect-attempts");
+  // The three toggles gate on `=== true`, not presence: yargs sets the negated
+  // form (--no-retain-files etc.) to `false`, and `false` is the default a fresh
+  // placeholder already carries, so only the enabling form was an override that
+  // could have done something. This matches warnUnsupportedFileSyncFlags's
+  // `=== true` gate on the same toggles and avoids a warning that names
+  // --retain-files when the operator actually typed --no-retain-files.
+  if (options.locklessRendezvous === true)
+    ignored.push("--lockless-rendezvous");
+  if (options.peerId !== undefined) ignored.push("--peer-id");
+  if (options.timestampInFilename === true)
+    ignored.push("--timestamp-in-filename");
+  if (options.retainFiles === true) ignored.push("--retain-files");
+  if (ignored.length === 0) return;
+  log.warn(
+    `${ignored.join(", ")} ${ignored.length === 1 ? "has" : "have"} no effect ` +
+      "on an offline invite/accept: the connection block is written for you to " +
+      "edit (a placeholder, or seeded from the invitation endpoint), and these " +
+      "tuning options are not applied to it. Set them under connection.options " +
+      "in the written config before running 'psilink exchange', or pass these " +
+      "flags on an online invite/accept, the zero-setup exchange, or 'psilink " +
+      "exchange'.",
+  );
+}
