@@ -679,10 +679,11 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
   // Both sides abort mid-handshake with their token un-rotated, so each emits a
   // "key exchange was in progress" recovery advisory at ERROR. Run them under
   // withCapturedLogs so those intended lines are captured for assertion below
-  // rather than leaked to the suite console. The logger names are unique to this
-  // test (the happy-path test above already created "invite"/"accept", and a
-  // logger created before the capture's interceptor is installed would bypass
-  // it -- a fresh name guarantees both loggers bind to the interceptor here).
+  // rather than leaked to the suite console. The natural "invite"/"accept" names
+  // are safe to reuse even though the happy-path test above already created those
+  // loggers: the integration setup installs the withCapturedLogs interceptor
+  // eagerly (capturedLogs.setup.ts), so a logger binds to capture regardless of
+  // when it was first materialized.
   const [[inviteOutcome, acceptOutcome], capturedLogs] = await withCapturedLogs(
     () =>
       Promise.allSettled([
@@ -696,7 +697,7 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
           configPath: inviteOptions.configFile,
           output: inviteReady.output,
           verbosity: 0,
-          loggerName: "mismatch-invite",
+          loggerName: "invite",
           recordOutput: resolveRecordOutput({
             enabled: inviteOptions.record,
             recordFile: inviteOptions.recordFile,
@@ -712,7 +713,7 @@ test("filedrop: a shared-secret mismatch aborts the handshake, persisting no con
           configPath: acceptOptions.configFile,
           output: acceptReady.output,
           verbosity: 0,
-          loggerName: "mismatch-accept",
+          loggerName: "accept",
           recordOutput: resolveRecordOutput({
             enabled: acceptOptions.record,
             recordFile: acceptOptions.recordFile,
@@ -909,11 +910,11 @@ describe("sftp", () => {
       // in-place mutation, the clone for the live connect, the handshake, and the
       // post-handshake saveConfig -- runs live. Each side emits one "authenticity
       // of host ... cannot be established" WARN carrying the presented fingerprint;
-      // capture WARNs so they are asserted rather than leaked to the suite console.
-      // The "fu-invite"/"fu-accept" logger names are unique to this test, so both
-      // bind to the capture interceptor (a logger created before it would bypass
-      // capture). The isTTY and stub mutations are set inside the try so the
-      // finally rolls both back even if a setup step throws.
+      // capture WARNs so they are asserted rather than leaked to the suite console
+      // (capture binds regardless of when these loggers were first materialized,
+      // because the integration setup installs the interceptor eagerly). The isTTY
+      // and stub mutations are set inside the try so the finally rolls both back
+      // even if a setup step throws.
       const originalIsTTY = process.stdin.isTTY;
       try {
         process.stdin.isTTY = true;

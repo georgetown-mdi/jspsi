@@ -34,11 +34,19 @@ const captures: Array<{
 }> = [];
 let interceptorInstalled = false;
 
-function ensureInterceptor(): void {
+/** Installs the loglevel `methodFactory` interceptor that backs `withCapturedLogs`,
+ * idempotently. `withCapturedLogs` calls this on its first use, so a standalone
+ * caller never needs it; call it eagerly from test setup -- before any named logger
+ * is constructed -- to close the creation-order gap noted on `withCapturedLogs`.
+ * loglevel binds a logger's methods from the factory live at `getLogger` time, so a
+ * named logger built before the interceptor exists never routes through capture;
+ * installing here first makes every later-created logger bind to capture regardless
+ * of creation order. */
+export function installCapturedLogsInterceptor(): void {
   if (interceptorInstalled) return;
   interceptorInstalled = true;
   // Snapshot the current factory here, not at module load, so any third-party
-  // wrappers installed before the first withCapturedLogs call are included.
+  // wrappers installed before the interceptor is materialized are included.
   const rootFactory = logLibrary.methodFactory;
   logLibrary.methodFactory = (methodName, level, loggerName) => {
     const original = rootFactory(methodName, level, loggerName);
@@ -69,8 +77,11 @@ function ensureInterceptor(): void {
  * concurrent calls do not affect each other's observable output.
  * If `fn` rejects, captured logs are discarded and the rejection propagates.
  * Limitations: messages below loglevel's current threshold are never delivered to
- * `methodFactory` (loglevel assigns `noop` directly) and will not be captured; named
- * child loggers created before the first call to this function also bypass capture. */
+ * `methodFactory` (loglevel assigns `noop` directly) and will not be captured; a
+ * named logger created before the interceptor is installed binds to the pre-install
+ * factory and bypasses capture -- call `installCapturedLogsInterceptor` from test
+ * setup, ahead of any logger, to close that creation-order gap (the CLI integration
+ * suite does, so its loggers are captured regardless of creation order). */
 export function withCapturedLogs<T>(
   fn: () => Promise<T>,
   levelFilter?: (level: string) => boolean,
@@ -83,7 +94,7 @@ export function withCapturedLogs<T>(
   fn: () => T | Promise<T>,
   levelFilter?: (level: string) => boolean,
 ): [T, LogEntry[]] | Promise<[T, LogEntry[]]> {
-  ensureInterceptor();
+  installCapturedLogsInterceptor();
   const logs: LogEntry[] = [];
   const entry = {
     filter: levelFilter ?? ((level: string) => level === "WARN"),
