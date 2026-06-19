@@ -59,8 +59,12 @@ export default async function setup({
   );
   return async () => {
     await server.stop();
-    reportDeadAllowlistEntries(sentinelSink);
-    fs.rmSync(sentinelSinkDir, { recursive: true, force: true });
+    try {
+      reportDeadAllowlistEntries(sentinelSink);
+    } finally {
+      // Always reclaim the temp dir, even if the advisory report throws.
+      fs.rmSync(sentinelSinkDir, { recursive: true, force: true });
+    }
   };
 }
 

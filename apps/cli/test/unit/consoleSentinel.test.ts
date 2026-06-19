@@ -149,6 +149,48 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
+  it("rejects a stateful (g/y) regex matcher at construction", () => {
+    // A g/y-flagged regex advances lastIndex across .test() calls, so the same
+    // matcher could accept a line on one evaluation and reject it on the next.
+    expect(
+      () =>
+        new ConsoleSentinel([
+          {
+            id: "stateful",
+            levels: ["warn"],
+            match: /repeating/g,
+            reason: "uses the g flag",
+          },
+        ]),
+    ).toThrowError(/stateful regex flag/);
+    expect(
+      () =>
+        new ConsoleSentinel([
+          {
+            id: "sticky",
+            levels: ["warn"],
+            match: /anchored/y,
+            reason: "uses the y flag",
+          },
+        ]),
+    ).toThrow();
+  });
+
+  it("rejects an id containing a newline at construction", () => {
+    // The id is the line-delimited key in the cross-file dead-entry sink.
+    expect(
+      () =>
+        new ConsoleSentinel([
+          {
+            id: "bad\nid",
+            levels: ["warn"],
+            match: /whatever/,
+            reason: "newline in id",
+          },
+        ]),
+    ).toThrowError(/must not contain a newline/);
+  });
+
   it("preserves pass-through to the wrapped method", () => {
     const seen: string[] = [];
     const fake: ConsoleLike = {

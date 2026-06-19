@@ -1,14 +1,5 @@
 import type { ConsoleAllowEntry, ConsoleLevel } from "../consoleSentinel";
 
-declare module "vitest" {
-  interface ProvidedContext {
-    // Path to the suite-wide sink the per-file sentinel appends matched
-    // allowlist ids to, so globalSetup's teardown can report ids that NO file
-    // matched (dead entries). Provided by the integration globalSetup.
-    consoleSentinelSink: string;
-  }
-}
-
 /**
  * Console levels the integration sentinel gates. We gate all three -- including
  * `log` -- because the value the sentinel adds over loglevel-based capture is

@@ -37,7 +37,9 @@ export interface ConsoleAllowEntry {
   id: string;
   /** Console levels this entry may accept. */
   levels: readonly ConsoleLevel[];
-  /** Accepts the joined message text. Avoid the `g` flag (stateful lastIndex). */
+  /** Accepts the joined message text. Must be a flagless-or-non-stateful regex:
+   * the constructor rejects the `g`/`y` flags, whose `lastIndex` would make
+   * matching depend on evaluation order. */
   match: RegExp | ((message: string) => boolean);
   /** Why this output is intended; shown in review and in the dead-entry report. */
   reason: string;
@@ -70,7 +72,6 @@ export class ConsoleSentinel {
   private readonly allowlist: readonly ConsoleAllowEntry[];
   private readonly gatedLevels: readonly ConsoleLevel[];
   private readonly recorded: RecordedConsoleLine[] = [];
-  private readonly matchedIds = new Set<string>();
   private target: ConsoleLike | null = null;
   private readonly originals = new Map<
     ConsoleLevel,
@@ -81,6 +82,29 @@ export class ConsoleSentinel {
     allowlist: readonly ConsoleAllowEntry[],
     options: { gatedLevels?: readonly ConsoleLevel[] } = {},
   ) {
+    for (const entry of allowlist) {
+      // The id is the line-delimited key in the cross-file dead-entry sink, so a
+      // newline in it would split into phantom ids on read; reject it at the
+      // source rather than corrupt the aggregation silently.
+      if (entry.id.includes("\n")) {
+        throw new Error(
+          `ConsoleAllowEntry id must not contain a newline: ` +
+            JSON.stringify(entry.id),
+        );
+      }
+      // A stateful regex (g/y) advances lastIndex across .test() calls, so the
+      // same matcher could accept a line on one evaluation and reject it on the
+      // next. Make the documented footgun a hard guarantee.
+      if (
+        entry.match instanceof RegExp &&
+        (entry.match.global || entry.match.sticky)
+      ) {
+        throw new Error(
+          `ConsoleAllowEntry "${entry.id}" matcher uses a stateful regex flag ` +
+            `(g/y); use a flagless regex so matching is order-independent`,
+        );
+      }
+    }
     this.allowlist = allowlist;
     this.gatedLevels = options.gatedLevels ?? ALL_LEVELS;
   }
@@ -112,49 +136,53 @@ export class ConsoleSentinel {
     this.target = null;
   }
 
-  // Recompute which allowlist entries matched and which recorded lines no entry
-  // accepts. Every entry that accepts a line is credited (so a line shared by
+  // A pure evaluation of the recorded lines against the allowlist: which lines
+  // no entry accepts (violations) and which entries accepted at least one line
+  // (matched). Every entry that accepts a line is credited (so a line shared by
   // two matchers leaves neither looking dead); a line accepted by none is a
-  // violation.
-  private evaluate(): RecordedConsoleLine[] {
-    this.matchedIds.clear();
+  // violation. Returns fresh values rather than mutating shared state, so
+  // sequencing two public methods cannot leak stale results between them.
+  private evaluate(): {
+    violations: RecordedConsoleLine[];
+    matchedIds: Set<string>;
+  } {
+    const matchedIds = new Set<string>();
     const violations: RecordedConsoleLine[] = [];
     for (const line of this.recorded) {
       let accepted = false;
       for (const entry of this.allowlist) {
         if (!entry.levels.includes(line.level)) continue;
         if (matchEntry(entry, line.message)) {
-          this.matchedIds.add(entry.id);
+          matchedIds.add(entry.id);
           accepted = true;
         }
       }
       if (!accepted) violations.push(line);
     }
-    return violations;
+    return { violations, matchedIds };
   }
 
   /** Recorded lines that no allowlist matcher accepts. */
   violations(): RecordedConsoleLine[] {
-    return this.evaluate();
+    return this.evaluate().violations;
   }
 
   /** Allowlist ids matched by at least one recorded line (for aggregation). */
   matchedAllowlistIds(): string[] {
-    this.evaluate();
-    return [...this.matchedIds];
+    return [...this.evaluate().matchedIds];
   }
 
   /** Allowlist ids no recorded line matched (dead-entry candidates). */
   unusedAllowlistIds(): string[] {
-    this.evaluate();
+    const { matchedIds } = this.evaluate();
     return this.allowlist
-      .filter((entry) => !this.matchedIds.has(entry.id))
+      .filter((entry) => !matchedIds.has(entry.id))
       .map((entry) => entry.id);
   }
 
   /** Throws if any recorded line is un-allowlisted; no-op otherwise. */
   assertClean(): void {
-    const violations = this.evaluate();
+    const { violations } = this.evaluate();
     if (violations.length === 0) return;
     const shown = violations.slice(0, MAX_REPORTED_VIOLATIONS);
     const lines = shown.map((v) => `  [${v.level}] ${v.message}`);
@@ -178,6 +206,8 @@ export class ConsoleSentinel {
  * file-level `afterAll` that flushes a macrotask and the microtask queue
  * attributes such a late line to this file rather than misattributing it to the
  * following test (or leaking it into the next file).
+ *
+ * Node-only: relies on `setImmediate`, which is not in the DOM lib.
  */
 export async function flushPendingConsole(timerMs = 25): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, timerMs));

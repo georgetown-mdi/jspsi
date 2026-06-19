@@ -8,6 +8,15 @@ import {
   SENTINEL_GATED_LEVELS,
 } from "./consoleAllowlist";
 
+declare module "vitest" {
+  interface ProvidedContext {
+    // Path to the suite-wide sink this file's afterAll appends matched allowlist
+    // ids to, so globalSetup's teardown can report ids that NO file matched
+    // (dead entries). Provided by the integration globalSetup.
+    consoleSentinelSink: string;
+  }
+}
+
 // A `setupFiles` entry, so this runs once in EACH integration file's worker
 // (the integration project uses the `forks` pool: one process per file). The
 // sentinel is installed at module load -- before any test or top-level import
@@ -30,8 +39,15 @@ afterAll(async () => {
   try {
     const sink = inject("consoleSentinelSink");
     const matched = sentinel.matchedAllowlistIds();
-    if (sink && matched.length > 0) {
-      fs.appendFileSync(sink, matched.map((id) => `${id}\n`).join(""));
+    if (sink) {
+      // One O_APPEND write per id, each well under PIPE_BUF, so concurrent
+      // teardowns across fork workers cannot interleave bytes within an id. (A
+      // single joined write would only stay atomic while it fit PIPE_BUF.) The
+      // reader splits on newlines and counts only known ids, so a torn line is
+      // harmless regardless.
+      for (const id of matched) {
+        fs.appendFileSync(sink, `${id}\n`);
+      }
     }
   } catch {
     // No sink (e.g. running this file outside the integration globalSetup): the
