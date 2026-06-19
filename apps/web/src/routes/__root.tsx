@@ -78,7 +78,7 @@ function RootComponent() {
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html {...mantineHtmlProps}>
+    <html lang="en" {...mantineHtmlProps}>
       <head>
         <HeadContent />
         <ColorSchemeScript />

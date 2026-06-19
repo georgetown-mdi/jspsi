@@ -35,10 +35,12 @@
 
 /* main only ever receives focus from the skip link (it is tabIndex -1, so it is
    not in the tab order otherwise); give that landing a visible indicator. The
-   offset is negative so the outline sits inside the full-width region rather
-   than overflowing the viewport. */
+   text color is used (not the primary) so the outline clears the 3:1 non-text
+   contrast bar in both color schemes -- the cyan primary is only ~2.8:1 on the
+   light background. The offset is negative so the outline sits inside the
+   full-width region rather than overflowing the viewport. */
 .main:focus {
-  outline: 2px solid var(--mantine-primary-color-filled);
+  outline: 2px solid var(--mantine-color-text);
   outline-offset: -2px;
 }
 
@@ -67,4 +69,9 @@
 
 .skipLink:focus {
   top: var(--mantine-spacing-sm);
+  /* An explicit, sufficiently contrasting focus ring: the link is a raw <a>, so
+     it does not inherit Mantine's component focus styles and would otherwise
+     rely on the UA default alone. */
+  outline: 2px solid var(--mantine-color-text);
+  outline-offset: 2px;
 }

@@ -55,7 +55,9 @@ export function Shell({ children }: { children: ReactNode }) {
       </main>
       <footer className={classes.footer}>
         <Container size="xl">
-          <Text size="xs" c="dimmed">
+          {/* Not c="dimmed": this is a confidentiality note, and the dimmed gray
+              falls below the 4.5:1 text-contrast bar on the light background. */}
+          <Text size="xs">
             Invitations carry a one-time secret. Share them only over a channel
             you trust, and never post them publicly.
           </Text>
