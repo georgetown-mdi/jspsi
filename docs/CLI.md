@@ -101,11 +101,6 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 >   invitation" below). A pre-existing configuration on the online path is still
 >   reported as a conflict and the command aborts; remove it or pass
 >   `--config-file` to proceed.
-> - Online invite does not embed a `connectionEndpoint` in the invitation it
->   prints; the server location is conveyed only by the printed `psilink accept
->   URL ...` hint. An offline acceptor of an online-generated invitation
->   therefore gets a placeholder connection block to fill in, not one seeded from
->   the inviter's endpoint.
 
 ## Offline invitation
 
@@ -151,7 +146,7 @@ After acceptance, both parties run `psilink exchange` at their convenience.
 psilink invite [--accept-timeout=DURATION] [--expires-in DURATION] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
-Similar to [offline invitation](#offline-invitation), this generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it and instructions for the user to forward to their partner by a secure, out-of-band channel. Those instructions include copy/pasteable templates for the invocation of `psilink accept` that reference the shared server. After printing the invitation information, the program connects to the server and waits for the partner to respond.
+Similar to [offline invitation](#offline-invitation), this generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it and instructions for the user to forward to their partner by a secure, out-of-band channel. Those instructions include copy/pasteable templates for the invocation of `psilink accept` that reference the shared server. The invitation it prints also embeds a [credential-free connection endpoint](#invitation-strings) derived from the connection this invite is using -- the public locator only (host/port/path, or the split `inbound_path`/`outbound_path` pair), never credentials -- so an acceptor seeds its `connection` block from it and need only supply its own credentials. After printing the invitation information, the program connects to the server and waits for the partner to respond.
 
 `--expires-in DURATION` overrides the one-hour invitation lifetime exactly as in the [offline invitation](#offline-invitation). When the resulting lifetime is shorter than `--accept-timeout`, the command warns that the token will expire before the wait ends and a later acceptance will be rejected.
 

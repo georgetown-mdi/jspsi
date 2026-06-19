@@ -23,6 +23,7 @@ import {
 } from "../../src/commands/invite";
 import { saveConfig } from "../../src/config";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
+import { connectionFromEndpoint } from "../../src/commands/bootstrap";
 import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
 
 const silentLog = getLogger("invite-test");
@@ -238,6 +239,105 @@ test("validateInvite: online still aborts on a pre-existing config file", async 
       log: silentLog,
     }),
   ).rejects.toThrow(options.configFile);
+});
+
+// --- online invite emits a connection endpoint -------------------------------
+
+test("validateInvite: online sftp emits a credential-free endpoint the acceptor seeds from", async () => {
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("sftp://sftp.example.org:2222/exchanges/drop"),
+      input,
+    },
+    // Credentials supplied via overrides: they reach the live connection but must
+    // never reach the emitted endpoint.
+    options: { ...options, serverUsername: "alice", serverPassword: "hunter2" },
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toEqual({
+    channel: "sftp",
+    host: "sftp.example.org",
+    port: 2222,
+    path: "/exchanges/drop",
+  });
+  // No credential material rode along (the strongest form of the invariant).
+  expect(JSON.stringify(token.connectionEndpoint)).not.toContain("hunter2");
+  expect(JSON.stringify(token.connectionEndpoint)).not.toContain("alice");
+  // The acceptor seeds its connection block from the embedded endpoint, marking
+  // the credential field for replacement (the same path web invitations exercise).
+  const { connection, seeded } = connectionFromEndpoint(
+    token.connectionEndpoint,
+  );
+  expect(seeded).toBe(true);
+  if (connection.channel !== "sftp") throw new Error("expected sftp");
+  expect(connection.server.host).toBe("sftp.example.org");
+  expect(connection.server.path).toBe("/exchanges/drop");
+  expect(connection.server.username).toMatch(/REPLACE_WITH/);
+  expect(connection.server.password).toBeUndefined();
+});
+
+test("validateInvite: online filedrop emits the shared-path endpoint", async () => {
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("file:///mnt/share/drop"), input },
+    options,
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toEqual({
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+  });
+});
+
+test("validateInvite: a split online invite emits the pair verbatim, acceptor mirror-swaps", async () => {
+  // --outbound-path makes the connection split (URL path = inbound, override =
+  // outbound). The endpoint carries the inviter's pair unswapped; the acceptor's
+  // connectionFromEndpoint lands the inviter's outbound on the acceptor's inbound,
+  // making the two parties mirror images (item 202418344's consumer, end-to-end).
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/inviter-in"), input },
+    options: { ...options, outboundPath: "/inviter-out", retainFiles: true },
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  if (token.connectionEndpoint?.channel !== "sftp")
+    throw new Error("expected sftp endpoint");
+  // Verbatim at emit: no pre-swap.
+  expect(token.connectionEndpoint.inboundPath).toBe("/inviter-in");
+  expect(token.connectionEndpoint.outboundPath).toBe("/inviter-out");
+  // Swapped at the acceptor.
+  const { connection } = connectionFromEndpoint(token.connectionEndpoint);
+  if (connection.channel !== "sftp") throw new Error("expected sftp");
+  expect(connection.server.inboundPath).toBe("/inviter-out");
+  expect(connection.server.outboundPath).toBe("/inviter-in");
+});
+
+test("validateInvite: an offline invitation carries no endpoint (field stays optional)", async () => {
+  // Only the online producer emits an endpoint; an offline invitation omits it
+  // and still encodes/decodes cleanly, so no regression for tokens minted
+  // elsewhere (the field is optional).
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-noendpoint-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toBeUndefined();
 });
 
 // --- validateInvite: offline, config as the linkage-terms source -------------

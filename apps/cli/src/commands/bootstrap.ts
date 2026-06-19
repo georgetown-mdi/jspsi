@@ -529,6 +529,86 @@ export function connectionFromEndpoint(
   }
 }
 
+// --- connection -> endpoint (producer) --------------------------------------
+
+/**
+ * Build the credential-free {@link ConnectionEndpoint} an online invitation
+ * carries, from the connection the inviter is actually using (the
+ * {@link connectionFromURL} result, with any `--server-*`/`--outbound-path`
+ * overrides already applied). This is the producer inverse of
+ * {@link connectionFromEndpoint}: it copies only the public locator
+ * (host/port/path, or the split inbound/outbound pair) and NEVER a credential --
+ * the endpoint type has no field for a password, private key, key-file path, or
+ * username, and the strict endpoint schema rejects one besides, so credential
+ * material cannot ride along by construction (the security invariant this task
+ * exists to honor on the producer side).
+ *
+ * The split inbound/outbound pair is emitted VERBATIM -- the inviter's own
+ * inbound stays inbound, its outbound stays outbound. The mirror swap that makes
+ * the two parties images of each other lives solely at the accept-side
+ * {@link connectionFromEndpoint}; swapping here too would double-swap and undo
+ * it. A shared (single-`path`) connection emits a single `path` as before.
+ *
+ * Scoped to the file-sync channels by the {@link RunnableConnectionConfig}
+ * parameter: a webrtc locator is the follow-up's producer (item 202482411,
+ * blocked on the CLI gaining a webrtc transport), so webrtc never reaches here.
+ *
+ * `port` is carried only when it is a reachable 1-65535 value. Port 0 is the one
+ * port the connection schema permits but the endpoint schema rejects (it is an
+ * OS-assigned ephemeral port, never a connect target), so it is dropped rather
+ * than emitted as a locator the partner could not dial -- and rather than
+ * failing the whole invite when the endpoint is encoded. Mirrors
+ * `webrtcEndpointFromLocation`'s port guard in the web inviter.
+ *
+ * @internal exported for testing
+ */
+export function endpointFromConnection(
+  connection: RunnableConnectionConfig,
+): ConnectionEndpoint {
+  // Keep a port only when it is a reachable 1-65535 value the endpoint schema
+  // accepts; drop port 0 (see the doc comment) so encoding never fails on it.
+  const reachablePort = (port: number | undefined): number | undefined =>
+    port !== undefined && Number.isInteger(port) && port >= 1 && port <= 65535
+      ? port
+      : undefined;
+
+  if (connection.channel === "sftp") {
+    const { server } = connection;
+    if (server.inboundPath !== undefined)
+      // Split-directory connection: emit the inviter's pair verbatim (the
+      // acceptor mirror-swaps it at connectionFromEndpoint; do not pre-swap).
+      return {
+        channel: "sftp",
+        host: server.host,
+        port: reachablePort(server.port),
+        inboundPath: server.inboundPath,
+        outboundPath: server.outboundPath,
+      };
+    return {
+      channel: "sftp",
+      host: server.host,
+      port: reachablePort(server.port),
+      // Shared mode: the inviter's remote working directory (omitted for a
+      // bare-host connection, which uses the server's default directory).
+      path: server.path,
+    };
+  }
+
+  // filedrop: the locator is the directory only -- no host/port/credentials.
+  if (connection.inboundPath !== undefined)
+    // Split-directory connection: emit the pair verbatim (swapped by the
+    // acceptor, as in the sftp branch above).
+    return {
+      channel: "filedrop",
+      inboundPath: connection.inboundPath,
+      outboundPath: connection.outboundPath,
+    };
+  return {
+    channel: "filedrop",
+    path: connection.path,
+  };
+}
+
 // --- shared secret --------------------------------------------------------------
 
 // Secret generation lives in @psilink/core (one definition shared with the web

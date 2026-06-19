@@ -23,6 +23,7 @@ import {
   connectionFromEndpoint,
   connectionFromURL,
   diffConnectionAgainstTarget,
+  endpointFromConnection,
   generateSharedSecret,
   loadInputRows,
   logOnlineBootstrapOutcome,
@@ -805,6 +806,111 @@ test("connectionFromEndpoint: the split swap is applied exactly once (no double-
   if (connection.channel !== "filedrop") throw new Error("expected filedrop");
   expect(connection.inboundPath).toBe(endpoint.outboundPath);
   expect(connection.inboundPath).not.toBe(endpoint.inboundPath);
+});
+
+// --- endpointFromConnection --------------------------------------------------
+
+test("endpointFromConnection: an sftp connection emits the host/port/path locator", () => {
+  const connection = connectionFromURL(
+    new URL("sftp://sftp.example.org:2222/exchanges/drop"),
+    {},
+  );
+  const endpoint = endpointFromConnection(connection);
+  expect(endpoint).toEqual({
+    channel: "sftp",
+    host: "sftp.example.org",
+    port: 2222,
+    path: "/exchanges/drop",
+  });
+});
+
+test("endpointFromConnection: a bare-host sftp connection emits no path", () => {
+  // A bare host (no remote path) leaves `path` unset rather than encoding "" or
+  // "/"; the endpoint schema requires a non-empty path when present.
+  const endpoint = endpointFromConnection(
+    connectionFromURL(new URL("sftp://sftp.example.org"), {}),
+  );
+  expect(endpoint).toEqual({ channel: "sftp", host: "sftp.example.org" });
+});
+
+test("endpointFromConnection: no credential rides along on the emitted endpoint", () => {
+  // The inviter's connection carries credentials (username/password/private key);
+  // the endpoint must carry only the public locator. This is the producer side of
+  // the invitation's no-credentials invariant.
+  const connection = connectionFromURL(new URL("sftp://host:2200/drop"), {
+    serverUsername: "alice",
+    serverPassword: "hunter2",
+    serverPrivateKey: "@/home/alice/.ssh/id_ed25519",
+  });
+  const endpoint = endpointFromConnection(connection);
+  expect(Object.keys(endpoint).sort()).toEqual([
+    "channel",
+    "host",
+    "path",
+    "port",
+  ]);
+  // Strongest leak check: none of the secret values appear anywhere in the
+  // serialized endpoint (the path the invitation actually encodes).
+  const serialized = JSON.stringify(endpoint);
+  expect(serialized).not.toContain("alice");
+  expect(serialized).not.toContain("hunter2");
+  expect(serialized).not.toContain("id_ed25519");
+});
+
+test("endpointFromConnection: a filedrop connection emits the shared path locator", () => {
+  const endpoint = endpointFromConnection(
+    connectionFromURL(new URL("file:///mnt/share/drop"), {}),
+  );
+  expect(endpoint).toEqual({ channel: "filedrop", path: "/mnt/share/drop" });
+});
+
+test("endpointFromConnection: a port the endpoint schema rejects (0) is dropped", () => {
+  // The connection schema permits port 0 (OS-assigned ephemeral); the endpoint
+  // schema rejects it as an unreachable connect target, so it is omitted rather
+  // than emitted as a locator the partner could not dial.
+  const connection = connectionFromURL(new URL("sftp://host:0/drop"), {});
+  if (connection.channel !== "sftp") throw new Error("expected sftp");
+  expect(connection.server.port).toBe(0);
+  const endpoint = endpointFromConnection(connection);
+  if (endpoint.channel !== "sftp") throw new Error("expected sftp endpoint");
+  expect(endpoint.port).toBeUndefined();
+});
+
+test.each(["sftp", "filedrop"] as const)(
+  "endpointFromConnection: a split %s connection emits the inbound/outbound pair VERBATIM",
+  (channel) => {
+    // --outbound-path splits the URL/positional path (inbound) from a separate
+    // outbound directory; the endpoint carries the inviter's own pair unswapped,
+    // since the mirror swap is the acceptor's job (connectionFromEndpoint).
+    const url =
+      channel === "sftp"
+        ? new URL("sftp://host/inviter-in")
+        : new URL("file:///inviter-in");
+    const connection = connectionFromURL(url, {
+      outboundPath: "/inviter-out",
+      retainFiles: true,
+    });
+    const endpoint = endpointFromConnection(connection);
+    if (endpoint.channel !== channel) throw new Error(`expected ${channel}`);
+    expect(endpoint.inboundPath).toBe("/inviter-in");
+    expect(endpoint.outboundPath).toBe("/inviter-out");
+    expect(endpoint.path).toBeUndefined();
+  },
+);
+
+test("endpointFromConnection -> connectionFromEndpoint round-trips a split pair mirror-swapped", () => {
+  // End-to-end producer -> consumer: the inviter emits its pair verbatim, and the
+  // acceptor's single swap site lands the inviter's outbound on the acceptor's
+  // inbound (item 202418344's dormant consumer, now exercised by the producer).
+  const connection = connectionFromURL(new URL("file:///inviter-in"), {
+    outboundPath: "/inviter-out",
+    retainFiles: true,
+  });
+  const endpoint = endpointFromConnection(connection);
+  const { connection: seeded } = connectionFromEndpoint(endpoint);
+  if (seeded.channel !== "filedrop") throw new Error("expected filedrop");
+  expect(seeded.inboundPath).toBe("/inviter-out");
+  expect(seeded.outboundPath).toBe("/inviter-in");
 });
 
 // --- generateSharedSecret -------------------------------------------------------
