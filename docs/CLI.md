@@ -185,6 +185,8 @@ psilink exchange INPUT_FILE [OUTPUT_FILE]
 
 The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful authentication handshake, before the data exchange begins; if the data exchange subsequently fails, both parties already hold the rotated token and can retry without re-inviting. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`.
 
+Before any connection, the `INPUT_FILE`'s columns are checked against the configuration's linkage terms, the same satisfiability pre-flight `accept` applies. If the CSV can satisfy no key -- it cannot produce the fields any key requires -- the run stops with a usage error (exit 64) that names the unsatisfied fields, rather than completing an exchange whose empty result is indistinguishable from a legitimate non-match; if it satisfies some but not all keys, a warning names the unsatisfied fields and the exchange proceeds on the keys that remain. This guards a recurring run whose CSV has drifted from the terms the configuration committed to -- a file swapped since setup, or one never checked at an offline accept. Any explicit column-standardization remapping in the configuration is honored, so a field a remap produces is not flagged.
+
 The `sftp` and `filedrop` channels are currently supported; `webrtc` is not yet available in the CLI. For file-drop exchanges, the `psilink.yaml` configuration uses `channel: filedrop` and `path` in place of `channel: sftp` and `server`:
 
 ```yaml

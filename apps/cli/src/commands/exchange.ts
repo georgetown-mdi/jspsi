@@ -44,6 +44,7 @@ import {
   warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
 } from "./bootstrap";
+import { checkLinkageSatisfiability } from "./linkagePreflight";
 import {
   runProtocol,
   type AuthPersist,
@@ -529,7 +530,8 @@ export function tokenExpiringAdvisory(
 
 // --- Data preparation --------------------------------------------------------
 
-async function prepareDataset(
+/** @internal exported for testing */
+export async function prepareDataset(
   exchangeDataSpec: ExchangeDataSpec,
   identity: string,
   input: string,
@@ -540,11 +542,38 @@ async function prepareDataset(
     openInputSource(input, { allowStdin: true }),
   );
   const rawRows = csvResult.data as Array<Record<string, string>>;
+  const columns = csvResult.meta.fields ?? [];
+
+  // Pre-flight this run's CSV against the committed linkage terms before any
+  // exchange work, the same satisfiability gate accept applies at accept time.
+  // The recurring `exchange` path is otherwise unguarded: prepared.warnings never
+  // covers the adopt-the-inviter's-terms case (prepareForExchange warns only when
+  // an explicit standardization spec is supplied), so without this a run whose CSV
+  // no longer satisfies the agreed terms -- a swapped CSV, or one never checked at
+  // an offline accept -- would proceed to a silent empty result that is
+  // byte-indistinguishable from a real empty intersection. Only the config's
+  // explicit linkageTerms are gated: when absent, prepareForExchange derives
+  // default terms from this CSV's own columns, which it satisfies by construction.
+  // The config's standardization is fed in so an explicit column remap that
+  // satisfies a field is not mis-flagged (accept passes none; see its comment).
+  if (exchangeDataSpec.linkageTerms !== undefined)
+    checkLinkageSatisfiability(
+      columns,
+      exchangeDataSpec.linkageTerms,
+      log,
+      {
+        source: "configuration",
+        blockRemedy:
+          "or re-establish the exchange with linkage terms the CSV satisfies.",
+      },
+      exchangeDataSpec.standardization,
+    );
+
   const prepared = prepareForExchange(
     exchangeDataSpec,
     identity,
     rawRows,
-    csvResult.meta.fields ?? [],
+    columns,
   );
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);

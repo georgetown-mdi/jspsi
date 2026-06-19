@@ -6,12 +6,14 @@ import yargs, { type Arguments } from "yargs";
 import YAML from "yaml";
 import { UsageError } from "@psilink/core";
 import { getLogger } from "@psilink/core";
+import type { LinkageTerms } from "@psilink/core";
 import { saveKeyFile } from "../../src/keyFile";
 import { runProtocol } from "../../src/protocol";
 import {
   builder,
   handler,
   loadConfig,
+  prepareDataset,
   warnAndStripInjectedAuthFields,
   shouldWarnTokenExpiring,
   tokenExpiringAdvisory,
@@ -795,4 +797,103 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
   } finally {
     exitSpy.mockRestore();
   }
+});
+
+// --- prepareDataset: linkage satisfiability pre-flight -----------------------
+// The recurring `exchange` path runs a committed config whose CSV is decoupled
+// from any CSV seen at accept time, so prepareDataset gates the run against the
+// config's linkage terms before preparing the dataset: block when the CSV can
+// satisfy no key, warn-and-proceed when it satisfies only some. prepareForExchange
+// stays mocked (see the top-of-file mock), so these assert the gate, not the prep.
+
+// ssn key only: a CSV with no ssn-typed column satisfies nothing.
+const ssnOnlyTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Test Party",
+  date: "2025-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: false },
+  deduplicate: false,
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+};
+
+// An ssn key plus a last-name+dob key: a CSV with only last_name+dob satisfies
+// the latter but not the former.
+const ssnAndNameDobTerms: LinkageTerms = {
+  ...ssnOnlyTerms,
+  linkageFields: [
+    { name: "ssn", type: "ssn" },
+    { name: "last_name", type: "lastName" },
+    { name: "dob", type: "dateOfBirth" },
+  ],
+  linkageKeys: [
+    { name: "SSN", elements: [{ field: "ssn" }] },
+    { name: "NAME_DOB", elements: [{ field: "last_name" }, { field: "dob" }] },
+  ],
+};
+
+function writeInput(contents: string): string {
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, contents);
+  return input;
+}
+
+test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
+  // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
+  // run must stop with a usage error rather than reach a silent empty exchange.
+  const input = writeInput("first_name\nAda\n");
+  const err = await prepareDataset(
+    { linkageTerms: ssnOnlyTerms },
+    "Test Party",
+    input,
+  ).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(
+    /cannot satisfy any of the configuration's linkage keys/,
+  );
+  expect((err as Error).message).toContain("ssn (ssn)");
+});
+
+test("prepareDataset: warns naming the unsatisfied field and proceeds when only some keys are satisfiable", async () => {
+  // last_name+dob satisfy the NAME_DOB key but not the SSN key, so prepareDataset
+  // warns (naming ssn) and proceeds to prepareForExchange rather than blocking.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const prepared = await prepareDataset(
+    { linkageTerms: ssnAndNameDobTerms },
+    "Test Party",
+    input,
+  );
+  expect(prepared).toBeDefined();
+  expect(
+    mockState.warnings.some(
+      (m) =>
+        m.includes(
+          "cannot satisfy all of the configuration's linkage fields",
+        ) && m.includes("ssn (ssn)"),
+    ),
+  ).toBe(true);
+});
+
+test("prepareDataset: an explicit standardization remap satisfies a field the column type alone would not", async () => {
+  // ssn_source does not infer to the ssn type, so without standardization the ssn
+  // key is unsatisfiable and the run blocks...
+  const input = writeInput("ssn_source\n123456789\n");
+  await expect(
+    prepareDataset({ linkageTerms: ssnOnlyTerms }, "Test Party", input),
+  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+
+  // ...but a remap binding ssn <- ssn_source makes the field producible, so the
+  // same CSV proceeds with no block and no warning. This is the exchange-path
+  // wrinkle accept does not have: a committed config can carry a column remap.
+  const prepared = await prepareDataset(
+    {
+      linkageTerms: ssnOnlyTerms,
+      standardization: [{ output: "ssn", input: "ssn_source" }],
+    },
+    "Test Party",
+    input,
+  );
+  expect(prepared).toBeDefined();
+  expect(mockState.warnings).toHaveLength(0);
 });
