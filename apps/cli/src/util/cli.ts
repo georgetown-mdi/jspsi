@@ -112,6 +112,12 @@ export function durationFlagSeconds(
  * message instead of a raw schema-error dump. `NaN` (the non-numeric case) is a
  * `number`, so it falls to the `isSafeInteger` check; the `typeof` guard is
  * purely defensive, for a future caller (or a test) that passes a non-number.
+ *
+ * Route only non-secret count flags through this helper: a rejected value is
+ * echoed verbatim in the usage error (`got <value>`), and
+ * {@link sanitizeErrorForDisplay} redacts PEM key blocks, not a bare token, so a
+ * secret-valued flag would leak into stderr and any log. The sole caller today
+ * (`--max-reconnect-attempts`) is a non-secret tuning count.
  */
 export function nonNegativeIntFlag(
   argv: Arguments,
