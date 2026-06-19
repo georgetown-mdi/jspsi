@@ -353,13 +353,21 @@ export function Exchange(config: ExchangeConfig) {
                 "tampered with. Do not retry; start over with a fresh invitation.",
             });
           } else {
+            // Generic, retryable transport/exchange failure. The raw error reads
+            // as an internal/developer message to an end user -- it can embed
+            // partner-/server-controlled bytes and the `[redacted-peer-id]`
+            // rendezvous-id placeholder, which looks like a bug in an alert -- so
+            // the alert uses a fixed, friendly message instead of the raw text. A
+            // transport drop is generally retryable (unlike the security category
+            // above), so the guidance invites another try. The detailed,
+            // id-redacted error stays in the dev-gated console.error above for
+            // diagnosis.
             setErrorAlert({
               title: "Exchange failed",
-              // A failed exchange can surface a raw transport error whose message
-              // or cause chain embeds partner-/server-controlled bytes (a hostile
-              // message-file path); route it through the display-boundary seam so
-              // the alert cannot render control/ANSI/deceptive-Unicode characters.
-              message: sanitizeErrorForDisplay(error),
+              message:
+                "The exchange could not be completed. This is usually a " +
+                "temporary connection problem rather than an issue with your " +
+                "data. Start over with a fresh invitation to try again.",
             });
           }
         },
