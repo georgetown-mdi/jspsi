@@ -51,7 +51,7 @@ import {
   prepareForOnlineExchange,
   runOnlineBootstrap,
   runOrExit,
-  warnOutboundPathIgnoredOffline,
+  warnServerOverridesIgnoredOffline,
   type CommonBootstrapOptions,
   type ResolvedDataSpec,
   type RunnableConnectionConfig,
@@ -342,10 +342,11 @@ export async function validateAccept(params: {
     };
   }
 
-  // Offline: --outbound-path cannot take effect (the connection block is seeded
-  // from the invitation endpoint or a placeholder, not built from a URL), so
-  // warn rather than drop a deliberately-passed flag silently.
-  warnOutboundPathIgnoredOffline(options.outboundPath, log);
+  // Offline: the server-block overrides (--server-* and --outbound-path) cannot
+  // take effect (the connection block is seeded from the invitation endpoint or a
+  // placeholder, not built from a URL), so warn rather than drop a
+  // deliberately-passed flag silently.
+  warnServerOverridesIgnoredOffline(options, log);
 
   // Offline.
   const reuseExistingConfig = reconcileAcceptConfig({

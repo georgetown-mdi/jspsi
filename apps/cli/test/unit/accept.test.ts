@@ -323,6 +323,86 @@ test("validateAccept: offline warns but proceeds when the CSV satisfies only som
   }
 });
 
+test("validateAccept: offline warns that a --server-* override is ignored", async () => {
+  // The offline path builds the connection block from connectionFromEndpoint (a
+  // placeholder here, since sampleToken carries no endpoint; or an endpoint seed
+  // when one is present -- the warning reads only `options`, so it fires the same
+  // way either way), so a --server-* override cannot take effect; it must be
+  // surfaced rather than silently dropped.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const log = getLogger("accept-offline-override-warn");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions({ serverUsername: "alice" }),
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].includes("--server-username") &&
+          c[0].includes("no effect on an offline invite/accept"),
+      ),
+    ).toBe(true);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: online does not warn about a --server-* override (it is applied)", async () => {
+  // The online path builds the connection from the URL through
+  // applyConnectionOverrides, so the override takes effect and no
+  // ignored-override warning is emitted.
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-accept-online-override-"),
+  );
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  const log = getLogger("accept-online-override-nowarn");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved: {
+        mode: "online",
+        url: new URL("sftp://host/drop"),
+        invitation: encoded,
+        input,
+      },
+      options: testOptions({
+        configFile: path.join(dir, "psilink.yaml"),
+        keyFile: path.join(dir, ".psilink.key"),
+        serverUsername: "alice",
+      }),
+      log,
+    });
+    expect(ready.mode).toBe("online");
+    if (ready.mode !== "online") return;
+    if (ready.connection.channel !== "sftp") throw new Error("expected sftp");
+    expect(ready.connection.server.username).toBe("alice");
+    expect(
+      warnSpy.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].includes("no effect on an offline invite/accept"),
+      ),
+    ).toBe(false);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- reconciling a pre-existing config ---------------------------------------
 
 /** Write a config whose linkage terms agree with the invitation's by default

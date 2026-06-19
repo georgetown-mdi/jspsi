@@ -33,7 +33,7 @@ import {
   parseCommonBootstrapArgs,
   runOnlineBootstrap,
   runOrExit,
-  warnOutboundPathIgnoredOffline,
+  warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
@@ -317,18 +317,49 @@ test("diffConnectionAgainstTarget: a split config against a shared target names 
   expect(conflicts[0].incoming).toBe("/mnt/shared");
 });
 
-test("warnOutboundPathIgnoredOffline: warns when --outbound-path is set", () => {
-  const warnings: string[] = [];
-  warnOutboundPathIgnoredOffline("/drop/out", {
-    warn: (m) => warnings.push(m),
+// Each server-block override flag, paired with the option field that carries it,
+// so the parametrized test below proves every one is named when set offline.
+const OFFLINE_IGNORED_OVERRIDES: ReadonlyArray<{
+  flag: string;
+  option: Parameters<typeof warnServerOverridesIgnoredOffline>[0];
+}> = [
+  { flag: "--server-username", option: { serverUsername: "alice" } },
+  { flag: "--server-password", option: { serverPassword: "hunter2" } },
+  { flag: "--server-private-key", option: { serverPrivateKey: "@key.pem" } },
+  { flag: "--server-port", option: { serverPort: 2222 } },
+  { flag: "--outbound-path", option: { outboundPath: "/drop/out" } },
+];
+
+for (const { flag, option } of OFFLINE_IGNORED_OVERRIDES)
+  test(`warnServerOverridesIgnoredOffline: warns naming ${flag} when set`, () => {
+    const warnings: string[] = [];
+    warnServerOverridesIgnoredOffline(option, {
+      warn: (m) => warnings.push(m),
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(flag);
+    expect(warnings[0]).toContain("no effect on an offline invite/accept");
   });
+
+test("warnServerOverridesIgnoredOffline: one warning names every set flag", () => {
+  const warnings: string[] = [];
+  warnServerOverridesIgnoredOffline(
+    { serverUsername: "alice", serverPort: 2222, outboundPath: "/drop/out" },
+    { warn: (m) => warnings.push(m) },
+  );
+  // A single warning rather than one per flag, so the operator sees the whole
+  // ignored set at once.
   expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("--server-username");
+  expect(warnings[0]).toContain("--server-port");
   expect(warnings[0]).toContain("--outbound-path");
+  // An unset flag is not named.
+  expect(warnings[0]).not.toContain("--server-password");
 });
 
-test("warnOutboundPathIgnoredOffline: stays silent when --outbound-path is unset", () => {
+test("warnServerOverridesIgnoredOffline: stays silent when no override is set", () => {
   const warnings: string[] = [];
-  warnOutboundPathIgnoredOffline(undefined, { warn: (m) => warnings.push(m) });
+  warnServerOverridesIgnoredOffline({}, { warn: (m) => warnings.push(m) });
   expect(warnings).toEqual([]);
 });
 
