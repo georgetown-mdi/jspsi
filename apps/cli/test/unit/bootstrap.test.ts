@@ -5,7 +5,12 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
-import { getLogger, SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
+import {
+  getLogger,
+  safeParseConnectionConfig,
+  SHARED_SECRET_REGEX,
+  UsageError,
+} from "@psilink/core";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
@@ -701,6 +706,105 @@ test("connectionFromEndpoint: a webrtc endpoint seeds the signaling locator", ()
   if (connection.channel !== "webrtc") return;
   expect(connection.server.host).toBe("peer.example.org");
   expect(connection.server.path).toBe("/psi");
+});
+
+test("connectionFromEndpoint: a split sftp endpoint mirror-swaps the inbound/outbound pair", () => {
+  // The endpoint carries the INVITER's own pair; the acceptor reads where the
+  // inviter writes (inviter outbound -> acceptor inbound) and vice versa, so the
+  // partners start as mirror images.
+  const endpoint: ConnectionEndpoint = {
+    channel: "sftp",
+    host: "sftp.example.org",
+    port: 2222,
+    inboundPath: "/exchange/inviter-in",
+    outboundPath: "/exchange/inviter-out",
+  };
+  const { connection, seeded } = connectionFromEndpoint(endpoint);
+  expect(seeded).toBe(true);
+  expect(connection.channel).toBe("sftp");
+  if (connection.channel !== "sftp") return;
+  expect(connection.server.host).toBe("sftp.example.org");
+  expect(connection.server.port).toBe(2222);
+  expect(connection.server.inboundPath).toBe("/exchange/inviter-out");
+  expect(connection.server.outboundPath).toBe("/exchange/inviter-in");
+  // The single shared `path` form is not used in split mode.
+  expect(connection.server.path).toBeUndefined();
+  expect(connection.server.username).toMatch(/REPLACE_WITH/);
+  // Split mode requires retain mode (which implies lockless + timestamped names),
+  // seeded so the written config is a runnable starting point.
+  expect(connection.options?.retainFiles).toBe(true);
+  expect(connection.options?.locklessRendezvous).toBe(true);
+  expect(connection.options?.timestampInFilename).toBe(true);
+});
+
+test("connectionFromEndpoint: a split filedrop endpoint mirror-swaps the inbound/outbound pair", () => {
+  const endpoint: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/mnt/share/from-inviter",
+    outboundPath: "/mnt/share/to-inviter",
+  };
+  const { connection, seeded } = connectionFromEndpoint(endpoint);
+  expect(seeded).toBe(true);
+  expect(connection.channel).toBe("filedrop");
+  if (connection.channel !== "filedrop") return;
+  expect(connection.inboundPath).toBe("/mnt/share/to-inviter");
+  expect(connection.outboundPath).toBe("/mnt/share/from-inviter");
+  expect(connection.path).toBeUndefined();
+  expect(connection.options?.retainFiles).toBe(true);
+  expect(connection.options?.locklessRendezvous).toBe(true);
+  expect(connection.options?.timestampInFilename).toBe(true);
+});
+
+test.each(["sftp", "filedrop"] as const)(
+  "connectionFromEndpoint: the swapped %s split config validates against the connection schema",
+  (channel) => {
+    // The seeded split config must be a coherent ConnectionConfig the operator
+    // can run after filling credentials -- in particular the retain-mode trio
+    // makes the split-directory requirement pass. Filling the sftp credential
+    // placeholder is the only edit a runnable config still needs.
+    const endpoint: ConnectionEndpoint =
+      channel === "sftp"
+        ? {
+            channel: "sftp",
+            host: "sftp.example.org",
+            inboundPath: "/exchange/in",
+            outboundPath: "/exchange/out",
+          }
+        : {
+            channel: "filedrop",
+            inboundPath: "/mnt/share/in",
+            outboundPath: "/mnt/share/out",
+          };
+    const { connection } = connectionFromEndpoint(endpoint);
+    const parsed = safeParseConnectionConfig(connection);
+    expect(parsed.success).toBe(true);
+  },
+);
+
+test("connectionFromEndpoint: throws on a filedrop endpoint naming no directory", () => {
+  // The endpoint schema forbids a filedrop endpoint with neither a path nor a
+  // split pair, but `path` is optional in the type, so a caller that bypasses
+  // decode can construct one. The guard fails clearly at the swap site rather
+  // than letting an undefined path surface as an opaque downstream schema error.
+  expect(() => connectionFromEndpoint({ channel: "filedrop" })).toThrow(
+    /neither a path nor a split/,
+  );
+});
+
+test("connectionFromEndpoint: the split swap is applied exactly once (no double-swap)", () => {
+  // A double application would land the inviter's inbound back on the acceptor's
+  // inbound. Asserting the acceptor's inbound is the inviter's OUTBOUND proves a
+  // single swap; the offline invite path passes `undefined` to this same
+  // function, so there is no second swap site.
+  const endpoint: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: "/inviter-in",
+    outboundPath: "/inviter-out",
+  };
+  const { connection } = connectionFromEndpoint(endpoint);
+  if (connection.channel !== "filedrop") throw new Error("expected filedrop");
+  expect(connection.inboundPath).toBe(endpoint.outboundPath);
+  expect(connection.inboundPath).not.toBe(endpoint.inboundPath);
 });
 
 // --- generateSharedSecret -------------------------------------------------------

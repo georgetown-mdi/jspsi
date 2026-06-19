@@ -603,6 +603,111 @@ test.each([
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 
+// --- Split-directory endpoint ------------------------------------------------
+
+// A split sftp/filedrop endpoint carries the inviter's own inbound/outbound pair
+// (the acceptor mirror-swaps it at connectionFromEndpoint, not here), so the
+// token round-trips the pair verbatim -- the token stays a faithful record of
+// the inviter's config. The directory-mode refines reject a half pair, both
+// forms at once, or (filedrop) no directory at all.
+
+const splitRoundTripCases: { name: string; endpoint: ConnectionEndpoint }[] = [
+  {
+    name: "sftp",
+    endpoint: {
+      channel: "sftp",
+      host: "sftp.example",
+      port: 2222,
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+    },
+  },
+  {
+    name: "filedrop",
+    endpoint: {
+      channel: "filedrop",
+      inboundPath: "/mnt/share/from-partner",
+      outboundPath: "/mnt/share/to-partner",
+    },
+  },
+];
+
+test.each(splitRoundTripCases)(
+  "round-trips a split-directory $name endpoint verbatim (no swap at the wire)",
+  async ({ endpoint }) => {
+    const decoded = await decodeInvitation(
+      await encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
+    );
+    expect(decoded.connectionEndpoint).toEqual(endpoint);
+  },
+);
+
+test.each([
+  {
+    name: "an sftp endpoint with both a path and a split pair",
+    bad: {
+      channel: "sftp",
+      host: "h",
+      path: "/shared",
+      inboundPath: "/in",
+      outboundPath: "/out",
+    },
+  },
+  {
+    name: "a filedrop endpoint with both a path and a split pair",
+    bad: {
+      channel: "filedrop",
+      path: "/shared",
+      inboundPath: "/in",
+      outboundPath: "/out",
+    },
+  },
+  {
+    name: "an sftp endpoint with only inbound_path (a half pair)",
+    bad: { channel: "sftp", host: "h", inboundPath: "/in" },
+  },
+  {
+    name: "an sftp endpoint with only outbound_path (a half pair)",
+    bad: { channel: "sftp", host: "h", outboundPath: "/out" },
+  },
+  {
+    name: "a filedrop endpoint with only inbound_path (a half pair)",
+    bad: { channel: "filedrop", inboundPath: "/in" },
+  },
+  {
+    name: "a filedrop endpoint with only outbound_path (a half pair)",
+    bad: { channel: "filedrop", outboundPath: "/out" },
+  },
+  {
+    name: "an sftp endpoint whose split halves are identical",
+    bad: { channel: "sftp", host: "h", inboundPath: "/x", outboundPath: "/x" },
+  },
+  {
+    name: "a filedrop endpoint whose split halves are identical",
+    bad: { channel: "filedrop", inboundPath: "/x", outboundPath: "/x" },
+  },
+  {
+    // Distinctness uses the same pathsResolveToSameDir rule as connection.ts, so
+    // halves that differ only by a trailing slash resolve to one directory and
+    // are rejected -- the swap would otherwise hand the acceptor an equal pair.
+    name: "a filedrop endpoint whose split halves differ only by a trailing slash",
+    bad: { channel: "filedrop", inboundPath: "/x", outboundPath: "/x/" },
+  },
+])("rejects $name", async ({ bad }) => {
+  const encoded = await encodeRaw({ ...baseToken, connectionEndpoint: bad });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
+test("encodeInvitation also rejects a malformed split endpoint (half pair)", async () => {
+  // Symmetry with the decode-path rejections above: encodeInvitation validates
+  // the token before serializing, so an inviter cannot mint a half-pair endpoint.
+  const token = {
+    ...baseToken,
+    connectionEndpoint: { channel: "filedrop", inboundPath: "/in" },
+  } as unknown as InvitationToken;
+  await expect(encodeInvitation(token)).rejects.toThrow(ZodError);
+});
+
 test("strips an unknown top-level field rather than embedding it", async () => {
   // encodeInvitation serializes the parse() result, so a field a caller adds by
   // bypassing the types is not carried onto the wire. decode would re-strip, so

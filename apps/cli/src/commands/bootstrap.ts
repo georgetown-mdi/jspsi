@@ -21,6 +21,7 @@ import type {
   ExchangeSpec,
   ExchangeDataSpec,
   FileDropConnectionConfig,
+  FileSyncOptions,
   LinkageTerms,
   PreparedExchange,
   SFTPConnectionConfig,
@@ -80,6 +81,20 @@ export type RunnableConnectionConfig = Extract<
 // before editing them. The string is intentionally not a valid hostname.
 const PLACEHOLDER_HOST = "REPLACE_WITH_SFTP_HOST";
 const PLACEHOLDER_USERNAME = "REPLACE_WITH_SSH_USERNAME";
+
+// Options seeded onto a connection built from a split-directory endpoint. A
+// split configuration requires retain mode, which in turn requires lockless
+// rendezvous and timestamped filenames (enforced by core's ConnectionConfig
+// schema). An inviter only holds a split config while running retain mode, and
+// retain mode is a bilateral setting, so an acceptor mirrored from a split
+// endpoint needs the same trio. Seeding it makes the written connection block a
+// runnable split-exchange starting point rather than one the operator must
+// remember to complete before `psilink exchange` would validate.
+const SPLIT_SEED_OPTIONS: FileSyncOptions = {
+  retainFiles: true,
+  locklessRendezvous: true,
+  timestampInFilename: true,
+};
 
 // Default time the inviter waits, from printing the invitation to receiving the
 // partner's acceptance, before giving up. 15 minutes, per docs/SECURITY_DESIGN.md.
@@ -410,6 +425,18 @@ export interface SeededConnection {
  * The endpoint's `path` is the inviter's own (for `filedrop`, possibly a mount
  * the acceptor must remap); it is written verbatim for the user to review.
  *
+ * Split-directory endpoints (sftp/filedrop carrying an inbound/outbound pair) are
+ * mirror-swapped here -- the inviter's outbound becomes this acceptor's inbound
+ * and vice versa -- so the two parties start as mirror images and an operator can
+ * keep a fixed mount layout while the invite conveys the role swap. This is the
+ * single swap site (the offline invite path calls this with `undefined`, so it
+ * never reaches a seeded branch and cannot double-swap). The swapped paths are
+ * the inviter's own strings: the role assignment is exact, but the concrete
+ * paths, host, and channel remain the operator's to reconcile, as for the single
+ * `path` form. Split mode requires retain mode, so {@link SPLIT_SEED_OPTIONS} is
+ * seeded alongside the pair. The pair is always whole here: the endpoint schema
+ * rejects a half pair, and this runs only on a decoded (validated) endpoint.
+ *
  * @internal exported for testing
  */
 export function connectionFromEndpoint(
@@ -425,6 +452,24 @@ export function connectionFromEndpoint(
 
   switch (endpoint.channel) {
     case "sftp": {
+      if (endpoint.inboundPath !== undefined) {
+        // Split-directory endpoint: mirror-swap the inviter's pair (inviter's
+        // outbound -> this acceptor's inbound, inviter's inbound -> outbound).
+        const connection: SFTPConnectionConfig = {
+          channel: "sftp",
+          server: {
+            host: endpoint.host,
+            port: endpoint.port,
+            inboundPath: endpoint.outboundPath,
+            outboundPath: endpoint.inboundPath,
+            // The endpoint never carries credentials; mark the field the user
+            // must supply (a password or private key is added via @path).
+            username: PLACEHOLDER_USERNAME,
+          },
+          options: SPLIT_SEED_OPTIONS,
+        };
+        return { connection, seeded: true };
+      }
       const connection: SFTPConnectionConfig = {
         channel: "sftp",
         server: {
@@ -439,6 +484,27 @@ export function connectionFromEndpoint(
       return { connection, seeded: true };
     }
     case "filedrop": {
+      if (endpoint.inboundPath !== undefined) {
+        // Split-directory endpoint: mirror-swap the inviter's pair (see the sftp
+        // branch). filedrop carries no credentials, so no placeholder is needed.
+        const connection: FileDropConnectionConfig = {
+          channel: "filedrop",
+          inboundPath: endpoint.outboundPath,
+          outboundPath: endpoint.inboundPath,
+          options: SPLIT_SEED_OPTIONS,
+        };
+        return { connection, seeded: true };
+      }
+      if (endpoint.path === undefined)
+        // Unreachable for a decoded endpoint: the schema requires a filedrop
+        // endpoint to name a directory in one form (path, or the split pair
+        // handled above), but `path` is optional in the type, so guard a caller
+        // that bypasses decode with a clear error here rather than letting an
+        // undefined path reach connection.ts as an opaque schema failure.
+        throw new Error(
+          "filedrop endpoint has neither a path nor a split " +
+            "inbound_path/outbound_path pair",
+        );
       const connection: FileDropConnectionConfig = {
         channel: "filedrop",
         path: endpoint.path,

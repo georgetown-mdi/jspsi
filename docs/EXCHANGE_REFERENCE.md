@@ -365,6 +365,10 @@ psilink --retain-files --outbound-path /mnt/share/to-partner \
   file:///mnt/share/from-partner records.csv results.csv
 ```
 
+**Mirror relationship across an invitation.** When an invitation carries a split-directory endpoint, the acceptor's seeded connection block starts as the inviter's *mirror image*: the acceptor's `inbound_path` is taken from the inviter's `outbound_path` and its `outbound_path` from the inviter's `inbound_path`, because one party's outbound is the other's inbound. The invitation conveys this role swap, so neither operator hand-edits which folder is inbound. The seeded block also carries the retain-mode options a split exchange requires, so it is runnable once the credential placeholders are filled in. (Emitting a split-directory endpoint from `psilink invite` is the inviter-side complement and is still pending -- see [CLI.md](CLI.md) "Current CLI limitations"; the acceptor mirror-swap applies to any invitation that does carry such an endpoint.)
+
+This keeps a Docker mount layout fixed. The two container mounts can stay constant -- for example `/data/in` and `/data/out` -- and the invitation, not a per-side config edit, decides which the party reads and which it writes. The folder *names* may still need a manual edit in an asymmetric topology, where the two parties' paths -- or even channels -- differ (one party syncing a local `file:///` directory up to a server the other reaches over `sftp://`): the swap fixes the *roles*, and the concrete paths, host, and channel are reconciled by the operator through the normal accept reconcile flow. An SFTP login-home (unset) path has no concrete value to mirror, so such an endpoint conveys the roles with no suggested path rather than failing.
+
 ### `connection.server`
 
 *Type:* object  

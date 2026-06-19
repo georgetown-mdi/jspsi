@@ -3,6 +3,7 @@ import { LinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
+import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -27,8 +28,23 @@ export interface SFTPEndpoint {
   host: string;
   /** Reachable port, 1-65535 (integer). Enforced by the schema, not the type. */
   port?: number;
-  /** Remote working directory; non-empty when present. */
+  /** Remote working directory (shared mode); non-empty when present. */
   path?: string;
+  /**
+   * Inbound (peer-written) remote directory for a split-directory exchange, as
+   * the INVITER sees it. The acceptor mirror-swaps the pair -- the inviter's
+   * outbound becomes the acceptor's inbound and vice versa -- so the two parties
+   * start as mirror images (the swap lives at the single consumer
+   * `connectionFromEndpoint` in apps/cli). Carried as a pair with
+   * {@link outboundPath}: both halves present or neither, and mutually exclusive
+   * with {@link path}.
+   */
+  inboundPath?: string;
+  /**
+   * Outbound (self-written) remote directory for a split-directory exchange; the
+   * companion to {@link inboundPath}.
+   */
+  outboundPath?: string;
 }
 
 /** A file-drop locator: the shared directory both parties rendezvous in. */
@@ -36,9 +52,23 @@ export interface FileDropEndpoint {
   channel: "filedrop";
   /**
    * Path to the shared directory; the inviter's own path, which the acceptor
-   * may need to remap to its local mount.
+   * may need to remap to its local mount. Mutually exclusive with the
+   * {@link inboundPath}/{@link outboundPath} split pair; exactly one form is
+   * present.
    */
-  path: string;
+  path?: string;
+  /**
+   * Inbound (peer-written) directory for a split-directory exchange, as the
+   * INVITER sees it; the acceptor mirror-swaps the pair (see
+   * {@link SFTPEndpoint.inboundPath}). Carried as a pair with
+   * {@link outboundPath}; mutually exclusive with {@link path}.
+   */
+  inboundPath?: string;
+  /**
+   * Outbound (self-written) directory for a split-directory exchange; the
+   * companion to {@link inboundPath}.
+   */
+  outboundPath?: string;
 }
 
 /**
@@ -47,8 +77,9 @@ export interface FileDropEndpoint {
  * Discriminated by `channel`, mirroring `ConnectionConfig` in `connection.ts`.
  *
  * INVARIANT: an endpoint carries only a public locator (signaling URL, SFTP
- * host/port, file-drop path) and MUST NEVER carry credentials -- no password,
- * private key, key file, or PeerJS API key. The per-channel shapes have no
+ * host/port, file-drop path, or a split inbound/outbound directory pair) and
+ * MUST NEVER carry credentials -- no password, private key, key file, or PeerJS
+ * API key. The per-channel shapes have no
  * field for any of these, and {@link ConnectionEndpointSchema} rejects any
  * field outside the locator allowlist, so a credential cannot ride along. A
  * public locator is not a secret, so including it does not weaken the
@@ -65,9 +96,11 @@ export type ConnectionEndpoint =
 // mischaracterized as an attempted credential) and names the kind of field the
 // rule excludes as the reason it is strict, rather than emitting Zod's generic
 // "Unrecognized key". The named fields are illustrative, not exhaustive: the
-// binding rule is the allowlist (anything that is not channel/host/port/path is
-// rejected), so the examples here and in the docs are representative and need
-// not enumerate every connection field a future schema might add.
+// binding rule is the allowlist (anything that is not one of a channel's locator
+// fields -- channel/host/port/path, plus the inbound_path/outbound_path pair for
+// sftp/filedrop -- is rejected), so the examples here and in the docs are
+// representative and need not enumerate every connection field a future schema
+// might add.
 const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code === "unrecognized_keys") {
     // The rejected key names are partner-controlled (the inviter crafts the
@@ -77,8 +110,9 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
     // "\x1b[31m..." cannot inject terminal control/ANSI sequences or deceptive
     // Unicode.
     return (
-      "a connection endpoint may carry only a credential-free locator " +
-      "(channel plus host/port/path); every other field is rejected so that no " +
+      "a connection endpoint may carry only a credential-free locator (channel " +
+      "plus host/port/path, or an inbound_path/outbound_path pair for a split " +
+      "file-sync directory); every other field is rejected so that no " +
       "credential or server-identity material (such as a password, private " +
       "key, or host-key fingerprint) can ride along. Remove unexpected " +
       "field(s): " +
@@ -150,6 +184,16 @@ const SFTPEndpointSchema = z.strictObject(
     // Non-empty when present: an empty remote working directory is meaningless;
     // omit the field instead of sending "".
     path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    // The split-directory pair (the inviter's own inbound/outbound directories),
+    // mirror-swapped by the acceptor. Non-empty like `path`; the directory-mode
+    // refines on ConnectionEndpointSchema enforce both-or-neither, mutual
+    // exclusion with `path`, and that the two differ. Only the absolute-path rule
+    // stays deferred to connection.ts on the acceptor's final config -- it is a
+    // per-party property (the acceptor remaps the inviter's paths), so the
+    // inviter's absoluteness is not meaningful to the acceptor, exactly as the
+    // single-`path` form defers it.
+    inboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    outboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     // No `username` (or other identity/auth field) by design: those are not
     // part of a public locator. Like credentials, the acceptor configures the
     // SSH identity in the credential portion of its own connection block, so an
@@ -159,29 +203,121 @@ const SFTPEndpointSchema = z.strictObject(
   { error: endpointKeyError },
 );
 
-// `path` is validated only as non-empty here, NOT as absolute the way
-// FileDropConnectionConfigSchema in connection.ts is. Deliberate: a file-drop
-// endpoint carries the inviter's own mount path, which the acceptor remaps to
-// its local mount before use, so the inviter's path being absolute is not
-// meaningful to the acceptor. The acceptor's final connection config is
-// re-validated by connection.ts (which does enforce absolute), so a bad path is
-// caught where it matters; coupling this schema to that path validator would
-// only duplicate the rule. The endpoint's security invariant is "no
-// credentials", not "absolute path".
+// `path` (and each half of the split pair) is validated only as non-empty here,
+// NOT as absolute the way FileDropConnectionConfigSchema in connection.ts is.
+// Deliberate: a file-drop endpoint carries the inviter's own mount path, which
+// the acceptor remaps to its local mount before use, so the inviter's path being
+// absolute is not meaningful to the acceptor. The acceptor's final connection
+// config is re-validated by connection.ts (which enforces absolute), so a bad
+// absolute path is caught where it matters; duplicating that per-party rule here
+// would be meaningless once the acceptor remaps the path. The endpoint's security
+// invariant is "no credentials", not "absolute path". (Distinctness of the split
+// halves, unlike absoluteness, survives the swap, so it IS enforced here by the
+// directory-mode refines.) `path` is optional (it was required before the split
+// pair existed); those refines require exactly one form.
 const FileDropEndpointSchema = z.strictObject(
   {
     channel: z.literal("filedrop"),
-    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH),
+    path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    inboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
+    outboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
   },
   { error: endpointKeyError },
 );
 
-const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> =
-  z.discriminatedUnion("channel", [
+/**
+ * Directory-mode fields for the file-sync endpoint channels (sftp/filedrop): the
+ * single shared `path` versus the split `inboundPath`/`outboundPath` pair.
+ * Returns undefined for webrtc (no directory), which the directory-mode refines
+ * skip. Mirrors `fileSyncPathMode` in connection.ts so an endpoint and a
+ * connection config validate the directory form by the same shape.
+ */
+function endpointDirMode(
+  endpoint: ConnectionEndpoint,
+): { path?: string; inboundPath?: string; outboundPath?: string } | undefined {
+  if (endpoint.channel === "sftp" || endpoint.channel === "filedrop")
+    return {
+      path: endpoint.path,
+      inboundPath: endpoint.inboundPath,
+      outboundPath: endpoint.outboundPath,
+    };
+  return undefined;
+}
+
+const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> = z
+  .discriminatedUnion("channel", [
     WebRTCEndpointSchema,
     SFTPEndpointSchema,
     FileDropEndpointSchema,
-  ]);
+  ])
+  // The split inbound/outbound pair is given whole or not at all: a lone half
+  // cannot be mirror-swapped into a usable pair. Mirrors the same rule in
+  // connection.ts so the endpoint and the connection config agree on the form.
+  .refine(
+    (endpoint) => {
+      const m = endpointDirMode(endpoint);
+      if (m === undefined) return true;
+      return (m.inboundPath !== undefined) === (m.outboundPath !== undefined);
+    },
+    {
+      message:
+        "inbound_path and outbound_path must be set together; a split " +
+        "directory endpoint needs both halves",
+    },
+  )
+  // The two halves must differ. Unlike absoluteness (a per-party property the
+  // acceptor remaps, left to connection.ts), distinctness survives the mirror
+  // swap -- equal inviter halves yield equal acceptor halves -- so enforcing it
+  // here fails a malformed split at decode rather than later at the acceptor's
+  // exchange load. Same rule and function (pathsResolveToSameDir) connection.ts
+  // applies to the final config, so the endpoint and the connection agree.
+  .refine(
+    (endpoint) => {
+      const m = endpointDirMode(endpoint);
+      if (
+        m === undefined ||
+        m.inboundPath === undefined ||
+        m.outboundPath === undefined
+      )
+        return true;
+      return !pathsResolveToSameDir(m.inboundPath, m.outboundPath);
+    },
+    {
+      message:
+        "inbound_path and outbound_path on a connection endpoint must differ",
+    },
+  )
+  // A directory is named in one form or the other, never both.
+  .refine(
+    (endpoint) => {
+      const m = endpointDirMode(endpoint);
+      if (m === undefined) return true;
+      const hasPair =
+        m.inboundPath !== undefined || m.outboundPath !== undefined;
+      return !(m.path !== undefined && hasPair);
+    },
+    {
+      message:
+        "set either a single path or the inbound_path/outbound_path pair on a " +
+        "connection endpoint, not both",
+    },
+  )
+  // filedrop must name a directory in one form or the other; sftp may leave all
+  // three unset (the SFTP login-home shared directory), as in connection.ts.
+  .refine(
+    (endpoint) => {
+      if (endpoint.channel !== "filedrop") return true;
+      const hasPair =
+        endpoint.inboundPath !== undefined &&
+        endpoint.outboundPath !== undefined;
+      return endpoint.path !== undefined || hasPair;
+    },
+    {
+      message:
+        "a filedrop endpoint requires a directory: set path, or both " +
+        "inbound_path and outbound_path",
+    },
+  );
 
 // --- Token -------------------------------------------------------------------
 
@@ -206,10 +342,17 @@ export interface InvitationToken {
    * at THIS top level is backward compatible (an older decoder validates with a
    * non-strict `z.object` and simply ignores the field), so it does not bump the
    * version; `connectionEndpoint` was added this way and the version stayed "1".
-   * This does NOT extend to the per-channel endpoint sub-schemas: those use
-   * `z.strictObject`, so an older decoder would REJECT (not ignore) any field
-   * added to one of them. Adding a field to an endpoint shape is therefore an
-   * incompatible change that must bump the version (or otherwise stage compat).
+   *
+   * The per-channel endpoint sub-schemas are `z.strictObject`, so an older
+   * decoder REJECTS (it does not ignore) any field added to one of them: an
+   * endpoint-shape addition is in principle an incompatible change. The
+   * split-directory `inbound_path`/`outbound_path` pair was nonetheless added to
+   * the sftp and filedrop endpoint shapes WITHOUT bumping the version -- a
+   * deliberate one-time decision taken while psilink is pre-release with no
+   * decoder deployed in the field. With no released consumer, no decoder can
+   * observe the incompatibility, so a bump would only churn the version for no
+   * reader. A strict-endpoint addition made AFTER a release ships must bump the
+   * version (or otherwise stage compat). See docs/spec/FILE_SYNC.md.
    */
   version: "1";
   linkageTerms: LinkageTerms;
