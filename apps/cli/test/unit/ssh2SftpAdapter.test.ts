@@ -106,6 +106,57 @@ describe("connect retry", () => {
     }
   });
 
+  test("does not retry a 'Host denied' host-key rejection (terminal, one attempt)", async () => {
+    // The connect-retry predicate treats a host-key verification rejection as
+    // terminal by matching the `Host denied` message fragment. The two tests
+    // above pin the other direction -- a transient `connection refused` IS
+    // retried up to maxReconnectAttempts -- so the three together prove the
+    // predicate discriminates rather than disabling retry wholesale. A
+    // regression here (a renamed fatal message, a typo) would silently retry a
+    // host-key failure maxReconnectAttempts times before failing with the same
+    // outcome; CONTRIBUTING.md's "Upgrading the SFTP stack" checklist names
+    // confirming this fragment as a per-bump obligation, which this pins.
+    vi.useFakeTimers();
+    const adapter = new SSH2SFTPClientAdapter();
+    let calls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      connect: vi.fn().mockImplementation(async () => {
+        calls++;
+        // The fatal handshake message ssh2 raises on a host-key rejection
+        // (hostVerifier calling verify(false)): "Host denied (verification
+        // failed)", from node_modules/ssh2/lib/protocol/kex.js. ssh2 sets no
+        // machine-readable `code` on it, so the predicate keys on the message
+        // fragment. Keep this string in sync with that same kex.js source named
+        // in CONTRIBUTING.md ("Upgrading the SFTP stack"); if a future bump
+        // renames it, that checklist and this string move together.
+        throw new Error("Host denied (verification failed)");
+      }),
+    };
+
+    try {
+      const p = adapter.connect({
+        host: "sftp.example.org",
+        // A non-zero reconnect budget is what makes the single-attempt
+        // assertion meaningful: a working predicate must refuse to spend it on a
+        // host-key rejection, where retrying only re-runs the key exchange
+        // against the same untrusted host.
+        maxReconnectAttempts: 3,
+      });
+      // Attach before advancing so the rejection is not unhandled.
+      const assertion = expect(p).rejects.toThrow("Host denied");
+      // Advance well past several 1 s retry windows: a regressed (always-true)
+      // predicate would have armed a retry timer in this span, lifting the count
+      // above one. The assertion is the observed attempt count via the stub, not
+      // a wall-clock bound on how long the rejection takes.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await assertion;
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("strips maxReconnectAttempts from options passed to ssh2", async () => {
     const adapter = new SSH2SFTPClientAdapter();
     let capturedOptions: Record<string, unknown> | undefined;
