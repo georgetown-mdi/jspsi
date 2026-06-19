@@ -25,6 +25,7 @@ import {
   parseCommonBootstrapArgs,
   runOnlineBootstrap,
   runOrExit,
+  warnOutboundPathIgnoredOffline,
   warnUnsupportedFileSyncFlags,
   type RunnableConnectionConfig,
 } from "../../src/commands/bootstrap";
@@ -263,9 +264,10 @@ test("diffConnectionAgainstTarget: a differing split half conflicts on that fiel
   expect(conflicts[0].incoming).toBe("/out");
 });
 
-test("diffConnectionAgainstTarget: a shared config against a split target conflicts on both halves", () => {
+test("diffConnectionAgainstTarget: a shared config against a split target conflicts on both halves, naming the shared path", () => {
   // A shared (single-path) config and a split target describe different
-  // topologies; the existing config has neither half set, so both are conflicts.
+  // topologies; both halves conflict, and the unset existing side names the
+  // single shared path the config actually holds rather than a bare "(unset)".
   const target: RunnableConnectionConfig = {
     channel: "filedrop",
     inboundPath: "/mnt/in",
@@ -280,7 +282,46 @@ test("diffConnectionAgainstTarget: a shared config against a split target confli
     "connection.inbound_path",
     "connection.outbound_path",
   ]);
-  expect(conflicts.every((c) => c.existing === "(unset)")).toBe(true);
+  expect(
+    conflicts.every((c) => c.existing.includes("single shared path /mnt/in")),
+  ).toBe(true);
+});
+
+test("diffConnectionAgainstTarget: a split config against a shared target names the split locator", () => {
+  // The reverse cross-topology case: a saved split config reconciled against a
+  // shared target (an accept without --outbound-path). The unset existing path
+  // names the split pair the config holds rather than a bare "(unset)".
+  const target: RunnableConnectionConfig = {
+    channel: "filedrop",
+    path: "/mnt/shared",
+  };
+  const existing: ConnectionConfig = {
+    channel: "filedrop",
+    inboundPath: "/mnt/in",
+    outboundPath: "/mnt/out",
+  };
+  const { conflicts } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].field).toBe("connection.path");
+  expect(conflicts[0].existing).toContain(
+    "split inbound_path /mnt/in, outbound_path /mnt/out",
+  );
+  expect(conflicts[0].incoming).toBe("/mnt/shared");
+});
+
+test("warnOutboundPathIgnoredOffline: warns when --outbound-path is set", () => {
+  const warnings: string[] = [];
+  warnOutboundPathIgnoredOffline("/drop/out", {
+    warn: (m) => warnings.push(m),
+  });
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("--outbound-path");
+});
+
+test("warnOutboundPathIgnoredOffline: stays silent when --outbound-path is unset", () => {
+  const warnings: string[] = [];
+  warnOutboundPathIgnoredOffline(undefined, { warn: (m) => warnings.push(m) });
+  expect(warnings).toEqual([]);
 });
 
 // --- redactUrlCredentials ----------------------------------------------------

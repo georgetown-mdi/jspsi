@@ -45,6 +45,7 @@ import {
   runOnlineBootstrap,
   runOrExit,
   unsatisfiedLinkageFields,
+  warnOutboundPathIgnoredOffline,
   type CommonBootstrapOptions,
   type ResolvedDataSpec,
   type RunnableConnectionConfig,
@@ -301,6 +302,11 @@ export async function validateInvite(params: {
       sharedSecret,
     };
   }
+
+  // Offline: --outbound-path cannot take effect (the connection block is written
+  // as a placeholder to edit, not built from a URL), so warn rather than drop a
+  // deliberately-passed flag silently.
+  warnOutboundPathIgnoredOffline(options.outboundPath, log);
 
   // Offline. Linkage terms come from a pre-existing config when one is present
   // at the config path, and are inferred from the input file otherwise.

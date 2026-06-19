@@ -232,6 +232,25 @@ function pushDirectoryConflicts(
   pathsEqual: (a: string | undefined, b: string | undefined) => boolean,
   field: (key: "path" | "inbound_path" | "outbound_path") => string,
 ): void {
+  // When the existing config is in the OTHER directory form than the target, the
+  // compared field is genuinely unset on the existing side -- but a bare
+  // "(unset)" hides the locator the config DOES hold in its own form, which an
+  // operator reads as "my config names no directory at all". Annotate the unset
+  // side with that locator so the conflict shows both forms. Only invoked when
+  // the field being rendered is actually unset, so it never fires for a
+  // same-form mismatch (where the existing value is shown directly).
+  const existingHint = (): string => {
+    if (have.path !== undefined)
+      return `${RECONCILE_UNSET} (the config uses a single shared path ${have.path})`;
+    if (have.inboundPath !== undefined || have.outboundPath !== undefined)
+      return (
+        `${RECONCILE_UNSET} (the config uses a split inbound_path ` +
+        `${have.inboundPath ?? RECONCILE_UNSET}, outbound_path ` +
+        `${have.outboundPath ?? RECONCILE_UNSET})`
+      );
+    return RECONCILE_UNSET;
+  };
+
   const split =
     want.inboundPath !== undefined || want.outboundPath !== undefined;
   if (split) {
@@ -241,7 +260,7 @@ function pushDirectoryConflicts(
     )
       conflicts.push({
         field: field("inbound_path"),
-        existing: have.inboundPath ?? RECONCILE_UNSET,
+        existing: have.inboundPath ?? existingHint(),
         incoming: want.inboundPath,
       });
     if (
@@ -250,7 +269,7 @@ function pushDirectoryConflicts(
     )
       conflicts.push({
         field: field("outbound_path"),
-        existing: have.outboundPath ?? RECONCILE_UNSET,
+        existing: have.outboundPath ?? existingHint(),
         incoming: want.outboundPath,
       });
     return;
@@ -258,7 +277,7 @@ function pushDirectoryConflicts(
   if (want.path !== undefined && !pathsEqual(have.path, want.path))
     conflicts.push({
       field: field("path"),
-      existing: have.path ?? RECONCILE_UNSET,
+      existing: have.path ?? existingHint(),
       incoming: want.path,
     });
 }
@@ -1187,4 +1206,30 @@ export function warnUnsupportedFileSyncFlags(
       `--retain-files has no effect on the ${channel} channel and will be ` +
         "ignored; it is only supported on sftp and filedrop",
     );
+}
+
+/**
+ * Warn that `--outbound-path` has no effect on an OFFLINE invite/accept. Those
+ * paths write a placeholder (invite) or invitation-endpoint-seeded (accept)
+ * connection block for the operator to edit before `psilink exchange`, rather
+ * than building a connection from a URL the way the online and zero-setup paths
+ * do -- so they go through {@link connectionFromEndpoint}, which applies no
+ * connection overrides, and the flag would otherwise be parsed and silently
+ * dropped. (The sibling `--server-*` overrides share this offline-blindness; this
+ * warning is scoped to `--outbound-path`, whose whole purpose is the connection's
+ * directory shape, so its silent loss is the most surprising.) A no-op when the
+ * flag is unset. Shared so the wording cannot drift between invite and accept.
+ */
+export function warnOutboundPathIgnoredOffline(
+  outboundPath: string | undefined,
+  log: { warn: (message: string) => void },
+): void {
+  if (outboundPath === undefined) return;
+  log.warn(
+    "--outbound-path has no effect on an offline invite/accept: the connection " +
+      "block is written as a placeholder to edit, not built from a URL. " +
+      "Configure the split directory (inbound_path/outbound_path) in that block " +
+      "before running 'psilink exchange', or pass --outbound-path on an online " +
+      "invite/accept, the zero-setup exchange, or 'psilink exchange'.",
+  );
 }
