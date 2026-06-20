@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
-import Ssh2SftpClient from "ssh2-sftp-client";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import { createRawSftpClient } from "../rawSftpClient";
 import { selectedBackend, selectedNativeProfile } from "../sftpServer";
 import { remotePath, sftpServer } from "../sftpServer/testContext";
 
@@ -76,7 +76,9 @@ allowlistOnly(
 chrootOnly(
   "confines the session: a path outside the served root is unreachable",
   async () => {
-    const client = new Ssh2SftpClient();
+    // A raw client (not the adapter) so the chroot is exercised directly; its
+    // teardown diagnostics are routed off the console -- see createRawSftpClient.
+    const client = createRawSftpClient();
     await client.connect({
       host: srv.host,
       port: srv.port,
@@ -113,7 +115,12 @@ restrictedCryptoOnly(
     // the handshake would succeed, and this test would fail red. (A legacy kex
     // like diffie-hellman-group14-sha1 would not catch that regression, since a
     // modern OpenSSH default already excludes it.)
-    const client = new Ssh2SftpClient();
+    //
+    // A raw client (not the adapter) so the forced handshake failure is exercised
+    // directly; the connection reset its teardown emits is routed off the console
+    // rather than landing as an async-late `Global error listener: read
+    // ECONNRESET` -- see createRawSftpClient.
+    const client = createRawSftpClient();
     await expect(
       client.connect({
         host: srv.host,
