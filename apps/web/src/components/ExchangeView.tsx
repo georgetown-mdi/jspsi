@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Group, Stack } from "@mantine/core";
 
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
+
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -505,6 +507,9 @@ export function ExchangeView(config: ExchangeConfig) {
         // rather than run together. tabIndex + ref so a blocking error takes focus.
         <Alert
           color="red"
+          // A severity icon so error is not signalled by color alone (WCAG
+          // 1.4.1); aria-hidden because the title text already names the error.
+          icon={<IconAlertCircle aria-hidden />}
           title={errorAlert.title}
           style={{ whiteSpace: "pre-line" }}
           ref={errorAlertRef}
@@ -537,7 +542,14 @@ export function ExchangeView(config: ExchangeConfig) {
         headingRef={config.role === "acceptor" ? leadingHeadingRef : undefined}
       />
       {warningAlert && (
-        <Alert color="yellow" title={warningAlert.title}>
+        <Alert
+          color="yellow"
+          // A severity icon so warning is not signalled by color alone (WCAG
+          // 1.4.1), and is distinguishable from the red error icon; aria-hidden
+          // because the title text already names the warning.
+          icon={<IconAlertTriangle aria-hidden />}
+          title={warningAlert.title}
+        >
           {warningAlert.message}
         </Alert>
       )}

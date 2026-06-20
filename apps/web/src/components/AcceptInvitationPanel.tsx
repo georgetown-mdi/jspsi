@@ -9,6 +9,8 @@ import {
   TextInput,
 } from "@mantine/core";
 
+import { IconAlertCircle } from "@tabler/icons-react";
+
 import { commitAcceptance } from "@psi/acceptConsent";
 
 import FileAcquire from "@components/FileAcquire";
@@ -88,6 +90,9 @@ export function AcceptInvitationPanel({
         // to an error, rather than leaving a screen-reader user on the spinner.
         <Alert
           color="red"
+          // Severity icon so the error is not signalled by color alone (WCAG
+          // 1.4.1); aria-hidden since the title text already names it.
+          icon={<IconAlertCircle aria-hidden />}
           title="Cannot accept this invitation"
           mt="md"
           ref={errorRef}
@@ -152,6 +157,7 @@ export function AcceptInvitationPanel({
             // zero-coverage block message carries none.
             <Alert
               color="red"
+              icon={<IconAlertCircle aria-hidden />}
               title={error.title}
               style={{ whiteSpace: "pre-line" }}
             >

@@ -52,6 +52,20 @@ export const mantineTheme: MantineThemeOverride = createTheme({
     "3xl": rem("32px"),
   },
   primaryColor: "cyan",
+  // Light-scheme primary shade raised 6 -> 9 for WCAG 2.1 AA contrast. The
+  // default cyan-6 (#15aabf) fails wherever the primary is used: white-on-cyan-6
+  // filled buttons (and the filled copy ActionIcon glyph and the consent Checkbox
+  // checkmark) = 2.79:1; the cyan-6 anchor/link and the cyan-6 focus-visible
+  // outline / input focus border on the white page = 2.79:1. autoContrast does
+  // not solve this -- it only recolours text sitting on a filled surface, so it
+  // cannot lift the anchor, focus ring, or input border (cyan-on-white, not
+  // text-on-fill). cyan-8 is also short (white text 4.35:1, under the 4.5 floor);
+  // cyan-9 (#0b7285) is the first shade that clears it, fixing all of those at
+  // once: white-on-cyan-9 = 5.59:1 and cyan-9-on-white = 5.59:1. The filled hover
+  // step resolves to cyan-8 (4.35:1) -- transient, and AA is judged on the resting
+  // state. dark stays at its 8 default (stated so it cannot drift); the dark
+  // scheme is unchanged. The ratios are enforced by test/unit/themeContrast.test.ts.
+  primaryShade: { light: 9, dark: 8 },
   components: {
     /** Put your mantine component override here */
     Container: Container.extend({
@@ -130,16 +144,64 @@ const MUTED_TEXT = {
 } as const;
 
 /**
+ * Accessible text color for the yellow "warning" and red "error" Mantine `light`
+ * variant surfaces in the light scheme -- the Alert title and icon, and the
+ * yellow "Non-standard matching" Badge label. Mantine's default
+ * `--mantine-color-{c}-light-color` is the color's shade 9 on its shade-1 tint,
+ * which fails WCAG 2.1 AA 1.4.3 for normal-weight text:
+ * - yellow-9 (#e67700) on yellow-1 (#fff3bf) = 2.69:1 -- and no yellow/orange
+ *   shade clears even the 3:1 non-text floor on that tint, so the text has to
+ *   leave the yellow ramp entirely.
+ * - red-9 (#c92a2a) on red-1 (#ffe3e3) = 4.51:1 -- a hairline pass, fragile to a
+ *   future palette nudge.
+ *
+ * Darkened in-hue rather than to plain black so each title still reads as
+ * amber/caution and red/error; warning-vs-error no longer rests on the title
+ * color alone, because the Alerts now also carry a severity icon (WCAG 1.4.1).
+ * Ratios against the real shade-1 tints:
+ * - warning #92400e on yellow-1 = 6.36:1.
+ * - error #a51111 on red-1 = 6.45:1.
+ *
+ * Only the light scheme is overridden -- it is where these failures are. The
+ * dark scheme is left at Mantine's defaults, where the same tokens are a
+ * near-white shade-0 on a dark tint (the inverse arrangement), not the dark-on-
+ * light one that fails here. The light-scheme ratios above are enforced by
+ * test/unit/themeContrast.test.ts.
+ */
+const STATUS_TEXT = {
+  warning: "#92400e",
+  error: "#a51111",
+} as const;
+
+/**
+ * Accessible color for Mantine's `error` token in the light scheme -- the input
+ * validation message text, the `withAsterisk` required marker, and the
+ * error-state input border. Mantine's light default is red-6 (#fa5252) = 3.28:1
+ * on the white page/input, which fails WCAG 2.1 AA 1.4.3 for the normal-weight
+ * validation text. red-9 (#c92a2a) = 5.46:1 on white (5.18:1 on the gray-0 card)
+ * clears it with margin. This differs from {@link STATUS_TEXT}.error: that sits
+ * on the red-1 Alert tint, where #c92a2a is only 4.51:1, so the two error reds
+ * are tuned to their different backgrounds. Enforced by
+ * test/unit/themeContrast.test.ts.
+ */
+const ERROR_TEXT = "#c92a2a";
+
+/**
  * Raises the `dimmed` and input `placeholder` tokens to {@link MUTED_TEXT} in
- * both color schemes. Mantine deep-merges this over the default resolver, so
- * only the overridden variables need be returned. Passed to `MantineProvider`
- * in the root route.
+ * both color schemes, and the yellow/red `light`-variant text tokens to
+ * {@link STATUS_TEXT} plus the `error` token to {@link ERROR_TEXT} in the light
+ * scheme. Mantine deep-merges this over the default resolver, so only the
+ * overridden variables need be returned. Passed to `MantineProvider` in the root
+ * route.
  */
 export const cssVariablesResolver: CSSVariablesResolver = () => ({
   variables: {},
   light: {
     "--mantine-color-dimmed": MUTED_TEXT.light,
     "--mantine-color-placeholder": MUTED_TEXT.light,
+    "--mantine-color-yellow-light-color": STATUS_TEXT.warning,
+    "--mantine-color-red-light-color": STATUS_TEXT.error,
+    "--mantine-color-error": ERROR_TEXT,
   },
   dark: {
     "--mantine-color-dimmed": MUTED_TEXT.dark,
