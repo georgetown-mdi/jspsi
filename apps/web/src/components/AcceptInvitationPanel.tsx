@@ -105,7 +105,8 @@ export function AcceptInvitationPanel({
       {decode.status === "ready" && (
         <Stack mt="md">
           <InvitationTerms
-            token={decode.invitation.token}
+            linkageTerms={decode.invitation.token.linkageTerms}
+            expires={decode.invitation.token.expires}
             headingRef={headingRef}
           />
           <Divider my="sm" label="Accept and exchange" labelPosition="center" />

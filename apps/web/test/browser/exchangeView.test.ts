@@ -40,6 +40,9 @@ const lifecycle = vi.hoisted(
       exchangeRole: "initiator" | "responder";
       sharedSecret: string;
       signal: AbortSignal;
+      // Captured so a test can drive a stage transition (e.g. peer-connect)
+      // without a real exchange.
+      onStage: (stageId: string) => void;
     }>;
   } => ({ outcome: "none", calls: [] }),
 );
@@ -48,6 +51,7 @@ vi.mock("@psi/exchangeLifecycle", () => ({
     exchangeRole: "initiator" | "responder";
     sharedSecret: string;
     signal: AbortSignal;
+    onStage: (stageId: string) => void;
     onResult: (outputs: { resultsUrl: string }) => void;
     onError: (failure: { category: string; error: unknown }) => void;
   }) => {
@@ -55,6 +59,7 @@ vi.mock("@psi/exchangeLifecycle", () => ({
       exchangeRole: options.exchangeRole,
       sharedSecret: options.sharedSecret,
       signal: options.signal,
+      onStage: options.onStage,
     });
     if (lifecycle.outcome === "success")
       options.onResult({ resultsUrl: "blob:results" });
@@ -92,6 +97,12 @@ function inviterConfig(sharedSecret: string): ExchangeConfig {
     partyName: "Inviter",
     sharedSecret,
     linkageTerms: inviterTerms,
+    // The exchange screen owns the share block now, so the inviter config carries
+    // the shareable artifacts.
+    share: {
+      deepLink: `https://example.org/accept#${sharedSecret}`,
+      encoded: sharedSecret,
+    },
     // Pre-acquired at compose time: the inviter does not prompt for a file again.
     acquired: { rawRows: [], columns: [] },
   };
@@ -264,5 +275,104 @@ describe("ExchangeView Start->run wiring", () => {
     await userEvent.click(page.getByRole("button", { name: "Start" }));
     await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Partial CSV coverage");
+  });
+});
+
+describe("ExchangeView focus throughline", () => {
+  test("moves focus to the results heading on done", async () => {
+    setOutcome("success");
+    render(acceptorConfig("secret-a"));
+
+    // On done, focus lands on the Status ("results") heading so the outcome is
+    // announced -- not on the mid-protocol stage label, which the live region
+    // handles without stealing focus.
+    await userEvent.click(page.getByRole("button", { name: "Start" }));
+    await expect.element(page.getByText("Done")).toBeInTheDocument();
+    await vi.waitFor(() => {
+      const active = document.activeElement;
+      expect(active?.tagName).toBe("H2");
+      expect(active?.textContent).toBe("Status");
+    });
+  });
+
+  test("a blocking error alert takes focus", async () => {
+    // Swallow the one expected dev-gated console.error from the failure path.
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setOutcome("failure");
+    render(acceptorConfig("secret-a"));
+
+    await userEvent.click(page.getByRole("button", { name: "Start" }));
+    await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
+    await vi.waitFor(() => {
+      // The focused element is the alert itself, carrying its title text -- not
+      // <body> (whose textContent would also contain the title, so the not-body
+      // check is what makes this assertion non-vacuous).
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement?.textContent).toContain("Exchange failed");
+    });
+  });
+
+  test("moves focus to the share-block heading on mount for the inviter", async () => {
+    // The inviter leads with the share block, so its entry focus lands on that
+    // heading -- taking a keyboard/screen-reader user who pressed Generate to the
+    // new screen rather than leaving focus on the unmounted compose button.
+    setOutcome("none");
+    render(inviterConfig("secret-a"));
+
+    await vi.waitFor(() => {
+      const active = document.activeElement;
+      expect(active?.tagName).toBe("H3");
+      expect(active?.textContent).toBe("Share this invitation");
+    });
+  });
+
+  test("recovers focus onto 'Partner connected' when the share block collapses", async () => {
+    setOutcome("none");
+    render(inviterConfig("secret-a"));
+
+    // The inviter auto-starts; its expanded share block holds the entry focus.
+    await vi.waitFor(() => {
+      expect(document.activeElement?.textContent).toBe("Share this invitation");
+      expect(lifecycle.calls).toHaveLength(1);
+    });
+
+    // Simulate the partner connecting: drive the captured onStage to a protocol
+    // stage, collapsing the share block and unmounting the focused heading. The
+    // resulting state update flushes asynchronously; the waitFor below polls for
+    // it (mirroring how the stub fires onResult/onError directly).
+    lifecycle.calls[0].onStage("confirming protocol");
+
+    // Focus is recovered onto the "Partner connected" indicator rather than left
+    // to fall to <body>. The indicator's icon is aria-hidden with no text, so its
+    // textContent is exactly "Partner connected" -- an exact match (not toContain),
+    // so a focus left on <body> (whose textContent also includes that string)
+    // would fail rather than pass vacuously.
+    await vi.waitFor(() => {
+      expect(document.activeElement?.textContent).toBe("Partner connected");
+    });
+  });
+
+  test("does not move focus on peer-connect when focus is already elsewhere", async () => {
+    setOutcome("none");
+    render(inviterConfig("secret-a"));
+    await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
+
+    // The user navigates to the terms heading (outside the share block, and it
+    // stays mounted through the collapse), so focus is NOT orphaned by the
+    // collapse.
+    const terms = page.getByRole("heading", {
+      name: "Terms you are proposing",
+    });
+    await expect.element(terms).toBeInTheDocument();
+    (terms.element() as HTMLElement).focus();
+    expect(document.activeElement?.textContent).toBe("Terms you are proposing");
+
+    // Partner connects and the share block collapses; since focus was not on
+    // <body>, the recovery must leave it where the user put it.
+    lifecycle.calls[0].onStage("confirming protocol");
+    await expect
+      .element(page.getByText("Partner connected"))
+      .toBeInTheDocument();
+    expect(document.activeElement?.textContent).toBe("Terms you are proposing");
   });
 });

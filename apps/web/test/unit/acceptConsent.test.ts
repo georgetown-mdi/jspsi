@@ -1046,7 +1046,7 @@ describe("accept screen: terms render from a decoded token", () => {
   test("escapes injection characters in the rendered identity", () => {
     const html = render(
       createElement(InvitationTerms, {
-        token: makeToken({ identity: EVIL_IDENTITY }),
+        linkageTerms: { ...baseTerms, identity: EVIL_IDENTITY },
       }),
     );
     expect(html).not.toContain(ESC);

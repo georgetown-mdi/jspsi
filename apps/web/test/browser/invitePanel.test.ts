@@ -163,27 +163,28 @@ describe("InvitePanel compose screen", () => {
     expect(document.activeElement).toBe(el);
   });
 
-  test("on success, transitions to the exchange screen carrying terms, rows, secret", async () => {
+  test("on success, transitions to the exchange screen carrying share artifacts, terms, rows, secret", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
     await compose();
 
-    // The share artifacts are presented on the exchange screen.
-    await expect
-      .element(page.getByText("Share this invitation"))
-      .toBeInTheDocument();
-    expect(document.body.textContent).toContain(generated.deepLink);
-    expect(document.body.textContent).toContain(generated.encoded);
+    // The exchange screen mounts and now owns the share block, so the share
+    // artifacts are handed to it rather than rendered by InvitePanel directly.
+    await expect.element(page.getByTestId("exchange-view")).toBeInTheDocument();
 
-    // The inviter's run is configured from the returned invitation: the SAME
-    // embedded terms object and the SAME parsed rows/columns (no re-derivation,
-    // no re-parse), plus the secret and expiry.
+    // The inviter's run is configured from the returned invitation: the share
+    // link/code, the SAME embedded terms object and the SAME parsed rows/columns
+    // (no re-derivation, no re-parse), plus the secret and expiry.
     const props = exchange.lastProps;
     expect(props?.role).toBe("inviter");
     expect(props?.partyName).toBe("County Health Dept");
     expect(props?.sharedSecret).toBe(generated.sharedSecret);
     expect(props?.expires).toBe(generated.expires);
     if (props?.role !== "inviter") throw new Error("expected inviter config");
+    expect(props.share).toEqual({
+      deepLink: generated.deepLink,
+      encoded: generated.encoded,
+    });
     expect(props.linkageTerms).toBe(generated.linkageTerms);
     expect(props.acquired.rawRows).toBe(generated.rawRows);
     expect(props.acquired.columns).toBe(generated.columns);
