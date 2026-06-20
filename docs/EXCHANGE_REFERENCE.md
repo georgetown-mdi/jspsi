@@ -816,20 +816,23 @@ metadata:
       role: payload
       description: "Date client enrolled in the program"
     - name: "COUNTY"
-      role: payload
+      role: ignored
+      description: "Present in the input but excluded from this exchange"
 ```
 
 ### Column fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Column name in the input CSV |
+| `name` | string | yes | Column name in the input CSV; must be unique within the metadata block (matched case-sensitively) |
 | `type` | string | no | Semantic type (see [Semantic Types](#semantic-types) above); inferred from name if omitted |
-| `role` | enum | no | `linkage`, `identifier`, or `payload`; inferred if omitted |
+| `role` | enum | no | `linkage`, `identifier`, `payload`, or `ignored`; inferred if omitted (inference never assigns `ignored` -- it is opt-in only) |
 | `is_payload` | boolean | no | Whether this column is transmitted as payload data after the intersection is identified; defaults to `true` when `role` is `payload`, `false` otherwise |
 | `description` | string | no | Human-readable description; shared with partner for payload columns |
 
 `role` and `is_payload` are partially independent. A column used for linkage or as an identifier can also carry `is_payload: true`, meaning it participates in the PSI protocol *and* is transmitted as payload for matched members. For example, a phone-number column can have `role: linkage` and `is_payload: true` so that it both links records and is delivered to the partner for matched rows. Any column that is not used for linkage or identification must have `is_payload: true`; the application will treat such a column as `role: payload` if no role is specified.
+
+`role: ignored` is the explicit opposite of that default: a column present in the input but used for nothing. An ignored column is never used for linkage, never treated as an identifier, and never transmitted as payload -- the role wins over `is_payload`, so an ignored column is not sent even if it carries `is_payload: true`. Use it to keep a column in the input file (so the file need not be edited) while declaring that this exchange must not touch it. Inference never assigns `ignored`; it must be set explicitly.
 
 ---
 

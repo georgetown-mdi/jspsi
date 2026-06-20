@@ -6,7 +6,30 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import type { SemanticType } from "../types";
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
-export const ColumnRoleSchema = z.enum(["linkage", "identifier", "payload"]);
+/**
+ * The role a declared input column plays in an exchange:
+ *
+ * - `linkage` -- participates in the PSI protocol via its semantic type.
+ * - `identifier` -- indexes this party's matched records in the output.
+ * - `payload` -- transmitted to the partner for matched members (the default
+ *   for any column not used for linkage or identification).
+ * - `ignored` -- present in the input but used for nothing: never linked, never
+ *   an identifier, and never transmitted as payload (regardless of `isPayload`).
+ *   Opt-in only -- {@link inferMetadata} never assigns it.
+ *
+ * Nothing in the linkage/key-building path consults `role` (it branches on the
+ * column's semantic `type`), so an `ignored` column is not coerced out of
+ * linkage by a role default -- it would otherwise leak in via its `type`. Each
+ * type- or payload-driven consumer therefore excludes `ignored` explicitly:
+ * `preparePayload`, `resolveFieldColumns` (both binding rules), `getDefaultLinkageTerms`,
+ * and the date-format inference in `prepareForExchange`.
+ */
+export const ColumnRoleSchema = z.enum([
+  "linkage",
+  "identifier",
+  "payload",
+  "ignored",
+]);
 export type ColumnRole = z.infer<typeof ColumnRoleSchema>;
 
 /**
@@ -31,7 +54,21 @@ const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
 
 export type Metadata = Array<ColumnMetadata>;
 
-export const MetadataSchema = z.array(ColumnMetadataSchema);
+// Column names must be unique. Every consumer treats metadata as keyed by name
+// (`metadata.find((c) => c.name === ...)`), so a duplicate name makes "the
+// metadata for column X" position-dependent -- e.g. a `role: ignored` entry and a
+// `role: payload` entry for the same name would resolve differently depending on
+// which `find` reaches first, silently defeating the ignored exclusion. Reject it
+// at the schema, mirroring the linkage-field / linkage-key name-uniqueness refines.
+// The message is static and does not echo the user-controlled name, matching the
+// type-enum errors (a name can carry control/ANSI/bidi bytes; see the no-echo test).
+export const MetadataSchema = z.array(ColumnMetadataSchema).refine(
+  (cols) => {
+    const names = cols.map((c) => c.name);
+    return names.length === new Set(names).size;
+  },
+  { message: "metadata column names must be unique" },
+);
 
 /**
  * Non-throwing parse of a raw value as {@link Metadata}. Snake_case keys (the

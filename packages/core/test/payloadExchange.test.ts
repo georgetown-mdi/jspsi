@@ -91,6 +91,57 @@ test("preparePayload: missing column value becomes null", () => {
   expect(result.rows[0]).toEqual(["P0", null]);
 });
 
+test("preparePayload: ignored column is never transmitted, even with isPayload:true", () => {
+  // The role: ignored opt-out wins over isPayload (accept-but-ignore resolution
+  // of the is_payload + ignored open question). diagnosis is a normal payload
+  // column; county is ignored despite isPayload:true and must not be sent.
+  const metaWithIgnored: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+    { name: "county", type: "other", role: "ignored", isPayload: true },
+  ];
+  const withCounty = rawRows.map((r) => ({ ...r, county: "DC" }));
+  const result = preparePayload(withCounty, metaWithIgnored, [[0], [0]]);
+  if (!result.hasData) throw new Error("expected hasData:true");
+  expect(result.columns).toEqual(["diagnosis"]);
+  expect(result.columns).not.toContain("county");
+});
+
+test("preparePayload: a dataset whose only isPayload column is ignored has no data", () => {
+  const metaOnlyIgnored: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "county", type: "other", role: "ignored", isPayload: true },
+  ];
+  const result = preparePayload(rawRows, metaOnlyIgnored, [[0], [0]]);
+  expect(result).toEqual({ hasData: false });
+});
+
+test("buildOutputTable: an ignored column is not treated as the identifier", () => {
+  // patient_id is present but marked ignored, so it is not the output identifier;
+  // the header falls back to row_id just as it does with no identifier column.
+  const metaIgnoredId: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    {
+      name: "patient_id",
+      type: "identifier",
+      role: "ignored",
+      isPayload: false,
+    },
+  ];
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id"],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  };
+  const { headers } = buildOutputTable(
+    [[0], [0]],
+    rawRows,
+    metaIgnoredId,
+    partnerPayload,
+  );
+  expect(headers[0]).toBe("row_id");
+});
+
 // --- exchangePayloads --------------------------------------------------------
 
 async function runExchangePayloads(

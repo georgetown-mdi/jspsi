@@ -208,7 +208,13 @@ export function getDefaultLinkageTerms(
 ): LinkageTerms {
   let linkageKeys: LinkageKey[];
   if (metadata !== undefined && metadata.length > 0) {
-    const availableTypes = new Set(metadata.map((m) => m.type));
+    // Exclude `role: ignored` columns: a key kept solely because an ignored
+    // column supplies the only instance of its type would then bind that ignored
+    // column at exchange time (resolveFieldColumns skips it, so the field would
+    // resolve to nothing) -- drop the key here instead of building an unusable one.
+    const availableTypes = new Set(
+      metadata.filter((m) => m.role !== "ignored").map((m) => m.type),
+    );
     linkageKeys = DEFAULT_LINKAGE_KEYS.filter((key) =>
       key.elements.every((el) => availableTypes.has(el.field as SemanticType)),
     );

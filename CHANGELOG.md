@@ -32,9 +32,11 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `psilink invite` (offline) prints how to abandon a pending invitation before it expires: delete its key file. See `docs/CLI.md`.
 - Key file schema: a versioned JSON format for persisting the shared token and exchange metadata between sessions.
 - Metadata inference (column semantic types and date formats), custom linkage keys via configurable transformations, and data standardization that canonicalizes linkage values by semantic type. See `docs/EXCHANGE_REFERENCE.md`.
+- Metadata `role: ignored`: mark an input column present in your file but excluded from the exchange -- never linked, never an identifier, and never transmitted as payload (even if `is_payload: true`). Opt-in only; inference never assigns it. See `docs/EXCHANGE_REFERENCE.md`.
 
 ### Changed
 
+- A `metadata` block with duplicate column names is now rejected at parse time; names must be unique (matched case-sensitively). See `docs/EXCHANGE_REFERENCE.md`.
 - BREAKING: the CLI authenticates recurring exchanges with the X25519 authenticated key exchange instead of SPAKE2, and the shared credential is renamed `pake_token` -> `shared_secret` in config. Old and new builds do not interoperate; pre-release, no migration shim. `exchange` now requires a `.psilink.key`. See `docs/spec/PROTOCOL.md`.
 - BREAKING: the `authentication` block moves from per-channel `connection` config to the top level of the exchange spec, and the WebRTC role moves to `connection.role`. Authentication, rotation, and expiry behavior are unchanged. See `docs/EXCHANGE_REFERENCE.md`.
 - BREAKING: the multi-word semantic-type and fuzzy-comparison enum values in config and invitations are now `snake_case` (`first_name`, `last_name`, `date_of_birth`, `phone_number`, `email_address`; `edit_distances`, `adjacent_years`), matching the convention for everything else users write; the old camelCase spellings are rejected. Single-word values (`ssn`, `ssn4`, `identifier`, `other`, `transpositions`) are unchanged. These ride the invitation token, so old and new builds do not interoperate; pre-release, no migration shim. See `docs/EXCHANGE_REFERENCE.md`.
