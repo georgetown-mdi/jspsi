@@ -10,17 +10,33 @@ import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 // These terms travel inside an invitation token, which the decoder accepts from
 // a counterparty whose token passed only a transcription checksum -- a check
 // anyone can recompute over a crafted payload, not an authenticity guarantee
-// (see invitation.ts). The rule below: every partner-controlled free-text string
-// carries a generous length `.max()`, and the two top-level arrays
-// (`linkageFields` and `linkageKeys`) carry a count `.max()`. What is left to the
-// boundary cap MAX_ENCODED_INVITATION_LENGTH in invitation.ts rather than a
-// per-field bound is the deeper collection COUNTS -- per-element `transform`
-// steps, each constraint's `exclude` list, the `payload` send/receive arrays, and
-// the `transform` `params` record's entries -- and the `params` value content
-// (typed `z.unknown()`, with no clean content bound). Their legitimate sizes vary
-// (a denylist can hold hundreds of values), so an invented count risks rejecting
-// a real config, and the boundary cap already bounds the whole payload before any
-// field is parsed. The bounds are defense-in-depth, not semantic limits.
+// (see invitation.ts) -- and they are parsed a second time off the exchange wire
+// (protocolSetup), where the binding size cap is the far larger
+// MAX_FRAME_SIZE_BYTES (~512 MiB, connection/frameSize.ts), not the 64 KiB
+// MAX_ENCODED_INVITATION_LENGTH of the token path. The rule below: every
+// partner-controlled free-text string carries a generous length `.max()`; the two
+// top-level arrays (`linkageFields` and `linkageKeys`) and the `transform.params`
+// record carry a count `.max()`. What is still left to those boundary caps rather
+// than a per-field bound is the deeper collection COUNTS -- per-element
+// `transform` steps, each constraint's `exclude` list, the `payload` send/receive
+// arrays, and a key's `elements` -- and the `params` VALUE content (typed
+// `z.unknown()`, with no clean content bound). Their legitimate sizes vary (a
+// denylist can hold hundreds of values), so an invented count risks rejecting a
+// real config. The `transform.params` ENTRY count is the exception now bounded
+// (MAX_PARAMS_ENTRIES): under the wire-path frame cap a payload of ~130k invalid
+// keys fits, and Zod overflows its own call stack accumulating and spreading one
+// issue per key before it can return a structured failure -- a schema count bound
+// forestalls that. The deferred counts nested beneath an OUTER array -- `exclude`
+// (under `linkageFields`), and `transform` steps and `elements` (under
+// `linkageKeys`) -- share that exposure: the inner issue array is spread through
+// two array frames, so a partner can still drive the same Zod-internal RangeError
+// there. The outermost `payload` send/receive arrays sit one array frame below the
+// root object, so they do not overflow at counts the frame cap admits (they stay
+// unbounded only for uniformity, not because they share the exposure). Every
+// reachable case is caught harmlessly in protocolSetup's parse-error catch (a
+// RangeError has no `.issues`, so it renders via the message fallback and the
+// exchange aborts cleanly). Bounding the deferred counts is a surveyed follow-on,
+// not done here. The bounds are defense-in-depth, not semantic limits.
 
 /**
  * Generous upper bound on a short partner-controlled string -- the identifier-
@@ -52,6 +68,19 @@ export const MAX_TEXT_LENGTH = 1024;
  * most-to-least-precise ordering of `linkageKeys` are unaffected.
  */
 export const MAX_LINKAGE_ENTRIES = 256;
+
+/**
+ * Generous upper bound on the COUNT of entries in a transform step's `params`
+ * record. A standardizing function takes a handful of parameters (the bundled
+ * functions use one to three); 256 is far above any real parameter list yet
+ * refuses a record padded with tens of thousands of keys. The bound is enforced
+ * BEFORE the per-key length validation (see {@link TransformStep}'s schema): an
+ * over-count record is rejected with a single issue rather than one issue per
+ * key, so a pathological-count payload on the wide wire-path frame cannot make
+ * Zod overflow its call stack accumulating an issue per key. See the
+ * untrusted-input bounds note above.
+ */
+export const MAX_PARAMS_ENTRIES = 256;
 
 // --- Output ------------------------------------------------------------------
 
@@ -291,9 +320,25 @@ const TransformStepSchema: z.ZodType<TransformStep> = z.object({
   function: z.string().min(1).max(MAX_NAME_LENGTH),
   // The record's KEYS are partner-controlled strings (parameter names), so they
   // are length-bounded like every other free-text string; the VALUE content is
-  // `z.unknown()` with no clean per-field bound and the entry COUNT is left to
-  // the boundary cap (see the bounds-section note above).
-  params: z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()).optional(),
+  // `z.unknown()` with no clean per-field bound. The entry COUNT is bounded at
+  // MAX_PARAMS_ENTRIES, and -- critically -- that gate runs BEFORE the per-key
+  // length check: a first permissive `z.record` accepts the keys unvalidated, so
+  // the count refine sees the whole set and rejects an over-count payload with a
+  // single issue; `.pipe` then re-validates the now count-capped keys against the
+  // length bound. Bounding the count on the length-bounded record directly would
+  // not help -- Zod accumulates one length issue per bad key during that record's
+  // own parse, before any refine runs, and on the wide wire-path frame
+  // (MAX_FRAME_SIZE_BYTES, far above the 64 KiB invitation cap) ~130k such keys
+  // overflow Zod's call stack as it spreads that issue array up through the
+  // nesting. The pipe keeps the post-cap `invalid_key` path -- and its parse-error
+  // sanitization (item 202554679) -- intact for an in-range over-long key.
+  params: z
+    .record(z.string(), z.unknown())
+    .refine((rec) => Object.keys(rec).length <= MAX_PARAMS_ENTRIES, {
+      message: `transform params must not exceed ${MAX_PARAMS_ENTRIES} entries`,
+    })
+    .pipe(z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()))
+    .optional(),
 });
 
 /**
