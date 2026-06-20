@@ -415,9 +415,11 @@ const TransformStepSchema: z.ZodType<TransformStep> = z.object({
   // are length-bounded like every other free-text string; the VALUE content is
   // `z.unknown()` with no clean per-field bound. The entry COUNT is bounded at
   // MAX_PARAMS_ENTRIES, and -- critically -- that gate is a cheap early-exit key
-  // count (see exceedsOwnKeyCount) that runs BEFORE both the per-key length check
-  // AND the permissive first stage's own per-key walk. A first `z.unknown()`
-  // accepts the value untouched; the count refine then rejects an over-count
+  // count (see exceedsOwnKeyCount) that runs BEFORE the per-key length check. The
+  // `z.unknown()` first stage accepts the value untouched, performing no per-key
+  // walk of its own -- unlike a permissive `z.record(z.string(), z.unknown())`
+  // first stage, which would iterate every key before the refine could fire, the
+  // O(n) linear burn this avoids. The count refine then rejects an over-count
   // record with a single issue after examining at most MAX_PARAMS_ENTRIES + 1
   // keys; `.pipe` re-validates the now count-capped record against the per-key
   // length bound. The refine passes a non-record value (null/array/primitive)
