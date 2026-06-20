@@ -229,7 +229,7 @@ describe("param schemas", () => {
       ).toBe(false);
     });
 
-    test("split_on accepts a delimiter and defaults include_original", () => {
+    test("split_on accepts a delimiter and defaults includeOriginal", () => {
       const parsed = schemaFor("split_on").safeParse({ delimiter: "-" });
       expect(parsed.success).toBe(true);
       expect(parsed.data).toEqual({ delimiter: "-", includeOriginal: false });

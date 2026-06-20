@@ -491,6 +491,13 @@ export interface StandardizationFunctionDescriptor {
    * params, which stay `z.unknown()` and are count-bounded in
    * `config/linkageTerms.ts`. The drift test pins each schema against its factory
    * so a descriptor cannot disagree with the function it describes.
+   *
+   * Typed `ZodObject<ZodRawShape>` rather than a per-function shape because the
+   * table is homogeneous (a `Record` over one descriptor type). An editor drives
+   * form fields by iterating `params.shape` at RUNTIME, where each entry is its
+   * concrete Zod type (`ZodNumber`, `ZodEnum`, ...); the interface widens the
+   * static shape to `ZodRawShape`, so a consumer that wants a param's static type
+   * narrows the concrete schema, not this field.
    */
   params: z.ZodObject<z.ZodRawShape>;
 }
@@ -501,7 +508,8 @@ const noParams = z.object({});
 /**
  * A user-authored regular-expression param. Required, and validated to compile,
  * mirroring each regex factory's `new RegExp(pattern)` (which throws on an
- * invalid pattern). The danger-tier gate against catastrophic backtracking is the
+ * invalid pattern; `replace_regex` adds the global flag, which does not affect
+ * validity). The danger-tier gate against catastrophic backtracking is the
  * editor's responsibility; this only rejects a syntactically invalid pattern.
  */
 const regexPatternSchema = z
@@ -694,7 +702,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     name: "extract_regex",
     label: "Extract (regex)",
     blurb:
-      "Keep only the first regular-expression capture group; drop the value on no match.",
+      "Keep the first regular-expression capture group, or the whole match if the pattern has none; drop the value on no match.",
     tier: "regex",
     params: z.object({
       pattern: regexPatternSchema,
