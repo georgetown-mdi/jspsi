@@ -13,6 +13,7 @@
  *
  * The two constants are set independently (this one here, `LocalChunkSize` in a
  * transitive dependency), so the relationship is enforced by an executable check
- * (`test/unit/csvIntake.test.ts`), not trusted to this note.
+ * on the value the dropzone actually receives (`test/browser/fileSelect.test.ts`),
+ * not trusted to this note.
  */
 export const MAX_CSV_FILE_BYTES = 10 * 1024 ** 2;

@@ -30,7 +30,7 @@ export function loadCSVFile(
       // fires), so a caller MUST keep the input within one `Papa.LocalChunkSize`
       // chunk or the result is silently truncated. Today's callers (the web
       // intake dropzone) enforce this with a byte cap; the bound is checked in
-      // apps/web (`test/unit/csvIntake.test.ts`).
+      // apps/web (`test/browser/fileSelect.test.ts`).
       worker: true,
       header: true,
       skipEmptyLines: true,
