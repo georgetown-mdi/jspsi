@@ -160,10 +160,12 @@ export function transformPatternIsUnsafe(
  * caught early), or when the analysis budget is exhausted before a pattern is
  * vetted (fail closed).
  *
- * The pattern value is coerced to a string exactly as `new RegExp` would coerce
- * it, so a non-string JSON value that stringifies to a dangerous pattern cannot
- * slip past by virtue of its type. An absent pattern compiles to the empty regex
- * at runtime and is treated as safe. Vetted bundled patterns
+ * A present pattern value is coerced to a string exactly as `new RegExp` would
+ * coerce it, so a non-string JSON value that stringifies to a dangerous pattern
+ * cannot slip past by virtue of its type -- including a JSON `null`, which both
+ * the runtime factory and this check render as the literal regex `/null/`. Only
+ * an omitted pattern (`undefined`) is skipped: it compiles to the empty regex at
+ * runtime, which is safe. Vetted bundled patterns
  * ({@link KNOWN_SAFE_TRANSFORM_PATTERNS}) bypass the analyzer.
  */
 export function linkageTermsHaveUnsafeTransformRegex(
