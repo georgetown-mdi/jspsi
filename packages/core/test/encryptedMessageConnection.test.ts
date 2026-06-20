@@ -6,6 +6,8 @@ import {
   EncryptedMessageConnection,
   IV_SEQ_OFFSET,
   TYPE_JSON,
+  MAX_JSON_OBJECT_KEYS,
+  MAX_JSON_NESTING_DEPTH,
 } from "../src/connection/encryptedMessageConnection";
 import {
   createMessagePipe,
@@ -339,6 +341,63 @@ test("a non-JSON JSON-tagged payload is rejected as a security failure", async (
     ),
   );
   await expectSecurity(recv.receive(), /not valid JSON/i);
+});
+
+test("a JSON object exceeding the per-object key bound is rejected without crashing", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // A single object one key past the bound. JSON.parse would meet an
+  // uncatchable, process-terminating engine limit at a far larger width; the
+  // decode-layer bound rejects it as a clean security failure first. The bound
+  // is exercised at its configured value, not the raw engine limit -- the
+  // assertion is that the bound fires, and that this test process survives the
+  // frame at all (a true over-limit object would kill the worker outright).
+  const wide: Record<string, number> = {};
+  for (let i = 0; i <= MAX_JSON_OBJECT_KEYS; i++) wide[i] = 0;
+  await peer.send(await sealRaw("initiator", 0, jsonPlaintext(wide)));
+  await expectSecurity(
+    recv.receive(),
+    /structure exceeds the permitted bound/i,
+  );
+});
+
+test("a large array of small objects (more total keys than the bound) decodes unchanged", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  // The IterationMap shape: one small object per element. The total key count
+  // far exceeds the per-object bound, but no single object is wide, so a
+  // per-object bound (unlike a byte or total-key budget) must accept it intact.
+  const message = Array.from(
+    { length: MAX_JSON_OBJECT_KEYS },
+    (_, i): { theirIndex: number; iteration: number } => ({
+      theirIndex: i,
+      iteration: i % 7,
+    }),
+  );
+  await encA.send(message);
+  expect(await encB.receive()).toEqual(message);
+});
+
+test("a JSON object at exactly the per-object key bound decodes unchanged", async () => {
+  const [encA, encB] = await makeEncryptedPair();
+  const atBound: Record<string, number> = {};
+  for (let i = 0; i < MAX_JSON_OBJECT_KEYS; i++) atBound[i] = i;
+  await encA.send(atBound);
+  expect(await encB.receive()).toEqual(atBound);
+});
+
+test("a JSON body nested past the depth bound is rejected without crashing", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // A run of open brackets one past the nesting-depth ceiling. The structural
+  // scan rejects it before JSON.parse -- and before its own per-container stack
+  // could grow without bound -- so the brackets need not even balance.
+  const json = new TextEncoder().encode("[".repeat(MAX_JSON_NESTING_DEPTH + 1));
+  const plaintext = new Uint8Array(1 + json.length) as Uint8Array<ArrayBuffer>;
+  plaintext[0] = TYPE_JSON;
+  plaintext.set(json, 1);
+  await peer.send(await sealRaw("initiator", 0, plaintext));
+  await expectSecurity(
+    recv.receive(),
+    /structure exceeds the permitted bound/i,
+  );
 });
 
 test("an inbound seq above MAX_SAFE_INTEGER is rejected before decryption", async () => {

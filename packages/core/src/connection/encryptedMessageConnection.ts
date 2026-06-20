@@ -8,6 +8,7 @@ import {
   type MessageConnection,
 } from "./messageConnection";
 import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
+import { exceedsJsonStructureBound } from "../utils/jsonStructureBound";
 import type { HandshakeRole } from "../types";
 
 // The `.max()` on the base64url ciphertext is defense-in-depth, NOT the primary
@@ -40,6 +41,33 @@ export const TYPE_BINARY = 1;
 // encode path (seqToIv) and the decode path (handleInbound) must agree on it.
 /** @internal */
 export const IV_SEQ_OFFSET = 4;
+
+// Decode-layer structural bounds on a TYPE_JSON payload, enforced before
+// JSON.parse runs. A single object wide enough, or a single array long enough,
+// drives JSON.parse into a process-terminating internal engine limit that NO
+// surrounding try/catch can intercept (it is an uncatchable abort, not a thrown
+// exception), so the only defense is to reject the frame before the parse can
+// reach that limit -- the bound has to precede the parse, not wrap it.
+// MAX_JSON_OBJECT_KEYS caps the members of any one object; it sits far above the
+// widest legitimate object (the linkage-terms transform.params record at
+// MAX_PARAMS_ENTRIES = 256, every other message being shallower) and far below
+// the per-object engine limit. MAX_JSON_ARRAY_ELEMENTS caps the elements of any
+// one array; legitimate array-bearing messages (the PSI association indices, the
+// payload rows / row indices, the mapped-element pairs) are sized by the matched
+// record count, itself transport-bounded to a few million, so this sits above
+// any real array yet well below the engine's array backing-store length limit
+// past which JSON.parse aborts. Both never pre-empt a clean schema-level
+// rejection yet always fire ahead of the crash. MAX_JSON_NESTING_DEPTH caps
+// structural nesting; legitimate messages nest only a few levels (the
+// parsed-config ceiling is camelizeKeys' 256), so this only catches a degenerate
+// all-`{`/`[` body, and it doubles as the bound on the pre-parse scan's own
+// per-container stack. See docs/spec/CHANNEL_SECURITY.md.
+/** @internal */
+export const MAX_JSON_OBJECT_KEYS = 65536;
+/** @internal */
+export const MAX_JSON_ARRAY_ELEMENTS = 16_777_216;
+/** @internal */
+export const MAX_JSON_NESTING_DEPTH = 4096;
 
 /**
  * Wraps any {@link MessageConnection} and transparently encrypts all outbound
@@ -492,6 +520,27 @@ export class EncryptedMessageConnection implements MessageConnection {
     if (tag === TYPE_BINARY) {
       return plain.slice(1);
     } else if (tag === TYPE_JSON) {
+      // Reject a structurally pathological body BEFORE JSON.parse: an object
+      // wide enough trips an uncatchable, process-terminating engine limit that
+      // the catch below could never intercept. The scan runs on the raw UTF-8
+      // (its structural markers are unambiguous ASCII bytes), so an over-budget
+      // frame is refused without even decoding it. Fixed-text error: it carries
+      // no attacker bytes, matching the decode-failure message's contract.
+      if (
+        exceedsJsonStructureBound(
+          plain.subarray(1),
+          MAX_JSON_OBJECT_KEYS,
+          MAX_JSON_ARRAY_ELEMENTS,
+          MAX_JSON_NESTING_DEPTH,
+        )
+      ) {
+        throw this.fail(
+          new ConnectionError(
+            "EncryptedMessageConnection: decrypted JSON payload structure exceeds the permitted bound",
+            "security",
+          ),
+        );
+      }
       try {
         // Fatal decode: invalid UTF-8 in the (authenticated) payload throws
         // rather than silently substituting U+FFFD, so a malformed frame from a
