@@ -9,6 +9,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 
 import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
@@ -242,6 +243,9 @@ export function InvitePanel() {
           {error && (
             <Alert
               color="red"
+              // Severity icon so the error is not signalled by color alone (WCAG
+              // 1.4.1); aria-hidden since the title text already names it.
+              icon={<IconAlertCircle aria-hidden />}
               title={error.title}
               // pre-line so the read-failure message's per-cause newlines (from
               // sanitizeErrorForDisplay) render one cause per line; the other
