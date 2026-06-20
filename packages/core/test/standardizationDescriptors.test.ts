@@ -208,6 +208,57 @@ describe("param schemas", () => {
     test("rejects a non-string value", () => {
       expect(schema.safeParse({ value: 5 }).success).toBe(false);
     });
+
+    // Neither field is required: the factory reads an absent value/values as an
+    // empty exclusion list and passes the value through, so the schema accepts
+    // an empty object to mirror that no-op rather than disagree with it.
+    test("accepts an empty object (the factory's no-op shape)", () => {
+      expect(schema.safeParse({}).success).toBe(true);
+    });
+  });
+
+  describe("parse_date", () => {
+    const schema = schemaFor("parse_date");
+
+    test("defaults both formats when omitted", () => {
+      const parsed = schema.safeParse({});
+      expect(parsed.success).toBe(true);
+      expect(parsed.data).toEqual({
+        inputFormat: "MM/DD/YYYY",
+        outputFormat: "YYYYMMDD",
+      });
+    });
+
+    test("accepts custom input and output formats", () => {
+      expect(
+        schema.safeParse({
+          inputFormat: "YYYY-MM-DD",
+          outputFormat: "DD/MM/YYYY",
+        }).success,
+      ).toBe(true);
+    });
+
+    test("rejects an empty format string", () => {
+      expect(schema.safeParse({ inputFormat: "" }).success).toBe(false);
+    });
+
+    test("rejects a non-string format", () => {
+      expect(schema.safeParse({ outputFormat: 5 }).success).toBe(false);
+    });
+
+    // The schema bounds the format strings to non-empty only, not their token
+    // content: a tokenless format like "garbage" is accepted, mirroring the
+    // factory, which accepts any string (it then matches little and yields null
+    // rather than throwing). Token presence is editor guidance, not a
+    // factory-agreement concern.
+    test("accepts a tokenless format string, agreeing with the factory", () => {
+      expect(schema.safeParse({ inputFormat: "garbage" }).success).toBe(true);
+      expect(() =>
+        runPipeline("01/15/1990", [
+          { function: "parse_date", params: { inputFormat: "garbage" } },
+        ]),
+      ).not.toThrow();
+    });
   });
 
   describe("regex family", () => {

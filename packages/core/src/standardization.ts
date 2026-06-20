@@ -641,6 +641,11 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     blurb:
       "Reformat a date between token layouts (YYYY, MM, DD) so different formats can match.",
     tier: "standard",
+    // Format strings are bounded to non-empty only, not their token content: a
+    // tokenless format is accepted, mirroring the factory, which builds a regex
+    // from any string and simply matches little (yielding null) rather than
+    // throwing. Requiring a YYYY/MM/DD token would reject a shape the factory
+    // accepts; surfacing tokenless formats is editor guidance, not validation.
     params: z.object({
       inputFormat: z.string().min(1).default("MM/DD/YYYY"),
       outputFormat: z.string().min(1).default("YYYYMMDD"),
