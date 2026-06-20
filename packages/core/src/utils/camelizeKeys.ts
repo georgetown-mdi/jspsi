@@ -1,3 +1,40 @@
+import { UsageError } from "../errors.js";
+
+/**
+ * Maximum object/array nesting depth {@link transformKeysDeep} will descend
+ * through before rejecting the input. The walker recurses once per level with
+ * native recursion, so an untrusted payload nested past the call-stack limit
+ * (empirically a few thousand levels, and lower on a smaller stack) would
+ * otherwise overflow with a `RangeError` BEFORE any schema validation runs --
+ * `parseLinkageTerms` camelizes ahead of Zod, so a deeply-nested partner payload
+ * (a few tens of KB of JSON, trivially within the invitation and frame caps)
+ * reaches this walker first. 256 is far above any real config or exchange message
+ * -- the deepest schema path is under a dozen levels, and a `transform.params`
+ * value (the deepest partner-controlled spot, typed `z.unknown()`) holds shallow
+ * scalars -- yet well below the overflow threshold on any stack, so the guard
+ * fires as a clean bounded rejection long before native recursion would fault.
+ * Rejecting here, at the single shared camelize/snakeize chokepoint and ahead of
+ * Zod, also keeps a deep value from surviving validation (under `z.unknown()`)
+ * only to overflow a later recursive consumer such as `canonicalString`.
+ */
+export const MAX_NESTING_DEPTH = 256;
+
+/**
+ * Thrown by {@link transformKeysDeep} (and so by {@link camelizeKeys} /
+ * {@link snakeizeKeys}) when input nesting exceeds {@link MAX_NESTING_DEPTH}. A
+ * {@link UsageError} subclass, like the transport input-bound errors and
+ * `CanonicalEncodingError`: a payload too deep to walk is a bounded rejection of
+ * untrusted input, terminal and (at the CLI) exit 64, not an internal fault. Its
+ * message is fixed text carrying no input bytes, so the parse-error relay
+ * (`describeDecodeError`) can surface it verbatim.
+ */
+export class NestingDepthExceededError extends UsageError {
+  constructor() {
+    super(`input nesting exceeds the maximum depth of ${MAX_NESTING_DEPTH}`);
+    this.name = "NestingDepthExceededError";
+  }
+}
+
 /**
  * Field names whose value is an opaque map passed verbatim to an external
  * library, and whose keys must therefore NOT be case-transformed. Currently
@@ -54,19 +91,29 @@ function camelToSnake(s: string): string {
  * guarantee (asserted directly by a unit test driven from OPAQUE_VALUE_KEYS)
  * that keeps the write -> read round-trip byte-stable, rather than two
  * independent recursions held in agreement by prose.
+ *
+ * `depth` bounds the native recursion against an untrusted deeply-nested payload:
+ * the root value is at depth 0, so a value at depth {@link MAX_NESTING_DEPTH} or
+ * deeper -- past the documented {@link MAX_NESTING_DEPTH} levels -- is rejected
+ * with a clean {@link NestingDepthExceededError} before the recursion can
+ * overflow the call stack with a `RangeError`; values shallower than that are
+ * walked normally. The opaque-key skip does not recurse, so an opaque subtree's
+ * own depth never counts toward the bound.
  */
 function transformKeysDeep(
   value: unknown,
   transformKey: (key: string) => string,
+  depth: number,
 ): unknown {
+  if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
   if (Array.isArray(value))
-    return value.map((v) => transformKeysDeep(v, transformKey));
+    return value.map((v) => transformKeysDeep(v, transformKey, depth + 1));
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) =>
         OPAQUE_VALUE_KEYS.has(snakeToCamel(k))
           ? [transformKey(k), v]
-          : [transformKey(k), transformKeysDeep(v, transformKey)],
+          : [transformKey(k), transformKeysDeep(v, transformKey, depth + 1)],
       ),
     );
   return value;
@@ -77,9 +124,17 @@ function transformKeysDeep(
  * that normalizes user-facing YAML/JSON (conventionally snake_case) into the
  * camelCase TypeScript sees before Zod parsing. Opaque-value maps
  * (`OPAQUE_VALUE_KEYS`) are left verbatim -- see {@link transformKeysDeep}.
+ *
+ * Runs ahead of the schema in the `parseX`/`safeParseX` config helpers, so on a
+ * pathologically deep input it throws BEFORE the schema -- meaning even a
+ * `safeParseX` wrapper that calls it can throw rather than return a failure
+ * result. No real config or exchange message reaches the bound.
+ *
+ * @throws {NestingDepthExceededError} if input nesting reaches
+ *   {@link MAX_NESTING_DEPTH} levels.
  */
 export function camelizeKeys(value: unknown): unknown {
-  return transformKeysDeep(value, snakeToCamel);
+  return transformKeysDeep(value, snakeToCamel, 0);
 }
 
 /**
@@ -95,9 +150,13 @@ export function camelizeKeys(value: unknown): unknown {
  * would snakeize to `u_r_l` -- but no such key occurs in the schema. Used by the
  * CLI config writer (`saveConfig`) to serialize a typed `ExchangeSpec` to
  * snake_case YAML; not a stable public API for consumers outside the workspace.
+ * Its input is the operator's own typed `ExchangeSpec`, never this deep, so the
+ * shared depth bound below is incidental here.
  *
+ * @throws {NestingDepthExceededError} if input nesting reaches
+ *   {@link MAX_NESTING_DEPTH} levels.
  * @internal
  */
 export function snakeizeKeys(value: unknown): unknown {
-  return transformKeysDeep(value, camelToSnake);
+  return transformKeysDeep(value, camelToSnake, 0);
 }
