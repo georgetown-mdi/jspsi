@@ -159,6 +159,38 @@ test("round-trips full linkage terms including all fields", async () => {
   expect(decoded.expires).toBe("2030-01-01T00:00:00.000Z");
 });
 
+test("decodeInvitation rejects linkage terms carrying a catastrophic-backtracking regex", async () => {
+  // A crafted invitation -- valid checksum (the checksum is a transcription-error
+  // detector, not an authenticity guarantee, so anyone can recompute it over a
+  // hostile payload) whose linkage terms embed a ReDoS pattern in an element
+  // transform. InvitationTokenSchema embeds LinkageTermsSchema, so the
+  // catastrophic-backtracking check fires at decode, before any pattern executes.
+  const malicious = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                { function: "filter_regex", params: { pattern: "(a+)+$" } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const encoded = await encodeRaw(malicious);
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+  await expect(decodeInvitation(encoded)).rejects.toThrow(
+    /catastrophic backtracking/,
+  );
+});
+
 // --- Checksum ----------------------------------------------------------------
 
 test("rejects a corrupted checksum", async () => {
