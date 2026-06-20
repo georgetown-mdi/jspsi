@@ -17,9 +17,13 @@ export function loadCSVFile(
       // `WORKERS_SUPPORTED` (`!!global.Worker`), which is false under Node -- so
       // the CLI's readable-stream inputs and the Node-environment tests keep
       // parsing inline exactly as before. The complete/error callback contract is
-      // identical in both modes, and a worker that fails to spawn throws
-      // synchronously inside this executor, which rejects the promise -- so a
-      // parse failure still surfaces to the caller on every path.
+      // identical in both modes: a read/parse failure (including a FileReader
+      // error inside the worker) posts back through `error` and rejects, and a
+      // worker that fails to spawn throws synchronously inside this executor,
+      // which also rejects. The one unhandled path is an uncaught exception in the
+      // worker thread -- PapaParse attaches no `Worker.onerror` -- which would
+      // leave the promise pending; an exceptional case not expected for a <=10MB
+      // parse.
       worker: true,
       header: true,
       skipEmptyLines: true,
