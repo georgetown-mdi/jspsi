@@ -1404,6 +1404,40 @@ test("an over-long transform params key within the count bound is still rejected
   }
 });
 
+test("an over-count transform params record is rejected without walking every key", () => {
+  // Pins the cheap-count guard's defining property (board item 202722105): the
+  // over-count rejection is reached without the camelize pre-pass OR the
+  // permissive record stage traversing all N keys. A Proxy reports a huge key
+  // count but tallies how many property descriptors are actually inspected; the
+  // early-exit count stops once the bound is passed, so only a bounded prefix is
+  // ever touched, whereas a full O(n) walk in either stage would inspect every one
+  // of the reported keys. Implementation-independent: any guard that early-exits
+  // passes, only one that walks the whole record fails.
+  const TOTAL = 100_000;
+  let inspected = 0;
+  const params = new Proxy(
+    {},
+    {
+      ownKeys: () => Array.from({ length: TOTAL }, (_, i) => `k${i}`),
+      getOwnPropertyDescriptor: () => {
+        inspected++;
+        return { enumerable: true, configurable: true, value: 1 };
+      },
+      get: () => 1,
+    },
+  );
+  const result = safeParseLinkageTerms(paramsTerms(params));
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(
+      result.error.issues.some((i) => /must not exceed/.test(i.message)),
+    ).toBe(true);
+  }
+  // Far below TOTAL: a full walk in either the camelize pre-pass or the record
+  // stage would push this to at least TOTAL.
+  expect(inspected).toBeLessThan(MAX_PARAMS_ENTRIES * 10);
+});
+
 // ─── Nested-collection count bounds ──────────────────────────────────────────
 // Each constraint `exclude` list, a key element's `transform` step list, and a
 // key's `elements` list is partner-controlled and nested beneath an outer array,

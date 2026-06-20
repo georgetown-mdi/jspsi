@@ -239,3 +239,58 @@ test("an opaque map is verbatim all the way down (nested objects, arrays), both 
   };
   expect(snakeized.provider_options).toEqual(opaque);
 });
+
+// --- Width-bounded keys ------------------------------------------------------
+// A caller (parseLinkageTerms, for transform.params) names keys whose object
+// value is left verbatim once its key count exceeds a given bound, so a
+// pathological-count partner record is not rewritten key by key before the
+// schema's own count bound rejects it (board item 202722105). The bound is keyed
+// by the canonical camelCase key name, like the opaque-value skip; a within-bound
+// value is recursed into and camelized as normal.
+
+test("a width-bounded key's over-count value is left verbatim", () => {
+  const value = { a_b: 1, c_d: 2, e_f: 3 };
+  // 3 keys exceeds the bound of 2: the value is handed back with its snake_case
+  // keys intact -- the schema, not the pre-pass, rejects it.
+  expect(camelizeKeys({ params: value }, new Map([["params", 2]]))).toEqual({
+    params: value,
+  });
+});
+
+test("a width-bounded key's at-bound value is camelized as normal", () => {
+  // 2 keys is not OVER the bound of 2, so the value is walked and rewritten.
+  expect(
+    camelizeKeys(
+      { params: { input_format: "x", out_fmt: "y" } },
+      new Map([["params", 2]]),
+    ),
+  ).toEqual({ params: { inputFormat: "x", outFmt: "y" } });
+});
+
+test("the width bound applies only to the named key", () => {
+  // A non-named key's over-bound value is camelized as usual -- the bound is
+  // keyed by name, so it leaves every other map untouched.
+  expect(
+    camelizeKeys(
+      { other_key: { a_b: 1, c_d: 2, e_f: 3 } },
+      new Map([["params", 2]]),
+    ),
+  ).toEqual({ otherKey: { aB: 1, cD: 2, eF: 3 } });
+});
+
+test("without the option a wide value is camelized regardless of count", () => {
+  expect(camelizeKeys({ params: { a_b: 1, c_d: 2, e_f: 3 } })).toEqual({
+    params: { aB: 1, cD: 2, eF: 3 },
+  });
+});
+
+test("the width bound does not skip a non-object value", () => {
+  // Only an object value can be left verbatim; an array or scalar under a
+  // width-bounded key is walked normally (an array recurses, a scalar is a leaf).
+  expect(
+    camelizeKeys(
+      { params: [{ a_b: 1 }], other: "no_change" },
+      new Map([["params", 0]]),
+    ),
+  ).toEqual({ params: [{ aB: 1 }], other: "no_change" });
+});

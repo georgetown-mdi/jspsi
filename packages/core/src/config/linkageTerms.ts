@@ -5,6 +5,7 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
+import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 
 // --- Untrusted-input bounds --------------------------------------------------
 
@@ -20,24 +21,32 @@ import { boundedArray } from "../utils/boundedArray.js";
 // per-element validation. The arrays take the boundedArray count gate -- the
 // top-level `linkageFields` and `linkageKeys`, each constraint's `exclude` list,
 // a `transform` step list, and a key's `elements`; the `transform.params` record
-// takes the same permissive-stage + count-refine + pipe shape applied to its
-// keys (an inline refine on a count, see MAX_PARAMS_ENTRIES), since boundedArray
-// itself is array-only. They all share a RangeError exposure a bare `.max()`
-// cannot close: Zod v4 validates every element BEFORE the length check, so a
-// partner array of millions of invalid elements (a few MB of JSON, trivially
-// under the wire-path frame cap) accumulates one issue per element first. Zod
-// then either spreads that issue array up through an enclosing
-// array/record/tuple frame and overflows its call stack (`Maximum call stack
-// size exceeded`, ~130k elements, for a collection nested >=2 frames deep -- an
-// intervening object frame does not prevent it), or, for a flat top-level array
-// with no such frame (`linkageFields`/`linkageKeys`), throws `Invalid string
-// length` building the error string from the issues (~3.5M elements). Both
-// reproduced on Zod 4.4.3. The permissive first stage lets the count refine fire
-// before either RangeError. Legitimate sizes vary -- a denylist holds
-// hundreds of values, hence the most generous bound (MAX_EXCLUDE_ENTRIES) -- but
-// each bound is far above any real config and far below the RangeError
-// thresholds. The `params` VALUE content stays unbounded (typed `z.unknown()`,
-// with no clean content bound).
+// takes an inline permissive-stage + count-refine + pipe of the same shape (its
+// count refine is a cheap early-exit key count, see MAX_PARAMS_ENTRIES and
+// exceedsOwnKeyCount), since boundedArray itself is array-only. They all share a
+// RangeError exposure a bare `.max()` cannot close: Zod v4 validates every
+// element BEFORE the length check, so a partner array of millions of invalid
+// elements (a few MB of JSON, trivially under the wire-path frame cap)
+// accumulates one issue per element first. Zod then either spreads that issue
+// array up through an enclosing array/record/tuple frame and overflows its call
+// stack (`Maximum call stack size exceeded`, ~130k elements, for a collection
+// nested >=2 frames deep -- an intervening object frame does not prevent it), or,
+// for a flat top-level array with no such frame (`linkageFields`/`linkageKeys`),
+// throws `Invalid string length` building the error string from the issues
+// (~3.5M elements). Both reproduced on Zod 4.4.3. The permissive first stage lets
+// the count refine fire before either RangeError. For the `transform.params`
+// record the count refine also closes a distinct LINEAR cost: not a RangeError
+// but a multi-second event-loop burn that, before this gate, ran in full twice
+// over a millions-key record -- once in the snake->camel camelize pre-pass and
+// once in the permissive record stage -- before the count was even checked. The
+// early-exit count gate fires ahead of both: the camelize pre-pass leaves an
+// over-count params value verbatim (parseLinkageTerms passes its bound to
+// camelizeKeys) and the schema's refine rejects it after examining at most
+// MAX_PARAMS_ENTRIES + 1 keys (item 202722105). Legitimate sizes vary -- a
+// denylist holds hundreds of values, hence the most generous bound
+// (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
+// below the RangeError thresholds. The `params` VALUE content stays unbounded
+// (typed `z.unknown()`, with no clean content bound).
 //
 // The `payload` send/receive arrays carry no enclosing array/record/tuple frame
 // (only the root object), so a pathological count there cannot drive the ~130k
@@ -101,10 +110,13 @@ export const MAX_LINKAGE_ENTRIES = 256;
  * record. A standardizing function takes a handful of parameters (the bundled
  * functions use one to three); 256 is far above any real parameter list yet
  * refuses a record padded with tens of thousands of keys. The bound is enforced
- * BEFORE the per-key length validation (see {@link TransformStep}'s schema): an
- * over-count record is rejected with a single issue rather than one issue per
- * key, so a pathological-count payload on the wide wire-path frame cannot make
- * Zod overflow its call stack accumulating an issue per key. See the
+ * by a cheap early-exit key count (see {@link TransformStep}'s schema and
+ * {@link exceedsOwnKeyCount}) that fires BEFORE the per-key length validation, so
+ * an over-count record is rejected with a single issue rather than one issue per
+ * key -- which on the wide wire-path frame would otherwise overflow Zod's call
+ * stack. The same bound also short-circuits the camelize pre-pass for an
+ * over-count record (see {@link parseLinkageTerms}), so neither the snake->camel
+ * walk nor the record stage traverses every key before the rejection. See the
  * untrusted-input bounds note above.
  */
 export const MAX_PARAMS_ENTRIES = 256;
@@ -402,22 +414,37 @@ const TransformStepSchema: z.ZodType<TransformStep> = z.object({
   // The record's KEYS are partner-controlled strings (parameter names), so they
   // are length-bounded like every other free-text string; the VALUE content is
   // `z.unknown()` with no clean per-field bound. The entry COUNT is bounded at
-  // MAX_PARAMS_ENTRIES, and -- critically -- that gate runs BEFORE the per-key
-  // length check: a first permissive `z.record` accepts the keys unvalidated, so
-  // the count refine sees the whole set and rejects an over-count payload with a
-  // single issue; `.pipe` then re-validates the now count-capped keys against the
-  // length bound. Bounding the count on the length-bounded record directly would
-  // not help -- Zod accumulates one length issue per bad key during that record's
-  // own parse, before any refine runs, and on the wide wire-path frame
-  // (MAX_FRAME_SIZE_BYTES, far above the 64 KiB invitation cap) ~130k such keys
-  // overflow Zod's call stack as it spreads that issue array up through the
-  // nesting. The pipe keeps the post-cap `invalid_key` path -- and its parse-error
-  // sanitization (item 202554679) -- intact for an in-range over-long key.
+  // MAX_PARAMS_ENTRIES, and -- critically -- that gate is a cheap early-exit key
+  // count (see exceedsOwnKeyCount) that runs BEFORE both the per-key length check
+  // AND the permissive first stage's own per-key walk. A first `z.unknown()`
+  // accepts the value untouched; the count refine then rejects an over-count
+  // record with a single issue after examining at most MAX_PARAMS_ENTRIES + 1
+  // keys; `.pipe` re-validates the now count-capped record against the per-key
+  // length bound. The refine passes a non-record value (null/array/primitive)
+  // straight through so the pipe surfaces the same record-type error as before.
+  // A length-bounded `z.record` first stage would not help -- Zod walks and
+  // validates every key during that record's own parse, before any refine runs,
+  // both burning O(n) on a millions-key record and (on the wide wire-path frame,
+  // MAX_FRAME_SIZE_BYTES, far above the 64 KiB invitation cap) overflowing its
+  // call stack at ~130k bad keys as it spreads that issue array up through the
+  // nesting. The camelize pre-pass (parseLinkageTerms) is short-circuited for the
+  // same over-count record by the same bound, so neither walk runs before this
+  // rejection. The pipe keeps the post-cap `invalid_key` path -- and its
+  // parse-error sanitization (item 202554679) -- intact for an in-range over-long
+  // key.
   params: z
-    .record(z.string(), z.unknown())
-    .refine((rec) => Object.keys(rec).length <= MAX_PARAMS_ENTRIES, {
-      message: `transform params must not exceed ${MAX_PARAMS_ENTRIES} entries`,
-    })
+    .unknown()
+    .refine(
+      (rec) =>
+        rec === null ||
+        typeof rec !== "object" ||
+        Array.isArray(rec) ||
+        !exceedsOwnKeyCount(rec, MAX_PARAMS_ENTRIES),
+      {
+        message: `transform params must not exceed ${MAX_PARAMS_ENTRIES} entries`,
+        abort: true,
+      },
+    )
     .pipe(z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()))
     .optional(),
 });
@@ -810,6 +837,20 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
 // --- Parse -------------------------------------------------------------------
 
 /**
+ * Keys whose object value the camelize pre-pass leaves verbatim once its key
+ * count exceeds the bound, rather than rewriting every key (see
+ * {@link camelizeKeys}). Only `transform.params` is partner-controlled and
+ * key-count-bounded, so an over-count params record is handed to the schema --
+ * whose own cheap count refine rejects it -- without the multi-second snake->camel
+ * walk a pathological-count payload would otherwise incur (item 202722105). The
+ * bound matches {@link MAX_PARAMS_ENTRIES}, so any record the pre-pass leaves
+ * verbatim here is one the schema also rejects.
+ */
+const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
+  ["params", MAX_PARAMS_ENTRIES],
+]);
+
+/**
  * Parse and validate a raw value as an {@link LinkageTerms}.
  * Snake_case keys in the input are converted to camelCase before validation,
  * so JSON/YAML from disk can be passed directly.
@@ -817,7 +858,7 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
  * @throws {ZodError} if validation fails.
  */
 export function parseLinkageTerms(raw: unknown): LinkageTerms {
-  return LinkageTermsSchema.parse(camelizeKeys(raw));
+  return LinkageTermsSchema.parse(camelizeKeys(raw, PARAMS_WIDTH_BOUND));
 }
 
 /**
@@ -826,7 +867,7 @@ export function parseLinkageTerms(raw: unknown): LinkageTerms {
  * `error`.
  */
 export function safeParseLinkageTerms(raw: unknown) {
-  return LinkageTermsSchema.safeParse(camelizeKeys(raw));
+  return LinkageTermsSchema.safeParse(camelizeKeys(raw, PARAMS_WIDTH_BOUND));
 }
 
 // --- Compatibility -----------------------------------------------------------
