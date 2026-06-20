@@ -115,6 +115,15 @@ function camelToSnake(s: string): string {
  * rewrite. A within-bound value is recursed into and rewritten as normal, so a
  * legitimate record is unaffected; like the opaque skip, only the value is left
  * verbatim, the key itself is still rewritten.
+ *
+ * Also like the opaque skip, this is a key-NAME match, not a path match: a
+ * matching name at any depth is width-checked. A nested over-count value sharing
+ * a bounded name (e.g. a key literally named `params` inside another `params`
+ * value, which is `z.unknown()` content) is therefore left verbatim too -- inert,
+ * because such a value is opaque content no consumer reads as camelCase, and a
+ * legitimate config never nests an over-count map under that name. The effect is
+ * version-deterministic (both parties on the same code skip identically), so it
+ * cannot diverge a cross-party canonical encoding within a version.
  */
 function transformKeysDeep(
   value: unknown,
