@@ -34,9 +34,12 @@ export const SENTINEL_GATED_LEVELS: readonly ConsoleLevel[] = [
  *   - The ssh2-sftp-client "Global ... listener" lines (`Global error listener:
  *     <msg>` on `console.error`; `Global end listener: end event raised` /
  *     `Global close listener: close event raised` on `console.log`) are routed
- *     to the adapter's project logger by `SSH2SFTPClientAdapter`'s constructor
- *     callbacks, so they no longer reach the console for an adapter-driven
- *     connection.
+ *     to the project logger by constructor callbacks rather than reaching the
+ *     console: `SSH2SFTPClientAdapter`'s callbacks for an adapter-driven
+ *     connection, and `createRawSftpClient`'s (`test/rawSftpClient.ts`) for the
+ *     few integration tests that must drive a bare client -- so neither path
+ *     leaks the teardown ECONNRESET the sentinel could otherwise only catch
+ *     best-effort.
  *   - The former unpinned-host-key WARN is gone: the no-pin host-key path now
  *     fails closed rather than warn-and-proceed.
  *
