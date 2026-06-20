@@ -82,6 +82,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `psilink invite` now reconciles an input CSV against a config's explicit `metadata`, resolving columns to linkage fields exactly as the exchange will, instead of falling back to column-name inference. A config that types a non-standard column explicitly is no longer wrongly rejected at invite time, and a CSV the config's metadata cannot satisfy is now caught when the invitation is generated rather than only at the exchange. See `docs/CLI.md`.
 - Linkage terms that pair `output.expects_output: false` with `payload.receive` columns are rejected as incoherent at parse time. See `docs/EXCHANGE_REFERENCE.md`.
 - Linkage terms that reference an undeclared linkage field, or whose `swap` names no element in its key, are rejected as incoherent at decode, instead of silently collapsing the affected key to an empty result. See `docs/EXCHANGE_REFERENCE.md`.
+- The web app parses a dropped CSV in a Web Worker, so a large (near-10MB) file no longer freezes the interface -- input and painting stay responsive -- while it is read.
 
 ### Security
 
