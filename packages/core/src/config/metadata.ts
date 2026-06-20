@@ -20,8 +20,9 @@ import type { SemanticType } from "../types";
  * Nothing in the linkage/key-building path consults `role` (it branches on the
  * column's semantic `type`), so an `ignored` column is not coerced out of
  * linkage by a role default -- it would otherwise leak in via its `type`. Each
- * type- or payload-driven consumer therefore excludes `ignored` explicitly
- * (`preparePayload`, `resolveFieldColumns`'s type fallback, `getDefaultLinkageTerms`).
+ * type- or payload-driven consumer therefore excludes `ignored` explicitly:
+ * `preparePayload`, `resolveFieldColumns` (both binding rules), `getDefaultLinkageTerms`,
+ * and the date-format inference in `prepareForExchange`.
  */
 export const ColumnRoleSchema = z.enum([
   "linkage",

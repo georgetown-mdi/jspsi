@@ -1373,6 +1373,23 @@ describe("resolveFieldColumns", () => {
     expect(resolution.get("lastName")?.column).toBe("last_name");
   });
 
+  test("an explicit standardization naming an ignored column does not bind it into linkage", () => {
+    // role: ignored wins over a contradictory explicit transform -- the field
+    // resolves to no column (surfacing as unsatisfiable) rather than silently
+    // linking a column the operator marked excluded. Without this, the explicit
+    // binding (rule 1) would bypass the type-fallback ignored guard.
+    const resolution = resolveFieldColumns(
+      terms,
+      [{ output: "ssn", input: "secret_ssn" }],
+      [
+        roledCol("secret_ssn", "ssn", "ignored"),
+        roledCol("last_name", "last_name", "linkage"),
+      ],
+    );
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("ssn")?.transform).toBeUndefined();
+  });
+
   test("the type fallback skips an ignored column to bind a later non-ignored one", () => {
     // First-match would pick the ignored column; the ignored exclusion makes the
     // fallback bind the non-ignored same-typed column listed after it.

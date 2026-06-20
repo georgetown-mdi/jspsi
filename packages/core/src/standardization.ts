@@ -740,8 +740,11 @@ export interface FieldColumnResolution {
  * 1. Explicit standardization preempts the type fallback: if `standardization`
  *    carries a transformation whose `output` is the field name, the field binds
  *    to that transformation's `input` column -- whether or not the column is
- *    present in the data. (When two transformations name the same output the
- *    last wins, matching the builder's field map and the checker's old mapping.)
+ *    present in the data -- UNLESS that column is `role: ignored`, in which case
+ *    the field binds to nothing: `ignored` ("never participates in linkage")
+ *    wins over a contradictory explicit transform. (When two transformations name
+ *    the same output the last wins, matching the builder's field map and the
+ *    checker's old mapping.)
  * 2. Type fallback: otherwise the field binds to the FIRST `metadata` column of
  *    its semantic type that is not `role: ignored`
  *    (`metadata.find(c => c.type === field.type && c.role !== "ignored")`), or to
@@ -777,7 +780,18 @@ export function resolveFieldColumns(
   for (const field of terms.linkageFields) {
     const transform = explicit.get(field.name);
     if (transform !== undefined) {
-      resolution.set(field.name, { column: transform.input, transform });
+      // An explicit standardization naming a `role: ignored` column must not
+      // bind it into linkage: `ignored` means "never participates in linkage",
+      // and that wins over a contradictory explicit transform. The field then
+      // resolves to no column (surfacing as unsatisfiable through the shared
+      // checker) rather than silently linking a column the operator excluded.
+      const inputIgnored =
+        metadata.find((c) => c.name === transform.input)?.role === "ignored";
+      if (inputIgnored) {
+        resolution.set(field.name, { column: undefined, transform: undefined });
+      } else {
+        resolution.set(field.name, { column: transform.input, transform });
+      }
       continue;
     }
     // Skip `role: ignored` columns: the linkage path keys on `type`, not
