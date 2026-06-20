@@ -1356,6 +1356,34 @@ describe("resolveFieldColumns", () => {
     expect(resolution.get("ssn")?.column).toBeUndefined();
   });
 
+  const roledCol = (
+    name: string,
+    type: ColumnMetadata["type"],
+    role: ColumnMetadata["role"],
+  ): ColumnMetadata => ({ name, type, role, isPayload: false });
+
+  test("an ignored column never binds a linkage field, even as the only one of its type", () => {
+    // The linkage path keys on `type`, not `role`, so an ignored ssn column would
+    // otherwise type-fall-back into the ssn field. It must resolve to no column.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      roledCol("ssn", "ssn", "ignored"),
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("lastName")?.column).toBe("last_name");
+  });
+
+  test("the type fallback skips an ignored column to bind a later non-ignored one", () => {
+    // First-match would pick the ignored column; the ignored exclusion makes the
+    // fallback bind the non-ignored same-typed column listed after it.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      roledCol("ignored_ssn", "ssn", "ignored"),
+      roledCol("real_ssn", "ssn", "linkage"),
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBe("real_ssn");
+  });
+
   test("a duplicate explicit output binds to the last one", () => {
     // Not reachable through the schema (it forbids duplicate outputs) but pinned
     // so the builder's field map and the checker stay in agreement on the rule.
@@ -1368,6 +1396,55 @@ describe("resolveFieldColumns", () => {
       inferMetadata(["first_src", "second_src"]),
     );
     expect(resolution.get("ssn")?.column).toBe("second_src");
+  });
+});
+
+// --- getDefaultLinkageTerms: role: ignored -----------------------------------
+
+describe("getDefaultLinkageTerms — ignored columns", () => {
+  const linkageCol = (
+    name: string,
+    type: ColumnMetadata["type"],
+  ): ColumnMetadata => ({ name, type, role: "linkage", isPayload: false });
+
+  test("a type supplied only by an ignored column is excluded from the keys", () => {
+    // ssn is present in the input but marked ignored; every other linkage type is
+    // a normal linkage column. No surviving key may reference ssn/ssn4, and ssn
+    // must not appear among the derived linkage fields.
+    const metadata: ColumnMetadata[] = [
+      { name: "SSN", type: "ssn", role: "ignored", isPayload: false },
+      linkageCol("FN", "first_name"),
+      linkageCol("LN", "last_name"),
+      linkageCol("DOB", "date_of_birth"),
+    ];
+    const terms = getDefaultLinkageTerms("Agency A", metadata);
+
+    const referencesSsn = terms.linkageKeys.some((k) =>
+      k.elements.some((el) => el.field === "ssn" || el.field === "ssn4"),
+    );
+    expect(referencesSsn).toBe(false);
+    expect(terms.linkageFields.some((f) => f.name === "ssn")).toBe(false);
+    // The pure-name key (LN + FN + DOB) needs no ssn, so it still survives.
+    expect(terms.linkageKeys.length).toBeGreaterThan(0);
+  });
+
+  test("marking a type ignored drops the keys an equivalent linkage column would keep", () => {
+    const base: ColumnMetadata[] = [
+      linkageCol("FN", "first_name"),
+      linkageCol("LN", "last_name"),
+      linkageCol("DOB", "date_of_birth"),
+    ];
+    const withSsnLinkage = getDefaultLinkageTerms("Agency A", [
+      linkageCol("SSN", "ssn"),
+      ...base,
+    ]);
+    const withSsnIgnored = getDefaultLinkageTerms("Agency A", [
+      { name: "SSN", type: "ssn", role: "ignored", isPayload: false },
+      ...base,
+    ]);
+    expect(withSsnIgnored.linkageKeys.length).toBeLessThan(
+      withSsnLinkage.linkageKeys.length,
+    );
   });
 });
 

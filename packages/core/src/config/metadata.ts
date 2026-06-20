@@ -6,7 +6,29 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import type { SemanticType } from "../types";
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
-export const ColumnRoleSchema = z.enum(["linkage", "identifier", "payload"]);
+/**
+ * The role a declared input column plays in an exchange:
+ *
+ * - `linkage` -- participates in the PSI protocol via its semantic type.
+ * - `identifier` -- indexes this party's matched records in the output.
+ * - `payload` -- transmitted to the partner for matched members (the default
+ *   for any column not used for linkage or identification).
+ * - `ignored` -- present in the input but used for nothing: never linked, never
+ *   an identifier, and never transmitted as payload (regardless of `isPayload`).
+ *   Opt-in only -- {@link inferMetadata} never assigns it.
+ *
+ * Nothing in the linkage/key-building path consults `role` (it branches on the
+ * column's semantic `type`), so an `ignored` column is not coerced out of
+ * linkage by a role default -- it would otherwise leak in via its `type`. Each
+ * type- or payload-driven consumer therefore excludes `ignored` explicitly
+ * (`preparePayload`, `resolveFieldColumns`'s type fallback, `getDefaultLinkageTerms`).
+ */
+export const ColumnRoleSchema = z.enum([
+  "linkage",
+  "identifier",
+  "payload",
+  "ignored",
+]);
 export type ColumnRole = z.infer<typeof ColumnRoleSchema>;
 
 /**

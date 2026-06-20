@@ -231,6 +231,56 @@ test.each([
   expect(result.success).toBe(false);
 });
 
+// ─── role: ignored ────────────────────────────────────────────────────────────
+
+test("safeParseMetadata accepts role: ignored", () => {
+  const result = safeParseMetadata([
+    { name: "COUNTY", type: "other", role: "ignored", is_payload: false },
+  ]);
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data[0].role).toBe("ignored");
+});
+
+test("safeParseMetadata accepts role: ignored with is_payload: true (accept-but-ignore)", () => {
+  // The is_payload + ignored open question is resolved as accept-but-ignore: the
+  // schema accepts any is_payload on an ignored column; transmission is suppressed
+  // at the preparePayload chokepoint (see payloadExchange.test.ts), not at parse.
+  const result = safeParseMetadata([
+    { name: "COUNTY", type: "other", role: "ignored", is_payload: true },
+  ]);
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data[0]).toEqual({
+    name: "COUNTY",
+    type: "other",
+    role: "ignored",
+    isPayload: true,
+  });
+});
+
+test("safeParseMetadata rejects an unknown role", () => {
+  const result = safeParseMetadata([
+    { name: "c", type: "other", role: "excluded", is_payload: false },
+  ]);
+  expect(result.success).toBe(false);
+});
+
+test("inferMetadata never assigns role: ignored", () => {
+  // ignored is opt-in (user intent, not inferable): inference only ever emits
+  // linkage, identifier, or payload. Exercise linkage, canonical-identifier,
+  // _id-suffix, promoted-single-id, and unknown columns together.
+  const result = inferMetadata([
+    "ssn",
+    "first_name",
+    "identifier",
+    "client_id",
+    "member_id",
+    "program_start_date",
+  ]);
+  expect(result.every((c) => c.role !== "ignored")).toBe(true);
+});
+
 test("a rejected metadata type is not echoed in the parse error", () => {
   // The metadata `type` is a z.enum(SEMANTIC_TYPES) reached by the operator-config
   // path (loadConfigLinkageSource), which relays the Zod issue message verbatim.

@@ -743,9 +743,11 @@ export interface FieldColumnResolution {
  *    present in the data. (When two transformations name the same output the
  *    last wins, matching the builder's field map and the checker's old mapping.)
  * 2. Type fallback: otherwise the field binds to the FIRST `metadata` column of
- *    its semantic type (`metadata.find(c => c.type === field.type)`), or to
+ *    its semantic type that is not `role: ignored`
+ *    (`metadata.find(c => c.type === field.type && c.role !== "ignored")`), or to
  *    nothing when no such column exists. First-match -- not "any same-typed
- *    column" -- because the exchange reads exactly that column.
+ *    column" -- because the exchange reads exactly that column. An ignored column
+ *    is skipped even when it is the only one of its type, so it never links.
  *
  * Binding is independent of whether the bound column is present in the input:
  * the builder reads rows from the column and a presence-only consumer layers the
@@ -778,7 +780,14 @@ export function resolveFieldColumns(
       resolution.set(field.name, { column: transform.input, transform });
       continue;
     }
-    const col = metadata.find((c) => c.type === field.type);
+    // Skip `role: ignored` columns: the linkage path keys on `type`, not
+    // `role`, so an ignored column of the field's type would otherwise bind here
+    // and participate in linkage. This is the one chokepoint the builder, the
+    // satisfiability checker, and the default-standardization derivation share,
+    // so excluding it once keeps an ignored column out of all three.
+    const col = metadata.find(
+      (c) => c.type === field.type && c.role !== "ignored",
+    );
     resolution.set(field.name, { column: col?.name, transform: undefined });
   }
   return resolution;
@@ -789,7 +798,7 @@ export function resolveFieldColumns(
  * each field to an input column via {@link resolveFieldColumns}: an explicit
  * standardization transformation when one names the field (its steps run on the
  * bound column), otherwise the identity transformation over the first metadata
- * column of the field's semantic type.
+ * column of the field's semantic type that is not `role: ignored`.
  *
  * Linkage fields that resolve to no column are absent from the dataset; records
  * referencing those fields are excluded from the corresponding linkage keys.
@@ -1048,9 +1057,9 @@ export function validateStandardizationAgainstTerms(
  * Because the binding is shared, the resolution rules apply unchanged: an
  * explicit standardization preempts the type fallback (a field whose explicit
  * source column is absent is unsatisfiable even when a same-typed column exists),
- * and the type fallback binds to the FIRST metadata column of the field's type.
- * An empty result means every configured field can be produced; a non-empty
- * result names the fields that cannot.
+ * and the type fallback binds to the FIRST non-`ignored` metadata column of the
+ * field's type. An empty result means every configured field can be produced; a
+ * non-empty result names the fields that cannot.
  *
  * Pass `metadata` to match an exchange that runs from an explicit metadata block
  * (`prepareForExchange` resolves the type fallback against

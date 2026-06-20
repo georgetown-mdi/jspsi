@@ -32,6 +32,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `psilink invite` (offline) prints how to abandon a pending invitation before it expires: delete its key file. See `docs/CLI.md`.
 - Key file schema: a versioned JSON format for persisting the shared token and exchange metadata between sessions.
 - Metadata inference (column semantic types and date formats), custom linkage keys via configurable transformations, and data standardization that canonicalizes linkage values by semantic type. See `docs/EXCHANGE_REFERENCE.md`.
+- Metadata `role: ignored`: mark an input column present in your file but excluded from the exchange -- never linked, never an identifier, and never transmitted as payload (even if `is_payload: true`). Opt-in only; inference never assigns it. See `docs/EXCHANGE_REFERENCE.md`.
 
 ### Changed
 

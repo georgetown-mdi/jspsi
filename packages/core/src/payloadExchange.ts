@@ -77,15 +77,20 @@ export type PayloadWireMessage = z.infer<typeof payloadWireSchema>;
  * Prepares the payload message to send after PSI linkage.
  *
  * Gathers all `isPayload` columns from the matched rows (indexed by
- * `associationTable[0]`) and packages them for transmission. Returns a
- * no-data message when the dataset has no payload columns or no matched rows.
+ * `associationTable[0]`) and packages them for transmission. A `role: ignored`
+ * column is never transmitted, regardless of its `isPayload` value -- the role
+ * is the explicit "use this column for nothing" opt-out, so it wins over any
+ * `isPayload: true` left on the column. Returns a no-data message when the
+ * dataset has no transmittable payload columns or no matched rows.
  */
 export function preparePayload(
   rawRows: Array<Record<string, string>>,
   metadata: Metadata,
   associationTable: AssociationTable,
 ): PayloadWireMessage {
-  const payloadCols = metadata.filter((col) => col.isPayload);
+  const payloadCols = metadata.filter(
+    (col) => col.isPayload && col.role !== "ignored",
+  );
   if (payloadCols.length === 0 || associationTable[0].length === 0) {
     return { hasData: false };
   }

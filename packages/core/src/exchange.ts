@@ -125,7 +125,12 @@ export function prepareForExchange(
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
-    const dobCol = metadata.find((c) => c.type === "date_of_birth");
+    // Skip `role: ignored` columns: an ignored date_of_birth column does not
+    // participate in linkage, so it must not drive the inferred date format
+    // either (and resolveFieldColumns would not bind it as the dob field).
+    const dobCol = metadata.find(
+      (c) => c.type === "date_of_birth" && c.role !== "ignored",
+    );
     if (dobCol !== undefined) {
       dateInputFormat = inferDateFormat(
         rawRows.map((row) => row[dobCol.name] ?? ""),
