@@ -265,11 +265,55 @@ test("exchangePayloads: a pathological-count partner row fails cleanly, not with
   expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });
 
+test("exchangePayloads: a pathological-count columns array fails cleanly, not with a RangeError", async () => {
+  // ~4M invalid (non-string) column names, past the ~3.5M `Invalid string
+  // length` threshold the unbounded `z.array(z.string())` schema hit (a ~4.5s
+  // CPU burn then a RangeError). The single-issue validator caps that at one
+  // clean issue; receiveParsed wraps it as ConnectionError("protocol").
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: Array.from({ length: 4_000_000 }, () => 1),
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("exchangePayloads: a pathological-count rowIndices array fails cleanly, not with a RangeError", async () => {
+  // ~4M invalid (negative) row indices, past the same threshold. rowIndices is
+  // one per matched record, legitimately in the millions, so a count `.max()` is
+  // unusable; the single-issue validator caps accumulation regardless of the
+  // length mismatch with `rows`.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["c"],
+    rowIndices: Array.from({ length: 4_000_000 }, () => -1),
+    rows: [["v"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
 test("exchangePayloads: a legitimately large partner payload parses", async () => {
-  // rows is one entry per matched record, legitimately in the millions; a count
-  // `.max()` low enough to forestall the overflow would reject this, the
-  // single-issue validator does not. 200k clears the ~130k overflow threshold,
-  // so this also proves a VALID large message never trips the bound.
+  // rows and rowIndices are one entry per matched record, legitimately in the
+  // millions; a count `.max()` low enough to forestall the overflow would reject
+  // this, the single-issue validators do not. 200k clears the ~130k overflow
+  // threshold, so this also proves a VALID large message never trips the bound.
   const n = 200_000;
   const [connA, connB] = createMessagePipe();
   const initiatorPromise = exchangePayloads(connA, "initiator", {

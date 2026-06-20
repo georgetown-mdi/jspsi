@@ -530,22 +530,25 @@ export interface ParseSchema<T> {
 }
 
 /**
- * Awaits the next message on `conn` and validates it with `schema.parse`. On a
- * parse failure this always throws a {@link ConnectionError} of kind
- * `"protocol"` (the peer sent a frame that violates the message contract),
- * preserving the validator's error as the `cause`.
+ * Validates an already-received value with `schema.parse`, throwing a
+ * {@link ConnectionError} of kind `"protocol"` (the peer sent a frame that
+ * violates the message contract) on failure, preserving the validator's error
+ * as the `cause`.
  *
- * No timeout argument: the connection's own inactivity deadline applies. This
- * is the shared receive-and-validate path for every consumer whose only
- * parse-failure response is "fail as a protocol violation". Sites that must run
- * a custom abort, or send an outbound frame before parsing, call
- * {@link MessageConnection.receive} and parse inline instead.
+ * This is the parse half of {@link receiveParsed}, factored out for the
+ * send-before-parse sites that must receive a frame, send an acknowledgement,
+ * then parse -- and so cannot fold the receive and the parse into one call.
+ * Routing those sites through it means a malformed final frame surfaces the same
+ * clean `"protocol"` error there as everywhere else, instead of the validator's
+ * raw throw escaping bare -- including a Zod `RangeError` ("Invalid string
+ * length") built over a pathological-count payload, the residual the
+ * single-issue array bounds (utils/singleIssueArray.ts) forestall at the schema
+ * but which this wrap classifies cleanly regardless.
  */
-export async function receiveParsed<T>(
-  conn: MessageConnection,
+export function parseOrProtocolError<T>(
   schema: ParseSchema<T>,
-): Promise<T> {
-  const raw = await conn.receive();
+  raw: unknown,
+): T {
   try {
     return schema.parse(raw);
   } catch (e) {
@@ -555,6 +558,26 @@ export async function receiveParsed<T>(
       { cause: e },
     );
   }
+}
+
+/**
+ * Awaits the next message on `conn` and validates it with `schema.parse`. On a
+ * parse failure this always throws a {@link ConnectionError} of kind
+ * `"protocol"` (the peer sent a frame that violates the message contract),
+ * preserving the validator's error as the `cause`.
+ *
+ * No timeout argument: the connection's own inactivity deadline applies. This
+ * is the shared receive-and-validate path for every consumer whose only
+ * parse-failure response is "fail as a protocol violation". Sites that must run
+ * a custom abort, or send an outbound frame before parsing, call
+ * {@link MessageConnection.receive} and parse inline (via
+ * {@link parseOrProtocolError}) instead.
+ */
+export async function receiveParsed<T>(
+  conn: MessageConnection,
+  schema: ParseSchema<T>,
+): Promise<T> {
+  return parseOrProtocolError(schema, await conn.receive());
 }
 
 /**

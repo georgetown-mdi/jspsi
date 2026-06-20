@@ -2,13 +2,19 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant, associationTableMessage } from "../src/participant";
+import {
+  PSIParticipant,
+  associationTableMessage,
+  numberArrayMessage,
+} from "../src/participant";
 
 import {
   createMessagePipe,
   receiveParsed,
+  parseOrProtocolError,
   ConnectionError,
 } from "../src/connection/messageConnection";
+import type { MessageConnection } from "../src/connection/messageConnection";
 import { sortAssociationTable } from "./utils/associationTable";
 
 const psiLibrary = await PSI();
@@ -107,4 +113,74 @@ test("a legitimately large association table parses", async () => {
   const [first, second] = await parsed;
   expect(first).toHaveLength(n);
   expect(second).toHaveLength(n);
+});
+
+// ─── numberArrayMessage: direct-`.parse()` send-before-parse site ─────────────
+// The joiner's final received frame -- the starter's original-index list -- is
+// read by a direct `parseOrProtocolError(numberArrayMessage, ...)` AFTER the
+// status acknowledgement is sent (so a malformed frame cannot strand the
+// partner). It is the one residual flat array read off a direct `.parse()`
+// rather than receiveParsed, so before the single-issue bound a pathological
+// count surfaced a BARE RangeError instead of a clean ConnectionError.
+
+// Replaces the value the Nth receive() on `conn` resolves with, leaving the send
+// path and every other receive untouched. The real frame is still drained from
+// the underlying connection so the pipe stays in lockstep.
+function corruptNthReceive(
+  conn: MessageConnection,
+  n: number,
+  replacement: unknown,
+): MessageConnection {
+  let count = 0;
+  return {
+    send: (data) => conn.send(data),
+    receive: async (timeoutMs?: number) => {
+      count += 1;
+      const real = await conn.receive(timeoutMs);
+      return count === n ? replacement : real;
+    },
+    close: () => conn.close(),
+  };
+}
+
+test("joiner: a pathological-count final frame fails cleanly, not with a bare RangeError", async () => {
+  const [serverConn, clientConn] = createMessagePipe();
+  const starter = new PSIParticipant("starter", psiLibrary, {
+    role: "starter",
+    verbose: 0,
+  });
+  const joiner = new PSIParticipant("joiner", psiLibrary, {
+    role: "joiner",
+    verbose: 0,
+  });
+  // ~4M invalid (non-number) elements, past the ~3.5M `Invalid string length`
+  // threshold the unbounded `z.array(z.number())` schema hit (a ~4.5s CPU burn
+  // then a bare RangeError). The joiner's 3rd receive is the final original-index
+  // frame parsed at the direct-`.parse()` site; replacing it drives the joiner to
+  // parse a pathological array while the real exchange otherwise proceeds.
+  const pathological = Array.from({ length: 4_000_000 }, () => "x");
+  const [starterOutcome, joinerOutcome] = await Promise.allSettled([
+    starter.identifyIntersection(serverConn, ["Alice", "Carol"]),
+    joiner.identifyIntersection(
+      corruptNthReceive(clientConn, 3, pathological),
+      ["Carol"],
+    ),
+  ]);
+  // The joiner acknowledges (status:completed) before parsing, so the starter
+  // completes; only the joiner's direct parse rejects.
+  expect(starterOutcome.status).toBe("fulfilled");
+  expect(joinerOutcome.status).toBe("rejected");
+  const err = (joinerOutcome as PromiseRejectedResult).reason;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("a legitimately large original-index frame parses", () => {
+  // The original-index list is bounded only by the frame cap, legitimately in
+  // the millions; 200k clears the overflow threshold, so a VALID large frame is
+  // never rejected by the single-issue bound.
+  const n = 200_000;
+  const valid = Array.from({ length: n }, (_, i) => i);
+  expect(parseOrProtocolError(numberArrayMessage, valid)).toHaveLength(n);
 });

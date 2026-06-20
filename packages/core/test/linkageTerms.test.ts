@@ -12,6 +12,7 @@ import {
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
+  MAX_PAYLOAD_ENTRIES,
 } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
@@ -1559,6 +1560,83 @@ test("a pathological-count linkage key elements list fails cleanly, not with a R
     expect(
       result.error.issues.some((i) =>
         /elements must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
+// ─── Payload send/receive count bounds ───────────────────────────────────────
+// payload.send / payload.receive are partner-controlled column lists sitting one
+// object-frame below the root, so they do not drive the ~130k STACK overflow the
+// nested collections hit -- but at ~3.5M invalid entries Zod throws `Invalid
+// string length` building its error string (a RangeError that safeParse does NOT
+// catch). Unlike the post-handshake wire arrays, a payload legitimately holds at
+// most a few hundred columns, so a count gate (MAX_PAYLOAD_ENTRIES, applied
+// before per-element validation) fits. `base` declares expectsOutput: true, so a
+// non-empty `receive` is permitted by the cross-field refine.
+
+const sendTerms = (send: unknown[]) => ({ ...base, payload: { send } });
+const receiveTerms = (receive: unknown[]) => ({
+  ...base,
+  payload: { receive },
+});
+
+test("accepts a payload send list at exactly the maximum count", () => {
+  const send = Array.from({ length: MAX_PAYLOAD_ENTRIES }, (_, i) => ({
+    name: `c${i}`,
+  }));
+  expect(() => parseLinkageTerms(sendTerms(send))).not.toThrow();
+});
+
+test("rejects a payload send list over the maximum count", () => {
+  const send = Array.from({ length: MAX_PAYLOAD_ENTRIES + 1 }, (_, i) => ({
+    name: `c${i}`,
+  }));
+  expect(() => parseLinkageTerms(sendTerms(send))).toThrow(ZodError);
+});
+
+test("a pathological-count payload send list fails cleanly, not with a RangeError", () => {
+  // ~4M invalid entries, past the ~3.5M `Invalid string length` threshold the
+  // unbounded `z.array(PayloadColumnSchema)` schema hit. The count gate, applied
+  // before per-element validation, must turn this into one clean count issue.
+  const send = Array.from({ length: 4_000_000 }, () => 123);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(sendTerms(send));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) => /send must not exceed/.test(i.message)),
+    ).toBe(true);
+  }
+});
+
+test("accepts a payload receive list at exactly the maximum count", () => {
+  const receive = Array.from({ length: MAX_PAYLOAD_ENTRIES }, (_, i) => ({
+    name: `c${i}`,
+  }));
+  expect(() => parseLinkageTerms(receiveTerms(receive))).not.toThrow();
+});
+
+test("rejects a payload receive list over the maximum count", () => {
+  const receive = Array.from({ length: MAX_PAYLOAD_ENTRIES + 1 }, (_, i) => ({
+    name: `c${i}`,
+  }));
+  expect(() => parseLinkageTerms(receiveTerms(receive))).toThrow(ZodError);
+});
+
+test("a pathological-count payload receive list fails cleanly, not with a RangeError", () => {
+  const receive = Array.from({ length: 4_000_000 }, () => 123);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(receiveTerms(receive));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) =>
+        /receive must not exceed/.test(i.message),
       ),
     ).toBe(true);
   }

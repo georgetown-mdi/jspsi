@@ -47,13 +47,25 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       hasData: z.literal(true),
       // `columns` and `rowIndices` are flat arrays one object-frame below this
       // object, so a pathological count cannot drive the ~130k STACK overflow
-      // `rows` faces. A far larger count (~millions of invalid elements, within
-      // the frame cap) can still make Zod throw a `RangeError: Invalid string
-      // length` building the error, but receiveParsed catches that harmlessly as
-      // ConnectionError("protocol"). Left unbounded as a Low residual; the
-      // legitimate counts are bounded only by MAX_FRAME_SIZE_BYTES.
-      columns: z.array(z.string()),
-      rowIndices: z.array(z.number().int().nonnegative()),
+      // `rows` faces -- but a far larger count (~millions of invalid elements,
+      // within the frame cap) makes Zod throw a DIFFERENT RangeError ("Invalid
+      // string length", ~3.5M on Zod 4.4.3) building its error string from one
+      // issue per element. receiveParsed catches that harmlessly as
+      // ConnectionError("protocol"), but the single-issue validators below cap
+      // issue accumulation at one regardless of count (utils/singleIssueArray.ts)
+      // so the burn never happens. A count `.max()` is wrong for `rowIndices`
+      // (one per matched record, legitimately in the millions like `rows`) and
+      // unnecessary for `columns`; both predicates mirror their replaced element
+      // schema exactly -- typeof-string for `z.string()`, Number.isSafeInteger
+      // and `>= 0` for `z.number().int().nonnegative()`.
+      columns: singleIssueArray<string>(
+        (value) => typeof value === "string",
+        "each column name must be a string",
+      ),
+      rowIndices: singleIssueArray<number>(
+        (value) => Number.isSafeInteger(value) && (value as number) >= 0,
+        "each row index must be a non-negative integer",
+      ),
       rows: z.array(payloadRow),
     })
     .refine(
