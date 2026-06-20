@@ -62,6 +62,7 @@ const dark6 = theme.colors.dark[6];
 
 const warningText = vars.light["--mantine-color-yellow-light-color"];
 const errorText = vars.light["--mantine-color-red-light-color"];
+const errorToken = vars.light["--mantine-color-error"];
 const dimmedLight = vars.light["--mantine-color-dimmed"];
 const placeholderLight = vars.light["--mantine-color-placeholder"];
 const dimmedDark = vars.dark["--mantine-color-dimmed"];
@@ -112,6 +113,12 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         name: "error Alert title: deep red on red-1",
         fg: errorText,
         bg: red1,
+        floor: 4.5,
+      },
+      {
+        name: "error token (validation text + asterisk): on white input",
+        fg: errorToken,
+        bg: white,
         floor: 4.5,
       },
       // Locks the prior dimmed/placeholder fix in both schemes.

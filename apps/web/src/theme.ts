@@ -174,11 +174,25 @@ const STATUS_TEXT = {
 } as const;
 
 /**
+ * Accessible color for Mantine's `error` token in the light scheme -- the input
+ * validation message text, the `withAsterisk` required marker, and the
+ * error-state input border. Mantine's light default is red-6 (#fa5252) = 3.28:1
+ * on the white page/input, which fails WCAG 2.1 AA 1.4.3 for the normal-weight
+ * validation text. red-9 (#c92a2a) = 5.46:1 on white (5.18:1 on the gray-0 card)
+ * clears it with margin. This differs from {@link STATUS_TEXT}.error: that sits
+ * on the red-1 Alert tint, where #c92a2a is only 4.51:1, so the two error reds
+ * are tuned to their different backgrounds. Enforced by
+ * test/unit/themeContrast.test.ts.
+ */
+const ERROR_TEXT = "#c92a2a";
+
+/**
  * Raises the `dimmed` and input `placeholder` tokens to {@link MUTED_TEXT} in
  * both color schemes, and the yellow/red `light`-variant text tokens to
- * {@link STATUS_TEXT} in the light scheme. Mantine deep-merges this over the
- * default resolver, so only the overridden variables need be returned. Passed to
- * `MantineProvider` in the root route.
+ * {@link STATUS_TEXT} plus the `error` token to {@link ERROR_TEXT} in the light
+ * scheme. Mantine deep-merges this over the default resolver, so only the
+ * overridden variables need be returned. Passed to `MantineProvider` in the root
+ * route.
  */
 export const cssVariablesResolver: CSSVariablesResolver = () => ({
   variables: {},
@@ -187,6 +201,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     "--mantine-color-placeholder": MUTED_TEXT.light,
     "--mantine-color-yellow-light-color": STATUS_TEXT.warning,
     "--mantine-color-red-light-color": STATUS_TEXT.error,
+    "--mantine-color-error": ERROR_TEXT,
   },
   dark: {
     "--mantine-color-dimmed": MUTED_TEXT.dark,
