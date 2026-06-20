@@ -23,10 +23,13 @@ import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
 import { seedAdvancedInvite } from "@psi/advancedInvite";
 
+import {
+  clearAdvancedHandoff,
+  peekAdvancedHandoff,
+} from "@components/advancedHandoff";
 import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
-import { peekAdvancedHandoff } from "@components/advancedHandoff";
 
 import type { LinkageTerms } from "@psilink/core";
 
@@ -95,6 +98,7 @@ export function AdvancedInvite() {
       columns = await loadCSVColumns(file);
     } catch (cause) {
       if (!mountedRef.current) return;
+      clearAdvancedHandoff();
       setError({
         title: "Could not read your file",
         message: sanitizeErrorForDisplay(cause),
@@ -103,6 +107,16 @@ export function AdvancedInvite() {
       return;
     }
     if (!mountedRef.current) return;
+
+    // The warm hand-off (if any) is now consumed: from here the file lives in the
+    // editing phase, not the module stash. Clear the stash so a later back/forward
+    // navigation to /advanced -- which does not pass through the compose screen's
+    // Advanced click -- falls back to the picker rather than re-seeding from this
+    // now-stale file. Safe under React StrictMode: this runs only after
+    // loadCSVColumns resolves, i.e. after the double-invoked render initializer and
+    // the setup/cleanup/setup effect cycle have already read the hand-off
+    // synchronously, so neither mount loses it.
+    clearAdvancedHandoff();
 
     // Assess against the FULL default terms (every default field declared) so the
     // block can name the field types the file lacks -- the same gate and wording
@@ -179,12 +193,17 @@ export function AdvancedInvite() {
       setGenerating(false);
       if (e instanceof InvitationFileError) {
         // The editor pre-validated, so this is defensive: a body that fails the
-        // full parse, or a satisfiability edge the header pass missed.
+        // full parse, or a satisfiability edge the header pass missed. Reset to
+        // recommended would re-derive from the same unusable file, so drop back to
+        // the picker -- where "choose another file" is an action the UI offers
+        // (the editing phase has no picker).
+        setFiles([]);
+        setPhase({ status: "acquire" });
         setError({
           title: "Could not generate invitation",
           message:
-            "Your file could not back this invitation. Reset to recommended " +
-            "or choose another file.",
+            "Your file could not back this invitation. Choose another file and " +
+            "try again.",
         });
       } else {
         // Internal fault (a schema/encoding error). Keep error internals out of

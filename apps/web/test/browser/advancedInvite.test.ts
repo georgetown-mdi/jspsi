@@ -9,8 +9,11 @@ import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
 
+import { InvitationFileError } from "@psi/invitation";
+
 import {
   clearAdvancedHandoff,
+  peekAdvancedHandoff,
   stashAdvancedHandoff,
 } from "@components/advancedHandoff";
 import { AdvancedInvite } from "@components/AdvancedInvite";
@@ -123,6 +126,58 @@ describe("AdvancedInvite", () => {
     await expect
       .element(page.getByRole("textbox", { name: "Your name" }))
       .toHaveValue("County Health Dept");
+  });
+
+  test("consuming a warm hand-off clears it so a return navigation gets the picker", async () => {
+    stashAdvancedHandoff({ file: csvFile(), name: "County Health Dept" });
+    mount();
+    await expect
+      .element(page.getByText("Customize your invitation"))
+      .toBeInTheDocument();
+    // The stash is consumed once read into the editing phase, so a browser
+    // back/forward to /advanced (no fresh Advanced click) no longer re-seeds it.
+    expect(peekAdvancedHandoff()).toBeUndefined();
+
+    // Remounting with nothing stashed (the return navigation) lands on the picker.
+    root?.unmount();
+    container?.remove();
+    mount();
+    await expect
+      .element(
+        page.getByText("Choose your data file to begin.", { exact: false }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a file that cannot back the invitation drops back to the picker", async () => {
+    gen.impl = () =>
+      Promise.reject(
+        new InvitationFileError({
+          kind: "unreadable",
+          cause: new Error("bad body"),
+        }),
+      );
+    stashAdvancedHandoff({ file: csvFile(), name: "County Health Dept" });
+    mount();
+    await expect
+      .element(page.getByRole("button", { name: "Generate invitation" }))
+      .toBeEnabled();
+    await userEvent.click(
+      page.getByRole("button", { name: "Generate invitation" }),
+    );
+
+    // The editing phase has no picker, so a file-backed failure returns to the
+    // route's own picker, where "choose another file" is an action that exists.
+    await expect
+      .element(page.getByText("Could not generate invitation"))
+      .toBeInTheDocument();
+    expect(document.body.textContent).toContain("Choose another file");
+    await expect
+      .element(
+        page.getByText("Choose your data file to begin.", { exact: false }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByTestId("exchange-view").query()).toBeNull();
   });
 
   test("generating from the editor transitions to the exchange screen", async () => {

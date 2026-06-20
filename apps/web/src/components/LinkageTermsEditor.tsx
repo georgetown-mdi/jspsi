@@ -32,7 +32,6 @@ import {
 
 import {
   buildAdvancedTerms,
-  seedAdvancedInvite,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
 
@@ -102,14 +101,16 @@ export function LinkageTermsEditor({
   /** Holds Generate disabled while an invitation is being generated. */
   generating?: boolean;
 }) {
-  // The draft is seeded once from the seed; "Reset to recommended" re-seeds it.
-  const freshDraft = (): AdvancedInviteDraft => {
-    const seeded = seedAdvancedInvite(
-      initialIdentity ?? seed.terms.identity,
-      seed.columns,
-    ).draft;
-    return seeded;
-  };
+  // The recommended starting draft: the seed's metadata-derived terms restated as
+  // an editable draft (every key enabled, the default lifetime, the prefilled
+  // name). "Reset to recommended" re-runs this. Built from seed.terms rather than
+  // re-deriving via seedAdvancedInvite -- the seed already holds that derivation,
+  // so this stays a cheap restatement, not a second metadata inference.
+  const freshDraft = (): AdvancedInviteDraft => ({
+    identity: initialIdentity ?? seed.terms.identity,
+    lifetimeSeconds: INVITATION_LIFETIME_SECONDS,
+    keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
+  });
   const [draft, setDraft] = useState<AdvancedInviteDraft>(freshDraft);
 
   // A polite live region for validation and reorder announcements, kept in a

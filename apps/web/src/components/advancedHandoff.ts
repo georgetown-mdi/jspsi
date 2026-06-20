@@ -12,10 +12,13 @@
  * "Advanced options" click (a browser event) and the sole reader is the
  * `/advanced` route (`ssr: false`), so this module-level value is never touched
  * during server rendering and cannot leak across requests. It is overwritten (or
- * cleared) on every Advanced click, so it always reflects the latest one, and a
- * full page load reinitializes it to `undefined` -- the intended cold-load
- * behavior, since the browser cannot regain access to a previously chosen local
- * file, so the route falls back to its own file picker.
+ * cleared) on every Advanced click, so it always reflects the latest one, and the
+ * `/advanced` route clears it once it has read the file into its own state -- so a
+ * back/forward navigation that returns to `/advanced` without a fresh click finds
+ * nothing stashed and falls back to the picker rather than re-seeding from a stale
+ * file. A full page load likewise reinitializes it to `undefined` (the browser
+ * cannot regain access to a previously chosen local file), so the route falls back
+ * to its own file picker.
  */
 export interface AdvancedHandoff {
   /** The CSV the inviter chose on the compose screen (a lazy handle, not bytes). */
