@@ -1,21 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
-  ActionIcon,
   Alert,
   Anchor,
-  Code,
-  CopyButton,
-  Divider,
-  Group,
   Paper,
   Stack,
   Text,
   TextInput,
   Title,
-  Tooltip,
 } from "@mantine/core";
-import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 
 import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
@@ -49,67 +42,6 @@ function invitationLocation(): InvitationLocation {
   };
 }
 
-/** A labelled, copy-to-clipboard view of one shareable artifact. It is only ever
- * rendered on the client -- behind the `session` state guard at its call site,
- * which starts `undefined` and is set only in an event handler, so CopyRow is
- * absent from the server render and never participates in hydration. The
- * `typeof navigator` check is defence-in-depth (and hides the button on
- * non-secure origins, where `navigator.clipboard` is undefined), not the SSR
- * safety mechanism -- that is the call-site guard. */
-function CopyRow({
-  label,
-  description,
-  value,
-}: {
-  label: string;
-  description: string;
-  value: string;
-}) {
-  return (
-    <Stack gap={2}>
-      <Text size="sm" fw={500}>
-        {label}
-      </Text>
-      <Text size="xs" c="dimmed">
-        {description}
-      </Text>
-      <Group gap="xs" wrap="nowrap" align="flex-start">
-        <Code block style={{ flex: 1, overflowWrap: "anywhere" }}>
-          {value}
-        </Code>
-        {
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          typeof navigator !== "undefined" && navigator.clipboard ? (
-            <CopyButton value={value} timeout={1000}>
-              {({ copied, copy }) => (
-                <Tooltip
-                  label={copied ? "Copied" : "Copy to clipboard"}
-                  // Open on keyboard focus too, not hover only, so keyboard
-                  // users get the same affordance.
-                  events={{ hover: true, focus: true, touch: true }}
-                >
-                  <ActionIcon
-                    onClick={copy}
-                    variant={copied ? "light" : "filled"}
-                    // Name reflects the copied state so a screen reader announces
-                    // the success (the icon/tooltip change alone is not conveyed
-                    // to assistive tech).
-                    aria-label={
-                      copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
-                    }
-                  >
-                    {copied ? <IconCheck size={18} /> : <IconCopy size={18} />}
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </CopyButton>
-          ) : null
-        }
-      </Group>
-    </Stack>
-  );
-}
-
 /** A generated invitation together with the inviter name that produced it. The
  * invitation carries the file-derived linkage terms and the parsed rows (so the
  * exchange below reuses them without re-parsing), and the secret seeds the
@@ -132,14 +64,6 @@ export function InvitePanel() {
     filesRef.current = next;
     setFiles(next);
   };
-
-  // Move focus to the result heading once an invitation is generated, so a
-  // screen-reader / keyboard user is taken to the output rather than left on the
-  // button with the new region announced only if they happen to explore for it.
-  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    if (session) resultHeadingRef.current?.focus();
-  }, [session]);
 
   const form = useForm({
     defaultValues: { inviterName: "" },
@@ -330,37 +254,12 @@ export function InvitePanel() {
         </Stack>
       ) : (
         <Stack mt="md">
-          <Title order={3} ref={resultHeadingRef} tabIndex={-1}>
-            Share this invitation
-          </Title>
-          <Text size="sm" c="dimmed">
-            Send one of these to your partner over a trusted channel (for
-            example, secure email). It carries a one-time secret, so treat it as
-            confidential and do not post it publicly.
-          </Text>
-          <CopyRow
-            label="Invitation link"
-            description="Opens the accept page with the invitation prefilled"
-            value={session.invitation.deepLink}
-          />
-          <CopyRow
-            label="Invitation code"
-            description="Paste into the accept form if the link cannot be used"
-            value={session.invitation.encoded}
-          />
-
-          <Divider
-            my="sm"
-            label="Then run the exchange"
-            labelPosition="center"
-          />
-          <Text size="sm" c="dimmed">
-            Your browser is waiting for your partner to accept the invitation
-            and connect, using the file you already chose. Keep this tab open.
-          </Text>
-          {/* The exchange runs on the file/terms captured at compose time: the
-              embedded linkage terms (reused verbatim so the acceptor adopts the
-              same set) and the parsed rows (no re-parse, no second file prompt). */}
+          {/* The exchange screen owns the share block (link/code + expiry) and the
+              terms summary now; it runs on the file/terms captured at compose
+              time: the embedded linkage terms (reused verbatim so the acceptor
+              adopts the same set) and the parsed rows (no re-parse, no second file
+              prompt), with the share artifacts surfaced for copying while it waits
+              for the partner. */}
           <ExchangeView
             key={session.invitation.sharedSecret}
             role="inviter"
@@ -368,6 +267,10 @@ export function InvitePanel() {
             sharedSecret={session.invitation.sharedSecret}
             expires={session.invitation.expires}
             linkageTerms={session.invitation.linkageTerms}
+            share={{
+              deepLink: session.invitation.deepLink,
+              encoded: session.invitation.encoded,
+            }}
             acquired={{
               rawRows: session.invitation.rawRows,
               columns: session.invitation.columns,

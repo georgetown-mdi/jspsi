@@ -17,11 +17,20 @@ import { IconDownload } from "@tabler/icons-react";
 
 import { ProcessState } from "@psilink/core";
 
+import type { Ref } from "react";
+
 import type { PaperProps } from "@mantine/core";
 
 export interface StatusProps extends PaperProps {
   stages: Array<{ id: string; label: string; state: ProcessState }>;
   stageId: string;
+  /** tabIndex + ref on the "Status" heading so the owner can move focus to the
+   * results once the exchange reaches `done` (the focus-on-done throughline). */
+  headingRef?: Ref<HTMLHeadingElement>;
+  /** Semantic level of the "Status" heading (visual size fixed at the h2 scale),
+   * so it nests under its container's outline -- h2 below the acceptor page's h1,
+   * h3 below the inviter section's h2. */
+  headingOrder?: 2 | 3;
   resultsFileURL: string | undefined;
   /** Self-attested audit record (JSON); safe to retain or share. */
   recordFileURL?: string | undefined;
@@ -44,6 +53,8 @@ export function Status(props: StatusProps) {
   const {
     stages,
     stageId,
+    headingRef,
+    headingOrder = 2,
     resultsFileURL,
     recordFileURL,
     recordFileName,
@@ -73,7 +84,9 @@ export function Status(props: StatusProps) {
       console.warn(`Status: unknown stageId "${stageId}"`);
     return (
       <Paper {...paperProps}>
-        <Title order={2}>Status</Title>
+        <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
+          Status
+        </Title>
         <Center mt="md">
           <Loader size="sm" />
         </Center>
@@ -89,21 +102,31 @@ export function Status(props: StatusProps) {
 
   return (
     <Paper {...paperProps}>
-      <Title order={2}>Status</Title>
-      <Transition
-        mounted={true}
-        transition="fade"
-        duration={200}
-        timingFunction="ease"
-      >
-        {(styles) => (
-          <div style={styles}>
-            <Text ta="center" size="lg" fw={500}>
-              {stageDescription}
-            </Text>
-          </div>
-        )}
-      </Transition>
+      <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
+        Status
+      </Title>
+      {/* The live region is this stable wrapper around the stage label ONLY, not
+          the card and not the fading inner element: a polite region announces a
+          change only when its own node persists and just its text content
+          changes, so the Transition (whose render-prop element React can replace)
+          stays INSIDE it rather than around it. aria-atomic re-reads the whole
+          short label on each stage change. */}
+      <div aria-live="polite" aria-atomic="true">
+        <Transition
+          mounted={true}
+          transition="fade"
+          duration={200}
+          timingFunction="ease"
+        >
+          {(styles) => (
+            <div style={styles}>
+              <Text ta="center" size="lg" fw={500}>
+                {stageDescription}
+              </Text>
+            </div>
+          )}
+        </Transition>
+      </div>
 
       {showSpinner && (
         <Center mt="md">

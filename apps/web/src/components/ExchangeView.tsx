@@ -26,6 +26,8 @@ import { waitForIncomingConnection } from "@psi/waitForConnection";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { InvitationTerms } from "@components/InvitationTerms";
+import { ShareBlock } from "@components/ShareBlock";
 import { Status } from "@components/Status";
 
 import type { AcquiredBundle, AlertContent } from "@components/FileAcquire";
@@ -76,6 +78,11 @@ export type ExchangeConfig =
        * inviter runs on the very terms the acceptor adopts (its identity is
        * already this party's name). */
       linkageTerms: LinkageTerms;
+      /** The shareable artifacts the inviter copies out-of-band, surfaced in the
+       * exchange screen's share block (the inviter waits here for the partner to
+       * accept). Both decode to the same token; the deep link prefills the accept
+       * page, the encoded string is pasted when the link cannot be used. */
+      share: { deepLink: string; encoded: string };
       /** The CSV parsed at compose time, fed straight into the exchange: no
        * re-parse, and no second file prompt (the inviter renders no
        * {@link FileAcquire}). */
@@ -195,6 +202,64 @@ export function ExchangeView(config: ExchangeConfig) {
     },
     [],
   );
+
+  // The screen-level accessibility throughline. Three focus targets, each its own
+  // ref so the effects below stay independent:
+  //  - leadingHeadingRef: the heading the screen leads with (the inviter's share
+  //    block, the acceptor's terms). Focused once on mount so a keyboard/screen-
+  //    reader user who pressed Generate/Accept lands on the new screen rather than
+  //    on the unmounted button. This is the entry move, not a mid-protocol one.
+  //  - resultsHeadingRef: the Status heading, focused on `done` so the results are
+  //    announced; mid-protocol stages deliberately do NOT move focus (the Status
+  //    live region announces them instead).
+  //  - errorAlertRef: a blocking error alert, focused so it is announced and
+  //    actionable. `done` and a blocking error are mutually exclusive (a successful
+  //    run reaches `done` and sets no alert; every error path leaves the stage
+  //    short of `done`), so the two effects never fight over focus.
+  const leadingHeadingRef = useRef<HTMLHeadingElement>(null);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const errorAlertRef = useRef<HTMLDivElement>(null);
+  // The collapsed "Partner connected" indicator, focused to recover focus the
+  // share block's collapse would otherwise orphan (see the peer-connect effect).
+  const partnerConnectedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    leadingHeadingRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (errorAlert) errorAlertRef.current?.focus();
+  }, [errorAlert]);
+  useEffect(() => {
+    if (stageId === "done") resultsHeadingRef.current?.focus();
+  }, [stageId]);
+
+  // The partner is connected once the run has advanced past the pre-stages
+  // ("before start"/"waiting for peer") into a protocol stage. Drives the inviter
+  // share block's collapse to its one-line "Partner connected" state.
+  const peerConnected = !preStages.some((stage) => stage.id === stageId);
+
+  // Recover focus orphaned by the inviter share block collapsing on peer-connect:
+  // when the expanded block (which may hold focus -- its heading or a copy button)
+  // becomes the one-line "Partner connected" indicator, the focused node unmounts
+  // and the browser drops focus to <body>. Move it onto the indicator so a
+  // keyboard/screen-reader user is not stranded -- but ONLY when focus is on
+  // <body>, so focus the user moved to a live element (the terms, the Status card)
+  // is not stolen. The <body> check cannot distinguish "orphaned by the collapse"
+  // from a screen reader in browse mode (which parks real focus on <body> while
+  // its virtual cursor reads elsewhere); in that case this pulls the cursor to the
+  // indicator -- an acceptable one-shot, since "Partner connected" is the timely,
+  // relevant event and the Status live region announces the stage regardless. A
+  // no-op for the acceptor, which renders no share block (the ref stays null).
+  useEffect(() => {
+    if (!peerConnected) return;
+    const active = document.activeElement;
+    if (!active || active === document.body)
+      partnerConnectedRef.current?.focus();
+  }, [peerConnected]);
+
+  // Heading level for the terms and Status headings, so the outline nests under
+  // each screen's container: the acceptor sits below the accept page's h1 (h2),
+  // the inviter below the invite section's h2 (h3, matching the share block).
+  const headingOrder = config.role === "inviter" ? 3 : 2;
 
   // Revoke this exchange's object URLs when the component unmounts (or before a
   // replacement set is stored): createObjectURL keeps each Blob alive until it is
@@ -437,15 +502,40 @@ export function ExchangeView(config: ExchangeConfig) {
         // not here. Those run-error messages are fixed strings or a single
         // sanitizeForDisplay'd message with no embedded newlines; pre-line is kept
         // defensively so any future multi-line message renders one line per line
-        // rather than run together.
+        // rather than run together. tabIndex + ref so a blocking error takes focus.
         <Alert
           color="red"
           title={errorAlert.title}
           style={{ whiteSpace: "pre-line" }}
+          ref={errorAlertRef}
+          tabIndex={-1}
         >
           {errorAlert.message}
         </Alert>
       )}
+      {/* The inviter leads with the share block, weighted above the terms; the
+          acceptor leads with the terms (no share block). Both see the terms
+          summary on the exchange screen as the agreed reference for the run. */}
+      {config.role === "inviter" && (
+        <ShareBlock
+          headingRef={leadingHeadingRef}
+          connectedRef={partnerConnectedRef}
+          deepLink={config.share.deepLink}
+          encoded={config.share.encoded}
+          expires={config.expires}
+          connected={peerConnected}
+        />
+      )}
+      <InvitationTerms
+        linkageTerms={config.linkageTerms}
+        // The inviter's expiry is already shown in the share block above, so it is
+        // withheld here to avoid showing the same deadline twice; the acceptor has
+        // no share block, so its terms carry the expiry.
+        expires={config.role === "inviter" ? undefined : config.expires}
+        perspective={config.role === "inviter" ? "proposing" : "accepted"}
+        headingOrder={headingOrder}
+        headingRef={config.role === "acceptor" ? leadingHeadingRef : undefined}
+      />
       {warningAlert && (
         <Alert color="yellow" title={warningAlert.title}>
           {warningAlert.message}
@@ -455,6 +545,8 @@ export function ExchangeView(config: ExchangeConfig) {
         <Status
           stages={stages}
           stageId={stageId}
+          headingRef={resultsHeadingRef}
+          headingOrder={headingOrder}
           resultsFileURL={outputs?.resultsUrl}
           recordFileURL={outputs?.record?.recordUrl}
           recordFileName={outputs?.record?.recordFileName}

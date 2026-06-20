@@ -503,13 +503,18 @@ function summarizeKey(
 }
 
 /**
- * Build a display-ready {@link InvitationSummary} from a decoded invitation
- * token. Pure and side-effect-free: it derives only what the accept screen
- * renders and sanitizes every partner-controlled string, so it is the single
- * tested boundary for that escaping.
+ * Build a display-ready {@link InvitationSummary} from an invitation's linkage
+ * terms and optional expiry. The parameter is a structural subset of
+ * {@link InvitationToken} (its `linkageTerms` and `expires`), so a full decoded
+ * token is accepted as-is, but so is the terms/expiry pair the exchange screen
+ * carries without a token. Pure and side-effect-free: it derives only what the
+ * terms screen renders and sanitizes every partner-controlled string, so it is
+ * the single tested boundary for that escaping.
  */
-export function summarizeInvitation(token: InvitationToken): InvitationSummary {
-  const terms = token.linkageTerms;
+export function summarizeInvitation(
+  source: Pick<InvitationToken, "linkageTerms" | "expires">,
+): InvitationSummary {
+  const terms = source.linkageTerms;
 
   const fieldByName = new Map(
     terms.linkageFields.map((field) => [field.name, field.type]),
@@ -576,8 +581,8 @@ export function summarizeInvitation(token: InvitationToken): InvitationSummary {
     };
   }
 
-  if (token.expires !== undefined)
-    summary.expires = sanitizeForDisplay(token.expires);
+  if (source.expires !== undefined)
+    summary.expires = sanitizeForDisplay(source.expires);
 
   return summary;
 }

@@ -2,10 +2,7 @@
 
 import { beforeAll, expect, inject, test } from "vitest";
 
-import Peer from "peerjs";
-
 import {
-  deriveRendezvousPeerId,
   generateSharedSecret,
   prepareForExchange,
   runExchange,
@@ -16,9 +13,9 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 
+import { connectRendezvousPair } from "../utils/rendezvousPair.js";
 import { sortAssociationTable } from "../utils/associationTable.js";
 
-import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 interface AddressInfo {
@@ -94,27 +91,6 @@ const firstNameOnlyTerms = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
-/** Resolve once `peer` has registered with the broker (its `open` event).
- * Settles exactly once and detaches both listeners, so an `open` and an `error`
- * firing in the same tick cannot both resolve and reject the promise. */
-function peerOpened(peer: Peer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const settle = (action: () => void) => {
-      if (settled) return;
-      settled = true;
-      peer.off("open", onOpen);
-      peer.off("error", onError);
-      action();
-    };
-    const onOpen = () => settle(resolve);
-    const onError = (err: unknown) =>
-      settle(() => reject(err instanceof Error ? err : new Error(String(err))));
-    peer.once("open", onOpen);
-    peer.once("error", onError);
-  });
-}
-
 // Undefined until a reachable server lets beforeAll run the exchange; the tests
 // gate on this, so an unreachable server skips rather than reading a stale or
 // absent result.
@@ -128,89 +104,15 @@ beforeAll(async () => {
   const reachable = await canReachServer();
   if (!reachable) return;
 
-  // The backend-free rendezvous: a fresh shared secret stands in for the
-  // invitation, and both peer ids are derived from it -- no /api/psi/* session.
-  // The inviter (PSI responder) listens on its derived id; the acceptor (PSI
-  // initiator) dials it.
+  // The backend-free rendezvous stands in for the invitation: a fresh shared
+  // secret, both peer ids derived from it (no /api/psi/* session). The inviter
+  // (PSI responder) listens; the acceptor (PSI initiator) dials. Hermetic ICE and
+  // the loopback-candidate reasoning live in connectRendezvousPair.
   const sharedSecret = generateSharedSecret();
-  const inviterId = await deriveRendezvousPeerId(sharedSecret, "inviter");
-  const acceptorId = await deriveRendezvousPeerId(sharedSecret, "acceptor");
-
-  // Hermetic ICE: both peers run in one browser on one machine, so a loopback
-  // host candidate is all they need. Configure no STUN/TURN, so the exchange
-  // contacts no external server (PeerJS's default config would otherwise reach
-  // public Google STUN, and on a runner with open egress Chromium would probe
-  // it). This makes the loopback host candidate the only one available, which is
-  // exactly why the browser project disables Chromium's mDNS host-candidate
-  // obfuscation (see vite.config.ts); without that the candidate is an
-  // unresolvable `.local` name and the connection cannot open. Production
-  // configures real STUN for cross-network peers (src/psi/rendezvous.ts).
-  const inviterPeer = new Peer(inviterId, {
-    host: addressInfo.address,
-    path: "/api/",
-    port: addressInfo.port,
-    config: { iceServers: [] },
-  });
-  await peerOpened(inviterPeer);
-
-  // Listen for the acceptor's inbound connection before it dials. Settles once
-  // and detaches both listeners, so a late post-open peer error cannot reject
-  // after the promise has resolved (which would leak into the runner).
-  const inviterConnPromise: Promise<DataConnection> = new Promise(
-    (resolve, reject) => {
-      let settled = false;
-      const settle = (action: () => void) => {
-        if (settled) return;
-        settled = true;
-        inviterPeer.off("connection", onConnection);
-        inviterPeer.off("error", onError);
-        action();
-      };
-      const onConnection = (conn: DataConnection) =>
-        conn.once("open", () => settle(() => resolve(conn)));
-      const onError = (err: unknown) =>
-        settle(() =>
-          reject(err instanceof Error ? err : new Error(String(err))),
-        );
-      inviterPeer.on("connection", onConnection);
-      inviterPeer.on("error", onError);
-    },
-  );
-
-  // Acceptor dials the inviter's derived id directly (the inviter is already
-  // listening, so there is no peer-unavailable retry to exercise here).
-  const acceptorPeer = new Peer(acceptorId, {
-    host: addressInfo.address,
-    path: "/api/",
-    port: addressInfo.port,
-    config: { iceServers: [] }, // hermetic ICE -- see inviterPeer above
-  });
-  const acceptorConn: DataConnection = await new Promise<DataConnection>(
-    (resolve, reject) => {
-      let settled = false;
-      const settle = (action: () => void) => {
-        if (settled) return;
-        settled = true;
-        acceptorPeer.off("open", onOpen);
-        acceptorPeer.off("error", onError);
-        action();
-      };
-      const onOpen = () => {
-        const conn = acceptorPeer.connect(inviterId, { reliable: true });
-        conn.once("open", () => settle(() => resolve(conn)));
-      };
-      const onError = (err: unknown) =>
-        settle(() =>
-          reject(err instanceof Error ? err : new Error(String(err))),
-        );
-      acceptorPeer.on("open", onOpen);
-      acceptorPeer.on("error", onError);
-    },
-  );
+  const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } =
+    await connectRendezvousPair(sharedSecret, addressInfo);
 
   const psiLibrary = await (PSI() as Promise<PSILibrary>);
-
-  const inviterConn = await inviterConnPromise;
 
   const serverPrepared = prepareForExchange(
     { linkageTerms: { ...firstNameOnlyTerms, identity: "server" } },
