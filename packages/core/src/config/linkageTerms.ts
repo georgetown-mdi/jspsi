@@ -17,21 +17,23 @@ import { boundedArray } from "../utils/boundedArray.js";
 // MAX_ENCODED_INVITATION_LENGTH of the token path. The rule below: every
 // partner-controlled free-text string carries a generous length `.max()`, and
 // every partner-controlled collection carries a count bound, applied BEFORE
-// per-element validation (see boundedArray). Every collection takes the same
-// gate -- the top-level `linkageFields` and `linkageKeys`, each constraint's
-// `exclude` list, a `transform` step list, a key's `elements`, and the
-// `transform.params` record -- because they all share a RangeError exposure a
-// bare `.max()` cannot close: Zod v4 validates every element BEFORE the length
-// check, so a partner array of millions of invalid elements (a few MB of JSON,
-// trivially under the wire-path frame cap) accumulates one issue per element
-// first. Zod then either spreads that issue array up through an enclosing
+// per-element validation. The arrays take the boundedArray count gate -- the
+// top-level `linkageFields` and `linkageKeys`, each constraint's `exclude` list,
+// a `transform` step list, and a key's `elements`; the `transform.params` record
+// takes the same permissive-stage + count-refine + pipe shape applied to its
+// keys (an inline refine on a count, see MAX_PARAMS_ENTRIES), since boundedArray
+// itself is array-only. They all share a RangeError exposure a bare `.max()`
+// cannot close: Zod v4 validates every element BEFORE the length check, so a
+// partner array of millions of invalid elements (a few MB of JSON, trivially
+// under the wire-path frame cap) accumulates one issue per element first. Zod
+// then either spreads that issue array up through an enclosing
 // array/record/tuple frame and overflows its call stack (`Maximum call stack
 // size exceeded`, ~130k elements, for a collection nested >=2 frames deep -- an
 // intervening object frame does not prevent it), or, for a flat top-level array
 // with no such frame (`linkageFields`/`linkageKeys`), throws `Invalid string
 // length` building the error string from the issues (~3.5M elements). Both
-// reproduced on Zod 4.4.3. boundedArray's permissive first stage lets the count
-// refine fire before either RangeError. Legitimate sizes vary -- a denylist holds
+// reproduced on Zod 4.4.3. The permissive first stage lets the count refine fire
+// before either RangeError. Legitimate sizes vary -- a denylist holds
 // hundreds of values, hence the most generous bound (MAX_EXCLUDE_ENTRIES) -- but
 // each bound is far above any real config and far below the RangeError
 // thresholds. The `params` VALUE content stays unbounded (typed `z.unknown()`,
