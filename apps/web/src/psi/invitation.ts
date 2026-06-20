@@ -242,13 +242,23 @@ export async function generateInvitation(params: {
   /**
    * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
    * (one hour) and must be in the range `(0, {@link MAX_INVITATION_LIFETIME_SECONDS}]`
-   * (up to one year). The web app has no lifetime-selection UI yet, so production
-   * callers omit it and take the default; the parameter is the seam a future
-   * selector (the configuration-GUI roadmap item) overrides through without
-   * reshaping this entry point, and the bounds are enforced here so that seam
-   * cannot mint an unbounded token.
+   * (up to one year). The quick path omits it and takes the default; the Advanced-
+   * options editor passes the inviter's chosen lifetime. The bounds are enforced
+   * here so that seam cannot mint an unbounded token.
    */
   lifetimeSeconds?: number;
+  /**
+   * Authored linkage terms to embed, from the Advanced-options editor. When
+   * supplied they are embedded VERBATIM: the editor seeded them from this file's
+   * columns, validated them through {@link safeParseLinkageTerms}, and confirmed
+   * at least one key is satisfiable, so the default-terms derivation is skipped
+   * and `inviterName` is not consulted for the terms (the authored terms carry
+   * their own `identity`). The file is still parsed -- for the `rawRows`/`columns`
+   * the inviter's own exchange runs on, and for a fail-closed satisfiability
+   * re-check against these exact terms. Omitted on the quick path, where the terms
+   * are derived from the file's columns as before.
+   */
+  linkageTerms?: LinkageTerms;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
@@ -288,30 +298,49 @@ export async function generateInvitation(params: {
     throw new InvitationFileError({ kind: "unreadable", cause });
   }
 
-  // Derive the terms to embed from the file's columns: inferred metadata filters
-  // the default keys to those the columns can satisfy (the same filter the
-  // inviter's own exchange would otherwise re-derive -- now computed once, here,
-  // and reused). standardization is left to CSV inference downstream.
-  const metadata = inferMetadata(columns);
-  const linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
+  // The terms to embed. The Advanced-options editor's authored terms are embedded
+  // verbatim; the quick path derives them from the file's columns (inferred
+  // metadata filters the default keys to those the columns can satisfy -- the same
+  // filter the inviter's own exchange would otherwise re-derive). standardization
+  // is left to CSV inference downstream in both cases.
+  let linkageTerms: LinkageTerms;
+  if (params.linkageTerms !== undefined) {
+    linkageTerms = params.linkageTerms;
+    // The mint boundary stays fail-closed even though the editor already gates on
+    // satisfiability: a set whose every key references a field the columns cannot
+    // produce would run to the silent empty result the quick path's block exists
+    // to prevent. Assess against the AUTHORED terms themselves (not the full
+    // defaults) so the verdict matches the keys actually embedded; the editor
+    // dropped the unproducible defaults, so a zero here means a genuinely
+    // unlinkable file rather than a filtered-away default.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      columns,
+      linkageTerms,
+    );
+    if (satisfiableKeyCount === 0)
+      throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+  } else {
+    const metadata = inferMetadata(columns);
+    linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
 
-  // Block a file that satisfies no linkage key, mirroring the acceptor pre-flight
-  // (FileAcquire): with zero satisfiable keys the exchange would emit no key
-  // strings and yield a silent empty result. Gate on the detector's
-  // satisfiableKeyCount, NOT on linkageTerms.linkageKeys.length: the two agree for
-  // a file with columns, but getDefaultLinkageTerms falls back to ALL keys when
-  // its metadata is empty (a column-less file), so the embedded set's key count
-  // would be non-zero there and miss the block, while the detector counts actual
-  // column producibility and correctly reports zero. Assess against the FULL
-  // default terms (every default field declared) rather than the filtered
-  // `linkageTerms`, so the block can name the field types the file lacks -- the
-  // filtered set no longer declares the dropped fields.
-  const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
-    columns,
-    getDefaultLinkageTerms(inviterName),
-  );
-  if (satisfiableKeyCount === 0)
-    throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+    // Block a file that satisfies no linkage key, mirroring the acceptor pre-flight
+    // (FileAcquire): with zero satisfiable keys the exchange would emit no key
+    // strings and yield a silent empty result. Gate on the detector's
+    // satisfiableKeyCount, NOT on linkageTerms.linkageKeys.length: the two agree for
+    // a file with columns, but getDefaultLinkageTerms falls back to ALL keys when
+    // its metadata is empty (a column-less file), so the embedded set's key count
+    // would be non-zero there and miss the block, while the detector counts actual
+    // column producibility and correctly reports zero. Assess against the FULL
+    // default terms (every default field declared) rather than the filtered
+    // `linkageTerms`, so the block can name the field types the file lacks -- the
+    // filtered set no longer declares the dropped fields.
+    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+      columns,
+      getDefaultLinkageTerms(inviterName),
+    );
+    if (satisfiableKeyCount === 0)
+      throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+  }
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
   // indefinitely. Measured from the current instant, so the lifetime clock starts
