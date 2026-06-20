@@ -384,10 +384,11 @@ function splitOnFactory(params: Params): StandardizingFn {
   };
 }
 
-// Each entry here must also be documented in
-// docs/EXCHANGE_REFERENCE.md § "Available functions" and given a descriptor in
-// STANDARDIZATION_FUNCTION_DESCRIPTORS below (its drift test fails CI on a
-// function added here without one, and vice versa).
+// Each entry here must also be given a descriptor in
+// STANDARDIZATION_FUNCTION_DESCRIPTORS below -- its drift test fails CI on a
+// function added here without a descriptor, and vice versa -- and be documented
+// in docs/EXCHANGE_REFERENCE.md § "Available functions", which is a prose
+// obligation no test enforces.
 //
 // NFC-comparison contract: any step that matches an authored value, pattern, or
 // delimiter against the intermediate value must NFC-normalize that value before
