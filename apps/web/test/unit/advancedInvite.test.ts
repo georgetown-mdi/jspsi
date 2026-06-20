@@ -179,7 +179,7 @@ describe("validateAdvancedInvite", () => {
     expect(result.errors.legalExpiration).toBeDefined();
   });
 
-  test("(c) blocks Generate on a non-future legal-agreement expiry", () => {
+  test("(c) blocks Generate on a past legal-agreement expiry", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(
       {
@@ -187,15 +187,37 @@ describe("validateAdvancedInvite", () => {
         legalAgreement: {
           reference: "MOU-1",
           purpose: "Audit",
-          // Equal to NOW's date -> not in the future.
-          expirationDate: "2026-06-20",
+          // The day before NOW -> already expired.
+          expirationDate: "2026-06-19",
         },
       },
       seed,
       NOW,
     );
     expect(result.canGenerate).toBe(false);
-    expect(result.errors.legalExpiration).toContain("future");
+    expect(result.errors.legalExpiration).toContain("past");
+  });
+
+  test("accepts a same-day legal-agreement expiry, matching the exchange", () => {
+    // The exchange rejects only an expirationDate strictly before today, so a
+    // same-day expiry is still honored there; the editor must not refuse an
+    // invitation the exchange would accept.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const result = validateAdvancedInvite(
+      {
+        ...draft,
+        legalAgreement: {
+          reference: "MOU-1",
+          purpose: "Audit",
+          // Equal to NOW's date.
+          expirationDate: "2026-06-20",
+        },
+      },
+      seed,
+      NOW,
+    );
+    expect(result.canGenerate).toBe(true);
+    expect(result.errors.legalExpiration).toBeUndefined();
   });
 
   test("accepts a complete, future-dated legal agreement", () => {

@@ -41,7 +41,7 @@ export interface DraftKey {
 
 /** The optional legal-agreement block, as the editor holds it before validation.
  * Free text is NFC-normalized and trimmed when the terms are built (see
- * {@link buildAdvancedTerms}); the future-date check lives in
+ * {@link buildAdvancedTerms}); the expiry check lives in
  * {@link validateAdvancedInvite}, not the core schema. */
 export interface DraftLegalAgreement {
   reference: string;
@@ -167,8 +167,8 @@ export function buildAdvancedTerms(
       reference: normalizeText(draft.legalAgreement.reference),
       purpose: normalizeText(draft.legalAgreement.purpose),
       // The date comes from a date input (YYYY-MM-DD), not free prose, so it is
-      // not NFC-normalized; its format is validated by the schema and its
-      // future-ness by validateAdvancedInvite.
+      // not NFC-normalized; its format is validated by the schema and that it has
+      // not already passed by validateAdvancedInvite.
       expirationDate: draft.legalAgreement.expirationDate.trim(),
     };
   }
@@ -176,9 +176,10 @@ export function buildAdvancedTerms(
   return terms;
 }
 
-/** Today's date as YYYY-MM-DD, for the legal-agreement future-date check. Matches
- * the slice `validateCompatibility` uses for the same comparison at exchange time
- * (`new Date().toISOString().slice(0, 10)`), so the editor refuses exactly the
+/** Today's date as YYYY-MM-DD, for the legal-agreement expiry check. Matches the
+ * slice `validateCompatibility` uses for the same comparison at exchange time
+ * (`new Date().toISOString().slice(0, 10)`), and the editor compares it the same
+ * way (strictly before today is expired), so the editor refuses exactly the
  * expired dates the exchange would. */
 function todayIso(now: Date): string {
   return now.toISOString().slice(0, 10);
@@ -189,9 +190,10 @@ function todayIso(now: Date): string {
  * ({@link safeParseLinkageTerms}) is the single source for everything it covers
  * (identity/legal-text presence, the date format, referential integrity); this
  * adds only the gates the schema does not express: the invitation-lifetime
- * bounds (not part of the terms), a future legal-agreement expiry (the schema
- * checks format, not that the date is ahead -- the exchange enforces that later,
- * so refuse it up front), at least one column-satisfiable linkage key, and a
+ * bounds (not part of the terms), a not-yet-passed legal-agreement expiry (the
+ * schema checks format, not that the date is still current -- the exchange
+ * rejects an already-passed date later, so refuse it up front), at least one
+ * column-satisfiable linkage key, and a
  * canonical-encode dry run (the byte form both parties hash; refuse a value that
  * cannot encode rather than fail cross-party).
  *
@@ -235,16 +237,20 @@ export function validateAdvancedInvite(
     }
   }
 
-  // A future expiry is not a schema rule (it checks only the date format), so
-  // add it -- but only once the date is a well-formed date the schema accepted,
-  // so a malformed date shows the format error rather than this one.
+  // An already-passed expiry is not a schema rule (it checks only the date
+  // format), so add it -- mirroring the exchange, which rejects an expirationDate
+  // strictly before today (config/linkageTerms.ts). A same-day expiry is still
+  // honored at the exchange, so accept it here too rather than refuse an
+  // invitation the exchange would. Apply it only once the date is a well-formed
+  // date the schema accepted, so a malformed date shows the format error rather
+  // than this one.
   const expiration = draft.legalAgreement?.expirationDate.trim();
   if (
     expiration !== undefined &&
     errors.legalExpiration === undefined &&
-    expiration <= todayIso(now)
+    expiration < todayIso(now)
   ) {
-    errors.legalExpiration = "The expiration date must be in the future.";
+    errors.legalExpiration = "The expiration date cannot be in the past.";
   }
 
   // Satisfiability is over column shape, not the schema: a key all of whose

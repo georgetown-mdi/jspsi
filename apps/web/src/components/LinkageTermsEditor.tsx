@@ -193,12 +193,16 @@ export function LinkageTermsEditor({
   ) => {
     // Merge inside the functional updater (reading `prev`, not the render
     // closure), so two legal-field updates in one batch cannot clobber each
-    // other -- matching updateDraft's own batching protection.
+    // other -- matching updateDraft's own batching protection. No-op when the
+    // block is closed (legalAgreement undefined, only reachable if a field update
+    // were batched after a disclosure-toggle off): spreading undefined would
+    // silently build a partial block rather than throw, so guard it instead.
     setAnnouncement("");
-    setDraft((prev) => ({
-      ...prev,
-      legalAgreement: { ...prev.legalAgreement!, ...next },
-    }));
+    setDraft((prev) =>
+      prev.legalAgreement === undefined
+        ? prev
+        : { ...prev, legalAgreement: { ...prev.legalAgreement, ...next } },
+    );
   };
 
   const handleReset = () => {

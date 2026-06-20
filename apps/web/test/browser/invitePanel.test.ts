@@ -14,6 +14,7 @@ import { InvitationFileError } from "@psi/invitation";
 import {
   clearAdvancedHandoff,
   peekAdvancedHandoff,
+  stashAdvancedHandoff,
 } from "@components/advancedHandoff";
 import { InvitePanel } from "@components/InvitePanel";
 
@@ -195,14 +196,23 @@ describe("InvitePanel compose screen", () => {
 
   test("Advanced options with no file clears any stale hand-off", async () => {
     gen.impl = () => Promise.resolve(generated);
+    // Seed a stale hand-off from an earlier Advanced click, so clearing it is
+    // observable (without this, the assertion would pass vacuously: afterEach
+    // already leaves the stash empty).
+    stashAdvancedHandoff({
+      file: new File(["c\n1\n"], "stale.csv"),
+      name: "Prior",
+    });
+    expect(peekAdvancedHandoff()).toBeDefined();
     mount();
 
     await userEvent.fill(page.getByRole("textbox"), "County Health Dept");
     await userEvent.click(page.getByText("Advanced options"));
 
-    // No file chosen: the route should fall back to its own picker, so nothing is
-    // stashed.
+    // No file chosen now: the panel clears the stale stash so the route falls back
+    // to its own picker rather than resurrecting the earlier file.
     expect(peekAdvancedHandoff()).toBeUndefined();
+    expect(nav.calls).toContainEqual({ to: "/advanced" });
   });
 
   test("on success, transitions to the exchange screen carrying share artifacts, terms, rows, secret", async () => {
