@@ -5,6 +5,7 @@ import type { Metadata } from "./config/metadata.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import { receiveParsed } from "./connection/messageConnection.js";
+import { singleIssueArray } from "./utils/singleIssueArray.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -24,14 +25,36 @@ export interface PartnerPayload {
   rows: Array<Array<string | null>>;
 }
 
+// One payload row: a single-issue array (utils/singleIssueArray.ts) rather than
+// `z.array(z.string().nullable())`. CONFIRMED-EXPOSED to Zod's
+// issue-accumulation stack overflow -- a partner row of hundreds of thousands of
+// invalid inner cells overflows Zod's call stack spreading one issue per cell up
+// through the inner-array and outer-`rows` frames (RangeError reproduced at ~300k
+// on Zod 4.4.3). The single-issue validator caps that at one clean issue. A count
+// `.max()` on the cells is unnecessary and a `.max()` on `rows` itself is
+// unsafe: a real exchange has one row per matched record, legitimately in the
+// millions (MAX_FRAME_SIZE_BYTES bounds it). The predicate mirrors
+// `z.string().nullable()` exactly.
+const payloadRow = singleIssueArray<string | null>(
+  (cell) => typeof cell === "string" || cell === null,
+  "each payload row must be an array of strings or nulls",
+);
+
 const payloadWireSchema = z.discriminatedUnion("hasData", [
   z.object({ hasData: z.literal(false) }),
   z
     .object({
       hasData: z.literal(true),
+      // `columns` and `rowIndices` are flat arrays one object-frame below this
+      // object, so a pathological count cannot drive the ~130k STACK overflow
+      // `rows` faces. A far larger count (~millions of invalid elements, within
+      // the frame cap) can still make Zod throw a `RangeError: Invalid string
+      // length` building the error, but receiveParsed catches that harmlessly as
+      // ConnectionError("protocol"). Left unbounded as a Low residual; the
+      // legitimate counts are bounded only by MAX_FRAME_SIZE_BYTES.
       columns: z.array(z.string()),
       rowIndices: z.array(z.number().int().nonnegative()),
-      rows: z.array(z.array(z.string().nullable())),
+      rows: z.array(payloadRow),
     })
     .refine(
       (v) => v.rowIndices.length === v.rows.length,

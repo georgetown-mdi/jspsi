@@ -5,6 +5,7 @@ import {
   receiveParsed,
   type MessageConnection,
 } from "./connection/messageConnection";
+import { singleIssueArray } from "./utils/singleIssueArray";
 
 import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -16,10 +17,41 @@ const statusCompletedMessage = z.object({
   status: z.literal("completed"),
 });
 
+// A single flat array parsed as the whole received message (the root). With no
+// enclosing array/record/tuple frame above the root, it cannot drive the ~130k
+// STACK overflow {@link associationTableMessage} faces. It is not wholly
+// RangeError-free: a far larger count (~millions of invalid elements, within
+// MAX_FRAME_SIZE_BYTES) makes Zod throw building the error string
+// (`RangeError: Invalid string length`). Unlike the receiveParsed sites, this is
+// read by a direct `.parse()` (send-before-parse, below), so that residual
+// surfaces as a bare RangeError rather than a clean ConnectionError("protocol").
+// Low and pre-existing (this schema is unchanged); bounding the residual flat
+// arrays uniformly is a follow-on. The legitimate count is the partner's
+// original-index list, bounded by MAX_FRAME_SIZE_BYTES.
 const numberArrayMessage = z.array(z.number());
-const associationTableMessage = z.tuple([
-  z.array(z.number()),
-  z.array(z.number()),
+
+// CONFIRMED-EXPOSED to Zod's issue-accumulation stack overflow: a partner can
+// send a tuple whose inner index array holds hundreds of thousands of invalid
+// (non-number) elements, and Zod overflows its call stack spreading one issue
+// per element up through the inner-array and tuple frames (RangeError reproduced
+// at ~130k on Zod 4.4.3). receiveParsed already caught that harmlessly; the
+// single-issue validators below turn it into a clean, bounded rejection instead.
+// A count `.max()` is not an option: the association table is the PSI
+// intersection, legitimately in the millions (MAX_FRAME_SIZE_BYTES bounds it),
+// so any overflow-forestalling count bound would reject a real result. Each
+// validator mirrors `z.number()` exactly via Number.isFinite (which, like
+// z.number(), accepts every finite number and rejects NaN/Infinity and
+// non-numbers). See utils/singleIssueArray.ts.
+/** @internal exported for the pathological-count wire-message test. */
+export const associationTableMessage = z.tuple([
+  singleIssueArray<number>(
+    Number.isFinite,
+    "must be an array of finite numbers",
+  ),
+  singleIssueArray<number>(
+    Number.isFinite,
+    "must be an array of finite numbers",
+  ),
 ]);
 
 const DEFAULT_VERBOSITY = 1;

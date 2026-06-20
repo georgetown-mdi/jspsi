@@ -9,6 +9,9 @@ import {
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
+  MAX_EXCLUDE_ENTRIES,
+  MAX_TRANSFORM_STEPS,
+  MAX_KEY_ELEMENTS,
 } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
@@ -1396,6 +1399,134 @@ test("an over-long transform params key within the count bound is still rejected
   expect(result.success).toBe(false);
   if (!result.success) {
     expect(result.error.issues[0].code).toBe("invalid_key");
+  }
+});
+
+// ─── Nested-collection count bounds ──────────────────────────────────────────
+// Each constraint `exclude` list, a key element's `transform` step list, and a
+// key's `elements` list is partner-controlled and nested beneath an outer array,
+// so an over-count payload could make Zod accumulate one issue per invalid
+// element and overflow its call stack spreading them (a RangeError, same class as
+// the transform.params bound). Each list is count-bounded BEFORE per-element
+// validation; pin the boundary, that a pathological count fails cleanly, and that
+// the per-element validation under the gate is preserved.
+
+const excludeTerms = (exclude: unknown[]) => ({
+  ...base,
+  linkageFields: [{ name: "ssn", type: "ssn", constraints: { exclude } }],
+});
+
+test("accepts a constraint exclude at exactly the maximum count", () => {
+  const exclude = Array.from(
+    { length: MAX_EXCLUDE_ENTRIES },
+    (_, i) => `v${i}`,
+  );
+  expect(() => parseLinkageTerms(excludeTerms(exclude))).not.toThrow();
+});
+
+test("rejects a constraint exclude over the maximum count", () => {
+  const exclude = Array.from(
+    { length: MAX_EXCLUDE_ENTRIES + 1 },
+    (_, i) => `v${i}`,
+  );
+  expect(() => parseLinkageTerms(excludeTerms(exclude))).toThrow(ZodError);
+});
+
+test("a pathological-count constraint exclude fails cleanly, not with a RangeError", () => {
+  // ~200k over-long values: on the unbounded schema Zod built one too_big issue
+  // per value and overflowed the call stack spreading them up through the
+  // exclude/linkageFields frames. The count gate, applied before per-element
+  // validation, must turn this into one clean, bounded issue. 200k clears the
+  // empirical overflow threshold (~130k).
+  const exclude = Array.from({ length: 200_000 }, () =>
+    "x".repeat(MAX_TEXT_LENGTH + 1),
+  );
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(excludeTerms(exclude));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) =>
+        /exclude must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
+const transformTerms = (transform: unknown[]) => ({
+  ...base,
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn", transform }] }],
+});
+
+test("accepts a transform step list at exactly the maximum count", () => {
+  const transform = Array.from({ length: MAX_TRANSFORM_STEPS }, () => ({
+    function: "trim",
+  }));
+  expect(() => parseLinkageTerms(transformTerms(transform))).not.toThrow();
+});
+
+test("rejects a transform step list over the maximum count", () => {
+  const transform = Array.from({ length: MAX_TRANSFORM_STEPS + 1 }, () => ({
+    function: "trim",
+  }));
+  expect(() => parseLinkageTerms(transformTerms(transform))).toThrow(ZodError);
+});
+
+test("a pathological-count transform step list fails cleanly, not with a RangeError", () => {
+  const transform = Array.from({ length: 200_000 }, () => 123);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(transformTerms(transform));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) =>
+        /transform must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
+const elementsTerms = (elements: unknown[]) => ({
+  ...base,
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: [{ name: "SSN", elements }],
+});
+
+test("accepts a linkage key elements list at exactly the maximum count", () => {
+  // Distinct element names keep the within-key identifier-uniqueness refine
+  // satisfied; every element references the declared "ssn" field.
+  const elements = Array.from({ length: MAX_KEY_ELEMENTS }, (_, i) => ({
+    field: "ssn",
+    name: `e${i}`,
+  }));
+  expect(() => parseLinkageTerms(elementsTerms(elements))).not.toThrow();
+});
+
+test("rejects a linkage key elements list over the maximum count", () => {
+  const elements = Array.from({ length: MAX_KEY_ELEMENTS + 1 }, (_, i) => ({
+    field: "ssn",
+    name: `e${i}`,
+  }));
+  expect(() => parseLinkageTerms(elementsTerms(elements))).toThrow(ZodError);
+});
+
+test("a pathological-count linkage key elements list fails cleanly, not with a RangeError", () => {
+  const elements = Array.from({ length: 200_000 }, () => 123);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(elementsTerms(elements));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) =>
+        /elements must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
   }
 });
 
