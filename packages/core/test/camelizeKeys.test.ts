@@ -4,6 +4,8 @@ import {
   camelizeKeys,
   OPAQUE_VALUE_KEYS,
   snakeizeKeys,
+  NestingDepthExceededError,
+  MAX_NESTING_DEPTH,
 } from "../src/utils/camelizeKeys";
 
 // snakeize a camelCase key the way the production walker's inverse transform
@@ -84,6 +86,66 @@ test("camelize and snakeize skip the identical set of opaque subtrees", () => {
   // ...and that set is exactly the opaque-keyed subtrees, not the control.
   expect(camelSkipped).toEqual([...expectedSkipped].sort());
   expect(camelSkipped).not.toContain("control");
+});
+
+// --- Nesting-depth guard -----------------------------------------------------
+// camelizeKeys runs BEFORE Zod on partner-controlled input (parseLinkageTerms),
+// and recurses once per nesting level, so a deeply-nested untrusted payload --
+// trivially within the invitation and frame caps -- would overflow the call
+// stack with a RangeError before any validation. The shared walker bounds the
+// depth so it fails as a clean, bounded rejection instead. snakeizeKeys shares
+// the walker and so the guard, though its input is operator-produced.
+
+// Build a chain of nested objects whose deepest value (an empty object) sits at
+// depth `depth` -- the index transformKeysDeep sees, with the root at depth 0 --
+// so the guard boundary can be asserted exactly.
+function nestedToDepth(depth: number): unknown {
+  let v: unknown = {};
+  for (let i = 0; i < depth; i++) v = { nested_key: v };
+  return v;
+}
+
+test("an ordinary nested payload is camelized at depth as before", () => {
+  expect(camelizeKeys({ outer_key: { inner_key: { leaf_key: 1 } } })).toEqual({
+    outerKey: { innerKey: { leafKey: 1 } },
+  });
+});
+
+test("the depth guard fires at exactly MAX_NESTING_DEPTH", () => {
+  // The deepest allowed value sits at depth MAX_NESTING_DEPTH - 1; one level
+  // deeper (depth MAX_NESTING_DEPTH) is rejected. Pinning the exact boundary --
+  // not just MAX +/- a margin -- keeps the guard from drifting by one. Both
+  // depths are far below the native stack overflow, so the accepted case proves
+  // the guard draws the line, not the stack. The bound is itself far above any
+  // real config (the deepest schema path is under a dozen levels).
+  expect(() =>
+    camelizeKeys(nestedToDepth(MAX_NESTING_DEPTH - 1)),
+  ).not.toThrow();
+  expect(() => camelizeKeys(nestedToDepth(MAX_NESTING_DEPTH))).toThrow(
+    NestingDepthExceededError,
+  );
+});
+
+test("a pathologically-deep payload fails cleanly, not with a RangeError", () => {
+  // ~5000 levels overflowed camelizeKeys's native recursion before the guard;
+  // it must now reject with the bounded UsageError. The guard fires at the bound,
+  // so the native stack overflow is never reached.
+  let err: unknown;
+  try {
+    camelizeKeys(nestedToDepth(5000));
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(NestingDepthExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
+});
+
+test("snakeizeKeys shares the depth guard", () => {
+  // The walker is shared, so the write direction is bounded too -- harmless, its
+  // input is the operator's typed ExchangeSpec and never this deep.
+  expect(() => snakeizeKeys(nestedToDepth(5000))).toThrow(
+    NestingDepthExceededError,
+  );
 });
 
 // --- Round-trip and verbatim behavior ----------------------------------------

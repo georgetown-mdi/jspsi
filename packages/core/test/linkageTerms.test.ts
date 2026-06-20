@@ -19,6 +19,7 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../src/utils/sanitizeForDisplay";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
+import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -1512,6 +1513,39 @@ test("rejects a linkage key elements list over the maximum count", () => {
     name: `e${i}`,
   }));
   expect(() => parseLinkageTerms(elementsTerms(elements))).toThrow(ZodError);
+});
+
+test("a deeply-nested transform.params value fails cleanly, not with a RangeError", () => {
+  // DISTINCT from the count-overflow above: parseLinkageTerms camelizes BEFORE
+  // Zod, and camelizeKeys recurses once per nesting level, so a deeply-nested
+  // partner value (here under transform.params, typed z.unknown(), so it would
+  // otherwise survive into the parsed terms) overflows the call stack pre-Zod.
+  // ~5000 levels is a few tens of KB of JSON, well within the invitation and
+  // frame caps; the camelize depth guard must reject it as a clean bounded error.
+  let deepValue: unknown = { leaf: 1 };
+  for (let i = 0; i < 5000; i++) deepValue = { nested: deepValue };
+  const terms = {
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [{ function: "trim", params: { deep: deepValue } }],
+          },
+        ],
+      },
+    ],
+  };
+  let err: unknown;
+  try {
+    parseLinkageTerms(terms);
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(NestingDepthExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
 });
 
 test("a pathological-count linkage key elements list fails cleanly, not with a RangeError", () => {
