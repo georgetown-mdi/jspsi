@@ -8,6 +8,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
+  MAX_PARAMS_ENTRIES,
 } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
@@ -1333,6 +1334,69 @@ test("rejects an over-long transform params key", () => {
       ],
     }),
   ).toThrow(ZodError);
+});
+
+const paramsTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [{ field: "ssn", transform: [{ function: "trim", params }] }],
+    },
+  ],
+});
+
+test("accepts a transform params record at exactly the maximum entry count", () => {
+  const params: Record<string, unknown> = {};
+  for (let i = 0; i < MAX_PARAMS_ENTRIES; i++) params[`k${i}`] = 1;
+  expect(() => parseLinkageTerms(paramsTerms(params))).not.toThrow();
+});
+
+test("rejects a transform params record over the maximum entry count", () => {
+  const params: Record<string, unknown> = {};
+  for (let i = 0; i <= MAX_PARAMS_ENTRIES; i++) params[`k${i}`] = 1;
+  expect(() => parseLinkageTerms(paramsTerms(params))).toThrow(ZodError);
+});
+
+test("a pathological-count transform params record fails cleanly, not with a RangeError", () => {
+  // Regression for the Zod issue-accumulation overflow: a record of ~200k keys
+  // each too long for the per-key bound. On the unbounded-count schema Zod built
+  // one issue per key and overflowed the call stack spreading that array up
+  // through the nesting -- the RangeError escaped even safeParse (it converts a
+  // ZodError to a result but not an internal throw). The count gate, applied
+  // before the per-key length check, must turn this into one clean, bounded
+  // issue. ~200k keys clears the empirical overflow threshold (~130k); a smaller
+  // over-count would reject without ever exercising the overflow path.
+  const params: Record<string, unknown> = {};
+  const overlong = "k".repeat(MAX_NAME_LENGTH + 1);
+  for (let i = 0; i < 200_000; i++) params[overlong + i] = 1;
+
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(paramsTerms(params));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    // A single count-bound issue, not one per key, and it carries no partner key
+    // bytes (the over-long keys never reach the per-key validation).
+    expect(
+      result.error.issues.some((i) => /must not exceed/.test(i.message)),
+    ).toBe(true);
+    expect(describeDecodeError(result.error)).toContain("params");
+  }
+});
+
+test("an over-long transform params key within the count bound is still rejected per-key", () => {
+  // The count gate must not mask the per-key length bound for an in-range record:
+  // a single over-long key still trips the post-pipe `invalid_key` path, the one
+  // item 202554679's parse-error sanitization relies on.
+  const result = safeParseLinkageTerms(
+    paramsTerms({ ["k".repeat(MAX_NAME_LENGTH + 1)]: 1 }),
+  );
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.issues[0].code).toBe("invalid_key");
+  }
 });
 
 test("rejects an over-long version string", () => {
