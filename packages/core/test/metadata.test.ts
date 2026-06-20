@@ -231,6 +231,42 @@ test.each([
   expect(result.success).toBe(false);
 });
 
+// ─── column-name uniqueness ───────────────────────────────────────────────────
+
+test("safeParseMetadata rejects duplicate column names", () => {
+  const result = safeParseMetadata([
+    { name: "X", type: "other", role: "ignored", is_payload: false },
+    { name: "X", type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(false);
+});
+
+test("safeParseMetadata does not echo a duplicated name in the error", () => {
+  // The name is operator-authored and may carry control/ANSI/bidi bytes; the
+  // uniqueness refine reports a static message, never the offending name.
+  const evil = "\x1b[31mDUP\x1b[0m‮";
+  const result = safeParseMetadata([
+    { name: evil, type: "other", role: "payload", is_payload: true },
+    { name: evil, type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.message).not.toContain("DUP");
+    expect(result.error.message).not.toContain("\x1b");
+    expect(result.error.message).not.toContain("‮");
+  }
+});
+
+test("safeParseMetadata accepts names differing only in case (matching is exact)", () => {
+  // Column identity is case-sensitive everywhere a column is read by name, so
+  // "X" and "x" are distinct columns, not a duplicate.
+  const result = safeParseMetadata([
+    { name: "X", type: "other", role: "payload", is_payload: true },
+    { name: "x", type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(true);
+});
+
 // ─── role: ignored ────────────────────────────────────────────────────────────
 
 test("safeParseMetadata accepts role: ignored", () => {

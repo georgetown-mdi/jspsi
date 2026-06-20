@@ -54,7 +54,21 @@ const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
 
 export type Metadata = Array<ColumnMetadata>;
 
-export const MetadataSchema = z.array(ColumnMetadataSchema);
+// Column names must be unique. Every consumer treats metadata as keyed by name
+// (`metadata.find((c) => c.name === ...)`), so a duplicate name makes "the
+// metadata for column X" position-dependent -- e.g. a `role: ignored` entry and a
+// `role: payload` entry for the same name would resolve differently depending on
+// which `find` reaches first, silently defeating the ignored exclusion. Reject it
+// at the schema, mirroring the linkage-field / linkage-key name-uniqueness refines.
+// The message is static and does not echo the user-controlled name, matching the
+// type-enum errors (a name can carry control/ANSI/bidi bytes; see the no-echo test).
+export const MetadataSchema = z.array(ColumnMetadataSchema).refine(
+  (cols) => {
+    const names = cols.map((c) => c.name);
+    return names.length === new Set(names).size;
+  },
+  { message: "metadata column names must be unique" },
+);
 
 /**
  * Non-throwing parse of a raw value as {@link Metadata}. Snake_case keys (the
