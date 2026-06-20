@@ -7,6 +7,7 @@ import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 
 import {
   createMessagePipe,
+  ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
 
@@ -338,6 +339,26 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
   expect(reason.message).not.toContain("‮");
   expect(reason.message).not.toContain("\x1b");
   expect(reason.message).toContain("\\u202e");
+});
+
+test("initiator: a pathological-count abortReasons fails cleanly, not with a RangeError", async () => {
+  // The partner's decision frame (termsWithDecisionMessage, message 2) carries an
+  // optional abortReasons list. A pathological count there made Zod throw
+  // `Invalid string length` building its error from one issue per entry; the
+  // boundedArray gate turns it into one clean count issue, so receiveParsed
+  // surfaces a ConnectionError("protocol") with a non-RangeError cause.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA);
+  await connB.receive(); // consume the initiator's terms (message 1)
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "abort",
+    abortReasons: Array.from({ length: 4_000_000 }, () => 123),
+  });
+  const err = await initiator.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });
 
 // --- Abort-send failure on the responder -------------------------------------

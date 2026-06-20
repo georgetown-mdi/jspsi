@@ -8,6 +8,7 @@ import {
   createMessagePipe,
   errorMessage,
   fromEventConnection,
+  parseOrProtocolError,
   receiveParsed,
 } from "../src/connection/messageConnection";
 
@@ -496,6 +497,32 @@ test("receiveParsed: a transport drop surfaces as transport, not protocol", asyn
   const err = await parked.catch((e: unknown) => e);
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("transport");
+});
+
+// --- parseOrProtocolError ----------------------------------------------------
+// The send-before-parse half of receiveParsed: the two direct `.parse()` sites
+// (participant.ts numberArrayMessage, link.ts associationAndIterationArray) must
+// receive a frame, acknowledge it, then parse, so they call this rather than
+// receiveParsed. It surfaces a parse failure as the same clean
+// ConnectionError("protocol") -- never the validator's raw throw escaping bare.
+
+test("parseOrProtocolError: returns the validated value on success", () => {
+  const schema = z.object({ n: z.number() });
+  expect(parseOrProtocolError(schema, { n: 42 })).toEqual({ n: 42 });
+});
+
+test("parseOrProtocolError: a malformed value throws a protocol ConnectionError", () => {
+  const schema = z.object({ n: z.number() });
+  let err: unknown;
+  try {
+    parseOrProtocolError(schema, { n: "not a number" });
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  // The validator's failure is preserved as the cause.
+  expect((err as ConnectionError).cause).toBeInstanceOf(z.ZodError);
 });
 
 // --- errorMessage / asConnectionError ----------------------------------------

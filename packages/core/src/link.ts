@@ -1,31 +1,49 @@
-import * as z from "zod";
-
 import type { PSIParticipant } from "./participant";
 import {
   receiveParsed,
+  parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
+import { singleIssueArray } from "./utils/singleIssueArray";
 
 import { getLoggerForVerbosity } from "./utils/logger";
-
-// Parsed as the whole received message (the root array). With no enclosing
-// array/record/tuple frame above the root, a pathological count cannot drive the
-// ~130k STACK overflow the nested collections face (see participant.ts
-// associationTableMessage and config/linkageTerms.ts). A far larger count
-// (~millions of invalid elements, within the frame cap) can still make Zod throw
-// a `RangeError: Invalid string length` building the error: the receiveParsed
-// site (below) catches that as ConnectionError("protocol"), while the direct
-// `.parse()` site surfaces a bare RangeError. Low and pre-existing; bounding the
-// residual flat arrays uniformly is a follow-on. The legitimate count is bounded
-// by MAX_FRAME_SIZE_BYTES.
-const associationAndIterationArray = z.array(
-  z.object({ theirIndex: z.number(), iteration: z.number() }),
-);
 
 interface IndexIterationPair {
   theirIndex: number;
   iteration: number;
 }
+
+// Parsed as the whole received message (the root array). With no enclosing
+// array/record/tuple frame above the root, a pathological count cannot drive the
+// ~130k STACK overflow the nested collections face (see participant.ts
+// associationTableMessage and config/linkageTerms.ts) -- but a far larger count
+// (~millions of invalid elements, within the frame cap) makes Zod throw a
+// DIFFERENT RangeError ("Invalid string length", ~3.5M on Zod 4.4.3) building its
+// error string from one issue per element. The single-issue validator caps issue
+// accumulation at one regardless of count (utils/singleIssueArray.ts), so a
+// pathological frame fails as a clean bounded rejection; a count `.max()` is not
+// an option because the legitimate count -- the matched intersection -- is in the
+// millions, bounded only by MAX_FRAME_SIZE_BYTES. The predicate mirrors
+// `z.object({ theirIndex: z.number(), iteration: z.number() })` for acceptance:
+// a non-null, non-array object (z.object rejects an array outright, even one
+// carrying theirIndex/iteration own-properties) with a finite value at each field
+// (Number.isFinite, like z.number()). Unlike that object schema it does not strip
+// unknown keys, which is immaterial -- a legitimate partner sends exactly these
+// two keys, and only theirIndex/iteration are ever read. This array is read both
+// via receiveParsed (sendFirst, below) and via a direct `.parse()` (the
+// !sendFirst send-before-parse path, wrapped in parseOrProtocolError) so either
+// way a malformed frame surfaces a clean ConnectionError("protocol").
+/** @internal exported for the pathological-count wire-message test. */
+export const associationAndIterationArray =
+  singleIssueArray<IndexIterationPair>(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Number.isFinite((value as Record<string, unknown>).theirIndex) &&
+      Number.isFinite((value as Record<string, unknown>).iteration),
+    "must be an array of {theirIndex, iteration} finite-number pairs",
+  );
 
 type IndexIterationMap = Array<IndexIterationPair | undefined>;
 type IterationMap = Array<IndexIterationPair>;
@@ -275,6 +293,6 @@ async function exchangeMappedElements(
     log.debug(`${id}: received other mapped elements`);
     log.debug(`${id}: sending own mapped elements`);
     await conn.send(values);
-    return associationAndIterationArray.parse(rawData);
+    return parseOrProtocolError(associationAndIterationArray, rawData);
   }
 }

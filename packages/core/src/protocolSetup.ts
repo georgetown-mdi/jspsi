@@ -11,12 +11,23 @@ import { SHARED_SECRET_REGEX } from "./config/connection";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay";
 import { describeDecodeError } from "./utils/describeDecodeError";
+import { boundedArray } from "./utils/boundedArray";
 import {
   receiveParsed,
   type MessageConnection,
 } from "./connection/messageConnection";
 
 // --- Message schemas ---------------------------------------------------------
+
+// Generous upper bound on the COUNT of partner-supplied abort reasons. A real
+// abort carries one reason per failed compatibility check (validateCompatibility
+// emits a handful) or a single parse-failure string; 256 is far above any real
+// list. The bound is the same class as the linkage-terms count bounds: a partner
+// can send abortReasons off the post-handshake frame (MAX_FRAME_SIZE_BYTES), and
+// a flat array of millions of invalid entries would otherwise make Zod throw
+// `RangeError: Invalid string length` building its error string from one issue
+// per entry. boundedArray gates the count before per-element validation.
+const MAX_ABORT_REASONS = 256;
 
 // The optional `hostKey` advertisement rides the terms exchange so each party
 // advertises the SFTP host key it observed (fingerprint + key type) to the
@@ -108,17 +119,23 @@ const termsMessage = z.object({
   hostKey: hostKeyField,
 });
 
+const abortReasonsField = boundedArray(
+  z.string(),
+  MAX_ABORT_REASONS,
+  `abortReasons must not exceed ${MAX_ABORT_REASONS} entries`,
+).optional();
+
 const termsWithDecisionMessage = z.object({
   linkageTerms: z.unknown(),
   decision: z.enum(["proceed", "abort"]),
-  abortReasons: z.array(z.string()).optional(),
+  abortReasons: abortReasonsField,
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
 
 const decisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
-  abortReasons: z.array(z.string()).optional(),
+  abortReasons: abortReasonsField,
 });
 
 const recordCountMessage = z.object({

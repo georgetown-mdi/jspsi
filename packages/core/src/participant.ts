@@ -3,6 +3,7 @@ import * as z from "zod";
 import type { AssociationTable, Config } from "./types";
 import {
   receiveParsed,
+  parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
 import { singleIssueArray } from "./utils/singleIssueArray";
@@ -19,16 +20,23 @@ const statusCompletedMessage = z.object({
 
 // A single flat array parsed as the whole received message (the root). With no
 // enclosing array/record/tuple frame above the root, it cannot drive the ~130k
-// STACK overflow {@link associationTableMessage} faces. It is not wholly
-// RangeError-free: a far larger count (~millions of invalid elements, within
-// MAX_FRAME_SIZE_BYTES) makes Zod throw building the error string
-// (`RangeError: Invalid string length`). Unlike the receiveParsed sites, this is
-// read by a direct `.parse()` (send-before-parse, below), so that residual
-// surfaces as a bare RangeError rather than a clean ConnectionError("protocol").
-// Low and pre-existing (this schema is unchanged); bounding the residual flat
-// arrays uniformly is a follow-on. The legitimate count is the partner's
-// original-index list, bounded by MAX_FRAME_SIZE_BYTES.
-const numberArrayMessage = z.array(z.number());
+// STACK overflow {@link associationTableMessage} faces -- but a far larger count
+// (~millions of invalid elements, within MAX_FRAME_SIZE_BYTES) makes Zod throw a
+// DIFFERENT RangeError ("Invalid string length", ~3.5M on Zod 4.4.3) building its
+// error string from one issue per element. The single-issue validator caps issue
+// accumulation at one regardless of count (see utils/singleIssueArray.ts), so a
+// pathological-count frame fails as a clean bounded rejection. A count `.max()`
+// is not an option: the legitimate count is the partner's original-index list,
+// in the millions, bounded only by MAX_FRAME_SIZE_BYTES. Number.isFinite mirrors
+// `z.number()` exactly (accepts every finite number, rejects NaN/Infinity and
+// non-numbers). This frame is read by a direct `.parse()` (send-before-parse,
+// below), wrapped via parseOrProtocolError so even a validator throw surfaces a
+// clean ConnectionError("protocol") rather than escaping bare.
+/** @internal exported for the pathological-count wire-message test. */
+export const numberArrayMessage = singleIssueArray<number>(
+  Number.isFinite,
+  "must be an array of finite numbers",
+);
 
 // CONFIRMED-EXPOSED to Zod's issue-accumulation stack overflow: a partner can
 // send a tuple whose inner index array holds hundreds of thousands of invalid
@@ -327,7 +335,7 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: sending status completed`);
       await conn.send({ status: "completed" });
 
-      return [localIndices, numberArrayMessage.parse(rawData)];
+      return [localIndices, parseOrProtocolError(numberArrayMessage, rawData)];
     }
   }
 }

@@ -25,20 +25,25 @@ export interface PartnerPayload {
   rows: Array<Array<string | null>>;
 }
 
-// One payload row: a single-issue array (utils/singleIssueArray.ts) rather than
-// `z.array(z.string().nullable())`. CONFIRMED-EXPOSED to Zod's
-// issue-accumulation stack overflow -- a partner row of hundreds of thousands of
-// invalid inner cells overflows Zod's call stack spreading one issue per cell up
-// through the inner-array and outer-`rows` frames (RangeError reproduced at ~300k
-// on Zod 4.4.3). The single-issue validator caps that at one clean issue. A count
-// `.max()` on the cells is unnecessary and a `.max()` on `rows` itself is
-// unsafe: a real exchange has one row per matched record, legitimately in the
-// millions (MAX_FRAME_SIZE_BYTES bounds it). The predicate mirrors
-// `z.string().nullable()` exactly.
-const payloadRow = singleIssueArray<string | null>(
-  (cell) => typeof cell === "string" || cell === null,
-  "each payload row must be an array of strings or nulls",
-);
+// `rows` is a 2-D partner-controlled collection, bounded as ONE single-issue
+// validator (utils/singleIssueArray.ts) over the whole structure rather than
+// `z.array(z.array(z.string().nullable()))`. It is exposed to BOTH Zod RangeError
+// classes: a single row of hundreds of thousands of invalid inner cells overflows
+// the call stack spreading one issue per cell up through the inner-array and
+// outer-`rows` frames (`Maximum call stack size exceeded`, ~300k), and a payload
+// of millions of invalid ROWS throws `Invalid string length` building the error
+// string from one issue per row (~3.5M) -- both on Zod 4.4.3. `isPayloadRow`
+// validates a whole row (is-array, every cell string-or-null) INSIDE the outer
+// single-issue `every`, so the entire structure yields at most one issue
+// regardless of row OR cell count. A `.max()` is unsafe on either axis: a real
+// exchange has one row per matched record, each as wide as the payload, both
+// legitimately in the millions (MAX_FRAME_SIZE_BYTES bounds them). The predicates
+// mirror `z.string().nullable()` (string-or-null) and the inner `z.array(...)`
+// (Array.isArray) exactly.
+const isPayloadCell = (cell: unknown): boolean =>
+  typeof cell === "string" || cell === null;
+const isPayloadRow = (row: unknown): boolean =>
+  Array.isArray(row) && row.every(isPayloadCell);
 
 const payloadWireSchema = z.discriminatedUnion("hasData", [
   z.object({ hasData: z.literal(false) }),
@@ -47,14 +52,29 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       hasData: z.literal(true),
       // `columns` and `rowIndices` are flat arrays one object-frame below this
       // object, so a pathological count cannot drive the ~130k STACK overflow
-      // `rows` faces. A far larger count (~millions of invalid elements, within
-      // the frame cap) can still make Zod throw a `RangeError: Invalid string
-      // length` building the error, but receiveParsed catches that harmlessly as
-      // ConnectionError("protocol"). Left unbounded as a Low residual; the
-      // legitimate counts are bounded only by MAX_FRAME_SIZE_BYTES.
-      columns: z.array(z.string()),
-      rowIndices: z.array(z.number().int().nonnegative()),
-      rows: z.array(payloadRow),
+      // `rows` faces -- but a far larger count (~millions of invalid elements,
+      // within the frame cap) makes Zod throw a DIFFERENT RangeError ("Invalid
+      // string length", ~3.5M on Zod 4.4.3) building its error string from one
+      // issue per element. receiveParsed catches that harmlessly as
+      // ConnectionError("protocol"), but the single-issue validators below cap
+      // issue accumulation at one regardless of count (utils/singleIssueArray.ts)
+      // so the burn never happens. A count `.max()` is wrong for `rowIndices`
+      // (one per matched record, legitimately in the millions like `rows`) and
+      // unnecessary for `columns`; both predicates mirror their replaced element
+      // schema exactly -- typeof-string for `z.string()`, Number.isSafeInteger
+      // and `>= 0` for `z.number().int().nonnegative()`.
+      columns: singleIssueArray<string>(
+        (value) => typeof value === "string",
+        "each column name must be a string",
+      ),
+      rowIndices: singleIssueArray<number>(
+        (value) => Number.isSafeInteger(value) && (value as number) >= 0,
+        "each row index must be a non-negative integer",
+      ),
+      rows: singleIssueArray<Array<string | null>>(
+        isPayloadRow,
+        "each payload row must be an array of strings or nulls",
+      ),
     })
     .refine(
       (v) => v.rowIndices.length === v.rows.length,
