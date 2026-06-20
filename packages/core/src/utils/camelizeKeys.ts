@@ -1,4 +1,5 @@
 import { UsageError } from "../errors.js";
+import { exceedsOwnKeyCount } from "./objectKeyCount.js";
 
 /**
  * Maximum object/array nesting depth {@link transformKeysDeep} will descend
@@ -99,22 +100,61 @@ function camelToSnake(s: string): string {
  * overflow the call stack with a `RangeError`; values shallower than that are
  * walked normally. The opaque-key skip does not recurse, so an opaque subtree's
  * own depth never counts toward the bound.
+ *
+ * `widthBoundedKeys` is an optional caller-supplied map from a (canonical
+ * camelCase) key name to the maximum key count its object value may carry. When
+ * a key matches and its object value exceeds that count -- decided by a key count
+ * (see {@link exceedsOwnKeyCount}; O(n) in keys, but the cheapest such pass) --
+ * the value is left verbatim instead of being recursed into and rewritten key by
+ * key, exactly as an opaque subtree is. This is a defense against a
+ * pathological-key-count partner record (the `transform.params` map, board item
+ * 202722105) whose snake->camel rewrite would otherwise burn multiple seconds
+ * before the schema's own count bound could reject it: leaving it verbatim hands
+ * the over-count record to the matching schema (which rejects it with a single
+ * clean issue) for the cost of one key count instead of the far more expensive
+ * rewrite. A within-bound value is recursed into and rewritten as normal, so a
+ * legitimate record is unaffected; like the opaque skip, only the value is left
+ * verbatim, the key itself is still rewritten.
+ *
+ * Also like the opaque skip, this is a key-NAME match, not a path match: a
+ * matching name at any depth is width-checked. A nested over-count value sharing
+ * a bounded name (e.g. a key literally named `params` inside another `params`
+ * value, which is `z.unknown()` content) is therefore left verbatim too -- inert,
+ * because such a value is opaque content no consumer reads as camelCase, and a
+ * legitimate config never nests an over-count map under that name. The effect is
+ * version-deterministic (both parties on the same code skip identically), so it
+ * cannot diverge a cross-party canonical encoding within a version.
  */
 function transformKeysDeep(
   value: unknown,
   transformKey: (key: string) => string,
   depth: number,
+  widthBoundedKeys?: ReadonlyMap<string, number>,
 ): unknown {
   if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
   if (Array.isArray(value))
-    return value.map((v) => transformKeysDeep(v, transformKey, depth + 1));
+    return value.map((v) =>
+      transformKeysDeep(v, transformKey, depth + 1, widthBoundedKeys),
+    );
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
-      Object.entries(value).map(([k, v]) =>
-        OPAQUE_VALUE_KEYS.has(snakeToCamel(k))
-          ? [transformKey(k), v]
-          : [transformKey(k), transformKeysDeep(v, transformKey, depth + 1)],
-      ),
+      Object.entries(value).map(([k, v]) => {
+        const camel = snakeToCamel(k);
+        if (OPAQUE_VALUE_KEYS.has(camel)) return [transformKey(k), v];
+        const widthBound = widthBoundedKeys?.get(camel);
+        if (
+          widthBound !== undefined &&
+          v !== null &&
+          typeof v === "object" &&
+          !Array.isArray(v) &&
+          exceedsOwnKeyCount(v, widthBound)
+        )
+          return [transformKey(k), v];
+        return [
+          transformKey(k),
+          transformKeysDeep(v, transformKey, depth + 1, widthBoundedKeys),
+        ];
+      }),
     );
   return value;
 }
@@ -130,11 +170,21 @@ function transformKeysDeep(
  * `safeParseX` wrapper that calls it can throw rather than return a failure
  * result. No real config or exchange message reaches the bound.
  *
+ * `widthBoundedKeys` (see {@link transformKeysDeep}) lets a caller name keys
+ * whose object value is left verbatim once it exceeds a given key count, so a
+ * pathological-count partner record is not rewritten key by key before the
+ * schema's own count bound rejects it. Callers that parse partner-controlled
+ * input with a bounded record (`parseLinkageTerms`, for `transform.params`) pass
+ * it; the rest omit it and the pre-pass is unchanged.
+ *
  * @throws {NestingDepthExceededError} if input nesting reaches
  *   {@link MAX_NESTING_DEPTH} levels.
  */
-export function camelizeKeys(value: unknown): unknown {
-  return transformKeysDeep(value, snakeToCamel, 0);
+export function camelizeKeys(
+  value: unknown,
+  widthBoundedKeys?: ReadonlyMap<string, number>,
+): unknown {
+  return transformKeysDeep(value, snakeToCamel, 0, widthBoundedKeys);
 }
 
 /**

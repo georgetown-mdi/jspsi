@@ -1404,6 +1404,43 @@ test("an over-long transform params key within the count bound is still rejected
   }
 });
 
+test("an over-count transform params record is rejected without the per-key camelize rewrite or record validation", () => {
+  // Pins the guard's defining property (board item 202722105): the over-count
+  // rejection skips the two EXPENSIVE per-key passes -- the snake->camel camelize
+  // rewrite and the permissive record stage's per-key validation -- that an
+  // over-count record would otherwise incur. The key count itself is still O(n)
+  // (V8 enumerates eagerly; see exceedsOwnKeyCount); what this test catches is a
+  // regression that subjects every key to the rewrite or to per-key parsing. A
+  // Proxy tallies per-key property-descriptor reads: the count via for...in reads
+  // descriptors lazily and stops at the bound, whereas a camelize rewrite
+  // (Object.entries over every key) or a record-stage parse (a ZodType per key)
+  // would read all TOTAL of them. So a bounded tally proves both expensive passes
+  // were skipped; a tally near TOTAL would mean one of them ran.
+  const TOTAL = 100_000;
+  let inspected = 0;
+  const params = new Proxy(
+    {},
+    {
+      ownKeys: () => Array.from({ length: TOTAL }, (_, i) => `k${i}`),
+      getOwnPropertyDescriptor: () => {
+        inspected++;
+        return { enumerable: true, configurable: true, value: 1 };
+      },
+      get: () => 1,
+    },
+  );
+  const result = safeParseLinkageTerms(paramsTerms(params));
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(
+      result.error.issues.some((i) => /must not exceed/.test(i.message)),
+    ).toBe(true);
+  }
+  // Far below TOTAL: a camelize rewrite or per-key record parse would push this to
+  // at least TOTAL.
+  expect(inspected).toBeLessThan(MAX_PARAMS_ENTRIES * 10);
+});
+
 // ─── Nested-collection count bounds ──────────────────────────────────────────
 // Each constraint `exclude` list, a key element's `transform` step list, and a
 // key's `elements` list is partner-controlled and nested beneath an outer array,
