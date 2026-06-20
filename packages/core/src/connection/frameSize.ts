@@ -13,8 +13,9 @@
  * Value: 536,870,888 bytes (~512 MiB), the exact value of Node's maximum string
  * length (`buffer.constants.MAX_STRING_LENGTH` on 64-bit). That length is the
  * hard ceiling above which the existing JSON-text read path cannot process a
- * frame at all: both read sites do `JSON.parse(buffer.toString())`, and
- * `Buffer.prototype.toString()` throws above MAX_STRING_LENGTH. Anchoring the
+ * frame at all: both read sites `.toString()` the buffer before parsing it
+ * (through `parseBoundedJson`), and `Buffer.prototype.toString()` throws above
+ * MAX_STRING_LENGTH. Anchoring the
  * cap there means it (a) never rejects a frame the transport could otherwise
  * decode -- anything larger already fails at `.toString()` regardless of memory
  * -- and (b) converts that late, opaque failure (raised only after the full,

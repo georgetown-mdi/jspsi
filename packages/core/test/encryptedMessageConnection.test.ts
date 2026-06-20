@@ -6,9 +6,11 @@ import {
   EncryptedMessageConnection,
   IV_SEQ_OFFSET,
   TYPE_JSON,
+} from "../src/connection/encryptedMessageConnection";
+import {
   MAX_JSON_OBJECT_KEYS,
   MAX_JSON_NESTING_DEPTH,
-} from "../src/connection/encryptedMessageConnection";
+} from "../src/utils/boundedJson";
 import {
   createMessagePipe,
   ConnectionError,

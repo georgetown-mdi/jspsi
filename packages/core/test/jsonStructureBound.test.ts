@@ -5,17 +5,22 @@ import { exceedsJsonStructureBound } from "../src/utils/jsonStructureBound";
 // Each test isolates one bound by overriding it and leaving the others generous,
 // so a failure points at the bound under test. Small explicit values keep the
 // over/under cases tiny and legible; the scan is bound-agnostic, so behavior at
-// keys/elements/depth of 4 generalizes to the production values.
+// keys/elements/depth of 4 generalizes to the production values. The helper runs
+// both representations the scanner accepts -- the UTF-8 bytes and the string --
+// and asserts they agree, so every case below covers both paths for free.
 function check(
   json: string,
   { keys = 1_000, elements = 1_000, depth = 1_000 } = {},
 ): boolean {
-  return exceedsJsonStructureBound(
+  const fromBytes = exceedsJsonStructureBound(
     new TextEncoder().encode(json),
     keys,
     elements,
     depth,
   );
+  const fromString = exceedsJsonStructureBound(json, keys, elements, depth);
+  expect(fromString).toBe(fromBytes);
+  return fromBytes;
 }
 
 // --- Per-object key bound -----------------------------------------------------
@@ -118,6 +123,14 @@ test("an escaped quote inside a string does not end the string early", () => {
   // The \" keeps the scan inside the string, so the colons after it are not
   // counted as keys of the object.
   expect(check('{"a":"he said \\"x:y:z:w:v\\""}', { keys: 4 })).toBe(false);
+});
+
+test("multi-byte characters inside strings are handled on both paths", () => {
+  // A non-ASCII value with structural-looking bytes inside the string: in UTF-8
+  // its bytes are all >= 0x80, in UTF-16 its code units are non-ASCII or a
+  // surrogate pair, so neither path mistakes them for a marker. `check` asserts
+  // the byte and string scans agree on this.
+  expect(check('{"name":"éèê 😀 a:b,c:d"}', { keys: 4 })).toBe(false);
 });
 
 // --- Nesting depth bound ------------------------------------------------------

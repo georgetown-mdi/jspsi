@@ -1,11 +1,13 @@
-// Byte values of the JSON structural characters and the string escape. Every
-// one is ASCII (<= 0x7F), and in well-formed UTF-8 no lead or continuation byte
-// of a multi-byte code point ever falls in the ASCII range (lead bytes are
-// >= 0xC0, continuation bytes 0x80-0xBF). So matching these byte values against
-// the raw UTF-8 cannot misfire inside a multi-byte character: a 0x3A byte is
-// always a real colon and a 0x22 byte is always a real quote. The scan
-// therefore needs no prior decode -- it runs ahead of it, so a pathological
-// frame is rejected without first allocating the full decoded string.
+// Code-unit values of the JSON structural characters and the string escape.
+// Every one is ASCII (<= 0x7F). The scan reads either the raw UTF-8 bytes or the
+// UTF-16 code units of an already-decoded string, and an ASCII value cannot
+// misfire in either: in well-formed UTF-8 no lead or continuation byte of a
+// multi-byte code point falls in the ASCII range (lead bytes >= 0xC0,
+// continuation bytes 0x80-0xBF), and in UTF-16 an ASCII code point is a single
+// unit that is never a surrogate half (0xD800-0xDFFF). So a 0x3A is always a
+// real colon and a 0x22 always a real quote. On the byte path the scan needs no
+// prior decode -- it runs ahead of it, so a pathological frame is rejected
+// without first allocating the decoded string.
 const QUOTE = 0x22; // "
 const COLON = 0x3a; // :
 const COMMA = 0x2c; // ,
@@ -16,8 +18,9 @@ const OPEN_BRACKET = 0x5b; // [
 const CLOSE_BRACKET = 0x5d; // ]
 
 /**
- * Scans the UTF-8 bytes of a JSON document and returns `true` if it carries a
- * structure that must be rejected BEFORE `JSON.parse` runs:
+ * Scans a JSON document -- its UTF-8 bytes, or the UTF-16 code units of an
+ * already-decoded string -- and returns `true` if it carries a structure that
+ * must be rejected BEFORE `JSON.parse` runs:
  *
  * - any single object with more than `maxObjectKeys` members,
  * - any single array with more than `maxArrayElements` elements, or
@@ -52,7 +55,7 @@ const CLOSE_BRACKET = 0x5d; // ]
  * single O(n) pass with early exit, ahead of the parse's own pass.
  */
 export function exceedsJsonStructureBound(
-  utf8: Uint8Array,
+  input: Uint8Array | string,
   maxObjectKeys: number,
   maxArrayElements: number,
   maxDepth: number,
@@ -65,10 +68,17 @@ export function exceedsJsonStructureBound(
   // to arrays) from ever colliding on one frame. The innermost container is the
   // top of the stack.
   const counts: number[] = [];
+  // Read a UTF-8 byte or a UTF-16 code unit per position; both yield the ASCII
+  // structural values identically. The kind is hoisted into two narrowed locals
+  // so the per-position cost is a single null check, not a `typeof` on every
+  // unit -- the loop walks a ~512 MB transport string on the large-frame path.
+  const str = typeof input === "string" ? input : null;
+  const bytes = str === null ? (input as Uint8Array) : null;
+  const length = input.length;
   let inString = false;
   let escaped = false;
-  for (let i = 0; i < utf8.length; i++) {
-    const b = utf8[i];
+  for (let i = 0; i < length; i++) {
+    const b = str !== null ? str.charCodeAt(i) : bytes![i];
     if (inString) {
       if (escaped) escaped = false;
       else if (b === BACKSLASH) escaped = true;
