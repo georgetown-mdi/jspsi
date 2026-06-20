@@ -119,3 +119,23 @@ test("a legitimately large mapped-elements frame parses", async () => {
   );
   expect(await parsed).toHaveLength(n);
 });
+
+test("a mapped-elements element that is an array (not a plain object) is rejected", () => {
+  // z.object rejects an array outright, even one carrying theirIndex/iteration
+  // own-properties; the single-issue predicate must too, so the set of accepted
+  // messages is exactly the one the replaced `z.object` schema accepted. This is
+  // unreachable over the JSON transport (an array cannot carry named own-
+  // properties through serialization), but the exact-mirror contract holds
+  // regardless -- it guards against the `!Array.isArray` check being dropped.
+  const arrayElement = [] as unknown as Record<string, unknown>;
+  arrayElement.theirIndex = 0;
+  arrayElement.iteration = 0;
+  let err: unknown;
+  try {
+    parseOrProtocolError(associationAndIterationArray, [arrayElement]);
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});

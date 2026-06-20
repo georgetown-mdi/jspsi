@@ -24,19 +24,22 @@ interface IndexIterationPair {
 // pathological frame fails as a clean bounded rejection; a count `.max()` is not
 // an option because the legitimate count -- the matched intersection -- is in the
 // millions, bounded only by MAX_FRAME_SIZE_BYTES. The predicate mirrors
-// `z.object({ theirIndex: z.number(), iteration: z.number() })` for acceptance
-// (Number.isFinite per field, like z.number()); unlike that object schema it
-// does not strip unknown keys, which is immaterial -- a legitimate partner sends
-// exactly these two keys, and only theirIndex/iteration are ever read. This array
-// is read both via receiveParsed (sendFirst, below) and via a direct `.parse()`
-// (the !sendFirst send-before-parse path, wrapped in parseOrProtocolError) so
-// either way a malformed frame surfaces a clean ConnectionError("protocol").
+// `z.object({ theirIndex: z.number(), iteration: z.number() })` for acceptance:
+// a non-null, non-array object (z.object rejects an array outright, even one
+// carrying theirIndex/iteration own-properties) with a finite value at each field
+// (Number.isFinite, like z.number()). Unlike that object schema it does not strip
+// unknown keys, which is immaterial -- a legitimate partner sends exactly these
+// two keys, and only theirIndex/iteration are ever read. This array is read both
+// via receiveParsed (sendFirst, below) and via a direct `.parse()` (the
+// !sendFirst send-before-parse path, wrapped in parseOrProtocolError) so either
+// way a malformed frame surfaces a clean ConnectionError("protocol").
 /** @internal exported for the pathological-count wire-message test. */
 export const associationAndIterationArray =
   singleIssueArray<IndexIterationPair>(
     (value) =>
       typeof value === "object" &&
       value !== null &&
+      !Array.isArray(value) &&
       Number.isFinite((value as Record<string, unknown>).theirIndex) &&
       Number.isFinite((value as Record<string, unknown>).iteration),
     "must be an array of {theirIndex, iteration} finite-number pairs",
