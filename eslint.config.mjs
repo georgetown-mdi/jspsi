@@ -11,6 +11,28 @@ function scopeToDir(dir, configs) {
   });
 }
 
+// Ban emitting through loglevel's bare root logger (the `logLibrary` default
+// import) in source that runs inside the CLI integration workers. The suite's
+// two leak-detection backstops -- the console sentinel and withCapturedLogs
+// capture -- only observe NAMED loggers: a named logger binds the
+// sentinel-wrapped console (and the capture interceptor) at getLogger time,
+// whereas the eager capture install rebinds the root logger against the raw,
+// pre-sentinel console (capturedLogs.setup.ts runs before the sentinel wraps
+// console). So a bare `logLibrary.<level>(...)` would silently escape BOTH
+// backstops. This rule is the executable form of that invariant -- the prose
+// "nothing emits through the bare root logger" the eager-install ordering rests
+// on -- so a future bare-root emit fails the lint check instead of quietly
+// reopening the blind spot. Emit through getLogger / getLoggerForVerbosity; the
+// root `logLibrary` is for setLevel / levels / getLogger only. (In core/src and
+// cli/src the loglevel default is uniformly imported as `logLibrary` and is
+// never a named-logger variable, so keying on that identifier is exact.)
+const noBareRootLoglevelEmit = {
+  selector:
+    "CallExpression[callee.object.name='logLibrary'][callee.property.name=/^(trace|debug|info|warn|error)$/]",
+  message:
+    "Do not emit through the bare root logger (logLibrary.<level>()): the CLI integration console sentinel and withCapturedLogs capture only see named loggers, so a bare-root emit escapes both leak-detection backstops. Use getLogger / getLoggerForVerbosity; logLibrary is for setLevel / levels / getLogger only.",
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -66,6 +88,7 @@ export default tseslint.config(
           message:
             "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
+        noBareRootLoglevelEmit,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
@@ -82,6 +105,17 @@ export default tseslint.config(
           ],
         },
       ],
+    },
+  },
+  {
+    // The bare-root-logger emit ban also covers core/src, which runs inside the
+    // CLI integration workers; cli/src gets the same selector folded into its
+    // no-restricted-syntax block above. Separate block because flat config
+    // replaces (does not merge) a rule's options across blocks, and cli/src
+    // already owns a no-restricted-syntax block for the sensitive-parse ban.
+    files: ["packages/core/src/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", noBareRootLoglevelEmit],
     },
   },
   ...scopeToDir("apps/web", webConfig),
