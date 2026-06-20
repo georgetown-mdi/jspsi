@@ -17,6 +17,11 @@ import { cssVariablesResolver, mantineTheme } from "@theme";
 
 /** WCAG 2.1 relative luminance of an `#rgb` or `#rrggbb` colour. */
 function relativeLuminance(hex: string): number {
+  // 0.03928 is the threshold in WCAG 2.1's published relative-luminance formula
+  // (and in Mantine's own luminance(), which drives its autoContrast picks). The
+  // mathematically-exact sRGB break is 0.04045; the two differ only for a channel
+  // landing in that narrow gap, which none of the tested colours do. Matching the
+  // spec text and Mantine is deliberate -- do not "correct" it to 0.04045.
   const linearize = (v: number) =>
     v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   let n = hex.replace("#", "");
@@ -58,6 +63,7 @@ const dark6 = theme.colors.dark[6];
 const warningText = vars.light["--mantine-color-yellow-light-color"];
 const errorText = vars.light["--mantine-color-red-light-color"];
 const dimmedLight = vars.light["--mantine-color-dimmed"];
+const placeholderLight = vars.light["--mantine-color-placeholder"];
 const dimmedDark = vars.dark["--mantine-color-dimmed"];
 const placeholderDark = vars.dark["--mantine-color-placeholder"];
 
@@ -119,6 +125,12 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         name: "dimmed text (light): on gray-0 surface",
         fg: dimmedLight,
         bg: gray0,
+        floor: 4.5,
+      },
+      {
+        name: "placeholder text (light): on white input",
+        fg: placeholderLight,
+        bg: white,
         floor: 4.5,
       },
       {

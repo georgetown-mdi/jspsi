@@ -162,8 +162,11 @@ const MUTED_TEXT = {
  * - warning #92400e on yellow-1 = 6.36:1.
  * - error #a51111 on red-1 = 6.45:1.
  *
- * Only the light scheme is overridden; the dark `light-color` (shade 0 on a dark
- * tint) already passes. Enforced by test/unit/themeContrast.test.ts.
+ * Only the light scheme is overridden -- it is where these failures are. The
+ * dark scheme is left at Mantine's defaults, where the same tokens are a
+ * near-white shade-0 on a dark tint (the inverse arrangement), not the dark-on-
+ * light one that fails here. The light-scheme ratios above are enforced by
+ * test/unit/themeContrast.test.ts.
  */
 const STATUS_TEXT = {
   warning: "#92400e",
