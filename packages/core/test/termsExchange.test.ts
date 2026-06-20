@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import { exchangeTerms, resolveRole } from "../src/protocolSetup";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 
@@ -296,6 +297,47 @@ test("neither party expects output -> both parties reject", async () => {
   );
   expect(results[0].status).toBe("rejected");
   expect(results[1].status).toBe("rejected");
+});
+
+test("responder neutralizes partner bytes in a linkage-terms parse error", async () => {
+  // End-to-end wiring guard for the source sanitization. The per-call-site unit
+  // pin lives in linkageTerms.test.ts (it exercises describeDecodeError on the
+  // ZodError directly); this proves protocolSetup actually ROUTES the relayed
+  // parse error through it. A partner whose terms fail to parse with bytes in
+  // the issue PATH -- an over-long transform.params key (the invalid_key code)
+  // leading with a bidi override and an ANSI escape -- must have those bytes
+  // neutralized in the rejection the responder relays, never surfaced raw.
+  // Reverting the call site to a raw ZodError.message regresses this (the JSON
+  // dump leaks U+202E verbatim).
+  const evilKey = "\x1b[31m‮" + "x".repeat(MAX_NAME_LENGTH);
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB);
+  await connA.send({
+    linkageTerms: {
+      ...termsA,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [{ function: "trim", params: { [evilKey]: 1 } }],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const reason = await responder.then(
+    () => {
+      throw new Error("expected the responder to reject");
+    },
+    (e: unknown) => e as Error,
+  );
+  expect(reason.message).toContain("failed to parse");
+  expect(reason.message).not.toContain("‮");
+  expect(reason.message).not.toContain("\x1b");
+  expect(reason.message).toContain("\\u202e");
 });
 
 // --- Abort-send failure on the responder -------------------------------------

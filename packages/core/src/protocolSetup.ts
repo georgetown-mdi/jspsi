@@ -10,6 +10,7 @@ import {
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay";
+import { describeDecodeError } from "./utils/describeDecodeError";
 import {
   receiveParsed,
   type MessageConnection,
@@ -283,24 +284,26 @@ export async function exchangeTerms(
       partnerTerms = parseLinkageTerms(msg.linkageTerms);
     } catch (parseErr) {
       await sendAbort(conn, ["partner linkage terms failed to parse"]);
-      // The schema-validation message is NOT routed through sanitizeForDisplay,
-      // because no partner-controlled bytes reach it on this path. Zod's one
-      // default message that echoes a received value is `unrecognized_keys`
-      // ("Unrecognized key: \"<key>\""), and it fires only on a `.strict()`
-      // object; every schema under parseLinkageTerms is a non-strict `z.object`,
-      // which strips unknown keys instead of reporting them (pinned by the
-      // "strips an unknown partner key" test). The other issue codes reachable
-      // here (type mismatch, enum, semver/date format, too_small) report the
-      // expected type/options and the schema path, not the received value.
-      // Leaving the message raw keeps the multi-line report readable for the
-      // common case of an honestly malformed config. (A partner value echoed
-      // into a curated diagnostic IS sanitized -- see validateCompatibility, the
-      // identity log in apps/cli/src/protocol.ts, and endpointKeyError in
-      // invitation.ts, whose strict endpoint objects DO echo a key and so escape
-      // it at the source.)
+      // These terms are genuinely partner-controlled, so the parse error is
+      // rendered through describeDecodeError, which escapes each Zod issue-path
+      // segment via sanitizeForDisplay and relays the schema-fixed message text
+      // (the shared chokepoint contract; see utils/describeDecodeError). The
+      // path escaping is load-bearing, not cosmetic: Zod's `invalid_key` code on
+      // the bounded `z.record` key in `transform.params`
+      // (z.string().max(MAX_NAME_LENGTH)) places the offending raw key VERBATIM
+      // into the issue PATH, which a raw `ZodError.message` JSON-dumps -- so a
+      // partner key carrying bidi-override / zero-width / homoglyph bytes would
+      // otherwise reach the operator unescaped. Escaping at the source makes the
+      // invariant real here rather than leaning on the display-sink backstop.
+      // The message text needs no escaping: unknown keys are stripped by the
+      // non-strict `z.object` schemas rather than echoed via `unrecognized_keys`
+      // (pinned by the "strips an unknown partner key" test), and the other
+      // reachable codes (type mismatch, enum, semver/date format, too_small)
+      // report the expected type/options, not the received value -- only the
+      // path carries partner bytes.
       throw new Error(
         "partner linkage terms failed to parse: " +
-          (parseErr instanceof Error ? parseErr.message : String(parseErr)),
+          describeDecodeError(parseErr),
       );
     }
 
@@ -343,15 +346,16 @@ export async function exchangeTerms(
       partnerHostKeyMalformed = parsed.hostKey.malformed;
       partnerTerms = parseLinkageTerms(parsed.linkageTerms);
     } catch (parseErr) {
-      parseError =
-        parseErr instanceof Error ? parseErr.message : String(parseErr);
+      // describeDecodeError escapes the partner-controlled Zod issue path at the
+      // source (the `invalid_key`/bounded-`z.record`-key path included) and
+      // relays the schema-fixed message text -- see the parse-error note in the
+      // initiator branch above.
+      parseError = describeDecodeError(parseErr);
     }
 
     const { errors, warnings } =
       parseError !== undefined
         ? {
-            // Not sanitized -- the Zod message carries no partner-supplied bytes
-            // (see the parse-error note in the initiator branch above).
             errors: [`partner linkage terms failed to parse: ${parseError}`],
             warnings: [],
           }
