@@ -1,3 +1,4 @@
+import { Button, Group, Stack } from "@mantine/core";
 import {
   ErrorComponent,
   Link,
@@ -5,6 +6,7 @@ import {
   useMatch,
   useRouter,
 } from "@tanstack/react-router";
+
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
@@ -17,37 +19,43 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   console.error("DefaultCatchBoundary Error:", error);
 
   return (
-    <div className="min-w-0 flex-1 p-4 flex flex-col items-center justify-center gap-6">
+    <Stack align="center" gap="xl" p="md">
       <ErrorComponent error={error} />
-      <div className="flex gap-2 items-center flex-wrap">
-        <button
+      <Group gap="2xs">
+        <Button
+          color="gray"
+          size="compact-sm"
+          tt="uppercase"
+          fw={800}
           onClick={() => {
             router.invalidate();
           }}
-          className={`px-2 py-1 bg-gray-600 dark:bg-gray-700 rounded text-white uppercase font-extrabold`}
         >
           Try Again
-        </button>
+        </Button>
         {isRoot ? (
-          <Link
+          <Button
+            component={Link}
             to="/"
-            className={`px-2 py-1 bg-gray-600 dark:bg-gray-700 rounded text-white uppercase font-extrabold`}
+            color="gray"
+            size="compact-sm"
+            tt="uppercase"
+            fw={800}
           >
             Home
-          </Link>
+          </Button>
         ) : (
-          <Link
-            to="/"
-            className={`px-2 py-1 bg-gray-600 dark:bg-gray-700 rounded text-white uppercase font-extrabold`}
-            onClick={(e) => {
-              e.preventDefault();
-              window.history.back();
-            }}
+          <Button
+            color="gray"
+            size="compact-sm"
+            tt="uppercase"
+            fw={800}
+            onClick={() => window.history.back()}
           >
             Go Back
-          </Link>
+          </Button>
         )}
-      </div>
-    </div>
+      </Group>
+    </Stack>
   );
 }
