@@ -103,17 +103,18 @@ function camelToSnake(s: string): string {
  *
  * `widthBoundedKeys` is an optional caller-supplied map from a (canonical
  * camelCase) key name to the maximum key count its object value may carry. When
- * a key matches and its object value exceeds that count -- decided by a cheap
- * early-exit count, never a full walk -- the value is left verbatim instead of
- * being recursed into and rewritten key by key, exactly as an opaque subtree is.
- * This is a defense against a pathological-key-count partner record (the
- * `transform.params` map, board item 202722105) whose snake->camel rewrite would
- * otherwise burn multiple seconds before the schema's own count bound could
- * reject it: leaving it verbatim hands the over-count record to the matching
- * schema (which rejects it with a single clean issue) without the O(n) pre-pass.
- * A within-bound value is recursed into and rewritten as normal, so a legitimate
- * record is unaffected; like the opaque skip, only the value is left verbatim,
- * the key itself is still rewritten.
+ * a key matches and its object value exceeds that count -- decided by a key count
+ * (see {@link exceedsOwnKeyCount}; O(n) in keys, but the cheapest such pass) --
+ * the value is left verbatim instead of being recursed into and rewritten key by
+ * key, exactly as an opaque subtree is. This is a defense against a
+ * pathological-key-count partner record (the `transform.params` map, board item
+ * 202722105) whose snake->camel rewrite would otherwise burn multiple seconds
+ * before the schema's own count bound could reject it: leaving it verbatim hands
+ * the over-count record to the matching schema (which rejects it with a single
+ * clean issue) for the cost of one key count instead of the far more expensive
+ * rewrite. A within-bound value is recursed into and rewritten as normal, so a
+ * legitimate record is unaffected; like the opaque skip, only the value is left
+ * verbatim, the key itself is still rewritten.
  */
 function transformKeysDeep(
   value: unknown,

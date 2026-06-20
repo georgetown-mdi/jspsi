@@ -38,11 +38,15 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // record the count refine also closes a distinct LINEAR cost: not a RangeError
 // but a multi-second event-loop burn that, before this gate, ran in full twice
 // over a millions-key record -- once in the snake->camel camelize pre-pass and
-// once in the permissive record stage -- before the count was even checked. The
-// early-exit count gate fires ahead of both: the camelize pre-pass leaves an
-// over-count params value verbatim (parseLinkageTerms passes its bound to
-// camelizeKeys) and the schema's refine rejects it after examining at most
-// MAX_PARAMS_ENTRIES + 1 keys (item 202722105). Legitimate sizes vary -- a
+// once in the permissive record stage -- before the count was even checked. Each
+// of those is an EXPENSIVE per-key pass (a snake->camel rewrite, a per-key Zod
+// validation); the count gate replaces both with the cheapest per-key pass, a
+// bare key count (exceedsOwnKeyCount; still O(n) in keys -- a materialized object
+// has no sub-linear count -- but far cheaper than either). The camelize pre-pass
+// leaves an over-count params value verbatim (parseLinkageTerms passes its bound
+// to camelizeKeys) instead of rewriting it, and the schema's refine rejects it
+// before the per-key record stage, so the over-count record is counted but never
+// rewritten or per-key-validated (item 202722105). Legitimate sizes vary -- a
 // denylist holds hundreds of values, hence the most generous bound
 // (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
 // below the RangeError thresholds. The `params` VALUE content stays unbounded
@@ -110,13 +114,15 @@ export const MAX_LINKAGE_ENTRIES = 256;
  * record. A standardizing function takes a handful of parameters (the bundled
  * functions use one to three); 256 is far above any real parameter list yet
  * refuses a record padded with tens of thousands of keys. The bound is enforced
- * by a cheap early-exit key count (see {@link TransformStep}'s schema and
+ * by a bare key count (see {@link TransformStep}'s schema and
  * {@link exceedsOwnKeyCount}) that fires BEFORE the per-key length validation, so
  * an over-count record is rejected with a single issue rather than one issue per
  * key -- which on the wide wire-path frame would otherwise overflow Zod's call
  * stack. The same bound also short-circuits the camelize pre-pass for an
- * over-count record (see {@link parseLinkageTerms}), so neither the snake->camel
- * walk nor the record stage traverses every key before the rejection. See the
+ * over-count record (see {@link parseLinkageTerms}), so the record is counted
+ * (O(n) in keys, but no sub-linear count exists for a materialized object) yet
+ * neither rewritten key by key by the camelize pass nor per-key-validated by the
+ * record stage -- the two expensive passes the count replaces. See the
  * untrusted-input bounds note above.
  */
 export const MAX_PARAMS_ENTRIES = 256;
@@ -414,26 +420,27 @@ const TransformStepSchema: z.ZodType<TransformStep> = z.object({
   // The record's KEYS are partner-controlled strings (parameter names), so they
   // are length-bounded like every other free-text string; the VALUE content is
   // `z.unknown()` with no clean per-field bound. The entry COUNT is bounded at
-  // MAX_PARAMS_ENTRIES, and -- critically -- that gate is a cheap early-exit key
-  // count (see exceedsOwnKeyCount) that runs BEFORE the per-key length check. The
-  // `z.unknown()` first stage accepts the value untouched, performing no per-key
-  // walk of its own -- unlike a permissive `z.record(z.string(), z.unknown())`
-  // first stage, which would iterate every key before the refine could fire, the
-  // O(n) linear burn this avoids. The count refine then rejects an over-count
-  // record with a single issue after examining at most MAX_PARAMS_ENTRIES + 1
-  // keys; `.pipe` re-validates the now count-capped record against the per-key
-  // length bound. The refine passes a non-record value (null/array/primitive)
-  // straight through so the pipe surfaces the same record-type error as before.
-  // A length-bounded `z.record` first stage would not help -- Zod walks and
-  // validates every key during that record's own parse, before any refine runs,
-  // both burning O(n) on a millions-key record and (on the wide wire-path frame,
-  // MAX_FRAME_SIZE_BYTES, far above the 64 KiB invitation cap) overflowing its
-  // call stack at ~130k bad keys as it spreads that issue array up through the
-  // nesting. The camelize pre-pass (parseLinkageTerms) is short-circuited for the
-  // same over-count record by the same bound, so neither walk runs before this
-  // rejection. The pipe keeps the post-cap `invalid_key` path -- and its
-  // parse-error sanitization (item 202554679) -- intact for an in-range over-long
-  // key.
+  // MAX_PARAMS_ENTRIES, and -- critically -- that gate is a bare key count (see
+  // exceedsOwnKeyCount) that runs BEFORE the per-key length check. The
+  // `z.unknown()` first stage accepts the value untouched, doing no per-key VALIDATION
+  // of its own -- unlike a permissive `z.record(z.string(), z.unknown())` first
+  // stage, which would parse every key (a ZodType per key) before the refine
+  // could fire. The count itself still enumerates the keys (O(n); a materialized
+  // object has no sub-linear count), but a plain count is far cheaper than that
+  // per-key parse, so the refine rejects an over-count record for roughly the
+  // cost of one key enumeration; `.pipe` re-validates the now count-capped record
+  // against the per-key length bound. The refine passes a non-record value
+  // (null/array/primitive) straight through so the pipe surfaces the same
+  // record-type error as before. A length-bounded `z.record` first stage would
+  // not help either -- Zod walks and validates every key during that record's own
+  // parse, before any refine runs, both burning O(n) on a millions-key record and
+  // (on the wide wire-path frame, MAX_FRAME_SIZE_BYTES, far above the 64 KiB
+  // invitation cap) overflowing its call stack at ~130k bad keys as it spreads
+  // that issue array up through the nesting. The camelize pre-pass
+  // (parseLinkageTerms) is short-circuited for the same over-count record by the
+  // same bound, so the record is rewritten by neither pass before this rejection.
+  // The pipe keeps the post-cap `invalid_key` path -- and its parse-error
+  // sanitization (item 202554679) -- intact for an in-range over-long key.
   params: z
     .unknown()
     .refine(
@@ -843,10 +850,11 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
  * count exceeds the bound, rather than rewriting every key (see
  * {@link camelizeKeys}). Only `transform.params` is partner-controlled and
  * key-count-bounded, so an over-count params record is handed to the schema --
- * whose own cheap count refine rejects it -- without the multi-second snake->camel
- * walk a pathological-count payload would otherwise incur (item 202722105). The
- * bound matches {@link MAX_PARAMS_ENTRIES}, so any record the pre-pass leaves
- * verbatim here is one the schema also rejects.
+ * whose own key-count refine rejects it -- without the multi-second snake->camel
+ * rewrite a pathological-count payload would otherwise incur (item 202722105):
+ * the pre-pass counts its keys but does not rewrite them. The bound matches
+ * {@link MAX_PARAMS_ENTRIES}, so any record the pre-pass leaves verbatim here is
+ * one the schema also rejects.
  */
 const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
   ["params", MAX_PARAMS_ENTRIES],

@@ -17,11 +17,14 @@ test("counts own enumerable keys only, not inherited ones", () => {
   expect(exceedsOwnKeyCount(obj, 1)).toBe(false);
 });
 
-test("early-exits after the bound rather than walking every key", () => {
-  // The whole point of the helper over `Object.keys(obj).length`: it stops once
-  // the count passes `max`, so a pathological-count record is judged cheaply. A
-  // Proxy reports a huge key set but tallies how many keys are inspected; a full
-  // walk would inspect all 100k.
+test("stops at the bound instead of processing every key's body", () => {
+  // Pins the loop's short-circuit: it returns as soon as a (max + 1)th own key is
+  // seen rather than counting all keys then comparing. This bounds the per-key
+  // BODY work, NOT the underlying enumeration -- on a real (non-Proxy) object V8
+  // builds the full own-key list up front, so the helper is O(n) in key count
+  // (see its doc comment); this is not a sub-linear-cost claim. The Proxy makes
+  // the per-key descriptor reads observable; a variant that processed every key
+  // would tally ~100k.
   let inspected = 0;
   const huge = new Proxy(
     {},

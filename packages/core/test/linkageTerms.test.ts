@@ -1404,15 +1404,18 @@ test("an over-long transform params key within the count bound is still rejected
   }
 });
 
-test("an over-count transform params record is rejected without walking every key", () => {
-  // Pins the cheap-count guard's defining property (board item 202722105): the
-  // over-count rejection is reached without the camelize pre-pass OR the
-  // permissive record stage traversing all N keys. A Proxy reports a huge key
-  // count but tallies how many property descriptors are actually inspected; the
-  // early-exit count stops once the bound is passed, so only a bounded prefix is
-  // ever touched, whereas a full O(n) walk in either stage would inspect every one
-  // of the reported keys. Implementation-independent: any guard that early-exits
-  // passes, only one that walks the whole record fails.
+test("an over-count transform params record is rejected without the per-key camelize rewrite or record validation", () => {
+  // Pins the guard's defining property (board item 202722105): the over-count
+  // rejection skips the two EXPENSIVE per-key passes -- the snake->camel camelize
+  // rewrite and the permissive record stage's per-key validation -- that an
+  // over-count record would otherwise incur. The key count itself is still O(n)
+  // (V8 enumerates eagerly; see exceedsOwnKeyCount); what this test catches is a
+  // regression that subjects every key to the rewrite or to per-key parsing. A
+  // Proxy tallies per-key property-descriptor reads: the count via for...in reads
+  // descriptors lazily and stops at the bound, whereas a camelize rewrite
+  // (Object.entries over every key) or a record-stage parse (a ZodType per key)
+  // would read all TOTAL of them. So a bounded tally proves both expensive passes
+  // were skipped; a tally near TOTAL would mean one of them ran.
   const TOTAL = 100_000;
   let inspected = 0;
   const params = new Proxy(
@@ -1433,8 +1436,8 @@ test("an over-count transform params record is rejected without walking every ke
       result.error.issues.some((i) => /must not exceed/.test(i.message)),
     ).toBe(true);
   }
-  // Far below TOTAL: a full walk in either the camelize pre-pass or the record
-  // stage would push this to at least TOTAL.
+  // Far below TOTAL: a camelize rewrite or per-key record parse would push this to
+  // at least TOTAL.
   expect(inspected).toBeLessThan(MAX_PARAMS_ENTRIES * 10);
 });
 

@@ -1,15 +1,26 @@
 /**
- * True if `obj` has MORE than `max` own enumerable keys, decided with an early
- * exit after at most `max + 1` keys -- O(min(n, max + 1)), never a full O(n)
- * traversal of every key.
+ * True if `obj` has MORE than `max` own enumerable keys.
  *
- * The early exit is the point: it lets a pathological-count partner record (a
- * `transform.params` map of millions of keys, board item 202722105) be rejected
- * cheaply, ahead of the snake->camel camelize pre-pass and the permissive Zod
- * record stage that would each otherwise walk every key first. `Object.keys(obj)
- * .length` cannot serve here -- it materializes the whole key array up front, the
- * very O(n) work this avoids. The `hasOwnProperty` guard keeps the count to own
- * keys even on an object with enumerable inherited properties.
+ * The loop stops the instant a (max + 1)th own key is seen, so it does the
+ * minimum BODY work to answer the question -- but the honest cost is O(n) in the
+ * object's key count, NOT a sub-linear "examine only max + 1 keys" probe: V8
+ * builds the full own-key enumeration for `for...in` up front, before the body
+ * runs, so the early return saves the per-key body work but not that
+ * enumeration. A materialized object offers no sub-linear own-key count (every
+ * own-key primitive -- `for...in`, `Object.keys`, `Reflect.ownKeys` -- enumerates
+ * eagerly), and the input here is already a fully materialized `JSON.parse`
+ * object by the time it reaches this check.
+ *
+ * Its value is being the CHEAPEST of the O(n) passes over a pathological-count
+ * partner record (a `transform.params` map of millions of keys, board item
+ * 202722105): the boolean it returns lets the parse reject the record while
+ * SKIPPING the two far more expensive O(n) passes the record would otherwise
+ * incur -- the snake->camel camelize rebuild and the permissive Zod record
+ * stage's per-key schema validation -- so the multi-second burn is cut to roughly
+ * one key enumeration, not eliminated. It is preferred over
+ * `Object.keys(obj).length > max` because it allocates no result array and stops
+ * the body early. The `hasOwnProperty` guard keeps the count to own keys even on
+ * an object with enumerable inherited properties.
  */
 export function exceedsOwnKeyCount(obj: object, max: number): boolean {
   let count = 0;
