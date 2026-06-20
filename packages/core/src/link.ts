@@ -8,6 +8,16 @@ import {
 
 import { getLoggerForVerbosity } from "./utils/logger";
 
+// Parsed as the whole received message (the root array). With no enclosing
+// array/record/tuple frame above the root, a pathological count cannot drive the
+// ~130k STACK overflow the nested collections face (see participant.ts
+// associationTableMessage and config/linkageTerms.ts). A far larger count
+// (~millions of invalid elements, within the frame cap) can still make Zod throw
+// a `RangeError: Invalid string length` building the error: the receiveParsed
+// site (below) catches that as ConnectionError("protocol"), while the direct
+// `.parse()` site surfaces a bare RangeError. Low and pre-existing; bounding the
+// residual flat arrays uniformly is a follow-on. The legitimate count is bounded
+// by MAX_FRAME_SIZE_BYTES.
 const associationAndIterationArray = z.array(
   z.object({ theirIndex: z.number(), iteration: z.number() }),
 );

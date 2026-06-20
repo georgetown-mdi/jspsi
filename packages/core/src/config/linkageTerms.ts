@@ -14,29 +14,48 @@ import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 // (protocolSetup), where the binding size cap is the far larger
 // MAX_FRAME_SIZE_BYTES (~512 MiB, connection/frameSize.ts), not the 64 KiB
 // MAX_ENCODED_INVITATION_LENGTH of the token path. The rule below: every
-// partner-controlled free-text string carries a generous length `.max()`; the two
-// top-level arrays (`linkageFields` and `linkageKeys`) and the `transform.params`
-// record carry a count `.max()`. What is still left to those boundary caps rather
-// than a per-field bound is the deeper collection COUNTS -- per-element
-// `transform` steps, each constraint's `exclude` list, the `payload` send/receive
-// arrays, and a key's `elements` -- and the `params` VALUE content (typed
-// `z.unknown()`, with no clean content bound). Their legitimate sizes vary (a
-// denylist can hold hundreds of values), so an invented count risks rejecting a
-// real config. The `transform.params` ENTRY count is the exception now bounded
-// (MAX_PARAMS_ENTRIES): under the wire-path frame cap a payload of ~130k invalid
-// keys fits, and Zod overflows its own call stack accumulating and spreading one
-// issue per key before it can return a structured failure -- a schema count bound
-// forestalls that. The deferred counts nested beneath an OUTER array -- `exclude`
-// (under `linkageFields`), and `transform` steps and `elements` (under
-// `linkageKeys`) -- share that exposure: the inner issue array is spread through
-// two array frames, so a partner can still drive the same Zod-internal RangeError
-// there. The outermost `payload` send/receive arrays sit one array frame below the
-// root object, so they do not overflow at counts the frame cap admits (they stay
-// unbounded only for uniformity, not because they share the exposure). Every
-// reachable case is caught harmlessly in protocolSetup's parse-error catch (a
-// RangeError has no `.issues`, so it renders via the message fallback and the
-// exchange aborts cleanly). Bounding the deferred counts is a surveyed follow-on,
-// not done here. The bounds are defense-in-depth, not semantic limits.
+// partner-controlled free-text string carries a generous length `.max()`, and
+// every partner-controlled collection carries a count bound. The top-level arrays
+// (`linkageFields` and `linkageKeys`) carry a count `.max()` directly; the deeper
+// collections nested beneath an OUTER array -- each constraint's `exclude` list,
+// a `transform` step list, a key's `elements`, and the `transform.params` record
+// -- are bounded BEFORE per-element validation (see boundedArray and
+// MAX_PARAMS_ENTRIES), because they share a stack-overflow exposure the top-level
+// arrays do not: a payload of more than ~130k invalid elements fits under the
+// wire-path frame cap, and Zod overflows its own call stack accumulating one
+// issue per element and then spreading that issue array up through an enclosing
+// array/record/tuple frame -- which an intervening object frame does not prevent
+// -- before it can return a structured failure (RangeError reproduced on Zod
+// 4.4.3). The top-level arrays carry no such enclosing frame (they sit directly
+// below the root object), so they do not overflow; their count `.max()` is
+// token-padding defense, not overflow defense. Their
+// legitimate sizes vary -- a denylist holds hundreds of values, hence the most
+// generous bound (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real
+// config and far below the overflow threshold. The `params` VALUE content stays
+// unbounded (typed `z.unknown()`, with no clean content bound).
+//
+// What is deliberately left unbounded: the `payload` send/receive arrays carry no
+// enclosing array/record/tuple frame (only the root object), so a pathological
+// count there cannot drive the ~130k STACK overflow the nested collections hit.
+// They are not wholly RangeError-free -- a far larger count, ~millions of invalid
+// elements still within the frame cap, makes Zod throw building the error string
+// (`RangeError: Invalid string length`) -- but safeParse-then-protocolSetup's
+// parse-error catch renders that harmlessly (see the closing note) and the
+// legitimate counts are frame-cap-bounded, so they stay unbounded as a Low
+// residual. The two post-handshake exchange-wire messages share this class but invert
+// the bound choice: `payloadExchange.ts` `rows` and `participant.ts`
+// `associationTableMessage` ARE overflow-exposed (doubly-nested array,
+// tuple-of-arrays), but are legitimately in the millions, so they are bounded
+// there with a single-issue element validator (utils/singleIssueArray.ts) rather
+// than a count `.max()` no real result could pass. The Connection,
+// Standardization, and Metadata schemas are out of the partner threat model
+// entirely -- reached only from the operator's own local config, never from a
+// partner-supplied payload -- so their count fields are left as trusted input.
+// Every still-reachable RangeError was caught harmlessly in protocolSetup's
+// parse-error catch already (a RangeError has no `.issues`, so it renders via the
+// message fallback and the exchange aborts cleanly); the bounds turn that
+// ungraceful internal exception into a clean, bounded rejection. They are
+// defense-in-depth, not semantic limits.
 
 /**
  * Generous upper bound on a short partner-controlled string -- the identifier-
@@ -81,6 +100,80 @@ export const MAX_LINKAGE_ENTRIES = 256;
  * untrusted-input bounds note above.
  */
 export const MAX_PARAMS_ENTRIES = 256;
+
+/**
+ * Generous upper bound on the COUNT of values in a constraint `exclude`
+ * denylist. A denylist legitimately holds hundreds of values (a list of invalid
+ * SSN patterns, blocked test values, an email blocklist), so this is the most
+ * generous of the collection-count bounds; 4096 is far above any real denylist
+ * yet well below the ~130k count at which Zod's issue accumulation overflows the
+ * call stack (see the untrusted-input bounds note above). Enforced before
+ * per-element validation by {@link boundedArray}.
+ */
+export const MAX_EXCLUDE_ENTRIES = 4096;
+
+/**
+ * Generous upper bound on the COUNT of steps in a linkage-key element's
+ * `transform` pipeline. The bundled standardizing pipelines chain a handful of
+ * steps (parse_date, trim, uppercase); 256 is far above any real pipeline yet
+ * refuses an array padded to overflow Zod's call stack. Enforced before
+ * per-element validation by {@link boundedArray}.
+ */
+export const MAX_TRANSFORM_STEPS = 256;
+
+/**
+ * Generous upper bound on the COUNT of elements in a linkage key. A key combines
+ * a few field-derived elements (the default template's widest key has four);
+ * with at most {@link MAX_LINKAGE_ENTRIES} declared fields to reference, 256 is
+ * generous yet refuses an array padded to overflow Zod's call stack. The
+ * existing `.min(1)` floor is preserved. Enforced before per-element validation
+ * by {@link boundedArray}.
+ */
+export const MAX_KEY_ELEMENTS = 256;
+
+/**
+ * Wrap an array schema so a pathological ELEMENT COUNT is rejected with a single
+ * bounded issue BEFORE per-element validation runs.
+ *
+ * A plain `z.array(element).max(maxEntries)` does NOT suffice on the wire path:
+ * Zod v4 validates every element first (one issue per invalid element) and
+ * applies the length check only after, so a partner array of more than ~130k
+ * invalid elements overflows Zod's call stack spreading that issue array up
+ * through the surrounding array frames before `.max()` can fire (verified on Zod
+ * 4.4.3; the same ordering subtlety the `transform.params` bound handles, board
+ * item 202609308). The permissive `z.array(z.unknown())` first stage accepts the
+ * array without validating elements, the count refine rejects an over-count
+ * array with one issue, and `.pipe` re-validates the now count-capped array
+ * against the real `element` schema -- preserving every per-element check, and
+ * its issue path, for an in-range array. `min`, when given, is the preserved
+ * lower-bound floor applied on the validated stage.
+ */
+function boundedArray<T>(
+  element: z.ZodType<T>,
+  maxEntries: number,
+  message: string,
+  min?: number,
+): z.ZodType<T[]> {
+  const validated =
+    min === undefined ? z.array(element) : z.array(element).min(min);
+  return z
+    .array(z.unknown())
+    .refine((value) => value.length <= maxEntries, { message })
+    .pipe(validated);
+}
+
+/**
+ * A constraint `exclude` denylist: partner-controlled free-text values, each
+ * length-bounded like every other free-text string, with the entry COUNT bounded
+ * at {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
+ * {@link boundedArray}). Shared by all four constraint schemas so the bound is
+ * defined once.
+ */
+const ExcludeSchema = boundedArray(
+  z.string().max(MAX_TEXT_LENGTH),
+  MAX_EXCLUDE_ENTRIES,
+  `exclude must not exceed ${MAX_EXCLUDE_ENTRIES} entries`,
+);
 
 // --- Output ------------------------------------------------------------------
 
@@ -156,7 +249,7 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
     )
     .optional(),
   affixesAllowed: z.boolean().optional(),
-  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
+  exclude: ExcludeSchema.optional(),
 });
 
 /** Constraints on date-of-birth fields. */
@@ -169,7 +262,7 @@ interface DateConstraints {
 
 const DateConstraintsSchema: z.ZodType<DateConstraints> = z.object({
   validOnly: z.boolean().optional(),
-  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
+  exclude: ExcludeSchema.optional(),
 });
 
 /** Constraints on SSN and SSN-last-4 fields. */
@@ -187,7 +280,7 @@ interface SSNConstraints {
 
 const SSNConstraintsSchema: z.ZodType<SSNConstraints> = z.object({
   validOnly: z.boolean().optional(),
-  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
+  exclude: ExcludeSchema.optional(),
 });
 
 /** Constraints applicable to any semantic type. */
@@ -197,7 +290,7 @@ interface AnyConstraints {
 }
 
 const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
-  exclude: z.array(z.string().max(MAX_TEXT_LENGTH)).optional(),
+  exclude: ExcludeSchema.optional(),
 });
 
 // Shared fields for all linkage field variants.
@@ -373,7 +466,13 @@ const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
   field: z.string().min(1).max(MAX_NAME_LENGTH),
   name: z.string().max(MAX_NAME_LENGTH).optional(),
   generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
-  transform: z.array(TransformStepSchema).optional(),
+  // The step COUNT is bounded at MAX_TRANSFORM_STEPS before per-element
+  // validation; see boundedArray and the untrusted-input bounds note.
+  transform: boundedArray(
+    TransformStepSchema,
+    MAX_TRANSFORM_STEPS,
+    `transform must not exceed ${MAX_TRANSFORM_STEPS} steps`,
+  ).optional(),
 });
 
 // --- Linkage keys ------------------------------------------------------------
@@ -400,7 +499,15 @@ export interface LinkageKey {
 
 const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
   name: z.string().min(1).max(MAX_NAME_LENGTH),
-  elements: z.array(LinkageKeyElementSchema).min(1),
+  // The element COUNT is bounded at MAX_KEY_ELEMENTS before per-element
+  // validation, with the existing .min(1) floor preserved; see boundedArray and
+  // the untrusted-input bounds note.
+  elements: boundedArray(
+    LinkageKeyElementSchema,
+    MAX_KEY_ELEMENTS,
+    `elements must not exceed ${MAX_KEY_ELEMENTS} entries`,
+    1,
+  ),
   swap: z
     .tuple([z.string().max(MAX_NAME_LENGTH), z.string().max(MAX_NAME_LENGTH)])
     .optional(),

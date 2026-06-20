@@ -9,7 +9,10 @@ import {
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
 
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  createMessagePipe,
+  ConnectionError,
+} from "../src/connection/messageConnection";
 import type { MessageConnection } from "../src/connection/messageConnection";
 
 // --- Fixtures ----------------------------------------------------------------
@@ -236,6 +239,51 @@ test("exchangePayloads: send rejection rejects the responder", async () => {
   await expect(
     exchangePayloads(conn, "responder", { hasData: false }),
   ).rejects.toThrow("send failed");
+});
+
+test("exchangePayloads: a pathological-count partner row fails cleanly, not with a RangeError", async () => {
+  // A single row of ~300k invalid inner cells: the count that overflowed Zod's
+  // call stack on the unbounded `z.array(z.array(z.string().nullable()))` schema
+  // (RangeError). The single-issue row validator must turn it into a clean
+  // protocol rejection. receiveParsed wraps either outcome as a
+  // ConnectionError("protocol"); the improvement under test is that the cause is a
+  // bounded validation error, not the RangeError.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive(); // consume the initiator's hasData:false frame
+  await connB.send({
+    hasData: true,
+    columns: ["c"],
+    rowIndices: [0],
+    rows: [Array.from({ length: 300_000 }, () => 1)],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("exchangePayloads: a legitimately large partner payload parses", async () => {
+  // rows is one entry per matched record, legitimately in the millions; a count
+  // `.max()` low enough to forestall the overflow would reject this, the
+  // single-issue validator does not. 200k clears the ~130k overflow threshold,
+  // so this also proves a VALID large message never trips the bound.
+  const n = 200_000;
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["c"],
+    rowIndices: Array.from({ length: n }, (_, i) => i),
+    rows: Array.from({ length: n }, () => ["v"]),
+  });
+  const received = await initiatorPromise;
+  expect(received.rows).toHaveLength(n);
 });
 
 // --- buildOutputTable --------------------------------------------------------
