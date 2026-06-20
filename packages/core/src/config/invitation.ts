@@ -4,6 +4,7 @@ import type { LinkageTerms } from "./linkageTerms.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
+import { parseBoundedJson } from "../utils/boundedJson.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -554,7 +555,11 @@ export async function decodeInvitation(
 
   let raw: unknown;
   try {
-    raw = JSON.parse(new TextDecoder().decode(bytes));
+    // The chokepoint structurally bounds the token before JSON.parse (a wide
+    // object / long array would otherwise crash the parser uncatchably) and
+    // fatal-decodes the UTF-8; a structural or decode/parse failure surfaces
+    // here as the same fixed-text rejection.
+    raw = parseBoundedJson(bytes);
   } catch {
     throw new Error("invitation payload is not valid JSON");
   }
