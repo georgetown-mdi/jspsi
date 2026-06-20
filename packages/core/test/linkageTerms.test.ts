@@ -1642,6 +1642,97 @@ test("a pathological-count payload receive list fails cleanly, not with a RangeE
   }
 });
 
+// ─── Top-level linkageFields / linkageKeys count bounds ──────────────────────
+// These two flat top-level arrays sit directly below the root, so a pathological
+// count does not overflow the call stack -- but a partner array of millions of
+// invalid entries still makes Zod throw `Invalid string length` building its
+// error from one issue per entry, because a bare `.max()` is checked only AFTER
+// per-element validation. They now take the boundedArray count gate (fired
+// before per-element validation), with the existing .min(1) floor preserved.
+
+const linkageFieldsTerms = (linkageFields: unknown[]) => ({
+  ...base,
+  linkageFields,
+  linkageKeys: [{ name: "K", elements: [{ field: "f0" }] }],
+});
+const linkageKeysTerms = (linkageKeys: unknown[]) => ({
+  ...base,
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys,
+});
+
+test("accepts linkageFields at exactly the maximum count", () => {
+  const fields = Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
+    name: `f${i}`,
+    type: "ssn",
+  }));
+  expect(() => parseLinkageTerms(linkageFieldsTerms(fields))).not.toThrow();
+});
+
+test("rejects linkageFields over the maximum count", () => {
+  const fields = Array.from({ length: MAX_LINKAGE_ENTRIES + 1 }, (_, i) => ({
+    name: `f${i}`,
+    type: "ssn",
+  }));
+  expect(() => parseLinkageTerms(linkageFieldsTerms(fields))).toThrow(ZodError);
+});
+
+test("a pathological-count linkageFields fails cleanly, not with a RangeError", () => {
+  // ~4M invalid entries, past the ~3.5M `Invalid string length` threshold the
+  // `.max()`-only schema hit (the .max ran after per-element validation). The
+  // count gate must turn this into one clean count issue.
+  const fields = Array.from({ length: 4_000_000 }, () => 123);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(linkageFieldsTerms(fields));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) =>
+        /linkageFields must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
+test("accepts linkageKeys at exactly the maximum count", () => {
+  const keys = Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
+    name: `K${i}`,
+    elements: [{ field: "ssn" }],
+  }));
+  expect(() => parseLinkageTerms(linkageKeysTerms(keys))).not.toThrow();
+});
+
+test("rejects linkageKeys over the maximum count", () => {
+  const keys = Array.from({ length: MAX_LINKAGE_ENTRIES + 1 }, (_, i) => ({
+    name: `K${i}`,
+    elements: [{ field: "ssn" }],
+  }));
+  expect(() => parseLinkageTerms(linkageKeysTerms(keys))).toThrow(ZodError);
+});
+
+test("a pathological-count linkageKeys fails cleanly, not with a RangeError or a TypeError", () => {
+  // ~4M INVALID (non-object) entries. Besides the `Invalid string length` burst,
+  // this also pins the boundedArray `abort`: without it the over-count refine is
+  // non-fatal, the raw `unknown[]` flows on, and the terms-level refines that do
+  // `key.elements.map(...)` throw a TypeError on a raw non-object key. The abort
+  // makes the over-count failure short-circuit to the clean count issue.
+  const keys = Array.from({ length: 4_000_000 }, () => 123);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(linkageKeysTerms(keys));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (result && !result.success) {
+    expect(
+      result.error.issues.some((i) =>
+        /linkageKeys must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
 test("rejects an over-long version string", () => {
   // Matches the semver regex (all digits, then `.0.0`) so the rejection is the
   // length bound, not the format check.

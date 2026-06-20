@@ -309,6 +309,29 @@ test("exchangePayloads: a pathological-count rowIndices array fails cleanly, not
   expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });
 
+test("exchangePayloads: a pathological-count rows array fails cleanly, not with a RangeError", async () => {
+  // ~4M invalid (non-array) ROWS. #220 made each ROW single-issue (capping a row
+  // of millions of invalid cells), but left the outer row COUNT unbounded -- so
+  // millions of invalid rows still accumulate one issue per row and burn the
+  // event loop (`Invalid string length` at the top). The outer `rows` is now a
+  // single-issue validator too, so the whole 2-D structure yields one issue.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["c"],
+    rowIndices: [0],
+    rows: Array.from({ length: 4_000_000 }, () => 0),
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
 test("exchangePayloads: a legitimately large partner payload parses", async () => {
   // rows and rowIndices are one entry per matched record, legitimately in the
   // millions; a count `.max()` low enough to forestall the overflow would reject
