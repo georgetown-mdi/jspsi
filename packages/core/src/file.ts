@@ -22,8 +22,15 @@ export function loadCSVFile(
       // worker that fails to spawn throws synchronously inside this executor,
       // which also rejects. The one unhandled path is an uncaught exception in the
       // worker thread -- PapaParse attaches no `Worker.onerror` -- which would
-      // leave the promise pending; an exceptional case not expected for a <=10MB
-      // parse.
+      // leave the promise pending; an exceptional case not expected for a single-
+      // chunk parse.
+      //
+      // Precondition: worker mode resolves with only the FINAL chunk's rows (it
+      // accumulates across chunks only inside the worker, where `complete` never
+      // fires), so a caller MUST keep the input within one `Papa.LocalChunkSize`
+      // chunk or the result is silently truncated. Today's callers (the web
+      // intake dropzone) enforce this with a byte cap; the bound is checked in
+      // apps/web (`test/unit/csvIntake.test.ts`).
       worker: true,
       header: true,
       skipEmptyLines: true,

@@ -9,6 +9,8 @@ import {
 
 import log from "loglevel";
 
+import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
+
 import type { PaperProps } from "@mantine/core";
 
 interface FileSelectProps extends PaperProps {
@@ -51,7 +53,7 @@ export default function FileSelect(props: FileSelectProps) {
           onReject={(rejectedFiles) => {
             log.warn("rejected file(s):", rejectedFiles);
           }}
-          maxSize={10 * 1024 ** 2} // 10MB
+          maxSize={MAX_CSV_FILE_BYTES} // 10MB; see csvIntake.ts for the bound
           accept={[
             "text/plain",
             MIME_TYPES.csv,
