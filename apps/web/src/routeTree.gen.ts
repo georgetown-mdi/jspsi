@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AdvancedRouteImport } from './routes/advanced'
 import { Route as AcceptRouteImport } from './routes/accept'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
 
+const AdvancedRoute = AdvancedRouteImport.update({
+  id: '/advanced',
+  path: '/advanced',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AcceptRoute = AcceptRouteImport.update({
   id: '/accept',
   path: '/accept',
@@ -44,6 +50,7 @@ const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accept': typeof AcceptRoute
+  '/advanced': typeof AdvancedRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accept': typeof AcceptRoute
+  '/advanced': typeof AdvancedRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accept': typeof AcceptRoute
+  '/advanced': typeof AdvancedRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
@@ -68,6 +77,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/accept'
+    | '/advanced'
     | '/api/peerjs/id'
     | '/api/peerjs/'
     | '/api/peerjs/$key/peers'
@@ -75,6 +85,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accept'
+    | '/advanced'
     | '/api/peerjs/id'
     | '/api/peerjs'
     | '/api/peerjs/$key/peers'
@@ -82,6 +93,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/accept'
+    | '/advanced'
     | '/api/peerjs/id'
     | '/api/peerjs/'
     | '/api/peerjs/$key/peers'
@@ -90,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcceptRoute: typeof AcceptRoute
+  AdvancedRoute: typeof AdvancedRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
   ApiPeerjsIndexRoute: typeof ApiPeerjsIndexRoute
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
@@ -97,6 +110,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/advanced': {
+      id: '/advanced'
+      path: '/advanced'
+      fullPath: '/advanced'
+      preLoaderRoute: typeof AdvancedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/accept': {
       id: '/accept'
       path: '/accept'
@@ -138,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcceptRoute: AcceptRoute,
+  AdvancedRoute: AdvancedRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,
   ApiPeerjsIndexRoute: ApiPeerjsIndexRoute,
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,
