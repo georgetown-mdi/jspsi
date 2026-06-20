@@ -11,6 +11,10 @@ import { MantineProvider } from "@mantine/core";
 
 import { InvitationFileError } from "@psi/invitation";
 
+import {
+  clearAdvancedHandoff,
+  peekAdvancedHandoff,
+} from "@components/advancedHandoff";
 import { InvitePanel } from "@components/InvitePanel";
 
 import type { Root } from "react-dom/client";
@@ -22,6 +26,16 @@ import type { LinkageTerms } from "@psilink/core";
 // Drive generateInvitation from the test: each case sets `gen.impl`. The real
 // module (and its InvitationFileError class, so `instanceof` in InvitePanel and
 // here refer to the same class) is preserved; only the entry point is swapped.
+// Capture navigation: InvitePanel's "Advanced options" link navigates to the
+// editor route via useNavigate. Mock the router so the panel can mount without a
+// RouterProvider (the render-test pattern) and record where it navigates.
+const nav = vi.hoisted(() => ({ calls: [] as Array<unknown> }));
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => (opts: unknown) => {
+    nav.calls.push(opts);
+  },
+}));
+
 const gen = vi.hoisted(() => ({
   impl: undefined as
     | ((params: {
@@ -140,27 +154,55 @@ afterEach(() => {
   container = undefined;
   exchange.lastProps = undefined;
   gen.impl = undefined;
+  nav.calls.length = 0;
+  clearAdvancedHandoff();
   consoleErrorSpy?.mockRestore();
   consoleErrorSpy = undefined;
 });
 
 describe("InvitePanel compose screen", () => {
-  test("Advanced options is a focusable, keyboard-reachable disabled control", async () => {
+  test("Advanced options is an active control that navigates to the editor route", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
     const advanced = page.getByText("Advanced options");
     await expect.element(advanced).toBeInTheDocument();
     const el = advanced.element() as HTMLElement;
-    // A real control (button), marked disabled via aria (not the native
-    // `disabled` attribute, which would drop it from the tab order) so it stays
-    // focusable and announced.
+    // A real, enabled control now that the editor exists (no longer aria-disabled).
     expect(el.tagName).toBe("BUTTON");
-    expect(el.getAttribute("aria-disabled")).toBe("true");
-    expect(el.hasAttribute("disabled")).toBe(false);
-    // It can actually take focus (not inert text).
-    el.focus();
-    expect(document.activeElement).toBe(el);
+    expect(el.getAttribute("aria-disabled")).not.toBe("true");
+
+    await userEvent.click(advanced);
+    // It navigates to the editor route.
+    expect(nav.calls).toContainEqual({ to: "/advanced" });
+  });
+
+  test("Advanced options hands off the chosen file and name in memory", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    mount();
+
+    await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
+    await userEvent.click(page.getByTestId("select-file"));
+    await userEvent.click(page.getByText("Advanced options"));
+
+    // The editor route reads this in-memory hand-off on arrival: the chosen file
+    // and the trimmed name, so it opens seeded without a re-drop.
+    const handoff = peekAdvancedHandoff();
+    expect(handoff?.file).toBeInstanceOf(File);
+    expect(handoff?.name).toBe("Dr. Jane");
+    expect(nav.calls).toContainEqual({ to: "/advanced" });
+  });
+
+  test("Advanced options with no file clears any stale hand-off", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    mount();
+
+    await userEvent.fill(page.getByRole("textbox"), "County Health Dept");
+    await userEvent.click(page.getByText("Advanced options"));
+
+    // No file chosen: the route should fall back to its own picker, so nothing is
+    // stashed.
+    expect(peekAdvancedHandoff()).toBeUndefined();
   });
 
   test("on success, transitions to the exchange screen carrying share artifacts, terms, rows, secret", async () => {
