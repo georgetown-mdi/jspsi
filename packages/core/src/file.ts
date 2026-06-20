@@ -52,12 +52,13 @@ export function loadCSVFile(
  * (which `loadCSVFile` does, and which `generateInvitation` still does at mint
  * time) would be wasted work held in memory through the edit session.
  *
- * `preview: 1` makes PapaParse read just the first chunk and stop after one row,
- * so only the header (plus at most one data row) is touched, not the whole file.
- * Parsed inline (no `worker`): the read is tiny, so the worker's setup cost and
- * its final-chunk-only contract buy nothing here. Resolves with the header field
- * list (empty when the file has no header row); rejects on a read/parse error,
- * the same failure contract as {@link loadCSVFile}.
+ * `preview: 1` caps the parse at one data row, so PapaParse reads only enough of
+ * the file to yield the header and that first row and then stops, rather than
+ * reading the whole file (the header is in `meta.fields` regardless of how many
+ * data rows are parsed). Parsed inline (no `worker`): the read is tiny, so the
+ * worker's setup cost and its final-chunk-only contract buy nothing here.
+ * Resolves with the header field list (empty when the file has no header row);
+ * rejects on a read/parse error, the same failure contract as {@link loadCSVFile}.
  */
 export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
   return new Promise((resolve, reject) => {

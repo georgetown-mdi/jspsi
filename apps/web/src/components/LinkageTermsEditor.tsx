@@ -191,9 +191,14 @@ export function LinkageTermsEditor({
   const updateLegal = (
     next: Partial<NonNullable<AdvancedInviteDraft["legalAgreement"]>>,
   ) => {
-    updateDraft({
-      legalAgreement: { ...draft.legalAgreement!, ...next },
-    });
+    // Merge inside the functional updater (reading `prev`, not the render
+    // closure), so two legal-field updates in one batch cannot clobber each
+    // other -- matching updateDraft's own batching protection.
+    setAnnouncement("");
+    setDraft((prev) => ({
+      ...prev,
+      legalAgreement: { ...prev.legalAgreement!, ...next },
+    }));
   };
 
   const handleReset = () => {
@@ -241,6 +246,7 @@ export function LinkageTermsEditor({
               required
               label="Your name"
               description="Recorded in the invitation's linkage terms so your partner can identify you"
+              placeholder="Your name"
               error={errors.identity}
               errorProps={{ role: "alert" }}
             />
@@ -348,7 +354,10 @@ export function LinkageTermsEditor({
                 label="Attach a legal agreement"
                 description="Reference, purpose, and expiry your partner must enter identically"
               />
-              {legalOpen && draft.legalAgreement !== undefined && (
+              {/* The `!== undefined` is load-bearing for type narrowing (it is
+                  what lets the fields below read draft.legalAgreement.*), not a
+                  duplicate of legalOpen. */}
+              {draft.legalAgreement !== undefined && (
                 <Stack gap="sm" pl="md">
                   <Alert
                     variant="light"

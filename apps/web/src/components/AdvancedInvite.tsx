@@ -165,6 +165,10 @@ export function AdvancedInvite() {
         lifetimeSeconds,
       });
       if (!mountedRef.current) return;
+      // Reset before the transition: the editing UI unmounts here so the flag is
+      // not observable today, but leaving it stuck `true` would mislead any future
+      // path that re-enters editing without a remount.
+      setGenerating(false);
       setPhase({
         status: "exchange",
         invitation,
