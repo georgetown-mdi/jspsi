@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import type {
@@ -384,7 +385,9 @@ function splitOnFactory(params: Params): StandardizingFn {
 }
 
 // Each entry here must also be documented in
-// docs/EXCHANGE_REFERENCE.md § "Available functions".
+// docs/EXCHANGE_REFERENCE.md § "Available functions" and given a descriptor in
+// STANDARDIZATION_FUNCTION_DESCRIPTORS below (its drift test fails CI on a
+// function added here without one, and vice versa).
 //
 // NFC-comparison contract: any step that matches an authored value, pattern, or
 // delimiter against the intermediate value must NFC-normalize that value before
@@ -438,6 +441,296 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
   ...Object.keys(STANDARDIZING_FUNCTIONS),
   "coalesce",
 ];
+
+// --- Function descriptors ----------------------------------------------------
+
+/**
+ * The authoring-risk tier of a standardization function.
+ *
+ * - `standard` -- every function whose params are plain typed values.
+ * - `regex` -- the raw-pattern family (`replace_regex`, `extract_regex`,
+ *   `filter_regex`, `split_on`), whose param is an operator-authored regular
+ *   expression. This is the danger tier: an editor must gate raw-pattern
+ *   authoring behind a catastrophic-backtracking-aware affordance, because an
+ *   unbounded user pattern can hang on adversarial input. The descriptor marks
+ *   the tier; enforcing the gate is the editor's responsibility.
+ */
+export type StandardizationFunctionTier = "standard" | "regex";
+
+/**
+ * A single standardization function's editor-facing descriptor: enough for a web
+ * step editor to render a typed, plain-language input for it without re-encoding
+ * the function's parameter shape, label, or risk tier.
+ *
+ * The descriptor table {@link STANDARDIZATION_FUNCTION_DESCRIPTORS} is the single
+ * source of truth both expert editors (the linkage-terms transform editor and the
+ * metadata/standardization editor) drive their parameterized step UIs from, kept
+ * in lockstep with {@link STANDARDIZATION_FUNCTION_NAMES} -- and so with the
+ * {@link STANDARDIZING_FUNCTIONS} registry it derives from -- by a parity test in
+ * both directions.
+ */
+export interface StandardizationFunctionDescriptor {
+  /** The snake_case function name core dispatches on; equals the table key. */
+  name: string;
+  /** Human-readable label for an editor control (e.g. "Pad left"). */
+  label: string;
+  /** One-line plain-language description of what the function does. */
+  blurb: string;
+  /** The authoring-risk tier; see {@link StandardizationFunctionTier}. */
+  tier: StandardizationFunctionTier;
+  /**
+   * Typed Zod schema for the function's `params` object, so an editor can drive
+   * form fields off `params.shape` and validate authored params.
+   *
+   * KEYS are camelCase, matching the runtime params each factory reads AFTER
+   * {@link camelizeKeys} (e.g. `inputFormat`, `includeOriginal`), not the
+   * snake_case an operator writes in YAML. A defaulted param carries its default
+   * via Zod `.default(...)`, so a parse of omitted params yields the same value
+   * the factory falls back to. These schemas describe well-formed editor output
+   * (a value, or an omitted default); they are NOT the partner-supplied wire
+   * params, which stay `z.unknown()` and are count-bounded in
+   * `config/linkageTerms.ts`. The drift test pins each schema against its factory
+   * so a descriptor cannot disagree with the function it describes.
+   */
+  params: z.ZodObject<z.ZodRawShape>;
+}
+
+/** Functions that take no params: their `params` schema accepts an empty object. */
+const noParams = z.object({});
+
+/**
+ * A user-authored regular-expression param. Required, and validated to compile,
+ * mirroring each regex factory's `new RegExp(pattern)` (which throws on an
+ * invalid pattern). The danger-tier gate against catastrophic backtracking is the
+ * editor's responsibility; this only rejects a syntactically invalid pattern.
+ */
+const regexPatternSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (pattern) => {
+      try {
+        new RegExp(pattern);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "must be a valid regular expression" },
+  );
+
+/**
+ * Editor-facing descriptor for every standardization function the library
+ * recognizes -- every member of {@link STANDARDIZING_FUNCTIONS} plus `coalesce`.
+ * Co-located with the registry so a new function is added beside its descriptor;
+ * the parity test enforces that neither can ship without the other.
+ *
+ * Param schemas are pinned to their factory behavior by the drift test: each
+ * accepts the well-formed param shapes its factory accepts and rejects malformed
+ * ones (e.g. `pad_left` rejects a non-positive `length` and a multi-character
+ * `char`, exactly as its factory throws).
+ */
+export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
+  string,
+  StandardizationFunctionDescriptor
+> = {
+  remove_non_ascii: {
+    name: "remove_non_ascii",
+    label: "Remove non-ASCII",
+    blurb:
+      "Drop every character outside the ASCII set (accented letters, emoji, symbols).",
+    tier: "standard",
+    params: noParams,
+  },
+  replace_separators_with_spaces: {
+    name: "replace_separators_with_spaces",
+    label: "Replace separators with spaces",
+    blurb:
+      "Turn hyphens, apostrophes, ampersands, slashes, and underscores into spaces.",
+    tier: "standard",
+    params: noParams,
+  },
+  squash_spaces: {
+    name: "squash_spaces",
+    label: "Squash spaces",
+    blurb: "Collapse runs of whitespace into a single space.",
+    tier: "standard",
+    params: noParams,
+  },
+  remove_punctuation: {
+    name: "remove_punctuation",
+    label: "Remove punctuation",
+    blurb:
+      "Remove ASCII punctuation and symbols, keeping letters, digits, and spaces.",
+    tier: "standard",
+    params: noParams,
+  },
+  remove_dashes: {
+    name: "remove_dashes",
+    label: "Remove dashes",
+    blurb: "Remove hyphens from the value.",
+    tier: "standard",
+    params: noParams,
+  },
+  trim_whitespace: {
+    name: "trim_whitespace",
+    label: "Trim whitespace",
+    blurb: "Remove leading and trailing whitespace.",
+    tier: "standard",
+    params: noParams,
+  },
+  to_upper_case: {
+    name: "to_upper_case",
+    label: "Uppercase",
+    blurb:
+      "Convert the value to uppercase so values differing only in case can match.",
+    tier: "standard",
+    params: noParams,
+  },
+  to_lower_case: {
+    name: "to_lower_case",
+    label: "Lowercase",
+    blurb:
+      "Convert the value to lowercase so values differing only in case can match.",
+    tier: "standard",
+    params: noParams,
+  },
+  remove_accents: {
+    name: "remove_accents",
+    label: "Remove accents",
+    blurb: "Strip accents and diacritics, keeping the base letters.",
+    tier: "standard",
+    params: noParams,
+  },
+  remove_affixes: {
+    name: "remove_affixes",
+    label: "Remove affixes",
+    blurb: "Remove name titles (Mr., Dr.) and suffixes (Jr., III).",
+    tier: "standard",
+    params: noParams,
+  },
+  substring: {
+    name: "substring",
+    label: "Substring",
+    blurb: "Keep a fixed slice of the value by start position and length.",
+    tier: "standard",
+    params: z.object({
+      // 1-indexed; a negative start counts from the end. 0 is rejected -- the
+      // factory treats it as a no-op (always null), so it is never a useful
+      // editor value.
+      start: z
+        .number()
+        .int()
+        .refine((n) => n !== 0, {
+          message: "start must not be 0 (positions are 1-indexed)",
+        }),
+      length: z.number().int().positive(),
+    }),
+  },
+  parse_date: {
+    name: "parse_date",
+    label: "Parse date",
+    blurb:
+      "Reformat a date between token layouts (YYYY, MM, DD) so different formats can match.",
+    tier: "standard",
+    params: z.object({
+      inputFormat: z.string().min(1).default("MM/DD/YYYY"),
+      outputFormat: z.string().min(1).default("YYYYMMDD"),
+    }),
+  },
+  pad_left: {
+    name: "pad_left",
+    label: "Pad left",
+    blurb: "Left-pad the value with a fill character up to a target length.",
+    tier: "standard",
+    params: z.object({
+      length: z.number().int().positive(),
+      // Exactly one character after NFC normalization, mirroring the factory's
+      // own check (a multi-unit fill corrupts padStart's cycling).
+      char: z
+        .string()
+        .refine((c) => c.normalize("NFC").length === 1, {
+          message: "char must be exactly one character",
+        })
+        .default("0"),
+    }),
+  },
+  phonetic: {
+    name: "phonetic",
+    label: "Phonetic encoding",
+    blurb:
+      "Replace the value with a sound-alike phonetic code so names that sound alike can match.",
+    tier: "standard",
+    // Only soundex is implemented; the factory throws on any other algorithm, so
+    // the schema admits only what the factory accepts.
+    params: z.object({
+      algorithm: z.enum(["soundex"]).default("soundex"),
+    }),
+  },
+  null_if: {
+    name: "null_if",
+    label: "Null if",
+    blurb: "Drop the value when it matches one of the listed values.",
+    tier: "standard",
+    // Either a single `value` or a list of `values`; the factory reads `values`
+    // first and falls back to `value`, treating neither as an empty exclusion
+    // list, so both are optional.
+    params: z.object({
+      value: z.string().optional(),
+      values: z.array(z.string()).optional(),
+    }),
+  },
+  replace_regex: {
+    name: "replace_regex",
+    label: "Replace (regex)",
+    blurb: "Replace every regular-expression match with a replacement string.",
+    tier: "regex",
+    params: z.object({
+      pattern: regexPatternSchema,
+      replacement: z.string().default(""),
+    }),
+  },
+  extract_regex: {
+    name: "extract_regex",
+    label: "Extract (regex)",
+    blurb:
+      "Keep only the first regular-expression capture group; drop the value on no match.",
+    tier: "regex",
+    params: z.object({
+      pattern: regexPatternSchema,
+    }),
+  },
+  filter_regex: {
+    name: "filter_regex",
+    label: "Filter (regex)",
+    blurb: "Drop the value unless it matches the regular expression.",
+    tier: "regex",
+    params: z.object({
+      pattern: regexPatternSchema,
+    }),
+  },
+  split_on: {
+    name: "split_on",
+    label: "Split on",
+    blurb:
+      "Split the value on a regular-expression delimiter into several match candidates.",
+    tier: "regex",
+    params: z.object({
+      delimiter: regexPatternSchema,
+      includeOriginal: z.boolean().default(false),
+    }),
+  },
+  coalesce: {
+    name: "coalesce",
+    label: "Coalesce",
+    blurb:
+      "Substitute a fallback value for an empty field, which can create matches that would not otherwise occur.",
+    tier: "standard",
+    params: z.object({
+      default: z.string().optional(),
+    }),
+  },
+};
 
 // --- Runtime-coercion contract -----------------------------------------------
 
