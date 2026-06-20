@@ -22,16 +22,21 @@ import { sanitizeForDisplay } from "./sanitizeForDisplay";
  * concise relay does not truncate that long guidance text. The contract a caller
  * relies on is therefore that any error message reaching this helper which could
  * carry partner-controlled bytes is escaped at its source; that holds for every
- * error `decodeInvitation` and the invitation schema raise today. A future caller
- * that passes an error whose message echoes unescaped partner-controlled input
- * must escape it at the source rather than expect this helper to, since it relays
- * the message as is.
+ * error `decodeInvitation` and the invitation schema raise, and for the
+ * `parseLinkageTerms` `ZodError` the terms exchange relays (its partner-supplied
+ * bytes land in the issue path -- e.g. the `invalid_key` code on the bounded
+ * `transform.params` record key -- which this helper escapes, while its issue
+ * messages report the expected type/options, not the received value). A future
+ * caller that passes an error whose message echoes unescaped partner-controlled
+ * input must escape it at the source rather than expect this helper to, since it
+ * relays the message as is.
  *
- * Shared by the CLI accept command and the web accept route so both collapse the
- * same failure into the same readable one-liner. Because it escapes the path
- * components it owns rather than relying on a surrounding sanitizer, a caller may
- * display its result directly without a further wrapping pass (which would
- * double-escape those already-escaped components).
+ * Shared by the CLI accept command, the web accept route, and the linkage-terms
+ * exchange (protocolSetup) so each collapses the same failure into the same
+ * readable one-liner. Because it escapes the path components it owns rather than
+ * relying on a surrounding sanitizer, a caller may display its result directly
+ * without a further wrapping pass (which would double-escape those
+ * already-escaped components).
  */
 export function describeDecodeError(err: unknown): string {
   if (err !== null && typeof err === "object" && "issues" in err) {

@@ -14,6 +14,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../src/utils/sanitizeForDisplay";
+import { describeDecodeError } from "../src/utils/describeDecodeError";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -206,21 +207,75 @@ test("safeParseLinkageTerms returns success: false on invalid input", () => {
 });
 
 test("a parse error does not echo a partner-supplied received value", () => {
-  // protocolSetup leaves the Zod parse-error message unsanitized because the
-  // issue codes reachable here (type mismatch, enum, semver/date format,
-  // too_small) report the expected type/options and the schema path, not the
-  // received value. Pin that: invalid fields carrying control/ANSI and
-  // bidi-override bytes must not surface raw in the error message.
+  // The terms exchange relays a parse error through describeDecodeError, which
+  // escapes each Zod issue-path segment via sanitizeForDisplay and relays the
+  // schema-fixed message text. Two distinct mechanisms keep partner bytes out
+  // of the operator-facing message; pin both.
+  //
+  // 1. For most codes (type mismatch, enum, semver/date format, too_small) the
+  //    Zod message reports the expected type/options, never the received value,
+  //    so even the RAW `error.message` carries no partner bytes.
   const evil = "\x1b[31mEVIL\x1b[0m‮";
-  const result = safeParseLinkageTerms({
+  const enumSemver = safeParseLinkageTerms({
     ...base,
     algorithm: evil, // invalid enum
     version: evil, // invalid semver
   });
+  expect(enumSemver.success).toBe(false);
+  if (!enumSemver.success) {
+    expect(enumSemver.error.message).not.toContain("\x1b");
+    expect(enumSemver.error.message).not.toContain("‮");
+  }
+
+  // 2. The `invalid_key` code on the bounded `transform.params` record key
+  //    (z.string().max(MAX_NAME_LENGTH)) DOES place the offending key VERBATIM
+  //    in the issue PATH, which the raw `error.message` JSON-dumps -- so here
+  //    the source escaping (describeDecodeError) is load-bearing, not the
+  //    schema. The dangerous bytes lead the key (with padding past the bound
+  //    after them) so escaping, not the display-length cap, is what neutralizes
+  //    them. Assert on the rendered message the exchange actually relays.
+  const evilKey = "\x1b[31m‮" + "x".repeat(MAX_NAME_LENGTH);
+  const invalidKey = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [{ function: "trim", params: { [evilKey]: 1 } }],
+          },
+        ],
+      },
+    ],
+  });
+  expect(invalidKey.success).toBe(false);
+  if (!invalidKey.success) {
+    // The raw dump leaks the bidi override -- this is exactly the gap the
+    // source escaping closes. (The ESC byte is JSON-escaped by the dump, but a
+    // bidi/zero-width/homoglyph byte is not.)
+    expect(invalidKey.error.message).toContain("‮");
+    const relayed = describeDecodeError(invalidKey.error);
+    expect(relayed).not.toContain("\x1b");
+    expect(relayed).not.toContain("‮");
+    expect(relayed).toContain("\\x1b");
+    expect(relayed).toContain("\\u202e");
+  }
+});
+
+test("a relayed parse error keeps an honest schema path readable", () => {
+  // Acceptance counterpart to the sanitization pin above: the source escaping
+  // must not over-escape an ordinary schema-fixed path. `sanitizeForDisplay`
+  // leaves printable ASCII intact, so the `.` separators and numeric array
+  // index of a path like `linkageFields.0.type` survive unchanged and an
+  // honestly malformed config stays readable.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [{ name: "ssn", type: 123 as unknown as string }],
+  });
   expect(result.success).toBe(false);
   if (!result.success) {
-    expect(result.error.message).not.toContain("\x1b");
-    expect(result.error.message).not.toContain("‮");
+    expect(describeDecodeError(result.error)).toContain("linkageFields.0.type");
   }
 });
 
