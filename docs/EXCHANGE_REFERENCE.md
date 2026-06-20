@@ -944,7 +944,7 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required), `char` (single character, default `"0"`) |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |
-| `extract_regex` | Keep only the first capture group; produce `null` if no match | `pattern` (required) |
+| `extract_regex` | Keep the first capture group, or the whole match if the pattern has none; produce `null` if there is no match or the result is empty | `pattern` (required) |
 
 #### Null-producing (filter) functions
 
