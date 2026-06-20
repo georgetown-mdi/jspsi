@@ -95,6 +95,15 @@ describe("param schemas", () => {
     expect(schemaFor("to_upper_case").safeParse({}).success).toBe(true);
   });
 
+  // The no-param functions share one `noParams` schema; the factory ignores
+  // params entirely, so the schema must strip unexpected keys rather than reject
+  // them -- otherwise it would disagree with a factory that accepts anything.
+  test("a no-param function strips unexpected keys (matching the factory)", () => {
+    const parsed = schemaFor("trim_whitespace").safeParse({ unexpected: 1 });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toEqual({});
+  });
+
   describe("pad_left", () => {
     const schema = schemaFor("pad_left");
 
@@ -167,6 +176,31 @@ describe("param schemas", () => {
     test("rejects a missing length", () => {
       expect(schema.safeParse({ start: 1 }).success).toBe(false);
     });
+
+    // The factory does not throw on start=0; it returns an always-null function.
+    // The schema rejects exactly the value the factory renders useless, and the
+    // shapes it accepts produce the slice the factory computes (positive from the
+    // front, negative from the end).
+    test("agrees with the factory on the start it rejects and accepts", () => {
+      expect(schema.safeParse({ start: 0, length: 3 }).success).toBe(false);
+      expect(
+        runPipeline("ABCDE", [
+          { function: "substring", params: { start: 0, length: 3 } },
+        ]),
+      ).toBeNull();
+
+      expect(schema.safeParse({ start: 1, length: 3 }).success).toBe(true);
+      expect(
+        runPipeline("ABCDE", [
+          { function: "substring", params: { start: 1, length: 3 } },
+        ]),
+      ).toBe("ABC");
+      expect(
+        runPipeline("ABCDE", [
+          { function: "substring", params: { start: -2, length: 2 } },
+        ]),
+      ).toBe("DE");
+    });
   });
 
   describe("phonetic", () => {
@@ -207,6 +241,10 @@ describe("param schemas", () => {
 
     test("rejects a non-string value", () => {
       expect(schema.safeParse({ value: 5 }).success).toBe(false);
+    });
+
+    test("rejects a non-string element in values", () => {
+      expect(schema.safeParse({ values: ["a", 5] }).success).toBe(false);
     });
 
     // Neither field is required: the factory reads an absent value/values as an
@@ -274,16 +312,52 @@ describe("param schemas", () => {
       expect(schemaFor("filter_regex").safeParse({}).success).toBe(false);
     });
 
-    test("rejects a syntactically invalid pattern", () => {
+    test("accepts a valid pattern for extract_regex and filter_regex", () => {
+      expect(
+        schemaFor("extract_regex").safeParse({ pattern: "^(\\w+)-" }).success,
+      ).toBe(true);
+      expect(
+        schemaFor("filter_regex").safeParse({ pattern: "^[A-Z]+$" }).success,
+      ).toBe(true);
+    });
+
+    // The schema's compile-check rejects the same invalid pattern the factory's
+    // `new RegExp(pattern)` throws on at construction, so the descriptor cannot
+    // admit a pattern the function would reject.
+    test("rejects an invalid pattern, agreeing with the factory", () => {
       expect(
         schemaFor("extract_regex").safeParse({ pattern: "(" }).success,
       ).toBe(false);
+      expect(() =>
+        runPipeline("x", [
+          { function: "extract_regex", params: { pattern: "(" } },
+        ]),
+      ).toThrow();
     });
 
     test("split_on accepts a delimiter and defaults includeOriginal", () => {
       const parsed = schemaFor("split_on").safeParse({ delimiter: "-" });
       expect(parsed.success).toBe(true);
       expect(parsed.data).toEqual({ delimiter: "-", includeOriginal: false });
+    });
+  });
+
+  describe("coalesce", () => {
+    const schema = schemaFor("coalesce");
+
+    test("accepts a string default", () => {
+      expect(schema.safeParse({ default: "UNKNOWN" }).success).toBe(true);
+    });
+
+    // `default` is optional: the factory reads an absent default as "no
+    // substitution" (the field stays null), so the schema must accept an empty
+    // object to mirror that, not require a default.
+    test("accepts an empty object (no default substitution)", () => {
+      expect(schema.safeParse({}).success).toBe(true);
+    });
+
+    test("rejects a non-string default", () => {
+      expect(schema.safeParse({ default: 5 }).success).toBe(false);
     });
   });
 });

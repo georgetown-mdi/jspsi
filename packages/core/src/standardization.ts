@@ -622,10 +622,14 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     label: "Substring",
     blurb: "Keep a fixed slice of the value by start position and length.",
     tier: "standard",
+    // The factory does no numeric validation -- it relies on String.slice, which
+    // tolerates fractional and negative bounds -- so the schema is deliberately
+    // stricter than the factory here, rejecting footgun shapes (a fractional
+    // position, a non-positive length, a 0 start) that slice would silently
+    // mangle. 0 is rejected because the factory treats it as a no-op returning an
+    // always-null fn; positions are 1-indexed, with a negative start counting
+    // from the end.
     params: z.object({
-      // 1-indexed; a negative start counts from the end. 0 is rejected -- the
-      // factory treats it as a no-op (always null), so it is never a useful
-      // editor value.
       start: z
         .number()
         .int()
@@ -672,7 +676,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     name: "phonetic",
     label: "Phonetic encoding",
     blurb:
-      "Replace the value with a sound-alike phonetic code so names that sound alike can match.",
+      "Replace the value with a sound-alike phonetic code so names that sound alike can match; drops a value with no letters.",
     tier: "standard",
     // Only soundex is implemented; the factory throws on any other algorithm, so
     // the schema admits only what the factory accepts.
@@ -707,7 +711,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     name: "extract_regex",
     label: "Extract (regex)",
     blurb:
-      "Keep the first regular-expression capture group, or the whole match if the pattern has none; drop the value on no match.",
+      "Keep the first regular-expression capture group, or the whole match if the pattern has none; drop the value on no match or an empty result.",
     tier: "regex",
     params: z.object({
       pattern: regexPatternSchema,
