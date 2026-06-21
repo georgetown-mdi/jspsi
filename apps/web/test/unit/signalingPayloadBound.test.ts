@@ -145,6 +145,42 @@ describe("signaling-server inbound frame bound", () => {
     });
   });
 
+  test("a frame at exactly the cap is accepted, pinning the reject boundary to strictly-greater", async () => {
+    const { wss, port } = await startHarness();
+
+    const handled = new Promise<Record<string, unknown>>((resolve, reject) => {
+      wss.on(
+        "message",
+        (
+          _client: { getId: () => string },
+          message: Record<string, unknown>,
+        ) => {
+          resolve(message);
+        },
+      );
+      // A 1009 close of an at-limit frame would re-emit as a server `error`; that
+      // means the cap rejected exactly MAX bytes (an off-by-one the over-cap test,
+      // which sends MAX + 1, cannot catch). Fail fast rather than hang to timeout.
+      wss.on("error", reject);
+    });
+
+    const ws = await connectRegistered(port, "at-limit");
+    // A valid-JSON, all-ASCII frame whose byte length is EXACTLY the cap: ASCII
+    // means UTF-8 byte length equals string length, so this lands on the boundary
+    // ws compares with strictly `>` -- MAX is accepted, MAX + 1 (the over-cap test)
+    // is rejected.
+    const base = { type: "OFFER", dst: "peer-2", payload: "" };
+    const pad = "a".repeat(
+      MAX_SIGNALING_PAYLOAD_BYTES - JSON.stringify(base).length,
+    );
+    const frame = JSON.stringify({ ...base, payload: pad });
+    expect(frame.length).toBe(MAX_SIGNALING_PAYLOAD_BYTES);
+    ws.send(frame);
+
+    const message = await handled;
+    expect(message).toMatchObject({ type: "OFFER", src: "at-limit" });
+  });
+
   test("a custom factory that drops the maxPayload bound fails closed at construction", () => {
     const httpServer = createServer();
     try {
