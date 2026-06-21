@@ -473,6 +473,12 @@ export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
  *   the encoded token exceeds {@link MAX_ENCODED_INVITATION_LENGTH} (a token that
  *   could not be decoded; fires only on a programming error, not a real config).
  * @throws {ZodError} if the token fails schema validation.
+ * @throws {NestingDepthExceededError|NodeCountExceededError} if the token's
+ *   `transform.params` is too deeply nested or too wide for the bounded camelCase
+ *   pre-pass `InvitationLinkageTermsSchema` runs while validating (the same
+ *   schema {@link decodeInvitation} parses through). Reachable only via a
+ *   type-bypassed `token`, since a well-typed {@link InvitationToken} carries an
+ *   already-structured `params`; both are `UsageError` subclasses.
  */
 export async function encodeInvitation(
   token: InvitationToken,

@@ -1047,6 +1047,24 @@ export function safeParseLinkageTerms(raw: unknown) {
  * than being rejected, matching how a hand-authored config is read. This wraps only
  * the linkage-terms field, so the token's other fields and the strict
  * connection-endpoint credential allowlist are unaffected.
+ *
+ * CONTRACT: because the throwing pre-pass runs inside `z.preprocess` (Zod does not
+ * trap exceptions a preprocessor raises), this schema is NOT genuinely "safe" --
+ * `.safeParse()` throws the same NestingDepthExceededError / NodeCountExceededError
+ * as `.parse()` on a pathological `params`, rather than returning
+ * `{ success: false }`. That is intended for the only consumer, the
+ * decode path's `.parse()`, which surfaces the throw as a clean bounded rejection.
+ * Anything needing the non-throwing contract a `safeParse` name promises must route
+ * through {@link safeParseLinkageTerms} / {@link safeParseCamelized}, which convert
+ * the camelize bounds into a `{ success: false }` ZodError; do not call
+ * `InvitationLinkageTermsSchema.safeParse()` expecting that. Internal to
+ * `@psilink/core` (used only by `InvitationTokenSchema`), not a stable public API.
+ *
+ * @throws {NestingDepthExceededError|NodeCountExceededError} from `.parse()` AND
+ *   `.safeParse()` on a `params` value too deeply nested or too wide for the
+ *   bounded pre-pass; both are `UsageError` subclasses with fixed, input-free
+ *   messages.
+ * @internal
  */
 export const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> =
   z.preprocess(
