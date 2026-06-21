@@ -27,6 +27,20 @@ type CustomConfig = Pick<
 
 const WS_PATH = "peerjs";
 
+// Cap inbound WebSocket frames well below the `ws` 100 MiB default. This server
+// brokers only small control messages -- SDP OFFER/ANSWER, ICE CANDIDATE,
+// HEARTBEAT and the like, all KB-scale; the PSI payload itself flows peer-to-peer
+// over the WebRTC data channel and never crosses this socket -- so 256 KiB sits
+// far above any legitimate signaling frame yet hundreds of times below both the
+// default and the size a single object or array needs to drive JSON.parse into an
+// uncatchable, process-terminating V8 abort. `ws` rejects an over-cap frame in the
+// receiver (close 1009) before the message handler's JSON.parse can run, so a
+// single oversized frame from any unauthenticated client -- this server is
+// internet-facing in production, gated only by the well-known default key -- can
+// neither crash the broker (taking down rendezvous for every peer) nor pin its
+// memory. See docs/spec/CHANNEL_SECURITY.md.
+export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
+
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
   private readonly realm: IRealm;
@@ -63,6 +77,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const options: WebSocket.ServerOptions = {
       path: this.path,
       noServer: true,
+      maxPayload: MAX_SIGNALING_PAYLOAD_BYTES,
     };
 
     this.socketServer = config.createWebSocketServer

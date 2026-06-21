@@ -103,6 +103,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `connection.provider_options` is applied through a default-deny allowlist, so it cannot override the security-critical connect options (host, credentials, host-key verification). See `docs/EXCHANGE_REFERENCE.md`.
 - A peer sending messages out of turn is rejected rather than buffered without limit.
 - Untrusted partner-supplied collections in the linkage terms and post-handshake messages are count-bounded, so a counterparty that packs a collection with millions of invalid elements into an otherwise-in-cap frame fails the exchange with a clean protocol error instead of an ungraceful internal parser error (a Zod `RangeError`) or a multi-second CPU burn. See `docs/spec/CHANNEL_SECURITY.md`.
+- The web app's bundled PeerJS signaling server caps inbound WebSocket frame size, so an oversized frame from an unauthenticated client is rejected before parsing -- it can no longer exhaust the rendezvous process's memory or crash it (which would drop signaling for every connected peer, not just one session). See `docs/spec/CHANNEL_SECURITY.md`.
 
 ## [0.1.0] - 2026-05-08
 
