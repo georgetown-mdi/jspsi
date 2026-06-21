@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 import { LinkageTermsSchema } from "./linkageTerms.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
@@ -63,7 +64,10 @@ export function parseExchangeSpec(raw: unknown): ExchangeSpec {
   return ExchangeSpecSchema.parse(camelizeKeys(raw));
 }
 
-/** Non-throwing version of {@link parseExchangeSpec}. */
+/**
+ * Non-throwing version of {@link parseExchangeSpec}. Honors the "safe" contract
+ * for the {@link camelizeKeys} bounds too -- see {@link safeParseCamelized}.
+ */
 export function safeParseExchangeSpec(raw: unknown) {
-  return ExchangeSpecSchema.safeParse(camelizeKeys(raw));
+  return safeParseCamelized(ExchangeSpecSchema, raw);
 }
