@@ -1,4 +1,4 @@
-import { expect, test, describe, vi } from "vitest";
+import { expect, test, describe, afterEach, vi } from "vitest";
 
 import {
   runPipeline,
@@ -857,6 +857,14 @@ describe("buildKeyStrings: NFC normalization of the assembled key", () => {
 });
 
 describe("buildKeyStrings: element-transform compilation reused across rows", () => {
+  // Restore the compileLinearRegex spy after every test, even one that throws
+  // mid-body: a per-test `spy.mockRestore()` is skipped when an assertion throws,
+  // and a vi.spyOn on the still-installed spy returns the same object carrying the
+  // failed test's stale call count -- inflating the next test's count (a real
+  // regression would then cascade as 50/100/160 instead of clean independent
+  // failures). afterEach restores regardless, so each count stands alone.
+  afterEach(() => vi.restoreAllMocks());
+
   // The element transform compiles once and is memoized by the step array's
   // identity, then reused for every row. A memoization bug would cross-contaminate
   // rows or stale a result, so build several rows through one regex element
@@ -924,7 +932,6 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     // One regex step in one element transform -> one compile, independent of the
     // 50 rows. Pre-memoization this was 50 (one recompile per row).
     expect(spy).toHaveBeenCalledTimes(1);
-    spy.mockRestore();
   });
 
   test("a parse_date element transform compiles once across many rows, not per row", () => {
@@ -955,7 +962,6 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     // parse_date builds its input-format regex once at closure-build time; memoized,
     // that build is shared across all 50 rows.
     expect(spy).toHaveBeenCalledTimes(1);
-    spy.mockRestore();
   });
 
   test("the swap path preserves the per-element compile cache (compiles per element, not per row)", () => {
@@ -997,7 +1003,64 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i, true);
     // Two distinct element-transform arrays -> two compiles across all 30 rows.
     expect(spy).toHaveBeenCalledTimes(2);
-    spy.mockRestore();
+  });
+
+  test("compile count tracks distinct element transforms, not row count", () => {
+    // The single-transform tests above pin the bound for one transform across
+    // rows; this pins the invariant the security comment actually rests on --
+    // total compiles equal the number of DISTINCT element transforms, flat in the
+    // row count -- by building several at once. The schema bounds that distinct
+    // count (MAX_LINKAGE_ENTRIES * MAX_KEY_ELEMENTS), far below the rows a real
+    // dataset carries, which is why per-element rather than per-row compilation is
+    // the bound that matters. Mixes regex and parse_date transforms.
+    const key = {
+      name: "MULTI",
+      elements: [
+        {
+          field: "f1",
+          transform: [
+            { function: "extract_regex", params: { pattern: "(\\d{2})$" } },
+          ],
+        },
+        {
+          field: "f2",
+          transform: [
+            { function: "extract_regex", params: { pattern: "^(\\d{2})" } },
+          ],
+        },
+        {
+          field: "f3",
+          transform: [
+            { function: "extract_regex", params: { pattern: "(\\d{3})" } },
+          ],
+        },
+        {
+          field: "f4",
+          transform: [
+            { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+          ],
+        },
+      ],
+    };
+    const rowCount = 50;
+    const rows = Array.from({ length: rowCount }, (_, i) => ({
+      F1: `${1000 + i}`,
+      F2: `${2000 + i}`,
+      F3: `${3000 + i}`,
+      F4: `01/${String((i % 28) + 1).padStart(2, "0")}/2020`,
+    }));
+    const dataset = new StandardizedDataset([
+      new StandardizedField("f1", "F1", [], rows),
+      new StandardizedField("f2", "F2", [], rows),
+      new StandardizedField("f3", "F3", [], rows),
+      new StandardizedField("f4", "F4", [], rows),
+    ]);
+
+    const spy = vi.spyOn(linearRegex, "compileLinearRegex");
+    for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
+    // Four distinct element transforms -> four compiles across all 50 rows,
+    // independent of row count. Pre-memoization this was 4 * 50.
+    expect(spy).toHaveBeenCalledTimes(4);
   });
 });
 
