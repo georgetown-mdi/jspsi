@@ -206,6 +206,49 @@ describe("linkageTermsHaveUnsafeTransformRegex", () => {
       ),
     ).toBe(false);
   });
+
+  // parse_date is not a `tier: "regex"` function and carries no raw pattern, but
+  // its inputFormat is EXPANDED into a per-row regex whose adjacent `(\d{1,2})`
+  // groups can catastrophically backtrack, so the screen reconstructs and analyzes
+  // that pattern. (The reconstruction is shared with the factory via
+  // parseDateRegexSource, so the analyzed pattern matches the executed one.)
+  test("rejects a catastrophic inputFormat in parse_date (adjacent ambiguous groups)", () => {
+    expect(
+      linkageTermsHaveUnsafeTransformRegex(
+        termsWith([
+          { function: "parse_date", params: { inputFormat: "MM".repeat(24) } },
+        ]),
+        BUDGET,
+      ),
+    ).toBe(true);
+  });
+
+  test.each(["MM/DD/YYYY", "YYYY-MM-DD", "YYYYMMDD", "DD/MM/YYYY"])(
+    "accepts the legitimate parse_date format %s",
+    (inputFormat) => {
+      expect(
+        linkageTermsHaveUnsafeTransformRegex(
+          termsWith([{ function: "parse_date", params: { inputFormat } }]),
+          BUDGET,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  test("treats a non-string or absent parse_date inputFormat as safe (no regex to screen)", () => {
+    expect(
+      linkageTermsHaveUnsafeTransformRegex(
+        termsWith([{ function: "parse_date", params: { inputFormat: 123 } }]),
+        BUDGET,
+      ),
+    ).toBe(false);
+    expect(
+      linkageTermsHaveUnsafeTransformRegex(
+        termsWith([{ function: "parse_date" }]),
+        BUDGET,
+      ),
+    ).toBe(false);
+  });
 });
 
 // ─── Registry parity and bundled-default drift guards ────────────────────────
