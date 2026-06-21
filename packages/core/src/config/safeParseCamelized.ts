@@ -30,6 +30,11 @@ import {
  *
  * Any throw that is not one of the two camelize bounds is a genuine fault and
  * propagates unchanged.
+ *
+ * Internal to `@psilink/core`: a shared helper for the config `safeParseX`
+ * siblings, not re-exported from the package index and not a stable public API.
+ *
+ * @internal
  */
 export function safeParseCamelized<T>(
   schema: z.ZodType<T>,
