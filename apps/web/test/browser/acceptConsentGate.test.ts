@@ -404,6 +404,71 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeDisabled();
     expect(exchangeMounted()).toBe(false);
   });
+
+  test("clearing a required param on a recommended step disables Continue until it is fixed, so a malformed pipeline never reaches the exchange", async () => {
+    // A date_of_birth field, whose recommended pipeline includes parse_date -- a
+    // standard-tier step that renders its "Input format" param inline. Editing it
+    // exercises the same launch gate the add-menu path would, through the override
+    // layer, with a directly visible control.
+    const dobTerms: LinkageTerms = {
+      version: "1.0.0",
+      identity: "County Health Department",
+      date: "2026-01-01",
+      algorithm: "psi",
+      output: { expectsOutput: true, shareWithPartner: true },
+      deduplicate: false,
+      linkageFields: [{ name: "dob", type: "date_of_birth" }],
+      linkageKeys: [{ name: "d", elements: [{ field: "dob" }] }],
+    };
+    const token: InvitationToken = {
+      version: "1",
+      linkageTerms: dobTerms,
+      sharedSecret: generateSharedSecret(),
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    };
+    window.location.hash = await encodeInvitation(token);
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // A satisfiable file: the launch gate is open before any step edit.
+    await reachEditor(csvFile("date_of_birth\n01/02/1990\n"));
+    const continueButton = page.getByRole("button", {
+      name: "Continue to exchange",
+    });
+    await expect.element(continueButton).toBeEnabled();
+
+    // Clear the recommended parse_date step's required "Input format": the step is
+    // now mid-edit. A malformed step would run as a silent full-field exclusion or
+    // throw at compile, so the gate must close until it is valid again.
+    const inputFormat = page.getByRole("textbox", { name: "Input format" });
+    await userEvent.clear(inputFormat);
+    await expect
+      .element(
+        page.getByText(
+          "Finish or fix the highlighted cleaning steps before continuing.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect.element(continueButton).toBeDisabled();
+
+    // Restoring a valid value re-opens the gate and clears the alert.
+    await userEvent.fill(inputFormat, "MM/DD/YYYY");
+    await expect.element(continueButton).toBeEnabled();
+    expect(
+      page
+        .getByText(
+          "Finish or fix the highlighted cleaning steps before continuing.",
+        )
+        .elements(),
+    ).toHaveLength(0);
+  });
 });
 
 describe("decode error rendering", () => {

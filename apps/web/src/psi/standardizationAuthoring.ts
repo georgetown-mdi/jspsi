@@ -372,16 +372,32 @@ export interface ConstraintViolation {
 }
 
 /** Whether `value` contains only characters in the field's `allowedCharacters`
- * class. The class was validated as a safe regex character class at parse time
- * (NameConstraintsSchema), but the field is partner-controlled, so the compile is
- * still guarded: an unexpectedly invalid class is treated as "cannot check" (no
- * violation) rather than throwing. The empty string trivially conforms. */
+ * class. `allowedCharacters` is partner-controlled (it arrives in the invitation
+ * token), and NameConstraintsSchema only checks that it compiles as the body of a
+ * `[...]` class -- NOT that it cannot break out of one. A crafted value can close
+ * the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`), so matching
+ * the WHOLE value against `^[allowed]*$` would run an attacker-chosen pattern that
+ * could backtrack catastrophically (ReDoS) on the local thread -- the same class of
+ * hazard the transform-regex engine swap (#248) closed for key-building.
+ *
+ * This is a local advisory, not a key-building step, so it does not reach that
+ * linear-time engine; instead it bounds every subject this regex sees to a single
+ * code point. Catastrophic backtracking needs a long subject to fan out over, so a
+ * length-1 subject makes the match cost bounded by the pattern length regardless of
+ * what was injected -- ReDoS-safe by construction. For a legitimate class this is
+ * exactly `^[allowed]*$` (every character must be in the class); it differs only on
+ * an adversarial breakout, which has no faithful semantics to preserve anyway. The
+ * compile is still guarded so an unexpectedly invalid class is treated as "cannot
+ * check" (no violation) rather than throwing. The empty string trivially conforms. */
 function withinAllowedCharacters(value: string, allowed: string): boolean {
+  let oneOf: RegExp;
   try {
-    return new RegExp(`^[${allowed}]*$`).test(value);
+    oneOf = new RegExp(`^[${allowed}]$`);
   } catch {
     return true;
   }
+  for (const character of value) if (!oneOf.test(character)) return false;
+  return true;
 }
 
 /** Whether a standardized value is a valid calendar date in canonical YYYYMMDD

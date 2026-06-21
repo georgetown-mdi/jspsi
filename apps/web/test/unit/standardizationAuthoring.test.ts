@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "@psilink/core";
+import {
+  STANDARDIZATION_FUNCTION_DESCRIPTORS,
+  getDefaultStandardization,
+} from "@psilink/core";
 
 import {
   STANDARDIZATION_FUNCTION_GROUPS,
@@ -8,12 +11,18 @@ import {
   authorableFunctionNames,
   checkValueConstraints,
   describeParamFields,
+  descriptorFor,
   functionDisplay,
   isStepValid,
   validateParamValue,
 } from "../../src/psi/standardizationAuthoring.js";
 
-import type { LinkageField, Standardization } from "@psilink/core";
+import type {
+  ColumnMetadata,
+  LinkageField,
+  LinkageTerms,
+  Standardization,
+} from "@psilink/core";
 
 import type { FieldStepOverride } from "../../src/psi/standardizationAuthoring.js";
 
@@ -110,6 +119,80 @@ describe("descriptor-driven typed param fields", () => {
         // shown verbatim.
         if (/[A-Z]/.test(field.key)) expect(field.label).not.toBe(field.key);
       }
+  });
+
+  test("classifies every authorable descriptor's params into a known widget kind, resolving the deepest wrapper chains", () => {
+    // The earlier test samples four descriptors; this proves the Zod unwrapping
+    // holds for ALL standard-tier descriptors, so a Zod-internals change cannot
+    // silently mis-render a descriptor the sample misses.
+    for (const name of authorableFunctionNames)
+      for (const field of describeParamFields(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
+      )) {
+        expect(["number", "string", "enum", "stringArray"]).toContain(
+          field.kind,
+        );
+        if (field.kind === "enum")
+          expect((field.enumOptions ?? []).length).toBeGreaterThan(0);
+      }
+    // The two deepest wrapper chains: `pad_left.char` is a refine folded under a
+    // default (must surface the "0" default as a string), and `coalesce.default` is
+    // an optional string (must surface as optional, not required).
+    const padChar = describeParamFields(
+      STANDARDIZATION_FUNCTION_DESCRIPTORS["pad_left"],
+    ).find((f) => f.key === "char");
+    expect(padChar).toMatchObject({ kind: "string", defaultValue: "0" });
+    const coalesceDefault = describeParamFields(
+      STANDARDIZATION_FUNCTION_DESCRIPTORS["coalesce"],
+    ).find((f) => f.key === "default");
+    expect(coalesceDefault).toMatchObject({ kind: "string", optional: true });
+  });
+});
+
+describe("every reachable pipeline function is descriptor-backed", () => {
+  // `isStepValid` treats a step whose function has no descriptor as valid (it is
+  // not authored through this surface). That is only safe because no descriptor-
+  // less function can reach the gate: the add menu offers only standard-tier
+  // descriptors (parity-tested above) and the recommended default pipelines use
+  // only catalogued functions. Pin the second half so a future default step that
+  // referenced an uncatalogued function (which would slip the gate and throw at
+  // compile) is caught here instead.
+  test("every function a default standardization emits has a descriptor", () => {
+    const fieldTypes = [
+      "first_name",
+      "last_name",
+      "date_of_birth",
+      "ssn",
+      "ssn4",
+      "phone_number",
+      "email_address",
+    ] as const;
+    const metadata: Array<ColumnMetadata> = fieldTypes.map((type, i) => ({
+      name: `c${i}`,
+      type,
+      role: "linkage",
+      isPayload: false,
+    }));
+    const terms: LinkageTerms = {
+      version: "1.0.0",
+      identity: "x",
+      date: "2026-01-01",
+      algorithm: "psi",
+      output: { expectsOutput: true, shareWithPartner: true },
+      deduplicate: false,
+      linkageFields: fieldTypes.map((type, i) => ({ name: `f${i}`, type })),
+      linkageKeys: fieldTypes.map((_, i) => ({
+        name: `k${i}`,
+        elements: [{ field: `f${i}` }],
+      })),
+    };
+    const functions = new Set(
+      getDefaultStandardization(metadata, terms).flatMap((t) =>
+        (t.steps ?? []).map((s) => s.function),
+      ),
+    );
+    expect(functions.size).toBeGreaterThan(0);
+    for (const name of functions) expect(descriptorFor(name)).toBeDefined();
   });
 });
 
@@ -259,15 +342,65 @@ describe("value-level constraint check", () => {
     expect(checkValueConstraints(withoutConstraint, "20210230")).toEqual([]);
   });
 
-  test("flags a structurally invalid SSN under validOnly", () => {
+  test("flags every structurally invalid SSN branch under validOnly, and passes valid forms", () => {
     const field: LinkageField = {
       name: "ssn",
       type: "ssn",
       constraints: { validOnly: true },
     };
-    // Area 000 is never issued.
-    expect(checkValueConstraints(field, "000123456").length).toBe(1);
-    expect(checkValueConstraints(field, "123456789")).toEqual([]);
+    const flagged = (value: string) =>
+      checkValueConstraints(field, value).some(
+        (v) => v.label === "invalid SSN",
+      );
+    // Each SSA structural rule is its own branch: area 000 / 666 / >= 900, group
+    // 00, and serial 0000 are never issued.
+    expect(flagged("000223456")).toBe(true);
+    expect(flagged("666223456")).toBe(true);
+    expect(flagged("900223456")).toBe(true);
+    expect(flagged("123003456")).toBe(true); // group 00
+    expect(flagged("123450000")).toBe(true); // serial 0000
+    // A structurally valid 9-digit value, and a non-9-digit value (left to the
+    // format-shaping pipeline, not judged here), are not flagged.
+    expect(flagged("123456789")).toBe(false);
+    expect(flagged("12345678")).toBe(false);
+  });
+
+  test("a partner-crafted allowedCharacters that breaks out of the class cannot stall the check", () => {
+    // `allowedCharacters` is partner-controlled and only validated to compile as a
+    // `[...]` class body, so this value closes the class and injects a
+    // catastrophic-backtracking construct (`^[x](a+)+b[y]...`). Matching the whole
+    // value against `^[allowed]*$` would have hung the thread (ReDoS); the check
+    // tests one character at a time, so a long crafted value returns promptly and
+    // still flags the disallowed input. The test completing under the default
+    // timeout is itself the regression guard.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "x](a+)+b[y" },
+    };
+    const hostile = "x" + "a".repeat(60) + "!";
+    expect(
+      checkValueConstraints(field, hostile).some(
+        (v) => v.label === "disallowed characters",
+      ),
+    ).toBe(true);
+  });
+
+  test("a partner-crafted allowedCharacters cannot silently suppress the disallowed-characters warning", () => {
+    // `a]|.*[b` breaks the class into `^[a]|.*[b]$`-shaped alternation that, matched
+    // against the whole value, matches anything and would never warn. Tested per
+    // character, a genuinely disallowed value is still flagged -- the warning the
+    // operator relies on cannot be turned off by class breakout.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "a]|.*[b" },
+    };
+    expect(
+      checkValueConstraints(field, "Z@#$").some(
+        (v) => v.label === "disallowed characters",
+      ),
+    ).toBe(true);
   });
 
   test("returns nothing for a field with no declared constraints", () => {
