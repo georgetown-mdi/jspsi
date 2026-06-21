@@ -455,10 +455,10 @@ export function LinkageTermsEditor({
               title="Fixed in this version"
             >
               Both you and your partner receive the matched result, matched
-              identifiers are revealed (not just a count), each record matches
-              at most one of your partner&apos;s, and no extra data columns are
-              shared. These are not adjustable yet; the preview shows exactly
-              what your partner will see.
+              identifiers are revealed (not just a count), and each record
+              matches at most one of your partner&apos;s. These are not
+              adjustable yet. Which of your columns are sent to your partner is
+              set per column under Your columns above.
             </Alert>
           </Stack>
         </Grid.Col>
