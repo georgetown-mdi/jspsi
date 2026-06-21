@@ -1046,13 +1046,13 @@ test("diffLinkageTerms: an un-encodable value does not throw and identical terms
 test("diffLinkageTerms: a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // A one-key-per-level params object, as a crafted invitation carries it. 3000
-  // levels sits in the gap the threat exploits: above the ~2000-level native
-  // overflow of the unbounded NFC/canonical reconcile walk, yet below
-  // parseBoundedJson's 4096 decode ceiling, so such a token decodes and only
-  // fails here. The incoming (invitation) side carries it, the threat direction;
-  // build it iteratively so the test itself does not recurse. With the guard,
-  // nfcDeep throws at depth 256, so the 3000-deep value is never walked in full.
+  // nfcDeep's own depth guard, exercised directly. A real invitation's deep params
+  // is now rejected earlier, at the decode chokepoint (the camelize fold bounds it
+  // -- see the decode-side test in core's invitation.test.ts), so the reconcile no
+  // longer sees one in practice. This builds the 3000-deep value straight into the
+  // reconcile input (bypassing decode) to pin nfcDeep's backstop: it is an
+  // independent recursion that must reject a deep value itself rather than trust its
+  // caller to have pre-bounded it. Build it iteratively so the test does not recurse.
   let deep: Record<string, unknown> = { leaf: "x" };
   for (let i = 0; i < 3000; i++) deep = { a: deep };
   incoming.linkageKeys[0].elements[0].transform = [
@@ -1086,6 +1086,23 @@ test("diffLinkageTerms: a realistically nested transform.params reconciles uncha
   }).not.toThrow();
   expect(result.conflicts).toEqual([]);
   expect(result.warnings).toEqual([]);
+});
+
+test("diffLinkageTerms: a transform.params value difference is a conflict", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // The reconcile compares already-camelCase terms (the existing config camelized
+  // at load, the invitation's adopted terms camelized at the decode chokepoint), so
+  // this checks the substance: a different param VALUE under the same key diverges
+  // and is flagged as a linkage_keys conflict.
+  existing.linkageKeys[0].elements[0].transform = [
+    { function: "parse_date", params: { inputFormat: "MMDDYYYY" } },
+  ];
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "parse_date", params: { inputFormat: "YYYYMMDD" } },
+  ];
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
 });
 
 test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {
