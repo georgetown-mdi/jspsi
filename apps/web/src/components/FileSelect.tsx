@@ -63,13 +63,23 @@ export default function FileSelect(props: FileSelectProps) {
 
   const handleReject = (rejectedFiles: Array<FileRejection>) => {
     log.warn("rejected file(s):", rejectedFiles);
-    const tooLarge = rejectedFiles.some((rejection) =>
-      rejection.errors.some((error) => error.code === "file-too-large"),
+    const codes = new Set(
+      rejectedFiles.flatMap((rejection) =>
+        rejection.errors.map((error) => error.code),
+      ),
     );
+    // Report each distinct reason: a batch can mix a too-large file with a
+    // wrong-type one, so checking the size code alone would hide the type
+    // rejection. Any non-size rejection is a type/format problem against the
+    // accept list, and the empty-reasons fallback keeps an unexpected code from
+    // producing a silent reject.
+    const reasons: Array<string> = [];
+    if (codes.has("file-too-large"))
+      reasons.push(`larger than the ${MAX_CSV_FILE_MB} MB maximum`);
+    if (codes.has("file-invalid-type") || reasons.length === 0)
+      reasons.push("not a supported file type");
     setRejectionMessage(
-      tooLarge
-        ? `That file is larger than the ${MAX_CSV_FILE_MB} MB maximum. Choose a smaller CSV.`
-        : "That file type is not supported. Choose a CSV file.",
+      `That file is ${reasons.join(" and ")}. Choose a CSV file under ${MAX_CSV_FILE_MB} MB.`,
     );
   };
 
@@ -136,12 +146,12 @@ export default function FileSelect(props: FileSelectProps) {
               Drag files here or click to select
             </Text>
             <Text size="xs" c="dimmed" inline mt={7}>
-              (Max file size: {MAX_CSV_FILE_MB}MB)
+              (Max file size: {MAX_CSV_FILE_MB} MB)
             </Text>
           </Group>
         </Dropzone>
 
-        {rejectionMessage && (
+        {!submitted && rejectionMessage && (
           <Text size="sm" c="red" role="alert">
             {rejectionMessage}
           </Text>

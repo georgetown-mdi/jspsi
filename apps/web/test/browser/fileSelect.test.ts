@@ -106,4 +106,36 @@ describe("FileSelect intake size cap", () => {
       ),
     );
   });
+
+  test("names every reason when a batch mixes a too-large and a wrong-type file", async () => {
+    renderFileSelect();
+
+    await vi.waitFor(() => expect(dropzone.props).toBeDefined());
+
+    const onReject = dropzone.props?.onReject as (
+      rejected: Array<{
+        file: File;
+        errors: Array<{ code: string; message: string }>;
+      }>,
+    ) => void;
+    onReject([
+      {
+        file: new File(["x"], "big.csv", { type: "text/csv" }),
+        errors: [{ code: "file-too-large", message: "too large" }],
+      },
+      {
+        file: new File(["x"], "note.txt", { type: "text/plain" }),
+        errors: [{ code: "file-invalid-type", message: "wrong type" }],
+      },
+    ]);
+
+    // A mixed batch must surface both reasons; checking only the size code would
+    // silently swallow the wrong-type rejection.
+    const maxMb = MAX_CSV_FILE_BYTES / 1024 ** 2;
+    await vi.waitFor(() => {
+      const text = container?.textContent ?? "";
+      expect(text).toContain(`larger than the ${maxMb} MB maximum`);
+      expect(text).toContain("not a supported file type");
+    });
+  });
 });
