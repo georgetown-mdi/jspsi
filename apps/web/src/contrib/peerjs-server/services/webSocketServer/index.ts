@@ -49,8 +49,8 @@ export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
 // attacker-controlled string the server both retains in the `clients` map and
 // writes onto every frame it relays. 256 is generous: psilink's rendezvous ids are
 // 32 hex chars (`deriveRendezvousPeerId`) and a PeerJS default id is a UUID (~36),
-// so the cap sits ~7x above any legitimate id and refuses no real peer, yet two
-// orders of magnitude below the incidental header limit.
+// so the cap sits ~7x above any legitimate id and refuses no real peer, yet well
+// over an order of magnitude below the incidental header limit (~64x).
 //
 // The `id` bound is the load-bearing one. The relay's per-queue byte cap
 // (`MAX_QUEUE_BYTES`, models/realm.ts) sizes a queued frame by the UTF-16 resident
