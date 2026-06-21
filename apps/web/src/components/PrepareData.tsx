@@ -13,6 +13,7 @@ import {
   Stack,
   Text,
   Title,
+  VisuallyHidden,
 } from "@mantine/core";
 import {
   IconAlertCircle,
@@ -38,10 +39,14 @@ import {
 
 import { applyStepOverrides, isStepValid } from "@psi/standardizationAuthoring";
 
+import { isSilentEmpty } from "@psi/nonEmptyAggregate";
+
+import { FieldCoverage } from "@components/FieldCoverage";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
+import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
   LinkageField,
@@ -196,6 +201,46 @@ export function PrepareData({
   // error, and launch is gated on it too so the file cannot run with an ambiguous
   // identifier even when every linkage key is otherwise satisfiable.
   const multipleIdentifiers = hasMultipleIdentifiers(metadata);
+
+  // The silent-empty defense: per-field non-empty rate over the FULL CSV, computed
+  // off the main thread above the row threshold (see useNonEmptyRates). The verdict
+  // above guards SHAPE; this is the only VALUE-level check that a field's transform
+  // has not collapsed every row to null -- a byte-indistinguishable empty
+  // intersection. It is surfaced, not gated: the operator sees the collapse before
+  // launch and fixes the steps, the same way the partial-coverage advisory informs
+  // rather than blocks.
+  const { rates: nonEmptyRates, pending: ratesPending } = useNonEmptyRates(
+    rawRows,
+    standardization,
+  );
+
+  // The safe labels of the fields whose transform drops every row, for the single
+  // editor-wide coverage announcement below. Built from the field's semantic-type
+  // label (the partner-controlled `output` is never announced raw) in
+  // standardization order so the read is stable.
+  const silentEmptyLabels = useMemo(() => {
+    if (nonEmptyRates === null) return [];
+    const labels: Array<string> = [];
+    for (const transformation of standardization) {
+      const rate = nonEmptyRates.get(transformation.output);
+      const field = fieldByName.get(transformation.output);
+      if (rate !== undefined && field !== undefined && isSilentEmpty(rate))
+        labels.push(SEMANTIC_TYPE_LABELS[field.type]);
+    }
+    return labels;
+  }, [nonEmptyRates, standardization, fieldByName]);
+
+  // One polite live region for the whole editor announces a collapse (debounced,
+  // because `nonEmptyRates` only updates once per recompute, not per keystroke).
+  // Empty when nothing collapses -- clearing it is silent, the standard pattern for
+  // an error region; the recovery is conveyed by the per-field readout and the
+  // satisfiability verdict.
+  const coverageAnnouncement =
+    silentEmptyLabels.length === 0
+      ? ""
+      : `Coverage warning: ${silentEmptyLabels.join(", ")} ${
+          silentEmptyLabels.length === 1 ? "produces" : "produce"
+        } no value for any row and cannot match. Check the cleaning steps.`;
 
   // The field types the file cannot currently produce, de-duplicated by type for
   // the fix UI (several fields can share a type). `LinkageField["type"]` is a
@@ -387,36 +432,51 @@ export function PrepareData({
             const steps = transformation.steps ?? [];
             return (
               <Paper withBorder p="md" key={transformation.output}>
-                <Grid gap="lg" align="flex-start">
-                  <Grid.Col span={{ base: 12, md: 7 }}>
-                    <StandardizationStepEditor
-                      fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
-                      inputColumn={transformation.input}
-                      steps={steps}
-                      onStepsChange={(next) =>
-                        setFieldSteps(
-                          transformation.output,
-                          transformation.input,
-                          next,
-                        )
-                      }
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, md: 5 }}>
-                    <Text size="xs" fw={600} mb="xs">
-                      Preview
-                    </Text>
-                    <StandardizationPreview
-                      field={field}
-                      inputColumn={transformation.input}
-                      steps={steps}
-                      rawRows={rawRows}
-                    />
-                  </Grid.Col>
-                </Grid>
+                <Stack gap="sm">
+                  <Grid gap="lg" align="flex-start">
+                    <Grid.Col span={{ base: 12, md: 7 }}>
+                      <StandardizationStepEditor
+                        fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+                        inputColumn={transformation.input}
+                        steps={steps}
+                        onStepsChange={(next) =>
+                          setFieldSteps(
+                            transformation.output,
+                            transformation.input,
+                            next,
+                          )
+                        }
+                      />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, md: 5 }}>
+                      <Text size="xs" fw={600} mb="xs">
+                        Preview
+                      </Text>
+                      <StandardizationPreview
+                        field={field}
+                        inputColumn={transformation.input}
+                        steps={steps}
+                        rawRows={rawRows}
+                      />
+                    </Grid.Col>
+                  </Grid>
+                  {/* Full-CSV coverage for this field: the visible silent-empty
+                      defense, distinct from the sample preview above. */}
+                  <FieldCoverage
+                    rate={nonEmptyRates?.get(transformation.output)}
+                    pending={ratesPending}
+                  />
+                </Stack>
               </Paper>
             );
           })}
+          {/* One polite, atomic live region announces a silent-empty collapse for
+              the whole editor (debounced via the recompute), so a screen-reader user
+              hears the alarm without each card firing its own region. The visible
+              per-card alarms are role="presentation". */}
+          <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+            {coverageAnnouncement}
+          </VisuallyHidden>
         </Stack>
       )}
 

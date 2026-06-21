@@ -325,3 +325,155 @@ describe("StandardizationStepEditor", () => {
       .toHaveTextContent("mary");
   });
 });
+
+describe("StandardizationStepEditor accessibility", () => {
+  test("removing a step keeps focus on a neighbor instead of dropping it to <body>", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [
+          { function: "to_upper_case" },
+          { function: "to_lower_case" },
+        ],
+        rawRows: [{ n: "Mary" }],
+      }),
+    );
+    // Remove the first step; the step that slides into its slot (Lowercase) takes
+    // focus, so a keyboard/screen-reader user is not dropped to <body>.
+    await userEvent.click(
+      page.getByRole("button", { name: "Remove Uppercase" }),
+    );
+    expect(page.getByText("Uppercase").elements()).toHaveLength(0);
+    await expect
+      .element(page.getByRole("button", { name: "Remove Lowercase" }))
+      .toHaveFocus();
+  });
+
+  test("removing the last step moves focus to the Add button", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [{ function: "to_upper_case" }],
+        rawRows: [{ n: "Mary" }],
+      }),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Remove Uppercase" }),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Add a step" }))
+      .toHaveFocus();
+  });
+
+  test("moving a step to the first slot keeps focus on an enabled control", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [
+          { function: "to_upper_case" },
+          { function: "to_lower_case" },
+        ],
+        rawRows: [{ n: "Mary" }],
+      }),
+    );
+    // Move Lowercase up to slot 0. Its "earlier" control disables at the edge, so
+    // focus must fall to the still-enabled "later" control rather than to <body>.
+    await userEvent.click(
+      page.getByRole("button", { name: "Move Lowercase earlier" }),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Move Lowercase later" }))
+      .toHaveFocus();
+  });
+
+  test("the step list announces the debounced summary via one polite live region, not the whole table", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [
+          { function: "to_upper_case" },
+          { function: "to_lower_case" },
+        ],
+        rawRows: [{ n: "Mary" }],
+      }),
+    );
+    // Wait for the editor to commit before reading the DOM.
+    await expect
+      .element(page.getByRole("button", { name: "Add a step" }))
+      .toBeInTheDocument();
+    // Exactly one polite live region for the step list (the preview adds none): the
+    // summary is announced through it, not by marking the whole list aria-live.
+    const regions = container!.querySelectorAll(
+      '[role="status"][aria-live="polite"]',
+    );
+    expect(regions).toHaveLength(1);
+    const region = regions[0];
+    // The initial pipeline is NOT announced -- only an edit is -- so it starts empty,
+    // which is also what keeps a screen reader from hearing every field's seed on
+    // mount.
+    expect(region.textContent).toBe("");
+
+    // A keyboard reorder (no drag, no menu) flips the summary order; the debounced
+    // region then announces the new order -- the visible list is unaffected.
+    await userEvent.click(
+      page.getByRole("button", { name: "Move Lowercase earlier" }),
+    );
+    await expect
+      .poll(() => region.textContent)
+      .toContain("2 cleaning steps: Lowercase, Uppercase");
+  });
+});
+
+describe("preview outcomes reach assistive tech by text/label, not color alone", () => {
+  test("the empty-value chip exposes its meaning as a label, not just an orange color", async () => {
+    // remove_dashes turns "---" into "" -- an empty key. The chip is icon-style, so
+    // its meaning must reach a screen reader as a label.
+    render(
+      createElement(StandardizationPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        steps: [{ function: "remove_dashes" }],
+        rawRows: [{ n: "---" }],
+      }),
+    );
+    await expect
+      .element(page.getByRole("img", { name: /empty value.*matching/i }))
+      .toBeInTheDocument();
+  });
+
+  test("a constraint violation is a labelled badge, distinct from the value color", async () => {
+    render(
+      createElement(StandardizationPreview, {
+        field: {
+          name: "fn",
+          type: "first_name",
+          constraints: { allowedCharacters: "A-Z " },
+        } satisfies LinkageField,
+        inputColumn: "n",
+        steps: [],
+        rawRows: [{ n: "mary" }],
+      }),
+    );
+    await expect
+      .element(page.getByRole("img", { name: /Constraint warning/i }))
+      .toBeInTheDocument();
+  });
+
+  test("a dropped value carries the word 'dropped', not a color cue alone", async () => {
+    render(
+      createElement(StandardizationPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        steps: [{ function: "null_if", params: { values: ["mary"] } }],
+        rawRows: [{ n: "mary" }],
+      }),
+    );
+    await expect
+      .element(page.getByTestId("outcome-dropped"))
+      .toHaveTextContent("dropped");
+  });
+});
