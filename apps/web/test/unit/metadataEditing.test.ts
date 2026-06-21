@@ -155,6 +155,64 @@ describe("single-identifier rule", () => {
     expect(next.find((x) => x.name === "c")?.role).toBe("identifier");
     expect(hasMultipleIdentifiers(next)).toBe(false);
   });
+
+  test("editing a non-identifier column leaves a seeded identifier pair untouched", () => {
+    // The rule only fires when an edit LANDS a column on the identifier role; it
+    // never auto-resolves an inferred two-identifier seed (which would silently
+    // pick one of two equally-valid identifiers). Editing an unrelated column must
+    // leave both standing, so the grid error and launch gate still bite.
+    const md: Metadata = [
+      col({
+        name: "a",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      }),
+      col({
+        name: "b",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      }),
+      col({ name: "c", type: "first_name", role: "linkage", isPayload: false }),
+    ];
+    expect(
+      hasMultipleIdentifiers(setColumnDisclosure(md, "c", "payload").metadata),
+    ).toBe(true);
+    expect(
+      hasMultipleIdentifiers(setColumnType(md, "c", "last_name").metadata),
+    ).toBe(true);
+  });
+});
+
+describe("setColumnDisclosure discloses only on an explicit payload choice", () => {
+  // The disclosure-path counterpart to the setColumnType safety property: a
+  // disclosure edit sends the edited column iff the operator explicitly chose
+  // `payload`, and never raises a bystander column's disclosure.
+  const CHOICES: Array<DisclosureChoice> = [
+    "match",
+    "identifier",
+    "payload",
+    "ignored",
+  ];
+  for (const from of CHOICES)
+    for (const to of CHOICES)
+      test(`${from} -> ${to}`, () => {
+        const target = applyDisclosure(col({ name: "x" }), from);
+        const bystander = col({
+          name: "y",
+          type: "first_name",
+          role: "linkage",
+          isPayload: false,
+        });
+        const { metadata } = setColumnDisclosure([target, bystander], "x", to);
+        expect(
+          isDisclosedToPartner(metadata.find((c) => c.name === "x")!),
+        ).toBe(to === "payload");
+        expect(
+          isDisclosedToPartner(metadata.find((c) => c.name === "y")!),
+        ).toBe(false);
+      });
 });
 
 describe("setColumnType keeps disclosure intent", () => {
@@ -173,6 +231,22 @@ describe("setColumnType keeps disclosure intent", () => {
     ];
     const next = setColumnType(md, "y", "other").metadata;
     expect(disclosureOf(next[0])).toBe("payload");
+  });
+
+  test("a sent column survives a retype to a matchable type (it is not demoted)", () => {
+    // The highest-risk keep-branch case: retyping a deliberately-sent column to a
+    // linkage or identifier type must KEEP it sent, not drop it to a not-sent
+    // fallback. The "never starts disclosing" property below does not cover this
+    // (staying sent), so pin it explicitly.
+    const md: Metadata = [
+      col({ name: "y", type: "other", role: "payload", isPayload: true }),
+    ];
+    expect(disclosureOf(setColumnType(md, "y", "first_name").metadata[0])).toBe(
+      "payload",
+    );
+    expect(disclosureOf(setColumnType(md, "y", "identifier").metadata[0])).toBe(
+      "payload",
+    );
   });
 
   // The disclosure-safety invariant, as a property over the whole space rather

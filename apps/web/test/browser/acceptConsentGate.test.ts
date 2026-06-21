@@ -301,21 +301,24 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
 
-    // Any verdict state will do; a blocked file is the simplest to reach.
     await reachEditor(csvFile("notes\nhello\n"));
     await expect
       .element(page.getByText("This file cannot match yet"))
       .toBeInTheDocument();
 
-    // The live region is the stable wrapper: it sits outside the verdict ternary,
-    // so its node persists as the inner Alert swaps and a remap-driven transition
-    // is actually announced. The colored Alert inside must NOT itself be a live
-    // region -- that was the swapped-node bug, where a flip remounted the region
-    // and went unannounced.
+    // The live region is the stable wrapper -- unconditional markup OUTSIDE the
+    // verdict ternary, so its node persists as the inner Alert swaps and a
+    // remap-driven transition is announced (three separately-mounted Alerts would
+    // not). The colored Alert inside must NOT be a live region of EITHER
+    // politeness: Mantine's Alert defaults role to "alert" (assertive) when none is
+    // set, which would nest an assertive region in this polite wrapper and fire on
+    // mount against the heading focus. This is the residue that regression guards.
     const verdict = document.querySelector('[data-testid="verdict"]');
     expect(verdict?.getAttribute("role")).toBe("status");
     expect(verdict?.getAttribute("aria-live")).toBe("polite");
-    expect(verdict?.querySelector('[role="status"]')).toBeNull();
+    expect(
+      verdict?.querySelector('[role="alert"], [role="status"]'),
+    ).toBeNull();
   });
 
   test("Back returns to the review screen and a different file reseeds the editor", async () => {

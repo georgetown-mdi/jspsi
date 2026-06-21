@@ -213,8 +213,13 @@ export function PrepareData({
           (three separately-mounted Alerts would not reliably announce a
           transition). Kept polite, not assertive: the verdict is a standing
           condition the operator is here to resolve, and an assertive node would
-          fire on mount and fight the heading focus. tabIndex=-1 makes it the
-          programmatic focus target after a remap without adding a tab stop. */}
+          fire on mount and fight the heading focus. The wrapper owns the
+          live-region semantics, so each inner Alert is role="presentation" --
+          Mantine's Alert defaults role to "alert" (assertive) when none is set,
+          which would otherwise nest an assertive region inside this polite one.
+          tabIndex=-1 makes it the programmatic focus target after a remap without
+          adding a tab stop; landing focus here re-reads the verdict, a benign
+          reinforcement of the polite announcement rather than a separate one. */}
       <div
         ref={verdictRef}
         tabIndex={-1}
@@ -225,6 +230,7 @@ export function PrepareData({
       >
         {blocked ? (
           <Alert
+            role="presentation"
             color="red"
             icon={<IconAlertCircle aria-hidden />}
             title="This file cannot match yet"
@@ -235,6 +241,7 @@ export function PrepareData({
           </Alert>
         ) : partial ? (
           <Alert
+            role="presentation"
             color="yellow"
             icon={<IconAlertTriangle aria-hidden />}
             title={`${satisfiable} of ${totalKeys} keys can match`}
@@ -245,6 +252,7 @@ export function PrepareData({
           </Alert>
         ) : (
           <Alert
+            role="presentation"
             color="green"
             icon={<IconCircleCheck aria-hidden />}
             title={`All ${totalKeys} keys can match`}
