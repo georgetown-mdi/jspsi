@@ -202,13 +202,12 @@ export function PrepareData({
   // identifier even when every linkage key is otherwise satisfiable.
   const multipleIdentifiers = hasMultipleIdentifiers(metadata);
 
-  // The silent-empty defense: per-field non-empty rate over the FULL CSV, computed
-  // off the main thread above the row threshold (see useNonEmptyRates). The verdict
-  // above guards SHAPE; this is the only VALUE-level check that a field's transform
-  // has not collapsed every row to null -- a byte-indistinguishable empty
-  // intersection. It is surfaced, not gated: the operator sees the collapse before
-  // launch and fixes the steps, the same way the partial-coverage advisory informs
-  // rather than blocks.
+  // The silent-empty defense: per-field coverage over the FULL CSV, computed off the
+  // main thread above the row threshold (see useNonEmptyRates). The verdict above
+  // guards SHAPE; this is the only VALUE-level check that a field's transform has not
+  // collapsed every row to null -- a byte-indistinguishable empty intersection. It is
+  // surfaced, not gated: the operator sees the collapse before launch and fixes the
+  // steps, the same way the partial-coverage advisory informs rather than blocks.
   const { rates: nonEmptyRates, pending: ratesPending } = useNonEmptyRates(
     rawRows,
     standardization,
@@ -216,8 +215,8 @@ export function PrepareData({
 
   // The safe labels of the fields whose transform drops every row, for the single
   // editor-wide coverage announcement below. Built from the field's semantic-type
-  // label (the partner-controlled `output` is never announced raw) in
-  // standardization order so the read is stable.
+  // label (the partner-controlled `output` is never announced raw) in standardization
+  // order so the read is stable.
   const silentEmptyLabels = useMemo(() => {
     if (nonEmptyRates === null) return [];
     const labels: Array<string> = [];
@@ -232,8 +231,8 @@ export function PrepareData({
 
   // One polite live region for the whole editor announces a collapse (debounced,
   // because `nonEmptyRates` only updates once per recompute, not per keystroke).
-  // Empty when nothing collapses -- clearing it is silent, the standard pattern for
-  // an error region; the recovery is conveyed by the per-field readout and the
+  // Empty when nothing collapses -- clearing it is silent, the standard pattern for an
+  // error region; the recovery is conveyed by the per-field readout and the
   // satisfiability verdict.
   const coverageAnnouncement =
     silentEmptyLabels.length === 0

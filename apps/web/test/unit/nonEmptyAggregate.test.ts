@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   NON_EMPTY_WORKER_ROW_THRESHOLD,
-  computeNonEmptyRates,
+  computeFieldCoverage,
   isSilentEmpty,
   shouldComputeOffThread,
 } from "../../src/psi/nonEmptyAggregate.js";
@@ -17,8 +17,8 @@ import type {
 
 import type { Standardization } from "@psilink/core";
 
-describe("computeNonEmptyRates: the silent-empty defense", () => {
-  test("a transform that collapses every row to null surfaces a 0% non-empty rate", () => {
+describe("computeFieldCoverage: the silent-empty defense", () => {
+  test("a transform that collapses every row to null surfaces a 0% coverage alarm", () => {
     // parse_date with the wrong input format matches no row -> every value drops to
     // null. This is the cited hazard: SHAPE is satisfiable (a date column is bound)
     // but VALUE collapses, byte-indistinguishable from a real empty intersection.
@@ -35,18 +35,18 @@ describe("computeNonEmptyRates: the silent-empty defense", () => {
         ],
       },
     ];
-    const [rate] = computeNonEmptyRates(rows, standardization);
-    expect(rate.total).toBe(2);
-    expect(rate.nonEmpty).toBe(0);
-    expect(rate.rate).toBe(0);
-    expect(rate.unavailable).toBe(false);
-    // The alarm fires.
-    expect(isSilentEmpty(rate)).toBe(true);
+    const [coverage] = computeFieldCoverage(rows, standardization);
+    expect(coverage.total).toBe(2);
+    expect(coverage.produced).toBe(0);
+    expect(coverage.rate).toBe(0);
+    expect(coverage.unavailable).toBe(false);
+    expect(isSilentEmpty(coverage)).toBe(true);
   });
 
-  test("a field whose rows clean to a real value reports a non-zero rate, no alarm", () => {
-    // "" cleans to "" -- an empty key, NOT a usable value -- so it is not counted;
-    // the two real names are. This pins that an empty string is treated as empty.
+  test("an empty string counts as a produced value, distinct from a dropped null", () => {
+    // "" cleans to "" -- a participating key, NOT a drop -- so the blank row counts
+    // toward produced, exactly as the per-row preview frames it. The field is not a
+    // silent-empty collapse.
     const rows = [{ n: "Mary" }, { n: "Jane" }, { n: "" }];
     const standardization: Standardization = [
       {
@@ -55,15 +55,17 @@ describe("computeNonEmptyRates: the silent-empty defense", () => {
         steps: [{ function: "to_upper_case" }],
       },
     ];
-    const [rate] = computeNonEmptyRates(rows, standardization);
-    expect(rate.total).toBe(3);
-    expect(rate.nonEmpty).toBe(2);
-    expect(isSilentEmpty(rate)).toBe(false);
+    const [coverage] = computeFieldCoverage(rows, standardization);
+    expect(coverage.total).toBe(3);
+    expect(coverage.produced).toBe(3);
+    expect(isSilentEmpty(coverage)).toBe(false);
   });
 
-  test("a field that collapses every row to an empty STRING also fires the alarm", () => {
-    // trim over an all-blank column yields "" for every row: a degenerate key shared
-    // by every row, no linkage signal -- the alarm must fire exactly as for null.
+  test("an all-empty-string field is fully produced, not a silent-empty collapse", () => {
+    // trim over an all-blank column yields "" for every row: each "" is a produced
+    // key (not a drop), so this is 100% produced, NOT zero coverage. A constant key
+    // is not flagged -- core's linkage drops keys duplicated within a dataset before
+    // the PSI round, so a constant key simply contributes no matches.
     const rows = [{ c: "  " }, { c: " " }, { c: "\t" }];
     const standardization: Standardization = [
       {
@@ -72,12 +74,13 @@ describe("computeNonEmptyRates: the silent-empty defense", () => {
         steps: [{ function: "trim_whitespace" }],
       },
     ];
-    const [rate] = computeNonEmptyRates(rows, standardization);
-    expect(rate.nonEmpty).toBe(0);
-    expect(isSilentEmpty(rate)).toBe(true);
+    const [coverage] = computeFieldCoverage(rows, standardization);
+    expect(coverage.produced).toBe(3);
+    expect(coverage.rate).toBe(1);
+    expect(isSilentEmpty(coverage)).toBe(false);
   });
 
-  test("the sweep observes empties, so coalesce rescuing dropped rows raises the rate", () => {
+  test("the sweep observes empties, so coalesce rescuing dropped rows raises coverage", () => {
     // The aggregate runs over the WHOLE row set (the preview's sample skips empties),
     // so a coalesce that substitutes a default for an otherwise-dropped value is
     // demonstrable here: null_if drops the "N/A" rows, coalesce then fills them.
@@ -89,7 +92,7 @@ describe("computeNonEmptyRates: the silent-empty defense", () => {
         steps: [{ function: "null_if", params: { values: ["N/A"] } }],
       },
     ];
-    expect(computeNonEmptyRates(rows, dropOnly)[0].nonEmpty).toBe(1);
+    expect(computeFieldCoverage(rows, dropOnly)[0].produced).toBe(1);
 
     const withCoalesce: Standardization = [
       {
@@ -101,29 +104,29 @@ describe("computeNonEmptyRates: the silent-empty defense", () => {
         ],
       },
     ];
-    expect(computeNonEmptyRates(rows, withCoalesce)[0].nonEmpty).toBe(3);
+    expect(computeFieldCoverage(rows, withCoalesce)[0].produced).toBe(3);
   });
 
-  test("an empty CSV is not flagged as a collapse, and a missing column counts as empty", () => {
-    expect(isSilentEmpty(computeNonEmptyRates([], stdFor("c"))[0])).toBe(false);
+  test("an empty CSV is not flagged, and a missing column collapses to silent-empty", () => {
+    expect(isSilentEmpty(computeFieldCoverage([], stdFor("c"))[0])).toBe(false);
     // A row lacking the input column carries no value; it still counts toward total.
     const rows = [{ other: "x" }, { other: "y" }];
-    const [rate] = computeNonEmptyRates(rows, stdFor("c"));
-    expect(rate.total).toBe(2);
-    expect(rate.nonEmpty).toBe(0);
-    expect(isSilentEmpty(rate)).toBe(true);
+    const [coverage] = computeFieldCoverage(rows, stdFor("c"));
+    expect(coverage.total).toBe(2);
+    expect(coverage.produced).toBe(0);
+    expect(isSilentEmpty(coverage)).toBe(true);
   });
 
-  test("a step left mid-edit makes the field unavailable, not a false 0% alarm", () => {
+  test("a step left mid-edit makes the field unavailable, not a false alarm", () => {
     // pad_left with no length throws at compile; the field is reported unavailable
-    // (its rate unknown) rather than crashing the whole sweep or reading as a collapse.
+    // (coverage unknown) rather than crashing the sweep or reading as a collapse.
     const rows = [{ n: "42" }];
     const standardization: Standardization = [
       { output: "first_name", input: "n", steps: [{ function: "pad_left" }] },
     ];
-    const [rate] = computeNonEmptyRates(rows, standardization);
-    expect(rate.unavailable).toBe(true);
-    expect(isSilentEmpty(rate)).toBe(false);
+    const [coverage] = computeFieldCoverage(rows, standardization);
+    expect(coverage.unavailable).toBe(true);
+    expect(isSilentEmpty(coverage)).toBe(false);
   });
 });
 
@@ -151,7 +154,7 @@ class FakeAggregateWorker implements AggregateWorker {
     }
     const response: AggregateResponse = {
       token: message.token,
-      rates: computeNonEmptyRates(this.rows, message.standardization),
+      rates: computeFieldCoverage(this.rows, message.standardization),
     };
     queueMicrotask(() => this.onmessage?.({ data: response }));
   }
@@ -184,7 +187,7 @@ describe("NonEmptyRateController: off-main-thread dispatch above the threshold",
     expect(controller.offThread).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
     await expect(controller.compute(UPPER)).resolves.toEqual(
-      computeNonEmptyRates(rows, UPPER),
+      computeFieldCoverage(rows, UPPER),
     );
   });
 
@@ -201,13 +204,12 @@ describe("NonEmptyRateController: off-main-thread dispatch above the threshold",
     expect(fake.received).toEqual([{ kind: "rows", rawRows: rows }]);
 
     const rates = await controller.compute(UPPER);
-    // The result came back through the worker, and equals the off-thread compute.
     expect(fake.received).toContainEqual({
       kind: "compute",
       token: 0,
       standardization: UPPER,
     });
-    expect(rates).toEqual(computeNonEmptyRates(rows, UPPER));
+    expect(rates).toEqual(computeFieldCoverage(rows, UPPER));
 
     // A second recompute reuses the same worker and re-seeds nothing.
     await controller.compute(UPPER);

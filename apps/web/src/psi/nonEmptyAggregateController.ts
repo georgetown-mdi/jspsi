@@ -1,14 +1,14 @@
 import {
-  computeNonEmptyRates,
+  computeFieldCoverage,
   shouldComputeOffThread,
 } from "./nonEmptyAggregate";
 
-import type { FieldNonEmptyRate } from "./nonEmptyAggregate";
+import type { FieldValueCoverage } from "./nonEmptyAggregate";
 
 import type { Standardization } from "@psilink/core";
 
 /**
- * Orchestrates the silent-empty aggregate ({@link computeNonEmptyRates}) on or off
+ * Orchestrates the silent-empty aggregate ({@link computeFieldCoverage}) on or off
  * the main thread, the single path both the React hook and the unit test drive.
  *
  * Below {@link shouldComputeOffThread} it computes inline (a worker's setup buys
@@ -43,7 +43,7 @@ export type AggregateRequest =
 /** Worker response: the rates for the compute identified by `token`. */
 export interface AggregateResponse {
   token: number;
-  rates: Array<FieldNonEmptyRate>;
+  rates: Array<FieldValueCoverage>;
 }
 
 export class NonEmptyRateController {
@@ -52,7 +52,7 @@ export class NonEmptyRateController {
   private nextToken = 0;
   private readonly pending = new Map<
     number,
-    (rates: Array<FieldNonEmptyRate>) => void
+    (rates: Array<FieldValueCoverage>) => void
   >();
   private readonly failers = new Map<number, (error: unknown) => void>();
   private disposed = false;
@@ -86,10 +86,12 @@ export class NonEmptyRateController {
    * above it. A compute superseded by {@link dispose} never settles -- the caller
    * (the hook) guards with its own cancellation flag and ignores a stale result.
    */
-  compute(standardization: Standardization): Promise<Array<FieldNonEmptyRate>> {
+  compute(
+    standardization: Standardization,
+  ): Promise<Array<FieldValueCoverage>> {
     if (this.worker === undefined)
       return Promise.resolve(
-        computeNonEmptyRates(this.rawRows, standardization),
+        computeFieldCoverage(this.rawRows, standardization),
       );
     const token = this.nextToken++;
     return new Promise((resolve, reject) => {

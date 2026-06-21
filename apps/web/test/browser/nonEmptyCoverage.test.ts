@@ -14,7 +14,7 @@ import { PrepareData } from "@components/PrepareData";
 
 import type { Root } from "react-dom/client";
 
-import type { FieldNonEmptyRate } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { LinkageTerms } from "@psilink/core";
 
 let container: HTMLElement | undefined;
@@ -34,23 +34,23 @@ function render(node: ReturnType<typeof createElement>) {
   root.render(createElement(MantineProvider, null, node));
 }
 
-function rate(partial: Partial<FieldNonEmptyRate>): FieldNonEmptyRate {
+function rate(partial: Partial<FieldValueCoverage>): FieldValueCoverage {
   return {
     output: "f",
     input: "c",
     total: 100,
-    nonEmpty: 87,
+    produced: 87,
     rate: 0.87,
     unavailable: false,
     ...partial,
   };
 }
 
-describe("FieldCoverage: the visible silent-empty defense", () => {
-  test("a 0% rate over a non-empty file raises the alarm, as a non-live presentation node", async () => {
+describe("FieldCoverage: the visible value-level defense", () => {
+  test("a 0% coverage over a non-empty file raises the silent-empty alarm, as a non-live presentation node", async () => {
     render(
       createElement(FieldCoverage, {
-        rate: rate({ total: 100, nonEmpty: 0, rate: 0 }),
+        rate: rate({ total: 100, produced: 0, rate: 0 }),
         pending: false,
       }),
     );
@@ -67,7 +67,7 @@ describe("FieldCoverage: the visible silent-empty defense", () => {
   test("a healthy rate reports the share of rows that produce a value", async () => {
     render(
       createElement(FieldCoverage, {
-        rate: rate({ total: 100, nonEmpty: 87, rate: 0.87 }),
+        rate: rate({ total: 100, produced: 87, rate: 0.87 }),
         pending: false,
       }),
     );
@@ -79,10 +79,27 @@ describe("FieldCoverage: the visible silent-empty defense", () => {
     );
   });
 
+  test("an all-empty-string field reports full coverage and no alarm (a constant key is benign)", async () => {
+    // "" counts as produced (100%), so it is NOT the silent-empty alarm; a constant
+    // key is dropped by core's linkage before the PSI round, so it is not flagged.
+    render(
+      createElement(FieldCoverage, {
+        rate: rate({ total: 100, produced: 100, rate: 1 }),
+        pending: false,
+      }),
+    );
+    await expect
+      .element(page.getByTestId("coverage-rate"))
+      .toHaveTextContent("100 of 100 rows produce a value (100%)");
+    expect(page.getByTestId("coverage-silent-empty").elements()).toHaveLength(
+      0,
+    );
+  });
+
   test("a tiny but non-zero rate shows <1%, never a 0% that reads like the alarm", async () => {
     render(
       createElement(FieldCoverage, {
-        rate: rate({ total: 100000, nonEmpty: 3, rate: 3 / 100000 }),
+        rate: rate({ total: 100000, produced: 3, rate: 3 / 100000 }),
         pending: false,
       }),
     );
@@ -102,7 +119,7 @@ describe("FieldCoverage: the visible silent-empty defense", () => {
         "div",
         null,
         createElement(FieldCoverage, {
-          rate: rate({ unavailable: true, nonEmpty: 0, rate: 0 }),
+          rate: rate({ unavailable: true, produced: 0, rate: 0 }),
           pending: false,
         }),
         createElement("span", { "data-testid": "sentinel" }, "ready"),

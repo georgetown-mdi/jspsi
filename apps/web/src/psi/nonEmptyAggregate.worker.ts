@@ -1,4 +1,4 @@
-import { computeNonEmptyRates } from "./nonEmptyAggregate";
+import { computeFieldCoverage } from "./nonEmptyAggregate";
 
 import type {
   AggregateRequest,
@@ -32,6 +32,6 @@ scope.onmessage = (event) => {
   }
   scope.postMessage({
     token: request.token,
-    rates: computeNonEmptyRates(rows, request.standardization),
+    rates: computeFieldCoverage(rows, request.standardization),
   });
 };

@@ -3,28 +3,28 @@ import { useEffect, useRef, useState } from "react";
 import { NonEmptyRateController } from "@psi/nonEmptyAggregateController";
 import { defaultSpawnAggregateWorker } from "@psi/nonEmptyAggregateWorkerClient";
 
-import type { FieldNonEmptyRate } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { SpawnAggregateWorker } from "@psi/nonEmptyAggregateController";
 
 import type { Standardization } from "@psilink/core";
 
 /** Debounce (ms) before a standardization edit triggers a recompute, so a burst of
- * keystrokes recomputes the full-CSV aggregate once rather than per edit. Distinct
+ * keystrokes recomputes the full-CSV coverage once rather than per edit. Distinct
  * from the visible UI, which tracks each edit synchronously; only this background
  * sweep is debounced. */
 export const AGGREGATE_DEBOUNCE_MS = 500;
 
-/** The hook's view of the silent-empty aggregate. */
+/** The hook's view of the per-field value coverage. */
 export interface NonEmptyRatesState {
-  /** Per-field rate keyed by linkage-field name (the transformation `output`), or
-   * `null` before the first sweep settles. */
-  rates: ReadonlyMap<string, FieldNonEmptyRate> | null;
+  /** Per-field coverage keyed by linkage-field name (the transformation `output`),
+   * or `null` before the first sweep settles. */
+  rates: ReadonlyMap<string, FieldValueCoverage> | null;
   /** True while a recompute is in flight (debounce pending or worker running). */
   pending: boolean;
 }
 
 /**
- * Run the full-CSV non-empty-rate aggregate for the current standardization, off the
+ * Run the full-CSV per-field value coverage for the current standardization, off the
  * main thread above the row threshold. One {@link NonEmptyRateController} is created
  * per row set (the worker, if any, is seeded once); each debounced standardization
  * edit posts only the standardization for a recompute. The result is keyed by field
@@ -39,7 +39,7 @@ export function useNonEmptyRates(
 ): NonEmptyRatesState {
   const [rates, setRates] = useState<ReadonlyMap<
     string,
-    FieldNonEmptyRate
+    FieldValueCoverage
   > | null>(null);
   const [pending, setPending] = useState(true);
 

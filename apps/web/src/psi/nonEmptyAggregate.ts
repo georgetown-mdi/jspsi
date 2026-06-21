@@ -3,22 +3,31 @@ import { StandardizedField } from "@psilink/core";
 import type { Standardization } from "@psilink/core";
 
 /**
- * The full-CSV non-empty-rate aggregate: the silent-empty defense.
+ * Whole-CSV per-field value coverage: the silent-empty defense.
  *
  * `assessLinkageSatisfiability` guards the SHAPE of a field (does a column of the
  * right semantic type bind to it) but never its VALUE -- so a wrong `substring` or
- * `parse_date` that collapses a field to all-null passes the satisfiability gate
- * yet produces no keys, byte-indistinguishable from a real empty intersection. This
- * aggregate is the only value-level check: it runs each field's CURRENT pipeline
- * over the WHOLE parsed CSV (not the preview's row sample) and reports the fraction
- * of rows that yield at least one usable key, so an all-null collapse is visible to
- * the operator before launch.
+ * `parse_date` that collapses a field to all-null can pass the satisfiability gate
+ * yet produce no keys, byte-indistinguishable from a real empty intersection. This
+ * module runs each field's CURRENT pipeline over the WHOLE parsed CSV (not the
+ * preview's row sample) and reports the share of rows that produce a key, so the
+ * operator sees an all-null collapse before launch.
  *
- * Pure and React-free -- the single tested boundary, so the 0%-collapse alarm, the
- * empty/empty-string/null classification, and the off-thread threshold are checked
- * here rather than through the UI. The off-main-thread plumbing that runs this on a
- * large file lives in {@link ./nonEmptyAggregateController}; the compute itself is
- * here so both the inline path and the worker call exactly this function.
+ * An empty string `""` is counted as PRODUCED, not as "no value": it is a real,
+ * participating key element, distinct from a dropped `null` (and convertible to one
+ * with `null_if`), so conflating the two would contradict the per-row preview and
+ * misreport a deliberately-blank field as a coverage failure. A field whose keys all
+ * collapse to one constant (including `""`) is NOT flagged: the linkage procedure
+ * already drops any key value that is duplicated within a dataset before the PSI
+ * round (`removeDuplicatesAndUndefineds` in core's `link.ts` keeps only values seen
+ * exactly once -- a constant key thus contributes no matches and those records fall
+ * through to later keys), so a low-cardinality or constant key is benign rather than
+ * a disclosure hazard, and warning on it would cry wolf on legitimate repeated-key
+ * designs.
+ *
+ * Pure and React-free -- the single tested boundary; the off-main-thread plumbing
+ * lives in {@link ./nonEmptyAggregateController} and calls exactly
+ * {@link computeFieldCoverage}.
  */
 
 /**
@@ -33,72 +42,64 @@ import type { Standardization } from "@psilink/core";
 export const NON_EMPTY_WORKER_ROW_THRESHOLD = 5000;
 
 /** Whether a CSV of `rowCount` rows crosses {@link NON_EMPTY_WORKER_ROW_THRESHOLD}
- * and so should have its aggregate computed off the main thread. */
+ * and so should have its coverage computed off the main thread. */
 export function shouldComputeOffThread(rowCount: number): boolean {
   return rowCount > NON_EMPTY_WORKER_ROW_THRESHOLD;
 }
 
 /**
- * The non-empty-rate result for one linkage field, over the whole CSV.
+ * The value-coverage result for one linkage field, over the whole CSV.
  *
  * `output` is the linkage-field name (the transformation `output`); it is
  * partner-controlled and must never be rendered raw -- the host shows the field's
  * safe semantic-type label instead. `input` is the operator's own column.
  */
-export interface FieldNonEmptyRate {
-  /** The linkage field (transformation `output`) this rate is for. */
+export interface FieldValueCoverage {
+  /** The linkage field (transformation `output`) this coverage is for. */
   output: string;
   /** The operator's input column the field's pipeline reads. */
   input: string;
   /** Rows examined -- the full parsed row count. */
   total: number;
-  /** Rows whose pipeline yields at least one non-empty key. */
-  nonEmpty: number;
-  /** {@link nonEmpty} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
+  /**
+   * Rows whose pipeline yields at least one key. `null` and an empty `Set` are not a
+   * key; an empty STRING is -- it is a participating key element, distinct from a
+   * dropped value -- so an all-`""` field is fully PRODUCED, not zero coverage.
+   */
+  produced: number;
+  /** {@link produced} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
   rate: number;
   /**
-   * True when the field's steps could not be compiled -- a step left mid-edit
-   * (e.g. a `pad_left` with no length yet) throws at compile. The rate is then not
+   * True when the field's steps could not be compiled -- a step left mid-edit (e.g.
+   * a `pad_left` with no length yet) throws at compile. Coverage is then not
    * computable, so it MUST NOT be read as a 0% collapse: the host already gates
-   * launch on a malformed pipeline, and surfacing a false silent-empty alarm for an
-   * incomplete step would just be noise on top of that step's own inline error.
+   * launch on a malformed pipeline, and a false alarm would be noise on top of that
+   * step's own inline error.
    */
   unavailable: boolean;
 }
 
-/** Whether a pipeline result contributes a usable key for the silent-empty count.
- * `null` (dropped) and an empty `Set` are not values. An empty STRING is also not
- * counted: it is a degenerate key shared by every row that produces it, so a field
- * that collapses every row to `""` carries no linkage signal and must trip the
- * alarm exactly as an all-null collapse does -- hence "non-empty" means at least one
- * value of non-zero length, not merely a non-null result. `StandardizedField.get`
- * has already reduced the result to its value set (`[]` for null/empty). */
-function hasUsableKey(values: ReadonlyArray<string>): boolean {
-  for (const value of values) if (value.length > 0) return true;
-  return false;
-}
-
 /**
- * Compute the per-field non-empty rate over the WHOLE row set. For each
- * transformation, runs its pipeline over every row's input column and counts the
- * rows that yield at least one usable key ({@link hasUsableKey}).
+ * Compute per-field value coverage over the WHOLE row set. For each transformation,
+ * runs its pipeline over every row's input column and counts the rows that yield a
+ * key (a non-null, non-empty-Set value set; an empty STRING counts).
  *
  * The sweep observes empties: a row whose input column is blank (or absent) is run
  * through the pipeline too, so a `coalesce` that substitutes a default for an empty
- * value RAISES the rate -- making demonstrable here the one transform the row-sample
- * preview cannot show (the sample skips empty values). A field whose transform drops
- * every row reports `nonEmpty: 0` and trips the silent-empty alarm.
+ * value RAISES coverage -- making demonstrable here the one transform the row-sample
+ * preview cannot show. A field whose transform drops every row reports `produced: 0`
+ * ({@link isSilentEmpty}).
  *
  * Each field gets its own {@link StandardizedField}, which compiles the steps once
  * (so a regex/`parse_date` pipeline is not recompiled per row); the field and its
- * per-row cache fall out of scope after its loop, so at most one field's cache is
- * resident at a time. A field whose steps do not compile is returned `unavailable`
- * rather than throwing, so one mid-edit step does not blank the whole aggregate.
+ * per-row cache fall out of scope after its loop. A field whose steps do not compile
+ * is returned `unavailable` rather than throwing, so one mid-edit step does not blank
+ * the whole aggregate.
  */
-export function computeNonEmptyRates(
+export function computeFieldCoverage(
   rawRows: ReadonlyArray<Record<string, string>>,
   standardization: Standardization,
-): Array<FieldNonEmptyRate> {
+): Array<FieldValueCoverage> {
   const total = rawRows.length;
   return standardization.map((transformation) => {
     const base = {
@@ -113,28 +114,30 @@ export function computeNonEmptyRates(
         transformation.steps ?? [],
         rawRows,
       );
-      let nonEmpty = 0;
+      let produced = 0;
       for (let index = 0; index < total; index++)
-        if (hasUsableKey(field.get(index))) nonEmpty++;
+        // `StandardizedField.get` has reduced the result to its value set: `[]` for a
+        // dropped (null) or empty-Set value, otherwise the produced key(s).
+        if (field.get(index).length > 0) produced++;
       return {
         ...base,
-        nonEmpty,
-        rate: total > 0 ? nonEmpty / total : 0,
+        produced,
+        rate: total > 0 ? produced / total : 0,
         unavailable: false,
       };
     } catch {
-      return { ...base, nonEmpty: 0, rate: 0, unavailable: true };
+      return { ...base, produced: 0, rate: 0, unavailable: true };
     }
   });
 }
 
 /**
- * Whether a rate is the silent-empty alarm condition: a field that was computable
- * over a non-empty CSV yet produced a usable key for ZERO rows. An empty CSV
- * (`total === 0`) is not flagged -- there is no collapse to warn about, and the
- * emptiness is surfaced upstream -- and neither is an `unavailable` field (its rate
- * is unknown, not zero).
+ * Whether coverage is the silent-empty alarm condition: a field that was computable
+ * over a non-empty CSV yet produced a key for ZERO rows -- an all-`null` collapse,
+ * byte-indistinguishable from a real empty intersection. An empty CSV (`total === 0`)
+ * is not flagged (there is no collapse to warn about), and neither is an
+ * `unavailable` field (its coverage is unknown, not zero).
  */
-export function isSilentEmpty(rate: FieldNonEmptyRate): boolean {
-  return !rate.unavailable && rate.total > 0 && rate.nonEmpty === 0;
+export function isSilentEmpty(coverage: FieldValueCoverage): boolean {
+  return !coverage.unavailable && coverage.total > 0 && coverage.produced === 0;
 }
