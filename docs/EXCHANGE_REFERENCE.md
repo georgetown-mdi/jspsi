@@ -942,7 +942,7 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text; re-normalizes to NFC after the diacritic strip | — |
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
 | `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
-| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`); tokens: `YYYY`, `MM`, `DD` |
+| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; tokens: `YYYY`, `MM`, `DD` |
 | `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required, at most 256), `char` (single character, default `"0"`) |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |

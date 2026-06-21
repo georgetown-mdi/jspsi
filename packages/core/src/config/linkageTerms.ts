@@ -51,10 +51,12 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // denylist holds hundreds of values, hence the most generous bound
 // (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
 // below the RangeError thresholds. The `params` VALUE content is otherwise
-// unbounded (typed `z.unknown()`, with no clean general content bound); the lone
-// exception is `pad_left`'s numeric `length`, capped at MAX_PAD_LEFT_LENGTH by a
-// per-step refine because an unbounded value drives an unbounded per-row
-// `padStart` allocation (see TransformStep's schema below).
+// unbounded (typed `z.unknown()`, with no clean general content bound); the
+// exceptions are the partner-controlled values whose magnitude drives unbounded
+// per-row work, each capped by a per-step refine on TransformStep's schema below:
+// `pad_left`'s numeric `length` (an unbounded `padStart` allocation,
+// MAX_PAD_LEFT_LENGTH) and `parse_date`'s `inputFormat` / `outputFormat` strings
+// (an unbounded per-row regex build and output allocation, MAX_DATE_FORMAT_LENGTH).
 //
 // The `payload` send/receive arrays carry no enclosing array/record/tuple frame
 // (only the root object), so a pathological count there cannot drive the ~130k
@@ -133,9 +135,10 @@ export const MAX_PARAMS_ENTRIES = 256;
 
 /**
  * Generous upper bound on the `length` param of a `pad_left` transform step --
- * the one partner-controlled transform-param VALUE that carries a content bound
- * (every other param value stays `z.unknown()`; the rest of the bounds in this
- * file cap COLLECTION counts, see the untrusted-input bounds note above).
+ * one of the two partner-controlled transform-param VALUES that carry a content
+ * bound (with {@link MAX_DATE_FORMAT_LENGTH}; every other param value stays
+ * `z.unknown()`; the rest of the bounds in this file cap COLLECTION counts, see
+ * the untrusted-input bounds note above).
  * `pad_left` runs per row inside the key-building pipeline
  * ({@link applyElementTransform}, driven by `buildKeyStrings`), and an unbounded
  * `length` makes every row allocate a `String.prototype.padStart(length, char)`
@@ -151,6 +154,28 @@ export const MAX_PARAMS_ENTRIES = 256;
  * schema. This is a DoS ceiling on the partner wire path, not a semantic limit.
  */
 export const MAX_PAD_LEFT_LENGTH = 256;
+
+/**
+ * Generous upper bound on the `inputFormat` and `outputFormat` params of a
+ * `parse_date` transform step -- the other partner-controlled transform-param
+ * VALUES that carry a content bound (with {@link MAX_PAD_LEFT_LENGTH}; every other
+ * param value stays `z.unknown()`, see the untrusted-input bounds note above).
+ * `parse_date` runs per row inside the key-building pipeline
+ * ({@link applyElementTransform}, which recompiles each step per row), and its
+ * factory builds a `new RegExp` from `inputFormat` and assembles the result from
+ * `outputFormat`. Both are partner-controlled, so an unbounded `inputFormat` makes
+ * every row compile a giant regex (a multi-KB format expands to a multi-KB
+ * pattern -- a per-row CPU burn that hangs the acceptor; unlike the raw-pattern
+ * `tier: "regex"` functions, `parse_date` is NOT screened by
+ * {@link linkageTermsHaveUnsafeTransformRegex}, since its format is not a raw
+ * pattern), and an unbounded `outputFormat` makes every matched row allocate an
+ * output string of that size. A real date format is tens of characters
+ * ("MM/DD/YYYY", "YYYY-MM-DD"); 256 is far above any legitimate format yet keeps
+ * the per-row regex build and output cheap. Enforced by a per-step refine on
+ * {@link TransformStep}'s schema before any row runs. This is a DoS ceiling on the
+ * partner wire path, not a semantic limit.
+ */
+export const MAX_DATE_FORMAT_LENGTH = 256;
 
 /**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
@@ -485,24 +510,25 @@ const TransformStepBaseSchema = z.object({
     .optional(),
 });
 
-// Bound a `pad_left` step's `length` -- the one partner-controlled transform-param
-// VALUE that carries a content bound (every other value stays `z.unknown()`; see
-// the untrusted-input bounds note above). `pad_left` runs per row in the
-// key-building pipeline (standardization.ts applyElementTransform, driven by
-// buildKeyStrings), so an unbounded `length` makes every row allocate a
-// `padStart(length, char)` of that size -- a crafted 1e9 exhausts memory and hangs
-// the acceptor, the memory-allocation sibling of the regex-ReDoS vector the refine
-// on LinkageTermsSchema rejects. Only a positive-integer `length` ever reaches
-// padStart (padLeftFactory throws on a non-number, non-integer, or non-positive
-// value before it allocates), so rejecting positive integers above
-// MAX_PAD_LEFT_LENGTH closes the whole allocation vector; a malformed `length` is
-// left to that runtime check, whose clean-abort path is unchanged. The message
-// names no partner value -- consistent with the unsanitized parse-error path the
-// referential-integrity and ReDoS refines rely on -- and the bound lives here, on
-// the partner-parsed wire schema, not on the editor descriptor an
-// attacker-authored token never passes through.
-const TransformStepSchema: z.ZodType<TransformStep> =
-  TransformStepBaseSchema.refine(
+// Content bounds on the two partner-controlled transform-param VALUES whose
+// magnitude drives unbounded per-row work; every other param value stays
+// `z.unknown()` (see the untrusted-input bounds note above). Each is a per-step
+// refine on this wire schema -- not on the editor descriptor an attacker-authored
+// token never passes through -- and each message names no partner value,
+// consistent with the unsanitized parse-error path the referential-integrity and
+// ReDoS refines rely on.
+const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
+  // `pad_left` runs per row in the key-building pipeline (standardization.ts
+  // applyElementTransform, driven by buildKeyStrings), so an unbounded `length`
+  // makes every row allocate a `padStart(length, char)` of that size -- a crafted
+  // 1e9 exhausts memory and hangs the acceptor, the memory-allocation sibling of
+  // the regex-ReDoS vector the refine on LinkageTermsSchema rejects. Only a
+  // positive-integer `length` ever reaches padStart (padLeftFactory throws on a
+  // non-number, non-integer, or non-positive value before it allocates), so
+  // rejecting positive integers above MAX_PAD_LEFT_LENGTH closes the whole
+  // allocation vector; a malformed `length` is left to that runtime check, whose
+  // clean-abort path is unchanged.
+  .refine(
     (step) => {
       if (step.function !== "pad_left") return true;
       const length = step.params?.length;
@@ -515,6 +541,30 @@ const TransformStepSchema: z.ZodType<TransformStep> =
     {
       message: `pad_left length must not exceed ${MAX_PAD_LEFT_LENGTH}`,
       path: ["params", "length"],
+    },
+  )
+  // `parse_date` builds a `new RegExp` from `inputFormat` and assembles its result
+  // from `outputFormat`, both recompiled per row by applyElementTransform, so an
+  // unbounded `inputFormat` makes every row compile a giant regex (a CPU burn --
+  // parse_date is not a raw-pattern `tier: "regex"` function, so the ReDoS screen
+  // does not cover it) and an unbounded `outputFormat` makes every matched row
+  // allocate an output string of that size. Only a string value drives either (the
+  // factory treats a non-string as an empty/absent format), so bounding the string
+  // length closes both; an out-of-range value is rejected before any row runs.
+  .refine(
+    (step) => {
+      if (step.function !== "parse_date") return true;
+      const { inputFormat, outputFormat } = step.params ?? {};
+      return (
+        (typeof inputFormat !== "string" ||
+          inputFormat.length <= MAX_DATE_FORMAT_LENGTH) &&
+        (typeof outputFormat !== "string" ||
+          outputFormat.length <= MAX_DATE_FORMAT_LENGTH)
+      );
+    },
+    {
+      message: `parse_date inputFormat and outputFormat must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+      path: ["params"],
     },
   );
 

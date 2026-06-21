@@ -10,6 +10,7 @@ import {
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
   MAX_PAD_LEFT_LENGTH,
+  MAX_DATE_FORMAT_LENGTH,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -569,6 +570,82 @@ test("a malformed pad_left length still validates, so the runtime factory check 
   expect(safeParseLinkageTerms(padLeftTerms({ length: "9" })).success).toBe(
     true,
   );
+});
+
+// ─── parse_date format-string bound (partner-controlled per-row regex DoS) ────
+// parse_date builds a `new RegExp` from `inputFormat` and assembles its result
+// from `outputFormat`, recompiled per row by applyElementTransform over the full
+// dataset. Unlike the four `tier: "regex"` functions, parse_date's format is not
+// a raw pattern and is NOT screened by the ReDoS control, so an unbounded format
+// string makes every row compile a giant regex (a CPU burn) or allocate a giant
+// output. The bound is enforced at LinkageTermsSchema validation, before any row
+// runs. (parse_date's runtime behavior is unit-tested in standardization.test.ts;
+// these assert the schema-level wiring on the partner-parsed path.)
+
+const parseDateTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "DOB",
+      elements: [
+        { field: "ssn", transform: [{ function: "parse_date", params }] },
+      ],
+    },
+  ],
+});
+
+test("an over-large parse_date inputFormat is rejected at validation, before any per-row regex build", () => {
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ inputFormat: "DD".repeat(MAX_DATE_FORMAT_LENGTH) }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("params");
+  expect(result.error.issues[0].message).toMatch(
+    /parse_date inputFormat and outputFormat must not exceed/,
+  );
+});
+
+test("an over-large parse_date outputFormat is rejected at validation", () => {
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ outputFormat: "Y".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+  );
+  expect(result.success).toBe(false);
+});
+
+test("a real-sized parse_date format parses and is preserved (no clamp)", () => {
+  // camelizeKeys maps the snake_case wire keys to the camelCase the factory reads.
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ input_format: "YYYY-MM-DD", output_format: "MM/DD/YYYY" }),
+  );
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    inputFormat: "YYYY-MM-DD",
+    outputFormat: "MM/DD/YYYY",
+  });
+});
+
+test("a parse_date format at exactly the maximum parses; one over it is rejected", () => {
+  expect(
+    safeParseLinkageTerms(
+      parseDateTerms({ inputFormat: "D".repeat(MAX_DATE_FORMAT_LENGTH) }),
+    ).success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(
+      parseDateTerms({ inputFormat: "D".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+    ).success,
+  ).toBe(false);
+});
+
+test("a non-string parse_date format still validates, so the runtime factory handles it", () => {
+  // Only a string format drives the regex build / output allocation; the factory
+  // treats a non-string as an empty/absent format, so the schema leaves it alone
+  // (behavior unchanged) rather than pre-empting it here.
+  expect(
+    safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 })).success,
+  ).toBe(true);
 });
 
 test("a swap resolving via element field names validates", () => {
