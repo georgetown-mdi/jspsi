@@ -75,6 +75,24 @@ function paramString(params: {
   return `key=${key}&id=${id}&token=${token}`;
 }
 
+/** Reject `promise` if it does not settle within `ms`, with a labelled error so
+ * a never-arriving event fails with a clear diagnostic rather than blocking to
+ * the bare vitest timeout. The timer is cleared once either side settles. */
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`timed out waiting for ${label}`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Open an upgrade with the given handshake params and resolve once the server
  * answers OPEN -- the registered path. The signaling path is `/peerjs` (config
  * `path` "/" plus the WS_PATH suffix). */
@@ -87,14 +105,32 @@ function connectRegistered(
       `ws://127.0.0.1:${port}/peerjs?${paramString(params)}`,
     );
     clients.push(ws);
-    ws.on("message", (data: WebSocket.RawData) => {
+    // Remove every listener on the first terminal event so a later close or
+    // error -- e.g. the `afterEach` teardown of a successfully-registered socket
+    // -- cannot reject an already-resolved promise.
+    const cleanup = () => {
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      ws.off("close", onClose);
+    };
+    const onMessage = (data: WebSocket.RawData) => {
       const type = (JSON.parse(data.toString()) as { type?: unknown }).type;
-      if (type === "OPEN") resolve(ws);
-    });
-    ws.on("error", reject);
-    ws.on("close", () =>
-      reject(new Error("signaling socket closed before OPEN")),
-    );
+      if (type === "OPEN") {
+        cleanup();
+        resolve(ws);
+      }
+    };
+    const onError = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("signaling socket closed before OPEN"));
+    };
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+    ws.on("close", onClose);
   });
 }
 
@@ -176,7 +212,11 @@ describe("signaling-server handshake parameter length bound", () => {
     const ws = await connectRegistered(port, { id });
     ws.send(JSON.stringify({ type: "OFFER", dst: "peer-2", payload: "sdp" }));
 
-    const { id: registeredId, src } = await received;
+    const { id: registeredId, src } = await withTimeout(
+      received,
+      3_000,
+      "relayed frame",
+    );
     expect(registeredId).toBe(id);
     // The server overwrites `src` with the connecting client's id; the bounded id
     // is what lands on the relayed frame.
