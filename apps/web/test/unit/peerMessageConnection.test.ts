@@ -24,11 +24,12 @@ class FakeDataConnection extends EventEmitter {
     this.torndown = true;
   });
 
-  // The PeerJS chunk-reassembly internals openPeerMessageConnection wraps to
+  // The PeerJS reassembly/unpack internals openPeerMessageConnection wraps to
   // bound inbound memory (see boundedReassembly.ts). Modeled here so the install
   // assertion passes; the bound itself is exercised in boundedReassembly.test.ts.
   _chunkedData: Record<number, unknown> = {};
   _handleChunk = (_chunk: unknown) => {};
+  _handleDataMessage = (_message: unknown) => {};
 
   constructor(open = true) {
     super();
@@ -97,7 +98,7 @@ describe("openPeerMessageConnection", () => {
     const fake = new EventEmitter();
     await expect(
       openPeerMessageConnection(fake as unknown as DataConnection),
-    ).rejects.toThrow(/chunk-reassembly internals/);
+    ).rejects.toThrow(/reassembly\/unpack internals/);
     // The premise is checked before any listener is attached, so a broken premise
     // strands nothing: no data/open/error/close listener is left on the channel.
     expect(fake.eventNames()).toHaveLength(0);

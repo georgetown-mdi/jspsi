@@ -5,6 +5,7 @@ import { ConnectionError } from "@psilink/core";
 import {
   boundChunkReassembly,
   checkDeliveredFrameBound,
+  structureOverBudget,
 } from "../../src/psi/boundedReassembly.js";
 
 import type { DataConnection } from "peerjs";
@@ -16,19 +17,35 @@ interface Chunk {
   data: Uint8Array;
 }
 
+function concatSlices(slices: Array<Uint8Array>): Uint8Array {
+  let len = 0;
+  for (const s of slices) len += s.length;
+  const out = new Uint8Array(len);
+  let off = 0;
+  for (const s of slices) {
+    out.set(s, off);
+    off += s.length;
+  }
+  return out;
+}
+
 /**
- * A faithful model of the PeerJS binary connection's chunk reassembly: it
- * accumulates slices into `_chunkedData` keyed by message id (storing the chunk
- * total from the first chunk, as PeerJS does) and deletes the entry once the
- * frame completes -- the exact lifecycle boundChunkReassembly wraps. `completed`
- * records each id whose frame finished, for observation.
+ * A faithful model of the PeerJS binary connection: `_handleChunk` accumulates
+ * slices keyed by message id (storing the chunk total from the first chunk) and,
+ * on completion, concatenates and recurses into `_handleDataMessage` -- the sole
+ * point at which a frame is "unpacked". `delivered` records each frame that
+ * reached that unpack point (i.e. was not refused first).
  */
 class FakeChunkedConnection {
   _chunkedData: Record<
     number,
     { data: Array<Uint8Array>; count: number; total: number }
   > = {};
-  completed: Array<number> = [];
+  delivered: Array<Uint8Array> = [];
+
+  _handleDataMessage = (message: { data: Uint8Array }): void => {
+    this.delivered.push(message.data);
+  };
 
   _handleChunk = (chunk: Chunk): void => {
     const id = chunk.__peerData;
@@ -42,7 +59,7 @@ class FakeChunkedConnection {
     this._chunkedData[id] = info;
     if (info.count === info.total) {
       delete this._chunkedData[id];
-      this.completed.push(id);
+      this._handleDataMessage({ data: concatSlices(info.data) });
     }
   };
 
@@ -56,27 +73,7 @@ function makeChunk(id: number, n: number, total: number, bytes: number): Chunk {
   return { __peerData: id, n, total, data: new Uint8Array(bytes) };
 }
 
-/** Deliver `bytes` as a frame split into `total` (>= 2) ordered chunks, so the
- * reassembly and completion-time structural scan are exercised. */
-function feedFrame(
-  conn: FakeChunkedConnection,
-  id: number,
-  bytes: Uint8Array,
-  total: number,
-): void {
-  const per = Math.ceil(bytes.length / total) || 1;
-  for (let n = 0; n < total; n++) {
-    conn._handleChunk({
-      __peerData: id,
-      n,
-      total,
-      data: bytes.subarray(n * per, Math.min(bytes.length, (n + 1) * per)),
-    });
-  }
-}
-
-/** A BinaryPack array32 header declaring `count` elements (no element bytes --
- * the scan rejects an over-budget count at the header, before reading them). */
+/** A BinaryPack array32 header declaring `count` elements (no element bytes). */
 function array32Header(count: number): Uint8Array {
   return new Uint8Array([
     0xdd,
@@ -85,6 +82,21 @@ function array32Header(count: number): Uint8Array {
     (count >>> 8) & 0xff,
     count & 0xff,
   ]);
+}
+
+/** `depth` nested array32 headers, each declaring `count` -- the deep-spine shape
+ * that bypassed an accounting that ignored already-committed children. */
+function nestedArrayHeaders(count: number, depth: number): Uint8Array {
+  const out: Array<number> = [];
+  for (let d = 0; d < depth; d++) out.push(...array32Header(count));
+  return new Uint8Array(out);
+}
+
+/** A BinaryPack array16 of `n` fixints (each one wire byte), fully byte-backed. */
+function arrayOfFixints(n: number): Uint8Array {
+  const out = [0xdc, (n >>> 8) & 0xff, n & 0xff];
+  for (let i = 0; i < n; i++) out.push(0x01);
+  return new Uint8Array(out);
 }
 
 type InstallOptions = {
@@ -107,7 +119,7 @@ function install(conn: FakeChunkedConnection, options?: InstallOptions) {
   return fail;
 }
 
-describe("boundChunkReassembly: wire-byte and partial bounds", () => {
+describe("boundChunkReassembly: wire-byte, chunk, and partial bounds", () => {
   test("rejects an over-cap reassembly and does not store the over-cap chunk", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameBytes: 100 });
@@ -121,20 +133,19 @@ describe("boundChunkReassembly: wire-byte and partial bounds", () => {
     expect(err).toBeInstanceOf(ConnectionError);
     expect(err.kind).toBe("protocol");
     expect(err.message).toContain("size limit");
-    // The over-cap chunk was never delegated to the original, so only the two
-    // in-cap chunks were stored -- allocation did not track the peer's claim.
     expect(conn._chunkedData[1].count).toBe(2);
+    expect(conn.delivered).toEqual([]);
   });
 
-  test("accepts an at-cap frame and completes it", () => {
+  test("accepts an at-cap frame and delivers it", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameBytes: 100 });
 
     conn._handleChunk(makeChunk(2, 0, 2, 50)); // 50
-    conn._handleChunk(makeChunk(2, 1, 2, 50)); // 100, exactly at cap -> accepted
+    conn._handleChunk(makeChunk(2, 1, 2, 50)); // 100, exactly at cap
 
     expect(fail).not.toHaveBeenCalled();
-    expect(conn.completed).toEqual([2]);
+    expect(conn.delivered).toHaveLength(1);
     expect(conn.partialCount).toBe(0);
   });
 
@@ -148,7 +159,7 @@ describe("boundChunkReassembly: wire-byte and partial bounds", () => {
     conn._handleChunk(makeChunk(4, 1, 2, 50)); // completes too -- no carryover
 
     expect(fail).not.toHaveBeenCalled();
-    expect(conn.completed).toEqual([3, 4]);
+    expect(conn.delivered).toHaveLength(2);
   });
 
   test("bounds the aggregate of concurrent partials by the running total", () => {
@@ -172,8 +183,6 @@ describe("boundChunkReassembly: wire-byte and partial bounds", () => {
       maxConcurrentReassemblies: 2,
     });
 
-    // Five never-completed partials from distinct ids, each one chunk of a
-    // claimed-5-chunk frame. Only the two most recent are retained.
     for (const id of [1, 2, 3, 4, 5])
       conn._handleChunk(makeChunk(id, 0, 5, 10));
 
@@ -190,39 +199,35 @@ describe("boundChunkReassembly: wire-byte and partial bounds", () => {
     });
 
     conn._handleChunk(makeChunk(1, 0, 5, 60)); // partial holds 60
-    conn._handleChunk(makeChunk(2, 0, 5, 60)); // new id evicts #1 (frees 60), then stores 60
+    conn._handleChunk(makeChunk(2, 0, 5, 60)); // evicts #1 (frees 60), then stores 60
 
     expect(fail).not.toHaveBeenCalled();
     expect(conn.partialCount).toBe(1);
     expect(Object.keys(conn._chunkedData).map(Number)).toEqual([2]);
   });
 
-  test("drops every chunk once it has failed the connection", () => {
+  test("drops every chunk and frame once it has failed the connection", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameBytes: 100 });
 
     conn._handleChunk(makeChunk(1, 0, 10, 60)); // 60, stored
-    conn._handleChunk(makeChunk(1, 1, 10, 60)); // 120 > 100 -> fail, not stored
+    conn._handleChunk(makeChunk(1, 1, 10, 60)); // 120 > 100 -> fail
     expect(fail).toHaveBeenCalledTimes(1);
     const partialsAtFailure = conn.partialCount;
 
-    // Post-failure chunks -- a small one for the failed id and one for a fresh id
-    // -- must not re-enter the new-frame path, reach the original handler, or
-    // re-fire fail(); the connection is already terminal.
     conn._handleChunk(makeChunk(1, 2, 10, 1));
     conn._handleChunk(makeChunk(2, 0, 10, 1));
+    conn._handleDataMessage({ data: new Uint8Array([0x01]) });
 
     expect(fail).toHaveBeenCalledTimes(1);
     expect(conn.partialCount).toBe(partialsAtFailure);
-    expect(conn.completed).toEqual([]);
+    expect(conn.delivered).toEqual([]);
   });
 
   test("counts a string chunk by byte residency, not character length", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameBytes: 10 });
 
-    // Six characters is 6 by length but 12 resident bytes (UTF-16 x2), over the
-    // 10-byte cap; counting characters would undercount and miss the bound.
     conn._handleChunk({
       __peerData: 1,
       n: 0,
@@ -236,8 +241,6 @@ describe("boundChunkReassembly: wire-byte and partial bounds", () => {
 
   test("bounds a flood of tiny chunks by per-chunk residency", () => {
     const conn = new FakeChunkedConnection();
-    // 256-byte residency floor, 1000-byte cap: four 1-byte chunks (4 payload
-    // bytes) are charged 256 each and trip the cap, where payload alone would not.
     const fail = install(conn, {
       maxFrameBytes: 1000,
       minChunkResidentBytes: 256,
@@ -271,54 +274,158 @@ describe("boundChunkReassembly: wire-byte and partial bounds", () => {
     );
   });
 
-  test("throws when the PeerJS chunk internals are absent", () => {
+  test("throws when the PeerJS reassembly/unpack internals are absent", () => {
     expect(() =>
       boundChunkReassembly({} as unknown as DataConnection, vi.fn()),
-    ).toThrow(/chunk-reassembly internals/);
+    ).toThrow(/reassembly\/unpack internals/);
+    // _handleChunk present but _handleDataMessage missing must also fail loud.
+    expect(() =>
+      boundChunkReassembly(
+        {
+          _handleChunk: () => {},
+          _chunkedData: {},
+        } as unknown as DataConnection,
+        vi.fn(),
+      ),
+    ).toThrow(/reassembly\/unpack internals/);
   });
 });
 
-describe("boundChunkReassembly: deserialized-structure bound", () => {
-  test("rejects a frame that declares more values than the node budget", () => {
+describe("boundChunkReassembly: deserialized-structure bound at the unpack chokepoint", () => {
+  test("rejects an unchunked frame that would deserialize past the node budget", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameNodes: 100 });
 
-    // An array declaring 1000 elements deserializes to 1000+ JS values; rejected
-    // at the header, before the unpack allocates, even though the wire is tiny.
-    feedFrame(conn, 1, array32Header(1000), 2);
+    // A byte-backed array of 200 fixints: 201 declared values > the 100 budget.
+    // Delivered straight through _handleDataMessage, never touching _handleChunk.
+    conn._handleDataMessage({ data: arrayOfFixints(200) });
 
     expect(fail).toHaveBeenCalledTimes(1);
     const err = fail.mock.calls[0][0] as ConnectionError;
     expect(err.kind).toBe("protocol");
     expect(err.message).toContain("structure limit");
-    expect(conn.completed).toEqual([]);
+    expect(conn.delivered).toEqual([]);
   });
 
-  test("accepts a small structure under the node budget and completes it", () => {
+  test("rejects a deep nested-array spine (children already committed are counted)", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameNodes: 1_000_000 });
+
+    // Eight nested array32, each declaring 999000: ~8M values, but each header
+    // declares far more elements than the bytes that follow -> refused.
+    conn._handleDataMessage({ data: nestedArrayHeaders(999000, 8) });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.delivered).toEqual([]);
+  });
+
+  test("rejects sibling containers whose combined declared count exceeds the budget", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameNodes: 100 });
 
-    // fixarray of three fixints -> four values, well under the budget.
-    feedFrame(conn, 1, new Uint8Array([0x93, 0x01, 0x02, 0x03]), 2);
+    // array(2) of two byte-backed array(60)s: each container is within the bytes
+    // that follow, but 1 + 2 + 60 + 60 = 123 declared values > 100.
+    const frame = new Uint8Array([
+      0xdc,
+      0x00,
+      0x02,
+      ...arrayOfFixints(60),
+      ...arrayOfFixints(60),
+    ]);
+    conn._handleDataMessage({ data: frame });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.delivered).toEqual([]);
+  });
+
+  test("rejects an array declaring more elements than the bytes that follow", () => {
+    const conn = new FakeChunkedConnection();
+    // Node budget generous; the bytes-that-follow check is what catches the
+    // zero-filled-array vector (a 5-byte header declaring a million elements).
+    const fail = install(conn, { maxFrameNodes: 1_000_000_000 });
+
+    conn._handleDataMessage({ data: array32Header(1_000_000) });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.delivered).toEqual([]);
+  });
+
+  test("accepts a small valid structure and delegates to unpack", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameNodes: 100 });
+
+    conn._handleDataMessage({ data: arrayOfFixints(50) }); // 51 values <= 100
 
     expect(fail).not.toHaveBeenCalled();
-    expect(conn.completed).toEqual([1]);
+    expect(conn.delivered).toHaveLength(1);
   });
 
   test("skips a large binary payload without materializing or miscounting it", () => {
     const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxFrameNodes: 4 });
+    const fail = install(conn, { maxFrameNodes: 2 });
 
-    // A raw16 of 10 bytes is a single value; the scan skips its payload across
-    // chunk boundaries and counts one node, so it passes a tiny node budget.
+    // raw16 of 10 bytes: one value; the scan skips the payload and counts one node.
     const raw = new Uint8Array(13);
     raw[0] = 0xda; // raw16
     raw[1] = 0x00;
     raw[2] = 0x0a; // length 10
-    feedFrame(conn, 1, raw, 3);
+    conn._handleDataMessage({ data: raw });
 
     expect(fail).not.toHaveBeenCalled();
-    expect(conn.completed).toEqual([1]);
+    expect(conn.delivered).toHaveLength(1);
+  });
+
+  test("scans the reassembled frame on the chunked-completion path too", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, {
+      maxFrameNodes: 100,
+      maxFrameBytes: 1_000_000,
+    });
+
+    // A byte-backed over-budget array delivered as two chunks: the scan runs on
+    // the reassembled buffer via the recursive _handleDataMessage call.
+    const frame = arrayOfFixints(200);
+    const mid = Math.ceil(frame.length / 2);
+    conn._handleChunk({
+      __peerData: 1,
+      n: 0,
+      total: 2,
+      data: frame.subarray(0, mid),
+    });
+    conn._handleChunk({
+      __peerData: 1,
+      n: 1,
+      total: 2,
+      data: frame.subarray(mid),
+    });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toContain(
+      "structure limit",
+    );
+    expect(conn.delivered).toEqual([]);
+  });
+});
+
+describe("structureOverBudget", () => {
+  test("flags a flat array over the node budget", () => {
+    expect(structureOverBudget(arrayOfFixints(50), 40, 256)).toBe(true);
+  });
+
+  test("passes a flat array under the node budget", () => {
+    expect(structureOverBudget(arrayOfFixints(50), 100, 256)).toBe(false);
+  });
+
+  test("flags an array declaring more than the bytes that follow", () => {
+    expect(structureOverBudget(array32Header(1000), 1_000_000, 256)).toBe(true);
+  });
+
+  test("flags excessive nesting depth", () => {
+    // Each level is one byte-backed array of one element; deeper than the cap.
+    const out: Array<number> = [];
+    for (let d = 0; d < 10; d++) out.push(0x91); // fixarray(1)
+    out.push(0x01); // a fixint leaf
+    expect(structureOverBudget(new Uint8Array(out), 1000, 4)).toBe(true);
   });
 });
 

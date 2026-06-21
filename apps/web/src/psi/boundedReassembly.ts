@@ -48,27 +48,34 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
 /**
  * Maximum number of JavaScript values a single inbound frame may deserialize to.
  * The {@link MAX_WEBRTC_FRAME_BYTES} cap bounds the *wire* bytes, but PeerJS
- * (BinaryPack) `unpack`s a completed frame into a JS structure *synchronously,
- * before delivery and before any schema validation*, and that structure can be
- * far larger than the wire: BinaryPack encodes an empty object or array in one
- * byte but `unpack` allocates a real JS value per element (measured ~64 bytes per
- * empty object, ~40 per empty array, ~8 per integer). So a ~256 MiB wire frame of
- * such elements -- an in-protocol shape, since the association-table and
- * mapped-element frames are arrays of numbers/objects -- would deserialize to
- * many GiB. A structural pre-scan (see {@link boundChunkReassembly}) rejects a
- * frame whose declared container element counts exceed this bound *before* the
- * unpack allocates, fail-closed.
+ * (BinaryPack) `unpack`s a frame into a JS structure *synchronously, before
+ * delivery and before any schema validation*, and that structure can be far
+ * larger than the wire: BinaryPack encodes an empty object or array in one byte
+ * but `unpack` allocates a real JS value per element (measured ~64 bytes per
+ * empty object, ~40 per empty array, ~8 per integer), and -- worse -- a
+ * `new Array(N)` from an `array32` header eagerly allocates N slots (~8N bytes)
+ * even when the elements are absent, since `unpack` reads past the end of the
+ * buffer as zero rather than throwing. So a tiny wire frame of array headers --
+ * an in-protocol shape, since the association-table and mapped-element frames are
+ * arrays of numbers/objects -- could deserialize to many GiB. A structural
+ * pre-scan (see {@link structureOverBudget}, run at the unpack chokepoint) rejects
+ * a frame whose declared structure would exceed this bound *before* `unpack`
+ * allocates, fail-closed. The scan also bounds each declared container by the
+ * bytes that follow it (each element needs at least one byte to encode), which
+ * ties the deserialized value count to the wire size and closes the
+ * zero-filled-array vector.
  *
  * Value: 33,554,432 (2^25), derived from the largest legitimate frame. That is
  * the mapped-element frame -- `Array<{theirIndex, iteration}>`, one entry per
- * matched record -- which deserializes to ~5 values per record (the outer array
- * slot, the object, its two keys and two values). At the set-size ceiling the
- * 256 MiB byte cap implies (~4 million elements), that is ~21 million values;
- * 2^25 leaves headroom so no exchange the byte cap admits is rejected on a
- * downstream frame. Residual: the worst-case attacker heap is bounded to roughly
- * this count times the ~64-byte empty-object cost (~2 GiB) -- fixed, and far
- * below the ~16 GiB the byte cap alone permitted; tightening it further would
- * require lowering the set-size byte cap. Fixed, not configurable.
+ * matched record -- which deserializes to ~5 values per record. At the set-size
+ * ceiling the 256 MiB byte cap implies (~4 million elements), that is ~21 million
+ * values; 2^25 leaves headroom so no exchange the byte cap admits is rejected on
+ * a downstream frame. Residual: a single frame's retained structure is bounded to
+ * roughly this count times the ~8-byte per-slot cost (~268 MiB) -- fixed, and far
+ * below the unbounded allocation the wire-byte cap alone permitted; reaching it
+ * requires proportional wire bytes (the per-container byte check above), so a
+ * pathological frame is no cheaper than a legitimate one of the same size.
+ * Fixed, not configurable.
  */
 export const MAX_WEBRTC_FRAME_NODES = 33_554_432;
 
@@ -115,28 +122,29 @@ interface PeerChunk {
   data: ArrayBufferView | ArrayBuffer | string | undefined;
 }
 
-/** PeerJS's per-message reassembly state: slices keyed by chunk index, a running
- * count, and the declared chunk total (set from the first chunk). */
-interface ChunkInfo {
-  data: Array<Uint8Array | undefined>;
-  count: number;
-  total: number;
+/** A message handed to PeerJS's `_handleDataMessage`, the sole point at which an
+ * inbound (or reassembled) frame is `unpack`ed. `data` is the raw bytes about to
+ * be deserialized. */
+interface PeerDataMessage {
+  data: ArrayBufferView | ArrayBuffer | string | undefined;
 }
 
 /**
  * The PeerJS `DataConnection` internals this guard wraps. PeerJS reassembles a
- * chunked binary frame in `_handleChunk`, accumulating slices into `_chunkedData`
- * keyed by message id and deleting the entry once the frame completes. Neither
- * field is part of the public `DataConnection` type, so this is a documented
- * dependency premise (the binary/chunked connection class is the one
- * `peer.connect`/an incoming connection uses by default; see the `peerjs`
- * bundler). {@link assertChunkReassemblySupported} checks both exist, so a
+ * chunked binary frame in `_handleChunk` (accumulating slices into `_chunkedData`
+ * keyed by message id, deleting the entry on completion), and `unpack`s every
+ * frame -- unchunked, or the reassembled buffer on completion -- in
+ * `_handleDataMessage`. None is part of the public `DataConnection` type, so this
+ * is a documented dependency premise (the binary/chunked connection class is the
+ * one `peer.connect`/an incoming connection uses by default; see the `peerjs`
+ * bundler). {@link assertChunkReassemblySupported} checks all three exist, so a
  * `peerjs` upgrade that renames or restructures them fails loud rather than
  * silently dropping the bound.
  */
 interface ChunkedDataConnection {
   _handleChunk: (chunk: PeerChunk) => void;
-  _chunkedData: Record<number, ChunkInfo | undefined>;
+  _handleDataMessage: (message: PeerDataMessage) => void;
+  _chunkedData: Record<number, { count: number } | undefined>;
 }
 
 /** Resident byte length of a chunk slice. A binary-mode channel always supplies
@@ -150,11 +158,11 @@ function chunkByteLength(data: PeerChunk["data"]): number {
   return data.byteLength;
 }
 
-/** Coerce a chunk slice to a `Uint8Array` view for the structural scan, without
- * copying where possible. Binary-mode channels always supply a view/buffer; a
- * string (never expected on this path) yields an empty view, which the scan
- * treats as a harmless gap. */
-function toUint8(data: PeerChunk["data"]): Uint8Array {
+/** Coerce a frame's bytes to a `Uint8Array` view for the structural scan, without
+ * copying. Binary-mode channels always supply a view/buffer; a string (never
+ * expected on this path) yields an empty view, which the scan treats as a
+ * harmless empty frame. */
+function toUint8(data: PeerDataMessage["data"]): Uint8Array {
   if (data === undefined || typeof data === "string") return new Uint8Array(0);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
@@ -176,14 +184,11 @@ function frameBoundError(detail: string): ConnectionError {
  * The delivered-frame half of the inbound byte bound: returns the terminal
  * {@link frameBoundError} if `data` is a binary frame larger than `maxBytes`,
  * otherwise `undefined`. This runs at the stable `data` event -- a backstop, at
- * the public layer, for the {@link boundChunkReassembly} guard at the fragile
- * internal layer: an over-cap `Uint8Array` is refused as delivered regardless of
- * how (or whether) PeerJS chunked it.
- *
- * A parsed object/array returns `undefined` (not cheaply byte-measurable here);
- * those frames are governed by the reassembly bounds before delivery and by
- * core's count/structure bounds after, and a large set arrives as the binary
- * `Uint8Array` this does measure.
+ * the public layer, for the reassembly guard at the fragile internal layer: an
+ * over-cap `Uint8Array` is refused as delivered regardless of how (or whether)
+ * PeerJS chunked it. A parsed object/array returns `undefined` (not cheaply
+ * byte-measurable here); the reassembly bounds govern it before delivery and
+ * core's count/structure bounds after.
  */
 export function checkDeliveredFrameBound(
   data: unknown,
@@ -198,31 +203,21 @@ export function checkDeliveredFrameBound(
     : undefined;
 }
 
-/** A cursor over an ordered list of byte slices, presenting them as one logical
- * big-endian stream without concatenating (so scanning the large binary set
- * frame skips its payload in O(slices), never materializing a second copy).
- * Every read throws `RangeError` past the end, which the scan treats as a
- * malformed/truncated frame. */
-class SliceCursor {
-  private si = 0;
-  private off = 0;
+/** A forward-only cursor over one BinaryPack buffer; every read throws
+ * `RangeError` past the end, which the scan treats as a malformed/truncated
+ * frame. */
+class ByteCursor {
+  private i = 0;
 
-  constructor(private readonly slices: ReadonlyArray<Uint8Array>) {}
+  constructor(private readonly b: Uint8Array) {}
 
-  private seek(): void {
-    while (
-      this.si < this.slices.length &&
-      this.off >= this.slices[this.si].length
-    ) {
-      this.off = 0;
-      this.si++;
-    }
+  remaining(): number {
+    return this.b.length - this.i;
   }
 
   u8(): number {
-    this.seek();
-    if (this.si >= this.slices.length) throw new RangeError("underrun");
-    return this.slices[this.si][this.off++];
+    if (this.i >= this.b.length) throw new RangeError("underrun");
+    return this.b[this.i++];
   }
 
   u16(): number {
@@ -239,18 +234,8 @@ class SliceCursor {
   }
 
   skip(n: number): void {
-    while (n > 0) {
-      this.seek();
-      if (this.si >= this.slices.length) throw new RangeError("underrun");
-      const avail = this.slices[this.si].length - this.off;
-      if (n < avail) {
-        this.off += n;
-        return;
-      }
-      n -= avail;
-      this.off = 0;
-      this.si++;
-    }
+    if (n > this.remaining()) throw new RangeError("underrun");
+    this.i += n;
   }
 }
 
@@ -259,7 +244,7 @@ class SliceCursor {
  * scalar). Mirrors `peerjs-js-binarypack`'s `Unpacker.unpack` marker dispatch:
  * a map of K pairs declares 2K children (K keys + K values). An unknown marker
  * yields 0 (BinaryPack returns `undefined` for it without consuming a payload). */
-function readValueChildren(cursor: SliceCursor): number {
+function readValueChildren(cursor: ByteCursor): number {
   const type = cursor.u8();
   if (type < 0x80) return 0; // positive fixint
   if ((type ^ 0xe0) < 0x20) return 0; // negative fixint
@@ -322,23 +307,31 @@ function readValueChildren(cursor: SliceCursor): number {
   }
 }
 
-/** Whether the BinaryPack value spanning `slices` would deserialize to more than
- * `maxNodes` values, or nest deeper than `maxDepth`. Walks the structure reading
+/**
+ * Whether the BinaryPack value in `buf` would deserialize to more than `maxNodes`
+ * values, nest deeper than `maxDepth`, or declare any container with more
+ * elements than the bytes that follow it can encode. Walks the structure reading
  * only container headers and scalar lengths -- never materializing the payload --
- * and rejects as soon as a declared container size would breach the budget, so an
- * over-cap frame is caught at its header before `unpack` allocates. A read past
- * the end (a malformed or truncated frame) returns `false`: it passed every
- * declared-size check, so it cannot be an amplification, and PeerJS's own unpack
- * handles the malformation downstream. */
-function structureOverBudget(
-  slices: ReadonlyArray<Uint8Array>,
+ * and rejects as soon as the running total of declared values breaches the budget
+ * or a container over-declares, so an over-cap frame is caught before `unpack`
+ * allocates (including the `new Array(N)`-from-a-tiny-header case, where each
+ * declared element must be backed by at least one wire byte). A read past the end
+ * (a malformed/truncated frame) returns `false`: every container it passed was
+ * within both the node budget and the bytes-that-follow check, so the structure
+ * it commits `unpack` to is already bounded, and PeerJS's own unpack handles the
+ * malformation downstream.
+ */
+export function structureOverBudget(
+  buf: Uint8Array,
   maxNodes: number,
   maxDepth: number,
 ): boolean {
-  const cursor = new SliceCursor(slices);
+  const cursor = new ByteCursor(buf);
   // remaining[d] = child values still to read at nesting level d; one root value.
   const remaining: Array<number> = [1];
-  let nodes = 0;
+  // Total values the structure has declared so far (the root plus every
+  // container's children), i.e. the number of values `unpack` will allocate.
+  let declared = 1;
   try {
     while (remaining.length > 0) {
       const top = remaining.length - 1;
@@ -347,12 +340,14 @@ function structureOverBudget(
         continue;
       }
       remaining[top]--;
-      nodes++;
-      if (nodes > maxNodes) return true;
       const children = readValueChildren(cursor);
       if (children > 0) {
+        // Each declared element needs at least one byte to encode, so a container
+        // claiming more elements than the bytes that follow is a zero-fill lie.
+        if (children > cursor.remaining()) return true;
+        declared += children;
+        if (declared > maxNodes) return true;
         if (remaining.length >= maxDepth) return true;
-        if (nodes + children > maxNodes) return true;
         remaining.push(children);
       }
     }
@@ -362,33 +357,11 @@ function structureOverBudget(
   return false;
 }
 
-/** Reconstruct a completed frame's slices in chunk-index order from PeerJS's
- * accumulated state plus the completing chunk (not yet stored). Returns
- * `undefined` if any index is missing (a duplicate-index chunk inflated the count
- * without filling every slot -- a malformed frame PeerJS will itself error on),
- * in which case the caller skips the scan and delegates. */
-function orderedSlices(
-  prev: ChunkInfo,
-  chunk: PeerChunk,
-): ReadonlyArray<Uint8Array> | undefined {
-  const slices: Array<Uint8Array> = new Array<Uint8Array>(prev.total);
-  for (let k = 0; k < prev.total; k++) {
-    if (k === chunk.n) {
-      slices[k] = toUint8(chunk.data);
-      continue;
-    }
-    const stored = prev.data[k];
-    if (stored === undefined) return undefined;
-    slices[k] = stored;
-  }
-  return slices;
-}
-
 /**
- * Asserts `conn` exposes the PeerJS chunk-reassembly internals
- * {@link boundChunkReassembly} wraps. Encodes the dependency premise as a runtime
- * check, not a comment: a `peerjs` upgrade that renames or restructures the chunk
- * reassembly must fail loud (the live browser exchange test installs the guard on
+ * Asserts `conn` exposes the PeerJS internals {@link boundChunkReassembly} wraps.
+ * Encodes the dependency premise as a runtime check, not a comment: a `peerjs`
+ * upgrade that renames or restructures the chunk reassembly or the unpack
+ * chokepoint must fail loud (the live browser exchange test installs the guard on
  * every exchange) rather than silently run with no inbound bound. Called up front
  * in `openPeerMessageConnection`, before any listener is attached, so a broken
  * premise fails cleanly with nothing to tear down.
@@ -396,44 +369,51 @@ function orderedSlices(
 export function assertChunkReassemblySupported(conn: DataConnection): void {
   const probe = conn as unknown as {
     _handleChunk?: unknown;
+    _handleDataMessage?: unknown;
     _chunkedData?: unknown;
   };
   if (
     typeof probe._handleChunk !== "function" ||
+    typeof probe._handleDataMessage !== "function" ||
     !probe._chunkedData ||
     typeof probe._chunkedData !== "object"
   ) {
     throw new Error(
-      "PeerJS data connection does not expose the expected chunk-reassembly " +
-        "internals (_handleChunk/_chunkedData); the inbound frame bound cannot " +
-        "be installed. Re-verify against the installed peerjs version.",
+      "PeerJS data connection does not expose the expected reassembly/unpack " +
+        "internals (_handleChunk/_handleDataMessage/_chunkedData); the inbound " +
+        "frame bound cannot be installed. Re-verify against the installed peerjs " +
+        "version.",
     );
   }
 }
 
 /**
- * Wraps `conn`'s PeerJS chunk reassembly so it cannot exhaust memory, the
- * primary inbound bound for the WebRTC transport. PeerJS reassembles a chunked
- * frame in `_handleChunk`, accumulating slices keyed by message id and then
- * `unpack`ing the completed buffer into a JS structure -- with no cap on total
- * wire bytes, on the deserialized value count, on retained chunk count, on
- * concurrent reassemblies, and no eviction of a never-completed partial. This
- * wrap adds all of those before delegating to the original, each fail-closed via
- * `fail` (mirroring the file-sync frame-size control's intent), so the offending
- * chunk is never stored or unpacked:
+ * Wraps `conn`'s PeerJS reassembly and unpack so an inbound frame cannot exhaust
+ * memory, the primary inbound bound for the WebRTC transport. PeerJS reassembles
+ * a chunked frame in `_handleChunk` (accumulating slices keyed by message id) and
+ * `unpack`s every frame -- unchunked, or the reassembled buffer on completion --
+ * in `_handleDataMessage`, with no cap on any of total wire bytes, deserialized
+ * value count, retained chunk count, or concurrent reassemblies, and no eviction
+ * of a never-completed partial. This wrap adds all of those before delegating,
+ * each fail-closed via `fail` (mirroring the file-sync frame-size control's
+ * intent), so the offending chunk is never stored and the offending frame is
+ * never unpacked:
  *
- * - Wire bytes across all in-flight reassemblies are bounded by `maxFrameBytes`.
- * - The deserialized value count is bounded by `maxFrameNodes`: on the completing
- *   chunk, the reassembled BinaryPack structure is scanned (see
- *   {@link structureOverBudget}) before PeerJS unpacks it, since `unpack` can
- *   allocate far more than the wire bytes.
- * - Retained chunks per reassembly are bounded by `maxChunks` (each chunk is a
- *   retained `Uint8Array` the byte cap undercounts).
+ * - Wire bytes across all in-flight reassemblies are bounded by `maxFrameBytes`
+ *   (in `_handleChunk`).
+ * - Retained chunks per reassembly are bounded by `maxChunks`, each charged at
+ *   least `minChunkResidentBytes` against the byte cap (a chunk is a retained
+ *   `Uint8Array` the payload-byte count undercounts).
  * - Concurrent incomplete reassemblies are bounded by `maxConcurrentReassemblies`;
  *   a new id beyond the cap evicts the oldest partial. Eviction is silent and
  *   non-fatal: the lockstep protocol never has a legitimate second partial, so it
  *   only drops adversarial data, and logging per eviction would itself be a
  *   spray-amplified log-flood vector.
+ * - The deserialized value count is bounded by `maxFrameNodes` (in
+ *   `_handleDataMessage`, the unpack chokepoint, which both an unchunked frame and
+ *   the reassembled-completion path flow through): the frame's BinaryPack
+ *   structure is scanned before PeerJS unpacks it, since `unpack` can allocate
+ *   far more than the wire bytes.
  *
  * @param conn   The PeerJS data connection (open or not yet open).
  * @param fail   Latches a terminal failure (the connection's `controls.fail`).
@@ -459,23 +439,27 @@ export function boundChunkReassembly(
   const maxFrameNodes = options?.maxFrameNodes ?? MAX_WEBRTC_FRAME_NODES;
   const maxDepth = options?.maxReassemblyDepth ?? MAX_WEBRTC_REASSEMBLY_DEPTH;
   const maxChunks = options?.maxChunks ?? MAX_CHUNKS_PER_REASSEMBLY;
-  // Charge each chunk at least its retained per-chunk overhead, so a flood of
-  // tiny chunks is bounded by true memory rather than payload bytes; legitimate
-  // chunks (~16 KiB) far exceed this, so it never affects them.
   const minChunkBytes =
     options?.minChunkResidentBytes ?? MIN_CHUNK_RESIDENT_BYTES;
 
   assertChunkReassemblySupported(conn);
   const internals = conn as unknown as ChunkedDataConnection;
-  const original = internals._handleChunk.bind(internals);
+  const originalHandleChunk = internals._handleChunk.bind(internals);
+  const originalHandleDataMessage =
+    internals._handleDataMessage.bind(internals);
 
   // Per-id accumulated state, in arrival order (Map preserves insertion order,
   // so the first key is the oldest partial to evict).
   const inFlight = new Map<number, { bytes: number; chunks: number }>();
   let bytesInFlight = 0;
   // Latched once a bound fails the connection: it is terminal, so every later
-  // chunk is dropped without bookkeeping or reaching the original handler.
+  // chunk and frame is dropped without bookkeeping, reassembly, or unpack.
   let failed = false;
+
+  const failClosed = (error: ConnectionError): void => {
+    failed = true;
+    fail(error);
+  };
 
   const evictOldest = (): void => {
     const oldest = inFlight.keys().next().value;
@@ -485,52 +469,31 @@ export function boundChunkReassembly(
     delete internals._chunkedData[oldest];
   };
 
-  const failClosed = (error: ConnectionError): void => {
-    failed = true;
-    fail(error);
-  };
-
+  // Bounds the chunk ACCUMULATION (before completion): wire bytes, retained chunk
+  // count, and concurrent reassemblies, evicting the oldest partial past the cap.
   internals._handleChunk = (chunk: PeerChunk): void => {
     if (failed) return;
     const id = chunk.__peerData;
     const bytes = Math.max(chunkByteLength(chunk.data), minChunkBytes);
     const entry = inFlight.get(id);
 
-    // A frame's first chunk starts a new reassembly: enforce the concurrent-count
-    // cap first, evicting the oldest partial to make room.
     if (entry === undefined) {
       while (inFlight.size >= maxConcurrent) evictOldest();
     }
-
-    // Wire-byte cap across every in-flight reassembly.
     if (bytesInFlight + bytes > maxFrameBytes) {
       failClosed(frameBoundError(`${maxFrameBytes}-byte size limit`));
       return;
     }
-    // Per-reassembly chunk-count cap (retained chunk overhead).
     const chunks = (entry?.chunks ?? 0) + 1;
     if (chunks > maxChunks) {
       failClosed(frameBoundError(`${maxChunks}-chunk reassembly limit`));
       return;
     }
-    // Deserialized value-count cap: scan the completed BinaryPack structure
-    // before PeerJS unpacks it (which can allocate far more than the wire bytes).
-    const prev = internals._chunkedData[id];
-    if (prev !== undefined && prev.count + 1 === prev.total) {
-      const slices = orderedSlices(prev, chunk);
-      if (
-        slices !== undefined &&
-        structureOverBudget(slices, maxFrameNodes, maxDepth)
-      ) {
-        failClosed(frameBoundError(`${maxFrameNodes}-value structure limit`));
-        return;
-      }
-    }
 
     bytesInFlight += bytes;
     inFlight.set(id, { bytes: (entry?.bytes ?? 0) + bytes, chunks });
 
-    original(chunk);
+    originalHandleChunk(chunk);
 
     // PeerJS deletes the `_chunkedData` entry when the frame completes; mirror
     // that here so a completed frame's bytes are released from the running total.
@@ -538,5 +501,18 @@ export function boundChunkReassembly(
       bytesInFlight -= inFlight.get(id)?.bytes ?? 0;
       inFlight.delete(id);
     }
+  };
+
+  // Bounds the DESERIALIZED structure at the unpack chokepoint, which both an
+  // unchunked frame (direct call) and a completed reassembly (recursive call from
+  // `_handleChunk`) flow through. Scanning here, before the original unpacks,
+  // covers a tiny unchunked frame that never reaches `_handleChunk` at all.
+  internals._handleDataMessage = (message: PeerDataMessage): void => {
+    if (failed) return;
+    if (structureOverBudget(toUint8(message.data), maxFrameNodes, maxDepth)) {
+      failClosed(frameBoundError(`${maxFrameNodes}-value structure limit`));
+      return;
+    }
+    originalHandleDataMessage(message);
   };
 }
