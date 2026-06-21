@@ -24,6 +24,12 @@ class FakeDataConnection extends EventEmitter {
     this.torndown = true;
   });
 
+  // The PeerJS chunk-reassembly internals openPeerMessageConnection wraps to
+  // bound inbound memory (see boundedReassembly.ts). Modeled here so the install
+  // assertion passes; the bound itself is exercised in boundedReassembly.test.ts.
+  _chunkedData: Record<number, unknown> = {};
+  _handleChunk = (_chunk: unknown) => {};
+
   constructor(open = true) {
     super();
     this.open = open;
@@ -46,6 +52,55 @@ describe("openPeerMessageConnection", () => {
     fake.emit("data", { hello: "world" });
 
     expect(await mc.receive()).toEqual({ hello: "world" });
+  });
+
+  test("rejects an over-cap delivered binary frame as a terminal protocol error", async () => {
+    // The delivered-frame backstop: an over-cap Uint8Array arriving on the data
+    // event fails the exchange rather than being handed to receive(). A tiny cap
+    // keeps the test cheap (the production cap is a fixed 256 MiB).
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn, { maxFrameBytes: 8 });
+
+    fake.emit("data", new Uint8Array(9)); // one byte over the cap
+
+    const err = await mc.receive().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("protocol");
+    expect((err as ConnectionError).message).toContain("exceeds");
+  });
+
+  test("accepts an at-cap delivered binary frame", async () => {
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn, { maxFrameBytes: 8 });
+
+    const atCap = new Uint8Array(8); // exactly at the cap is accepted
+    fake.emit("data", atCap);
+
+    expect(await mc.receive()).toBe(atCap);
+  });
+
+  test("does not size-bound a delivered non-binary frame", async () => {
+    // A parsed object/array is not byte-measured here (core's count bounds govern
+    // it); the byte bound only refuses binary frames.
+    const { fake, conn } = makeConn();
+    const mc = await openPeerMessageConnection(conn, { maxFrameBytes: 1 });
+
+    const obj = { theirIndex: 1, iteration: 0 };
+    fake.emit("data", obj);
+
+    expect(await mc.receive()).toBe(obj);
+  });
+
+  test("fails to install the inbound bound on a connection lacking PeerJS internals", async () => {
+    // The dependency-premise check: a connection without _handleChunk/_chunkedData
+    // (a future peerjs that renamed them) fails loud rather than running unbounded.
+    const fake = new EventEmitter() as unknown as {
+      _handleChunk?: unknown;
+      _chunkedData?: unknown;
+    } & EventEmitter;
+    await expect(
+      openPeerMessageConnection(fake as unknown as DataConnection),
+    ).rejects.toThrow(/chunk-reassembly internals/);
   });
 
   test("delegates send to the underlying channel", async () => {

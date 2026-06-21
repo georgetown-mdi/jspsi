@@ -4,6 +4,11 @@ import {
   asConnectionError,
 } from "@psilink/core";
 
+import {
+  MAX_WEBRTC_FRAME_BYTES,
+  boundChunkReassembly,
+  checkDeliveredFrameBound,
+} from "./boundedReassembly";
 import { redactErrorIds } from "./peerLogging";
 import { waitForConnectionOpen } from "./waitForOpen";
 
@@ -36,6 +41,15 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * the channel; and `close` detaches the listeners and closes the channel,
  * flushing buffered writes first on a clean close.
  *
+ * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
+ * reassembly is capped so an oversized PSI set frame or a flood of
+ * never-completed partial reassemblies fails closed rather than allocating
+ * proportional to what the peer sends (see {@link boundChunkReassembly}), and a
+ * delivered frame is re-checked at this stable layer (see
+ * {@link checkDeliveredFrameBound}). This is the WebRTC transport's own bound:
+ * core's AEAD frame-size envelope is out of scope on the web path, which runs
+ * the data channel under DTLS and declines the AEAD wrap.
+ *
  * If the channel never opens (timeout, or a pre-open `error`/`close`), the
  * returned promise rejects and the half-open channel is torn down before the
  * rejection propagates, since `peer.disconnect()` alone would not close it.
@@ -44,16 +58,44 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * @param options  `openTimeoutMs` bounds how long to wait for the channel to
  *                 open (see {@link waitForConnectionOpen}); `inactivityTimeoutMs`
  *                 overrides the {@link DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS}
- *                 parked-receive budget.
+ *                 parked-receive budget. `maxFrameBytes` /
+ *                 `maxConcurrentReassemblies` override the fixed inbound bounds
+ *                 (default {@link MAX_WEBRTC_FRAME_BYTES} and the concurrent
+ *                 reassembly cap) for tests only -- they are not an
+ *                 operator-facing knob.
  */
 export async function openPeerMessageConnection(
   conn: DataConnection,
-  options?: { openTimeoutMs?: number; inactivityTimeoutMs?: number },
+  options?: {
+    openTimeoutMs?: number;
+    inactivityTimeoutMs?: number;
+    maxFrameBytes?: number;
+    maxConcurrentReassemblies?: number;
+  },
 ): Promise<MessageConnection> {
+  const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
   const opened = waitForConnectionOpen(conn, options?.openTimeoutMs);
   const mc = new QueuedMessageConnection(
     (controls) => {
-      const onData = (data: unknown) => controls.deliver(data);
+      // Bound PeerJS chunk reassembly before any chunk arrives, so an oversized
+      // frame or a partial-reassembly flood fails closed (via controls.fail)
+      // rather than allocating proportional to the peer-chosen size. The over-cap
+      // error carries no peer id, so it needs no redaction.
+      boundChunkReassembly(conn, controls.fail, {
+        maxFrameBytes,
+        maxConcurrentReassemblies: options?.maxConcurrentReassemblies,
+      });
+      // Re-check a fully delivered frame at this stable layer: a backstop for the
+      // chunk-layer bound above (which reaches into PeerJS internals) that refuses
+      // an over-cap binary frame as delivered, however it was assembled.
+      const onData = (data: unknown) => {
+        const overCap = checkDeliveredFrameBound(data, maxFrameBytes);
+        if (overCap) {
+          controls.fail(overCap);
+          return;
+        }
+        controls.deliver(data);
+      };
       // PeerJS interpolates the remote id (`conn.peer`, a derived rendezvous id)
       // into the errors it emits on a mid-exchange failure; redact it before
       // `asConnectionError` wraps, so neither the wrapped message nor the
