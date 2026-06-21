@@ -572,15 +572,18 @@ test("a malformed pad_left length still validates, so the runtime factory check 
   );
 });
 
-// ─── parse_date format-string bound (partner-controlled per-row regex DoS) ────
+// ─── parse_date format-string bounds (partner-controlled per-row regex DoS) ───
 // parse_date builds a `new RegExp` from `inputFormat` and assembles its result
 // from `outputFormat`, recompiled per row by applyElementTransform over the full
-// dataset. Unlike the four `tier: "regex"` functions, parse_date's format is not
-// a raw pattern and is NOT screened by the ReDoS control, so an unbounded format
-// string makes every row compile a giant regex (a CPU burn) or allocate a giant
-// output. The bound is enforced at LinkageTermsSchema validation, before any row
-// runs. (parse_date's runtime behavior is unit-tested in standardization.test.ts;
-// these assert the schema-level wiring on the partner-parsed path.)
+// dataset. Two distinct risks, two controls, both at LinkageTermsSchema
+// validation: (1) an unbounded format makes every row compile / allocate work
+// proportional to its length -- bounded by the MAX_DATE_FORMAT_LENGTH refine; and
+// (2) the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that can
+// catastrophically backtrack at a length well under that cap -- rejected by the
+// ReDoS screen (linkageTermsHaveUnsafeTransformRegex, extended to reconstruct and
+// analyze parse_date's pattern). Tests that target ONLY the length cap use a
+// non-token literal ("x") so the two controls are exercised independently.
+// (parse_date's runtime behavior is unit-tested in standardization.test.ts.)
 
 const parseDateTerms = (params: Record<string, unknown>) => ({
   ...base,
@@ -594,9 +597,10 @@ const parseDateTerms = (params: Record<string, unknown>) => ({
   ],
 });
 
-test("an over-large parse_date inputFormat is rejected at validation, before any per-row regex build", () => {
+test("an over-large parse_date inputFormat is rejected by the length cap", () => {
+  // A non-token literal, so this isolates the length cap from the ReDoS screen.
   const result = safeParseLinkageTerms(
-    parseDateTerms({ inputFormat: "DD".repeat(MAX_DATE_FORMAT_LENGTH) }),
+    parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
   );
   expect(result.success).toBe(false);
   if (result.success) return;
@@ -606,9 +610,10 @@ test("an over-large parse_date inputFormat is rejected at validation, before any
   );
 });
 
-test("an over-large parse_date outputFormat is rejected at validation", () => {
+test("an over-large parse_date outputFormat is rejected by the length cap", () => {
+  // outputFormat is assembled, not compiled, so only the length cap guards it.
   const result = safeParseLinkageTerms(
-    parseDateTerms({ outputFormat: "Y".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+    parseDateTerms({ outputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
   );
   expect(result.success).toBe(false);
 });
@@ -626,23 +631,55 @@ test("a real-sized parse_date format parses and is preserved (no clamp)", () => 
   });
 });
 
-test("a parse_date format at exactly the maximum parses; one over it is rejected", () => {
+test("a parse_date format at exactly the length maximum parses; one over is rejected", () => {
+  // Non-token literal so this isolates the length cap from the ReDoS screen.
   expect(
     safeParseLinkageTerms(
-      parseDateTerms({ inputFormat: "D".repeat(MAX_DATE_FORMAT_LENGTH) }),
+      parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH) }),
     ).success,
   ).toBe(true);
   expect(
     safeParseLinkageTerms(
-      parseDateTerms({ inputFormat: "D".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+      parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
     ).success,
   ).toBe(false);
 });
 
+test("a catastrophic-backtracking parse_date inputFormat is rejected by the ReDoS screen", () => {
+  // "MM".repeat(24) is 48 chars -- well under the length cap -- but expands to 24
+  // adjacent `(\d{1,2})` groups, a catastrophic-backtracking regex. The length cap
+  // does not catch it (it is short); the ReDoS screen, extended to reconstruct
+  // parse_date's pattern, does. Without this the per-row regex would hang the
+  // acceptor over the full dataset.
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ inputFormat: "MM".repeat(24) }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/catastrophic backtracking/);
+});
+
+test("common parse_date formats are not falsely flagged by the ReDoS screen", () => {
+  // Legitimate layouts (separated, or with at most two adjacent ambiguous groups
+  // like YYYYMMDD) must not be over-rejected by the catastrophic-backtracking
+  // screen.
+  for (const inputFormat of [
+    "MM/DD/YYYY",
+    "YYYY-MM-DD",
+    "YYYYMMDD",
+    "DD/MM/YYYY",
+  ]) {
+    expect(safeParseLinkageTerms(parseDateTerms({ inputFormat })).success).toBe(
+      true,
+    );
+  }
+});
+
 test("a non-string parse_date format still validates, so the runtime factory handles it", () => {
   // Only a string format drives the regex build / output allocation; the factory
-  // treats a non-string as an empty/absent format, so the schema leaves it alone
-  // (behavior unchanged) rather than pre-empting it here.
+  // treats a non-string as an empty/absent format, so neither the length cap nor
+  // the ReDoS screen pre-empts it (behavior unchanged).
   expect(
     safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 })).success,
   ).toBe(true);

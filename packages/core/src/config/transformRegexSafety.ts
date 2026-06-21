@@ -1,5 +1,6 @@
 import { isSafePattern } from "redos-detector";
 import type { LinkageTerms } from "./linkageTerms.js";
+import { parseDateRegexSource } from "../standardization.js";
 
 // --- Catastrophic-backtracking (ReDoS) rejection -----------------------------
 //
@@ -161,20 +162,53 @@ export function transformPatternIsUnsafe(
 }
 
 /**
- * Whether any linkage-key element transform in `terms` uses a regex pattern that
- * is a catastrophic-backtracking risk. Walks every regex step
- * ({@link REGEX_STEP_PATTERN_PARAM}) across all keys, elements, and transform
- * steps and returns `true` on the first unsafe pattern (so a packed bomb is
- * caught early), or when the analysis budget is exhausted before a pattern is
- * vetted (fail closed).
+ * The regex source a transform `step` compiles and runs per row, or `undefined`
+ * if it runs none.
  *
- * A present pattern value is coerced to a string exactly as `new RegExp` would
- * coerce it, so a non-string JSON value that stringifies to a dangerous pattern
- * cannot slip past by virtue of its type -- including a JSON `null`, which both
- * the runtime factory and this check render as the literal regex `/null/`. Only
- * an omitted pattern (`undefined`) is skipped: it compiles to the empty regex at
- * runtime, which is safe. Vetted bundled patterns
- * ({@link KNOWN_SAFE_TRANSFORM_PATTERNS}) bypass the analyzer.
+ * For a `tier: "regex"` function ({@link REGEX_STEP_PATTERN_PARAM}) it is the raw
+ * partner pattern, coerced to a string exactly as `new RegExp` would coerce it, so
+ * a non-string JSON value that stringifies to a dangerous pattern cannot slip past
+ * by its type -- including a JSON `null`, which both the runtime factory and this
+ * check render as the literal regex `/null/`; an omitted pattern is skipped (it
+ * compiles to the empty, safe regex).
+ *
+ * For `parse_date` it is the regex its factory BUILDS from `inputFormat`
+ * ({@link parseDateRegexSource}). `parse_date` is deliberately absent from
+ * {@link REGEX_STEP_PATTERN_PARAM} because its format is not a raw pattern -- but
+ * the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that can
+ * catastrophically backtrack, so the screen must inspect the expansion, not a raw
+ * param. A non-string `inputFormat` builds a trivial empty regex at runtime (the
+ * factory defaults only a nullish value; a present non-string yields no tokens),
+ * so there is nothing to screen.
+ */
+function transformStepRegexSource(step: {
+  function: string;
+  params?: Record<string, unknown>;
+}): string | undefined {
+  const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
+  if (paramKey !== undefined) {
+    const raw = step.params?.[paramKey];
+    if (raw === undefined) return undefined;
+    return typeof raw === "string" ? raw : String(raw);
+  }
+  if (step.function === "parse_date") {
+    const inputFormat = step.params?.inputFormat;
+    if (typeof inputFormat !== "string") return undefined;
+    return parseDateRegexSource(inputFormat);
+  }
+  return undefined;
+}
+
+/**
+ * Whether any linkage-key element transform in `terms` compiles a per-row regex
+ * that is a catastrophic-backtracking risk. Walks every transform step across all
+ * keys and elements, takes the regex source each step would run
+ * ({@link transformStepRegexSource} -- a raw `tier: "regex"` pattern, or the
+ * pattern `parse_date` expands from its `inputFormat`), and returns `true` on the
+ * first unsafe one (so a packed bomb is caught early), or when the analysis budget
+ * is exhausted before a pattern is vetted (fail closed). A step that runs no regex
+ * is skipped; vetted bundled patterns ({@link KNOWN_SAFE_TRANSFORM_PATTERNS})
+ * bypass the analyzer.
  */
 export function linkageTermsHaveUnsafeTransformRegex(
   terms: Pick<LinkageTerms, "linkageKeys">,
@@ -188,11 +222,8 @@ export function linkageTermsHaveUnsafeTransformRegex(
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
       for (const step of element.transform ?? []) {
-        const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
-        if (paramKey === undefined) continue;
-        const raw = step.params?.[paramKey];
-        if (raw === undefined) continue;
-        const source = typeof raw === "string" ? raw : String(raw);
+        const source = transformStepRegexSource(step);
+        if (source === undefined) continue;
         if (KNOWN_SAFE_TRANSFORM_PATTERNS.has(source)) continue;
 
         const remainingMs = totalBudgetMs - (Date.now() - startedAt);

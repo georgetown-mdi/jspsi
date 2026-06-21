@@ -156,17 +156,23 @@ function removeAffixes(s: string): string {
     .trim();
 }
 
-// Parse `input_format` -> YAML camelizes keys but not values, so format
-// string tokens YYYY / MM / DD stay as written; delimiter characters are
-// literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
-function parseDateFactory(params: Params): StandardizingFn {
-  const inputFormat =
-    (params.inputFormat as string | undefined) ?? "MM/DD/YYYY";
-  const outputFormat =
-    (params.outputFormat as string | undefined) ?? "YYYYMMDD";
+type DateFormatToken = "YYYY" | "MM" | "DD";
 
-  type Token = "YYYY" | "MM" | "DD";
-  const order: Token[] = [];
+interface ParsedDateFormat {
+  /** Anchored regex source compiled to match an input date string. */
+  source: string;
+  /** Capture-group order, parallel to the regex's groups. */
+  order: DateFormatToken[];
+}
+
+// Build the anchored regex source and capture order for a parse_date input
+// format. Shared with the linkage-terms ReDoS screen (via parseDateRegexSource)
+// so the pattern that screen analyzes is byte-identical to the one compiled and
+// run here: the format is partner-controlled and its MM/DD tokens EXPAND into
+// adjacent `(\d{1,2})` groups, which can catastrophically backtrack even though
+// the format is not a raw `tier: "regex"` pattern. See transformRegexSafety.ts.
+function parseDateFormat(inputFormat: string): ParsedDateFormat {
+  const order: DateFormatToken[] = [];
   let regexStr = "";
   let i = 0;
 
@@ -190,7 +196,36 @@ function parseDateFactory(params: Params): StandardizingFn {
     }
   }
 
-  const re = new RegExp(`^${regexStr}$`);
+  return { source: `^${regexStr}$`, order };
+}
+
+/**
+ * The anchored regex source `parse_date` compiles from `inputFormat`, exposed so
+ * the linkage-terms ReDoS screen ({@link linkageTermsHaveUnsafeTransformRegex})
+ * analyzes the exact pattern this factory runs per row. `parse_date` is not a
+ * raw-pattern `tier: "regex"` function, but its format's MM/DD tokens expand into
+ * adjacent `(\d{1,2})` groups that can catastrophically backtrack, so the screen
+ * must inspect the EXPANSION, not a raw param. Sharing the construction here
+ * keeps the analyzed pattern from drifting from the executed one.
+ *
+ * @internal Exported for the ReDoS screen and unit tests; not a supported entry
+ * point.
+ */
+export function parseDateRegexSource(inputFormat: string): string {
+  return parseDateFormat(inputFormat).source;
+}
+
+// Parse `input_format` -> YAML camelizes keys but not values, so format
+// string tokens YYYY / MM / DD stay as written; delimiter characters are
+// literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
+function parseDateFactory(params: Params): StandardizingFn {
+  const inputFormat =
+    (params.inputFormat as string | undefined) ?? "MM/DD/YYYY";
+  const outputFormat =
+    (params.outputFormat as string | undefined) ?? "YYYYMMDD";
+
+  const { source, order } = parseDateFormat(inputFormat);
+  const re = new RegExp(source);
 
   return (s) => {
     // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract). Date
@@ -200,7 +235,7 @@ function parseDateFactory(params: Params): StandardizingFn {
     const m = s.normalize("NFC").match(re);
     if (!m) return null;
 
-    const parts: Partial<Record<Token, string>> = {};
+    const parts: Partial<Record<DateFormatToken, string>> = {};
     order.forEach((token, idx) => {
       parts[token] =
         token === "YYYY" ? m[idx + 1] : m[idx + 1].padStart(2, "0");

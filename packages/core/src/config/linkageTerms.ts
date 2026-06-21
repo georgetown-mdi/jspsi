@@ -161,19 +161,20 @@ export const MAX_PAD_LEFT_LENGTH = 256;
  * VALUES that carry a content bound (with {@link MAX_PAD_LEFT_LENGTH}; every other
  * param value stays `z.unknown()`, see the untrusted-input bounds note above).
  * `parse_date` runs per row inside the key-building pipeline
- * ({@link applyElementTransform}, which recompiles each step per row), and its
- * factory builds a `new RegExp` from `inputFormat` and assembles the result from
- * `outputFormat`. Both are partner-controlled, so an unbounded `inputFormat` makes
- * every row compile a giant regex (a multi-KB format expands to a multi-KB
- * pattern -- a per-row CPU burn that hangs the acceptor; unlike the raw-pattern
- * `tier: "regex"` functions, `parse_date` is NOT screened by
- * {@link linkageTermsHaveUnsafeTransformRegex}, since its format is not a raw
- * pattern), and an unbounded `outputFormat` makes every matched row allocate an
- * output string of that size. A real date format is tens of characters
- * ("MM/DD/YYYY", "YYYY-MM-DD"); 256 is far above any legitimate format yet keeps
- * the per-row regex build and output cheap. Enforced by a per-step refine on
- * {@link TransformStep}'s schema before any row runs. This is a DoS ceiling on the
- * partner wire path, not a semantic limit.
+ * ({@link applyElementTransform}, which recompiles each step per row): its factory
+ * builds a `new RegExp` from `inputFormat` and assembles the result from
+ * `outputFormat`. This length cap bounds the per-row WORK SIZE -- an unbounded
+ * `inputFormat` would compile an ever-larger regex per row, and an unbounded
+ * `outputFormat` would allocate an ever-larger output per matched row -- with 256
+ * far above any real date layout ("MM/DD/YYYY", "YYYY-MM-DD") yet small enough that
+ * the per-row build and output stay cheap. It is NOT the whole `parse_date`
+ * control: the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that
+ * can catastrophically backtrack at a length well under this cap, so the SHAPE of
+ * the expanded regex is screened separately by
+ * {@link linkageTermsHaveUnsafeTransformRegex} (extended to reconstruct and analyze
+ * `parse_date`'s pattern, since the format is not a raw `tier: "regex"` value).
+ * Enforced by a per-step refine on {@link TransformStep}'s schema before any row
+ * runs. A DoS ceiling on the partner wire path, not a semantic limit.
  */
 export const MAX_DATE_FORMAT_LENGTH = 256;
 
@@ -544,13 +545,14 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
     },
   )
   // `parse_date` builds a `new RegExp` from `inputFormat` and assembles its result
-  // from `outputFormat`, both recompiled per row by applyElementTransform, so an
-  // unbounded `inputFormat` makes every row compile a giant regex (a CPU burn --
-  // parse_date is not a raw-pattern `tier: "regex"` function, so the ReDoS screen
-  // does not cover it) and an unbounded `outputFormat` makes every matched row
-  // allocate an output string of that size. Only a string value drives either (the
-  // factory treats a non-string as an empty/absent format), so bounding the string
-  // length closes both; an out-of-range value is rejected before any row runs.
+  // from `outputFormat`, both recompiled per row by applyElementTransform. This
+  // length cap bounds the per-row WORK SIZE: an unbounded `inputFormat` compiles an
+  // ever-larger regex per row, an unbounded `outputFormat` allocates an ever-larger
+  // per-row output. Only a string value drives either (the factory treats a
+  // non-string as an empty/absent format), so the bound is on the string length.
+  // The catastrophic-backtracking risk in the expanded regex (adjacent `(\d{1,2})`
+  // from MM/DD tokens) is independent of length and is rejected separately by the
+  // ReDoS refine on LinkageTermsSchema (extended to screen parse_date's pattern).
   .refine(
     (step) => {
       if (step.function !== "parse_date") return true;
