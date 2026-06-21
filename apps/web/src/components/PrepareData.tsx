@@ -90,6 +90,11 @@ export function PrepareData({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
+  // The verdict is one stable live region (see below); it is also the focus
+  // target after a quick-fix remap, whose Select unmounts the moment its field
+  // becomes satisfiable -- focus lands on the verdict (the result) rather than
+  // falling to <body>.
+  const verdictRef = useRef<HTMLDivElement>(null);
   // Seeded once from the file's columns; the operator owns the state from here (no
   // silent re-inference), and Reset returns to exactly this.
   const initialMetadata = useMemo(
@@ -147,8 +152,14 @@ export function PrepareData({
   // Remap: bind a field type to a chosen column by setting that column's semantic
   // type. The derived standardization regenerates the recommended cleaning for the
   // new binding, so a remap both makes the field satisfiable and cleans it.
-  const remap = (type: LinkageField["type"], columnName: string) =>
-    setMetadata((prev) => setColumnType(prev, columnName, type));
+  const remap = (type: LinkageField["type"], columnName: string) => {
+    setMetadata((prev) => setColumnType(prev, columnName, type).metadata);
+    // Move focus to the verdict before the chosen Select unmounts (it does as
+    // soon as the field is satisfied), so a keyboard/screen-reader user lands on
+    // the result instead of being dropped to <body>. The verdict node is stable,
+    // so focusing it here -- ahead of the re-render -- is safe.
+    verdictRef.current?.focus();
+  };
 
   const launch = () => {
     closeConfirm();
@@ -196,38 +207,52 @@ export function PrepareData({
         />
       </Paper>
 
-      {blocked ? (
-        <Alert
-          color="red"
-          icon={<IconAlertCircle aria-hidden />}
-          title="This file cannot match yet"
-          role="status"
-        >
-          None of the agreed linkage keys can be satisfied by your columns, so
-          no matches are possible. Set the columns below to the missing field
-          types, then this will clear.
-        </Alert>
-      ) : partial ? (
-        <Alert
-          color="yellow"
-          icon={<IconAlertTriangle aria-hidden />}
-          title={`${satisfiable} of ${totalKeys} keys can match`}
-          role="status"
-        >
-          Some linkage keys cannot be satisfied by your columns and will be
-          inactive for this exchange. The other keys will proceed normally. You
-          can map more columns below to enable additional keys.
-        </Alert>
-      ) : (
-        <Alert
-          color="green"
-          icon={<IconCircleCheck aria-hidden />}
-          title={`All ${totalKeys} keys can match`}
-          role="status"
-        >
-          Your columns can satisfy every agreed linkage key.
-        </Alert>
-      )}
+      {/* The verdict lives in ONE stable, polite, atomic live region whose inner
+          Alert swaps as the verdict changes. Because the wrapper node persists
+          across the swap, a remap that flips blocked->all-clear is announced
+          (three separately-mounted Alerts would not reliably announce a
+          transition). Kept polite, not assertive: the verdict is a standing
+          condition the operator is here to resolve, and an assertive node would
+          fire on mount and fight the heading focus. tabIndex=-1 makes it the
+          programmatic focus target after a remap without adding a tab stop. */}
+      <div
+        ref={verdictRef}
+        tabIndex={-1}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="verdict"
+      >
+        {blocked ? (
+          <Alert
+            color="red"
+            icon={<IconAlertCircle aria-hidden />}
+            title="This file cannot match yet"
+          >
+            None of the agreed linkage keys can be satisfied by your columns, so
+            no matches are possible. Set the columns below to the missing field
+            types, then this will clear.
+          </Alert>
+        ) : partial ? (
+          <Alert
+            color="yellow"
+            icon={<IconAlertTriangle aria-hidden />}
+            title={`${satisfiable} of ${totalKeys} keys can match`}
+          >
+            Some linkage keys cannot be satisfied by your columns and will be
+            inactive for this exchange. The other keys will proceed normally.
+            You can map more columns below to enable additional keys.
+          </Alert>
+        ) : (
+          <Alert
+            color="green"
+            icon={<IconCircleCheck aria-hidden />}
+            title={`All ${totalKeys} keys can match`}
+          >
+            Your columns can satisfy every agreed linkage key.
+          </Alert>
+        )}
+      </div>
 
       {unsatisfiedTypes.length > 0 && (
         <Paper withBorder p="md">

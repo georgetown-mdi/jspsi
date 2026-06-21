@@ -54,8 +54,8 @@ function termsOf(spec: ExchangeDataSpec): LinkageTerms {
  * first_name and `b` to last_name. */
 function remappedMetadata(): Metadata {
   let md = normalizeForEditor(inferMetadata(columns));
-  md = setColumnType(md, "a", "first_name");
-  md = setColumnType(md, "b", "last_name");
+  md = setColumnType(md, "a", "first_name").metadata;
+  md = setColumnType(md, "b", "last_name").metadata;
   return md;
 }
 

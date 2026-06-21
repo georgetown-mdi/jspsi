@@ -77,32 +77,36 @@ export function MetadataGrid({
   }, [summary]);
 
   // A separate, immediate live region for the single-identifier demotion:
-  // choosing `identifier` for one column displaces any prior identifier to
+  // landing a column on the identifier role displaces any prior identifier to
   // `ignored` (no longer sent), a state change a sighted user sees in the
-  // displaced row but assistive tech would otherwise miss. Cleared on the next
-  // edit so it does not linger (the same idiom the inviter editor uses).
+  // displaced row but assistive tech would otherwise miss. It is its own region
+  // (not folded into the debounced summary) deliberately: the demotion is set
+  // synchronously here while the summary updates 600ms later, so the two never
+  // write in the same render tick -- which is what avoids two polite regions
+  // coalescing. Cleared on a non-demoting edit so it does not linger.
   const [actionAnnouncement, setActionAnnouncement] = useState("");
 
-  const onType = (columnName: string, type: SemanticType) => {
-    setActionAnnouncement("");
-    onChange(setColumnType(metadata, columnName, type));
-  };
-  const onDisclosure = (columnName: string, choice: DisclosureChoice) => {
-    const { metadata: next, demotedIdentifiers } = setColumnDisclosure(
-      metadata,
-      columnName,
-      choice,
-    );
+  // Both mutators can demote now: a type change that lands a column on the
+  // identifier role displaces the others just as a disclosure change does, so both
+  // route through here to announce it.
+  const applyEdit = (result: {
+    metadata: Metadata;
+    demotedIdentifiers: Array<string>;
+  }) => {
     setActionAnnouncement(
-      demotedIdentifiers.length === 0
+      result.demotedIdentifiers.length === 0
         ? ""
-        : `${demotedIdentifiers.join(", ")} ${
-            demotedIdentifiers.length === 1 ? "is" : "are"
+        : `${result.demotedIdentifiers.join(", ")} ${
+            result.demotedIdentifiers.length === 1 ? "is" : "are"
           } no longer the row identifier and will not be sent; only one ` +
             "column can be the row identifier.",
     );
-    onChange(next);
+    onChange(result.metadata);
   };
+  const onType = (columnName: string, type: SemanticType) =>
+    applyEdit(setColumnType(metadata, columnName, type));
+  const onDisclosure = (columnName: string, choice: DisclosureChoice) =>
+    applyEdit(setColumnDisclosure(metadata, columnName, choice));
 
   const multipleIdentifiers = hasMultipleIdentifiers(metadata);
 
@@ -168,12 +172,13 @@ export function MetadataGrid({
       <Text size="sm" fw={disclosed.length > 0 ? 600 : 400}>
         {summary}
       </Text>
-      <VisuallyHidden role="status" aria-live="polite">
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </VisuallyHidden>
       {/* The demotion is announced immediately (the summary above is debounced),
-          so a single-identifier change is heard as it happens. */}
-      <VisuallyHidden role="status" aria-live="polite">
+          so a single-identifier change is heard as it happens. aria-atomic so the
+          whole sentence is read, never a fragment. */}
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {actionAnnouncement}
       </VisuallyHidden>
     </Stack>

@@ -128,67 +128,113 @@ export function normalizeForEditor(metadata: Metadata): Metadata {
 }
 
 /**
- * Set one column's disclosure choice, enforcing the single-identifier rule live:
- * choosing `identifier` for one column demotes EVERY other `identifier` column to
- * `ignored` (not sent, not indexed) so at most one identifier survives. A seed can
- * carry more than one (`inferMetadata` marks both an `id` and an `identifier`
- * column `role: identifier`), so all of them are demoted, not just the first found.
- * Demoting to `ignored` rather than `payload` keeps a displaced column from being
- * silently transmitted; the caller announces the demotions by the returned names.
- * Returns a new metadata array (the input is not mutated).
+ * The disclosure choice a column lands on when its semantic type changes to
+ * `type`. The current choice is kept when it still fits the new type -- so a
+ * deliberately-sent `payload` column stays sent and a type change never alters
+ * disclosure on its own -- EXCEPT a column sitting at `ignored` that is retyped to
+ * a matchable type (any linkage type or `identifier`), which is promoted to the
+ * type's natural usable choice so the quick-fix remap cannot silently leave a
+ * field unsatisfiable (`resolveFieldColumns` skips `role: ignored`). Otherwise the
+ * column falls back to that natural choice: `match` for a linkage type,
+ * `identifier` for the identifier type, `ignored` for `other`. The fallback is
+ * never `payload`, so a type change can never START disclosing a column.
+ */
+function chooseDisclosureForType(
+  column: ColumnMetadata,
+  type: SemanticType,
+): DisclosureChoice {
+  const allowed = disclosureChoicesForType(type);
+  const current = disclosureOf(column);
+  // The type's natural usable, not-sent resting state. `other` cannot be matched,
+  // so its natural state is `ignored`.
+  const natural: DisclosureChoice =
+    type === "other"
+      ? "ignored"
+      : type === "identifier"
+        ? "identifier"
+        : "match";
+  // Keep a still-valid current choice, but treat `ignored` as not-preserved when
+  // retyping to a matchable type (so it promotes rather than no-ops). Order
+  // matters: this keep-branch wins for `payload`, so a sent column stays sent.
+  if (allowed.includes(current) && !(current === "ignored" && type !== "other"))
+    return current;
+  return natural;
+}
+
+/**
+ * Demote every `identifier` column other than `keptColumn` to `ignored`, so at
+ * most one identifier survives. A no-op unless `keptColumn` is (now) the
+ * identifier -- so it fires exactly when an edit lands a column on the identifier
+ * role, never auto-resolving an inferred two-identifier seed the operator has not
+ * touched. Demoting to `ignored` (not `payload`) keeps a displaced column from
+ * being silently transmitted; the demoted names are returned so the caller can
+ * announce the displacement.
+ */
+function enforceSingleIdentifier(
+  metadata: Metadata,
+  keptColumn: string,
+): { metadata: Metadata; demotedIdentifiers: Array<string> } {
+  const kept = metadata.find((column) => column.name === keptColumn);
+  if (kept?.role !== "identifier") return { metadata, demotedIdentifiers: [] };
+  const demotedIdentifiers: Array<string> = [];
+  const next = metadata.map((column) => {
+    if (column.name === keptColumn || column.role !== "identifier")
+      return column;
+    demotedIdentifiers.push(column.name);
+    return applyDisclosure(column, "ignored");
+  });
+  return { metadata: next, demotedIdentifiers };
+}
+
+/**
+ * Set one column's disclosure choice, enforcing the single-identifier rule:
+ * choosing `identifier` demotes every other `identifier` column to `ignored` (via
+ * {@link enforceSingleIdentifier}) so at most one survives. Returns the new
+ * metadata and the demoted names so the caller can announce the displacement; the
+ * input is not mutated.
  */
 export function setColumnDisclosure(
   metadata: Metadata,
   columnName: string,
   choice: DisclosureChoice,
 ): { metadata: Metadata; demotedIdentifiers: Array<string> } {
-  const demotedIdentifiers: Array<string> = [];
-  const next = metadata.map((column) => {
-    if (column.name === columnName) return applyDisclosure(column, choice);
-    if (choice === "identifier" && column.role === "identifier") {
-      demotedIdentifiers.push(column.name);
-      return applyDisclosure(column, "ignored");
-    }
-    return column;
-  });
-  return { metadata: next, demotedIdentifiers };
+  const applied = metadata.map((column) =>
+    column.name === columnName ? applyDisclosure(column, choice) : column,
+  );
+  return enforceSingleIdentifier(applied, columnName);
 }
 
 /**
- * Set one column's semantic type, keeping its disclosure intent across the change.
- * The current choice is kept when it remains valid for the new type; otherwise the
- * column stays sent if it was sent (`payload`) and the new type allows it, and
- * otherwise falls back to a not-sent choice -- so a type change never turns a
- * not-sent column into a sent one. Returns a new metadata array.
+ * Set one column's semantic type. The disclosure choice is carried across the
+ * change by {@link chooseDisclosureForType} (a sent column stays sent, an
+ * `ignored` column retyped to a matchable type is promoted so the remap cannot
+ * no-op, and the fallback is never `payload`), then the single-identifier rule is
+ * enforced exactly as in {@link setColumnDisclosure} -- because a retype to the
+ * identifier type can newly land a column on that role. Returns the new metadata
+ * and any demoted identifier names so the caller can announce the displacement.
  */
 export function setColumnType(
   metadata: Metadata,
   columnName: string,
   type: SemanticType,
-): Metadata {
-  return metadata.map((column) => {
-    if (column.name !== columnName) return column;
-    const allowed = disclosureChoicesForType(type);
-    const current = disclosureOf(column);
-    // Keep the current choice when the new type still offers it. Every type
-    // offers `payload`, so this branch already covers a sent column: it stays
-    // sent. Otherwise the current choice does not fit and (since `payload` is
-    // always offered) the column was not already sent -- prefer `match` for a
-    // linkage type, else `ignored`, never `payload`, so a type change can never
-    // start disclosing a column.
-    const next: DisclosureChoice = allowed.includes(current)
-      ? current
-      : allowed.includes("match")
-        ? "match"
-        : "ignored";
-    return applyDisclosure({ ...column, type }, next);
-  });
+): { metadata: Metadata; demotedIdentifiers: Array<string> } {
+  const applied = metadata.map((column) =>
+    column.name === columnName
+      ? applyDisclosure(
+          { ...column, type },
+          chooseDisclosureForType(column, type),
+        )
+      : column,
+  );
+  return enforceSingleIdentifier(applied, columnName);
 }
 
 /** Whether a metadata set declares more than one `identifier` column, which the
- * single-identifier rule forbids. Used by the grid to surface a live error;
- * {@link setColumnDisclosure} prevents reaching this state through the control,
- * so it only bites on externally-supplied metadata. */
+ * single-identifier rule forbids. The mutators ({@link setColumnDisclosure},
+ * {@link setColumnType}) never CREATE this state -- both demote the others when a
+ * column becomes the identifier -- but `inferMetadata` can SEED it (an `id` and an
+ * `identifier` column both infer to `role: identifier`), so the grid surfaces it
+ * as a live error and the host gates launch on it until the operator picks one. */
 export function hasMultipleIdentifiers(metadata: Metadata): boolean {
   return metadata.filter((column) => column.role === "identifier").length > 1;
 }

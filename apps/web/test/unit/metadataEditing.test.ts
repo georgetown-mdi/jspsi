@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { inferMetadata, isDisclosedToPartner } from "@psilink/core";
+import {
+  SEMANTIC_TYPES,
+  inferMetadata,
+  isDisclosedToPartner,
+} from "@psilink/core";
 
 import {
   applyDisclosure,
@@ -158,7 +162,7 @@ describe("setColumnType keeps disclosure intent", () => {
     const md: Metadata = [
       col({ name: "x", type: "first_name", role: "linkage", isPayload: false }),
     ];
-    const next = setColumnType(md, "x", "other");
+    const next = setColumnType(md, "x", "other").metadata;
     expect(disclosureOf(next[0])).not.toBe("payload");
     expect(isDisclosedToPartner(next[0])).toBe(false);
   });
@@ -167,8 +171,76 @@ describe("setColumnType keeps disclosure intent", () => {
     const md: Metadata = [
       col({ name: "y", type: "first_name", role: "payload", isPayload: true }),
     ];
-    const next = setColumnType(md, "y", "other");
+    const next = setColumnType(md, "y", "other").metadata;
     expect(disclosureOf(next[0])).toBe("payload");
+  });
+
+  // The disclosure-safety invariant, as a property over the whole space rather
+  // than two examples: changing a column's type must NEVER yield a sent column
+  // unless it was already sent. This is the line the editor cannot cross.
+  describe("a type change never starts disclosing a column", () => {
+    const CHOICES: Array<DisclosureChoice> = [
+      "match",
+      "identifier",
+      "payload",
+      "ignored",
+    ];
+    for (const from of CHOICES)
+      for (const type of SEMANTIC_TYPES)
+        test(`${from} -> ${type}`, () => {
+          const start = applyDisclosure(col({ name: "x" }), from);
+          const out = setColumnType([start], "x", type).metadata[0];
+          if (isDisclosedToPartner(out))
+            expect(isDisclosedToPartner(start)).toBe(true);
+        });
+  });
+
+  test("retyping a not-yet-usable column to a linkage type promotes it to match", () => {
+    // The remap fix: an `ignored` column retyped to satisfy a field must actually
+    // become usable (resolveFieldColumns skips `role: ignored`), not silently stay
+    // ignored -- and `match` is not sent, so disclosure does not increase.
+    const md: Metadata = [
+      col({ name: "x", type: "other", role: "ignored", isPayload: false }),
+    ];
+    const out = setColumnType(md, "x", "first_name").metadata[0];
+    expect(disclosureOf(out)).toBe("match");
+    expect(isDisclosedToPartner(out)).toBe(false);
+  });
+
+  test("retyping an ignored column to other leaves it ignored", () => {
+    // `other` cannot be matched, so there is nothing to promote it to: it stays
+    // not-participating rather than being forced into a linkage role.
+    const md: Metadata = [
+      col({ name: "x", type: "first_name", role: "ignored", isPayload: false }),
+    ];
+    expect(disclosureOf(setColumnType(md, "x", "other").metadata[0])).toBe(
+      "ignored",
+    );
+  });
+
+  test("retyping to identifier lands on identifier and demotes the prior one", () => {
+    // The single-identifier rule is enforced on the type path too: a retype that
+    // mints a new identifier displaces the old one and reports it.
+    const md: Metadata = [
+      col({
+        name: "old",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      }),
+      col({ name: "x", type: "first_name", role: "linkage", isPayload: false }),
+    ];
+    const { metadata, demotedIdentifiers } = setColumnType(
+      md,
+      "x",
+      "identifier",
+    );
+    expect(disclosureOf(metadata.find((c) => c.name === "x")!)).toBe(
+      "identifier",
+    );
+    expect(metadata.find((c) => c.name === "old")?.role).toBe("ignored");
+    expect(demotedIdentifiers).toEqual(["old"]);
+    expect(hasMultipleIdentifiers(metadata)).toBe(false);
   });
 });
 

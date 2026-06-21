@@ -294,6 +294,30 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     expect(exchange.lastProps.initialWarning).toBeUndefined();
   });
 
+  test("the verdict is announced from one stable live region, not the swapped alert", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // Any verdict state will do; a blocked file is the simplest to reach.
+    await reachEditor(csvFile("notes\nhello\n"));
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+
+    // The live region is the stable wrapper: it sits outside the verdict ternary,
+    // so its node persists as the inner Alert swaps and a remap-driven transition
+    // is actually announced. The colored Alert inside must NOT itself be a live
+    // region -- that was the swapped-node bug, where a flip remounted the region
+    // and went unannounced.
+    const verdict = document.querySelector('[data-testid="verdict"]');
+    expect(verdict?.getAttribute("role")).toBe("status");
+    expect(verdict?.getAttribute("aria-live")).toBe("polite");
+    expect(verdict?.querySelector('[role="status"]')).toBeNull();
+  });
+
   test("Back returns to the review screen and a different file reseeds the editor", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();

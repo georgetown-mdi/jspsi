@@ -13,7 +13,10 @@ import {
   setDraftMetadata,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
-import { setColumnType } from "../../src/psi/metadataEditing.js";
+import {
+  setColumnDisclosure,
+  setColumnType,
+} from "../../src/psi/metadataEditing.js";
 
 import type { AdvancedInviteDraft } from "../../src/psi/advancedInvite.js";
 
@@ -131,7 +134,7 @@ describe("setDraftMetadata re-derives offerable keys", () => {
     // Remap `extra` -> ssn: ssn keys become offerable and appear in the draft.
     const next = setDraftMetadata(
       draft,
-      setColumnType(draft.metadata, "extra", "ssn"),
+      setColumnType(draft.metadata, "extra", "ssn").metadata,
     );
     expect(ssnKeyNames(next).length).toBeGreaterThan(0);
     // The terms built from the new draft now declare ssn, so the run can produce
@@ -139,6 +142,23 @@ describe("setDraftMetadata re-derives offerable keys", () => {
     expect(
       buildAdvancedTerms(next).linkageFields.some((f) => f.name === "ssn"),
     ).toBe(true);
+  });
+
+  test("remapping a previously-ignored column promotes it so its key becomes offerable", () => {
+    // The inviter-side analogue of the acceptor remap fix: an `ignored` column
+    // retyped to a linkage type is promoted to a usable role, so the key it now
+    // supplies is offerable -- it does not silently fail to satisfy the field.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    const ignored = setColumnDisclosure(
+      draft.metadata,
+      "extra",
+      "ignored",
+    ).metadata;
+    const next = setDraftMetadata(
+      draft,
+      setColumnType(ignored, "extra", "ssn").metadata,
+    );
+    expect(ssnKeyNames(next).length).toBeGreaterThan(0);
   });
 
   test("a remap that only adds keys preserves the enabled/order of existing keys", () => {
@@ -154,7 +174,7 @@ describe("setDraftMetadata re-derives offerable keys", () => {
     };
     const next = setDraftMetadata(
       withDisabled,
-      setColumnType(withDisabled.metadata, "extra", "ssn"),
+      setColumnType(withDisabled.metadata, "extra", "ssn").metadata,
     );
     // The disabled key kept its position and disabled flag; the new ssn keys are
     // appended enabled.
