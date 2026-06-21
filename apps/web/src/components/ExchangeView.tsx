@@ -284,7 +284,10 @@ export function ExchangeView(config: ExchangeConfig) {
   useEffect(() => {
     if (outputs === undefined) return;
     return () => {
-      window.URL.revokeObjectURL(outputs.resultsUrl);
+      // resultsUrl is absent when the result was withheld from this party (a
+      // non-receiving helper); only revoke a URL that was actually created.
+      if (outputs.resultsUrl !== undefined)
+        window.URL.revokeObjectURL(outputs.resultsUrl);
       if (outputs.record !== undefined) {
         window.URL.revokeObjectURL(outputs.record.recordUrl);
         window.URL.revokeObjectURL(outputs.record.openingUrl);
@@ -325,23 +328,36 @@ export function ExchangeView(config: ExchangeConfig) {
       prepared: PreparedExchange,
     ): ExchangeOutputs => {
       log.info("linkage complete, generating results and record files");
-      const { headers, rows } = buildOutputTable(
-        result.associationTable,
-        prepared.rawRows,
-        prepared.metadata,
-        result.partnerPayload,
-      );
-      const csv =
-        headers.join(",") + "\n" + rows.map((r) => r.join(",") + "\n").join("");
       const jsonUrl = (text: string): string =>
         window.URL.createObjectURL(
           new Blob([text], { type: "application/json" }),
         );
-      const generated: ExchangeOutputs = {
-        resultsUrl: window.URL.createObjectURL(
-          new Blob([csv], { type: "text/csv" }),
-        ),
-      };
+      // The exchange withholds the result table from a party whose agreed terms
+      // give it no output (a one-sided exchange where this party is the PSI
+      // sender/helper): result.associationTable is undefined. Produce no results
+      // file -- the UI shows it contributed but receives no result -- while still
+      // offering the audit record below (the helper's record does not bind the
+      // table, but the record itself is produced).
+      const generated: ExchangeOutputs =
+        result.associationTable === undefined
+          ? { resultWithheld: true }
+          : (() => {
+              const { headers, rows } = buildOutputTable(
+                result.associationTable,
+                prepared.rawRows,
+                prepared.metadata,
+                result.partnerPayload,
+              );
+              const csv =
+                headers.join(",") +
+                "\n" +
+                rows.map((r) => r.join(",") + "\n").join("");
+              return {
+                resultsUrl: window.URL.createObjectURL(
+                  new Blob([csv], { type: "text/csv" }),
+                ),
+              };
+            })();
       // The audit record and its opening are produced as a pair, so one guard
       // offers both or neither. They are absent only if building the record
       // failed after a successful exchange; in that case the downloads are
@@ -589,6 +605,7 @@ export function ExchangeView(config: ExchangeConfig) {
           headingRef={resultsHeadingRef}
           headingOrder={headingOrder}
           resultsFileURL={outputs?.resultsUrl}
+          resultWithheld={outputs?.resultWithheld}
           recordFileURL={outputs?.record?.recordUrl}
           recordFileName={outputs?.record?.recordFileName}
           openingFileURL={outputs?.record?.openingUrl}

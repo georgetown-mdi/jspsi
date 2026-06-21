@@ -6,6 +6,7 @@ import logLibrary from "loglevel";
 
 import {
   describeDecodeError,
+  deriveAcceptedLinkageTerms,
   getLogger,
   decodeInvitation,
   isInvitationExpired,
@@ -196,12 +197,17 @@ export function displayInvitation(
   // since this summary is shown before the operator confirms acceptance.
   log.info(`  inviting party: ${sanitizeForDisplay(t.identity)}`);
   log.info(`  PSI algorithm: ${t.algorithm}`);
+  // Stated from the accepting party's perspective (this summary is shown only to
+  // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
+  // inviter receives iff its terms expect output. For a one-sided invitation this
+  // tells the acceptor plainly whether it gets a result, rather than leaving it to
+  // invert the inviter's "shares with partner" bit.
   log.info(
-    `  inviter receives output: ${t.output.expectsOutput ? "yes" : "no"}`,
+    `  you will receive the result: ${t.output.shareWithPartner ? "yes" : "no"}`,
   );
   log.info(
-    `  inviter shares result with partner: ` +
-      `${t.output.shareWithPartner ? "yes" : "no"}`,
+    `  the inviting party will receive the result: ` +
+      `${t.output.expectsOutput ? "yes" : "no"}`,
   );
   log.info(
     `  linkage keys: ` +
@@ -274,9 +280,16 @@ export async function validateAccept(params: {
   );
 
   const myIdentity = options.identity ?? userInfo().username;
-  // Adopt the invitation's linkage keys, algorithm, and output policy, but record
-  // this party's own identity (the invitation's identity is the inviter's).
-  const myTerms: LinkageTerms = { ...token.linkageTerms, identity: myIdentity };
+  // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
+  // party's own identity (the invitation's identity is the inviter's) and MIRROR
+  // the output direction rather than copying it: validateCompatibility compares
+  // output as a mirror, so a verbatim copy only happens to agree in the symmetric
+  // both-receive case and would abort any one-sided exchange. The shared core
+  // helper also backs the web acceptor (see deriveAcceptedLinkageTerms).
+  const myTerms: LinkageTerms = deriveAcceptedLinkageTerms(
+    token.linkageTerms,
+    myIdentity,
+  );
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;

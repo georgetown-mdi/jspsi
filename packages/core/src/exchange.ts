@@ -232,7 +232,20 @@ export interface ExchangeBootstrapResult {
 
 /** The result returned by {@link runExchange} on successful completion. */
 export interface ExchangeResult {
-  associationTable: AssociationTable;
+  /**
+   * The matched association table, or `undefined` when this party's agreed terms
+   * give it no output (`output.expectsOutput` is false) -- a one-sided exchange
+   * in which this party is the PSI sender / helper. This is the privacy gate: a
+   * party not entitled to the result does not receive the result table from the
+   * exchange, so neither front end can write it. The table is still computed
+   * inside {@link runExchange} (the sender needs it to extract its own outgoing
+   * payload) and is withheld only here, at the return. A both-output exchange, and
+   * the receiver of a one-sided exchange, get the table as before. The withholding
+   * predicate is exactly the one that gates the audit record's committed
+   * association table, so the returned result and the record stay one rule: a
+   * helper neither receives the table nor binds it in its record.
+   */
+  associationTable: AssociationTable | undefined;
   /** Linkage terms received from the partner during the handshake. */
   partnerTerms: LinkageTerms;
   /** The PSI role assigned to this party (sender or receiver). */
@@ -484,6 +497,17 @@ export async function runExchange(
   // Both payloads are normalized to the record's canonical committed form
   // (toCommittedPayload) so a sender and receiver commit over byte-identical data
   // for the same logical payload.
+  //
+  // heldAssociationTable is the entitlement predicate for the association TABLE: it
+  // gates BOTH the record's committed table (below) AND the table returned to the
+  // caller (the `associationTable` field of the result). A helper therefore neither
+  // receives the result table from the exchange nor binds it in its record -- the
+  // returned-result gate and the record gate are deliberately one rule (see
+  // ExchangeResult). It scopes the result TABLE only: `partnerPayload` rides a
+  // separate, output-direction-independent channel (exchangePayloads, governed by
+  // each party's own disclosure metadata, not by expectsOutput), so a non-receiving
+  // helper can still receive the receiver's disclosed payload values -- a known
+  // residual disclosure tracked separately, not closed by this gate.
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;
@@ -516,7 +540,10 @@ export async function runExchange(
   }
 
   return {
-    associationTable,
+    // Withheld (undefined) from a party whose agreed terms give it no output, so
+    // a non-receiving helper does not get the result table to write; the receiver
+    // and both-output parties get it as before. Same predicate as the record gate.
+    associationTable: heldAssociationTable ? associationTable : undefined,
     partnerTerms,
     resolvedRole,
     partnerPayload,

@@ -265,15 +265,37 @@ export function InvitationTerms({
           </Stack>
         </Term>
 
+        {/* Viewer-centric, so each party reads its OWN outcome first-person rather
+            than inferring it from the inviter's perspective: this is the consent-
+            legible form for a one-sided exchange, where the acceptor must know plainly
+            whether IT receives a result. The viewer is the inviter under
+            "proposing" (its preview) and the acceptor under "review"/"accepted"; the
+            acceptor receives iff the inviter shares (and shares iff the inviter
+            receives), the mirror the exchange derives. */}
         <Term label="Result sharing">
-          <Text size="sm">
-            Inviter expects to receive the result:{" "}
-            {yesNo(summary.inviterReceivesOutput)}
-          </Text>
-          <Text size="sm">
-            Inviter is willing to share the result with you:{" "}
-            {yesNo(summary.inviterSharesResult)}
-          </Text>
+          {perspective === "proposing" ? (
+            <>
+              <Text size="sm">
+                You will receive the matched result:{" "}
+                {yesNo(summary.inviterReceivesOutput)}
+              </Text>
+              <Text size="sm">
+                Your partner will receive the result:{" "}
+                {yesNo(summary.inviterSharesResult)}
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text size="sm">
+                You will receive the matched result:{" "}
+                {yesNo(summary.inviterSharesResult)}
+              </Text>
+              <Text size="sm">
+                Your partner (the inviter) will receive the result:{" "}
+                {yesNo(summary.inviterReceivesOutput)}
+              </Text>
+            </>
+          )}
         </Term>
       </Stack>
 

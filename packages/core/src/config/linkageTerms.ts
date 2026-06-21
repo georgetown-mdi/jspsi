@@ -1088,6 +1088,82 @@ export function safeParseLinkageTerms(raw: unknown) {
 // would throw the camelize bounds. See the invitationLinkageTermsSchema note in
 // config/invitation.ts.
 
+// --- Acceptance --------------------------------------------------------------
+
+/**
+ * Derive the {@link LinkageTerms} an ACCEPTOR runs from the inviter's terms
+ * decoded from an invitation. The acceptor adopts the inviter's shared, agreed
+ * fields verbatim -- `version`, `algorithm`, `linkageFields`, `linkageKeys`,
+ * `legalAgreement`, and so on are cross-checked for equality at exchange time,
+ * so both sides must carry an identical set -- but two facets are the acceptor's
+ * own perspective and are derived, not copied:
+ *
+ * - `identity` is replaced with the acceptor's own name, so the inviter's
+ *   identity does not leak into the acceptor's prepared terms (and from there
+ *   into its exchange record).
+ * - `output` is MIRRORED, not copied. {@link validateCompatibility}, run by both
+ *   parties, compares output as a mirror: it requires
+ *   `local.output.shareWithPartner === partner.output.expectsOutput` and
+ *   `local.output.expectsOutput === partner.output.shareWithPartner`. So the
+ *   acceptor's `expectsOutput` is the inviter's `shareWithPartner`, and the
+ *   acceptor's `shareWithPartner` is the inviter's `expectsOutput`. A verbatim
+ *   copy is only ACCIDENTALLY correct for the symmetric "both receive" case
+ *   (`expectsOutput` and `shareWithPartner` both true, where each value equals
+ *   its mirror); for any one-sided configuration a copy makes both sides claim to
+ *   receive, fails the mirror, and aborts the exchange before any data moves.
+ *
+ * `deduplicate` and `payload` are left as adopted from the inviter's terms. Both
+ * are per-party in principle, but the web Advanced-options editor and the CLI
+ * default acceptance never author either one-sided (`deduplicate` stays false, and
+ * no `payload` block is authored), so for the configurations those front ends
+ * produce a verbatim adoption is correct and the mirror is always coherent.
+ * Mirroring per-party payload `send`/`receive` lists is deferred to the payload-
+ * authoring work. Metadata and standardization stay per-party and local (they are
+ * never embedded in the token); this function shapes only the agreed linkage terms.
+ *
+ * It fails closed. A config that is valid for the INVITER can mirror to one that is
+ * incoherent for the acceptor: an inviter that is the sole receiver
+ * (`expectsOutput: true`) may carry `deduplicate: true` or a non-empty
+ * `payload.receive`, both of which require receiving output -- but the acceptor
+ * mirrors to `expectsOutput: false`, which the schema's cross-field rules forbid.
+ * The front ends above never produce such an inviter config, but a hand-authored
+ * CLI config or a crafted invitation token could, and the derived terms are not
+ * otherwise re-validated before the run. So the derived terms are re-checked
+ * against {@link LinkageTermsSchema} here and an incoherent result throws, aborting
+ * acceptance cleanly rather than running an invalid configuration. The thrown
+ * message names no partner-controlled value (the only reachable failures are the
+ * fixed-message output-coherence refines, since the inviter's terms were already
+ * validated at decode and only `identity`/`output` are changed here).
+ *
+ * @throws {Error} when the inviter's terms cannot be coherently accepted for the
+ *   mirrored output direction.
+ */
+export function deriveAcceptedLinkageTerms(
+  inviterTerms: LinkageTerms,
+  acceptorIdentity: string,
+): LinkageTerms {
+  const derived: LinkageTerms = {
+    ...inviterTerms,
+    identity: acceptorIdentity,
+    output: {
+      expectsOutput: inviterTerms.output.shareWithPartner,
+      shareWithPartner: inviterTerms.output.expectsOutput,
+    },
+  };
+  // Fail closed on an inviter config that mirrors to an incoherent acceptor config
+  // (see the doc comment). safeParse is a validity gate only; return the object we
+  // built, not parsed.data, so the canonical/agreed-terms bytes are unchanged.
+  if (!LinkageTermsSchema.safeParse(derived).success) {
+    throw new Error(
+      "the invitation's linkage terms cannot be accepted unchanged: mirroring " +
+        "the output direction for the accepting party produced an incompatible " +
+        "configuration (a party that receives no output cannot deduplicate or " +
+        "receive payload columns)",
+    );
+  }
+  return derived;
+}
+
 // --- Compatibility -----------------------------------------------------------
 
 export interface CompatibilityResult {

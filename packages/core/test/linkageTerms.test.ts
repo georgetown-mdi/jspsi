@@ -2,6 +2,7 @@ import { ZodError } from "zod";
 import { expect, test } from "vitest";
 
 import {
+  deriveAcceptedLinkageTerms,
   parseLinkageTerms,
   safeParseLinkageTerms,
   validateCompatibility,
@@ -2295,4 +2296,135 @@ test("rejects an over-long legal agreement purpose", () => {
       },
     }),
   ).toThrow(ZodError);
+});
+
+// ─── Acceptor term derivation (output mirror) ────────────────────────────────
+
+// The acceptor adopts the inviter's agreed fields/keys but mirrors the output
+// direction and substitutes its identity (deriveAcceptedLinkageTerms). These pin
+// that the derived terms are the MIRROR of the inviter's, not a verbatim copy, and
+// that they pass validateCompatibility for each of the three output directions --
+// the property the editor's 3-way control relies on.
+const inviterBase: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Inviting Org",
+  date: "2025-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+};
+
+test.each([
+  {
+    direction: "both",
+    inviter: { expectsOutput: true, shareWithPartner: true },
+    acceptor: { expectsOutput: true, shareWithPartner: true },
+  },
+  {
+    direction: "inviter-only",
+    inviter: { expectsOutput: true, shareWithPartner: false },
+    acceptor: { expectsOutput: false, shareWithPartner: true },
+  },
+  {
+    direction: "partner-only",
+    inviter: { expectsOutput: false, shareWithPartner: true },
+    acceptor: { expectsOutput: true, shareWithPartner: false },
+  },
+])(
+  "deriveAcceptedLinkageTerms mirrors the output for the $direction case and passes validateCompatibility",
+  ({ inviter, acceptor }) => {
+    const inviterTerms: LinkageTerms = { ...inviterBase, output: inviter };
+    const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+
+    // Output is the mirror, not a copy: the acceptor's expectsOutput is the
+    // inviter's shareWithPartner and vice versa.
+    expect(derived.output).toStrictEqual(acceptor);
+    // Identity is the acceptor's; the inviter's does not leak in.
+    expect(derived.identity).toBe("Accepting Org");
+    // The agreed fields/keys are adopted verbatim.
+    expect(derived.linkageFields).toEqual(inviterTerms.linkageFields);
+    expect(derived.linkageKeys).toEqual(inviterTerms.linkageKeys);
+
+    // The mirror is exactly what validateCompatibility (run by both parties)
+    // requires: no output mismatch, from either side's point of view.
+    expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+    expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+  },
+);
+
+test("deriveAcceptedLinkageTerms does not mutate the inviter's terms", () => {
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+  deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  // The substitution and mirror are a copy: the source is untouched.
+  expect(inviterTerms.identity).toBe("Inviting Org");
+  expect(inviterTerms.output).toStrictEqual({
+    expectsOutput: true,
+    shareWithPartner: false,
+  });
+});
+
+test("a verbatim copy of one-sided inviter output would FAIL the mirror (why mirror, not copy)", () => {
+  // The regression guard for the bug this work closes: with one-sided output, a
+  // verbatim copy (the old behavior) makes both sides claim the same direction,
+  // which validateCompatibility rejects. Mirroring is what makes it pass.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+  const verbatim: LinkageTerms = {
+    ...inviterTerms,
+    identity: "Accepting Org",
+    // No mirror: copy the inviter's output as-is.
+    output: { ...inviterTerms.output },
+  };
+  expect(
+    validateCompatibility(inviterTerms, verbatim).errors.length,
+  ).toBeGreaterThan(0);
+});
+
+test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (deduplicate)", () => {
+  // An inviter that is the sole receiver may validly carry deduplicate: true
+  // (deduplicate requires expectsOutput, which the inviter has). The acceptor
+  // mirrors to expectsOutput: false, where deduplicate: true is forbidden -- so the
+  // derivation must throw rather than produce an invalid, never-re-validated config.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    deduplicate: true,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).toThrow(/cannot be accepted unchanged/);
+});
+
+test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (payload.receive)", () => {
+  // Same shape via payload: an inviter sole-receiver with a non-empty
+  // payload.receive mirrors to expectsOutput: false with a non-empty receive list,
+  // which the schema forbids (a non-receiving party gets no payload columns).
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+    payload: { receive: [{ name: "dob" }] },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).toThrow(/cannot be accepted unchanged/);
+});
+
+test("deriveAcceptedLinkageTerms accepts a coherent deduplicate config (no false positive)", () => {
+  // deduplicate: true with both-receive mirrors to an acceptor that also receives,
+  // so deduplicate stays valid -- the fail-closed gate must NOT reject it.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    deduplicate: true,
+    output: { expectsOutput: true, shareWithPartner: true },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).not.toThrow();
 });

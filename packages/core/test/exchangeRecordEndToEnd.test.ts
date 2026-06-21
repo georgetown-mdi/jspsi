@@ -108,6 +108,12 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(init.record.commitments.associationTable).toBeDefined();
   expect(resp.record.commitments.associationTable).toBeDefined();
 
+  // Both are entitled to output, so the exchange returns the result table to each
+  // -- the returned-result gate is the same entitlement predicate as the record
+  // gate above.
+  expect(initiator.associationTable).toBeDefined();
+  expect(responder.associationTable).toBeDefined();
+
   // Governance metadata is derived from the agreed terms on both sides and agrees
   // on the cross-party-consistent fields. firstNameTerms configure no payload and
   // no legal agreement, so the payload categories are explicitly empty.
@@ -276,6 +282,14 @@ test("single-output: result size omitted, but each party records its own exposur
   expect(init.record.commitments.associationTable).toBeDefined();
   expect(resp.record.commitments.associationTable).toBeUndefined();
 
+  // The privacy gate this work adds: the exchange RETURNS the result table only to
+  // the entitled party. The receiver (initiator) gets it; the sender/helper
+  // (responder) gets undefined -- withheld at the return on the same entitlement
+  // predicate as the record's committed table, so neither front end can write a
+  // result the helper is not entitled to.
+  expect(initiator.associationTable).toBeDefined();
+  expect(responder.associationTable).toBeUndefined();
+
   // Terms hash still matches across parties.
   expect(init.record.termsHash).toBe(resp.record.termsHash);
 
@@ -285,4 +299,27 @@ test("single-output: result size omitted, but each party records its own exposur
   expect(
     (await verifyRecordCommitments(resp.record, resp.opening)).allValid,
   ).toBe(true);
+});
+
+test("single-output (responder receives): the gate withholds from the initiator", async () => {
+  // The mirror of the test above, exercising the OTHER one-sided direction live:
+  // the responder is the sole receiver and the initiator is the sender/helper. This
+  // covers the partner-only direction at the gate, which the test above (initiator
+  // receives) does not -- so the withholding is asserted for both directions, not
+  // just by predicate argument.
+  const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
+  const senderOut: Output = { expectsOutput: false, shareWithPartner: true };
+  const [initiator, responder] = await runBoth(senderOut, receiverOut);
+
+  expect(initiator.resolvedRole).toBe("sender");
+  expect(responder.resolvedRole).toBe("receiver");
+
+  // The entitled party (responder) gets the table; the helper (initiator) gets
+  // undefined -- withheld at the return.
+  expect(responder.associationTable).toBeDefined();
+  expect(initiator.associationTable).toBeUndefined();
+
+  // And the record gate matches: only the entitled responder commits the table.
+  expect(built(responder).record.commitments.associationTable).toBeDefined();
+  expect(built(initiator).record.commitments.associationTable).toBeUndefined();
 });

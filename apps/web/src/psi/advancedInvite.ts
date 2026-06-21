@@ -11,7 +11,7 @@ import {
 
 import { normalizeForEditor } from "./metadataEditing";
 
-import type { LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
+import type { LinkageKey, LinkageTerms, Metadata, Output } from "@psilink/core";
 
 /**
  * The pure data model behind the Advanced-options editor: seeding a draft from the
@@ -22,19 +22,21 @@ import type { LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
  *
  * Scope of this iteration (see the board item): the editor reviews and reorders
  * the metadata-derived defaults, edits the per-party column metadata (semantic
- * type and disclosure -- see {@link setDraftMetadata}), and attaches identity,
- * lifetime, and an optional legal agreement. It deliberately exposes NO control
- * for output sharing, `algorithm` (psi-c), `deduplicate`, or fuzzy comparisons:
- * those are carried from the seed unchanged, so a draft's TERMS can only ever
- * emit the default `psi` / both-receive / no-dedup / no-fuzzy shape, and no
- * payload block is authored into the terms. Element, transform, and swap
- * internals are read-only too. Each of those is a capability the engine does not
- * yet honor end-to-end (one-sided output) or is tracked as its own authoring
- * task; surfacing a settable control here would let the editor mint an invitation
- * whose headline behavior silently does not happen. The column METADATA is
- * editable and threaded into the inviter's own `prepareForExchange` (never the
- * token), so its disclosure choices govern what the inviter sends without
- * touching the agreed terms.
+ * type and disclosure -- see {@link setDraftMetadata}), chooses who receives the
+ * matched results (the 3-way output direction -- see {@link OutputDirection}),
+ * and attaches identity, lifetime, and an optional legal agreement. It still
+ * exposes NO control for `algorithm` (psi-c), `deduplicate`, or fuzzy comparisons:
+ * those are carried from the seed unchanged, so a draft's TERMS can only ever emit
+ * the default `psi` / no-dedup / no-fuzzy shape, and no payload block is authored
+ * into the terms. Element, transform, and swap internals are read-only too. Each
+ * of those is a capability tracked as its own authoring task; surfacing a settable
+ * control here would let the editor mint an invitation whose headline behavior
+ * silently does not happen. The output direction IS settable now that one-sided
+ * output is honored end-to-end (the acceptor mirrors the inviter's output and the
+ * exchange withholds the result from a non-receiving party). The column METADATA
+ * is editable and threaded into the inviter's own `prepareForExchange` (never the
+ * token), so its disclosure choices govern what the inviter sends without touching
+ * the agreed terms.
  */
 
 /** One linkage key in the editor, paired with whether it is active. Display and
@@ -43,6 +45,35 @@ import type { LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
 export interface DraftKey {
   key: LinkageKey;
   enabled: boolean;
+}
+
+/**
+ * Who receives the matched results, from the INVITER's point of view:
+ * - `"both"`   -- both parties receive (the default, symmetric exchange).
+ * - `"inviter"` -- only the inviter ("me") receives; the partner is the helper.
+ * - `"partner"` -- only the partner receives; the inviter is the helper.
+ *
+ * This is the editor's representation of the {@link Output} pair. Modeling it as
+ * a 3-value choice (rather than two independent booleans) makes the forbidden
+ * "neither party receives" combination unrepresentable by construction: there is
+ * no draft state that maps to `{ expectsOutput: false, shareWithPartner: false }`,
+ * which `validateCompatibility` rejects ("neither party expects output").
+ */
+export type OutputDirection = "both" | "inviter" | "partner";
+
+/** Map an {@link OutputDirection} to the inviter's {@link Output} pair. The three
+ * cases are exactly the three valid (non-"neither") combinations, so no choice can
+ * yield a forbidden pair. The acceptor derives its own (mirrored) output from
+ * these terms at accept time (see `deriveAcceptedLinkageTerms` in core). */
+export function outputForDirection(direction: OutputDirection): Output {
+  switch (direction) {
+    case "both":
+      return { expectsOutput: true, shareWithPartner: true };
+    case "inviter":
+      return { expectsOutput: true, shareWithPartner: false };
+    case "partner":
+      return { expectsOutput: false, shareWithPartner: true };
+  }
 }
 
 /** The optional legal-agreement block, as the editor holds it before validation.
@@ -64,6 +95,11 @@ export interface AdvancedInviteDraft {
   /** Invitation lifetime in seconds; threaded into `generateInvitation`, not the
    * linkage terms. Bounded in {@link validateAdvancedInvite}. */
   lifetimeSeconds: number;
+  /** Who receives the matched results (see {@link OutputDirection}); applied to
+   * the built terms' `output` by {@link buildAdvancedTerms}. Defaults to `"both"`
+   * (the symmetric exchange). The forbidden "neither receives" pair is
+   * unrepresentable -- it has no `OutputDirection`. */
+  outputDirection: OutputDirection;
   legalAgreement?: DraftLegalAgreement;
   /** The inviter's per-party column metadata (semantic type + disclosure role),
    * editable in the grid. Editing a column's type re-derives which keys are
@@ -136,6 +172,9 @@ export function seedAdvancedInvite(
     draft: {
       identity,
       lifetimeSeconds: INVITATION_LIFETIME_SECONDS,
+      // The default is the symmetric both-receive exchange, matching the quick
+      // path and getDefaultLinkageTerms' output.
+      outputDirection: "both",
       metadata,
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     },
@@ -196,12 +235,12 @@ function normalizeText(value: string): string {
 }
 
 /**
- * Build the {@link LinkageTerms} a draft represents. Output sharing, `algorithm`,
- * `deduplicate`, `version`, and `date` are carried from the seed unchanged (the
- * editor exposes no control for them, so a draft cannot alter them); `identity`
- * and the optional legal agreement come from the draft (free text NFC-normalized
- * and trimmed); linkage keys are the enabled ones in draft order, and linkage
- * fields are filtered to those the enabled keys reference (mirroring
+ * Build the {@link LinkageTerms} a draft represents. `algorithm`, `deduplicate`,
+ * `version`, and `date` are carried from the seed unchanged (the editor exposes no
+ * control for them, so a draft cannot alter them); `identity`, the `output`
+ * direction, and the optional legal agreement come from the draft (free text
+ * NFC-normalized and trimmed); linkage keys are the enabled ones in draft order,
+ * and linkage fields are filtered to those the enabled keys reference (mirroring
  * `getDefaultLinkageTerms`, so disabling a key drops a now-unreferenced field).
  *
  * Pure: it does not validate. {@link validateAdvancedInvite} runs the result
@@ -210,8 +249,9 @@ function normalizeText(value: string): string {
 export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // The recommended terms for the draft's CURRENT metadata, so a column type edit
   // re-derives the offerable fields/keys in lockstep with the grid. The base
-  // carries the non-authored shape (version/date/algorithm/output/deduplicate);
-  // the draft overrides identity, the enabled keys, and the legal agreement.
+  // carries the non-authored shape (version/date/algorithm/deduplicate); the draft
+  // overrides identity, the output direction, the enabled keys, and the legal
+  // agreement.
   const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
   const enabledKeys = draft.keys
     .filter((entry) => entry.enabled)
@@ -226,6 +266,9 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const terms: LinkageTerms = {
     ...baseTerms,
     identity: normalizeText(draft.identity),
+    // The chosen 3-way output direction; one of the three valid pairs, so it never
+    // produces the forbidden "neither receives" combination (see OutputDirection).
+    output: outputForDirection(draft.outputDirection),
     linkageFields,
     linkageKeys: enabledKeys,
   };
