@@ -6,6 +6,7 @@ import {
 
 import {
   MAX_WEBRTC_FRAME_BYTES,
+  assertChunkReassemblySupported,
   boundChunkReassembly,
   checkDeliveredFrameBound,
 } from "./boundedReassembly";
@@ -74,6 +75,12 @@ export async function openPeerMessageConnection(
   },
 ): Promise<MessageConnection> {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
+  // Validate the PeerJS chunk-reassembly premise before attaching any listener or
+  // constructing the connection: if it is broken, throwing here leaves nothing to
+  // tear down, whereas throwing from the constructor callback below would strand
+  // the half-wired channel (the QueuedMessageConnection is never returned, so its
+  // catch-driven close cannot run).
+  assertChunkReassemblySupported(conn);
   const opened = waitForConnectionOpen(conn, options?.openTimeoutMs);
   const mc = new QueuedMessageConnection(
     (controls) => {

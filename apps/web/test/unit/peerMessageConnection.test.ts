@@ -94,13 +94,13 @@ describe("openPeerMessageConnection", () => {
   test("fails to install the inbound bound on a connection lacking PeerJS internals", async () => {
     // The dependency-premise check: a connection without _handleChunk/_chunkedData
     // (a future peerjs that renamed them) fails loud rather than running unbounded.
-    const fake = new EventEmitter() as unknown as {
-      _handleChunk?: unknown;
-      _chunkedData?: unknown;
-    } & EventEmitter;
+    const fake = new EventEmitter();
     await expect(
       openPeerMessageConnection(fake as unknown as DataConnection),
     ).rejects.toThrow(/chunk-reassembly internals/);
+    // The premise is checked before any listener is attached, so a broken premise
+    // strands nothing: no data/open/error/close listener is left on the channel.
+    expect(fake.eventNames()).toHaveLength(0);
   });
 
   test("delegates send to the underlying channel", async () => {

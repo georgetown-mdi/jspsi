@@ -146,6 +146,43 @@ describe("boundChunkReassembly", () => {
     expect(Object.keys(conn._chunkedData).map(Number)).toEqual([2]);
   });
 
+  test("drops every chunk once it has failed the connection", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameBytes: 100 });
+
+    conn._handleChunk(makeChunk(1, 0, 10, 60)); // 60, stored
+    conn._handleChunk(makeChunk(1, 1, 10, 60)); // 120 > 100 -> fail, not stored
+    expect(fail).toHaveBeenCalledTimes(1);
+    const partialsAtFailure = conn.partialCount;
+
+    // Post-failure chunks -- a small one for the failed id and one for a fresh id
+    // -- must not re-enter the new-frame path, reach the original handler, or
+    // re-fire fail(); the connection is already terminal.
+    conn._handleChunk(makeChunk(1, 2, 10, 1));
+    conn._handleChunk(makeChunk(2, 0, 10, 1));
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.partialCount).toBe(partialsAtFailure);
+    expect(conn.completed).toEqual([]);
+  });
+
+  test("counts a string chunk by byte residency, not character length", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameBytes: 10 });
+
+    // Six characters is 6 by length but 12 resident bytes (UTF-16 x2), over the
+    // 10-byte cap; counting characters would undercount and miss the bound.
+    conn._handleChunk({
+      __peerData: 1,
+      n: 0,
+      total: 2,
+      data: "abcdef",
+    } as unknown as Chunk);
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).kind).toBe("protocol");
+  });
+
   test("throws when the PeerJS chunk internals are absent", () => {
     expect(() =>
       boundChunkReassembly({} as unknown as DataConnection, vi.fn()),

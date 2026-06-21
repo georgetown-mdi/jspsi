@@ -70,7 +70,7 @@ interface PeerChunk {
   __peerData: number;
   n: number;
   total: number;
-  data: { byteLength?: number; length?: number } | undefined;
+  data: { byteLength?: number; length?: number } | string | undefined;
 }
 
 /**
@@ -90,10 +90,14 @@ interface ChunkedDataConnection {
   _chunkedData: Record<number, unknown>;
 }
 
-/** Byte length of a chunk slice, tolerant of a `Uint8Array`/`ArrayBuffer` or a
- * length-bearing view; `0` if unmeasurable (never expected, fails safe low). */
+/** Resident byte length of a chunk slice. A binary-mode channel always supplies
+ * a `Uint8Array`/`ArrayBuffer`, so `byteLength` is the usual path; a string is
+ * counted as UTF-16 code units times two (its worst-case heap residency, the
+ * same measure the signaling-server queue cap uses) rather than character
+ * length, which would undercount multi-byte text and under-enforce the bound. */
 function chunkByteLength(data: PeerChunk["data"]): number {
   if (data === undefined) return 0;
+  if (typeof data === "string") return data.length * 2;
   if (typeof data.byteLength === "number") return data.byteLength;
   if (typeof data.length === "number") return data.length;
   return 0;
@@ -138,6 +142,33 @@ export function checkDeliveredFrameBound(
 }
 
 /**
+ * Asserts `conn` exposes the PeerJS chunk-reassembly internals
+ * {@link boundChunkReassembly} wraps. Encodes the dependency premise as a runtime
+ * check, not a comment: a `peerjs` upgrade that renames or restructures the chunk
+ * reassembly must fail loud (the live browser exchange test installs the guard on
+ * every exchange) rather than silently run with no inbound bound. Called up front
+ * in `openPeerMessageConnection`, before any listener is attached, so a broken
+ * premise fails cleanly with nothing to tear down.
+ */
+export function assertChunkReassemblySupported(conn: DataConnection): void {
+  const probe = conn as unknown as {
+    _handleChunk?: unknown;
+    _chunkedData?: unknown;
+  };
+  if (
+    typeof probe._handleChunk !== "function" ||
+    !probe._chunkedData ||
+    typeof probe._chunkedData !== "object"
+  ) {
+    throw new Error(
+      "PeerJS data connection does not expose the expected chunk-reassembly " +
+        "internals (_handleChunk/_chunkedData); the inbound frame bound cannot " +
+        "be installed. Re-verify against the installed peerjs version.",
+    );
+  }
+}
+
+/**
  * Wraps `conn`'s PeerJS chunk reassembly so it cannot exhaust memory, the
  * primary inbound bound for the WebRTC transport. PeerJS reassembles a chunked
  * frame in `_handleChunk`, accumulating slices keyed by message id with no cap
@@ -175,25 +206,8 @@ export function boundChunkReassembly(
   const maxConcurrent =
     options?.maxConcurrentReassemblies ?? MAX_CONCURRENT_REASSEMBLIES;
 
+  assertChunkReassemblySupported(conn);
   const internals = conn as unknown as ChunkedDataConnection;
-  // Encode the dependency premise as a runtime check, not a comment: a `peerjs`
-  // upgrade that renames or restructures the chunk reassembly must fail loud
-  // (the live browser exchange test installs this guard) rather than silently
-  // run the exchange with no inbound bound. Validate against a loosely-typed view
-  // (the cast above asserts the fields exist; this re-checks at runtime).
-  const probe = internals as { _handleChunk?: unknown; _chunkedData?: unknown };
-  if (
-    typeof probe._handleChunk !== "function" ||
-    !probe._chunkedData ||
-    typeof probe._chunkedData !== "object"
-  ) {
-    throw new Error(
-      "PeerJS data connection does not expose the expected chunk-reassembly " +
-        "internals (_handleChunk/_chunkedData); the inbound frame bound cannot " +
-        "be installed. Re-verify against the installed peerjs version.",
-    );
-  }
-
   const original = internals._handleChunk.bind(internals);
   // Per-id accumulated bytes, in arrival order (Map preserves insertion order,
   // so the first key is the oldest partial to evict). Mirrors PeerJS's own
@@ -201,6 +215,11 @@ export function boundChunkReassembly(
   // removed when the frame completes or is evicted.
   const inFlight = new Map<number, number>();
   let bytesInFlight = 0;
+  // Latched once the bound fails the connection: it is terminal, so every later
+  // chunk is dropped without bookkeeping or reaching the original handler (which
+  // would otherwise re-accumulate on a connection that will never deliver, and
+  // re-enter the new-frame path for the failed id whose bytes were never booked).
+  let failed = false;
 
   const evictOldest = (): void => {
     const oldest = inFlight.keys().next().value;
@@ -211,6 +230,7 @@ export function boundChunkReassembly(
   };
 
   internals._handleChunk = (chunk: PeerChunk): void => {
+    if (failed) return;
     const id = chunk.__peerData;
     const chunkBytes = chunkByteLength(chunk.data);
 
@@ -224,6 +244,7 @@ export function boundChunkReassembly(
     // never allocated. The running total spans every in-flight reassembly, so
     // this caps both a single frame and the aggregate of concurrent partials.
     if (bytesInFlight + chunkBytes > maxFrameBytes) {
+      failed = true;
       fail(oversizedFrameError(maxFrameBytes));
       return;
     }
