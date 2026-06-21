@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { SEMANTIC_TYPES } from "../types";
-import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { SemanticType } from "../types";
 
@@ -75,10 +75,13 @@ export const MetadataSchema = z.array(ColumnMetadataSchema).refine(
  * on-disk form, e.g. `is_payload`) are converted to camelCase before validation,
  * so a `metadata` block read straight from a YAML/JSON config can be passed
  * directly -- mirroring {@link safeParseLinkageTerms} and
- * {@link safeParseExchangeSpec}. Returns a Zod `SafeParseReturnType`.
+ * {@link safeParseExchangeSpec}. Returns a Zod `SafeParseReturnType`. Honors the
+ * "safe" contract for the camelize bounds too -- a depth- or node-count-tripping
+ * input yields a `{ success: false }` result rather than throwing (see
+ * {@link safeParseCamelized}).
  */
 export function safeParseMetadata(raw: unknown) {
-  return MetadataSchema.safeParse(camelizeKeys(raw));
+  return safeParseCamelized(MetadataSchema, raw);
 }
 
 // ─── Metadata Inference ──────────────────────────────────────────────────────

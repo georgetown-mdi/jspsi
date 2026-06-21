@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 
@@ -1057,9 +1058,13 @@ export function parseConnectionConfig(raw: unknown): ConnectionConfig {
   return ConnectionConfigSchema.parse(camelizeKeys(raw));
 }
 
-/** Non-throwing version of {@link parseConnectionConfig}. */
+/**
+ * Non-throwing version of {@link parseConnectionConfig}. Honors the "safe"
+ * contract for the {@link camelizeKeys} bounds too -- see
+ * {@link safeParseCamelized}.
+ */
 export function safeParseConnectionConfig(raw: unknown) {
-  return ConnectionConfigSchema.safeParse(camelizeKeys(raw));
+  return safeParseCamelized(ConnectionConfigSchema, raw);
 }
 
 /**
@@ -1074,7 +1079,11 @@ export function parseFileSyncOptions(raw: unknown): FileSyncOptions {
   return FileSyncOptionsSchema.parse(camelizeKeys(raw));
 }
 
-/** Non-throwing version of {@link parseFileSyncOptions}. */
+/**
+ * Non-throwing version of {@link parseFileSyncOptions}. Honors the "safe"
+ * contract for the {@link camelizeKeys} bounds too -- see
+ * {@link safeParseCamelized}.
+ */
 export function safeParseFileSyncOptions(raw: unknown) {
-  return FileSyncOptionsSchema.safeParse(camelizeKeys(raw));
+  return safeParseCamelized(FileSyncOptionsSchema, raw);
 }

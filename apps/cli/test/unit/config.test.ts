@@ -6,6 +6,7 @@ import YAML from "yaml";
 import {
   getDefaultLinkageTerms,
   MAX_NAME_LENGTH,
+  MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   parseExchangeSpec,
   UsageError,
@@ -1316,6 +1317,60 @@ test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
     expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
     expect(() => loadConfigLinkageSource(configPath)).toThrow(
       "invalid linkage_terms",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A local config whose linkage_terms trips a camelizeKeys structural bound (here
+// the depth bound, the cheapest to reach) must still surface the file-named
+// "config file X has invalid linkage_terms: ..." wrap, not the raw bound-error
+// text -- safeParseLinkageTerms is now genuinely non-throwing for the bound, so
+// the if(!result.success) branch produces the helpful message rather than the
+// throw skipping straight past it. Still a UsageError (CLI exit 64), as before.
+test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // Nest one level past the depth bound so camelizeKeys rejects before Zod.
+    let deepTerms: unknown = { identity: "Agency A" };
+    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+      deepTerms = { nested: deepTerms };
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    // The file-named wrap, carrying the bound's fixed message (no input bytes),
+    // not the raw NestingDepthExceededError text that the pre-fix throw produced.
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid linkage_terms: input nesting ` +
+        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The same for the metadata branch: a valid linkage_terms reaches it, then a
+// camelize-bound-tripping metadata block surfaces the file-named "invalid
+// metadata" wrap rather than throwing the raw bound error.
+test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    let deepMetadata: unknown = { name: "X" };
+    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+      deepMetadata = { nested: deepMetadata };
+    fs.writeFileSync(
+      configPath,
+      YAML.stringify({
+        linkage_terms: getDefaultLinkageTerms("Agency A"),
+        metadata: deepMetadata,
+      }),
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid metadata: input nesting ` +
+        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

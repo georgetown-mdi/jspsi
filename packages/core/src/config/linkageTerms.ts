@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
@@ -1003,10 +1004,12 @@ export function parseLinkageTerms(raw: unknown): LinkageTerms {
 /**
  * Non-throwing version of {@link parseLinkageTerms}.
  * Returns a Zod `SafeParseReturnType` with `success` and either `data` or
- * `error`.
+ * `error`. Honors the "safe" contract for the {@link camelizeKeys} bounds too:
+ * a depth- or node-count-tripping input yields a `{ success: false }` result
+ * rather than throwing (see {@link safeParseCamelized}).
  */
 export function safeParseLinkageTerms(raw: unknown) {
-  return LinkageTermsSchema.safeParse(camelizeKeys(raw, PARAMS_WIDTH_BOUND));
+  return safeParseCamelized(LinkageTermsSchema, raw, PARAMS_WIDTH_BOUND);
 }
 
 // --- Compatibility -----------------------------------------------------------
