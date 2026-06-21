@@ -3,8 +3,11 @@ import http from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
+import {
+  MAX_MESSAGE_BYTES,
+  WebSocketServer,
+} from "@peerjs-server/services/webSocketServer/index";
 import { Realm } from "@peerjs-server/models/realm";
-import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index";
 
 import type { AddressInfo } from "node:net";
 import type { IRealm } from "@peerjs-server/models/realm";
@@ -16,8 +19,6 @@ import type { IRealm } from "@peerjs-server/models/realm";
 // same pattern test/devServer/signalingProbe.ts uses. The pre-101 handshake
 // timeout is covered separately in signalingUpgradeTimeout.test.ts, which imports
 // no `ws` (see the note there).
-
-const MAX_MESSAGE_BYTES = 64 * 1024;
 
 interface Signaling {
   port: number;
@@ -45,7 +46,14 @@ async function startSignaling(): Promise<Signaling> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   cleanups.push(
-    () => new Promise<void>((resolve) => server.close(() => resolve())),
+    () =>
+      new Promise<void>((resolve) => {
+        // Force-close any still-open (upgraded) connections so close() resolves
+        // promptly even when a test failed before closing its own `ws` -- an
+        // upgraded socket would otherwise keep the server alive and hang teardown.
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
   );
   return { port, realm };
 }
@@ -64,26 +72,32 @@ function waitForFrame(
   timeoutMs = 3_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`no ${type} frame within ${timeoutMs}ms`)),
-      timeoutMs,
-    );
-    ws.on("message", (data: WebSocket.RawData) => {
+    const settle = (action: () => void) => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      action();
+    };
+    const onMessage = (data: WebSocket.RawData) => {
       let frameType: unknown;
       try {
         frameType = (JSON.parse(data.toString()) as { type?: unknown }).type;
       } catch {
         return;
       }
-      if (frameType === type) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    ws.on("error", () => {
-      clearTimeout(timer);
-      reject(new Error("socket error before frame"));
-    });
+      if (frameType === type) settle(resolve);
+    };
+    const onError = () =>
+      settle(() => reject(new Error("socket error before frame")));
+    const timer = setTimeout(
+      () =>
+        settle(() =>
+          reject(new Error(`no ${type} frame within ${timeoutMs}ms`)),
+        ),
+      timeoutMs,
+    );
+    ws.on("message", onMessage);
+    ws.on("error", onError);
   });
 }
 

@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import {
+  MAX_MESSAGES_PER_QUEUE,
+  MAX_OUTSTANDING_QUEUES,
+  Realm,
+} from "@peerjs-server/models/realm";
 import { CheckBrokenConnections } from "@peerjs-server/services/checkBrokenConnections/index";
 import { Client } from "@peerjs-server/models/client";
 import { MessageType } from "@peerjs-server/enums";
-import { Realm } from "@peerjs-server/models/realm";
+import defaultConfig from "@peerjs-server/config/index";
 
 import type { IMessage } from "@peerjs-server/models/message";
 
@@ -121,19 +126,31 @@ describe("relay message-queue bounds", () => {
   test("caps the number of distinct queued destinations", () => {
     const realm = new Realm();
     // Spray more distinct unregistered destinations than the bound allows.
-    for (let i = 0; i < 1_500; i += 1) {
+    for (let i = 0; i < MAX_OUTSTANDING_QUEUES + 500; i += 1) {
       realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`));
     }
-    // MAX_OUTSTANDING_QUEUES in realm.ts.
-    expect(realm.getClientsIdsWithQueue().length).toBe(1_000);
+    expect(realm.getClientsIdsWithQueue().length).toBe(MAX_OUTSTANDING_QUEUES);
   });
 
   test("caps the depth of a single queue", () => {
     const realm = new Realm();
-    for (let i = 0; i < 150; i += 1) {
+    for (let i = 0; i < MAX_MESSAGES_PER_QUEUE + 50; i += 1) {
       realm.addMessageToQueue("dst", offerTo("dst"));
     }
-    // MAX_MESSAGES_PER_QUEUE in realm.ts.
-    expect(realm.getMessageQueueById("dst")?.size()).toBe(100);
+    expect(realm.getMessageQueueById("dst")?.size()).toBe(
+      MAX_MESSAGES_PER_QUEUE,
+    );
+  });
+});
+
+describe("liveness-timeout config invariant", () => {
+  // The two-tier reaper's defense depends on the short window being shorter than
+  // the generous one; inverting the two would silently reap established peers and
+  // spare silent ones. Pin the ordering as a check so an edit to the defaults
+  // that breaks it fails here rather than in production.
+  test("unconfirmed_timeout is shorter than alive_timeout", () => {
+    expect(defaultConfig.unconfirmed_timeout).toBeLessThan(
+      defaultConfig.alive_timeout,
+    );
   });
 });

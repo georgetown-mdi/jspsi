@@ -32,8 +32,8 @@ export interface IRealm {
 // legitimate rendezvous (a handful of queued frames for a momentarily-absent
 // peer); a message dropped past either bound is a no-op for the spammer and only
 // loses a frame for a real peer that is itself far past needing a reconnect hold.
-const MAX_OUTSTANDING_QUEUES = 1000;
-const MAX_MESSAGES_PER_QUEUE = 100;
+export const MAX_OUTSTANDING_QUEUES = 1000;
+export const MAX_MESSAGES_PER_QUEUE = 100;
 
 export class Realm implements IRealm {
   private readonly clients = new Map<string, IClient>();

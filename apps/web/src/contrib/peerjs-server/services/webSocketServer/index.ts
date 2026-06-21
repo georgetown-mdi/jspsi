@@ -32,7 +32,7 @@ const WS_PATH = "peerjs";
 // legitimate frame while bounding the memory a single inbound frame can claim;
 // `ws` closes a connection that exceeds it (1009). Without this the `ws` default
 // admits a 100 MB frame from an unauthenticated peer.
-const MAX_MESSAGE_BYTES = 64 * 1024;
+export const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
