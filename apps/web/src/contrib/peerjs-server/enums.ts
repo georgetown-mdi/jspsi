@@ -2,6 +2,7 @@ export enum Errors {
   INVALID_KEY = "Invalid key provided",
   INVALID_TOKEN = "Invalid token provided",
   INVALID_WS_PARAMETERS = "No id, token, or key supplied to websocket server",
+  WS_PARAMETER_TOO_LONG = "id, token, or key exceeds the maximum length",
   CONNECTION_LIMIT_EXCEED = "Server has reached its concurrent user limit",
 }
 

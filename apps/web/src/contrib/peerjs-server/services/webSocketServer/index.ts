@@ -41,6 +41,33 @@ const WS_PATH = "peerjs";
 // memory. See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
 
+// Bound the length of each upgrade-handshake parameter (`id`, `token`, `key`)
+// where it enters in `_onSocketConnection`, before the id is stored in the realm
+// `clients` map or stamped onto a relayed frame as `message.src`. Without this an
+// id is capped only incidentally by Node's ~16 KiB HTTP header-size limit on the
+// upgrade URL, not by any application bound -- and the id is the one
+// attacker-controlled string the server both retains in the `clients` map and
+// writes onto every frame it relays. 256 is generous: psilink's rendezvous ids are
+// 32 hex chars (`deriveRendezvousPeerId`) and a PeerJS default id is a UUID (~36),
+// so the cap sits ~7x above any legitimate id and refuses no real peer, yet two
+// orders of magnitude below the incidental header limit.
+//
+// The `id` bound is the load-bearing one. The relay's per-queue byte cap
+// (`MAX_QUEUE_BYTES`, models/realm.ts) sizes a queued frame by the UTF-16 resident
+// bytes of its string fields, `src` included, and the server overwrites `src` with
+// the connecting client's id (below): an unbounded id therefore lets a single
+// near-maximum frame addressed to an absent destination exceed the per-queue byte
+// cap on account of `src` alone, breaking the "any single legal frame is always
+// holdable" margin that cap's 2x-the-wire-cap sizing rests on. Bounding the id
+// holds that `src` contribution to at most 2 * MAX_HANDSHAKE_PARAM_LENGTH (512)
+// resident bytes -- a negligible fraction of the 512 KiB queue cap -- so a real,
+// KB-scale frame from any accepted id stays holdable. `token` and `key` are bounded
+// at the same point for a uniform "no handshake parameter is unbounded" invariant:
+// `token` is also retained per-client in the `clients` map (the same standing
+// memory surface as the id), while `key` is only compared and never stored.
+// See docs/spec/CHANNEL_SECURITY.md.
+export const MAX_HANDSHAKE_PARAM_LENGTH = 256;
+
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
   private readonly realm: IRealm;
@@ -146,6 +173,15 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
     if (!id || !token || !key) {
       this._sendErrorAndClose(socket, Errors.INVALID_WS_PARAMETERS);
+      return;
+    }
+
+    if (
+      id.length > MAX_HANDSHAKE_PARAM_LENGTH ||
+      token.length > MAX_HANDSHAKE_PARAM_LENGTH ||
+      key.length > MAX_HANDSHAKE_PARAM_LENGTH
+    ) {
+      this._sendErrorAndClose(socket, Errors.WS_PARAMETER_TOO_LONG);
       return;
     }
 
