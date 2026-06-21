@@ -13,11 +13,14 @@
 //
 // Together those pin both acceptance criteria: in-dialect patterns are
 // byte-identical to the previous engine, and the CLI (Node) and web (browser)
-// builds derive identical values. Only in-dialect patterns and inputs JS `RegExp`
-// can evaluate without catastrophic backtracking appear here; the linear-time
-// behavior on the former-ReDoS patterns is checked separately (linearRegex.test.ts
-// and the parse_date many-token vector below, which uses a matching input so the
-// JS reference terminates).
+// builds derive identical values. The vectors cover the domain where re2js and
+// `new RegExp` agree: in-dialect patterns on BMP inputs that JS `RegExp` can
+// evaluate without catastrophic backtracking. They deliberately exclude the one
+// known divergence -- `.` matches a code point under RE2 but a UTF-16 code unit
+// under JS, so the two differ on a non-BMP input (documented in PROTOCOL.md) --
+// and the linear-time behavior on the former-ReDoS patterns, checked separately
+// (linearRegex.test.ts and the parse_date many-token vector below, which uses a
+// matching input so the JS reference terminates).
 //
 // Run:  node packages/core/test/vectors/generate-transform-regex-vectors.mjs
 // It prints the JSON to stdout; redirect into transform-regex-vectors.json.

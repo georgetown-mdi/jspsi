@@ -9,10 +9,15 @@ import type { FieldValue } from "../src/standardization";
 // transform-regex-vectors.json carry the output each step produced on the
 // JavaScript `RegExp` engine (computed by generate-transform-regex-vectors.mjs);
 // runPipeline now runs those steps on the linear-time engine (re2js). Asserting
-// the engine reproduces every vector pins "in-dialect patterns are byte-identical
-// to the previous engine" -- including every bundled default-template pattern.
-// apps/web/test/browser/transformRegex.test.ts asserts the BROWSER build
-// reproduces the same vectors, so the two build targets agree byte-for-byte.
+// the engine reproduces every vector pins that in-dialect patterns are
+// byte-identical to the previous engine for the patterns and inputs these vectors
+// cover -- including every bundled default-template pattern. The one known
+// divergence from `new RegExp` is outside that domain and not exercised here: `.`
+// matches a code point under RE2 but a UTF-16 code unit under JS, so the two
+// engines differ on a non-BMP input (documented in PROTOCOL.md); all vector
+// inputs are BMP. apps/web/test/browser/transformRegex.test.ts asserts the
+// BROWSER build reproduces the same vectors, so the two build targets agree
+// byte-for-byte.
 
 interface Vector {
   name: string;
