@@ -24,7 +24,7 @@ export interface IMessageQueue {
 
   byteSize(): number;
 
-  addMessage(message: IMessage): void;
+  addMessage(message: IMessage, byteSize?: number): void;
 
   readMessage(): IMessage | undefined;
 
@@ -34,10 +34,13 @@ export interface IMessageQueue {
 export class MessageQueue implements IMessageQueue {
   private lastReadAt: number = new Date().getTime();
   private readonly messages: IMessage[] = [];
-  // Running total of `messageByteSize` over `messages`, kept in step on every
-  // push and shift so the relay can bound a queue's resident bytes without
-  // rescanning it. Reads decrement it, so a queue a reconnecting peer drains
-  // can accept fresh frames again rather than staying wedged at the cap.
+  // Byte size of each entry in `messages`, pushed and shifted in lockstep, plus
+  // their running total. This lets the relay bound a queue's resident bytes
+  // without rescanning a payload: each message's size is measured exactly once
+  // (on enqueue) and reused on read, so `messageByteSize` is never recomputed.
+  // Reads decrement the total, so a queue a reconnecting peer drains can accept
+  // fresh frames again rather than staying wedged at the cap.
+  private readonly messageSizes: number[] = [];
   private bytes = 0;
 
   public getLastReadAt(): number {
@@ -52,17 +55,20 @@ export class MessageQueue implements IMessageQueue {
     return this.bytes;
   }
 
-  public addMessage(message: IMessage): void {
-    this.bytes += messageByteSize(message);
+  public addMessage(
+    message: IMessage,
+    byteSize: number = messageByteSize(message),
+  ): void {
+    this.bytes += byteSize;
     this.messages.push(message);
+    this.messageSizes.push(byteSize);
   }
 
   public readMessage(): IMessage | undefined {
     if (this.messages.length > 0) {
       this.lastReadAt = new Date().getTime();
-      const message = this.messages.shift();
-      if (message) this.bytes -= messageByteSize(message);
-      return message;
+      this.bytes -= this.messageSizes.shift() ?? 0;
+      return this.messages.shift();
     }
 
     return undefined;

@@ -92,11 +92,13 @@ export class Realm implements IRealm {
 
     // Cap the depth of any one queue for the same reason, by message count and
     // by total buffered bytes -- the byte check keeps the resident ceiling far
-    // below the count cap times the max frame size.
+    // below the count cap times the max frame size. Size the frame once and
+    // hand it to `addMessage` so the queue does not measure it a second time.
+    const messageBytes = messageByteSize(message);
     if (queue.size() >= MAX_MESSAGES_PER_QUEUE) return;
-    if (queue.byteSize() + messageByteSize(message) > MAX_QUEUE_BYTES) return;
+    if (queue.byteSize() + messageBytes > MAX_QUEUE_BYTES) return;
 
-    queue.addMessage(message);
+    queue.addMessage(message, messageBytes);
   }
 
   public clearMessageQueue(id: string): void {
