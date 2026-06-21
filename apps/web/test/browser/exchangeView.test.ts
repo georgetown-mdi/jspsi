@@ -123,9 +123,12 @@ function acceptorConfig(
       path: "/api/",
     },
     linkageTerms: acceptorTerms,
-    // Pre-acquired on the review screen: the acceptor renders no file prompt and
-    // dials only on Start.
+    // Pre-acquired on the review screen and prepared in the metadata editor: the
+    // acceptor renders no file prompt and dials only on Start. The empty bundle
+    // carries empty metadata/standardization to match.
     acquired: { rawRows: [], columns: [] },
+    metadata: [],
+    standardization: [],
     ...(initialWarning ? { initialWarning } : {}),
   };
 }

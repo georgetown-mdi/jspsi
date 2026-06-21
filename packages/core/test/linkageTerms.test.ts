@@ -24,8 +24,8 @@ import {
 } from "../src/utils/sanitizeForDisplay";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import {
+  MAX_NODE_COUNT,
   NestingDepthExceededError,
-  NodeCountExceededError,
 } from "../src/utils/camelizeKeys";
 
 // Minimal valid set of terms used as a base for individual tests.
@@ -1271,6 +1271,35 @@ test("a non-canonical linkage-key param is reported, not thrown", () => {
   ).toBe(true);
 });
 
+test("a transform.params value difference is an incompatibility", () => {
+  // The comparison operates on already-camelCase terms -- every parse path (config
+  // load, the post-handshake wire, and the invitation decode chokepoint) normalizes
+  // params key casing before terms reach here -- so this checks the substance: a
+  // different param VALUE under the same key diverges canonically and is reported.
+  const withParams = (
+    params: Record<string, unknown>,
+  ): LinkageTerms["linkageKeys"] => [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "parse_date", params }] },
+      ],
+    },
+  ];
+  const a: LinkageTerms = {
+    ...termsA,
+    linkageKeys: withParams({ inputFormat: "MMDDYYYY" }),
+  };
+  const b: LinkageTerms = {
+    ...termsB,
+    linkageKeys: withParams({ inputFormat: "YYYYMMDD" }),
+  };
+  const { errors } = validateCompatibility(a, b);
+  expect(errors.some((e) => e.includes("linkage keys do not match"))).toBe(
+    true,
+  );
+});
+
 test("legal agreement present on one side only is an error", () => {
   const { errors } = validateCompatibility(
     {
@@ -2029,18 +2058,20 @@ test("rejects a payload send list over the maximum count", () => {
 test("a pathological-count payload send list is rejected by the node budget, not with a RangeError", () => {
   // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
   // ~3.5M `Invalid string length` threshold the unbounded schema hit. The
-  // camelize pre-pass now fronts the boundedArray count gate: an over-budget
-  // partner collection is rejected with a clean, bounded NodeCountExceededError
-  // before the O(n) walk -- and so before Zod (path b) -- never a RangeError.
+  // camelize pre-pass fronts the boundedArray count gate: an over-budget partner
+  // collection is rejected by that budget before the O(n) walk -- and so before
+  // Zod (path b) -- never a RangeError. safeParseLinkageTerms now ABSORBS that
+  // bound into a { success: false } result (the "safe" contract) instead of
+  // throwing, so the rejection surfaces as the node-count issue, not an exception.
   const send = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(sendTerms(send));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(sendTerms(send));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 test("accepts a payload receive list at exactly the maximum count", () => {
@@ -2059,14 +2090,14 @@ test("rejects a payload receive list over the maximum count", () => {
 
 test("a pathological-count payload receive list is rejected by the node budget, not with a RangeError", () => {
   const receive = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(receiveTerms(receive));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(receiveTerms(receive));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 // ─── Top-level linkageFields / linkageKeys count bounds ──────────────────────
@@ -2109,18 +2140,19 @@ test("rejects linkageFields over the maximum count", () => {
 test("a pathological-count linkageFields is rejected by the node budget, not with a RangeError", () => {
   // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
   // ~3.5M `Invalid string length` threshold the `.max()`-only schema hit. The
-  // camelize node budget now fronts the boundedArray count gate, rejecting the
-  // over-budget array with a clean, bounded NodeCountExceededError before the
-  // walk -- and so before Zod (path b) -- never a RangeError.
+  // camelize node budget fronts the boundedArray count gate, rejecting the
+  // over-budget array by that budget before the walk -- and so before Zod (path
+  // b) -- never a RangeError. safeParseLinkageTerms absorbs the bound into a
+  // { success: false } result rather than throwing (the "safe" contract).
   const fields = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(linkageFieldsTerms(fields));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(linkageFieldsTerms(fields));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 test("accepts linkageKeys at exactly the maximum count", () => {
@@ -2141,22 +2173,23 @@ test("rejects linkageKeys over the maximum count", () => {
 
 test("a pathological-count linkageKeys is rejected by the node budget, not with a RangeError or a TypeError", () => {
   // ~4M entries, past the camelize node budget (MAX_NODE_COUNT). The node budget
-  // fronts the boundedArray count gate, rejecting the over-budget array with a
-  // clean, bounded NodeCountExceededError before the walk -- and so before Zod
-  // (path b) -- never a RangeError, and never the TypeError a raw non-object key
-  // would drive at the terms-level refine (the over-budget array never reaches
-  // it). The boundedArray `abort` that guards that refine for a sub-budget
-  // over-count is pinned by the next test.
+  // fronts the boundedArray count gate, rejecting the over-budget array by that
+  // budget before the walk -- and so before Zod (path b) -- never a RangeError,
+  // and never the TypeError a raw non-object key would drive at the terms-level
+  // refine (the over-budget array never reaches it). safeParseLinkageTerms
+  // absorbs the bound into a { success: false } result rather than throwing (the
+  // "safe" contract); the not-throwing assertion stands in for the prior
+  // not-a-RangeError / not-a-TypeError checks. The boundedArray `abort` that
+  // guards that refine for a sub-budget over-count is pinned by the next test.
   const keys = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(linkageKeysTerms(keys));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
-  expect(err).not.toBeInstanceOf(TypeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(linkageKeysTerms(keys));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 test("an over-count linkageKeys of raw non-object entries aborts to a clean count issue", () => {

@@ -12,7 +12,6 @@ import FileAcquire from "@components/FileAcquire";
 import type { Root } from "react-dom/client";
 
 import type { AcquiredBundle, AlertContent } from "@components/FileAcquire";
-import type { LinkageTerms } from "@psilink/core";
 
 // The acquire phase pulls in only core + FileSelect (no peerjs/WASM), but the real
 // Mantine Dropzone is awkward to drive headlessly. Stub FileSelect with a file
@@ -61,7 +60,7 @@ vi.mock("@components/FileSelect", () => ({
 // Swap core's loadCSVFile per-test to drive the read-failure and teardown-mid-read
 // paths, which a real (always-resolving) papaparse parse cannot reach
 // deterministically. With impl unset it delegates to the real parser, so the
-// pre-flight tests below still run against real CSV parsing and satisfiability.
+// happy-path handoff below runs against real CSV parsing.
 const csvLoad = vi.hoisted(() => ({
   impl: undefined as ((file: unknown) => Promise<unknown>) | undefined,
 }));
@@ -76,25 +75,6 @@ vi.mock("@psilink/core", async (importOriginal) => {
   };
 });
 
-// Two single-element linkage keys, one per name field, so a CSV can satisfy both,
-// one, or neither -- the three pre-flight outcomes the acceptor distinguishes.
-const acceptorTerms: LinkageTerms = {
-  version: "1.0.0",
-  identity: "County Health Department",
-  date: "2026-01-01",
-  algorithm: "psi",
-  output: { expectsOutput: true, shareWithPartner: true },
-  deduplicate: false,
-  linkageFields: [
-    { name: "firstName", type: "first_name" },
-    { name: "lastName", type: "last_name" },
-  ],
-  linkageKeys: [
-    { name: "first", elements: [{ field: "firstName" }] },
-    { name: "last", elements: [{ field: "lastName" }] },
-  ],
-};
-
 function csvFile(content: string): File {
   return new File([content], "data.csv", { type: "text/csv" });
 }
@@ -102,14 +82,13 @@ function csvFile(content: string): File {
 function makeSpies() {
   return {
     onError: vi.fn((_alert: AlertContent | undefined): void => {}),
-    onWarning: vi.fn((_alert: AlertContent | undefined): void => {}),
     onAcquired: vi.fn((_bundle: AcquiredBundle): void => {}),
   };
 }
 type Spies = ReturnType<typeof makeSpies>;
 
 /** The non-clear (defined) arguments a spy was called with: the acquire phase
- * clears each alert with `undefined` at the start of every attempt, so the
+ * clears the error with `undefined` at the start of every attempt, so the
  * meaningful assertions are over the alerts it actually raised. */
 function raised(spy: Spies["onError"]): Array<AlertContent> {
   return spy.mock.calls
@@ -120,16 +99,14 @@ function raised(spy: Spies["onError"]): Array<AlertContent> {
 let container: HTMLElement | undefined;
 let root: Root | undefined;
 
-function mount(linkageTerms: LinkageTerms | undefined, spies: Spies) {
+function mount(spies: Spies) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   root.render(
     createElement(FileAcquire, {
       submitLabel: "Start",
-      linkageTerms,
       onError: spies.onError,
-      onWarning: spies.onWarning,
       onAcquired: spies.onAcquired,
     }),
   );
@@ -153,59 +130,20 @@ afterEach(() => {
   csvLoad.impl = undefined;
 });
 
-describe("FileAcquire pre-flight parity", () => {
-  test("inviter (no terms) hands off any parsed file with no pre-flight", async () => {
+describe("FileAcquire handoff", () => {
+  test("a parsed file is handed off with its rows and columns, no pre-flight", async () => {
     const spies = makeSpies();
-    mount(undefined, spies);
+    mount(spies);
+    // A file with no linkage columns at all still hands off: the satisfiability
+    // verdict (and any block) now lives in the metadata editor, not here, so the
+    // acquire phase never dead-ends a file.
     await selectAndStart(csvFile("notes\nhello\n"));
 
     await vi.waitFor(() => expect(spies.onAcquired).toHaveBeenCalledTimes(1));
     const bundle = spies.onAcquired.mock.calls[0][0];
     expect(bundle.columns).toEqual(["notes"]);
     expect(bundle.rawRows).toEqual([{ notes: "hello" }]);
-    // The inviter is the source of the terms: it never blocks or warns on
-    // coverage, even for a file that would be unsatisfiable as an acceptor.
     expect(raised(spies.onError)).toEqual([]);
-    expect(raised(spies.onWarning)).toEqual([]);
-  });
-
-  test("acceptor with full coverage hands off without a warning", async () => {
-    const spies = makeSpies();
-    mount(acceptorTerms, spies);
-    await selectAndStart(csvFile("first_name,last_name\nAlice,Smith\n"));
-
-    await vi.waitFor(() => expect(spies.onAcquired).toHaveBeenCalledTimes(1));
-    const bundle = spies.onAcquired.mock.calls[0][0];
-    expect(bundle.columns).toEqual(["first_name", "last_name"]);
-    expect(raised(spies.onError)).toEqual([]);
-    expect(raised(spies.onWarning)).toEqual([]);
-  });
-
-  test("acceptor with partial coverage warns but still hands off", async () => {
-    const spies = makeSpies();
-    mount(acceptorTerms, spies);
-    // Only first_name is present: the "first" key survives, "last" does not.
-    await selectAndStart(csvFile("first_name\nAlice\n"));
-
-    await vi.waitFor(() => expect(spies.onAcquired).toHaveBeenCalledTimes(1));
-    const warnings = raised(spies.onWarning);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].title).toBe("Partial CSV coverage");
-    expect(raised(spies.onError)).toEqual([]);
-  });
-
-  test("acceptor with zero coverage blocks and never hands off", async () => {
-    const spies = makeSpies();
-    mount(acceptorTerms, spies);
-    // No name columns at all: no linkage key can match.
-    await selectAndStart(csvFile("notes\nhello\n"));
-
-    await vi.waitFor(() => {
-      const errors = raised(spies.onError);
-      expect(errors).toHaveLength(1);
-      expect(errors[0].title).toBe("This file cannot be linked");
-    });
-    expect(spies.onAcquired).not.toHaveBeenCalled();
   });
 });
 
@@ -215,7 +153,7 @@ describe("FileAcquire read failure and teardown", () => {
     // CSV still resolves), so force the reject to exercise the read-failure branch.
     csvLoad.impl = () => Promise.reject(new Error("stream exploded"));
     const spies = makeSpies();
-    mount(acceptorTerms, spies);
+    mount(spies);
     await selectAndStart(csvFile("first_name\nAlice\n"));
 
     await vi.waitFor(() => {
@@ -223,10 +161,8 @@ describe("FileAcquire read failure and teardown", () => {
       expect(errors).toHaveLength(1);
       expect(errors[0].title).toBe("Could not read your file");
     });
-    // The read failed before the pre-flight, so nothing is handed off and no
-    // partial-coverage warning is raised.
+    // The read failed, so nothing is handed off.
     expect(spies.onAcquired).not.toHaveBeenCalled();
-    expect(raised(spies.onWarning)).toEqual([]);
   });
 
   test("a teardown mid-read hands nothing off and raises no alert", async () => {
@@ -239,7 +175,7 @@ describe("FileAcquire read failure and teardown", () => {
         release = resolve;
       });
     const spies = makeSpies();
-    mount(acceptorTerms, spies);
+    mount(spies);
     await selectAndStart(csvFile("first_name,last_name\nA,B\n"));
 
     root?.unmount();
@@ -252,9 +188,8 @@ describe("FileAcquire read failure and teardown", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(spies.onAcquired).not.toHaveBeenCalled();
-    // Only the start-of-attempt clears (with undefined) were emitted; no defined
+    // Only the start-of-attempt clear (with undefined) was emitted; no defined
     // alert is raised after the teardown.
     expect(raised(spies.onError)).toEqual([]);
-    expect(raised(spies.onWarning)).toEqual([]);
   });
 });

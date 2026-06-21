@@ -45,7 +45,9 @@ import type {
   ExchangeDataSpec,
   ExchangeResult,
   LinkageTerms,
+  Metadata,
   PreparedExchange,
+  Standardization,
   WebRTCEndpoint,
 } from "@psilink/core";
 
@@ -80,6 +82,12 @@ export type ExchangeConfig =
        * inviter runs on the very terms the acceptor adopts (its identity is
        * already this party's name). */
       linkageTerms: LinkageTerms;
+      /** The inviter's edited per-party column metadata from the Advanced-options
+       * editor, threaded into its own `prepareForExchange` (never embedded in the
+       * token), so its disclosure choices govern what it sends and its column
+       * bindings match the keys it authored. Absent on the quick path, where the
+       * inviter's metadata is inferred from its columns. */
+      metadata?: Metadata;
       /** The shareable artifacts the inviter copies out-of-band, surfaced in the
        * exchange screen's share block (the inviter waits here for the partner to
        * accept). Both decode to the same token; the deep link prefills the accept
@@ -97,14 +105,20 @@ export type ExchangeConfig =
       expires?: string;
       endpoint: WebRTCEndpoint;
       linkageTerms: LinkageTerms;
-      /** The CSV parsed and pre-flighted on the accept review screen, fed straight
-       * into the exchange on Start: no re-parse, and no file prompt here. Mirrors
-       * the inviter's `acquired`. */
+      /** The CSV parsed on the accept review screen, fed straight into the exchange
+       * on Start: no re-parse, and no file prompt here. Mirrors the inviter's
+       * `acquired`. */
       acquired: AcquiredBundle;
-      /** The partial-coverage advisory the review screen's pre-flight raised, if
-       * any, seeded into the warning slot so it stays visible through the run (kept
-       * on success, cleared on a run failure). Absent when the file satisfied every
-       * linkage key. */
+      /** The per-party metadata and standardization the acceptor authored in the
+       * "Prepare your data" editor, threaded into `prepareForExchange` via
+       * {@link acceptorExchangeDataSpec}. Local and never cross-checked, so they
+       * govern this party's match rate and disclosure without touching the agreed
+       * terms the consent screen accepted. */
+      metadata: Metadata;
+      standardization: Standardization;
+      /** The partial-coverage advisory the editor raised, if any, seeded into the
+       * warning slot so it stays visible through the run (kept on success, cleared
+       * on a run failure). Absent when the file satisfied every linkage key. */
       initialWarning?: AlertContent;
     };
 
@@ -365,12 +379,27 @@ export function ExchangeView(config: ExchangeConfig) {
       // very terms it derived from its file and embedded in the token (their
       // identity is already this party's name), so the two sides carry an
       // identical fields/keys set and the terms-compatibility handshake agrees.
-      // Either party's metadata, standardization, and payloads still derive from
-      // its own CSV -- only the linkage terms are pinned to the invitation.
+      // Each party's metadata, standardization, and payloads stay per-party and
+      // local -- only the linkage terms are pinned to the invitation. The acceptor
+      // carries the metadata/standardization it authored in the "Prepare your
+      // data" editor (derived from its own CSV, never cross-checked); the inviter
+      // lets prepareForExchange infer them from its CSV.
       const dataSpec: ExchangeDataSpec =
         config.role === "acceptor"
-          ? acceptorExchangeDataSpec(config.linkageTerms, partyName)
-          : { linkageTerms: config.linkageTerms };
+          ? acceptorExchangeDataSpec(config.linkageTerms, partyName, {
+              metadata: config.metadata,
+              standardization: config.standardization,
+            })
+          : {
+              linkageTerms: config.linkageTerms,
+              // The inviter threads its edited metadata when it prepared data in
+              // the Advanced editor; the quick path omits it and metadata is
+              // inferred. standardization stays inferred for the inviter this slice
+              // (it authors none yet).
+              ...(config.metadata !== undefined && {
+                metadata: config.metadata,
+              }),
+            };
       const prepared = prepareForExchange(
         dataSpec,
         partyName,

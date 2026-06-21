@@ -133,6 +133,33 @@ describe("generateInvitation", () => {
     ]);
   });
 
+  test("threads the inviter's edited metadata to the result, never into the token", async () => {
+    // The Advanced editor passes its edited metadata alongside the authored terms;
+    // marking first_name as sent makes the metadata distinctive.
+    const metadata = inferMetadata([
+      "ssn",
+      "first_name",
+      "last_name",
+      "dob",
+    ]).map((c) =>
+      c.name === "first_name"
+        ? { ...c, role: "payload" as const, isPayload: true }
+        : c,
+    );
+    const result = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(PARTIAL_CSV),
+      location,
+      linkageTerms: getDefaultLinkageTerms("Org", metadata),
+      metadata,
+    });
+    // Returned so the inviter's own exchange binds and discloses on it...
+    expect(result.metadata).toEqual(metadata);
+    // ...but it is per-party and local: never embedded in the encoded token.
+    const token = await decodeInvitation(result.encoded);
+    expect("metadata" in token).toBe(false);
+  });
+
   test("a partial-column invitation stays terms-compatible with the acceptor it produces", async () => {
     // The bug this flow fixes: the acceptor adopts the invitation's terms, so if
     // the embedded set diverged from what the inviter runs, the terms-compat

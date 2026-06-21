@@ -18,12 +18,14 @@ import type { Root } from "react-dom/client";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import type { ExchangeConfig } from "@components/ExchangeView";
 
-// Stub the dialing exchange screen: this suite verifies the REVIEW screen -- that
-// the exchange screen mounts (carrying the parsed file) only after consent + a
-// satisfiable file, never before -- not the exchange itself, which would pull in
-// peerjs and the PSI WASM. Capture the props the route hands it so the test can
-// assert the bundle and the carried advisory; the no-dial-before-Start half lives
-// in exchangeView.test.ts. (vitest hoists vi.mock above the imports.)
+// Stub the dialing exchange screen: this suite verifies the REVIEW + PREPARE
+// screens -- that the prepare editor mounts only after consent, and the exchange
+// screen mounts (carrying the parsed file and the editor's metadata/standardization)
+// only after the operator confirms in the editor, never before -- not the exchange
+// itself, which would pull in peerjs and the PSI WASM. Capture the props the route
+// hands it so the test can assert the bundle, the threaded edits, and the carried
+// advisory; the no-dial-before-Start half lives in exchangeView.test.ts. (vitest
+// hoists vi.mock above the imports.)
 const exchange = vi.hoisted(() => ({
   lastProps: undefined as ExchangeConfig | undefined,
 }));
@@ -41,9 +43,9 @@ vi.mock("@components/ExchangeView", () => ({
 // Stub the dropzone with a file counter and two buttons -- one seeds the selected
 // file from `harness`, one is the real "Accept and continue" submit (honoring the
 // consent gate via submitDisabled). The real FileAcquire still runs the real CSV
-// parse and satisfiability pre-flight on submit, so the block/warn paths are
-// genuinely exercised. The counter lets the test wait for the file-state commit
-// before submitting, so handleSubmit never reads a stale (empty) selection.
+// parse on submit; the satisfiability verdict now lives in the prepare editor, not
+// here. The counter lets the test wait for the file-state commit before
+// submitting, so handleSubmit never reads a stale (empty) selection.
 const harness = vi.hoisted(() => ({ files: [] as Array<File> }));
 vi.mock("@components/FileSelect", () => ({
   default: (props: {
@@ -184,7 +186,7 @@ afterEach(() => {
 });
 
 describe("accept review screen (consent + file before any connection)", () => {
-  test("mounts the exchange only after consent, a name, a file, and Accept", async () => {
+  test("mounts the prepare editor, not the exchange, after consent and Accept", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
 
@@ -193,39 +195,26 @@ describe("accept review screen (consent + file before any connection)", () => {
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
 
-    // Pre-consent: the affirmative action is present but disabled, and the
-    // exchange screen (which dials) has not mounted.
+    // Pre-consent: the affirmative action is present but disabled, and neither the
+    // editor nor the dialing exchange screen has mounted.
     const accept = page.getByTestId("accept");
     await expect.element(accept).toBeDisabled();
     expect(exchangeMounted()).toBe(false);
 
-    // Consent + name + a fully satisfiable file enables the action.
+    // Consent + name + a parsed file enables the action.
     await reviewAndChoose(csvFile("first_name,last_name\nAlice,Smith\n"));
     await expect.element(accept).toBeEnabled();
-    expect(exchangeMounted()).toBe(false);
 
-    // Only the explicit Accept transitions to the exchange screen, carrying the
-    // parsed file and the decoded invitation's terms to the acceptor role.
+    // Accept moves to the "Prepare your data" editor -- NOT straight to the
+    // exchange. Nothing dials yet.
     await userEvent.click(accept);
     await expect
-      .element(page.getByTestId("exchange-mounted"))
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
       .toBeInTheDocument();
-    expect(exchange.lastProps?.role).toBe("acceptor");
-    expect(exchange.lastProps?.partyName).toBe("Dana");
-    if (exchange.lastProps?.role !== "acceptor")
-      throw new Error("expected acceptor config");
-    expect(exchange.lastProps.acquired.columns).toEqual([
-      "first_name",
-      "last_name",
-    ]);
-    expect(exchange.lastProps.acquired.rawRows).toEqual([
-      { first_name: "Alice", last_name: "Smith" },
-    ]);
-    // A fully satisfiable file carries no partial-coverage advisory.
-    expect(exchange.lastProps.initialWarning).toBeUndefined();
+    expect(exchangeMounted()).toBe(false);
   });
 
-  test("does not enable accept (or mount the exchange) without consent", async () => {
+  test("does not enable accept (or mount anything) without consent", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
 
@@ -233,8 +222,8 @@ describe("accept review screen (consent + file before any connection)", () => {
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
 
-    // A name and a satisfiable file, but consent unchecked: the action stays
-    // disabled and nothing mounts the exchange.
+    // A name and a file, but consent unchecked: the action stays disabled and
+    // nothing transitions.
     await userEvent.fill(page.getByRole("textbox"), "Dana");
     harness.files = [csvFile("first_name,last_name\nAlice,Smith\n")];
     await userEvent.click(page.getByTestId("select"));
@@ -242,55 +231,178 @@ describe("accept review screen (consent + file before any connection)", () => {
 
     await expect.element(page.getByTestId("accept")).toBeDisabled();
     expect(exchangeMounted()).toBe(false);
+    expect(document.body.textContent).not.toContain("Prepare your data");
   });
 });
 
-describe("accept review screen: satisfiability pre-flight", () => {
-  test("blocks a file that satisfies no linkage key, naming the missing fields", async () => {
+describe("prepare your data editor (verdict, disclosure, launch)", () => {
+  // Consent, name, choose the file, and press Accept to land in the editor.
+  async function reachEditor(file: File) {
+    await reviewAndChoose(file);
+    await userEvent.click(page.getByTestId("accept"));
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+  }
+
+  test("a satisfiable file reaches the exchange after Continue and Confirm, threading the edited spec", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
-
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
 
-    // No name columns at all: no linkage key can match.
-    await reviewAndChoose(csvFile("notes\nhello\n"));
-    await userEvent.click(page.getByTestId("accept"));
-
-    // The block message appears on the review screen, naming the missing field
-    // types, and the exchange screen never mounts -- nothing dials.
+    // first_name + last_name satisfy both keys; the extra `zip` column is inferred
+    // as payload, so the disclosure summary names exactly it.
+    await reachEditor(csvFile("first_name,last_name,zip\nAlice,Smith,90210\n"));
     await expect
-      .element(page.getByText("This file cannot be linked"))
+      .element(page.getByText("Columns sent to your partner: zip."))
       .toBeInTheDocument();
-    expect(document.body.textContent).toContain("firstName (first_name)");
-    expect(document.body.textContent).toContain("lastName (last_name)");
+
+    // Continue opens the confirmation, which lists the disclosed column; only
+    // confirming mounts the exchange.
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue to exchange" }),
+    );
+    await expect
+      .element(page.getByText("Confirm what you will send"))
+      .toBeInTheDocument();
     expect(exchangeMounted()).toBe(false);
-  });
+    await userEvent.click(
+      page.getByRole("button", { name: "Confirm and continue" }),
+    );
 
-  test("warns on partial coverage but still transitions, carrying the advisory", async () => {
-    window.location.hash = await encodeAcceptToken();
-    mountAcceptRoute();
-
-    await expect
-      .element(page.getByText("Invitation from County Health Department"))
-      .toBeInTheDocument();
-
-    // Only first_name is present: the "first" key survives, "last" does not.
-    await reviewAndChoose(csvFile("first_name\nAlice\n"));
-    await userEvent.click(page.getByTestId("accept"));
-
-    // Partial coverage still hands off: the exchange screen mounts, and the
-    // advisory rides along as initialWarning so it stays visible through the run.
     await expect
       .element(page.getByTestId("exchange-mounted"))
       .toBeInTheDocument();
     if (exchange.lastProps?.role !== "acceptor")
       throw new Error("expected acceptor config");
-    expect(exchange.lastProps.acquired.columns).toEqual(["first_name"]);
-    expect(exchange.lastProps.initialWarning?.title).toBe(
-      "Partial CSV coverage",
+    expect(exchange.lastProps.partyName).toBe("Dana");
+    expect(exchange.lastProps.acquired.columns).toEqual([
+      "first_name",
+      "last_name",
+      "zip",
+    ]);
+    // The editor's edited metadata and standardization are threaded to the run.
+    expect(exchange.lastProps.metadata.map((c) => c.name)).toEqual([
+      "first_name",
+      "last_name",
+      "zip",
+    ]);
+    expect(exchange.lastProps.standardization.length).toBeGreaterThan(0);
+    // A fully satisfiable file carries no partial-coverage advisory.
+    expect(exchange.lastProps.initialWarning).toBeUndefined();
+  });
+
+  test("the verdict is announced from one stable live region, not the swapped alert", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    await reachEditor(csvFile("notes\nhello\n"));
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+
+    // The live region is the stable wrapper -- unconditional markup OUTSIDE the
+    // verdict ternary, so its node persists as the inner Alert swaps and a
+    // remap-driven transition is announced (three separately-mounted Alerts would
+    // not). The colored Alert inside must NOT be a live region of EITHER
+    // politeness: Mantine's Alert defaults role to "alert" (assertive) when none is
+    // set, which would nest an assertive region in this polite wrapper and fire on
+    // mount against the heading focus. This is the residue that regression guards.
+    const verdict = document.querySelector('[data-testid="verdict"]');
+    expect(verdict?.getAttribute("role")).toBe("status");
+    expect(verdict?.getAttribute("aria-live")).toBe("polite");
+    expect(
+      verdict?.querySelector('[role="alert"], [role="status"]'),
+    ).toBeNull();
+  });
+
+  test("Back returns to the review screen and a different file reseeds the editor", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // Reach the editor with a first file; `zip` is the inferred payload.
+    await reachEditor(csvFile("first_name,last_name,zip\nAlice,Smith,90210\n"));
+    await expect
+      .element(page.getByText("Columns sent to your partner: zip."))
+      .toBeInTheDocument();
+
+    // Back returns to the review screen (the terms heading shows again) and the
+    // editor unmounts -- nothing was committed, and consent is preserved.
+    await userEvent.click(
+      page.getByRole("button", { name: "Choose a different file" }),
     );
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Prepare your data");
+    expect(exchangeMounted()).toBe(false);
+
+    // A different file (consent already given, so only re-select) re-enters the
+    // editor reseeded from the NEW columns: `notes` is the payload now, not `zip`.
+    harness.files = [csvFile("first_name,last_name,notes\nBob,Jones,hi\n")];
+    await userEvent.click(page.getByTestId("select"));
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
+    await userEvent.click(page.getByTestId("accept"));
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Columns sent to your partner: notes."))
+      .toBeInTheDocument();
+  });
+
+  test("a file with two identifier columns gates Continue even when keys are satisfiable", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // `id` and `identifier` both infer to role:identifier, so the seed carries two
+    // identifiers. The name columns satisfy both keys (not blocked), but the grid
+    // flags the ambiguous identifier and Continue stays disabled until it is fixed.
+    await reachEditor(
+      csvFile("id,identifier,first_name,last_name\n1,2,Alice,Smith\n"),
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Only one column can be the row identifier. Choose a single identifier.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Continue to exchange" }))
+      .toBeDisabled();
+    expect(exchangeMounted()).toBe(false);
+  });
+
+  test("a zero-coverage file shows the block and disables Continue, so nothing dials", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // No name columns at all: no linkage key can match. The dead-end is now an
+    // editor entry -- the block message shows, Continue is disabled, and nothing
+    // dials -- but the operator can fix it in place rather than being bounced out.
+    await reachEditor(csvFile("notes\nhello\n"));
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Continue to exchange" }))
+      .toBeDisabled();
+    expect(exchangeMounted()).toBe(false);
   });
 });
 

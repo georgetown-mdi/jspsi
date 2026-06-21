@@ -117,7 +117,6 @@ function renderPanel(
       acceptorName: "",
       onAcceptorNameChange: () => {},
       onAcquireError: () => {},
-      onAcquireWarning: () => {},
       onAcquired: () => {},
       ...overrides,
     }),

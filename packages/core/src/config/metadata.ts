@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { SEMANTIC_TYPES } from "../types";
-import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { SemanticType } from "../types";
 
@@ -54,6 +54,28 @@ const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
 
 export type Metadata = Array<ColumnMetadata>;
 
+/**
+ * Whether a column's standardized values are transmitted to the exchange partner.
+ * This is the single source of truth for "what is disclosed": {@link preparePayload}
+ * gathers exactly the columns this returns true for, so any operator-facing
+ * disclosure summary MUST derive from this predicate rather than re-deriving its
+ * own (e.g. testing `role === "payload"`), or it would mis-state what leaves the
+ * machine -- a `role: identifier` column left with `isPayload: true` is still
+ * transmitted, and an `ignored` column never is regardless of `isPayload`.
+ */
+export function isDisclosedToPartner(column: ColumnMetadata): boolean {
+  return column.isPayload && column.role !== "ignored";
+}
+
+/**
+ * The names of the columns disclosed to the partner, in metadata order -- exactly
+ * the set {@link preparePayload} transmits. The seam a disclosure summary or
+ * launch confirmation reads so it cannot drift from what is actually sent.
+ */
+export function disclosedColumnNames(metadata: Metadata): Array<string> {
+  return metadata.filter(isDisclosedToPartner).map((column) => column.name);
+}
+
 // Column names must be unique. Every consumer treats metadata as keyed by name
 // (`metadata.find((c) => c.name === ...)`), so a duplicate name makes "the
 // metadata for column X" position-dependent -- e.g. a `role: ignored` entry and a
@@ -75,10 +97,13 @@ export const MetadataSchema = z.array(ColumnMetadataSchema).refine(
  * on-disk form, e.g. `is_payload`) are converted to camelCase before validation,
  * so a `metadata` block read straight from a YAML/JSON config can be passed
  * directly -- mirroring {@link safeParseLinkageTerms} and
- * {@link safeParseExchangeSpec}. Returns a Zod `SafeParseReturnType`.
+ * {@link safeParseExchangeSpec}. Returns a Zod `SafeParseReturnType`. Honors the
+ * "safe" contract for the camelize bounds too -- a depth- or node-count-tripping
+ * input yields a `{ success: false }` result rather than throwing (see
+ * {@link safeParseCamelized}).
  */
 export function safeParseMetadata(raw: unknown) {
-  return MetadataSchema.safeParse(camelizeKeys(raw));
+  return safeParseCamelized(MetadataSchema, raw);
 }
 
 // ─── Metadata Inference ──────────────────────────────────────────────────────

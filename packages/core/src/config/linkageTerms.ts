@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
@@ -1071,11 +1072,21 @@ export function parseLinkageTerms(raw: unknown): LinkageTerms {
 /**
  * Non-throwing version of {@link parseLinkageTerms}.
  * Returns a Zod `SafeParseReturnType` with `success` and either `data` or
- * `error`.
+ * `error`. Honors the "safe" contract for the {@link camelizeKeys} bounds too:
+ * a depth- or node-count-tripping input yields a `{ success: false }` result
+ * rather than throwing (see {@link safeParseCamelized}).
  */
 export function safeParseLinkageTerms(raw: unknown) {
-  return LinkageTermsSchema.safeParse(camelizeKeys(raw, PARAMS_WIDTH_BOUND));
+  return safeParseCamelized(LinkageTermsSchema, raw, PARAMS_WIDTH_BOUND);
 }
+
+// The invitation decode path needs the same camelize-before-validate pre-pass
+// over its linkage-terms field, but builds it from the exported LinkageTermsSchema
+// and PARAMS_WIDTH_BOUND's width bound (MAX_PARAMS_ENTRIES) at its own module
+// rather than here -- a throwing z.preprocess kept off this file's wholesale
+// public export, so no external caller can reach a schema whose `.safeParse()`
+// would throw the camelize bounds. See the invitationLinkageTermsSchema note in
+// config/invitation.ts.
 
 // --- Compatibility -----------------------------------------------------------
 
@@ -1162,6 +1173,16 @@ export function validateCompatibility(
   // between plain and Zod-parsed objects) does not affect the result; fields are
   // pre-sorted by name because their array order is not significant, whereas
   // linkage keys are ordered most-to-least precise and compared in place.
+  //
+  // No casing fold is applied here: `transform.params` keys (the only
+  // partner-controlled keys whose form could vary) are normalized to camelCase at
+  // every parse chokepoint that produces a LinkageTerms -- config load and the
+  // post-handshake wire path via parseLinkageTerms, and the invitation decode path
+  // via its own camelize pre-pass (config/invitation.ts) -- so both sides reach
+  // this comparison in the one camelCase form. The encoder sorts keys but does not fold casing, which
+  // is why the normalization is a parse-layer invariant rather than something this
+  // comparison re-does (and why the agreed-terms hash, which also does not fold,
+  // stays cross-party reproducible: it hashes the same camelCase form).
   //
   // canonicalString throws CanonicalEncodingError on a value outside the
   // reproducible domain. A partner can reach this: transform `params` is

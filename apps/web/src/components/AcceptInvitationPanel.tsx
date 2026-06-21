@@ -52,7 +52,6 @@ export function AcceptInvitationPanel({
   onAcceptorNameChange,
   error,
   onAcquireError,
-  onAcquireWarning,
   onAcquired,
 }: {
   decode: DecodeState;
@@ -63,19 +62,14 @@ export function AcceptInvitationPanel({
   acceptorName: string;
   onAcceptorNameChange: (value: string) => void;
   /** The review-screen error to display beneath the consent gate: a CSV read
-   * failure or a zero-coverage pre-flight block. Cleared by the pre-flight at the
-   * start of each attempt. */
+   * failure. Cleared at the start of each attempt. */
   error?: AlertContent;
   /** Set or clear the review-screen error; wired to the file-acquire phase's
    * `onError`. */
   onAcquireError: (alert: AlertContent | undefined) => void;
-  /** Set or clear the partial-coverage advisory; wired to the file-acquire
-   * phase's `onWarning`. The route carries it to the exchange screen rather than
-   * rendering it here, since a partial file still hands off and transitions. */
-  onAcquireWarning: (alert: AlertContent | undefined) => void;
-  /** Receive the parsed, satisfiable CSV; wired to the file-acquire phase's
-   * `onAcquired`. The route commits consent and transitions to the exchange
-   * screen from here. */
+  /** Receive the parsed CSV; wired to the file-acquire phase's `onAcquired`. The
+   * route commits consent and transitions to the "Prepare your data" editor from
+   * here. */
   onAcquired: (bundle: AcquiredBundle) => void;
 }) {
   return (
@@ -134,27 +128,25 @@ export function AcceptInvitationPanel({
             description="Recorded in your exchange record so your partner can identify you"
             placeholder="Your name"
           />
-          {/* The file-acquire phase parses and pre-flights the chosen CSV on the
-              single "Accept and continue" action. commitAcceptance is the
-              authoritative gate, used here for the submit's disabled state and
-              again in the route's onAcquired handler, so nothing is parsed -- let
-              alone handed off and dialed -- before both consent and a name. On a
-              satisfiable file it hands the parsed bundle to onAcquired; an
-              unsatisfiable one blocks via onError and never transitions. */}
+          {/* The file-acquire phase parses the chosen CSV on the single "Accept
+              and continue" action. commitAcceptance is the authoritative gate,
+              used here for the submit's disabled state and again in the route's
+              onAcquired handler, so nothing is parsed -- let alone handed off and
+              dialed -- before both consent and a name. On a successful parse it
+              hands the parsed bundle to onAcquired, which moves to the "Prepare
+              your data" editor where the linkage-satisfiability verdict is shown
+              and an unsatisfiable file can be fixed rather than dead-ended. */}
           <FileAcquire
             submitLabel="Accept and continue"
             submitDisabled={
               commitAcceptance({ consented, name: acceptorName }) === undefined
             }
-            linkageTerms={decode.invitation.token.linkageTerms}
             onError={onAcquireError}
-            onWarning={onAcquireWarning}
             onAcquired={onAcquired}
           />
           {error && (
             // pre-line so a read-failure message's per-cause newlines (from
-            // sanitizeErrorForDisplay) render one cause per line; the
-            // zero-coverage block message carries none.
+            // sanitizeErrorForDisplay) render one cause per line.
             <Alert
               color="red"
               icon={<IconAlertCircle aria-hidden />}

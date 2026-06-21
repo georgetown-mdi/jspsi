@@ -109,9 +109,10 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
         // when we are the ONLY upgrade listener (the production server, where
         // nothing else will answer) close it rather than leak an open socket:
         // Node will not auto-destroy an unhandled upgrade once any `upgrade`
-        // listener exists, and no socket timeout reaps it. This restores the
-        // prompt reject the old `{ server, path }` wiring did, without clobbering
-        // co-resident listeners.
+        // listener exists, so close it here rather than leak it (the production
+        // connection idle-timeout is at best a far coarser backstop). This
+        // restores the prompt reject the old `{ server, path }` wiring did,
+        // without clobbering co-resident listeners.
         if (server.listenerCount("upgrade") === 1 && !socket.destroyed) {
           socket.destroy();
         }
@@ -207,6 +208,11 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
   private _configureWS(socket: WebSocket, client: IClient): void {
     client.setSocket(socket);
+    // Each newly attached socket starts an unconfirmed session: its first inbound
+    // frame re-confirms liveness. This matters on the reconnect path, where
+    // `client` is reused and would otherwise carry a prior session's confirmed
+    // state -- skipping the short unconfirmed window -- into the new socket.
+    client.resetLiveness();
 
     // Cleanup after a socket closes.
     socket.on("close", () => {
@@ -218,6 +224,13 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
     // Handle messages from peers.
     socket.on("message", (data) => {
+      // Any inbound frame proves the client is a real, talking peer rather than a
+      // socket that registered and went silent, so it graduates from the short
+      // unconfirmed reap window to the generous alive_timeout and refreshes the
+      // liveness clock (see Client.confirm and the reaper in
+      // checkBrokenConnections). Mark it before parsing -- a live-but-malformed
+      // frame is still liveness, and the parse below can throw.
+      client.confirm();
       try {
         const message = JSON.parse(data.toString()) as Writable<IMessage>;
 

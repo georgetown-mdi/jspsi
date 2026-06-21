@@ -1,0 +1,161 @@
+import http from "node:http";
+
+import { afterEach, describe, expect, test } from "vitest";
+import WebSocket from "ws";
+
+import { Realm } from "@peerjs-server/models/realm";
+import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index";
+import { hardenUpgradeSurface } from "../../server/upgradeHardening";
+
+import type { AddressInfo } from "node:net";
+import type { IRealm } from "@peerjs-server/models/realm";
+
+// Socket-level coverage for the signaling guards that need a live `ws`
+// connection: the liveness flag that gates the two-tier reaper and the
+// pre-handshake idle timeout's exemption of an established socket, alongside a
+// regression check that a normal registration still answers OPEN. These drive a
+// real http.Server + `ws` on a loopback port, the same pattern
+// test/devServer/signalingProbe.ts uses. The per-message size cap is covered in
+// signalingPayloadBound.test.ts; the pre-101 handshake timeout in
+// signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
+
+interface Signaling {
+  port: number;
+  realm: IRealm;
+}
+
+const cleanups: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  while (cleanups.length) await cleanups.pop()?.();
+});
+
+async function startSignaling(
+  opts: { preHandshakeIdleMs?: number } = {},
+): Promise<Signaling> {
+  const server = http.createServer();
+  if (opts.preHandshakeIdleMs !== undefined) {
+    hardenUpgradeSurface(server, {
+      preHandshakeIdleMs: opts.preHandshakeIdleMs,
+    });
+  }
+  const realm = new Realm();
+  const wss = new WebSocketServer({
+    server,
+    realm,
+    config: { path: "/api", key: "peerjs", concurrent_limit: 5000 },
+  });
+  // The real wiring (instance.ts) attaches an error listener; without one the
+  // server's `emit("error")` on a socket error would throw as unhandled.
+  wss.on("error", () => {});
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  cleanups.push(
+    () =>
+      new Promise<void>((resolve) => {
+        // Force-close any still-open (upgraded) connections so close() resolves
+        // promptly even when a test failed before closing its own `ws` -- an
+        // upgraded socket would otherwise keep the server alive and hang teardown.
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  return { port, realm };
+}
+
+function signalingUrl(port: number, id: string): string {
+  return (
+    `ws://127.0.0.1:${port}/api/peerjs` +
+    `?key=peerjs&id=${id}&token=tok&version=1.5.5`
+  );
+}
+
+/** Resolve once a frame of the given `type` arrives, reject on timeout/error. */
+function waitForFrame(
+  ws: WebSocket,
+  type: string,
+  timeoutMs = 3_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const settle = (action: () => void) => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+      action();
+    };
+    const onMessage = (data: WebSocket.RawData) => {
+      let frameType: unknown;
+      try {
+        frameType = (JSON.parse(data.toString()) as { type?: unknown }).type;
+      } catch {
+        return;
+      }
+      if (frameType === type) settle(resolve);
+    };
+    const onError = () =>
+      settle(() => reject(new Error("socket error before frame")));
+    const timer = setTimeout(
+      () =>
+        settle(() =>
+          reject(new Error(`no ${type} frame within ${timeoutMs}ms`)),
+        ),
+      timeoutMs,
+    );
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+  });
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("condition not met in time");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+describe("signaling socket guards", () => {
+  test("a normal registration completes and answers OPEN", async () => {
+    const sig = await startSignaling();
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-open"));
+    await waitForFrame(ws, "OPEN");
+    expect(sig.realm.getClientById("peer-open")).toBeDefined();
+    ws.close();
+  });
+
+  test("a registered client is confirmed only after it sends a frame", async () => {
+    const sig = await startSignaling();
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-live"));
+    await waitForFrame(ws, "OPEN");
+
+    // Registered but silent so far: unconfirmed, so the reaper holds it to the
+    // short window.
+    expect(sig.realm.getClientById("peer-live")?.isConfirmed()).toBe(false);
+
+    // Any inbound frame graduates it to the generous alive_timeout.
+    ws.send(JSON.stringify({ type: "HEARTBEAT" }));
+    await waitFor(
+      () => sig.realm.getClientById("peer-live")?.isConfirmed() === true,
+    );
+    expect(sig.realm.getClientById("peer-live")?.isConfirmed()).toBe(true);
+    ws.close();
+  });
+
+  test("an established connection is not cut by the pre-handshake idle timeout", async () => {
+    // Harden with a short pre-handshake idle bound, then prove an upgraded socket
+    // that stays silent past it survives: `ws` resets the socket timeout to 0 on
+    // the 101, handing liveness back to the reaper. If `ws` stopped doing that,
+    // this fails rather than silently tearing down idle established peers.
+    const sig = await startSignaling({ preHandshakeIdleMs: 500 });
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-quiet"));
+    await waitForFrame(ws, "OPEN");
+    // Stay completely silent well past the 500ms pre-handshake bound.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
+  });
+});

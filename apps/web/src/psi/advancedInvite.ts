@@ -9,7 +9,9 @@ import {
   safeParseLinkageTerms,
 } from "@psilink/core";
 
-import type { LinkageKey, LinkageTerms } from "@psilink/core";
+import { normalizeForEditor } from "./metadataEditing";
+
+import type { LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
 
 /**
  * The pure data model behind the Advanced-options editor: seeding a draft from the
@@ -19,16 +21,20 @@ import type { LinkageKey, LinkageTerms } from "@psilink/core";
  * than through the UI.
  *
  * Scope of this iteration (see the board item): the editor reviews and reorders
- * the metadata-derived defaults and attaches identity, lifetime, and an optional
- * legal agreement. It deliberately exposes NO control for output sharing,
- * `algorithm` (psi-c), `deduplicate`, fuzzy comparisons, or payload columns:
- * those are carried from the seed unchanged, so a draft can only ever emit the
- * default `psi` / both-receive / no-dedup / no-fuzzy / no-payload shape. Element,
- * transform, and swap internals are read-only too. Each of those is a capability
- * the engine does not yet honor end-to-end (one-sided output and payload
- * transmission) or is tracked as its own authoring task; surfacing a settable
- * control here would let the editor mint an invitation whose headline behavior
- * silently does not happen.
+ * the metadata-derived defaults, edits the per-party column metadata (semantic
+ * type and disclosure -- see {@link setDraftMetadata}), and attaches identity,
+ * lifetime, and an optional legal agreement. It deliberately exposes NO control
+ * for output sharing, `algorithm` (psi-c), `deduplicate`, or fuzzy comparisons:
+ * those are carried from the seed unchanged, so a draft's TERMS can only ever
+ * emit the default `psi` / both-receive / no-dedup / no-fuzzy shape, and no
+ * payload block is authored into the terms. Element, transform, and swap
+ * internals are read-only too. Each of those is a capability the engine does not
+ * yet honor end-to-end (one-sided output) or is tracked as its own authoring
+ * task; surfacing a settable control here would let the editor mint an invitation
+ * whose headline behavior silently does not happen. The column METADATA is
+ * editable and threaded into the inviter's own `prepareForExchange` (never the
+ * token), so its disclosure choices govern what the inviter sends without
+ * touching the agreed terms.
  */
 
 /** One linkage key in the editor, paired with whether it is active. Display and
@@ -59,6 +65,13 @@ export interface AdvancedInviteDraft {
    * linkage terms. Bounded in {@link validateAdvancedInvite}. */
   lifetimeSeconds: number;
   legalAgreement?: DraftLegalAgreement;
+  /** The inviter's per-party column metadata (semantic type + disclosure role),
+   * editable in the grid. Editing a column's type re-derives which keys are
+   * offerable (see {@link setDraftMetadata}); the disclosure choice governs what
+   * the inviter sends and is threaded into its exchange spec. Seeded from
+   * {@link inferMetadata}, normalized so the collapsed disclosure control is
+   * faithful. */
+  metadata: Metadata;
   keys: Array<DraftKey>;
 }
 
@@ -70,6 +83,9 @@ export interface AdvancedInviteSeed {
    * the file's inferred metadata) -- the same terms the quick path would embed for
    * these columns, so the editor opens on a known-good valid state. */
   terms: LinkageTerms;
+  /** The inferred, normalized starting metadata -- the reset anchor for the grid
+   * (the draft's `metadata` opens equal to this). */
+  metadata: Metadata;
   /** The inviter's CSV column names. */
   columns: Array<string>;
 }
@@ -109,16 +125,66 @@ export function seedAdvancedInvite(
   identity: string,
   columns: Array<string>,
 ): { draft: AdvancedInviteDraft; seed: AdvancedInviteSeed } {
-  const metadata = inferMetadata(columns);
+  // Normalized so the collapsed disclosure control opens on a faithful diagonal
+  // (an inferred identifier column is not silently disclosed). Normalization only
+  // re-derives isPayload from role, so the offerable key set -- which
+  // getDefaultLinkageTerms derives from the non-ignored column TYPES -- is
+  // unchanged by it.
+  const metadata = normalizeForEditor(inferMetadata(columns));
   const terms = getDefaultLinkageTerms(identity, metadata);
   return {
     draft: {
       identity,
       lifetimeSeconds: INVITATION_LIFETIME_SECONDS,
+      metadata,
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     },
-    seed: { terms, columns },
+    seed: { terms, metadata, columns },
   };
+}
+
+/**
+ * Re-derive the editor's draft for a new column metadata: editing a column's
+ * semantic type changes which linkage keys are offerable ({@link getDefaultLinkageTerms}
+ * filters by the non-ignored column types present), so this recomputes the
+ * offerable key set and reconciles it with the current draft -- keys still
+ * offerable keep their enabled flag and position, newly-offerable keys are
+ * appended (enabled), and keys no longer offerable drop. The threaded metadata is
+ * what the inviter's exchange binds on, so a remap that makes a key offerable also
+ * makes the run actually produce it.
+ */
+export function setDraftMetadata(
+  draft: AdvancedInviteDraft,
+  metadata: Metadata,
+): AdvancedInviteDraft {
+  const offerable = getDefaultLinkageTerms(
+    draft.identity,
+    metadata,
+  ).linkageKeys;
+  return { ...draft, metadata, keys: reconcileKeys(draft.keys, offerable) };
+}
+
+/** Reconcile the draft's keys against a freshly-derived offerable set: keep the
+ * order and enabled flag of keys that remain offerable (replacing the key object
+ * with the fresh template), then append any newly-offerable key as enabled. */
+function reconcileKeys(
+  prevKeys: Array<DraftKey>,
+  offerable: Array<LinkageKey>,
+): Array<DraftKey> {
+  const offerableByName = new Map(offerable.map((key) => [key.name, key]));
+  const kept: Array<DraftKey> = [];
+  const seen = new Set<string>();
+  for (const entry of prevKeys) {
+    const fresh = offerableByName.get(entry.key.name);
+    if (fresh !== undefined) {
+      kept.push({ key: fresh, enabled: entry.enabled });
+      seen.add(entry.key.name);
+    }
+  }
+  for (const key of offerable) {
+    if (!seen.has(key.name)) kept.push({ key, enabled: true });
+  }
+  return kept;
 }
 
 /** NFC-normalize and trim a free-text value. NFC is the cross-party canonical
@@ -141,22 +207,24 @@ function normalizeText(value: string): string {
  * Pure: it does not validate. {@link validateAdvancedInvite} runs the result
  * through the core schema, which stays the single validation source.
  */
-export function buildAdvancedTerms(
-  draft: AdvancedInviteDraft,
-  seed: AdvancedInviteSeed,
-): LinkageTerms {
+export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
+  // The recommended terms for the draft's CURRENT metadata, so a column type edit
+  // re-derives the offerable fields/keys in lockstep with the grid. The base
+  // carries the non-authored shape (version/date/algorithm/output/deduplicate);
+  // the draft overrides identity, the enabled keys, and the legal agreement.
+  const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
   const enabledKeys = draft.keys
     .filter((entry) => entry.enabled)
     .map((entry) => entry.key);
   const referenced = new Set(
     enabledKeys.flatMap((key) => key.elements.map((el) => el.field)),
   );
-  const linkageFields = seed.terms.linkageFields.filter((field) =>
+  const linkageFields = baseTerms.linkageFields.filter((field) =>
     referenced.has(field.name),
   );
 
   const terms: LinkageTerms = {
-    ...seed.terms,
+    ...baseTerms,
     identity: normalizeText(draft.identity),
     linkageFields,
     linkageKeys: enabledKeys,
@@ -206,7 +274,7 @@ export function validateAdvancedInvite(
   seed: AdvancedInviteSeed,
   now: Date = new Date(),
 ): AdvancedValidation {
-  const terms = buildAdvancedTerms(draft, seed);
+  const terms = buildAdvancedTerms(draft);
   const errors: Partial<Record<AdvancedField, string>> = {};
 
   // Lifetime is a generateInvitation parameter, not part of the terms, so it is
@@ -258,9 +326,14 @@ export function validateAdvancedInvite(
   // exchange would emit no key strings and yield a silent empty result), the same
   // gate generateInvitation and the acceptor pre-flight apply.
   if (enabledCount > 0 && errors.keys === undefined) {
+    // Assess against the draft's edited metadata, the same binding the inviter's
+    // exchange uses (it is threaded into the spec), so a column remap that makes a
+    // key offerable is judged satisfiable here exactly when the run can produce it.
     const { satisfiableKeyCount } = assessLinkageSatisfiability(
       seed.columns,
       terms,
+      undefined,
+      draft.metadata,
     );
     if (satisfiableKeyCount === 0) {
       errors.keys =

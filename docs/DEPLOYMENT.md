@@ -20,6 +20,54 @@ The web application bundles a PeerJS-compatible peer-coordination server, served
 
 Deploying a standalone peer-coordination server — for example, as a serverless WebSocket function on AWS Lambda or Cloudflare Workers — is not currently supported by configuration in the web application and is targeted for the 1.1 release (see [ROADMAP.md](ROADMAP.md)).
 
+### Hardening the signaling surface
+
+The bundled coordination server is untrusted by design: the rendezvous ids are derived from the out-of-band invitation secret and the two browsers run an authenticated key exchange directly between themselves, so the server only relays opaque setup messages and never sees exchange data (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)). The residual exposure on its WebSocket upgrade surface is therefore resource exhaustion and nuisance, not access to any party's data. The application enforces several defense-in-depth guards itself, unconditionally and regardless of deployment:
+
+- A slow, partial, or idle upgrade handshake (a "slowloris" that dribbles, stalls, or connects and then sends nothing at all) is bounded by connection-level timeouts and closed server-side rather than held open.
+- Each signaling message is size-capped, so an unauthenticated peer cannot send an oversized frame.
+- A client that registers but never proves it is a live peer (it sends no heartbeat) is reaped within seconds, well before the liveness timeout that governs an established peer, so an abandoned or junk registration cannot squat a slot; a real peer, which heartbeats within seconds of connecting, is never cut short.
+- The relay's hold-for-reconnect message queues are bounded in count and depth, so a client cannot drive unbounded memory by addressing messages to many made-up recipients.
+
+The constant values and rationale for these guards are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#web-signaling-surface-bounds).
+
+Two further protections depend on the deployment and are the reverse proxy's responsibility, because only the proxy sees the real client origin and address:
+
+- **Origin / cross-site enforcement.** The application does not restrict the WebSocket upgrade by Origin, because it is not configured with its public origin -- the value it could otherwise derive is its internal bind address, which does not match the browser's public origin, so enforcing it would reject legitimate clients. A cross-site connection to the signaling server gains nothing an unauthenticated script does not already have (it cannot target or read any exchange -- the authenticated handshake protects that), but an operator who wants to restrict the upgrade by Origin should do so at the reverse proxy, which knows the public origin.
+- **Per-address rate limiting.** Bounding how many connections or registrations a single client address may open belongs at the proxy or hosting layer, which sees the real client address. Behind a proxy the application sees only the proxy's address, so an in-application per-address cap would either do nothing or throttle all clients together. The in-application reaper above clears a fire-and-forget flood (sockets that register and go silent), but a flood that keeps each socket alive with heartbeats is indistinguishable from real peers in the application; the only in-application ceiling on it is the global registered-client cap (default 5,000), which is shared across all clients, so without a proxy such a flood degrades to global connection exhaustion rather than per-address throttling.
+
+A deployment that exposes the web application directly, with no reverse proxy, gets the unconditional in-application guards above but neither Origin enforcement nor per-address rate limiting; run the coordination server behind a reverse proxy for those.
+
+Both controls scope to the `/api/peerjs` upgrade path. The following nginx reference shows where each goes; the rate and connection limits are illustrative starting points to tune to your load, not recommended values:
+
+```nginx
+# http{} context: per-client-address shared-memory zones.
+limit_req_zone  $binary_remote_addr  zone=psilink_sig_req:10m   rate=10r/s;
+limit_conn_zone $binary_remote_addr  zone=psilink_sig_conn:10m;
+
+# Optional Origin allowlist (a browser always sends Origin on a WS upgrade).
+map $http_origin $psilink_origin_ok {
+    default                        0;
+    "https://psilink.example.org"  1;   # replace with your public origin(s)
+}
+
+# server{} context: scope the controls to the signaling upgrade location.
+location /api/peerjs {
+    if ($psilink_origin_ok = 0) { return 403; }   # remove to skip Origin checks
+
+    limit_req   zone=psilink_sig_req burst=20 nodelay;   # new-connection rate per address
+    limit_conn  psilink_sig_conn 32;                     # concurrent connections per address
+
+    proxy_pass          http://psilink_app;              # your upstream
+    proxy_http_version  1.1;
+    proxy_set_header    Upgrade    $http_upgrade;
+    proxy_set_header    Connection "upgrade";
+    proxy_set_header    Host       $host;
+}
+```
+
+Origin is enforced by the browser and can be omitted or forged by a non-browser client, so the allowlist is defense-in-depth that cuts drive-by cross-site connections rather than authentication; the per-address `limit_req`/`limit_conn` are the resource-exhaustion control that complements the in-application bounds above. The bundled AWS Elastic Beanstalk reference under `apps/web/deploy/aws_eb/` applies the per-address `limit_req`/`limit_conn` on `/api/peerjs` by default -- with the illustrative numbers above, to tune to your load -- and ships the Origin allowlist as a commented-out template you enable by uncommenting the `map` and its matching `if` and setting your public origin (it cannot ship active, because the map defaults to deny and would otherwise reject every client). On a load-balanced environment nginx sees the load balancer's address rather than the client's, so the per-address limits need the real client address recovered from `X-Forwarded-For` to throttle per client instead of collapsing onto one bucket; the reference ships a commented `real_ip` template you scope to the load balancer's subnet(s) -- not the whole VPC, which would let any host in it forge `X-Forwarded-For` -- for that. Confirm the limits suit your load, recover the real client address if you run load-balanced, and enable Origin enforcement if you want it, before exposing a deployment publicly.
+
 ## Diagnosing web connection failures
 
 By default the web client logs PeerJS connection activity at errors-only, so a normal exchange prints no connection-diagnostic detail to the browser console. This is deliberate: PeerJS's warning-level logs interpolate the remote peer id, and a web exchange's peer ids are rendezvous addresses derived from the invitation secret, which the app keeps out of its logs (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)).

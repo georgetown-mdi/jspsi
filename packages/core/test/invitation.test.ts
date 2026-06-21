@@ -19,7 +19,9 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
+  MAX_DATE_FORMAT_LENGTH,
 } from "../src/config/linkageTerms";
+import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
@@ -193,6 +195,188 @@ test("decodeInvitation rejects linkage terms carrying an out-of-dialect transfor
   await expect(decodeInvitation(encoded)).rejects.toThrow(
     /linear-time dialect/,
   );
+});
+
+// --- transform.params key-casing normalization at decode ---------------------
+// The invitation decode path is the chokepoint that folds partner-controlled
+// transform.params keys to camelCase (InvitationLinkageTermsSchema), so a
+// decoded token's params match the form every other parse path produces and the
+// per-step length and dialect screens run on the normalized form.
+
+test("decodeInvitation normalizes snake_case transform.params keys to camelCase", async () => {
+  // A hand-crafted token can carry snake_case params (the params record is
+  // z.unknown() content with no key-form constraint). The decode chokepoint folds
+  // them to camelCase, so a third-party token converges with a psilink-minted one
+  // and the standardization runtime (which reads params.inputFormat) sees them.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "parse_date",
+                  params: {
+                    input_format: "MM/DD/YYYY",
+                    output_format: "YYYYMMDD",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(
+    decoded.linkageTerms.linkageKeys[0].elements[0].transform?.[0].params,
+  ).toEqual({ inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" });
+});
+
+test("decodeInvitation screens a snake_case parse_date inputFormat for length (the fold precedes the screen)", async () => {
+  // The per-step length screen reads the camelCase `inputFormat`. Because the
+  // decode fold runs BEFORE validation, a snake_case `input_format` over the
+  // format-length cap is normalized first and then screened, so it is rejected --
+  // not folded into effect after the screen already passed over the absent
+  // camelCase key. (parse_date's catastrophic-backtracking exposure is closed by
+  // the linear-time engine, not a screen; the residual the fold protects is the
+  // length cap on the regex parse_date expands per row.)
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "parse_date",
+                  params: {
+                    input_format: "M".repeat(MAX_DATE_FORMAT_LENGTH + 1),
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    /must not exceed/,
+  );
+});
+
+test("decodeInvitation: a param spelling the fold leaves non-canonical is inert (screen and runtime read the same name)", async () => {
+  // The complement of the length-screen test above, pinning the safety margin the
+  // whole fold rests on: the per-step length screen and the standardization runtime
+  // (parseDateFactory) read the SAME camelCase param name, `inputFormat`. A spelling
+  // the snake->camel fold does NOT canonicalize to that name -- here SCREAMING_SNAKE
+  // `INPUT_FORMAT`, whose `_F` the fold leaves intact (camelizeKeys only collapses
+  // `_` followed by a lowercase letter) -- is therefore invisible to BOTH: the
+  // length screen does not fire, so decode does not reject, AND the runtime never
+  // reads it (`params.inputFormat` is absent, so parse_date falls back to its
+  // default format). An over-cap format parked under such a key is inert, never a
+  // value that slips the screen and then activates downstream. The over-cap format
+  // is the same payload the length-screen test rejects under the canonical key;
+  // under this non-canonical key it parses cleanly and is left verbatim. Were a
+  // future camelizeKeys change to canonicalize `INPUT_FORMAT` to `inputFormat`, the
+  // fold-before-validation ordering would route this very token through the screen
+  // and decode would start rejecting it -- so this test fails loudly either way,
+  // guarding the screen/runtime name agreement against silent drift.
+  const overCap = "M".repeat(MAX_DATE_FORMAT_LENGTH + 1);
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "parse_date",
+                  params: { INPUT_FORMAT: overCap },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  const params =
+    decoded.linkageTerms.linkageKeys[0].elements[0].transform?.[0].params;
+  // The over-cap format stayed under the non-canonical key, untouched; the
+  // canonical name the runtime reads is absent, so parse_date sees no format and
+  // uses its default.
+  expect(params).toEqual({ INPUT_FORMAT: overCap });
+  expect(params).not.toHaveProperty("inputFormat");
+});
+
+test("decodeInvitation rejects a deeply-nested transform.params at decode (bounded fold)", async () => {
+  // transform.params is z.unknown() content, so a one-key-per-level params decodes
+  // structurally (parseBoundedJson admits up to 4096 levels). The camelCase fold is
+  // the bounded camelizeKeys walk, so params nested past MAX_NESTING_DEPTH is a clean
+  // NestingDepthExceededError (a UsageError) at decode rather than a stack overflow
+  // from a raw recursion. Build the value iteratively so the test does not recurse.
+  let deep: Record<string, unknown> = { leaf: "x" };
+  for (let i = 0; i < 3000; i++) deep = { a: deep };
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "K",
+          elements: [
+            { field: "ssn", transform: [{ function: "noop", params: deep }] },
+          ],
+        },
+      ],
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    NestingDepthExceededError,
+  );
+});
+
+test("decodeInvitation accepts snake_case structural linkage-terms keys, like the config path", async () => {
+  // Folding before validation makes the invitation path read snake_case
+  // linkage-terms keys the same way a hand-authored config does (parseLinkageTerms
+  // camelizes), so a token spelled snake_case at the structural level is accepted
+  // and normalized, not rejected. Only the linkage-terms field is folded; the
+  // token's other fields and the strict connection-endpoint allowlist are
+  // unaffected (covered by their own tests).
+  const token = {
+    version: "1",
+    sharedSecret: VALID_SECRET,
+    linkageTerms: {
+      version: "1.0.0",
+      identity: "Test Party",
+      date: "2025-01-01",
+      algorithm: "psi",
+      output: { expects_output: true, share_with_partner: false },
+      deduplicate: false,
+      linkage_fields: [{ name: "ssn", type: "ssn" }],
+      linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(decoded.linkageTerms.linkageFields[0].name).toBe("ssn");
+  expect(decoded.linkageTerms.output.expectsOutput).toBe(true);
 });
 
 // --- Checksum ----------------------------------------------------------------
