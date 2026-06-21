@@ -37,7 +37,14 @@ function closeStalledHandshake(
       err.code === "ERR_HTTP_REQUEST_TIMEOUT"
         ? "408 Request Timeout"
         : "400 Bad Request";
-    socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    // Send a best-effort response, then destroy once it has flushed. `end()`
+    // alone only half-closes (sends our FIN), so a peer that never sends its own
+    // FIN could otherwise hold the connection half-open -- the exact resource
+    // hold this guard exists to close. Destroying in the flush callback reaps the
+    // socket without truncating the response for a peer that is reading it.
+    socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`, () =>
+      socket.destroy(),
+    );
   } else {
     socket.destroy();
   }
@@ -63,5 +70,8 @@ export function hardenUpgradeSurface(
     options.headersTimeoutMs ?? SIGNALING_HEADERS_TIMEOUT_MS;
   server.requestTimeout =
     options.requestTimeoutMs ?? SIGNALING_REQUEST_TIMEOUT_MS;
+  // Idempotent: remove first so a repeated call (a test that re-hardens a server,
+  // a hot-reload) cannot stack a second handler that fires twice per error.
+  server.removeListener("clientError", closeStalledHandshake);
   server.on("clientError", closeStalledHandshake);
 }

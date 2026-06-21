@@ -82,6 +82,35 @@ describe("two-tier liveness reaper", () => {
       reaper.stop();
     }
   });
+
+  test("a liveness-reset (reconnected) client returns to the unconfirmed window", () => {
+    const realm = new Realm();
+    const client = new Client({ id: "recon", token: "t" });
+    client.confirm();
+    realm.setClient(client, "recon");
+    const reaper = startReaper(realm);
+    try {
+      // Confirmed: survives well past the unconfirmed window.
+      vi.advanceTimersByTime(30_000);
+      expect(realm.getClientById("recon")).toBeDefined();
+
+      // Reconnect attaches a new socket and resets liveness.
+      client.resetLiveness();
+      expect(client.isConfirmed()).toBe(false);
+
+      // The reset refreshes lastPing, so the client is NOT instantly reaped
+      // against the 30s-stale prior timestamp -- it gets a fresh unconfirmed
+      // window from the reset.
+      vi.advanceTimersByTime(10_000);
+      expect(realm.getClientById("recon")).toBeDefined();
+
+      // Silent past the unconfirmed window since the reset: reaped.
+      vi.advanceTimersByTime(15_000);
+      expect(realm.getClientById("recon")).toBeUndefined();
+    } finally {
+      reaper.stop();
+    }
+  });
 });
 
 describe("relay message-queue bounds", () => {

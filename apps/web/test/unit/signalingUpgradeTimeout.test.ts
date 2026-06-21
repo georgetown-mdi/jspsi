@@ -29,8 +29,11 @@ function fakeSocket(writable: boolean): {
   const ended: Array<string> = [];
   const socket = {
     writable,
-    end: (chunk?: string) => {
+    // `end(chunk, cb)` flushes then fires the callback, where the handler reaps
+    // the socket; invoke it so the destroy half is exercised.
+    end: (chunk?: string, cb?: () => void) => {
       if (typeof chunk === "string") ended.push(chunk);
+      if (typeof cb === "function") cb();
     },
     destroy: () => {
       wasDestroyed = true;
@@ -69,23 +72,39 @@ describe("hardenUpgradeSurface", () => {
     server.close();
   });
 
-  test("closes a stalled handshake with a 408 and Connection: close", () => {
+  test("closes a stalled handshake with a 408, then destroys it", () => {
     const server = http.createServer();
     hardenUpgradeSurface(server);
-    const { socket, ended } = fakeSocket(true);
+    const { socket, ended, destroyed } = fakeSocket(true);
     emitClientError(server, "ERR_HTTP_REQUEST_TIMEOUT", socket);
     expect(ended).toHaveLength(1);
     expect(ended[0]).toContain("408 Request Timeout");
     expect(ended[0]).toContain("Connection: close");
+    // end() only half-closes; the socket must also be destroyed so a peer that
+    // ignores the FIN cannot hold it half-open.
+    expect(destroyed()).toBe(true);
     server.close();
   });
 
-  test("closes a malformed handshake with a 400", () => {
+  test("closes a malformed handshake with a 400, then destroys it", () => {
     const server = http.createServer();
     hardenUpgradeSurface(server);
-    const { socket, ended } = fakeSocket(true);
+    const { socket, ended, destroyed } = fakeSocket(true);
     emitClientError(server, "HPE_INVALID_METHOD", socket);
     expect(ended[0]).toContain("400 Bad Request");
+    expect(destroyed()).toBe(true);
+    server.close();
+  });
+
+  test("is idempotent -- re-hardening does not stack clientError handlers", () => {
+    const server = http.createServer();
+    hardenUpgradeSurface(server);
+    hardenUpgradeSurface(server);
+    expect(server.listenerCount("clientError")).toBe(1);
+    // A single error closes the socket once, not once per stacked handler.
+    const { socket, ended } = fakeSocket(true);
+    emitClientError(server, "ERR_HTTP_REQUEST_TIMEOUT", socket);
+    expect(ended).toHaveLength(1);
     server.close();
   });
 
