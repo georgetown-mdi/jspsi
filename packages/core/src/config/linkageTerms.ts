@@ -50,8 +50,11 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // rewritten or per-key-validated (item 202722105). Legitimate sizes vary -- a
 // denylist holds hundreds of values, hence the most generous bound
 // (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
-// below the RangeError thresholds. The `params` VALUE content stays unbounded
-// (typed `z.unknown()`, with no clean content bound).
+// below the RangeError thresholds. The `params` VALUE content is otherwise
+// unbounded (typed `z.unknown()`, with no clean general content bound); the lone
+// exception is `pad_left`'s numeric `length`, capped at MAX_PAD_LEFT_LENGTH by a
+// per-step refine because an unbounded value drives an unbounded per-row
+// `padStart` allocation (see TransformStep's schema below).
 //
 // The `payload` send/receive arrays carry no enclosing array/record/tuple frame
 // (only the root object), so a pathological count there cannot drive the ~130k
@@ -127,6 +130,27 @@ export const MAX_LINKAGE_ENTRIES = 256;
  * untrusted-input bounds note above.
  */
 export const MAX_PARAMS_ENTRIES = 256;
+
+/**
+ * Generous upper bound on the `length` param of a `pad_left` transform step --
+ * the one partner-controlled transform-param VALUE that carries a content bound
+ * (every other param value stays `z.unknown()`; the rest of the bounds in this
+ * file cap COLLECTION counts, see the untrusted-input bounds note above).
+ * `pad_left` runs per row inside the key-building pipeline
+ * ({@link applyElementTransform}, driven by `buildKeyStrings`), and an unbounded
+ * `length` makes every row allocate a `String.prototype.padStart(length, char)`
+ * of that size -- a crafted `1e9` exhausts memory and hangs the acceptor (a
+ * browser-tab freeze on the web path, a hung process on the CLI), the
+ * memory-allocation sibling of the regex-ReDoS vector
+ * ({@link linkageTermsHaveUnsafeTransformRegex}). A real left-pad target is tens
+ * of characters (a zero-padded SSN is 9, a phone 10); 256 is far above any
+ * legitimate pad yet far below an allocation that matters. Enforced by a per-step
+ * refine on {@link TransformStep}'s schema before any per-row allocation; the
+ * factory's positive-integer check (standardization.ts) remains the runtime
+ * backstop for the operator-local standardization path, which never reaches this
+ * schema. This is a DoS ceiling on the partner wire path, not a semantic limit.
+ */
+export const MAX_PAD_LEFT_LENGTH = 256;
 
 /**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
@@ -416,7 +440,9 @@ export interface TransformStep {
   params?: Record<string, unknown>;
 }
 
-const TransformStepSchema: z.ZodType<TransformStep> = z.object({
+// Not annotated as ZodType<TransformStep> because the concrete ZodObject is the
+// base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
+const TransformStepBaseSchema = z.object({
   function: z.string().min(1).max(MAX_NAME_LENGTH),
   // The record's KEYS are partner-controlled strings (parameter names), so they
   // are length-bounded like every other free-text string; the VALUE content is
@@ -458,6 +484,39 @@ const TransformStepSchema: z.ZodType<TransformStep> = z.object({
     .pipe(z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()))
     .optional(),
 });
+
+// Bound a `pad_left` step's `length` -- the one partner-controlled transform-param
+// VALUE that carries a content bound (every other value stays `z.unknown()`; see
+// the untrusted-input bounds note above). `pad_left` runs per row in the
+// key-building pipeline (standardization.ts applyElementTransform, driven by
+// buildKeyStrings), so an unbounded `length` makes every row allocate a
+// `padStart(length, char)` of that size -- a crafted 1e9 exhausts memory and hangs
+// the acceptor, the memory-allocation sibling of the regex-ReDoS vector the refine
+// on LinkageTermsSchema rejects. Only a positive-integer `length` ever reaches
+// padStart (padLeftFactory throws on a non-number, non-integer, or non-positive
+// value before it allocates), so rejecting positive integers above
+// MAX_PAD_LEFT_LENGTH closes the whole allocation vector; a malformed `length` is
+// left to that runtime check, whose clean-abort path is unchanged. The message
+// names no partner value -- consistent with the unsanitized parse-error path the
+// referential-integrity and ReDoS refines rely on -- and the bound lives here, on
+// the partner-parsed wire schema, not on the editor descriptor an
+// attacker-authored token never passes through.
+const TransformStepSchema: z.ZodType<TransformStep> =
+  TransformStepBaseSchema.refine(
+    (step) => {
+      if (step.function !== "pad_left") return true;
+      const length = step.params?.length;
+      return (
+        typeof length !== "number" ||
+        !Number.isInteger(length) ||
+        length <= MAX_PAD_LEFT_LENGTH
+      );
+    },
+    {
+      message: `pad_left length must not exceed ${MAX_PAD_LEFT_LENGTH}`,
+      path: ["params", "length"],
+    },
+  );
 
 /**
  * A single element of a linkage key. References a linkage field by name and

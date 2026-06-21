@@ -9,6 +9,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
+  MAX_PAD_LEFT_LENGTH,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -495,6 +496,79 @@ test("an element-transform regex that cannot compile still validates, so the run
     ],
   });
   expect(result.success).toBe(true);
+});
+
+// ─── pad_left length bound (partner-controlled allocation DoS) ────────────────
+// A pad_left element transform reads a partner-controlled `length` and runs
+// padStart(length, char) per row over the full dataset; an unbounded value
+// allocates a giant string per row and exhausts the acceptor's memory (the
+// memory-allocation sibling of the ReDoS vector above). The bound is enforced at
+// LinkageTermsSchema validation, before any per-row key-building allocation. (The
+// factory's positive-integer runtime check is unit-tested in
+// standardization.test.ts; these assert the schema-level wiring on the
+// partner-parsed path.)
+
+const padLeftTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "pad_left", params }] },
+      ],
+    },
+  ],
+});
+
+test("an over-large pad_left length is rejected at validation, before any per-row allocation", () => {
+  const result = safeParseLinkageTerms(padLeftTerms({ length: 1e9 }));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("length");
+  expect(result.error.issues[0].message).toMatch(
+    /pad_left length must not exceed/,
+  );
+});
+
+test("a real-sized pad_left length parses and is preserved (no clamp)", () => {
+  // Preservation matters: PSI requires both parties to derive byte-identical
+  // keys, so the bound must reject out-of-range values, never silently rewrite an
+  // in-range one.
+  const result = safeParseLinkageTerms(padLeftTerms({ length: 9 }));
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    length: 9,
+  });
+});
+
+test("a pad_left length at exactly the maximum parses; one over it is rejected", () => {
+  expect(
+    safeParseLinkageTerms(padLeftTerms({ length: MAX_PAD_LEFT_LENGTH }))
+      .success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(padLeftTerms({ length: MAX_PAD_LEFT_LENGTH + 1 }))
+      .success,
+  ).toBe(false);
+});
+
+test("a malformed pad_left length still validates, so the runtime factory check handles it", () => {
+  // The schema adds only the upper bound; a non-positive, non-integer, or
+  // non-numeric length is not pre-empted here -- padLeftFactory throws on it at
+  // key-build time and the exchange aborts through the existing error boundary,
+  // behavior unchanged by this hardening (the runtime throws are pinned in
+  // standardization.test.ts). None of these is an allocation risk: padStart is
+  // never reached for them.
+  expect(safeParseLinkageTerms(padLeftTerms({ length: -5 })).success).toBe(
+    true,
+  );
+  expect(safeParseLinkageTerms(padLeftTerms({ length: 1.5 })).success).toBe(
+    true,
+  );
+  expect(safeParseLinkageTerms(padLeftTerms({ length: "9" })).success).toBe(
+    true,
+  );
 });
 
 test("a swap resolving via element field names validates", () => {
