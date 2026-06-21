@@ -27,6 +27,13 @@ type CustomConfig = Pick<
 
 const WS_PATH = "peerjs";
 
+// Per-message size cap on the signaling socket. The relay only ever forwards
+// small opaque JSON control frames (SDP/ICE), so a tight cap is far above any
+// legitimate frame while bounding the memory a single inbound frame can claim;
+// `ws` closes a connection that exceeds it (1009). Without this the `ws` default
+// admits a 100 MB frame from an unauthenticated peer.
+const MAX_MESSAGE_BYTES = 64 * 1024;
+
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
   private readonly realm: IRealm;
@@ -63,6 +70,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const options: WebSocket.ServerOptions = {
       path: this.path,
       noServer: true,
+      maxPayload: MAX_MESSAGE_BYTES,
     };
 
     this.socketServer = config.createWebSocketServer
@@ -192,6 +200,12 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
     // Handle messages from peers.
     socket.on("message", (data) => {
+      // Any inbound frame proves the client is a real, talking peer rather than a
+      // socket that registered and went silent, so it graduates from the short
+      // unconfirmed reap window to the generous alive_timeout (see the reaper in
+      // checkBrokenConnections). Mark it before parsing -- a live-but-malformed
+      // frame is still liveness, and the parse below can throw.
+      client.confirm();
       try {
         const message = JSON.parse(data.toString()) as Writable<IMessage>;
 

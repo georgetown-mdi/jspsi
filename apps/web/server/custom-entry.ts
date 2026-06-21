@@ -22,6 +22,8 @@ import { getLogger } from "@psilink/core";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
 
+import { hardenUpgradeSurface } from "./upgradeHardening";
+
 import type { AddressInfo } from "node:net";
 
 const configManager = new ConfigManager();
@@ -42,6 +44,10 @@ const server =
       new HttpsServer({ key, cert }, toNodeListener(nitroApp.h3App))
     : // @ts-ignore part of preset
       new HttpServer(toNodeListener(nitroApp.h3App));
+
+// Bound a slow or partial signaling upgrade handshake (slowloris) on the shared
+// HTTP server; post-101 reaping is the signaling layer's job.
+hardenUpgradeSurface(server);
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 const port = (config.PORT || 3000) as number;

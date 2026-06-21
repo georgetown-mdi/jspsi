@@ -4,7 +4,7 @@ import type { IRealm } from "../../models/realm.ts";
 
 const DEFAULT_CHECK_INTERVAL = 300;
 
-type CustomConfig = Pick<IConfig, "alive_timeout">;
+type CustomConfig = Pick<IConfig, "alive_timeout" | "unconfirmed_timeout">;
 
 export class CheckBrokenConnections {
   public readonly checkInterval: number;
@@ -55,16 +55,26 @@ export class CheckBrokenConnections {
     const clientsIds = this.realm.getClientsIds();
 
     const now = new Date().getTime();
-    const { alive_timeout: aliveTimeout } = this.config;
+    const {
+      alive_timeout: aliveTimeout,
+      unconfirmed_timeout: unconfirmedTimeout,
+    } = this.config;
 
     for (const clientId of clientsIds) {
       const client = this.realm.getClientById(clientId);
 
       if (!client) continue;
 
+      // A client that has never sent an inbound frame since registering has not
+      // established a real session, so it is reaped on the short unconfirmed
+      // window rather than squatting a slot for the full alive_timeout. Once it
+      // has shown liveness (its first frame sets `confirmed`) it keeps the
+      // generous window, refreshed by each heartbeat, so a slow-but-live exchange
+      // is never cut short -- the reap is tied to liveness, not a flat wall-clock.
+      const timeout = client.isConfirmed() ? aliveTimeout : unconfirmedTimeout;
       const timeSinceLastPing = now - client.getLastPing();
 
-      if (timeSinceLastPing < aliveTimeout) continue;
+      if (timeSinceLastPing < timeout) continue;
 
       try {
         client.getSocket()?.close();

@@ -24,6 +24,17 @@ export interface IRealm {
   generateClientId(generateClientId?: () => string): string;
 }
 
+// Bounds on the relay's hold-for-reconnect queues. A registered client can
+// address signaling messages to an arbitrary, unregistered `dst` id; each such
+// id would otherwise allocate a queue and grow it without limit. These cap the
+// number of distinct queued destinations and the depth of any one queue, so an
+// unconnected-destination spray cannot exhaust memory. Both are far above any
+// legitimate rendezvous (a handful of queued frames for a momentarily-absent
+// peer); a message dropped past either bound is a no-op for the spammer and only
+// loses a frame for a real peer that is itself far past needing a reconnect hold.
+const MAX_OUTSTANDING_QUEUES = 1000;
+const MAX_MESSAGES_PER_QUEUE = 100;
+
 export class Realm implements IRealm {
   private readonly clients = new Map<string, IClient>();
   private readonly messageQueues = new Map<string, IMessageQueue>();
@@ -59,11 +70,20 @@ export class Realm implements IRealm {
   }
 
   public addMessageToQueue(id: string, message: IMessage): void {
-    if (!this.getMessageQueueById(id)) {
-      this.messageQueues.set(id, new MessageQueue());
+    let queue = this.getMessageQueueById(id);
+
+    if (!queue) {
+      // Refuse a new queue past the global cap so a spray to many distinct
+      // unregistered destinations cannot allocate queues without bound.
+      if (this.messageQueues.size >= MAX_OUTSTANDING_QUEUES) return;
+      queue = new MessageQueue();
+      this.messageQueues.set(id, queue);
     }
 
-    this.getMessageQueueById(id)?.addMessage(message);
+    // Cap the depth of any one queue for the same reason.
+    if (queue.size() >= MAX_MESSAGES_PER_QUEUE) return;
+
+    queue.addMessage(message);
   }
 
   public clearMessageQueue(id: string): void {

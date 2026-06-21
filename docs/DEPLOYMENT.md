@@ -20,6 +20,24 @@ The web application bundles a PeerJS-compatible peer-coordination server, served
 
 Deploying a standalone peer-coordination server — for example, as a serverless WebSocket function on AWS Lambda or Cloudflare Workers — is not currently supported by configuration in the web application and is targeted for the 1.1 release (see [ROADMAP.md](ROADMAP.md)).
 
+### Hardening the signaling surface
+
+The bundled coordination server is untrusted by design: the rendezvous ids are derived from the out-of-band invitation secret and the two browsers run an authenticated key exchange directly between themselves, so the server only relays opaque setup messages and never sees exchange data (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)). The residual exposure on its WebSocket upgrade surface is therefore resource exhaustion and nuisance, not access to any party's data. The application enforces several defense-in-depth guards itself, unconditionally and regardless of deployment:
+
+- A slow or partial upgrade handshake (a "slowloris" that never completes) is bounded by a header and request timeout and closed server-side rather than held open.
+- Each signaling message is size-capped, so an unauthenticated peer cannot send an oversized frame.
+- A client that registers but never proves it is a live peer (it sends no heartbeat) is reaped within seconds, well before the 90-second liveness timeout, so an abandoned or junk registration cannot squat a slot; a real peer, which heartbeats within seconds of connecting, is never cut short.
+- The relay's hold-for-reconnect message queues are bounded in count and depth, so a client cannot drive unbounded memory by addressing messages to many made-up recipients.
+
+The constant values and rationale for these guards are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#web-signaling-surface-bounds).
+
+Two further protections depend on the deployment and are the reverse proxy's responsibility, because only the proxy sees the real client origin and address:
+
+- **Origin / cross-site enforcement.** The application does not restrict the WebSocket upgrade by Origin, because it is not configured with its public origin -- the value it could otherwise derive is its internal bind address, which does not match the browser's public origin, so enforcing it would reject legitimate clients. A cross-site connection to the signaling server gains nothing an unauthenticated script does not already have (it cannot target or read any exchange -- the authenticated handshake protects that), but an operator who wants to restrict the upgrade by Origin should do so at the reverse proxy, which knows the public origin.
+- **Per-address rate limiting.** Bounding how many connections or registrations a single client address may open belongs at the proxy or hosting layer, which sees the real client address. Behind a proxy the application sees only the proxy's address, so an in-application per-address cap would either do nothing or throttle all clients together.
+
+A deployment that exposes the web application directly, with no reverse proxy, gets the unconditional in-application guards above but neither Origin enforcement nor per-address rate limiting; run the coordination server behind a reverse proxy for those.
+
 ## Diagnosing web connection failures
 
 By default the web client logs PeerJS connection activity at errors-only, so a normal exchange prints no connection-diagnostic detail to the browser console. This is deliberate: PeerJS's warning-level logs interpolate the remote peer id, and a web exchange's peer ids are rendezvous addresses derived from the invitation secret, which the app keeps out of its logs (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)).

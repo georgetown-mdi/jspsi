@@ -3,6 +3,8 @@ import type { IMessage } from "./message.ts";
 export interface IMessageQueue {
   getLastReadAt(): number;
 
+  size(): number;
+
   addMessage(message: IMessage): void;
 
   readMessage(): IMessage | undefined;
@@ -16,6 +18,10 @@ export class MessageQueue implements IMessageQueue {
 
   public getLastReadAt(): number {
     return this.lastReadAt;
+  }
+
+  public size(): number {
+    return this.messages.length;
   }
 
   public addMessage(message: IMessage): void {

@@ -1,0 +1,67 @@
+import type { Duplex } from "node:stream";
+import type { Server as HttpServer } from "node:http";
+import type { Server as HttpsServer } from "node:https";
+
+/**
+ * Default bound (ms) for receiving the complete request headers before the
+ * connection is reaped. A real signaling handshake sends its (small) headers in
+ * one segment, so this sits far above any legitimate upgrade while closing a
+ * slowloris that dribbles -- or never finishes -- its headers. Node enforces it
+ * on its periodic connections-checking sweep, so the effective bound is this
+ * plus up to one sweep interval.
+ */
+export const SIGNALING_HEADERS_TIMEOUT_MS = 10_000;
+
+/**
+ * Default backstop (ms) for receiving the entire request. Must exceed
+ * {@link SIGNALING_HEADERS_TIMEOUT_MS} (Node wants requestTimeout greater than
+ * headersTimeout, or 0 to disable); it bounds a client that completes headers
+ * but then stalls the rest of the request.
+ */
+export const SIGNALING_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Close a stalled or malformed handshake. Node already does this from its
+ * built-in `clientError` default, but that default is suppressed the moment any
+ * `clientError` listener is attached -- which an embedding framework, or a test
+ * environment that loads `ws`, may do -- so we close it explicitly rather than
+ * rely on a default that another listener can silently disable. Mirrors the
+ * default's best-effort response for a still-writable socket, then destroys.
+ */
+function closeStalledHandshake(
+  err: NodeJS.ErrnoException,
+  socket: Duplex,
+): void {
+  if (socket.writable) {
+    const status =
+      err.code === "ERR_HTTP_REQUEST_TIMEOUT"
+        ? "408 Request Timeout"
+        : "400 Bad Request";
+    socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+  } else {
+    socket.destroy();
+  }
+}
+
+/**
+ * Bound the pre-101 upgrade handshake on the shared HTTP server: an
+ * unauthenticated client that opens a connection and dribbles -- or never
+ * finishes -- its request headers is closed server-side rather than held until a
+ * loose (60s) default. Once a socket completes the 101 it is a WebSocket the
+ * signaling layer governs (the `ws` close timer and the liveness reaper), so
+ * these bound only the handshake. The override args exist so the behavior is
+ * unit-testable on a short clock; production uses the defaults.
+ */
+export function hardenUpgradeSurface(
+  server: HttpServer | HttpsServer,
+  options: {
+    headersTimeoutMs?: number;
+    requestTimeoutMs?: number;
+  } = {},
+): void {
+  server.headersTimeout =
+    options.headersTimeoutMs ?? SIGNALING_HEADERS_TIMEOUT_MS;
+  server.requestTimeout =
+    options.requestTimeoutMs ?? SIGNALING_REQUEST_TIMEOUT_MS;
+  server.on("clientError", closeStalledHandshake);
+}
