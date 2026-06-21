@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -13,10 +13,15 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 
-import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
+import {
+  loadCSVColumns,
+  sanitizeErrorForDisplay,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
+import { quickInviteDisclosedColumns } from "@psi/metadataEditing";
 
 import {
   clearAdvancedHandoff,
@@ -57,6 +62,38 @@ export function InvitePanel() {
     filesRef.current = next;
     setFiles(next);
   };
+  // The columns the quick path will send to the partner, surfaced as an awareness
+  // statement before the operator generates. `undefined` while no file is chosen
+  // or its header read is still in flight; an empty array means the quick path
+  // would send nothing (so no statement is shown). Derived from the SAME predicate
+  // the wire uses (see quickInviteDisclosedColumns), so it cannot drift from what
+  // is actually transmitted.
+  const [disclosedColumns, setDisclosedColumns] = useState<Array<string>>();
+
+  // Read the chosen file's header (only the header -- see loadCSVColumns) and
+  // compute the quick-path disclosure each time the selection changes. Best-effort
+  // awareness: a read error is swallowed here (the statement just stays hidden);
+  // the authoritative full parse and its surfaced error happen at generate. The
+  // cleanup flag drops a stale or post-unmount result -- selecting a new file (or
+  // navigating to Advanced) supersedes an in-flight read of the previous one.
+  useEffect(() => {
+    if (files.length === 0) {
+      setDisclosedColumns(undefined);
+      return;
+    }
+    const file = files[0];
+    let cancelled = false;
+    setDisclosedColumns(undefined);
+    void loadCSVColumns(file)
+      .then((columns) => {
+        if (!cancelled)
+          setDisclosedColumns(quickInviteDisclosedColumns(columns));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
 
   const form = useForm({
     defaultValues: { inviterName: "" },
@@ -146,6 +183,22 @@ export function InvitePanel() {
     },
   });
 
+  // Open the column-aware editor, handing off the already-chosen file and name in
+  // memory (a File cannot ride the URL) so the editor opens seeded without a
+  // re-drop; if no file is chosen yet, clear any stale hand-off so the editor falls
+  // back to its own file picker. Shared by the standing "Advanced options" link and
+  // the disclosure statement's "change what is sent" link, so the quick-invite
+  // operator has a one-click path into Advanced to alter what is disclosed.
+  const openAdvanced = () => {
+    if (filesRef.current.length > 0)
+      stashAdvancedHandoff({
+        file: filesRef.current[0],
+        name: form.state.values.inviterName.trim(),
+      });
+    else clearAdvancedHandoff();
+    void navigate({ to: "/advanced" });
+  };
+
   return (
     <Paper>
       <Title order={2}>Invite someone to join you in a data exchange</Title>
@@ -210,19 +263,7 @@ export function InvitePanel() {
             type="button"
             ta="left"
             style={{ width: "fit-content" }}
-            // Open the column-aware editor. Hand off the already-chosen file and
-            // name in memory (a File cannot ride the URL), so the editor opens
-            // seeded without a re-drop; if no file is chosen yet, clear any stale
-            // hand-off so the editor falls back to its own file picker.
-            onClick={() => {
-              if (filesRef.current.length > 0)
-                stashAdvancedHandoff({
-                  file: filesRef.current[0],
-                  name: form.state.values.inviterName.trim(),
-                });
-              else clearAdvancedHandoff();
-              void navigate({ to: "/advanced" });
-            }}
+            onClick={openAdvanced}
           >
             Advanced options
           </Anchor>
@@ -237,6 +278,41 @@ export function InvitePanel() {
               />
             )}
           </form.Subscribe>
+          {/* Awareness surface: the columns the quick path will send to the
+              partner, shown before the operator generates. Wrapped in a standing
+              polite live region so its asynchronous appearance after a file is
+              chosen is announced. Nothing is shown when the quick path would send
+              nothing (no disclosure to surface). The column set derives from the
+              same predicate the wire uses, so it cannot over- or under-state what
+              leaves the machine; column names are the operator's own but sanitized
+              for display, matching the other file-derived text on this screen. */}
+          <div role="status" aria-live="polite">
+            {disclosedColumns && disclosedColumns.length > 0 && (
+              <Paper withBorder p="md">
+                <Text size="sm" fw={600} mb={4}>
+                  What the quick path will send
+                </Text>
+                <Text size="sm">
+                  For each matched row, these columns will be sent to your
+                  partner:{" "}
+                  {disclosedColumns
+                    .map((name) => sanitizeForDisplay(name))
+                    .join(", ")}
+                  .
+                </Text>
+                <Anchor
+                  component="button"
+                  type="button"
+                  ta="left"
+                  mt="xs"
+                  style={{ width: "fit-content" }}
+                  onClick={openAdvanced}
+                >
+                  Change what is sent in Advanced options
+                </Anchor>
+              </Paper>
+            )}
+          </div>
           {error && (
             <Alert
               color="red"

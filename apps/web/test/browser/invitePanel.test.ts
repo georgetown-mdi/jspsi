@@ -75,6 +75,14 @@ vi.mock("@components/ExchangeView", () => ({
   },
 }));
 
+// The CSV the "select file" mock button seeds. A hoisted handle so a test can
+// pick the file's columns before clicking (InvitePanel reads the header to derive
+// the quick-path disclosure statement); defaults to a single `other` column.
+const fileSeed = vi.hoisted(() => ({
+  content: ["c\n1\n"] as Array<string>,
+  name: "data.csv",
+}));
+
 // Stand in for the Mantine dropzone: a button to seed a file and a Generate
 // button wired to InvitePanel's submit, gated on a file being present exactly as
 // the real FileSelect gates it.
@@ -93,7 +101,8 @@ vi.mock("@components/FileSelect", () => ({
         "button",
         {
           "data-testid": "select-file",
-          onClick: () => props.setFiles([new File(["c\n1\n"], "data.csv")]),
+          onClick: () =>
+            props.setFiles([new File(fileSeed.content, fileSeed.name)]),
         },
         "select",
       ),
@@ -156,6 +165,8 @@ afterEach(() => {
   exchange.lastProps = undefined;
   gen.impl = undefined;
   nav.calls.length = 0;
+  fileSeed.content = ["c\n1\n"];
+  fileSeed.name = "data.csv";
   clearAdvancedHandoff();
   consoleErrorSpy?.mockRestore();
   consoleErrorSpy = undefined;
@@ -184,7 +195,12 @@ describe("InvitePanel compose screen", () => {
 
     await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
     await userEvent.click(page.getByTestId("select-file"));
-    await userEvent.click(page.getByText("Advanced options"));
+    // Exact match: once a file is chosen the disclosure statement adds a "Change
+    // what is sent in Advanced options" link, so a substring match would be
+    // ambiguous. This asserts the standing top-level link.
+    await userEvent.click(
+      page.getByRole("button", { name: "Advanced options", exact: true }),
+    );
 
     // The editor route reads this in-memory hand-off on arrival: the chosen file
     // and the trimmed name, so it opens seeded without a re-drop.
@@ -212,6 +228,63 @@ describe("InvitePanel compose screen", () => {
     // No file chosen now: the panel clears the stale stash so the route falls back
     // to its own picker rather than resurrecting the earlier file.
     expect(peekAdvancedHandoff()).toBeUndefined();
+    expect(nav.calls).toContainEqual({ to: "/advanced" });
+  });
+
+  test("surfaces exactly the columns the quick path will send for the chosen file", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    // first_name (linkage, not sent), record_id (inferred row identifier, still
+    // sent on the un-normalized quick path), notes (other, sent).
+    fileSeed.content = ["first_name,record_id,notes\n", "Alice,1,vip\n"];
+    mount();
+    await userEvent.click(page.getByTestId("select-file"));
+
+    await expect
+      .element(page.getByText("What the quick path will send"))
+      .toBeInTheDocument();
+    // The disclosed set, in column order, derived from the same predicate the wire
+    // uses -- the identifier and other columns, never the linkage one.
+    expect(document.body.textContent).toContain("record_id, notes.");
+    expect(document.body.textContent).not.toContain("first_name");
+  });
+
+  test("shows no statement when the quick path would send nothing", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    // Start with a disclosing file so the statement is present...
+    fileSeed.content = ["first_name,notes\n", "Alice,vip\n"];
+    mount();
+    await userEvent.click(page.getByTestId("select-file"));
+    await expect
+      .element(page.getByText("What the quick path will send"))
+      .toBeInTheDocument();
+
+    // ...then choose a file whose columns are all linkage types, so nothing is
+    // disclosed: the statement is withdrawn (no awareness surface is required when
+    // the quick path sends nothing).
+    fileSeed.content = ["first_name,ssn\n", "Alice,123-45-6789\n"];
+    await userEvent.click(page.getByTestId("select-file"));
+    await expect
+      .element(page.getByText("What the quick path will send"))
+      .not.toBeInTheDocument();
+  });
+
+  test("the disclosure statement offers a one-click path into Advanced options", async () => {
+    gen.impl = () => Promise.resolve(generated);
+    fileSeed.content = ["first_name,notes\n", "Alice,vip\n"];
+    mount();
+    await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
+    await userEvent.click(page.getByTestId("select-file"));
+
+    const change = page.getByText("Change what is sent in Advanced options");
+    await expect.element(change).toBeInTheDocument();
+    await userEvent.click(change);
+
+    // Same hand-off and navigation as the standing Advanced link: the chosen file
+    // and trimmed name, so the editor opens seeded and the operator changes what is
+    // disclosed without restarting the flow.
+    const handoff = peekAdvancedHandoff();
+    expect(handoff?.file).toBeInstanceOf(File);
+    expect(handoff?.name).toBe("Dr. Jane");
     expect(nav.calls).toContainEqual({ to: "/advanced" });
   });
 
