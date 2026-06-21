@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   MAX_MESSAGES_PER_QUEUE,
   MAX_OUTSTANDING_QUEUES,
+  MAX_QUEUE_BYTES,
   Realm,
 } from "@peerjs-server/models/realm";
 import { CheckBrokenConnections } from "@peerjs-server/services/checkBrokenConnections/index";
 import { Client } from "@peerjs-server/models/client";
 import { MessageType } from "@peerjs-server/enums";
 import defaultConfig from "@peerjs-server/config/index";
+import { messageByteSize } from "@peerjs-server/models/messageQueue";
 
 import type { IMessage } from "@peerjs-server/models/message";
 
@@ -123,6 +125,19 @@ describe("relay message-queue bounds", () => {
     return { type: MessageType.OFFER, src: "spammer", dst };
   }
 
+  // A near-full-size signaling frame: a 64 K-character payload, so MAX_QUEUE_BYTES
+  // is reached in a handful of frames -- the byte cap binds well before the
+  // 100-message count cap, which is the point of the byte dimension.
+  const FRAME_PAYLOAD_CHARS = 64 * 1024;
+  function bigOfferTo(dst: string): IMessage {
+    return {
+      type: MessageType.OFFER,
+      src: "spammer",
+      dst,
+      payload: "x".repeat(FRAME_PAYLOAD_CHARS),
+    };
+  }
+
   test("caps the number of distinct queued destinations", () => {
     const realm = new Realm();
     // Spray more distinct unregistered destinations than the bound allows.
@@ -140,6 +155,98 @@ describe("relay message-queue bounds", () => {
     expect(realm.getMessageQueueById("dst")?.size()).toBe(
       MAX_MESSAGES_PER_QUEUE,
     );
+  });
+
+  test("caps the resident bytes of a single queue", () => {
+    const realm = new Realm();
+    // Spray far more full-size frames than the byte cap can hold. The count cap
+    // (100) is never reached, so it is the byte cap that bounds the queue.
+    for (let i = 0; i < 200; i += 1) {
+      realm.addMessageToQueue("dst", bigOfferTo("dst"));
+    }
+    const queue = realm.getMessageQueueById("dst");
+    expect(queue).toBeDefined();
+    expect(queue!.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(queue!.size()).toBeLessThan(MAX_MESSAGES_PER_QUEUE);
+    // The queue actually filled to within one frame of the cap -- the bound is
+    // doing real work, not rejecting at zero.
+    expect(queue!.byteSize()).toBeGreaterThan(
+      MAX_QUEUE_BYTES - messageByteSize(bigOfferTo("dst")),
+    );
+  });
+
+  test("counts resident (UTF-16) bytes, so a non-Latin1 payload cannot evade the cap", () => {
+    // V8 stores a string as two bytes per character once it holds any non-Latin1
+    // character, so an all-`Ā` payload and an equal-length ASCII payload
+    // have the same heap residency. messageByteSize must size them identically;
+    // a UTF-8 measure would call the ASCII one half the size and let a wide
+    // payload occupy ~2x the cap while measuring under it.
+    const base = { type: MessageType.OFFER, src: "s", dst: "d" } as const;
+    const ascii: IMessage = {
+      ...base,
+      payload: "a".repeat(FRAME_PAYLOAD_CHARS),
+    };
+    const wide: IMessage = {
+      ...base,
+      payload: "Ā".repeat(FRAME_PAYLOAD_CHARS),
+    };
+    expect(messageByteSize(ascii)).toBe(messageByteSize(wide));
+    expect(messageByteSize(wide)).toBe(
+      2 * ("OFFER".length + "s".length + "d".length + FRAME_PAYLOAD_CHARS),
+    );
+
+    // And the queue enforces the cap against a wide-payload spray just the same.
+    const realm = new Realm();
+    const wideOfferTo = (dst: string): IMessage => ({
+      type: MessageType.OFFER,
+      src: "spammer",
+      dst,
+      payload: "Ā".repeat(FRAME_PAYLOAD_CHARS),
+    });
+    for (let i = 0; i < 200; i += 1) {
+      realm.addMessageToQueue("dst", wideOfferTo("dst"));
+    }
+    expect(realm.getMessageQueueById("dst")!.byteSize()).toBeLessThanOrEqual(
+      MAX_QUEUE_BYTES,
+    );
+  });
+
+  test("rejects a frame with a non-string payload before it is queued", () => {
+    // payload is typed string, but the inbound frame is parsed from untrusted
+    // JSON; a non-string payload must not slip past the byte accounting (which
+    // would otherwise undercount or NaN-poison the running total). messageByteSize
+    // throws on it, so addMessageToQueue never enqueues such a frame.
+    const malformed = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: "d",
+      payload: { not: "a string" },
+    } as unknown as IMessage;
+    expect(() => messageByteSize(malformed)).toThrow();
+
+    const realm = new Realm();
+    expect(() => realm.addMessageToQueue("d", malformed)).toThrow();
+    expect(realm.getMessageQueueById("d")).toBeUndefined();
+  });
+
+  test("frees bytes as a queue is read, so a drained queue accepts again", () => {
+    const realm = new Realm();
+    for (let i = 0; i < 200; i += 1) {
+      realm.addMessageToQueue("dst", bigOfferTo("dst"));
+    }
+    const queue = realm.getMessageQueueById("dst")!;
+    const filled = queue.byteSize();
+    expect(filled).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(filled).toBeGreaterThan(
+      MAX_QUEUE_BYTES - messageByteSize(bigOfferTo("dst")),
+    );
+
+    // A reconnecting peer drains one frame; its bytes are released and a fresh
+    // frame is admitted, never pushing the queue back over the cap.
+    queue.readMessage();
+    expect(queue.byteSize()).toBeLessThan(filled);
+    realm.addMessageToQueue("dst", bigOfferTo("dst"));
+    expect(queue.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
   });
 });
 
