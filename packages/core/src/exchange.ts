@@ -498,11 +498,16 @@ export async function runExchange(
   // (toCommittedPayload) so a sender and receiver commit over byte-identical data
   // for the same logical payload.
   //
-  // heldAssociationTable is the single entitlement predicate: it gates BOTH the
-  // record's committed table (below) AND the table returned to the caller (the
-  // `associationTable` field of the result). A helper therefore neither receives
-  // the result table from the exchange nor binds it in its record -- the returned-
-  // result gate and the record gate are deliberately one rule (see ExchangeResult).
+  // heldAssociationTable is the entitlement predicate for the association TABLE: it
+  // gates BOTH the record's committed table (below) AND the table returned to the
+  // caller (the `associationTable` field of the result). A helper therefore neither
+  // receives the result table from the exchange nor binds it in its record -- the
+  // returned-result gate and the record gate are deliberately one rule (see
+  // ExchangeResult). It scopes the result TABLE only: `partnerPayload` rides a
+  // separate, output-direction-independent channel (exchangePayloads, governed by
+  // each party's own disclosure metadata, not by expectsOutput), so a non-receiving
+  // helper can still receive the receiver's disclosed payload values -- a known
+  // residual disclosure tracked separately, not closed by this gate.
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;

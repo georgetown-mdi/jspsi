@@ -113,10 +113,14 @@ describe("InvitationTerms: always-visible core vs Details disclosure", () => {
     // screen.
     expect(panel.textContent).not.toContain("Non-standard matching");
     expect(panel.textContent).not.toContain("shared identifiers");
-    expect(panel.textContent).not.toContain("Inviter expects to receive");
+    expect(panel.textContent).not.toContain(
+      "You will receive the matched result",
+    );
     expect(container!.textContent).toContain("Non-standard matching");
     expect(container!.textContent).toContain("shared identifiers");
-    expect(container!.textContent).toContain("Inviter expects to receive");
+    expect(container!.textContent).toContain(
+      "You will receive the matched result",
+    );
     // The key name is the always-visible anchor for its collapsed detail.
     expect(container!.textContent).toContain("FN + DOB");
 
@@ -139,5 +143,66 @@ describe("InvitationTerms: always-visible core vs Details disclosure", () => {
     const panel = detailsPanel();
     expect(panel.getAttribute("aria-hidden")).toBe("false");
     expect(panel.hasAttribute("inert")).toBe(false);
+  });
+});
+
+describe("InvitationTerms: result sharing is stated from the viewer's perspective", () => {
+  // Render the same terms with a chosen output direction and perspective. The
+  // viewer is the inviter under "proposing" (its own preview) and the acceptor
+  // under "review"/"accepted"; each must read its OWN outcome first-person, which
+  // is the consent-legible form for a one-sided exchange.
+  function renderOutput(
+    output: { expectsOutput: boolean; shareWithPartner: boolean },
+    perspective?: "review" | "accepted" | "proposing",
+  ) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: { ...terms, output },
+          ...(perspective ? { perspective } : {}),
+        }),
+      ),
+    );
+  }
+
+  test("an acceptor of an inviter-only invitation is told plainly it receives no result", async () => {
+    // inviter-only: the inviter receives and does not share, so the acceptor gets
+    // nothing -- and must read that first-person, not infer it from the inviter's
+    // "shares with you: No".
+    renderOutput({ expectsOutput: true, shareWithPartner: false });
+    await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "You will receive the matched result: No",
+    );
+    expect(container!.textContent).toContain(
+      "Your partner (the inviter) will receive the result: Yes",
+    );
+  });
+
+  test("an acceptor of a partner-only invitation is told plainly it receives the result", async () => {
+    renderOutput({ expectsOutput: false, shareWithPartner: true });
+    await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "You will receive the matched result: Yes",
+    );
+    expect(container!.textContent).toContain(
+      "Your partner (the inviter) will receive the result: No",
+    );
+  });
+
+  test("the inviter's own preview frames the outcome for the proposer", async () => {
+    // proposing: the viewer IS the inviter, so "you" is the inviter and "your
+    // partner" the acceptor. inviter-only here: the inviter receives, the partner
+    // does not.
+    renderOutput({ expectsOutput: true, shareWithPartner: false }, "proposing");
+    await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "You will receive the matched result: Yes",
+    );
+    expect(container!.textContent).toContain(
+      "Your partner will receive the result: No",
+    );
   });
 });

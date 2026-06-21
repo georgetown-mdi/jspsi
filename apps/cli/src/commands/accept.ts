@@ -197,12 +197,17 @@ export function displayInvitation(
   // since this summary is shown before the operator confirms acceptance.
   log.info(`  inviting party: ${sanitizeForDisplay(t.identity)}`);
   log.info(`  PSI algorithm: ${t.algorithm}`);
+  // Stated from the accepting party's perspective (this summary is shown only to
+  // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
+  // inviter receives iff its terms expect output. For a one-sided invitation this
+  // tells the acceptor plainly whether it gets a result, rather than leaving it to
+  // invert the inviter's "shares with partner" bit.
   log.info(
-    `  inviter receives output: ${t.output.expectsOutput ? "yes" : "no"}`,
+    `  you will receive the result: ${t.output.shareWithPartner ? "yes" : "no"}`,
   );
   log.info(
-    `  inviter shares result with partner: ` +
-      `${t.output.shareWithPartner ? "yes" : "no"}`,
+    `  the inviting party will receive the result: ` +
+      `${t.output.expectsOutput ? "yes" : "no"}`,
   );
   log.info(
     `  linkage keys: ` +
