@@ -9,6 +9,8 @@ import {
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
+  MAX_PAD_LEFT_LENGTH,
+  MAX_DATE_FORMAT_LENGTH,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -21,8 +23,8 @@ import {
 } from "../src/utils/sanitizeForDisplay";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import {
+  MAX_NODE_COUNT,
   NestingDepthExceededError,
-  NodeCountExceededError,
 } from "../src/utils/camelizeKeys";
 
 // Minimal valid set of terms used as a base for individual tests.
@@ -495,6 +497,192 @@ test("an element-transform regex that cannot compile still validates, so the run
     ],
   });
   expect(result.success).toBe(true);
+});
+
+// ─── pad_left length bound (partner-controlled allocation DoS) ────────────────
+// A pad_left element transform reads a partner-controlled `length` and runs
+// padStart(length, char) per row over the full dataset; an unbounded value
+// allocates a giant string per row and exhausts the acceptor's memory (the
+// memory-allocation sibling of the ReDoS vector above). The bound is enforced at
+// LinkageTermsSchema validation, before any per-row key-building allocation. (The
+// factory's positive-integer runtime check is unit-tested in
+// standardization.test.ts; these assert the schema-level wiring on the
+// partner-parsed path.)
+
+const padLeftTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "pad_left", params }] },
+      ],
+    },
+  ],
+});
+
+test("an over-large pad_left length is rejected at validation, before any per-row allocation", () => {
+  const result = safeParseLinkageTerms(padLeftTerms({ length: 1e9 }));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("length");
+  expect(result.error.issues[0].message).toMatch(
+    /pad_left length must not exceed/,
+  );
+});
+
+test("a real-sized pad_left length parses and is preserved (no clamp)", () => {
+  // Preservation matters: PSI requires both parties to derive byte-identical
+  // keys, so the bound must reject out-of-range values, never silently rewrite an
+  // in-range one.
+  const result = safeParseLinkageTerms(padLeftTerms({ length: 9 }));
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    length: 9,
+  });
+});
+
+test("a pad_left length at exactly the maximum parses; one over it is rejected", () => {
+  expect(
+    safeParseLinkageTerms(padLeftTerms({ length: MAX_PAD_LEFT_LENGTH }))
+      .success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(padLeftTerms({ length: MAX_PAD_LEFT_LENGTH + 1 }))
+      .success,
+  ).toBe(false);
+});
+
+test("a malformed pad_left length still validates, so the runtime factory check handles it", () => {
+  // The schema adds only the upper bound; a non-positive, non-integer, or
+  // non-numeric length is not pre-empted here -- padLeftFactory throws on it at
+  // key-build time and the exchange aborts through the existing error boundary,
+  // behavior unchanged by this hardening (the runtime throws are pinned in
+  // standardization.test.ts). None of these is an allocation risk: padStart is
+  // never reached for them.
+  expect(safeParseLinkageTerms(padLeftTerms({ length: -5 })).success).toBe(
+    true,
+  );
+  expect(safeParseLinkageTerms(padLeftTerms({ length: 1.5 })).success).toBe(
+    true,
+  );
+  expect(safeParseLinkageTerms(padLeftTerms({ length: "9" })).success).toBe(
+    true,
+  );
+});
+
+// ─── parse_date format-string bounds (partner-controlled per-row regex DoS) ───
+// parse_date builds a `new RegExp` from `inputFormat` and assembles its result
+// from `outputFormat`, recompiled per row by applyElementTransform over the full
+// dataset. Two distinct risks, two controls, both at LinkageTermsSchema
+// validation: (1) an unbounded format makes every row compile / allocate work
+// proportional to its length -- bounded by the MAX_DATE_FORMAT_LENGTH refine; and
+// (2) the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that can
+// catastrophically backtrack at a length well under that cap -- rejected by the
+// ReDoS screen (linkageTermsHaveUnsafeTransformRegex, extended to reconstruct and
+// analyze parse_date's pattern). Tests that target ONLY the length cap use a
+// non-token literal ("x") so the two controls are exercised independently.
+// (parse_date's runtime behavior is unit-tested in standardization.test.ts.)
+
+const parseDateTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "DOB",
+      elements: [
+        { field: "ssn", transform: [{ function: "parse_date", params }] },
+      ],
+    },
+  ],
+});
+
+test("an over-large parse_date inputFormat is rejected by the length cap", () => {
+  // A non-token literal, so this isolates the length cap from the ReDoS screen.
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("params");
+  expect(result.error.issues[0].message).toMatch(
+    /parse_date inputFormat and outputFormat must not exceed/,
+  );
+});
+
+test("an over-large parse_date outputFormat is rejected by the length cap", () => {
+  // outputFormat is assembled, not compiled, so only the length cap guards it.
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ outputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+  );
+  expect(result.success).toBe(false);
+});
+
+test("a real-sized parse_date format parses and is preserved (no clamp)", () => {
+  // camelizeKeys maps the snake_case wire keys to the camelCase the factory reads.
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ input_format: "YYYY-MM-DD", output_format: "MM/DD/YYYY" }),
+  );
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    inputFormat: "YYYY-MM-DD",
+    outputFormat: "MM/DD/YYYY",
+  });
+});
+
+test("a parse_date format at exactly the length maximum parses; one over is rejected", () => {
+  // Non-token literal so this isolates the length cap from the ReDoS screen.
+  expect(
+    safeParseLinkageTerms(
+      parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH) }),
+    ).success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(
+      parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
+    ).success,
+  ).toBe(false);
+});
+
+test("a catastrophic-backtracking parse_date inputFormat is rejected by the ReDoS screen", () => {
+  // "MM".repeat(24) is 48 chars -- well under the length cap -- but expands to 24
+  // adjacent `(\d{1,2})` groups, a catastrophic-backtracking regex. The length cap
+  // does not catch it (it is short); the ReDoS screen, extended to reconstruct
+  // parse_date's pattern, does. Without this the per-row regex would hang the
+  // acceptor over the full dataset.
+  const result = safeParseLinkageTerms(
+    parseDateTerms({ inputFormat: "MM".repeat(24) }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/catastrophic backtracking/);
+});
+
+test("common parse_date formats are not falsely flagged by the ReDoS screen", () => {
+  // Legitimate layouts (separated, or with at most two adjacent ambiguous groups
+  // like YYYYMMDD) must not be over-rejected by the catastrophic-backtracking
+  // screen.
+  for (const inputFormat of [
+    "MM/DD/YYYY",
+    "YYYY-MM-DD",
+    "YYYYMMDD",
+    "DD/MM/YYYY",
+  ]) {
+    expect(safeParseLinkageTerms(parseDateTerms({ inputFormat })).success).toBe(
+      true,
+    );
+  }
+});
+
+test("a non-string parse_date format still validates, so the runtime factory handles it", () => {
+  // Only a string format drives the regex build / output allocation; the factory
+  // treats a non-string as an empty/absent format, so neither the length cap nor
+  // the ReDoS screen pre-empts it (behavior unchanged).
+  expect(
+    safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 })).success,
+  ).toBe(true);
 });
 
 test("a swap resolving via element field names validates", () => {
@@ -1714,18 +1902,20 @@ test("rejects a payload send list over the maximum count", () => {
 test("a pathological-count payload send list is rejected by the node budget, not with a RangeError", () => {
   // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
   // ~3.5M `Invalid string length` threshold the unbounded schema hit. The
-  // camelize pre-pass now fronts the boundedArray count gate: an over-budget
-  // partner collection is rejected with a clean, bounded NodeCountExceededError
-  // before the O(n) walk -- and so before Zod (path b) -- never a RangeError.
+  // camelize pre-pass fronts the boundedArray count gate: an over-budget partner
+  // collection is rejected by that budget before the O(n) walk -- and so before
+  // Zod (path b) -- never a RangeError. safeParseLinkageTerms now ABSORBS that
+  // bound into a { success: false } result (the "safe" contract) instead of
+  // throwing, so the rejection surfaces as the node-count issue, not an exception.
   const send = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(sendTerms(send));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(sendTerms(send));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 test("accepts a payload receive list at exactly the maximum count", () => {
@@ -1744,14 +1934,14 @@ test("rejects a payload receive list over the maximum count", () => {
 
 test("a pathological-count payload receive list is rejected by the node budget, not with a RangeError", () => {
   const receive = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(receiveTerms(receive));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(receiveTerms(receive));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 // ─── Top-level linkageFields / linkageKeys count bounds ──────────────────────
@@ -1794,18 +1984,19 @@ test("rejects linkageFields over the maximum count", () => {
 test("a pathological-count linkageFields is rejected by the node budget, not with a RangeError", () => {
   // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
   // ~3.5M `Invalid string length` threshold the `.max()`-only schema hit. The
-  // camelize node budget now fronts the boundedArray count gate, rejecting the
-  // over-budget array with a clean, bounded NodeCountExceededError before the
-  // walk -- and so before Zod (path b) -- never a RangeError.
+  // camelize node budget fronts the boundedArray count gate, rejecting the
+  // over-budget array by that budget before the walk -- and so before Zod (path
+  // b) -- never a RangeError. safeParseLinkageTerms absorbs the bound into a
+  // { success: false } result rather than throwing (the "safe" contract).
   const fields = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(linkageFieldsTerms(fields));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(linkageFieldsTerms(fields));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 test("accepts linkageKeys at exactly the maximum count", () => {
@@ -1826,22 +2017,23 @@ test("rejects linkageKeys over the maximum count", () => {
 
 test("a pathological-count linkageKeys is rejected by the node budget, not with a RangeError or a TypeError", () => {
   // ~4M entries, past the camelize node budget (MAX_NODE_COUNT). The node budget
-  // fronts the boundedArray count gate, rejecting the over-budget array with a
-  // clean, bounded NodeCountExceededError before the walk -- and so before Zod
-  // (path b) -- never a RangeError, and never the TypeError a raw non-object key
-  // would drive at the terms-level refine (the over-budget array never reaches
-  // it). The boundedArray `abort` that guards that refine for a sub-budget
-  // over-count is pinned by the next test.
+  // fronts the boundedArray count gate, rejecting the over-budget array by that
+  // budget before the walk -- and so before Zod (path b) -- never a RangeError,
+  // and never the TypeError a raw non-object key would drive at the terms-level
+  // refine (the over-budget array never reaches it). safeParseLinkageTerms
+  // absorbs the bound into a { success: false } result rather than throwing (the
+  // "safe" contract); the not-throwing assertion stands in for the prior
+  // not-a-RangeError / not-a-TypeError checks. The boundedArray `abort` that
+  // guards that refine for a sub-budget over-count is pinned by the next test.
   const keys = Array.from({ length: 4_000_000 }, () => 123);
-  let err: unknown;
-  try {
-    safeParseLinkageTerms(linkageKeysTerms(keys));
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(NodeCountExceededError);
-  expect(err).not.toBeInstanceOf(RangeError);
-  expect(err).not.toBeInstanceOf(TypeError);
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(linkageKeysTerms(keys));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(result?.success === false && result.error.issues[0]?.message).toBe(
+    `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
+  );
 });
 
 test("an over-count linkageKeys of raw non-object entries aborts to a clean count issue", () => {

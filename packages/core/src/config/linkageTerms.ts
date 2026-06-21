@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
@@ -50,8 +51,13 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // rewritten or per-key-validated (item 202722105). Legitimate sizes vary -- a
 // denylist holds hundreds of values, hence the most generous bound
 // (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
-// below the RangeError thresholds. The `params` VALUE content stays unbounded
-// (typed `z.unknown()`, with no clean content bound).
+// below the RangeError thresholds. The `params` VALUE content is otherwise
+// unbounded (typed `z.unknown()`, with no clean general content bound); the
+// exceptions are the partner-controlled values whose magnitude drives unbounded
+// per-row work, each capped by a per-step refine on TransformStep's schema below:
+// `pad_left`'s numeric `length` (an unbounded `padStart` allocation,
+// MAX_PAD_LEFT_LENGTH) and `parse_date`'s `inputFormat` / `outputFormat` strings
+// (an unbounded per-row regex build and output allocation, MAX_DATE_FORMAT_LENGTH).
 //
 // The `payload` send/receive arrays carry no enclosing array/record/tuple frame
 // (only the root object), so a pathological count there cannot drive the ~130k
@@ -127,6 +133,51 @@ export const MAX_LINKAGE_ENTRIES = 256;
  * untrusted-input bounds note above.
  */
 export const MAX_PARAMS_ENTRIES = 256;
+
+/**
+ * Generous upper bound on the `length` param of a `pad_left` transform step --
+ * one of the two partner-controlled transform-param VALUES that carry a content
+ * bound (with {@link MAX_DATE_FORMAT_LENGTH}; every other param value stays
+ * `z.unknown()`; the rest of the bounds in this file cap COLLECTION counts, see
+ * the untrusted-input bounds note above).
+ * `pad_left` runs per row inside the key-building pipeline
+ * ({@link applyElementTransform}, driven by `buildKeyStrings`), and an unbounded
+ * `length` makes every row allocate a `String.prototype.padStart(length, char)`
+ * of that size -- a crafted `1e9` exhausts memory and hangs the acceptor (a
+ * browser-tab freeze on the web path, a hung process on the CLI), the
+ * memory-allocation sibling of the regex-ReDoS vector
+ * ({@link linkageTermsHaveUnsafeTransformRegex}). A real left-pad target is tens
+ * of characters (a zero-padded SSN is 9, a phone 10); 256 is far above any
+ * legitimate pad yet far below an allocation that matters. Enforced by a per-step
+ * refine on {@link TransformStep}'s schema before any per-row allocation; the
+ * factory's positive-integer check (standardization.ts) remains the runtime
+ * backstop for the operator-local standardization path, which never reaches this
+ * schema. This is a DoS ceiling on the partner wire path, not a semantic limit.
+ */
+export const MAX_PAD_LEFT_LENGTH = 256;
+
+/**
+ * Generous upper bound on the `inputFormat` and `outputFormat` params of a
+ * `parse_date` transform step -- the other partner-controlled transform-param
+ * VALUES that carry a content bound (with {@link MAX_PAD_LEFT_LENGTH}; every other
+ * param value stays `z.unknown()`, see the untrusted-input bounds note above).
+ * `parse_date` runs per row inside the key-building pipeline
+ * ({@link applyElementTransform}, which recompiles each step per row): its factory
+ * builds a `new RegExp` from `inputFormat` and assembles the result from
+ * `outputFormat`. This length cap bounds the per-row WORK SIZE -- an unbounded
+ * `inputFormat` would compile an ever-larger regex per row, and an unbounded
+ * `outputFormat` would allocate an ever-larger output per matched row -- with 256
+ * far above any real date layout ("MM/DD/YYYY", "YYYY-MM-DD") yet small enough that
+ * the per-row build and output stay cheap. It is NOT the whole `parse_date`
+ * control: the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that
+ * can catastrophically backtrack at a length well under this cap, so the SHAPE of
+ * the expanded regex is screened separately by
+ * {@link linkageTermsHaveUnsafeTransformRegex} (extended to reconstruct and analyze
+ * `parse_date`'s pattern, since the format is not a raw `tier: "regex"` value).
+ * Enforced by a per-step refine on {@link TransformStep}'s schema before any row
+ * runs. A DoS ceiling on the partner wire path, not a semantic limit.
+ */
+export const MAX_DATE_FORMAT_LENGTH = 256;
 
 /**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
@@ -416,7 +467,9 @@ export interface TransformStep {
   params?: Record<string, unknown>;
 }
 
-const TransformStepSchema: z.ZodType<TransformStep> = z.object({
+// Not annotated as ZodType<TransformStep> because the concrete ZodObject is the
+// base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
+const TransformStepBaseSchema = z.object({
   function: z.string().min(1).max(MAX_NAME_LENGTH),
   // The record's KEYS are partner-controlled strings (parameter names), so they
   // are length-bounded like every other free-text string; the VALUE content is
@@ -458,6 +511,65 @@ const TransformStepSchema: z.ZodType<TransformStep> = z.object({
     .pipe(z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()))
     .optional(),
 });
+
+// Content bounds on the two partner-controlled transform-param VALUES whose
+// magnitude drives unbounded per-row work; every other param value stays
+// `z.unknown()` (see the untrusted-input bounds note above). Each is a per-step
+// refine on this wire schema -- not on the editor descriptor an attacker-authored
+// token never passes through -- and each message names no partner value,
+// consistent with the unsanitized parse-error path the referential-integrity and
+// ReDoS refines rely on.
+const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
+  // `pad_left` runs per row in the key-building pipeline (standardization.ts
+  // applyElementTransform, driven by buildKeyStrings), so an unbounded `length`
+  // makes every row allocate a `padStart(length, char)` of that size -- a crafted
+  // 1e9 exhausts memory and hangs the acceptor, the memory-allocation sibling of
+  // the regex-ReDoS vector the refine on LinkageTermsSchema rejects. Only a
+  // positive-integer `length` ever reaches padStart (padLeftFactory throws on a
+  // non-number, non-integer, or non-positive value before it allocates), so
+  // rejecting positive integers above MAX_PAD_LEFT_LENGTH closes the whole
+  // allocation vector; a malformed `length` is left to that runtime check, whose
+  // clean-abort path is unchanged.
+  .refine(
+    (step) => {
+      if (step.function !== "pad_left") return true;
+      const length = step.params?.length;
+      return (
+        typeof length !== "number" ||
+        !Number.isInteger(length) ||
+        length <= MAX_PAD_LEFT_LENGTH
+      );
+    },
+    {
+      message: `pad_left length must not exceed ${MAX_PAD_LEFT_LENGTH}`,
+      path: ["params", "length"],
+    },
+  )
+  // `parse_date` builds a `new RegExp` from `inputFormat` and assembles its result
+  // from `outputFormat`, both recompiled per row by applyElementTransform. This
+  // length cap bounds the per-row WORK SIZE: an unbounded `inputFormat` compiles an
+  // ever-larger regex per row, an unbounded `outputFormat` allocates an ever-larger
+  // per-row output. Only a string value drives either (the factory treats a
+  // non-string as an empty/absent format), so the bound is on the string length.
+  // The catastrophic-backtracking risk in the expanded regex (adjacent `(\d{1,2})`
+  // from MM/DD tokens) is independent of length and is rejected separately by the
+  // ReDoS refine on LinkageTermsSchema (extended to screen parse_date's pattern).
+  .refine(
+    (step) => {
+      if (step.function !== "parse_date") return true;
+      const { inputFormat, outputFormat } = step.params ?? {};
+      return (
+        (typeof inputFormat !== "string" ||
+          inputFormat.length <= MAX_DATE_FORMAT_LENGTH) &&
+        (typeof outputFormat !== "string" ||
+          outputFormat.length <= MAX_DATE_FORMAT_LENGTH)
+      );
+    },
+    {
+      message: `parse_date inputFormat and outputFormat must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+      path: ["params"],
+    },
+  );
 
 /**
  * A single element of a linkage key. References a linkage field by name and
@@ -892,10 +1004,12 @@ export function parseLinkageTerms(raw: unknown): LinkageTerms {
 /**
  * Non-throwing version of {@link parseLinkageTerms}.
  * Returns a Zod `SafeParseReturnType` with `success` and either `data` or
- * `error`.
+ * `error`. Honors the "safe" contract for the {@link camelizeKeys} bounds too:
+ * a depth- or node-count-tripping input yields a `{ success: false }` result
+ * rather than throwing (see {@link safeParseCamelized}).
  */
 export function safeParseLinkageTerms(raw: unknown) {
-  return LinkageTermsSchema.safeParse(camelizeKeys(raw, PARAMS_WIDTH_BOUND));
+  return safeParseCamelized(LinkageTermsSchema, raw, PARAMS_WIDTH_BOUND);
 }
 
 // --- Compatibility -----------------------------------------------------------

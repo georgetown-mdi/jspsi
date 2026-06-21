@@ -261,9 +261,11 @@ function transformKeysDeep(
  * (`OPAQUE_VALUE_KEYS`) are left verbatim -- see {@link transformKeysDeep}.
  *
  * Runs ahead of the schema in the `parseX`/`safeParseX` config helpers, so on a
- * pathologically deep or wide input it throws BEFORE the schema -- meaning even a
- * `safeParseX` wrapper that calls it can throw rather than return a failure
- * result. No real config or exchange message reaches either bound.
+ * pathologically deep or wide input it throws BEFORE the schema. The throwing
+ * `parseX` helpers propagate that throw (their partner-wire call sites catch it);
+ * the `safeParseX` helpers route through `safeParseCamelized`, which converts the
+ * bound into a `{ success: false }` result so their "safe" contract holds. No
+ * real config or exchange message reaches either bound.
  *
  * `widthBoundedKeys` (see {@link transformKeysDeep}) lets a caller name keys
  * whose object value is left verbatim once it exceeds a given key count, so a

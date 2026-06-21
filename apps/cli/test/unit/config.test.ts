@@ -6,6 +6,8 @@ import YAML from "yaml";
 import {
   getDefaultLinkageTerms,
   MAX_NAME_LENGTH,
+  MAX_NESTING_DEPTH,
+  NestingDepthExceededError,
   parseExchangeSpec,
   UsageError,
 } from "@psilink/core";
@@ -1041,6 +1043,51 @@ test("diffLinkageTerms: an un-encodable value does not throw and identical terms
   expect(result.warnings.some((w) => w.includes("JSON-safe range"))).toBe(true);
 });
 
+test("diffLinkageTerms: a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // A one-key-per-level params object, as a crafted invitation carries it. 3000
+  // levels sits in the gap the threat exploits: above the ~2000-level native
+  // overflow of the unbounded NFC/canonical reconcile walk, yet below
+  // parseBoundedJson's 4096 decode ceiling, so such a token decodes and only
+  // fails here. The incoming (invitation) side carries it, the threat direction;
+  // build it iteratively so the test itself does not recurse. With the guard,
+  // nfcDeep throws at depth 256, so the 3000-deep value is never walked in full.
+  let deep: Record<string, unknown> = { leaf: "x" };
+  for (let i = 0; i < 3000; i++) deep = { a: deep };
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: deep },
+  ];
+  // The depth guard fires as a clean NestingDepthExceededError (a UsageError ->
+  // CLI exit 64) at depth 256, before nfcDeep overflows the call stack with an
+  // unguarded RangeError that would otherwise surface as a generic exit 69.
+  expect(() => diffLinkageTerms(existing, incoming)).toThrow(
+    NestingDepthExceededError,
+  );
+});
+
+test("diffLinkageTerms: a realistically nested transform.params reconciles unchanged", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // A nested params object at a depth a real config could plausibly use -- far
+  // above the one or two levels the bundled functions need, yet well within the
+  // bound -- present identically on both sides, so the terms stay equal and must
+  // reconcile with no conflict and no throw (the bound rejects no real token).
+  const nested = { table: { fields: { score: { weight: 3 } } } };
+  existing.linkageKeys[0].elements[0].transform = [
+    { function: "lookup", params: nested },
+  ];
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "lookup", params: structuredClone(nested) },
+  ];
+  let result!: ReturnType<typeof diffLinkageTerms>;
+  expect(() => {
+    result = diffLinkageTerms(existing, incoming);
+  }).not.toThrow();
+  expect(result.conflicts).toEqual([]);
+  expect(result.warnings).toEqual([]);
+});
+
 test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
@@ -1270,6 +1317,60 @@ test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
     expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
     expect(() => loadConfigLinkageSource(configPath)).toThrow(
       "invalid linkage_terms",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A local config whose linkage_terms trips a camelizeKeys structural bound (here
+// the depth bound, the cheapest to reach) must still surface the file-named
+// "config file X has invalid linkage_terms: ..." wrap, not the raw bound-error
+// text -- safeParseLinkageTerms is now genuinely non-throwing for the bound, so
+// the if(!result.success) branch produces the helpful message rather than the
+// throw skipping straight past it. Still a UsageError (CLI exit 64), as before.
+test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    // Nest one level past the depth bound so camelizeKeys rejects before Zod.
+    let deepTerms: unknown = { identity: "Agency A" };
+    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+      deepTerms = { nested: deepTerms };
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    // The file-named wrap, carrying the bound's fixed message (no input bytes),
+    // not the raw NestingDepthExceededError text that the pre-fix throw produced.
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid linkage_terms: input nesting ` +
+        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The same for the metadata branch: a valid linkage_terms reaches it, then a
+// camelize-bound-tripping metadata block surfaces the file-named "invalid
+// metadata" wrap rather than throwing the raw bound error.
+test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    let deepMetadata: unknown = { name: "X" };
+    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+      deepMetadata = { nested: deepMetadata };
+    fs.writeFileSync(
+      configPath,
+      YAML.stringify({
+        linkage_terms: getDefaultLinkageTerms("Agency A"),
+        metadata: deepMetadata,
+      }),
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid metadata: input nesting ` +
+        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

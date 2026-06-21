@@ -3,23 +3,21 @@ import http from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
-import {
-  MAX_MESSAGE_BYTES,
-  WebSocketServer,
-} from "@peerjs-server/services/webSocketServer/index";
 import { Realm } from "@peerjs-server/models/realm";
+import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index";
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
 import type { IRealm } from "@peerjs-server/models/realm";
 
 // Socket-level coverage for the signaling guards that need a live `ws`
-// connection: the per-message size cap and the liveness flag that gates the
-// two-tier reaper, alongside a regression check that a normal registration still
-// answers OPEN. These drive a real http.Server + `ws` on a loopback port, the
-// same pattern test/devServer/signalingProbe.ts uses. The pre-101 handshake
-// timeout is covered separately in signalingUpgradeTimeout.test.ts, which imports
-// no `ws` (see the note there).
+// connection: the liveness flag that gates the two-tier reaper and the
+// pre-handshake idle timeout's exemption of an established socket, alongside a
+// regression check that a normal registration still answers OPEN. These drive a
+// real http.Server + `ws` on a loopback port, the same pattern
+// test/devServer/signalingProbe.ts uses. The per-message size cap is covered in
+// signalingPayloadBound.test.ts; the pre-101 handshake timeout in
+// signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
 
 interface Signaling {
   port: number;
@@ -145,19 +143,6 @@ describe("signaling socket guards", () => {
     );
     expect(sig.realm.getClientById("peer-live")?.isConfirmed()).toBe(true);
     ws.close();
-  });
-
-  test("an inbound frame larger than the cap closes the connection", async () => {
-    const sig = await startSignaling();
-    const ws = new WebSocket(signalingUrl(sig.port, "peer-big"));
-    await waitForFrame(ws, "OPEN");
-
-    const closeCode = await new Promise<number>((resolve) => {
-      ws.on("close", (code) => resolve(code));
-      ws.send("x".repeat(MAX_MESSAGE_BYTES + 1));
-    });
-    // 1009 = message too big.
-    expect(closeCode).toBe(1009);
   });
 
   test("an established connection is not cut by the pre-handshake idle timeout", async () => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 
 // Signing configuration for exchange receipts. Lives as an optional `signing`
 // block on the ExchangeSpec (psilink.yaml); see EXCHANGE_REFERENCE.md. It carries
@@ -125,7 +126,10 @@ export function parseSigningConfig(raw: unknown): SigningConfig {
   return SigningConfigSchema.parse(camelizeKeys(raw));
 }
 
-/** Non-throwing version of {@link parseSigningConfig}. */
+/**
+ * Non-throwing version of {@link parseSigningConfig}. Honors the "safe" contract
+ * for the {@link camelizeKeys} bounds too -- see {@link safeParseCamelized}.
+ */
 export function safeParseSigningConfig(raw: unknown) {
-  return SigningConfigSchema.safeParse(camelizeKeys(raw));
+  return safeParseCamelized(SigningConfigSchema, raw);
 }
