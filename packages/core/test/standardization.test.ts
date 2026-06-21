@@ -1062,6 +1062,44 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     // independent of row count. Pre-memoization this was 4 * 50.
     expect(spy).toHaveBeenCalledTimes(4);
   });
+
+  test("a multi-step element transform compiles every step once, not per row", () => {
+    // The other compile-count tests use single-step transforms, so they pin "one
+    // transform array -> one compile" but not "every STEP of the array compiles
+    // once". The WeakMap caches the whole compiled step array under the array's
+    // identity, so each regex-bearing step must compile once and be reused across
+    // rows. Without this case, a regression that re-ran compileSteps per row only
+    // for multi-step arrays (e.g. a `steps.length > 1` carve-out) would pass every
+    // single-step test while recompiling up to MAX_TRANSFORM_STEPS (256) patterns
+    // per row -- the same fail-open per-row compile cost the control bounds. The
+    // real bound is distinct-transforms * regex-steps-per-transform, flat in rows.
+    const key = {
+      name: "MULTI_STEP",
+      elements: [
+        {
+          field: "ssn",
+          transform: [
+            { function: "filter_regex", params: { pattern: "\\d" } },
+            { function: "extract_regex", params: { pattern: "(\\d{2})$" } },
+          ],
+        },
+      ],
+    };
+    const rowCount = 50;
+    const rows = Array.from({ length: rowCount }, (_, i) => ({
+      SSN: `${100000000 + i}`,
+    }));
+    const dataset = new StandardizedDataset([
+      new StandardizedField("ssn", "SSN", [], rows),
+    ]);
+
+    const spy = vi.spyOn(linearRegex, "compileLinearRegex");
+    for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
+    // Two regex steps in one transform array -> two compiles total (the array is
+    // compiled once and reused), flat in the 50 rows. A per-row recompile of a
+    // multi-step transform would be 2 * 50.
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("regex factories fail closed (no fallback to new RegExp)", () => {
