@@ -1,6 +1,7 @@
 import type { Duplex } from "node:stream";
 import type { Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
+import type { Socket } from "node:net";
 
 /**
  * Default bound (ms) for receiving the complete request headers before the
@@ -19,6 +20,27 @@ export const SIGNALING_HEADERS_TIMEOUT_MS = 10_000;
  * but then stalls the rest of the request.
  */
 export const SIGNALING_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Default bound (ms) for a connected socket that has not begun -- or has paused
+ * before finishing -- its request. {@link SIGNALING_HEADERS_TIMEOUT_MS} and
+ * {@link SIGNALING_REQUEST_TIMEOUT_MS} only arm once HTTP request parsing has
+ * begun, so a peer that completes the TCP handshake and then sends nothing has
+ * no request for them to bound and would sit held open until the OS reaps it.
+ * This per-socket idle timeout closes that hold. `ws` resets the socket timeout
+ * to 0 the moment a socket completes the 101 upgrade, so an established
+ * WebSocket -- governed by the liveness reaper, not this -- is never cut by it.
+ */
+export const SIGNALING_PREHANDSHAKE_IDLE_MS = 10_000;
+
+// Per-server idle reaper, tracked so a repeated harden (a test re-hardening, a
+// hot reload) replaces rather than stacks it. Unlike closeStalledHandshake, the
+// reaper closes over its per-call idle bound, so it cannot be a single shared
+// function compared by identity.
+const idleReaperByServer = new WeakMap<
+  HttpServer | HttpsServer,
+  (socket: Socket) => void
+>();
 
 /**
  * Close a stalled or malformed handshake. Node already does this from its
@@ -54,16 +76,19 @@ function closeStalledHandshake(
  * Bound the pre-101 upgrade handshake on the shared HTTP server: an
  * unauthenticated client that opens a connection and dribbles -- or never
  * finishes -- its request headers is closed server-side rather than held until a
- * loose (60s) default. Once a socket completes the 101 it is a WebSocket the
- * signaling layer governs (the `ws` close timer and the liveness reaper), so
- * these bound only the handshake. The override args exist so the behavior is
- * unit-testable on a short clock; production uses the defaults.
+ * loose (60s) default, and one that connects and then sends nothing at all (no
+ * request for the header/request timeouts to bound) is reaped on a per-socket
+ * idle timeout. Once a socket completes the 101 it is a WebSocket the signaling
+ * layer governs (the `ws` close timer and the liveness reaper), so these bound
+ * only the handshake. The override args exist so the behavior is unit-testable
+ * on a short clock; production uses the defaults.
  */
 export function hardenUpgradeSurface(
   server: HttpServer | HttpsServer,
   options: {
     headersTimeoutMs?: number;
     requestTimeoutMs?: number;
+    preHandshakeIdleMs?: number;
   } = {},
 ): void {
   server.headersTimeout =
@@ -74,4 +99,16 @@ export function hardenUpgradeSurface(
   // a hot-reload) cannot stack a second handler that fires twice per error.
   server.removeListener("clientError", closeStalledHandshake);
   server.on("clientError", closeStalledHandshake);
+
+  // Reap a connected-but-idle socket the header/request timeouts cannot see
+  // (see SIGNALING_PREHANDSHAKE_IDLE_MS). Replace any prior reaper so a repeated
+  // call does not stack a second one.
+  const idleMs = options.preHandshakeIdleMs ?? SIGNALING_PREHANDSHAKE_IDLE_MS;
+  const previousReaper = idleReaperByServer.get(server);
+  if (previousReaper) server.removeListener("connection", previousReaper);
+  const reapIdlePreHandshakeSocket = (socket: Socket): void => {
+    socket.setTimeout(idleMs, () => socket.destroy());
+  };
+  idleReaperByServer.set(server, reapIdlePreHandshakeSocket);
+  server.on("connection", reapIdlePreHandshakeSocket);
 }

@@ -8,6 +8,7 @@ import {
   WebSocketServer,
 } from "@peerjs-server/services/webSocketServer/index";
 import { Realm } from "@peerjs-server/models/realm";
+import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
 import type { IRealm } from "@peerjs-server/models/realm";
@@ -31,8 +32,15 @@ afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });
 
-async function startSignaling(): Promise<Signaling> {
+async function startSignaling(
+  opts: { preHandshakeIdleMs?: number } = {},
+): Promise<Signaling> {
   const server = http.createServer();
+  if (opts.preHandshakeIdleMs !== undefined) {
+    hardenUpgradeSurface(server, {
+      preHandshakeIdleMs: opts.preHandshakeIdleMs,
+    });
+  }
   const realm = new Realm();
   const wss = new WebSocketServer({
     server,
@@ -150,5 +158,19 @@ describe("signaling socket guards", () => {
     });
     // 1009 = message too big.
     expect(closeCode).toBe(1009);
+  });
+
+  test("an established connection is not cut by the pre-handshake idle timeout", async () => {
+    // Harden with a short pre-handshake idle bound, then prove an upgraded socket
+    // that stays silent past it survives: `ws` resets the socket timeout to 0 on
+    // the 101, handing liveness back to the reaper. If `ws` stopped doing that,
+    // this fails rather than silently tearing down idle established peers.
+    const sig = await startSignaling({ preHandshakeIdleMs: 500 });
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-quiet"));
+    await waitForFrame(ws, "OPEN");
+    // Stay completely silent well past the 500ms pre-handshake bound.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
   });
 });
