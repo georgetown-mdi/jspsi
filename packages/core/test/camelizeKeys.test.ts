@@ -6,6 +6,8 @@ import {
   snakeizeKeys,
   NestingDepthExceededError,
   MAX_NESTING_DEPTH,
+  NodeCountExceededError,
+  MAX_NODE_COUNT,
 } from "../src/utils/camelizeKeys";
 
 // snakeize a camelCase key the way the production walker's inverse transform
@@ -238,4 +240,150 @@ test("an opaque map is verbatim all the way down (nested objects, arrays), both 
     provider_options: typeof opaque;
   };
   expect(snakeized.provider_options).toEqual(opaque);
+});
+
+// --- Width-bounded keys ------------------------------------------------------
+// A caller (parseLinkageTerms, for transform.params) names keys whose object
+// value is left verbatim once its key count exceeds a given bound, so a
+// pathological-count partner record is not rewritten key by key before the
+// schema's own count bound rejects it (board item 202722105). The bound is keyed
+// by the canonical camelCase key name, like the opaque-value skip; a within-bound
+// value is recursed into and camelized as normal.
+
+test("a width-bounded key's over-count value is left verbatim", () => {
+  const value = { a_b: 1, c_d: 2, e_f: 3 };
+  // 3 keys exceeds the bound of 2: the value is handed back with its snake_case
+  // keys intact -- the schema, not the pre-pass, rejects it.
+  expect(camelizeKeys({ params: value }, new Map([["params", 2]]))).toEqual({
+    params: value,
+  });
+});
+
+test("a width-bounded key's at-bound value is camelized as normal", () => {
+  // 2 keys is not OVER the bound of 2, so the value is walked and rewritten.
+  expect(
+    camelizeKeys(
+      { params: { input_format: "x", out_fmt: "y" } },
+      new Map([["params", 2]]),
+    ),
+  ).toEqual({ params: { inputFormat: "x", outFmt: "y" } });
+});
+
+test("the width bound applies only to the named key", () => {
+  // A non-named key's over-bound value is camelized as usual -- the bound is
+  // keyed by name, so it leaves every other map untouched.
+  expect(
+    camelizeKeys(
+      { other_key: { a_b: 1, c_d: 2, e_f: 3 } },
+      new Map([["params", 2]]),
+    ),
+  ).toEqual({ otherKey: { aB: 1, cD: 2, eF: 3 } });
+});
+
+test("without the option a wide value is camelized regardless of count", () => {
+  expect(camelizeKeys({ params: { a_b: 1, c_d: 2, e_f: 3 } })).toEqual({
+    params: { aB: 1, cD: 2, eF: 3 },
+  });
+});
+
+test("the width bound does not skip a non-object value", () => {
+  // Only an object value can be left verbatim; an array or scalar under a
+  // width-bounded key is walked normally (an array recurses, a scalar is a leaf).
+  expect(
+    camelizeKeys(
+      { params: [{ a_b: 1 }], other: "no_change" },
+      new Map([["params", 0]]),
+    ),
+  ).toEqual({ params: [{ aB: 1 }], other: "no_change" });
+});
+
+// --- Node-count (width) budget -----------------------------------------------
+// camelizeKeys runs BEFORE Zod on partner-controlled input, and the snake->camel
+// rewrite is O(total nodes), so a wide untrusted payload -- within the frame and
+// decode-layer caps -- would otherwise burn multiple seconds before validation
+// rejects (and, for a wide object under an UNKNOWN key, the non-strict schema then
+// SILENTLY strips it, so the parse succeeds after the burn). A single running
+// node budget across the whole walk -- the width analogue of the depth bound --
+// rejects it cleanly first. A "node" is one array element or one object member.
+
+// A flat array of `n` scalars is exactly `n` nodes and rewrites no keys, so it is
+// the cheapest way to land the budget on an exact boundary.
+function flatArray(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i);
+}
+// A snake_case object of `n` keys -- a single wide object (path a).
+function wideObject(n: number): Record<string, number> {
+  const o: Record<string, number> = {};
+  for (let i = 0; i < n; i++) o[`some_snake_key_${i}`] = i;
+  return o;
+}
+
+test("an ordinary wide-enough payload is camelized as before", () => {
+  // Comfortably under the budget: keys are still rewritten normally.
+  expect(camelizeKeys({ outer_block: { inner_key: 1, leaf_key: 2 } })).toEqual({
+    outerBlock: { innerKey: 1, leafKey: 2 },
+  });
+});
+
+test("the node-count guard fires at exactly MAX_NODE_COUNT", () => {
+  // MAX_NODE_COUNT nodes are accepted; one more is rejected. Pinning the exact
+  // boundary -- not just MAX +/- a margin -- keeps the guard from drifting by one,
+  // mirroring the depth-guard boundary test. Far below the multi-second burn, so
+  // the accepted case proves the guard draws the line, not the cost.
+  expect(() => camelizeKeys(flatArray(MAX_NODE_COUNT))).not.toThrow();
+  expect(() => camelizeKeys(flatArray(MAX_NODE_COUNT + 1))).toThrow(
+    NodeCountExceededError,
+  );
+});
+
+test("a payload at the budget boundary camelizes unchanged", () => {
+  // An at-budget array round-trips to an equal value; the budget rejects only
+  // what is over it, never a payload it admits.
+  const atBudget = flatArray(MAX_NODE_COUNT);
+  expect(camelizeKeys(atBudget)).toEqual(atBudget);
+});
+
+test("path (a): a wide object under an unknown key is rejected by the budget", () => {
+  // The motivating case: a multi-million-key object placed under an UNKNOWN
+  // top-level key the non-strict schema later strips. The budget must reject it
+  // rather than let it be fully camelized and then silently dropped. The object
+  // is refused before Object.entries materializes it, so this is a clean bounded
+  // rejection, never a RangeError.
+  let err: unknown;
+  try {
+    camelizeKeys({ unknown_top: wideObject(MAX_NODE_COUNT) });
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(NodeCountExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
+});
+
+test("path (b): an array of objects over the budget is rejected by the budget", () => {
+  // The count-gated partner arrays (linkageFields, elements, ...) incur an O(n)
+  // camelize walk before their boundedArray count refine can fire; the budget
+  // rejects an over-size one first. Each 3-key object is 4 nodes (the element
+  // plus its three members), so 65537 of them clears MAX_NODE_COUNT.
+  const arr = Array.from({ length: 65537 }, () => ({ a_b: 1, c_d: 2, e_f: 3 }));
+  expect(() => camelizeKeys(arr)).toThrow(NodeCountExceededError);
+});
+
+test("snakeizeKeys shares the node-count guard", () => {
+  // The walker is shared, so the write direction is bounded too -- harmless, its
+  // input is the operator's typed ExchangeSpec and never this wide.
+  expect(() => snakeizeKeys(flatArray(MAX_NODE_COUNT + 1))).toThrow(
+    NodeCountExceededError,
+  );
+});
+
+test("a width-bounded over-count value does not consume the node budget", () => {
+  // The per-key width skip and the global budget compose without double-counting:
+  // a skipped (over-count) value is not recursed into, so its members never count
+  // toward the budget. Here `params` alone is far over MAX_NODE_COUNT, but the
+  // skip leaves it verbatim, so the walk does not throw -- it is handed to the
+  // schema's own count refine, exactly as the dedicated skip intends.
+  const params = wideObject(MAX_NODE_COUNT + 1000);
+  expect(() =>
+    camelizeKeys({ params }, new Map([["params", 2]])),
+  ).not.toThrow();
 });

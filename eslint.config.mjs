@@ -113,9 +113,41 @@ export default tseslint.config(
     // no-restricted-syntax block above. Separate block because flat config
     // replaces (does not merge) a rule's options across blocks, and cli/src
     // already owns a no-restricted-syntax block for the sensitive-parse ban.
+    //
+    // This block also forces all parsing of untrusted JSON (a partner wire
+    // frame, a transport-controlled file, an invitation token) through the
+    // single chokepoint in packages/core/src/utils/boundedJson.ts, which
+    // structurally bounds the body before JSON.parse so a pathological object or
+    // array cannot drive the parser into an uncatchable, process-terminating
+    // abort. Banning the raw access here stops a new reader silently reopening
+    // the crash at a fresh parse site. The chokepoint module itself is exempt
+    // (it owns the raw parse); tests are not matched. A genuinely trusted parse
+    // opts out with an eslint-disable-next-line carrying a one-line why.
     files: ["packages/core/src/**/*.ts"],
+    ignores: ["packages/core/src/utils/boundedJson.ts"],
+    // Fail CI on a stray or rule-silencing disable so the ban cannot be quietly
+    // turned off on an untrusted parse (a bare `eslint .` only warns).
+    linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
       "no-restricted-syntax": ["error", noBareRootLoglevelEmit],
+      // no-restricted-properties (a property-access ban, not a CallExpression
+      // selector) so the ban catches not just a direct `JSON.parse(...)` call
+      // but also an alias `const p = JSON.parse`, a computed `JSON['parse']`,
+      // and a destructured `const { parse } = JSON`. It does NOT catch a renamed
+      // JSON object (`const J = JSON; J.parse(...)`) or `globalThis.JSON.parse`:
+      // those need value-flow analysis, not a syntactic shape, and are left to
+      // review (the cli sensitive-parse ban, a CallExpression selector, catches
+      // strictly less). The runtime is clean -- the chokepoint owns the package's
+      // only JSON.parse -- so this ban is regression-prevention, not a live hole.
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "JSON",
+          property: "parse",
+          message:
+            "Parse untrusted JSON (a partner frame, transport file, or invitation token) through packages/core/src/utils/boundedJson.ts (parseBoundedJson); it structurally bounds the body before JSON.parse so a pathological object/array cannot crash the parser. A trusted parse: eslint-disable-next-line with a one-line justification.",
+        },
+      ],
     },
   },
   ...scopeToDir("apps/web", webConfig),

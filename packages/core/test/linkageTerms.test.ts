@@ -20,7 +20,10 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../src/utils/sanitizeForDisplay";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
-import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
+import {
+  NestingDepthExceededError,
+  NodeCountExceededError,
+} from "../src/utils/camelizeKeys";
 
 // Minimal valid set of terms used as a base for individual tests.
 const base = {
@@ -1478,6 +1481,43 @@ test("an over-long transform params key within the count bound is still rejected
   }
 });
 
+test("an over-count transform params record is rejected without the per-key camelize rewrite or record validation", () => {
+  // Pins the guard's defining property (board item 202722105): the over-count
+  // rejection skips the two EXPENSIVE per-key passes -- the snake->camel camelize
+  // rewrite and the permissive record stage's per-key validation -- that an
+  // over-count record would otherwise incur. The key count itself is still O(n)
+  // (V8 enumerates eagerly; see exceedsOwnKeyCount); what this test catches is a
+  // regression that subjects every key to the rewrite or to per-key parsing. A
+  // Proxy tallies per-key property-descriptor reads: the count via for...in reads
+  // descriptors lazily and stops at the bound, whereas a camelize rewrite
+  // (Object.entries over every key) or a record-stage parse (a ZodType per key)
+  // would read all TOTAL of them. So a bounded tally proves both expensive passes
+  // were skipped; a tally near TOTAL would mean one of them ran.
+  const TOTAL = 100_000;
+  let inspected = 0;
+  const params = new Proxy(
+    {},
+    {
+      ownKeys: () => Array.from({ length: TOTAL }, (_, i) => `k${i}`),
+      getOwnPropertyDescriptor: () => {
+        inspected++;
+        return { enumerable: true, configurable: true, value: 1 };
+      },
+      get: () => 1,
+    },
+  );
+  const result = safeParseLinkageTerms(paramsTerms(params));
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(
+      result.error.issues.some((i) => /must not exceed/.test(i.message)),
+    ).toBe(true);
+  }
+  // Far below TOTAL: a camelize rewrite or per-key record parse would push this to
+  // at least TOTAL.
+  expect(inspected).toBeLessThan(MAX_PARAMS_ENTRIES * 10);
+});
+
 // ─── Nested-collection count bounds ──────────────────────────────────────────
 // Each constraint `exclude` list, a key element's `transform` step list, and a
 // key's `elements` list is partner-controlled and nested beneath an outer array,
@@ -1647,7 +1687,9 @@ test("a pathological-count linkage key elements list fails cleanly, not with a R
 // catch). Unlike the post-handshake wire arrays, a payload legitimately holds at
 // most a few hundred columns, so a count gate (MAX_PAYLOAD_ENTRIES, applied
 // before per-element validation) fits. `base` declares expectsOutput: true, so a
-// non-empty `receive` is permitted by the cross-field refine.
+// non-empty `receive` is permitted by the cross-field refine. A count past the
+// camelize node budget (MAX_NODE_COUNT) is rejected by that budget before Zod;
+// the count gate handles a moderate over-count that stays under it.
 
 const sendTerms = (send: unknown[]) => ({ ...base, payload: { send } });
 const receiveTerms = (receive: unknown[]) => ({
@@ -1669,21 +1711,21 @@ test("rejects a payload send list over the maximum count", () => {
   expect(() => parseLinkageTerms(sendTerms(send))).toThrow(ZodError);
 });
 
-test("a pathological-count payload send list fails cleanly, not with a RangeError", () => {
-  // ~4M invalid entries, past the ~3.5M `Invalid string length` threshold the
-  // unbounded `z.array(PayloadColumnSchema)` schema hit. The count gate, applied
-  // before per-element validation, must turn this into one clean count issue.
+test("a pathological-count payload send list is rejected by the node budget, not with a RangeError", () => {
+  // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
+  // ~3.5M `Invalid string length` threshold the unbounded schema hit. The
+  // camelize pre-pass now fronts the boundedArray count gate: an over-budget
+  // partner collection is rejected with a clean, bounded NodeCountExceededError
+  // before the O(n) walk -- and so before Zod (path b) -- never a RangeError.
   const send = Array.from({ length: 4_000_000 }, () => 123);
-  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
-  expect(() => {
-    result = safeParseLinkageTerms(sendTerms(send));
-  }).not.toThrow();
-  expect(result?.success).toBe(false);
-  if (result && !result.success) {
-    expect(
-      result.error.issues.some((i) => /send must not exceed/.test(i.message)),
-    ).toBe(true);
+  let err: unknown;
+  try {
+    safeParseLinkageTerms(sendTerms(send));
+  } catch (e) {
+    err = e;
   }
+  expect(err).toBeInstanceOf(NodeCountExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
 });
 
 test("accepts a payload receive list at exactly the maximum count", () => {
@@ -1700,20 +1742,16 @@ test("rejects a payload receive list over the maximum count", () => {
   expect(() => parseLinkageTerms(receiveTerms(receive))).toThrow(ZodError);
 });
 
-test("a pathological-count payload receive list fails cleanly, not with a RangeError", () => {
+test("a pathological-count payload receive list is rejected by the node budget, not with a RangeError", () => {
   const receive = Array.from({ length: 4_000_000 }, () => 123);
-  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
-  expect(() => {
-    result = safeParseLinkageTerms(receiveTerms(receive));
-  }).not.toThrow();
-  expect(result?.success).toBe(false);
-  if (result && !result.success) {
-    expect(
-      result.error.issues.some((i) =>
-        /receive must not exceed/.test(i.message),
-      ),
-    ).toBe(true);
+  let err: unknown;
+  try {
+    safeParseLinkageTerms(receiveTerms(receive));
+  } catch (e) {
+    err = e;
   }
+  expect(err).toBeInstanceOf(NodeCountExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
 });
 
 // ─── Top-level linkageFields / linkageKeys count bounds ──────────────────────
@@ -1722,7 +1760,9 @@ test("a pathological-count payload receive list fails cleanly, not with a RangeE
 // invalid entries still makes Zod throw `Invalid string length` building its
 // error from one issue per entry, because a bare `.max()` is checked only AFTER
 // per-element validation. They now take the boundedArray count gate (fired
-// before per-element validation), with the existing .min(1) floor preserved.
+// before per-element validation), with the existing .min(1) floor preserved. A
+// count past the camelize node budget (MAX_NODE_COUNT) is rejected by that budget
+// before Zod; the count gate handles a moderate over-count that stays under it.
 
 const linkageFieldsTerms = (linkageFields: unknown[]) => ({
   ...base,
@@ -1751,23 +1791,21 @@ test("rejects linkageFields over the maximum count", () => {
   expect(() => parseLinkageTerms(linkageFieldsTerms(fields))).toThrow(ZodError);
 });
 
-test("a pathological-count linkageFields fails cleanly, not with a RangeError", () => {
-  // ~4M invalid entries, past the ~3.5M `Invalid string length` threshold the
-  // `.max()`-only schema hit (the .max ran after per-element validation). The
-  // count gate must turn this into one clean count issue.
+test("a pathological-count linkageFields is rejected by the node budget, not with a RangeError", () => {
+  // ~4M entries, past both the camelize node budget (MAX_NODE_COUNT) and the
+  // ~3.5M `Invalid string length` threshold the `.max()`-only schema hit. The
+  // camelize node budget now fronts the boundedArray count gate, rejecting the
+  // over-budget array with a clean, bounded NodeCountExceededError before the
+  // walk -- and so before Zod (path b) -- never a RangeError.
   const fields = Array.from({ length: 4_000_000 }, () => 123);
-  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
-  expect(() => {
-    result = safeParseLinkageTerms(linkageFieldsTerms(fields));
-  }).not.toThrow();
-  expect(result?.success).toBe(false);
-  if (result && !result.success) {
-    expect(
-      result.error.issues.some((i) =>
-        /linkageFields must not exceed/.test(i.message),
-      ),
-    ).toBe(true);
+  let err: unknown;
+  try {
+    safeParseLinkageTerms(linkageFieldsTerms(fields));
+  } catch (e) {
+    err = e;
   }
+  expect(err).toBeInstanceOf(NodeCountExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
 });
 
 test("accepts linkageKeys at exactly the maximum count", () => {
@@ -1786,19 +1824,37 @@ test("rejects linkageKeys over the maximum count", () => {
   expect(() => parseLinkageTerms(linkageKeysTerms(keys))).toThrow(ZodError);
 });
 
-test("a pathological-count linkageKeys fails cleanly, not with a RangeError or a TypeError", () => {
-  // ~4M INVALID (non-object) entries. Besides the `Invalid string length` burst,
-  // this also pins the boundedArray `abort`: without it the over-count refine is
-  // non-fatal, the raw `unknown[]` flows on, and the terms-level refines that do
-  // `key.elements.map(...)` throw a TypeError on a raw non-object key. The abort
-  // makes the over-count failure short-circuit to the clean count issue.
+test("a pathological-count linkageKeys is rejected by the node budget, not with a RangeError or a TypeError", () => {
+  // ~4M entries, past the camelize node budget (MAX_NODE_COUNT). The node budget
+  // fronts the boundedArray count gate, rejecting the over-budget array with a
+  // clean, bounded NodeCountExceededError before the walk -- and so before Zod
+  // (path b) -- never a RangeError, and never the TypeError a raw non-object key
+  // would drive at the terms-level refine (the over-budget array never reaches
+  // it). The boundedArray `abort` that guards that refine for a sub-budget
+  // over-count is pinned by the next test.
   const keys = Array.from({ length: 4_000_000 }, () => 123);
-  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
-  expect(() => {
-    result = safeParseLinkageTerms(linkageKeysTerms(keys));
-  }).not.toThrow();
-  expect(result?.success).toBe(false);
-  if (result && !result.success) {
+  let err: unknown;
+  try {
+    safeParseLinkageTerms(linkageKeysTerms(keys));
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(NodeCountExceededError);
+  expect(err).not.toBeInstanceOf(RangeError);
+  expect(err).not.toBeInstanceOf(TypeError);
+});
+
+test("an over-count linkageKeys of raw non-object entries aborts to a clean count issue", () => {
+  // The boundedArray `abort` short-circuits an over-count array to the count
+  // issue instead of letting the raw `unknown[]` flow to the terms-level refines
+  // (which do `key.elements.map(...)` and would TypeError on a raw non-object
+  // entry). Exercised JUST over MAX_LINKAGE_ENTRIES -- under the camelize node
+  // budget -- so the boundedArray gate, not the node budget, is what rejects it,
+  // and safeParse returns a clean result rather than throwing.
+  const keys = Array.from({ length: MAX_LINKAGE_ENTRIES + 1 }, () => 123);
+  const result = safeParseLinkageTerms(linkageKeysTerms(keys));
+  expect(result.success).toBe(false);
+  if (!result.success) {
     expect(
       result.error.issues.some((i) =>
         /linkageKeys must not exceed/.test(i.message),

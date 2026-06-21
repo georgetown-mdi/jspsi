@@ -1,13 +1,17 @@
 import * as z from "zod";
 
 import { deriveAeadKey } from "../auth";
-import { toBase64Url, fromBase64Url, enc, decFatal } from "../utils/crypto";
+import { toBase64Url, fromBase64Url, enc } from "../utils/crypto";
 import {
   ConnectionError,
   asConnectionError,
   type MessageConnection,
 } from "./messageConnection";
 import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
+import {
+  parseBoundedJson,
+  JsonStructureBoundError,
+} from "../utils/boundedJson";
 import type { HandshakeRole } from "../types";
 
 // The `.max()` on the base64url ciphertext is defense-in-depth, NOT the primary
@@ -493,16 +497,21 @@ export class EncryptedMessageConnection implements MessageConnection {
       return plain.slice(1);
     } else if (tag === TYPE_JSON) {
       try {
-        // Fatal decode: invalid UTF-8 in the (authenticated) payload throws
-        // rather than silently substituting U+FFFD, so a malformed frame from a
-        // non-conforming peer is rejected here as a security failure instead of
-        // being delivered mangled. Both the decode and the parse fall under this
-        // catch.
-        return JSON.parse(decFatal.decode(plain.subarray(1)));
-      } catch {
+        // parseBoundedJson structurally bounds the body BEFORE JSON.parse, so a
+        // partner object wide enough or array long enough cannot drive the parse
+        // into an uncatchable, process-terminating engine abort the catch here
+        // could never intercept. It also fatal-decodes: invalid UTF-8 in the
+        // authenticated payload throws rather than silently substituting U+FFFD,
+        // so a malformed frame is rejected here instead of delivered mangled.
+        return parseBoundedJson(plain.subarray(1));
+      } catch (err) {
+        // Both failure shapes are fixed-text security errors carrying no
+        // attacker bytes; only the operator-facing text differs.
         throw this.fail(
           new ConnectionError(
-            "EncryptedMessageConnection: decrypted payload is not valid JSON",
+            err instanceof JsonStructureBoundError
+              ? "EncryptedMessageConnection: decrypted JSON payload structure exceeds the permitted bound"
+              : "EncryptedMessageConnection: decrypted payload is not valid JSON",
             "security",
           ),
         );

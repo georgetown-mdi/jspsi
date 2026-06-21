@@ -11,6 +11,10 @@ import { pathsResolveToSameDir } from "../utils/pathCompare";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
 import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import {
+  parseBoundedJson,
+  JsonStructureBoundError,
+} from "../utils/boundedJson";
+import {
   computeHostKeyFingerprint,
   matchHostKeyFingerprint,
   keyTypeFromBlob,
@@ -560,8 +564,18 @@ async function readControlFileWithGate(
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw.toString());
-    } catch {
+      parsed = parseBoundedJson(raw.toString());
+    } catch (err) {
+      // A structurally pathological control file is fully formed, not a partial
+      // write -- retrying cannot make it valid -- so reject it terminally like
+      // the message-body parse, rather than re-reading it every poll cycle to
+      // the peer timeout. A genuine partial write fails the parse (never the
+      // structural bound) and still retries.
+      if (err instanceof JsonStructureBoundError)
+        throw new UsageError(
+          `control file at ${sanitizeForDisplay(filePath)} has a malformed ` +
+            `payload: structure exceeds the permitted bound`,
+        );
       // Partial write: body is not valid JSON yet; retry until fully synced.
       await cancellableDelay(pollingFrequency, signal);
       continue;
@@ -4177,7 +4191,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         encoding: "utf-8",
         maxBytes: ABORT_MARKER_MAX_BYTES,
       });
-      const parsed = JSON.parse(raw.toString()) as unknown;
+      const parsed = parseBoundedJson(raw.toString());
       if (
         typeof parsed !== "object" ||
         parsed === null ||
@@ -4448,7 +4462,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           const parseMessage = (): z.infer<typeof Message> => {
             let parsed: unknown;
             try {
-              parsed = JSON.parse(message.toString());
+              parsed = parseBoundedJson(message.toString());
             } catch (parseErr: unknown) {
               // The parser's own message is sanitized too: V8's JSON.parse error
               // quotes a span of the offending input (`Unexpected token 'x',
