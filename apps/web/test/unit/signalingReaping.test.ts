@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   MAX_MESSAGES_PER_QUEUE,
   MAX_OUTSTANDING_QUEUES,
+  MAX_QUEUE_BYTES,
   Realm,
 } from "@peerjs-server/models/realm";
 import { CheckBrokenConnections } from "@peerjs-server/services/checkBrokenConnections/index";
@@ -123,6 +124,19 @@ describe("relay message-queue bounds", () => {
     return { type: MessageType.OFFER, src: "spammer", dst };
   }
 
+  // A near-full-size signaling frame: a 64 KiB payload, so MAX_QUEUE_BYTES
+  // (256 KiB) is reached in a handful of frames -- the byte cap binds well
+  // before the 100-message count cap, which is the point of the byte dimension.
+  const FRAME_PAYLOAD_BYTES = 64 * 1024;
+  function bigOfferTo(dst: string): IMessage {
+    return {
+      type: MessageType.OFFER,
+      src: "spammer",
+      dst,
+      payload: "x".repeat(FRAME_PAYLOAD_BYTES),
+    };
+  }
+
   test("caps the number of distinct queued destinations", () => {
     const realm = new Realm();
     // Spray more distinct unregistered destinations than the bound allows.
@@ -140,6 +154,38 @@ describe("relay message-queue bounds", () => {
     expect(realm.getMessageQueueById("dst")?.size()).toBe(
       MAX_MESSAGES_PER_QUEUE,
     );
+  });
+
+  test("caps the resident bytes of a single queue", () => {
+    const realm = new Realm();
+    // Spray far more full-size frames than the byte cap can hold. With a 64 KiB
+    // payload each, MAX_QUEUE_BYTES tops out at four frames -- the count cap
+    // (100) is never reached, so it is the byte cap that bounds the queue.
+    for (let i = 0; i < 200; i += 1) {
+      realm.addMessageToQueue("dst", bigOfferTo("dst"));
+    }
+    const queue = realm.getMessageQueueById("dst");
+    expect(queue).toBeDefined();
+    expect(queue!.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(queue!.size()).toBeLessThan(MAX_MESSAGES_PER_QUEUE);
+  });
+
+  test("frees bytes as a queue is read, so a drained queue accepts again", () => {
+    const realm = new Realm();
+    for (let i = 0; i < 200; i += 1) {
+      realm.addMessageToQueue("dst", bigOfferTo("dst"));
+    }
+    const queue = realm.getMessageQueueById("dst")!;
+    const filled = queue.byteSize();
+    expect(filled).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(filled).toBeGreaterThan(MAX_QUEUE_BYTES - FRAME_PAYLOAD_BYTES);
+
+    // A reconnecting peer drains one frame; its bytes are released and a fresh
+    // frame is admitted, never pushing the queue back over the cap.
+    queue.readMessage();
+    expect(queue.byteSize()).toBeLessThan(filled);
+    realm.addMessageToQueue("dst", bigOfferTo("dst"));
+    expect(queue.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
   });
 });
 

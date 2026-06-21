@@ -1,5 +1,5 @@
 import type { IMessageQueue } from "./messageQueue.ts";
-import { MessageQueue } from "./messageQueue.ts";
+import { MessageQueue, messageByteSize } from "./messageQueue.ts";
 import { randomUUID } from "node:crypto";
 import type { IClient } from "./client.ts";
 import type { IMessage } from "./message.ts";
@@ -27,13 +27,23 @@ export interface IRealm {
 // Bounds on the relay's hold-for-reconnect queues. A registered client can
 // address signaling messages to an arbitrary, unregistered `dst` id; each such
 // id would otherwise allocate a queue and grow it without limit. These cap the
-// number of distinct queued destinations and the depth of any one queue, so an
-// unconnected-destination spray cannot exhaust memory. Both are far above any
-// legitimate rendezvous (a handful of queued frames for a momentarily-absent
-// peer); a message dropped past either bound is a no-op for the spammer and only
-// loses a frame for a real peer that is itself far past needing a reconnect hold.
+// number of distinct queued destinations, the depth of any one queue, and the
+// total buffered bytes of any one queue, so an unconnected-destination spray
+// cannot exhaust memory. All three are far above any legitimate rendezvous (a
+// handful of queued frames for a momentarily-absent peer); a message dropped
+// past any bound is a no-op for the spammer and only loses a frame for a real
+// peer that is itself far past needing a reconnect hold.
 export const MAX_OUTSTANDING_QUEUES = 1000;
 export const MAX_MESSAGES_PER_QUEUE = 100;
+// The message-count cap alone leaves a queue's resident ceiling at
+// MAX_MESSAGES_PER_QUEUE times the inbound frame cap (256 KiB, the vendored
+// MAX_SIGNALING_PAYLOAD_BYTES) -- ~25 MiB per queue, ~25 GiB across the full
+// MAX_OUTSTANDING_QUEUES. This byte cap holds it down directly: a flood of
+// max-size frames cannot push one queue past 256 KiB, so the global resident
+// ceiling is ~256 MiB. It equals one max frame, so any single legal frame is
+// always holdable; real signaling frames are KB-scale, so a queue still holds
+// dozens of them.
+export const MAX_QUEUE_BYTES = 256 * 1024;
 
 export class Realm implements IRealm {
   private readonly clients = new Map<string, IClient>();
@@ -80,8 +90,11 @@ export class Realm implements IRealm {
       this.messageQueues.set(id, queue);
     }
 
-    // Cap the depth of any one queue for the same reason.
+    // Cap the depth of any one queue for the same reason, by message count and
+    // by total buffered bytes -- the byte check keeps the resident ceiling far
+    // below the count cap times the max frame size.
     if (queue.size() >= MAX_MESSAGES_PER_QUEUE) return;
+    if (queue.byteSize() + messageByteSize(message) > MAX_QUEUE_BYTES) return;
 
     queue.addMessage(message);
   }
