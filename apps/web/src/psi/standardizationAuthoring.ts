@@ -1,6 +1,10 @@
-import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "@psilink/core";
+import {
+  STANDARDIZATION_FUNCTION_DESCRIPTORS,
+  compileLinearRegex,
+} from "@psilink/core";
 
 import type {
+  CompiledLinearRegex,
   LinkageField,
   Standardization,
   StandardizationFunctionDescriptor,
@@ -375,24 +379,24 @@ export interface ConstraintViolation {
  * class. `allowedCharacters` is partner-controlled (it arrives in the invitation
  * token), and NameConstraintsSchema only checks that it compiles as the body of a
  * `[...]` class -- NOT that it cannot break out of one. A crafted value can close
- * the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`), so matching
- * the WHOLE value against `^[allowed]*$` would run an attacker-chosen pattern that
- * could backtrack catastrophically (ReDoS) on the local thread -- the same class of
- * hazard the transform-regex engine swap (#248) closed for key-building.
+ * the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`).
  *
- * This is a local advisory, not a key-building step, so it does not reach that
- * linear-time engine; instead it bounds every subject this regex sees to a single
- * code point. Catastrophic backtracking needs a long subject to fan out over, so a
- * length-1 subject makes the match cost bounded by the pattern length regardless of
- * what was injected -- ReDoS-safe by construction. For a legitimate class this is
- * exactly `^[allowed]*$` (every character must be in the class); it differs only on
- * an adversarial breakout, which has no faithful semantics to preserve anyway. The
- * compile is still guarded so an unexpectedly invalid class is treated as "cannot
- * check" (no violation) rather than throwing. The empty string trivially conforms. */
+ * Two hazards follow, each guarded here. (1) ReDoS: matching against an attacker-
+ * chosen pattern on the native `RegExp` engine could backtrack catastrophically and
+ * hang the local thread. The class is compiled under the linear-time engine the
+ * transform-regex paths use (#248, re2js) instead, so the blow-up is impossible by
+ * construction -- no partner pattern ever touches the backtracking engine, and a
+ * pattern that engine cannot compile is treated as "cannot check" (no violation,
+ * fail-open) rather than throwing. (2) Warning suppression: a breakout that matches
+ * everything (e.g. `a]|.*[b`) would silently pass disallowed values. Testing one
+ * code point at a time against `^[allowed]$` defeats it -- a multi-character breakout
+ * construct cannot match a single character -- so a genuinely disallowed value is
+ * still flagged. For a legitimate class this is exactly `^[allowed]*$` (every
+ * character must be in the class). The empty string trivially conforms. */
 function withinAllowedCharacters(value: string, allowed: string): boolean {
-  let oneOf: RegExp;
+  let oneOf: CompiledLinearRegex;
   try {
-    oneOf = new RegExp(`^[${allowed}]$`);
+    oneOf = compileLinearRegex(`^[${allowed}]$`);
   } catch {
     return true;
   }

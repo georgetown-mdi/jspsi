@@ -46,6 +46,8 @@ export {
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
 export { describeDecodeError } from "./utils/describeDecodeError";
+export { compileLinearRegex } from "./utils/linearRegex";
+export type { CompiledLinearRegex } from "./utils/linearRegex";
 
 export * from "./config/standardization";
 export * from "./config/connection";
