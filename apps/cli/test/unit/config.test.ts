@@ -6,6 +6,7 @@ import YAML from "yaml";
 import {
   getDefaultLinkageTerms,
   MAX_NAME_LENGTH,
+  NestingDepthExceededError,
   parseExchangeSpec,
   UsageError,
 } from "@psilink/core";
@@ -1039,6 +1040,51 @@ test("diffLinkageTerms: an un-encodable value does not throw and identical terms
   // could not be compared here -- the exchange re-checks compatibility later.
   expect(result.conflicts).toEqual([]);
   expect(result.warnings.some((w) => w.includes("JSON-safe range"))).toBe(true);
+});
+
+test("diffLinkageTerms: a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // A one-key-per-level params object, as a crafted invitation carries it. 3000
+  // levels sits in the gap the threat exploits: above the ~2000-level native
+  // overflow of the unbounded NFC/canonical reconcile walk, yet below
+  // parseBoundedJson's 4096 decode ceiling, so such a token decodes and only
+  // fails here. The incoming (invitation) side carries it, the threat direction;
+  // build it iteratively so the test itself does not recurse. With the guard,
+  // nfcDeep throws at depth 256, so the 3000-deep value is never walked in full.
+  let deep: Record<string, unknown> = { leaf: "x" };
+  for (let i = 0; i < 3000; i++) deep = { a: deep };
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: deep },
+  ];
+  // The depth guard fires as a clean NestingDepthExceededError (a UsageError ->
+  // CLI exit 64) at depth 256, before nfcDeep overflows the call stack with an
+  // unguarded RangeError that would otherwise surface as a generic exit 69.
+  expect(() => diffLinkageTerms(existing, incoming)).toThrow(
+    NestingDepthExceededError,
+  );
+});
+
+test("diffLinkageTerms: a realistically nested transform.params reconciles unchanged", () => {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  // A nested params object at a depth a real config could plausibly use -- far
+  // above the one or two levels the bundled functions need, yet well within the
+  // bound -- present identically on both sides, so the terms stay equal and must
+  // reconcile with no conflict and no throw (the bound rejects no real token).
+  const nested = { table: { fields: { score: { weight: 3 } } } };
+  existing.linkageKeys[0].elements[0].transform = [
+    { function: "lookup", params: nested },
+  ];
+  incoming.linkageKeys[0].elements[0].transform = [
+    { function: "lookup", params: structuredClone(nested) },
+  ];
+  let result!: ReturnType<typeof diffLinkageTerms>;
+  expect(() => {
+    result = diffLinkageTerms(existing, incoming);
+  }).not.toThrow();
+  expect(result.conflicts).toEqual([]);
+  expect(result.warnings).toEqual([]);
 });
 
 test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {

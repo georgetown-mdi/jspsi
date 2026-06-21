@@ -11,6 +11,8 @@ import type {
 import {
   canonicalString,
   CanonicalEncodingError,
+  MAX_NESTING_DEPTH,
+  NestingDepthExceededError,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -353,15 +355,36 @@ export const RECONCILE_UNSET = "(unset)";
  * to {@link canonicalString}, which rejects it. Two values that differ only in
  * an absent vs explicitly-`undefined` optional therefore compare equal, matching
  * how the schema treats them.
+ *
+ * `depth` bounds the native recursion at the same {@link MAX_NESTING_DEPTH} the
+ * camelize/snakeize chokepoint applies on the config-parse path. This walk runs
+ * over an invitation's linkage terms, and the invitation decode path -- unlike
+ * the post-handshake wire path -- does NOT run `camelizeKeys` over the
+ * `z.unknown()` `transform.params` value, so without this guard a
+ * partner-controlled one-key-per-level `params` (bounded only by the 64 KiB
+ * encoded-invitation cap and `parseBoundedJson`'s 4096-level decode depth, both
+ * above the ~2000-level native call-stack limit) would overflow this walk with an
+ * unguarded `RangeError` that the command boundary maps to a generic
+ * internal-error exit (69) -- catchable and non-fatal, but ungraceful. `nfcDeep`
+ * overflows first and carries no boundary guard of its own; the recursive
+ * `canonicalString` it feeds would instead convert a deep-input overflow into a
+ * typed `CanonicalEncodingError`. Rejecting at 256 turns that into a clean,
+ * terminal {@link NestingDepthExceededError} (a `UsageError`, CLI exit 64) long
+ * before the overflow, with headroom far above any real config (the deepest
+ * schema path is under a dozen levels, and `params` legitimately holds shallow
+ * scalars). The existing-config side is already bounded to this depth at load
+ * (camelized through the same `MAX_NESTING_DEPTH` chokepoint), so no legitimate
+ * reconcile pair exceeds it. See docs/spec/CHANNEL_SECURITY.md.
  */
-function nfcDeep(value: unknown): unknown {
+function nfcDeep(value: unknown, depth = 0): unknown {
+  if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
   if (typeof value === "string") return value.normalize("NFC");
-  if (Array.isArray(value)) return value.map(nfcDeep);
+  if (Array.isArray(value)) return value.map((v) => nfcDeep(v, depth + 1));
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value)
         .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => [k, nfcDeep(v)]),
+        .map(([k, v]) => [k, nfcDeep(v, depth + 1)]),
     );
   return value;
 }
