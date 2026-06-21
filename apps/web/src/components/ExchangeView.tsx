@@ -82,6 +82,12 @@ export type ExchangeConfig =
        * inviter runs on the very terms the acceptor adopts (its identity is
        * already this party's name). */
       linkageTerms: LinkageTerms;
+      /** The inviter's edited per-party column metadata from the Advanced-options
+       * editor, threaded into its own `prepareForExchange` (never embedded in the
+       * token), so its disclosure choices govern what it sends and its column
+       * bindings match the keys it authored. Absent on the quick path, where the
+       * inviter's metadata is inferred from its columns. */
+      metadata?: Metadata;
       /** The shareable artifacts the inviter copies out-of-band, surfaced in the
        * exchange screen's share block (the inviter waits here for the partner to
        * accept). Both decode to the same token; the deep link prefills the accept
@@ -384,7 +390,16 @@ export function ExchangeView(config: ExchangeConfig) {
               metadata: config.metadata,
               standardization: config.standardization,
             })
-          : { linkageTerms: config.linkageTerms };
+          : {
+              linkageTerms: config.linkageTerms,
+              // The inviter threads its edited metadata when it prepared data in
+              // the Advanced editor; the quick path omits it and metadata is
+              // inferred. standardization stays inferred for the inviter this slice
+              // (it authors none yet).
+              ...(config.metadata !== undefined && {
+                metadata: config.metadata,
+              }),
+            };
       const prepared = prepareForExchange(
         dataSpec,
         partyName,

@@ -10,10 +10,19 @@ import {
 import {
   buildAdvancedTerms,
   seedAdvancedInvite,
+  setDraftMetadata,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
+import { setColumnType } from "../../src/psi/metadataEditing.js";
 
 import type { AdvancedInviteDraft } from "../../src/psi/advancedInvite.js";
+
+/** The names of the draft keys that reference an `ssn` field. */
+function ssnKeyNames(draft: AdvancedInviteDraft): Array<string> {
+  return draft.keys
+    .filter((entry) => entry.key.elements.some((el) => el.field === "ssn"))
+    .map((entry) => entry.key.name);
+}
 
 // Columns carrying every default linkage type, and a partial set missing ssn4
 // (like the bundled fake data): keys referencing ssn4 drop from the seed.
@@ -42,7 +51,7 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
     );
     // Generating with no changes produces terms equivalent to today's quick-path
     // auto-derived output for the same inputs.
-    expect(buildAdvancedTerms(draft, seed)).toStrictEqual(
+    expect(buildAdvancedTerms(draft)).toStrictEqual(
       getDefaultLinkageTerms("County Health Dept", inferMetadata(ALL_COLUMNS)),
     );
     // The seed itself is that auto-derived set, so it opens valid, never blank.
@@ -71,14 +80,14 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
   test("reordering keys reorders the built linkage keys in place", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const reversed = { ...draft, keys: [...draft.keys].reverse() };
-    const built = buildAdvancedTerms(reversed, seed);
+    const built = buildAdvancedTerms(reversed);
     expect(built.linkageKeys.map((k) => k.name)).toEqual(
       [...seed.terms.linkageKeys].reverse().map((k) => k.name),
     );
   });
 
   test("disabling the keys that use a field drops that field too", () => {
-    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const withoutSsn4Keys = {
       ...draft,
       keys: draft.keys.map((entry) => ({
@@ -86,13 +95,13 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
         enabled: !entry.key.elements.some((e) => e.field === "ssn4"),
       })),
     };
-    const built = buildAdvancedTerms(withoutSsn4Keys, seed);
+    const built = buildAdvancedTerms(withoutSsn4Keys);
     expect(built.linkageKeys.length).toBeGreaterThan(0);
     expect(built.linkageFields.some((f) => f.name === "ssn4")).toBe(false);
   });
 
   test("free text in identity and legal agreement is NFC-normalized and trimmed", () => {
-    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const edited: AdvancedInviteDraft = {
       ...draft,
       // "Café" (NFD) must normalize to "Café" (NFC); surrounding
@@ -104,10 +113,59 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
         expirationDate: "2030-01-01",
       },
     };
-    const built = buildAdvancedTerms(edited, seed);
+    const built = buildAdvancedTerms(edited);
     expect(built.identity).toBe("Café Org");
     expect(built.legalAgreement?.reference).toBe("MOU-1");
     expect(built.legalAgreement?.purpose).toBe("Audit");
+  });
+});
+
+describe("setDraftMetadata re-derives offerable keys", () => {
+  const COLS = ["first_name", "last_name", "dob", "extra"];
+
+  test("editing a column type adds the keys its type makes offerable", () => {
+    // No ssn column: no ssn-referencing key is offerable.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    expect(ssnKeyNames(draft)).toEqual([]);
+
+    // Remap `extra` -> ssn: ssn keys become offerable and appear in the draft.
+    const next = setDraftMetadata(
+      draft,
+      setColumnType(draft.metadata, "extra", "ssn"),
+    );
+    expect(ssnKeyNames(next).length).toBeGreaterThan(0);
+    // The terms built from the new draft now declare ssn, so the run can produce
+    // it -- the metadata that re-derived the keys is the metadata the run binds on.
+    expect(
+      buildAdvancedTerms(next).linkageFields.some((f) => f.name === "ssn"),
+    ).toBe(true);
+  });
+
+  test("a remap that only adds keys preserves the enabled/order of existing keys", () => {
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    // Disable the first key, then remap to add ssn keys (which does not drop any
+    // existing key, since no default key references the `other`-typed `extra`).
+    const firstName = draft.keys[0].key.name;
+    const withDisabled: AdvancedInviteDraft = {
+      ...draft,
+      keys: draft.keys.map((entry, i) =>
+        i === 0 ? { ...entry, enabled: false } : entry,
+      ),
+    };
+    const next = setDraftMetadata(
+      withDisabled,
+      setColumnType(withDisabled.metadata, "extra", "ssn"),
+    );
+    // The disabled key kept its position and disabled flag; the new ssn keys are
+    // appended enabled.
+    expect(next.keys[0].key.name).toBe(firstName);
+    expect(next.keys[0].enabled).toBe(false);
+    expect(ssnKeyNames(next).length).toBeGreaterThan(0);
+    expect(
+      next.keys
+        .filter((e) => e.key.elements.some((el) => el.field === "ssn"))
+        .every((e) => e.enabled),
+    ).toBe(true);
   });
 });
 
@@ -278,9 +336,8 @@ describe("controls the editor does not expose stay at their safe defaults", () =
   };
 
   test("(d) output is always both-receive and never a forbidden combination", () => {
-    const { seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     for (const draft of variants()) {
-      const built = buildAdvancedTerms(draft, seed);
+      const built = buildAdvancedTerms(draft);
       expect(built.output).toStrictEqual({
         expectsOutput: true,
         shareWithPartner: true,
@@ -289,9 +346,8 @@ describe("controls the editor does not expose stay at their safe defaults", () =
   });
 
   test("(e) algorithm stays psi, deduplicate stays off, no fuzzy is added", () => {
-    const { seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     for (const draft of variants()) {
-      const built = buildAdvancedTerms(draft, seed);
+      const built = buildAdvancedTerms(draft);
       expect(built.algorithm).toBe("psi");
       expect(built.deduplicate).toBe(false);
       expect(

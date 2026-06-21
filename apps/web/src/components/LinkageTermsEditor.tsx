@@ -30,16 +30,19 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   assessLinkageSatisfiability,
+  getDefaultLinkageTerms,
 } from "@psilink/core";
 
 import {
   buildAdvancedTerms,
+  setDraftMetadata,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
 
 import { InvitationTerms } from "@components/InvitationTerms";
+import { MetadataGrid } from "@components/MetadataGrid";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms, Metadata } from "@psilink/core";
 
 import type {
   AdvancedInviteDraft,
@@ -97,9 +100,16 @@ export function LinkageTermsEditor({
   /** The name to prefill the identity field with (carried from the compose
    * screen). Falls back to the seed terms' identity. */
   initialIdentity?: string;
-  /** Called with the validated terms and chosen lifetime when the inviter presses
-   * Generate. The terms are embedded verbatim by `generateInvitation`. */
-  onGenerate: (terms: LinkageTerms, lifetimeSeconds: number) => void;
+  /** Called with the validated terms, chosen lifetime, and edited column metadata
+   * when the inviter presses Generate. The terms are embedded verbatim by
+   * `generateInvitation`; the metadata is threaded into the inviter's exchange
+   * spec (per-party, never embedded in the token), so its disclosure choices
+   * govern what the inviter sends and its bindings match the run. */
+  onGenerate: (
+    terms: LinkageTerms,
+    lifetimeSeconds: number,
+    metadata: Metadata,
+  ) => void;
   /** Holds Generate disabled while an invitation is being generated. */
   generating?: boolean;
 }) {
@@ -111,6 +121,7 @@ export function LinkageTermsEditor({
   const freshDraft = (): AdvancedInviteDraft => ({
     identity: initialIdentity ?? seed.terms.identity,
     lifetimeSeconds: INVITATION_LIFETIME_SECONDS,
+    metadata: seed.metadata,
     keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
   });
   const [draft, setDraft] = useState<AdvancedInviteDraft>(freshDraft);
@@ -132,28 +143,28 @@ export function LinkageTermsEditor({
     () => validateAdvancedInvite(draft, seed),
     [draft, seed],
   );
-  const previewTerms = useMemo(
-    () => buildAdvancedTerms(draft, seed),
-    [draft, seed],
-  );
+  const previewTerms = useMemo(() => buildAdvancedTerms(draft), [draft]);
 
-  // Per-key satisfiability, derived once from the seed (its keys are pre-filtered
-  // to those the columns can satisfy, so these are all satisfiable today; the
-  // indicator still confirms it per key and stays correct if a key referencing an
-  // unproducible field is ever added). A field is producible when it is declared
-  // and not in the unsatisfied set.
+  // Per-key satisfiability badge, derived from the draft's CURRENT metadata so it
+  // tracks column-type edits. A field is producible when the edited metadata has a
+  // non-ignored column of its type; the offerable terms for that metadata declare
+  // exactly the producible fields, so a reconciled key (all of whose fields are
+  // offerable) shows satisfiable and stays correct after a remap.
   const producibleFieldNames = useMemo(() => {
+    const offerable = getDefaultLinkageTerms(draft.identity, draft.metadata);
     const { unsatisfied } = assessLinkageSatisfiability(
       seed.columns,
-      seed.terms,
+      offerable,
+      undefined,
+      draft.metadata,
     );
     const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
     return new Set(
-      seed.terms.linkageFields
+      offerable.linkageFields
         .map((f) => f.name)
         .filter((name) => !unsatisfiedNames.has(name)),
     );
-  }, [seed]);
+  }, [draft.identity, draft.metadata, seed.columns]);
   const keyIsSatisfiable = (index: number): boolean =>
     draft.keys[index].key.elements.every((el) =>
       producibleFieldNames.has(el.field),
@@ -162,6 +173,14 @@ export function LinkageTermsEditor({
   const updateDraft = (next: Partial<AdvancedInviteDraft>) => {
     setAnnouncement("");
     setDraft((prev) => ({ ...prev, ...next }));
+  };
+
+  // A column-metadata edit re-derives the offerable key set (a type change adds or
+  // drops keys) and reconciles the enabled/order state -- see setDraftMetadata.
+  // Read prev in the functional updater so it composes with a batched key edit.
+  const updateMetadata = (metadata: Metadata) => {
+    setAnnouncement("");
+    setDraft((prev) => setDraftMetadata(prev, metadata));
   };
 
   const toggleKey = (index: number, enabled: boolean) => {
@@ -215,7 +234,7 @@ export function LinkageTermsEditor({
 
   const handleGenerate = () => {
     if (!validation.canGenerate || validation.terms === undefined) return;
-    onGenerate(validation.terms, draft.lifetimeSeconds);
+    onGenerate(validation.terms, draft.lifetimeSeconds, draft.metadata);
   };
 
   // Focus the first legal-agreement field when the block is disclosed, so a
@@ -271,6 +290,22 @@ export function LinkageTermsEditor({
               error={errors.lifetime}
               errorProps={{ role: "alert" }}
             />
+
+            <Stack gap="xs">
+              <Text size="sm" fw={600}>
+                Your columns
+              </Text>
+              <Text size="xs" c="dimmed">
+                Set what each column is and whether it is sent to your partner.
+                Changing a column&apos;s type updates which matching rules below
+                you can use.
+              </Text>
+              <MetadataGrid
+                metadata={draft.metadata}
+                onChange={updateMetadata}
+                caption="Your columns, their types, and how each is used"
+              />
+            </Stack>
 
             <Stack gap="xs">
               <Text size="sm" fw={600}>
