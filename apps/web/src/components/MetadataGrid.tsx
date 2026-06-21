@@ -76,10 +76,31 @@ export function MetadataGrid({
     return () => clearTimeout(handle);
   }, [summary]);
 
-  const onType = (columnName: string, type: SemanticType) =>
+  // A separate, immediate live region for the single-identifier demotion:
+  // choosing `identifier` for one column displaces any prior identifier to
+  // `ignored` (no longer sent), a state change a sighted user sees in the
+  // displaced row but assistive tech would otherwise miss. Cleared on the next
+  // edit so it does not linger (the same idiom the inviter editor uses).
+  const [actionAnnouncement, setActionAnnouncement] = useState("");
+
+  const onType = (columnName: string, type: SemanticType) => {
+    setActionAnnouncement("");
     onChange(setColumnType(metadata, columnName, type));
-  const onDisclosure = (columnName: string, choice: DisclosureChoice) =>
-    onChange(setColumnDisclosure(metadata, columnName, choice).metadata);
+  };
+  const onDisclosure = (columnName: string, choice: DisclosureChoice) => {
+    const { metadata: next, demotedIdentifier } = setColumnDisclosure(
+      metadata,
+      columnName,
+      choice,
+    );
+    setActionAnnouncement(
+      demotedIdentifier === undefined
+        ? ""
+        : `${demotedIdentifier} is no longer the row identifier and will ` +
+            "not be sent; only one column can be the row identifier.",
+    );
+    onChange(next);
+  };
 
   const multipleIdentifiers = hasMultipleIdentifiers(metadata);
 
@@ -147,6 +168,11 @@ export function MetadataGrid({
       </Text>
       <VisuallyHidden role="status" aria-live="polite">
         {announcement}
+      </VisuallyHidden>
+      {/* The demotion is announced immediately (the summary above is debounced),
+          so a single-identifier change is heard as it happens. */}
+      <VisuallyHidden role="status" aria-live="polite">
+        {actionAnnouncement}
       </VisuallyHidden>
     </Stack>
   );

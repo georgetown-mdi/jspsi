@@ -58,7 +58,8 @@ export function AcceptInvitation() {
   // affirmatively checks this and provides a name (see commitAcceptance).
   const [consented, setConsented] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
-  // The post-consent phase: reviewing -> preparing -> exchange. Its presence
+  // The post-consent phase: reviewing -> preparing -> exchange, with a back edge
+  // preparing -> reviewing so the operator can pick a different file. Its presence
   // (anything past "reviewing") is the in-route transition off the review screen.
   const [phase, setPhase] = useState<AcceptPhase>({ status: "reviewing" });
   // The review-screen error (a CSV read failure): nothing is handed off, so the
@@ -159,6 +160,7 @@ export function AcceptInvitation() {
         <PrepareData
           linkageTerms={decode.invitation.token.linkageTerms}
           columns={phase.bundle.columns}
+          onBack={() => setPhase({ status: "reviewing" })}
           onLaunch={(edits, warning) =>
             setPhase({
               status: "exchange",

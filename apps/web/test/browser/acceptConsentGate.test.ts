@@ -294,6 +294,44 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     expect(exchange.lastProps.initialWarning).toBeUndefined();
   });
 
+  test("Back returns to the review screen and a different file reseeds the editor", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // Reach the editor with a first file; `zip` is the inferred payload.
+    await reachEditor(csvFile("first_name,last_name,zip\nAlice,Smith,90210\n"));
+    await expect
+      .element(page.getByText("Columns sent to your partner: zip."))
+      .toBeInTheDocument();
+
+    // Back returns to the review screen (the terms heading shows again) and the
+    // editor unmounts -- nothing was committed, and consent is preserved.
+    await userEvent.click(
+      page.getByRole("button", { name: "Choose a different file" }),
+    );
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Prepare your data");
+    expect(exchangeMounted()).toBe(false);
+
+    // A different file (consent already given, so only re-select) re-enters the
+    // editor reseeded from the NEW columns: `notes` is the payload now, not `zip`.
+    harness.files = [csvFile("first_name,last_name,notes\nBob,Jones,hi\n")];
+    await userEvent.click(page.getByTestId("select"));
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
+    await userEvent.click(page.getByTestId("accept"));
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Columns sent to your partner: notes."))
+      .toBeInTheDocument();
+  });
+
   test("a zero-coverage file shows the block and disables Continue, so nothing dials", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();

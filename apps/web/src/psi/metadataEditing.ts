@@ -168,17 +168,17 @@ export function setColumnType(
     if (column.name !== columnName) return column;
     const allowed = disclosureChoicesForType(type);
     const current = disclosureOf(column);
-    let next: DisclosureChoice;
-    if (allowed.includes(current)) {
-      next = current;
-    } else if (current === "payload" && allowed.includes("payload")) {
-      next = "payload";
-    } else {
-      // The current choice does not fit the new type and the column was not
-      // already sent: prefer `match` for a linkage type, else `ignored` -- never
-      // `payload`, so a type change cannot start disclosing a column.
-      next = allowed.includes("match") ? "match" : "ignored";
-    }
+    // Keep the current choice when the new type still offers it. Every type
+    // offers `payload`, so this branch already covers a sent column: it stays
+    // sent. Otherwise the current choice does not fit and (since `payload` is
+    // always offered) the column was not already sent -- prefer `match` for a
+    // linkage type, else `ignored`, never `payload`, so a type change can never
+    // start disclosing a column.
+    const next: DisclosureChoice = allowed.includes(current)
+      ? current
+      : allowed.includes("match")
+        ? "match"
+        : "ignored";
     return applyDisclosure({ ...column, type }, next);
   });
 }

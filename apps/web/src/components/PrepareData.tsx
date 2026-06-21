@@ -15,6 +15,7 @@ import {
 import {
   IconAlertCircle,
   IconAlertTriangle,
+  IconArrowLeft,
   IconCircleCheck,
 } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
@@ -66,6 +67,7 @@ export function PrepareData({
   linkageTerms,
   columns,
   onLaunch,
+  onBack,
 }: {
   /** The adopted (agreed) linkage terms the operator is matching against, shown
    * read-only via {@link InvitationTerms}. */
@@ -76,6 +78,10 @@ export function PrepareData({
    * standardization, plus an optional partial-coverage advisory to surface through
    * the run. */
   onLaunch: (edits: AcceptorDataEdits, warning?: AlertContent) => void;
+  /** Return to the review screen to pick a different file. Consent is preserved
+   * (it lives on the container), and this editor unmounts on the way back, so
+   * re-acquiring a different file remounts it and reseeds the metadata. */
+  onBack: () => void;
 }) {
   // Focus the heading on mount so a keyboard/screen-reader user who pressed
   // "Accept and continue" lands on this editor rather than the unmounted button.
@@ -154,6 +160,15 @@ export function PrepareData({
 
   return (
     <Stack>
+      <Group>
+        <Button
+          variant="subtle"
+          onClick={onBack}
+          leftSection={<IconArrowLeft size={16} aria-hidden />}
+        >
+          Choose a different file
+        </Button>
+      </Group>
       <Title order={2} ref={headingRef} tabIndex={-1}>
         Prepare your data
       </Title>
