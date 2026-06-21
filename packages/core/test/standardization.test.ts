@@ -1,4 +1,4 @@
-import { expect, test, describe } from "vitest";
+import { expect, test, describe, vi } from "vitest";
 
 import {
   runPipeline,
@@ -12,6 +12,7 @@ import {
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
+import * as linearRegex from "../src/utils/linearRegex";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
@@ -880,6 +881,116 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     expect(buildKeyStrings(key, dataset, 1)).toEqual(new Set(["6666"]));
     // No 4-digit tail -> the element produces no value -> the key collapses.
     expect(buildKeyStrings(key, dataset, 2)).toBeNull();
+  });
+
+  // The per-element compile-once is a security control, not just a perf win: a
+  // hostile-but-schema-valid terms set can carry more distinct patterns than the
+  // linear-time engine's own compile cache holds, so per-row recompilation would
+  // thrash that cache into an unbounded per-row CPU cost over a large dataset.
+  // "Compilation does not happen per row" is therefore a runtime invariant, and a
+  // comment asserting it would rot silently; these spy on the compile entry point
+  // so the invariant is a check instead. compileLinearRegex is the entry point
+  // every regex/parse_date factory calls exactly once at closure-build time, so
+  // its call count over a build IS the element-transform compile count.
+  test("a regex element transform compiles once across many rows, not per row", () => {
+    const key = {
+      name: "SSN4",
+      elements: [
+        {
+          field: "ssn",
+          transform: [
+            { function: "extract_regex", params: { pattern: "(\\d{4})$" } },
+          ],
+        },
+      ],
+    };
+    const rowCount = 50;
+    const rows = Array.from({ length: rowCount }, (_, i) => ({
+      SSN: `${100000000 + i}`,
+    }));
+    const dataset = new StandardizedDataset([
+      new StandardizedField("ssn", "SSN", [], rows),
+    ]);
+
+    const spy = vi.spyOn(linearRegex, "compileLinearRegex");
+    for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
+    // One regex step in one element transform -> one compile, independent of the
+    // 50 rows. Pre-memoization this was 50 (one recompile per row).
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  test("a parse_date element transform compiles once across many rows, not per row", () => {
+    const key = {
+      name: "DOB",
+      elements: [
+        {
+          field: "dob",
+          transform: [
+            {
+              function: "parse_date",
+              params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+            },
+          ],
+        },
+      ],
+    };
+    const rowCount = 50;
+    const rows = Array.from({ length: rowCount }, (_, i) => ({
+      DOB: `01/${String((i % 28) + 1).padStart(2, "0")}/2020`,
+    }));
+    const dataset = new StandardizedDataset([
+      new StandardizedField("dob", "DOB", [], rows),
+    ]);
+
+    const spy = vi.spyOn(linearRegex, "compileLinearRegex");
+    for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
+    // parse_date builds its input-format regex once at closure-build time; memoized,
+    // that build is shared across all 50 rows.
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  test("the swap path preserves the per-element compile cache (compiles per element, not per row)", () => {
+    // swapElements rebuilds the element wrapper objects on every receiver row but
+    // preserves each element's own `transform` array reference, so the WeakMap keyed
+    // on that array still hits across rows under swap. A swap that copied the steps
+    // would silently reintroduce per-row recompilation; pin that it does not.
+    const key = {
+      name: "SWAP",
+      swap: ["a", "b"] as [string, string],
+      elements: [
+        {
+          name: "a",
+          field: "first",
+          transform: [
+            { function: "extract_regex", params: { pattern: "(\\d{2})$" } },
+          ],
+        },
+        {
+          name: "b",
+          field: "second",
+          transform: [
+            { function: "extract_regex", params: { pattern: "^(\\d{2})" } },
+          ],
+        },
+      ],
+    };
+    const rowCount = 30;
+    const rows = Array.from({ length: rowCount }, (_, i) => ({
+      FIRST: `${1000 + i}`,
+      SECOND: `${2000 + i}`,
+    }));
+    const dataset = new StandardizedDataset([
+      new StandardizedField("first", "FIRST", [], rows),
+      new StandardizedField("second", "SECOND", [], rows),
+    ]);
+
+    const spy = vi.spyOn(linearRegex, "compileLinearRegex");
+    for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i, true);
+    // Two distinct element-transform arrays -> two compiles across all 30 rows.
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
   });
 });
 
