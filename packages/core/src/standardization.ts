@@ -1192,13 +1192,39 @@ function cartesianProduct(arrays: string[][]): string[][] {
   );
 }
 
+// Compiled element transforms, memoized by the step array's identity. buildKeyStrings
+// calls applyElementTransform once per value PER ROW with the same `element.transform`
+// array (the parsed LinkageKey is reused for every row), so without this each row
+// would recompile -- and a regex step recompiles its pattern under the linear-time
+// engine. A hostile-but-schema-valid terms set can carry far more distinct patterns
+// than the engine's own compile cache holds, so per-row recompilation would thrash
+// that cache into an unbounded per-row compile cost over a large dataset -- a
+// fail-open CPU denial of service, the volume sibling of the catastrophic-
+// backtracking vector the linear-time engine closes. Compiling each element
+// transform once bounds total compile work to the (gate-bounded) distinct element
+// transforms, independent of row count. A WeakMap keys on the array so entries are
+// released with the terms; the swap path preserves the array reference, so a swapped
+// element still hits. The compiled steps are stateless (each factory closure builds a
+// fresh matcher per call), so reuse across rows is safe.
+const compiledElementTransforms = new WeakMap<
+  TransformStep[],
+  CompiledStep[]
+>();
+
 // Element-level transforms must produce a single string (they do not fan out).
 // If a fan-out step appears in an element transform it is collapsed by joining.
 function applyElementTransform(
   value: string,
-  steps: TransformStep[],
+  steps: TransformStep[] | undefined,
 ): string | null {
-  const compiled = compileSteps(steps);
+  // No steps: the value passes through unchanged (the empty-pipeline identity),
+  // and nothing is compiled or memoized.
+  if (steps === undefined || steps.length === 0) return value;
+  let compiled = compiledElementTransforms.get(steps);
+  if (compiled === undefined) {
+    compiled = compileSteps(steps);
+    compiledElementTransforms.set(steps, compiled);
+  }
   let current: FieldValue = value;
   for (const step of compiled) {
     current = applyStep(current, step);
@@ -1263,7 +1289,7 @@ export function buildKeyStrings(
 
     const transformed: string[] = [];
     for (const v of raw) {
-      const t = applyElementTransform(v, element.transform ?? []);
+      const t = applyElementTransform(v, element.transform);
       if (t !== null) transformed.push(t);
     }
     if (transformed.length === 0) return null;

@@ -159,12 +159,16 @@ test("round-trips full linkage terms including all fields", async () => {
   expect(decoded.expires).toBe("2030-01-01T00:00:00.000Z");
 });
 
-test("decodeInvitation rejects linkage terms carrying a catastrophic-backtracking regex", async () => {
+test("decodeInvitation rejects linkage terms carrying an out-of-dialect transform regex", async () => {
   // A crafted invitation -- valid checksum (the checksum is a transcription-error
   // detector, not an authenticity guarantee, so anyone can recompute it over a
-  // hostile payload) whose linkage terms embed a ReDoS pattern in an element
-  // transform. InvitationTokenSchema embeds LinkageTermsSchema, so the
-  // catastrophic-backtracking check fires at decode, before any pattern executes.
+  // hostile payload) whose linkage terms embed a transform pattern outside the
+  // linear-time dialect (a backreference, which the engine cannot compile).
+  // InvitationTokenSchema embeds LinkageTermsSchema, so the dialect-conformance
+  // check fires at decode, before any pattern executes. (A pattern that merely
+  // backtracks catastrophically on `new RegExp`, like `(a+)+$`, is now in-dialect
+  // and accepted -- the linear-time engine runs it safely; see standardization
+  // and linearRegex tests.)
   const malicious = {
     ...baseToken,
     linkageTerms: {
@@ -176,7 +180,7 @@ test("decodeInvitation rejects linkage terms carrying a catastrophic-backtrackin
             {
               field: "ssn",
               transform: [
-                { function: "filter_regex", params: { pattern: "(a+)+$" } },
+                { function: "filter_regex", params: { pattern: "(a)\\1" } },
               ],
             },
           ],
@@ -187,7 +191,7 @@ test("decodeInvitation rejects linkage terms carrying a catastrophic-backtrackin
   const encoded = await encodeRaw(malicious);
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
   await expect(decodeInvitation(encoded)).rejects.toThrow(
-    /catastrophic backtracking/,
+    /linear-time dialect/,
   );
 });
 

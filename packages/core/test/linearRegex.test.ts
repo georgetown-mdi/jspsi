@@ -107,6 +107,30 @@ describe("coerceToPatternString", () => {
   });
 });
 
+// --- Dialect semantics that differ from JavaScript RegExp --------------------
+// Pinned so a future re2js change is caught. These are deliberate, documented
+// divergences from JS (PROTOCOL.md): both parties run re2js, so they agree with
+// each other; only a migration from the old engine sees the difference.
+
+describe("RE2 vs JavaScript class semantics", () => {
+  test("\\s is ASCII-only -- narrower than JavaScript's Unicode \\s", () => {
+    expect(compileLinearRegex("\\s").test("\t")).toBe(true);
+    expect(compileLinearRegex("\\s").test(" ")).toBe(true);
+    // JavaScript's \s matches each of these (with or without the u flag); RE2 does not.
+    for (const ws of ["\u00a0", "\u000b", "\u2028", "\u2029", "\u3000"]) {
+      expect(compileLinearRegex("\\s").test(ws)).toBe(false);
+    }
+  });
+
+  test(". excludes only newline -- it matches CR and Unicode line separators", () => {
+    // JavaScript's . (no s flag) also excludes \r, U+2028, U+2029; RE2's does not.
+    expect(compileLinearRegex("^.$").matchGroups("\n")).toBeNull();
+    for (const ch of ["\r", "\u2028", "\u2029"]) {
+      expect(compileLinearRegex("^.$").matchGroups(ch)).not.toBeNull();
+    }
+  });
+});
+
 // --- Linearity (the whole point) ---------------------------------------------
 
 describe("linear-time execution", () => {

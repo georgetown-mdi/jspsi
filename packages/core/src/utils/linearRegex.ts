@@ -121,8 +121,12 @@ export interface CompiledLinearRegex {
  * Compile `pattern` under the linear-time engine and return the per-row
  * operations. Throws (an `RE2JS` exception) if the pattern is outside the dialect;
  * callers that execute already-validated terms never hit that throw (the dialect
- * gate rejected such a pattern at parse time), and the operator-local
- * `runPipeline` path surfaces it exactly as the previous `new RegExp` throw did.
+ * gate rejected such a pattern at parse time). The operator-local `runPipeline`
+ * path surfaces it as a thrown error like the previous `new RegExp` path did,
+ * though the trigger is wider: `new RegExp` threw only on JavaScript-invalid
+ * syntax, whereas this also throws on a JavaScript-valid pattern the dialect drops
+ * (a backreference or lookaround). The pattern there is operator-authored, so the
+ * error echoing it leaks nothing partner-controlled.
  */
 export function compileLinearRegex(pattern: string): CompiledLinearRegex {
   const re = compileCached(pattern);
