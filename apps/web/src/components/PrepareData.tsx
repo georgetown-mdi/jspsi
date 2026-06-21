@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Divider,
+  Grid,
   Group,
   List,
   Modal,
@@ -36,8 +38,15 @@ import {
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
+import { StandardizationPreview } from "@components/StandardizationPreview";
+import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 
-import type { LinkageField, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  LinkageField,
+  LinkageTerms,
+  Metadata,
+  StandardizationStep,
+} from "@psilink/core";
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 import type { AlertContent } from "@components/FileAcquire";
@@ -67,6 +76,7 @@ import type { AlertContent } from "@components/FileAcquire";
 export function PrepareData({
   linkageTerms,
   columns,
+  rawRows,
   onLaunch,
   onBack,
 }: {
@@ -75,6 +85,8 @@ export function PrepareData({
   linkageTerms: LinkageTerms;
   /** The acceptor's own CSV column names, from the parsed file. */
   columns: Array<string>;
+  /** The parsed CSV rows, the sample source for the before->after preview. */
+  rawRows: Array<Record<string, string>>;
   /** Commit the prepared data and move to the exchange: the edited metadata and
    * standardization, plus an optional partial-coverage advisory to surface through
    * the run. */
@@ -103,15 +115,51 @@ export function PrepareData({
   );
   const [metadata, setMetadata] = useState<Metadata>(initialMetadata);
 
-  // Standardization is derived from the current metadata: the recommended per-type
-  // cleaning for whatever columns each field is currently bound to. Deriving it
-  // (rather than holding stale steps) keeps the verdict honest after a remap and
-  // preserves the acceptor's prior behavior, where cleaning was inferred from the
-  // adopted terms. The same object feeds the verdict and onLaunch.
-  const standardization = useMemo(
+  // The operator's per-field step edits, keyed by linkage-field name (the
+  // transformation `output`). Held as an override LAYER over the derived default
+  // rather than as the whole standardization, so a metadata remap that re-binds a
+  // field's input column keeps the operator's authored steps (they re-apply to the
+  // new column) and the verdict stays honest off the freshly-derived bindings. An
+  // empty map means no edits, so the effective standardization equals the derived
+  // default -- the acceptor's prior behavior, byte for byte.
+  const [stepOverrides, setStepOverrides] = useState<
+    Map<string, Array<StandardizationStep>>
+  >(new Map());
+
+  // The recommended per-type cleaning for whatever columns each field is currently
+  // bound to: the binding (input column, which fields exist) is always re-derived
+  // from the current metadata, so it tracks a remap.
+  const baseStandardization = useMemo(
     () => getDefaultStandardization(metadata, linkageTerms),
     [metadata, linkageTerms],
   );
+
+  // The effective standardization the verdict and onLaunch consume: the derived
+  // bindings with each field's authored steps layered on where the operator edited
+  // them. Field-name keyed, so an override survives a column remap and re-applies
+  // to the re-derived input column.
+  const standardization = useMemo(
+    () =>
+      baseStandardization.map((transformation) => {
+        const override = stepOverrides.get(transformation.output);
+        return override === undefined
+          ? transformation
+          : { ...transformation, steps: override };
+      }),
+    [baseStandardization, stepOverrides],
+  );
+
+  // Field name -> its declared linkage field, for the per-field card label and the
+  // value-level constraint check the preview runs. The field `name` is the
+  // transformation `output`, so this resolves every card's field.
+  const fieldByName = useMemo(
+    () =>
+      new Map(linkageTerms.linkageFields.map((field) => [field.name, field])),
+    [linkageTerms],
+  );
+
+  const setFieldSteps = (output: string, steps: Array<StandardizationStep>) =>
+    setStepOverrides((prev) => new Map(prev).set(output, steps));
 
   const verdict = useMemo(
     () =>
@@ -292,8 +340,67 @@ export function PrepareData({
         caption="Your columns, their types, and how each is used"
       />
 
+      {standardization.length > 0 && (
+        <Stack
+          gap="sm"
+          component="section"
+          aria-label="Clean your data to match"
+        >
+          <Divider />
+          <div>
+            <Text size="sm" fw={600}>
+              Clean your data to match
+            </Text>
+            <Text size="xs" c="dimmed">
+              Each field is cleaned by an ordered list of steps before matching.
+              Edit the steps and watch the before-and-after on a sample of your
+              rows. Cleaning runs on your device and changes only your own match
+              rate; it is never sent to your partner.
+            </Text>
+          </div>
+          {standardization.map((transformation) => {
+            const field = fieldByName.get(transformation.output);
+            if (field === undefined) return null;
+            const steps = transformation.steps ?? [];
+            return (
+              <Paper withBorder p="md" key={transformation.output}>
+                <Grid gap="lg" align="flex-start">
+                  <Grid.Col span={{ base: 12, md: 7 }}>
+                    <StandardizationStepEditor
+                      fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+                      inputColumn={transformation.input}
+                      steps={steps}
+                      onStepsChange={(next) =>
+                        setFieldSteps(transformation.output, next)
+                      }
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 5 }}>
+                    <Text size="xs" fw={600} mb="xs">
+                      Preview
+                    </Text>
+                    <StandardizationPreview
+                      field={field}
+                      inputColumn={transformation.input}
+                      steps={steps}
+                      rawRows={rawRows}
+                    />
+                  </Grid.Col>
+                </Grid>
+              </Paper>
+            );
+          })}
+        </Stack>
+      )}
+
       <Group justify="space-between">
-        <Button variant="default" onClick={() => setMetadata(initialMetadata)}>
+        <Button
+          variant="default"
+          onClick={() => {
+            setMetadata(initialMetadata);
+            setStepOverrides(new Map());
+          }}
+        >
           Reset to recommended
         </Button>
         <Button onClick={openConfirm} disabled={blocked || multipleIdentifiers}>

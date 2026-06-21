@@ -160,6 +160,7 @@ export function AcceptInvitation() {
         <PrepareData
           linkageTerms={decode.invitation.token.linkageTerms}
           columns={phase.bundle.columns}
+          rawRows={phase.bundle.rawRows}
           onBack={() => setPhase({ status: "reviewing" })}
           onLaunch={(edits, warning) =>
             setPhase({
