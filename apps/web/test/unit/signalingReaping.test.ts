@@ -9,6 +9,7 @@ import {
 import { CheckBrokenConnections } from "@peerjs-server/services/checkBrokenConnections/index";
 import { Client } from "@peerjs-server/models/client";
 import { MessageType } from "@peerjs-server/enums";
+import { PEER_PING_INTERVAL_MS } from "@psi/rendezvous";
 import defaultConfig from "@peerjs-server/config/index";
 import { messageByteSize } from "@peerjs-server/models/messageQueue";
 
@@ -20,8 +21,12 @@ import type { IMessage } from "@peerjs-server/models/message";
 // the full window), and the relay's per-destination queue bounds (a spray to many
 // unregistered destinations cannot allocate queues without limit).
 
-const ALIVE_TIMEOUT_MS = 90_000;
-const UNCONFIRMED_TIMEOUT_MS = 20_000;
+// Source the reap windows from the production defaults (90_000 / 20_000) rather
+// than mirroring the literals, so the behavioral tests below exercise the same
+// values the `liveness-timeout config invariant` block pins -- a future edit to
+// the defaults cannot leave a behavioral test passing against a stale local copy.
+const ALIVE_TIMEOUT_MS = defaultConfig.alive_timeout;
+const UNCONFIRMED_TIMEOUT_MS = defaultConfig.unconfirmed_timeout;
 const CHECK_INTERVAL_MS = 100;
 
 describe("two-tier liveness reaper", () => {
@@ -71,6 +76,36 @@ describe("two-tier liveness reaper", () => {
       // the reap is tied to liveness rather than a flat wall-clock.
       vi.advanceTimersByTime(60_000);
       expect(realm.getClientById("live")).toBeDefined();
+    } finally {
+      reaper.stop();
+    }
+  });
+
+  test("a peer that confirms at the heartbeat cadence graduates past the unconfirmed window", () => {
+    // Distinct from the pre-confirmed "shown liveness survives" case above: this
+    // exercises the unconfirmed -> confirmed transition timed at the real client
+    // cadence -- a peer that registers silent and only proves liveness when its
+    // first heartbeat lands. That is the slow-but-live invited peer the
+    // unconfirmed window must not cut.
+    const realm = new Realm();
+    const client = new Client({ id: "slow", token: "t" });
+    realm.setClient(client, "slow");
+    const reaper = startReaper(realm);
+    try {
+      // The PeerJS client's first heartbeat lands at the pinned cadence, which is
+      // comfortably inside the unconfirmed window (pinned at >= 4x the cadence by
+      // the invariant test below), so the peer is still registered -- not yet
+      // reaped -- when that frame arrives.
+      vi.advanceTimersByTime(PEER_PING_INTERVAL_MS);
+      expect(realm.getClientById("slow")).toBeDefined();
+
+      // That first inbound frame confirms the peer, graduating it from the
+      // unconfirmed window to the generous alive window. Advance past the
+      // unconfirmed deadline it would have been reaped at had it stayed silent: it
+      // survives, because the reap is tied to liveness, not a flat wall-clock.
+      client.confirm();
+      vi.advanceTimersByTime(UNCONFIRMED_TIMEOUT_MS);
+      expect(realm.getClientById("slow")).toBeDefined();
     } finally {
       reaper.stop();
     }
@@ -258,6 +293,21 @@ describe("liveness-timeout config invariant", () => {
   test("unconfirmed_timeout is shorter than alive_timeout", () => {
     expect(defaultConfig.unconfirmed_timeout).toBeLessThan(
       defaultConfig.alive_timeout,
+    );
+  });
+
+  // The unconfirmed window's safety argument is that it is at least 4x the PeerJS
+  // first-heartbeat cadence, so a real peer always sends a frame and graduates to
+  // the generous window before it can fire (4x leaves margin for a slow socket
+  // open and one missed heartbeat). The cadence is now psilink-owned -- set
+  // explicitly at Peer construction (PEER_PING_INTERVAL_MS) rather than left to
+  // the caret-ranged `peerjs` default -- so pin the margin against both values
+  // here: a future edit to either the reap window or the cadence that narrows it
+  // below 4x fails CI rather than silently shrinking the headroom that justifies
+  // the window.
+  test("unconfirmed_timeout stays at least 4x the heartbeat cadence", () => {
+    expect(defaultConfig.unconfirmed_timeout).toBeGreaterThanOrEqual(
+      4 * PEER_PING_INTERVAL_MS,
     );
   });
 });
