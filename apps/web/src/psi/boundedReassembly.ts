@@ -100,9 +100,9 @@ export const MAX_WEBRTC_REASSEMBLY_DEPTH = 256;
  * bounded: with {@link MAX_CONCURRENT_REASSEMBLIES} reassemblies at most this many
  * chunks each, retained chunk overhead stays on the order of the byte cap.
  *
- * Value: 131,072 (2^17), ~8x the ~16,100 chunks a 256 MiB frame produces at
- * PeerJS's ~16 KiB chunk MTU, so it never rejects a legitimate frame while
- * bounding a tiny-chunk flood. Fixed, not configurable.
+ * Value: 131,072 (2^17), ~8x the ~16,500 chunks a 256 MiB frame produces at
+ * PeerJS's ~16 KiB (16,300-byte) chunk MTU, so it never rejects a legitimate
+ * frame while bounding a tiny-chunk flood. Fixed, not configurable.
  */
 export const MAX_CHUNKS_PER_REASSEMBLY = 131_072;
 
