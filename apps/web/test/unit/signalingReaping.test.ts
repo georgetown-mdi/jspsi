@@ -81,7 +81,12 @@ describe("two-tier liveness reaper", () => {
     }
   });
 
-  test("a slow peer that first heartbeats at the cadence is not reaped early", () => {
+  test("a peer that confirms at the heartbeat cadence graduates past the unconfirmed window", () => {
+    // Distinct from the pre-confirmed "shown liveness survives" case above: this
+    // exercises the unconfirmed -> confirmed transition timed at the real client
+    // cadence -- a peer that registers silent and only proves liveness when its
+    // first heartbeat lands. That is the slow-but-live invited peer the
+    // unconfirmed window must not cut.
     const realm = new Realm();
     const client = new Client({ id: "slow", token: "t" });
     realm.setClient(client, "slow");
@@ -89,15 +94,15 @@ describe("two-tier liveness reaper", () => {
     try {
       // The PeerJS client's first heartbeat lands at the pinned cadence, which is
       // comfortably inside the unconfirmed window (pinned at >= 4x the cadence by
-      // the invariant test below), so the peer is still registered when that
-      // frame arrives -- a real but slow-to-pair invited peer is never cut before
-      // it can graduate.
+      // the invariant test below), so the peer is still registered -- not yet
+      // reaped -- when that frame arrives.
       vi.advanceTimersByTime(PEER_PING_INTERVAL_MS);
       expect(realm.getClientById("slow")).toBeDefined();
 
-      // That first inbound frame confirms the peer and refreshes its liveness
-      // clock, graduating it to the generous alive window, so it survives well
-      // past where the unconfirmed window would otherwise have reaped it.
+      // That first inbound frame confirms the peer, graduating it from the
+      // unconfirmed window to the generous alive window. Advance past the
+      // unconfirmed deadline it would have been reaped at had it stayed silent: it
+      // survives, because the reap is tied to liveness, not a flat wall-clock.
       client.confirm();
       vi.advanceTimersByTime(UNCONFIRMED_TIMEOUT_MS);
       expect(realm.getClientById("slow")).toBeDefined();
