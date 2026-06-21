@@ -11,14 +11,16 @@ import {
 import type { Duplex } from "node:stream";
 
 // gap 1: a slow or partial upgrade handshake is bounded and closed server-side
-// rather than held open. The end-to-end behavior -- Node firing `clientError`
-// once the short headersTimeout elapses, and the handler closing the socket --
-// was verified against plain Node (the connection is closed at ~headersTimeout
-// with a 408). It is not reproduced here as a live-socket timing test: under
-// vitest, loading `ws` anywhere in the worker disrupts Node's request-timeout
-// path on an unrelated server, which would make such a test flaky. Instead this
-// pins the two code paths the entry owns -- the bounds are set, and the wired
-// `clientError` handler closes a stalled or malformed handshake.
+// rather than held open. The end-to-end behavior was verified against plain Node
+// on the supported runtime (Node >= 26): the timeout fires `clientError` with
+// `ERR_HTTP_REQUEST_TIMEOUT` and the handler responds 408 and closes -- the close
+// landing on Node's periodic connections sweep, so headersTimeout plus up to one
+// sweep interval, not instantly. It is not reproduced here as a live-socket
+// timing test: under vitest, loading `ws` anywhere in the worker disrupts Node's
+// request-timeout path on an unrelated server, which would make such a test
+// flaky. Instead this pins the two code paths the entry owns -- the bounds are
+// set, and the wired `clientError` handler closes a stalled or malformed
+// handshake.
 
 function fakeSocket(writable: boolean): {
   socket: Duplex;
