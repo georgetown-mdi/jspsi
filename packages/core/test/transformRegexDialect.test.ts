@@ -109,4 +109,31 @@ describe("linkageTermsHaveNonConformantTransformRegex", () => {
       ),
     ).toBe(true);
   });
+
+  test("rejects an oversized in-dialect source on length, before compiling it", () => {
+    // An IN-DIALECT pattern longer than maxPatternLength. The gate must reject it
+    // on length WITHOUT compiling: RE2JS.compile's cost is super-linear in source
+    // length, so a ~150KB in-dialect pattern would otherwise stall validation for
+    // seconds (the schema's over-length refine cannot interrupt that compile).
+    const oversized = "a".repeat(2000); // in-dialect, > the 1000 bound
+    expect(
+      linkageTermsHaveNonConformantTransformRegex(
+        termsWith([
+          { function: "replace_regex", params: { pattern: oversized } },
+        ]),
+        { maxPatternLength: 1000 },
+      ),
+    ).toBe(true);
+    // Without the bound the SAME in-dialect pattern compiles cleanly, so the gate
+    // does NOT reject it (over-length rejection then comes only from the schema
+    // refine). This is exactly the gate behavior the maxPatternLength guard adds;
+    // the production caller (LinkageTermsSchema) always passes the bound.
+    expect(
+      linkageTermsHaveNonConformantTransformRegex(
+        termsWith([
+          { function: "replace_regex", params: { pattern: oversized } },
+        ]),
+      ),
+    ).toBe(false);
+  });
 });

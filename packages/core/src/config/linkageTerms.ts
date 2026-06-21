@@ -197,11 +197,15 @@ export const MAX_DATE_FORMAT_LENGTH = 256;
  * per-row COMPILE-COST ceiling, not a safety control -- it preserves the
  * parse-cost bound the removed `redos-detector` screen provided
  * (MAX_ANALYZED_PATTERN_LENGTH, also 1000). A real transform pattern is short
- * (tens of characters); 1000 is far above any legitimate one. Enforced by a
- * per-step refine on {@link TransformStep}'s schema before any row runs;
- * dialect conformance (which patterns are valid at all) is enforced separately by
- * the refine on {@link LinkageTermsSchema}. A DoS ceiling on the partner wire
- * path, not a semantic limit.
+ * (tens of characters); 1000 is far above any legitimate one. Enforced in two
+ * places before any row runs: a per-step refine on {@link TransformStep}'s schema
+ * reports the precise over-length message, and the dialect gate on
+ * {@link LinkageTermsSchema} is handed this same bound (as `maxPatternLength`) so
+ * it rejects an oversized source WITHOUT compiling -- otherwise the gate's own
+ * `RE2JS.compile`, whose cost is super-linear in source length, would stall
+ * validation for seconds on a single oversized in-dialect pattern before the
+ * refine reported it. A DoS ceiling on the partner wire path, not a semantic
+ * limit.
  */
 export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
 
@@ -1022,13 +1026,19 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     // partner-controlled value -- the offending pattern is located by inspection,
     // not echoed -- consistent with the unsanitized parse-error path the
     // referential-integrity refines above rely on.
-    .refine((a) => !linkageTermsHaveNonConformantTransformRegex(a), {
-      message:
-        "a linkage key element transform uses a regular expression outside the " +
-        "linear-time dialect (RE2 syntax; backreferences and lookaround are not " +
-        "supported); it is rejected before any pattern executes",
-      path: ["linkageKeys"],
-    });
+    .refine(
+      (a) =>
+        !linkageTermsHaveNonConformantTransformRegex(a, {
+          maxPatternLength: MAX_TRANSFORM_PATTERN_LENGTH,
+        }),
+      {
+        message:
+          "a linkage key element transform uses a regular expression outside the " +
+          "linear-time dialect (RE2 syntax; backreferences and lookaround are not " +
+          "supported); it is rejected before any pattern executes",
+        path: ["linkageKeys"],
+      },
+    );
 
 // --- Parse -------------------------------------------------------------------
 

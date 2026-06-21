@@ -58,12 +58,25 @@ export const REGEX_STEP_PATTERN_PARAM: Readonly<Record<string, string>> = {
  */
 export const REGEX_DIALECT_TOTAL_BUDGET_MS = 2000;
 
-/** Optional override for the conformance budget; defaulted from the constant
- * above. Exposed so tests can drive the budget-exhaustion path deterministically. */
+/** Optional overrides for the conformance walk; both defaulted. Exposed so tests
+ * can drive the budget-exhaustion path deterministically, and so the schema can
+ * pass the source-length bound the gate rejects at. */
 export interface RegexDialectBudget {
   /** Total wall-clock budget across all patterns; see
    * {@link REGEX_DIALECT_TOTAL_BUDGET_MS}. */
   totalBudgetMs?: number;
+  /**
+   * Upper bound on the COERCED source length (coerceToPatternString) of any one
+   * pattern. A source longer than this is rejected on length alone, WITHOUT
+   * compiling: an in-dialect source compiles in time super-linear in its length
+   * (a ~150 KB pattern takes seconds), a cost a single pattern can incur before
+   * the per-step length refine reports it and that the wall-clock budget above
+   * cannot interrupt mid-compile. The schema passes its own
+   * MAX_TRANSFORM_PATTERN_LENGTH here so the gate rejects at the same threshold
+   * the refine does; when omitted (the dialect/budget unit tests) no length
+   * bound applies and every coerced source is compiled.
+   */
+  maxPatternLength?: number;
 }
 
 /**
@@ -74,9 +87,12 @@ export interface RegexDialectBudget {
  * keys and elements; for each raw-pattern step ({@link REGEX_STEP_PATTERN_PARAM})
  * it checks the pattern the factory would compile -- coerced to a string exactly
  * as the factory coerces it ({@link coerceToPatternString}), so the verdict here
- * matches what executes. An omitted pattern is skipped (the factory compiles it to
- * a degenerate but in-dialect literal); `parse_date` is not a raw-pattern step and
- * is not screened (its generated regex is always in-dialect).
+ * matches what executes. A coerced source longer than `budget.maxPatternLength`
+ * is rejected on length alone, before compiling, so an oversized source cannot
+ * make the compile itself a denial of service. An omitted pattern is skipped (the
+ * factory compiles it to a degenerate but in-dialect literal); `parse_date` is not
+ * a raw-pattern step and is not screened (its generated regex is always
+ * in-dialect).
  *
  * The message the caller attaches names no partner-controlled value -- the
  * offending pattern is located by inspection, not echoed -- consistent with the
@@ -87,6 +103,7 @@ export function linkageTermsHaveNonConformantTransformRegex(
   budget: RegexDialectBudget = {},
 ): boolean {
   const totalBudgetMs = budget.totalBudgetMs ?? REGEX_DIALECT_TOTAL_BUDGET_MS;
+  const maxPatternLength = budget.maxPatternLength ?? Infinity;
   const startedAt = Date.now();
 
   for (const key of terms.linkageKeys) {
@@ -100,7 +117,15 @@ export function linkageTermsHaveNonConformantTransformRegex(
         if (raw === undefined) continue;
 
         if (Date.now() - startedAt >= totalBudgetMs) return true;
-        if (!patternConformsToDialect(coerceToPatternString(raw))) return true;
+        const source = coerceToPatternString(raw);
+        // Reject an oversized source on length alone, before compiling. An
+        // in-dialect source compiles in time super-linear in its length, so a
+        // single oversized pattern could otherwise stall validation for seconds
+        // -- the budget check above cannot interrupt one in-flight compile. The
+        // per-step length refine reports the same rejection with a precise
+        // over-length message (MAX_TRANSFORM_PATTERN_LENGTH).
+        if (source.length > maxPatternLength) return true;
+        if (!patternConformsToDialect(source)) return true;
       }
     }
   }
