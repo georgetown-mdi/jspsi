@@ -21,6 +21,46 @@ import { exceedsOwnKeyCount } from "./objectKeyCount.js";
 export const MAX_NESTING_DEPTH = 256;
 
 /**
+ * Maximum total node count {@link transformKeysDeep} will rewrite before
+ * rejecting the input -- the WIDTH analogue of the {@link MAX_NESTING_DEPTH}
+ * depth bound. A "node" is one object member or one array element; the budget is
+ * a single running total threaded across the WHOLE walk (every object and every
+ * array), not a per-container cap.
+ *
+ * The snake->camel rewrite is O(total nodes), and `camelizeKeys` runs ahead of
+ * all Zod validation on partner input (`parseLinkageTerms` off the post-handshake
+ * wire and the invitation token), so without this bound an authenticated peer can
+ * drive a one-shot multi-second CPU burn before validation rejects -- or, worse,
+ * silently accepts -- the payload. Two unbounded shapes motivate it: (a) a
+ * multi-million-key object placed under an UNKNOWN top-level key is fully
+ * camelized and then SILENTLY STRIPPED by the non-strict schema, so the parse
+ * SUCCEEDS after the burn rather than rejecting; (b) a count-gated partner array
+ * (linkageFields, linkageKeys, exclude, transform steps, elements, payload
+ * columns) is walked in full by the pre-pass before its `boundedArray` count
+ * refine can reject it. A running total catches both -- path (a)'s single wide
+ * object AND path (b)'s width spread across many small ones -- where a per-object
+ * cap alone would miss the latter.
+ *
+ * 262144 (2^18) is far above any realistic operator `ExchangeSpec` -- low tens of
+ * thousands of nodes at most (its single widest object is a `transform.params`
+ * record at `MAX_PARAMS_ENTRIES` = 256, its collections cap at 256 to 4096
+ * entries) -- and far below the burn: the rewrite reaches a multi-second cost only
+ * past ~1M nodes (measured), whereas rejecting at this budget caps the wasted walk
+ * well under a second. Like the rest of the parsed-input-bounds family it is
+ * defense-in-depth, not a semantic limit: the per-collection caps DO compose to a
+ * schema-valid maximum above this budget (256 `linkageFields`, each carrying a
+ * 4096-entry `exclude`, is ~1M nodes), so a pathological-but-schema-valid config
+ * could trip it -- but no config a real operator writes comes within an order of
+ * magnitude, and a tripped one fails as the same clean bounded rejection. It also
+ * sits above the decode layer's per-object key ceiling
+ * (`MAX_JSON_OBJECT_KEYS` = 65536, boundedJson.ts), so any single object that
+ * layer admits still camelizes. The two compose: the decode budget bounds each
+ * CONTAINER's width before `JSON.parse`; this bounds the TOTAL the walker
+ * rewrites. See docs/spec/CHANNEL_SECURITY.md.
+ */
+export const MAX_NODE_COUNT = 262144;
+
+/**
  * Thrown by {@link transformKeysDeep} (and so by {@link camelizeKeys} /
  * {@link snakeizeKeys}) when input nesting exceeds {@link MAX_NESTING_DEPTH}. A
  * {@link UsageError} subclass, like the transport input-bound errors and
@@ -33,6 +73,21 @@ export class NestingDepthExceededError extends UsageError {
   constructor() {
     super(`input nesting exceeds the maximum depth of ${MAX_NESTING_DEPTH}`);
     this.name = "NestingDepthExceededError";
+  }
+}
+
+/**
+ * Thrown by {@link transformKeysDeep} (and so by {@link camelizeKeys} /
+ * {@link snakeizeKeys}) when the input's total node count exceeds
+ * {@link MAX_NODE_COUNT}. The width counterpart of {@link NestingDepthExceededError}:
+ * same {@link UsageError} contract (terminal, exit 64 at the CLI, fixed message
+ * carrying no input bytes so `describeDecodeError` surfaces it verbatim), for a
+ * payload too WIDE to rewrite rather than too deep.
+ */
+export class NodeCountExceededError extends UsageError {
+  constructor() {
+    super(`input node count exceeds the maximum of ${MAX_NODE_COUNT}`);
+    this.name = "NodeCountExceededError";
   }
 }
 
@@ -101,6 +156,21 @@ function camelToSnake(s: string): string {
  * walked normally. The opaque-key skip does not recurse, so an opaque subtree's
  * own depth never counts toward the bound.
  *
+ * `budget` is a single mutable node counter threaded across the WHOLE walk (one
+ * is created per top-level {@link camelizeKeys} / {@link snakeizeKeys} call),
+ * bounding the total rewrite width against an untrusted wide payload -- the
+ * counterpart of the `depth` bound above. Each array element and each object
+ * member counts one node; crossing {@link MAX_NODE_COUNT} throws a clean
+ * {@link NodeCountExceededError} before the rewrite burns. An over-wide array is
+ * refused by its O(1) length before `.map`, and an over-wide object by a
+ * streaming own-key count before `Object.entries` materializes it, so neither the
+ * burn nor the materialization happens. Like the depth bound, a SKIPPED subtree
+ * (an opaque value, or a width-bounded over-count value below) is not recursed
+ * into and so never counts toward this budget -- which is how the two width
+ * mechanisms compose without double-counting: the per-key skip hands one bounded
+ * record straight to the schema for the cost of a key count, and this budget
+ * bounds everything the walk actually rewrites.
+ *
  * `widthBoundedKeys` is an optional caller-supplied map from a (canonical
  * camelCase) key name to the maximum key count its object value may carry. When
  * a key matches and its object value exceeds that count -- decided by a key count
@@ -129,16 +199,34 @@ function transformKeysDeep(
   value: unknown,
   transformKey: (key: string) => string,
   depth: number,
+  budget: { nodes: number },
   widthBoundedKeys?: ReadonlyMap<string, number>,
 ): unknown {
   if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
-  if (Array.isArray(value))
+  if (Array.isArray(value)) {
+    // Length is O(1), so reject an over-budget array before `.map` allocates
+    // and recurses (path b); a within-budget array commits its element count up
+    // front and recurses as before.
+    if (budget.nodes + value.length > MAX_NODE_COUNT)
+      throw new NodeCountExceededError();
+    budget.nodes += value.length;
     return value.map((v) =>
-      transformKeysDeep(v, transformKey, depth + 1, widthBoundedKeys),
+      transformKeysDeep(v, transformKey, depth + 1, budget, widthBoundedKeys),
     );
-  if (value !== null && typeof value === "object")
+  }
+  if (value !== null && typeof value === "object") {
+    // Reject a single over-wide object before `Object.entries` MATERIALIZES it
+    // (path a) -- a cheap streaming own-key count (the same early-exit pass the
+    // params skip uses) against the budget still left, so a multi-million-key
+    // object under an unknown key is refused rather than rewritten then stripped.
+    if (exceedsOwnKeyCount(value, MAX_NODE_COUNT - budget.nodes))
+      throw new NodeCountExceededError();
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => {
+        // The per-key check also catches the budget being exhausted by a
+        // DESCENDANT of an earlier key in this same object, which the pre-pass
+        // count above (this object's own width only) does not see.
+        if (++budget.nodes > MAX_NODE_COUNT) throw new NodeCountExceededError();
         const camel = snakeToCamel(k);
         if (OPAQUE_VALUE_KEYS.has(camel)) return [transformKey(k), v];
         const widthBound = widthBoundedKeys?.get(camel);
@@ -152,10 +240,17 @@ function transformKeysDeep(
           return [transformKey(k), v];
         return [
           transformKey(k),
-          transformKeysDeep(v, transformKey, depth + 1, widthBoundedKeys),
+          transformKeysDeep(
+            v,
+            transformKey,
+            depth + 1,
+            budget,
+            widthBoundedKeys,
+          ),
         ];
       }),
     );
+  }
   return value;
 }
 
@@ -166,9 +261,9 @@ function transformKeysDeep(
  * (`OPAQUE_VALUE_KEYS`) are left verbatim -- see {@link transformKeysDeep}.
  *
  * Runs ahead of the schema in the `parseX`/`safeParseX` config helpers, so on a
- * pathologically deep input it throws BEFORE the schema -- meaning even a
+ * pathologically deep or wide input it throws BEFORE the schema -- meaning even a
  * `safeParseX` wrapper that calls it can throw rather than return a failure
- * result. No real config or exchange message reaches the bound.
+ * result. No real config or exchange message reaches either bound.
  *
  * `widthBoundedKeys` (see {@link transformKeysDeep}) lets a caller name keys
  * whose object value is left verbatim once it exceeds a given key count, so a
@@ -179,12 +274,20 @@ function transformKeysDeep(
  *
  * @throws {NestingDepthExceededError} if input nesting reaches
  *   {@link MAX_NESTING_DEPTH} levels.
+ * @throws {NodeCountExceededError} if the input's total node count exceeds
+ *   {@link MAX_NODE_COUNT}.
  */
 export function camelizeKeys(
   value: unknown,
   widthBoundedKeys?: ReadonlyMap<string, number>,
 ): unknown {
-  return transformKeysDeep(value, snakeToCamel, 0, widthBoundedKeys);
+  return transformKeysDeep(
+    value,
+    snakeToCamel,
+    0,
+    { nodes: 0 },
+    widthBoundedKeys,
+  );
 }
 
 /**
@@ -205,8 +308,10 @@ export function camelizeKeys(
  *
  * @throws {NestingDepthExceededError} if input nesting reaches
  *   {@link MAX_NESTING_DEPTH} levels.
+ * @throws {NodeCountExceededError} if the input's total node count exceeds
+ *   {@link MAX_NODE_COUNT}.
  * @internal
  */
 export function snakeizeKeys(value: unknown): unknown {
-  return transformKeysDeep(value, camelToSnake, 0);
+  return transformKeysDeep(value, camelToSnake, 0, { nodes: 0 });
 }
