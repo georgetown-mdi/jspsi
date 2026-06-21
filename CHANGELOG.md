@@ -55,6 +55,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - The CLI and the web accept screen render an invitation or config validation failure as a readable one-liner instead of a raw schema-error dump.
 - The web exchange screen shows a fixed, friendly, retry-oriented message when a generic transport failure (a dropped or failed connection) ends an exchange, instead of the raw error text; the detailed error stays in the browser console for diagnosis.
 - Documentation is reorganized into `docs/` (overview) and `docs/spec/` (wire formats, byte encodings, constants); some files moved or were renamed, so links to old paths break. See `docs/spec/README.md`.
+- The web app now accepts CSV uploads up to 100 MB (was 10 MB), and a file larger than one parser chunk parses to its complete row set instead of risking a silently truncated subset. See `docs/spec/PROTOCOL.md`.
 
 ### Removed
 
