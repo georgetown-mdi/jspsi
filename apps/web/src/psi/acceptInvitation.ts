@@ -37,6 +37,10 @@ export interface AcceptableInvitation {
  * @throws {Error}    on an expired token, or one without a WebRTC endpoint.
  * @throws {Error}    on invalid base64url or a checksum mismatch (`decodeInvitation`).
  * @throws {ZodError} on schema validation failure (`decodeInvitation`).
+ * @throws {NestingDepthExceededError|NodeCountExceededError} on a token whose
+ *   `transform.params` is too deeply nested or too wide for the bounded camelCase
+ *   normalization `decodeInvitation` applies; the accept route renders all of
+ *   these through `describeDecodeError`.
  */
 export async function prepareAcceptedInvitation(
   encoded: string,

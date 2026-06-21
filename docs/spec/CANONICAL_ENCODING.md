@@ -98,6 +98,39 @@ comparator, and is the ordering RFC 8785 specifies. Duplicate keys cannot occur
 
 Array element order is **significant** and is preserved as given.
 
+The encoder sorts keys but does **not** fold their **casing**: two objects whose
+keys differ only in snake_case-vs-camelCase form (`{"input_format": ...}` vs
+`{"inputFormat": ...}`) encode to different bytes. This matters for the
+partner-controlled `transform.params` keys, the only linkage-terms keys whose
+form could vary. They are normalized to camelCase at **every** parse path that
+produces a `LinkageTerms` -- config load and the post-handshake wire path (via
+`camelizeKeys` in `parseLinkageTerms`), and the invitation decode path (via the
+same `camelizeKeys` pre-pass before validating). So by the time terms reach a
+canonical encoding they are already camelCase on both sides: a casing fold is a
+parse-layer invariant, not something the consumers re-do. The agreed-terms hash
+(`computeTermsHash`) and the cross-party `validateCompatibility` comparison
+therefore both encode the same camelCase form without folding, which is what keeps
+the hash cross-party reproducible.
+
+A third-party implementation reproducing the agreed-terms hash MUST apply the
+identical key fold before encoding, because the fold is byte-significant and is
+deliberately a minimal rewrite, not a general snake_case-to-camelCase conversion.
+The normative rule: in **every** object key throughout the terms (applied
+recursively), replace each underscore immediately followed by an ASCII lowercase
+letter (`a`-`z`) with that letter upper-cased and drop the underscore; leave every
+other character unchanged, and never transform string *values*, only keys. It is
+exactly the substitution `s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())`. The
+edge cases a reproducer must match: an underscore NOT followed by an ASCII
+lowercase letter is left intact, so `input_format` -> `inputFormat` but
+`INPUT_FORMAT` -> `INPUT_FORMAT` (the `_F` does not fold), `field_1` -> `field_1`
+(digit), and `input__format` -> `input_Format` (only the second underscore folds);
+a LEADING underscore before a lowercase letter still folds and is dropped, so
+`_format` -> `Format`; an already-camelCase key has no underscore-plus-lowercase
+and is unchanged. psilink
+emits only camelCase keys, so a token it produced is already in this normal form --
+the fold is observable only for a hand-authored or third-party token carrying
+`snake_case` keys.
+
 ### Numbers
 
 A number MUST be finite. RFC 8785 serializes a number as ECMAScript
