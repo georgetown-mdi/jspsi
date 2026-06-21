@@ -51,24 +51,37 @@ const COMPILE_CACHE_MAX = 1024;
 
 /**
  * Upper bound on a partner pattern's compiled RE2 program size (its instruction
- * count). RE2 matching is linear in the input length, but with a per-row constant
- * factor proportional to the program size -- and the program size is PARTNER-
- * controlled: a short, in-dialect pattern can expand into a huge program via a
- * counted repetition over a sub-expression (e.g. `(.*){1000}` compiles to ~4000
- * instructions and costs ~1 s per row even on a one-character value). The pattern-
- * length cap, the per-repetition `{n}<=1000` limit, and re2js's rejection of
- * nested counted repetition do NOT bound this; only the program size does. This
- * caps it so the worst per-row match cost stays in the single-digit-millisecond
- * range on realistic field values.
+ * count). Per-row regex cost is O(program_size x input_length): RE2 matching is
+ * linear in the input, but with a per-row constant factor proportional to the
+ * program size, and the program size is PARTNER-controlled -- a short, in-dialect
+ * pattern can expand into a huge program via a counted repetition over a sub-
+ * expression (e.g. `(.*){1000}` compiles to thousands of instructions and costs
+ * ~1 s per row even on a one-character value). The pattern-length cap, the per-
+ * repetition `{n}<=1000` limit, and re2js's rejection of nested counted repetition
+ * do NOT bound this; only the program size does.
  *
- * 2000 sits above what a maximally long ORDINARY pattern (bounded by the 1000-
- * character length cap, e.g. a long literal or alternation) compiles to (~1000-
- * 1500 instructions), so it never rejects a pattern that already passed the length
- * cap; and well below the expansion bombs (a single `(.*){500}` is 2002, the
- * documented attack patterns are 90k-396k). See docs/spec/PROTOCOL.md for the
- * normative dialect bound.
+ * This caps the program-size factor. It does NOT by itself bound per-row cost on
+ * an arbitrarily long field value -- a hard bound also needs an input-length limit,
+ * tracked as follow-up work -- but it removes the input-INDEPENDENT blow-up (a
+ * pattern that costs ~1 s per row even on a one-character input) and collapses the
+ * residual: the worst high-ambiguity pattern's per-row cost grows super-linearly
+ * with program size, so capping the program size low makes the residual tiny -- the
+ * worst pattern at this cap (e.g. `(.*.*){k}`) measures well under a millisecond per
+ * row even on a 1000-character field, versus ~90 ms at a 2000-instruction cap and an
+ * unbounded hang with no cap.
+ *
+ * 256 is far above the bundled defaults (under 20 instructions) and any realistic
+ * field-standardization pattern, while rejecting the dense expansions. A long or
+ * dense ORDINARY pattern (over ~256 instructions, e.g. a 254-character literal) is
+ * rejected by this cap rather than by the 1000-character length cap; that is
+ * acceptable, since a pattern that dense is implausible for field standardization.
+ * `parse_date` is not screened by the gate and its generated regex can exceed this
+ * (a 256-character format expands to ~640 instructions), but that regex is low-
+ * ambiguity by construction (only bounded `\d` quantifiers, never an unbounded
+ * quantifier over a sub-expression), so it stays cheap per row regardless. See
+ * docs/spec/PROTOCOL.md for the normative dialect bound.
  */
-export const MAX_TRANSFORM_PROGRAM_SIZE = 2000;
+export const MAX_TRANSFORM_PROGRAM_SIZE = 256;
 
 /**
  * Memoized compiled patterns, keyed by the exact pattern source. Insertion-

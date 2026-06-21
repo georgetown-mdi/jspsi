@@ -707,14 +707,14 @@ test("a non-string parse_date format still validates, so the runtime factory han
   ).toBe(true);
 });
 
-// ─── transform regex pattern-length bound (partner-controlled per-row compile) ──
+// ─── transform regex pattern-length bound (source pre-filter) ──
 // The four tier:"regex" functions compile their raw pattern / delimiter under the
-// linear-time engine, recompiled per row by applyElementTransform, so an unbounded
-// pattern compiles an ever-larger program every row. The engine bounds backtracking
-// by construction; MAX_TRANSFORM_PATTERN_LENGTH bounds the per-row COMPILE cost and
-// is the successor to the removed redos-detector screen's parse-cost ceiling -- the
-// only control bounding a single accepted (in-dialect, linear) pattern's compile
-// cost -- so pin both edges of the cap. (Dialect conformance is enforced separately.)
+// linear-time engine (compiled once per transform array, memoized).
+// MAX_TRANSFORM_PATTERN_LENGTH caps the pattern SOURCE length -- a cheap pre-filter
+// on parse cost, independent of the program-size cap that bounds per-row match cost
+// (see the dialect-gate test below and linearRegex.test.ts). Use a SPARSE pattern
+// (many tiny non-capturing groups, program-small) so the LENGTH cap -- not the
+// program-size cap -- is the binding control at the boundary.
 
 const regexStepTerms = (fn: string, params: Record<string, unknown>) => ({
   ...base,
@@ -726,20 +726,28 @@ const regexStepTerms = (fn: string, params: Record<string, unknown>) => ({
   ],
 });
 
-test("a replace_regex pattern at exactly the length maximum parses; one over is rejected", () => {
-  // A long literal is in-dialect (it compiles), so the only control that can reject
-  // it is the length cap -- which is what makes this a clean test of that cap.
+// `(?:x)` is 5 chars and ~1 instruction, so this is at the length cap yet far under
+// the program-size cap; appending one more group pushes it just over the length cap
+// while staying program-small, isolating the length cap as the rejecting control.
+const sparseAtLengthCap = "(?:x)".repeat(
+  Math.floor(MAX_TRANSFORM_PATTERN_LENGTH / 5),
+);
+const sparseOverLengthCap = "(?:x)".repeat(
+  Math.floor(MAX_TRANSFORM_PATTERN_LENGTH / 5) + 1,
+);
+
+test("a replace_regex pattern at the length cap parses; one over is rejected by the length cap", () => {
   expect(
     safeParseLinkageTerms(
       regexStepTerms("replace_regex", {
-        pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH),
+        pattern: sparseAtLengthCap,
         replacement: "",
       }),
     ).success,
   ).toBe(true);
   const over = safeParseLinkageTerms(
     regexStepTerms("replace_regex", {
-      pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
+      pattern: sparseOverLengthCap,
       replacement: "",
     }),
   );
@@ -757,16 +765,12 @@ test("the pattern-length cap also covers split_on's delimiter param", () => {
   // so the same cap must apply -- a regression if the map and the refine drift apart.
   expect(
     safeParseLinkageTerms(
-      regexStepTerms("split_on", {
-        delimiter: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH),
-      }),
+      regexStepTerms("split_on", { delimiter: sparseAtLengthCap }),
     ).success,
   ).toBe(true);
   expect(
     safeParseLinkageTerms(
-      regexStepTerms("split_on", {
-        delimiter: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
-      }),
+      regexStepTerms("split_on", { delimiter: sparseOverLengthCap }),
     ).success,
   ).toBe(false);
 });
