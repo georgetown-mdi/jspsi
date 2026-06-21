@@ -27,6 +27,22 @@ export type PeerFactory = (id: string, options: PeerOptions) => Peer;
 const defaultPeerFactory: PeerFactory = (id, options) => new Peer(id, options);
 
 /**
+ * The WebSocket heartbeat cadence the PeerJS client sends, pinned here rather
+ * than left to the `peerjs` default. `peerjs` is a caret range (`^1.5.5`) whose
+ * default `pingInterval` (~5s) is a default parameter inside a bundled file --
+ * not exported -- so a minor bump could silently change the cadence. The
+ * signaling server's "unconfirmed" reap window (`unconfirmed_timeout` in the
+ * vendored peerjs-server reaper) is justified as a multiple of this cadence: a
+ * real peer graduates to the generous `alive_timeout` window the moment its
+ * first heartbeat lands, so the reap window only ever cuts a socket that
+ * registers and stays silent. Setting the cadence to a psilink-owned value keeps
+ * that safety margin pinned to something we control instead of a transitive
+ * default. The reap-window-vs-cadence margin itself is enforced as a check in
+ * `test/unit/signalingReaping.test.ts`, not asserted in prose here.
+ */
+export const PEER_PING_INTERVAL_MS = 5_000;
+
+/**
  * Per-attempt ceiling for a dialed data channel to finish opening, matching the
  * channel-open bound in `waitForOpen.ts`. Reaching it means the inviter's id IS
  * registered (otherwise the broker would have answered `peer-unavailable` in a
@@ -74,6 +90,7 @@ function buildPeerOptions(
     host: loc.host,
     path: loc.path,
     port: loc.port,
+    pingInterval: PEER_PING_INTERVAL_MS,
     debug: resolvePeerDebugLevel(config.PEERJS_DEBUG_LEVEL, isDiagnosticMode()),
     logFunction: createRedactingLogFunction(redactableIds),
     config: {
