@@ -5,7 +5,10 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
-import { linkageTermsHaveUnsafeTransformRegex } from "./transformRegexSafety.js";
+import {
+  linkageTermsHaveNonConformantTransformRegex,
+  REGEX_STEP_PATTERN_PARAM,
+} from "./transformRegexDialect.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 
 // --- Untrusted-input bounds --------------------------------------------------
@@ -55,8 +58,11 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // exceptions are the partner-controlled values whose magnitude drives unbounded
 // per-row work, each capped by a per-step refine on TransformStep's schema below:
 // `pad_left`'s numeric `length` (an unbounded `padStart` allocation,
-// MAX_PAD_LEFT_LENGTH) and `parse_date`'s `inputFormat` / `outputFormat` strings
-// (an unbounded per-row regex build and output allocation, MAX_DATE_FORMAT_LENGTH).
+// MAX_PAD_LEFT_LENGTH), `parse_date`'s `inputFormat` / `outputFormat` strings (an
+// unbounded per-row regex build and output allocation, MAX_DATE_FORMAT_LENGTH),
+// and the four `tier: "regex"` functions' raw `pattern` / `delimiter` (an
+// unbounded per-row regex compile under the linear-time engine,
+// MAX_TRANSFORM_PATTERN_LENGTH).
 //
 // The `payload` send/receive arrays carry no enclosing array/record/tuple frame
 // (only the root object), so a pathological count there cannot drive the ~130k
@@ -144,8 +150,8 @@ export const MAX_PARAMS_ENTRIES = 256;
  * `length` makes every row allocate a `String.prototype.padStart(length, char)`
  * of that size -- a crafted `1e9` exhausts memory and hangs the acceptor (a
  * browser-tab freeze on the web path, a hung process on the CLI), the
- * memory-allocation sibling of the regex-ReDoS vector
- * ({@link linkageTermsHaveUnsafeTransformRegex}). A real left-pad target is tens
+ * memory-allocation sibling of the regex compile-cost vector
+ * ({@link MAX_TRANSFORM_PATTERN_LENGTH}). A real left-pad target is tens
  * of characters (a zero-padded SSN is 9, a phone 10); 256 is far above any
  * legitimate pad yet far below an allocation that matters. Enforced by a per-step
  * refine on {@link TransformStep}'s schema before any per-row allocation; the
@@ -162,21 +168,41 @@ export const MAX_PAD_LEFT_LENGTH = 256;
  * param value stays `z.unknown()`, see the untrusted-input bounds note above).
  * `parse_date` runs per row inside the key-building pipeline
  * ({@link applyElementTransform}, which recompiles each step per row): its factory
- * builds a `new RegExp` from `inputFormat` and assembles the result from
- * `outputFormat`. This length cap bounds the per-row WORK SIZE -- an unbounded
- * `inputFormat` would compile an ever-larger regex per row, and an unbounded
- * `outputFormat` would allocate an ever-larger output per matched row -- with 256
- * far above any real date layout ("MM/DD/YYYY", "YYYY-MM-DD") yet small enough that
- * the per-row build and output stay cheap. It is NOT the whole `parse_date`
- * control: the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that
- * can catastrophically backtrack at a length well under this cap, so the SHAPE of
- * the expanded regex is screened separately by
- * {@link linkageTermsHaveUnsafeTransformRegex} (extended to reconstruct and analyze
- * `parse_date`'s pattern, since the format is not a raw `tier: "regex"` value).
- * Enforced by a per-step refine on {@link TransformStep}'s schema before any row
- * runs. A DoS ceiling on the partner wire path, not a semantic limit.
+ * builds a regex from `inputFormat` and assembles the result from `outputFormat`.
+ * This length cap bounds the per-row WORK SIZE -- an unbounded `inputFormat` would
+ * compile an ever-larger regex per row, and an unbounded `outputFormat` would
+ * allocate an ever-larger output per matched row -- with 256 far above any real
+ * date layout ("MM/DD/YYYY", "YYYY-MM-DD") yet small enough that the per-row build
+ * and output stay cheap. The format's MM/DD tokens expand into adjacent
+ * `(\d{1,2})` groups that catastrophically backtrack on the JavaScript engine, but
+ * `parse_date` compiles its regex under the linear-time engine
+ * (standardization.ts), which bounds that by construction -- so this cap is a
+ * work-SIZE ceiling, no longer the backstop against a backtracking blow-up it once
+ * shared with a separate screen. Enforced by a per-step refine on
+ * {@link TransformStep}'s schema before any row runs. A DoS ceiling on the partner
+ * wire path, not a semantic limit.
  */
 export const MAX_DATE_FORMAT_LENGTH = 256;
+
+/**
+ * Upper bound on the length of a raw partner-controlled regex pattern -- the
+ * `pattern` of `replace_regex` / `extract_regex` / `filter_regex` and the
+ * `delimiter` of `split_on` (the four `tier: "regex"` functions). These run per
+ * row inside the key-building pipeline ({@link applyElementTransform}, which
+ * recompiles each step per row), so an unbounded pattern would compile an
+ * ever-larger linear-time-engine program on every row. The engine matches in
+ * linear time regardless (no catastrophic backtracking), and its compile is
+ * internally bounded (repeat counts capped, program size limited), so this is a
+ * per-row COMPILE-COST ceiling, not a safety control -- it preserves the
+ * parse-cost bound the removed `redos-detector` screen provided
+ * (MAX_ANALYZED_PATTERN_LENGTH, also 1000). A real transform pattern is short
+ * (tens of characters); 1000 is far above any legitimate one. Enforced by a
+ * per-step refine on {@link TransformStep}'s schema before any row runs;
+ * dialect conformance (which patterns are valid at all) is enforced separately by
+ * the refine on {@link LinkageTermsSchema}. A DoS ceiling on the partner wire
+ * path, not a semantic limit.
+ */
+export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
 
 /**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
@@ -517,13 +543,13 @@ const TransformStepBaseSchema = z.object({
 // refine on this wire schema -- not on the editor descriptor an attacker-authored
 // token never passes through -- and each message names no partner value,
 // consistent with the unsanitized parse-error path the referential-integrity and
-// ReDoS refines rely on.
+// dialect refines rely on.
 const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // `pad_left` runs per row in the key-building pipeline (standardization.ts
   // applyElementTransform, driven by buildKeyStrings), so an unbounded `length`
   // makes every row allocate a `padStart(length, char)` of that size -- a crafted
   // 1e9 exhausts memory and hangs the acceptor, the memory-allocation sibling of
-  // the regex-ReDoS vector the refine on LinkageTermsSchema rejects. Only a
+  // the regex compile-cost cap below (MAX_TRANSFORM_PATTERN_LENGTH). Only a
   // positive-integer `length` ever reaches padStart (padLeftFactory throws on a
   // non-number, non-integer, or non-positive value before it allocates), so
   // rejecting positive integers above MAX_PAD_LEFT_LENGTH closes the whole
@@ -544,15 +570,15 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params", "length"],
     },
   )
-  // `parse_date` builds a `new RegExp` from `inputFormat` and assembles its result
-  // from `outputFormat`, both recompiled per row by applyElementTransform. This
-  // length cap bounds the per-row WORK SIZE: an unbounded `inputFormat` compiles an
+  // `parse_date` builds a regex from `inputFormat` and assembles its result from
+  // `outputFormat`, both recompiled per row by applyElementTransform. This length
+  // cap bounds the per-row WORK SIZE: an unbounded `inputFormat` compiles an
   // ever-larger regex per row, an unbounded `outputFormat` allocates an ever-larger
   // per-row output. Only a string value drives either (the factory treats a
   // non-string as an empty/absent format), so the bound is on the string length.
   // The catastrophic-backtracking risk in the expanded regex (adjacent `(\d{1,2})`
-  // from MM/DD tokens) is independent of length and is rejected separately by the
-  // ReDoS refine on LinkageTermsSchema (extended to screen parse_date's pattern).
+  // from MM/DD tokens) is closed by running parse_date on the linear-time engine
+  // (standardization.ts), not by this cap or a separate screen.
   .refine(
     (step) => {
       if (step.function !== "parse_date") return true;
@@ -566,6 +592,29 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
     },
     {
       message: `parse_date inputFormat and outputFormat must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+      path: ["params"],
+    },
+  )
+  // The four `tier: "regex"` functions compile their raw `pattern` / `delimiter`
+  // under the linear-time engine, recompiled per row by applyElementTransform, so
+  // an unbounded pattern compiles an ever-larger program every row. The engine
+  // bounds backtracking by construction; this bounds the per-row COMPILE cost,
+  // preserving the parse-cost ceiling the removed redos-detector screen provided
+  // (see MAX_TRANSFORM_PATTERN_LENGTH). Only a string param drives the compile
+  // (a non-string is coerced to a short literal), so the bound is on string
+  // length; dialect conformance is enforced separately on LinkageTermsSchema.
+  .refine(
+    (step) => {
+      const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
+      if (paramKey === undefined) return true;
+      const value = step.params?.[paramKey];
+      return (
+        typeof value !== "string" ||
+        value.length <= MAX_TRANSFORM_PATTERN_LENGTH
+      );
+    },
+    {
+      message: `transform regex pattern must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
       path: ["params"],
     },
   );
@@ -954,21 +1003,24 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         path: ["linkageKeys"],
       },
     )
-    // Reject a catastrophic-backtracking (ReDoS) regex in any element transform
-    // before it can run. Element-transform regex patterns are partner-controlled
-    // and execute per row over the full dataset, where a crafted pattern hangs the
-    // single JavaScript thread; the check belongs here so every parse path
-    // (initiator/joiner parseLinkageTerms, the invitation-token decode, and
-    // ExchangeSpecSchema) inherits it before any pattern executes. See
-    // transformRegexSafety.ts for the threat model and the best-effort nature of
-    // the heuristic. The message names no partner-controlled value -- the offending
-    // pattern is located by inspection, not echoed -- consistent with the
-    // unsanitized parse-error path the referential-integrity refines above rely on.
-    .refine((a) => !linkageTermsHaveUnsafeTransformRegex(a), {
+    // Reject a transform regex outside the linear-time dialect before it can run.
+    // Element-transform regex patterns are partner-controlled and execute per row
+    // over the full dataset, under the linear-time engine (utils/linearRegex.ts),
+    // so they cannot backtrack catastrophically; this rejects a pattern that
+    // engine cannot compile (a backreference, lookaround, or unsupported escape)
+    // -- fail closed, before any execution and before both parties commit to terms
+    // they could not evaluate identically. The check belongs here so every parse
+    // path (initiator/joiner parseLinkageTerms, the invitation-token decode, and
+    // ExchangeSpecSchema) inherits it. See transformRegexDialect.ts for the model
+    // and docs/spec/PROTOCOL.md for the normative dialect. The message names no
+    // partner-controlled value -- the offending pattern is located by inspection,
+    // not echoed -- consistent with the unsanitized parse-error path the
+    // referential-integrity refines above rely on.
+    .refine((a) => !linkageTermsHaveNonConformantTransformRegex(a), {
       message:
-        "a linkage key element transform uses a regular expression vulnerable " +
-        "to catastrophic backtracking (ReDoS); it is rejected before any " +
-        "pattern executes",
+        "a linkage key element transform uses a regular expression outside the " +
+        "linear-time dialect (RE2 syntax; backreferences and lookaround are not " +
+        "supported); it is rejected before any pattern executes",
       path: ["linkageKeys"],
     });
 

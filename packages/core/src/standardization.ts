@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import {
+  compileLinearRegex,
+  coerceToPatternString,
+  patternConformsToDialect,
+} from "./utils/linearRegex.js";
 import type {
   Standardization,
   StandardizationStep,
@@ -166,11 +171,12 @@ interface ParsedDateFormat {
 }
 
 // Build the anchored regex source and capture order for a parse_date input
-// format. Shared with the linkage-terms ReDoS screen (via parseDateRegexSource)
-// so the pattern that screen analyzes is byte-identical to the one compiled and
-// run here: the format is partner-controlled and its MM/DD tokens EXPAND into
-// adjacent `(\d{1,2})` groups, which can catastrophically backtrack even though
-// the format is not a raw `tier: "regex"` pattern. See transformRegexSafety.ts.
+// format. The format is partner-controlled and its MM/DD tokens EXPAND into
+// adjacent `(\d{1,2})` groups, which catastrophically backtrack on the JavaScript
+// engine; that is why parseDateFactory compiles this source under the linear-time
+// engine (compileLinearRegex), not `new RegExp`, even though the format is not a
+// raw `tier: "regex"` pattern. The expansion is harmless under a non-backtracking
+// engine, so no separate screen is needed -- the engine bounds it by construction.
 function parseDateFormat(inputFormat: string): ParsedDateFormat {
   const order: DateFormatToken[] = [];
   let regexStr = "";
@@ -199,22 +205,6 @@ function parseDateFormat(inputFormat: string): ParsedDateFormat {
   return { source: `^${regexStr}$`, order };
 }
 
-/**
- * The anchored regex source `parse_date` compiles from `inputFormat`, exposed so
- * the linkage-terms ReDoS screen ({@link linkageTermsHaveUnsafeTransformRegex})
- * analyzes the exact pattern this factory runs per row. `parse_date` is not a
- * raw-pattern `tier: "regex"` function, but its format's MM/DD tokens expand into
- * adjacent `(\d{1,2})` groups that can catastrophically backtrack, so the screen
- * must inspect the EXPANSION, not a raw param. Sharing the construction here
- * keeps the analyzed pattern from drifting from the executed one.
- *
- * @internal Exported for the ReDoS screen and unit tests; not a supported entry
- * point.
- */
-export function parseDateRegexSource(inputFormat: string): string {
-  return parseDateFormat(inputFormat).source;
-}
-
 // Parse `input_format` -> YAML camelizes keys but not values, so format
 // string tokens YYYY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
@@ -225,20 +215,29 @@ function parseDateFactory(params: Params): StandardizingFn {
     (params.outputFormat as string | undefined) ?? "YYYYMMDD";
 
   const { source, order } = parseDateFormat(inputFormat);
-  const re = new RegExp(source);
+  // Compile the anchored source under the linear-time engine, not `new RegExp`:
+  // the MM/DD tokens expand into adjacent `(\d{1,2})` groups that backtrack
+  // catastrophically on the JavaScript engine, so a partner-controlled format
+  // would otherwise hang the per-row loop. The engine bounds this by construction.
+  const re = compileLinearRegex(source);
 
   return (s) => {
     // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract). Date
     // separators are ASCII in practice, so this is a no-op on real input, but it
     // keeps parse_date inside the same authored-pattern-matching family as the
     // other regex steps rather than a silent exception.
-    const m = s.normalize("NFC").match(re);
-    if (!m) return null;
+    const groups = re.matchGroups(s.normalize("NFC"));
+    if (groups === null) return null;
 
     const parts: Partial<Record<DateFormatToken, string>> = {};
     order.forEach((token, idx) => {
-      parts[token] =
-        token === "YYYY" ? m[idx + 1] : m[idx + 1].padStart(2, "0");
+      // The source anchors every token group, so a successful whole-string match
+      // populates each; guard the null only to satisfy the type and to leave the
+      // part unset (caught by the YYYY/MM/DD presence check below) if it ever did
+      // not participate.
+      const value = groups[idx + 1];
+      if (value === null) return;
+      parts[token] = token === "YYYY" ? value : value.padStart(2, "0");
     });
 
     if (!parts.YYYY || !parts.MM || !parts.DD) return null;
@@ -360,40 +359,36 @@ function nullIfFactory(params: Params): StandardizingFn {
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
-  const pattern = params.pattern as string;
+  const pattern = coerceToPatternString(params.pattern);
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
   // sequence into the key (the pattern itself is matched as authored; author it
   // in NFC to match NFC runtime values).
   const replacement = (
     (params.replacement as string | undefined) ?? ""
   ).normalize("NFC");
-  const re = new RegExp(pattern, "g");
+  const re = compileLinearRegex(pattern);
   // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract) so an
   // authored-NFC pattern matches a value left non-NFC by an upstream case-fold;
   // the result is derived from the normalized value, byte-identical for
-  // already-canonical inputs.
-  return (s) => s.normalize("NFC").replace(re, replacement);
+  // already-canonical inputs. replaceAll is global, like the old `g` flag.
+  return (s) => re.replaceAll(s.normalize("NFC"), replacement);
 }
 
 function extractRegexFactory(params: Params): StandardizingFn {
-  const pattern = params.pattern as string;
-  const re = new RegExp(pattern);
+  const pattern = coerceToPatternString(params.pattern);
+  const re = compileLinearRegex(pattern);
   // Match AND slice on the NFC-normalized value (see the STANDARDIZING_FUNCTIONS
   // contract): an authored-NFC pattern must match a value left non-NFC by an
   // upstream case-fold, and the returned capture must come from the same
   // normalized string -- NFC can change the code-unit count, so a capture taken
-  // from the original could misalign. `match` returns capture substrings of the
-  // string it ran against, so slicing follows the normalized value for free.
-  return (s) => {
-    const m = s.normalize("NFC").match(re);
-    if (!m) return null;
-    return (m[1] ?? m[0]) || null;
-  };
+  // from the original could misalign. extractFirst returns capture substrings of
+  // the string it ran against, so slicing follows the normalized value for free.
+  return (s) => re.extractFirst(s.normalize("NFC"));
 }
 
 function filterRegexFactory(params: Params): StandardizingFn {
-  const pattern = params.pattern as string;
-  const re = new RegExp(pattern);
+  const pattern = coerceToPatternString(params.pattern);
+  const re = compileLinearRegex(pattern);
   // NFC-normalize before testing (see the STANDARDIZING_FUNCTIONS contract) so
   // an authored-NFC pattern matches a value left non-NFC by an upstream
   // case-fold; return the original value on a match so emitted bytes for
@@ -402,10 +397,10 @@ function filterRegexFactory(params: Params): StandardizingFn {
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
-  const delimiter = params.delimiter as string;
+  const delimiter = coerceToPatternString(params.delimiter);
   const includeOriginal =
     (params.includeOriginal as boolean | undefined) ?? false;
-  const re = new RegExp(delimiter);
+  const re = compileLinearRegex(delimiter);
   return (s) => {
     // Normalize before splitting (see the STANDARDIZING_FUNCTIONS contract) so
     // an authored-NFC delimiter matches a value left non-NFC by an upstream
@@ -413,7 +408,7 @@ function splitOnFactory(params: Params): StandardizingFn {
     // like extract_regex, since the split offsets are computed on it; this is a
     // no-op for already-canonical inputs.
     const n = s.normalize("NFC");
-    const parts = n.split(re).filter((p) => p.length > 0);
+    const parts = re.split(n).filter((p) => p.length > 0);
     if (parts.length <= 1) return new Set([n]);
     return includeOriginal ? new Set([n, ...parts]) : new Set(parts);
   };
@@ -486,10 +481,12 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
  * - `standard` -- every function whose params are plain typed values.
  * - `regex` -- the raw-pattern family (`replace_regex`, `extract_regex`,
  *   `filter_regex`, `split_on`), whose param is an operator-authored regular
- *   expression. This is the danger tier: an editor must gate raw-pattern
- *   authoring behind a catastrophic-backtracking-aware affordance, because an
- *   unbounded user pattern can hang on adversarial input. The descriptor marks
- *   the tier; enforcing the gate is the editor's responsibility.
+ *   expression. These patterns run under the linear-time engine (see
+ *   utils/linearRegex.ts), so an unbounded pattern can no longer hang on
+ *   adversarial input; the tier instead marks raw-pattern inputs an editor should
+ *   validate against the dialect ({@link patternConformsToDialect}, the same
+ *   check {@link regexPatternSchema} applies) and present with extra care, since a
+ *   pattern still shapes which records match.
  */
 export type StandardizationFunctionTier = "standard" | "regex";
 
@@ -542,26 +539,22 @@ export interface StandardizationFunctionDescriptor {
 const noParams = z.object({});
 
 /**
- * A user-authored regular-expression param. Required, and validated to compile,
- * mirroring each regex factory's `new RegExp(pattern)` (which throws on an
- * invalid pattern; `replace_regex` adds the global flag, which does not affect
- * validity). The danger-tier gate against catastrophic backtracking is the
- * editor's responsibility; this only rejects a syntactically invalid pattern.
+ * A user-authored regular-expression param. Required, and validated to compile
+ * under the linear-time dialect ({@link patternConformsToDialect}) -- the same
+ * engine the regex factories run, so the editor accepts exactly the patterns an
+ * exchange will execute and rejects what RE2 drops (backreferences, lookaround).
+ * This replaces the danger-tier "catastrophic backtracking is the editor's
+ * problem" gate: under a non-backtracking engine there is no danger tier to gate,
+ * only the dialect to conform to. See docs/spec/PROTOCOL.md.
  */
 const regexPatternSchema = z
   .string()
   .min(1)
-  .refine(
-    (pattern) => {
-      try {
-        new RegExp(pattern);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "must be a valid regular expression" },
-  );
+  .refine(patternConformsToDialect, {
+    message:
+      "must be a valid regular expression in the linear-time dialect " +
+      "(RE2 syntax; backreferences and lookaround are not supported)",
+  });
 
 /**
  * Editor-facing descriptor for every standardization function the library

@@ -425,14 +425,46 @@ test("a swap target matching no element in its key is rejected", () => {
   expect(result.error.issues[0].message).toMatch(/swap target/);
 });
 
-// ─── Catastrophic-backtracking (ReDoS) transform regexes ─────────────────────
+// ─── Transform-regex dialect conformance ─────────────────────────────────────
 // Element-transform regex patterns are partner-controlled and run per row over
-// the full dataset; a crafted catastrophic pattern hangs the single JS thread.
-// The check lives in LinkageTermsSchema so every parse path inherits it. (The
-// per-pattern analysis and the four covered functions are unit-tested in
-// transformRegexSafety.test.ts; these assert the schema-level wiring.)
+// the full dataset, under the linear-time engine (utils/linearRegex.ts), so they
+// cannot backtrack catastrophically. The remaining validation control is dialect
+// conformance: a pattern the engine cannot compile (a backreference, lookaround,
+// or unsupported escape) is rejected before any execution. The check lives in
+// LinkageTermsSchema so every parse path inherits it. (Engine semantics, and the
+// former-ReDoS patterns running in linear time, are unit-tested in
+// linearRegex.test.ts and standardization.test.ts.)
 
-test("a catastrophic-backtracking regex in an element transform is rejected at validation", () => {
+test("a transform regex outside the linear-time dialect is rejected at validation", () => {
+  // A backreference is valid JavaScript regex but outside the RE2 dialect; it is
+  // rejected at terms validation, fail closed, before any pattern executes.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [
+              { function: "filter_regex", params: { pattern: "(a)\\1" } },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/linear-time dialect/);
+});
+
+test("a nested-quantifier pattern that backtracks on new RegExp now validates", () => {
+  // `(a+)+$` is the textbook catastrophic-backtracking pattern on a backtracking
+  // engine; under the linear-time engine it is in-dialect and matches in linear
+  // time, so it is accepted rather than rejected -- the by-construction successor
+  // to the removed best-effort ReDoS screen.
   const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
@@ -449,13 +481,10 @@ test("a catastrophic-backtracking regex in an element transform is rejected at v
       },
     ],
   });
-  expect(result.success).toBe(false);
-  if (result.success) return;
-  expect(result.error.issues[0].path).toContain("linkageKeys");
-  expect(result.error.issues[0].message).toMatch(/catastrophic backtracking/);
+  expect(result.success).toBe(true);
 });
 
-test("the bundled email-filter pattern in an element transform validates (allowlisted)", () => {
+test("the bundled email-filter pattern in an element transform validates (in-dialect)", () => {
   const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
@@ -478,10 +507,10 @@ test("the bundled email-filter pattern in an element transform validates (allowl
   expect(result.success).toBe(true);
 });
 
-test("an element-transform regex that cannot compile still validates, so the runtime SyntaxError boundary handles it", () => {
-  // An invalid pattern is not pre-empted by this check: the standardization
-  // factory's own new RegExp(...) throws at runtime and the exchange aborts
-  // through the existing sanitized error boundary -- unchanged by this hardening.
+test("an element-transform regex the engine cannot compile is rejected at validation (fail closed)", () => {
+  // An uncompilable pattern is now rejected at terms validation rather than
+  // deferred to a runtime throw: the dialect gate compiles every pattern, and one
+  // that cannot compile fails closed before any data is processed.
   const result = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
@@ -496,7 +525,9 @@ test("an element-transform regex that cannot compile still validates, so the run
       },
     ],
   });
-  expect(result.success).toBe(true);
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].message).toMatch(/linear-time dialect/);
 });
 
 // ─── pad_left length bound (partner-controlled allocation DoS) ────────────────
@@ -572,17 +603,15 @@ test("a malformed pad_left length still validates, so the runtime factory check 
   );
 });
 
-// ─── parse_date format-string bounds (partner-controlled per-row regex DoS) ───
-// parse_date builds a `new RegExp` from `inputFormat` and assembles its result
-// from `outputFormat`, recompiled per row by applyElementTransform over the full
-// dataset. Two distinct risks, two controls, both at LinkageTermsSchema
-// validation: (1) an unbounded format makes every row compile / allocate work
-// proportional to its length -- bounded by the MAX_DATE_FORMAT_LENGTH refine; and
-// (2) the format's MM/DD tokens expand into adjacent `(\d{1,2})` groups that can
-// catastrophically backtrack at a length well under that cap -- rejected by the
-// ReDoS screen (linkageTermsHaveUnsafeTransformRegex, extended to reconstruct and
-// analyze parse_date's pattern). Tests that target ONLY the length cap use a
-// non-token literal ("x") so the two controls are exercised independently.
+// ─── parse_date format-string bound (partner-controlled per-row regex DoS) ────
+// parse_date builds a regex from `inputFormat` and assembles its result from
+// `outputFormat`, recompiled per row by applyElementTransform over the full
+// dataset. An unbounded format makes every row compile / allocate work
+// proportional to its length -- bounded by the MAX_DATE_FORMAT_LENGTH refine at
+// LinkageTermsSchema validation. The other former risk -- the format's MM/DD
+// tokens expanding into adjacent `(\d{1,2})` groups that catastrophically
+// backtrack at a length well under that cap -- is now closed by running parse_date
+// on the linear-time engine (standardization.ts), so no separate screen is needed.
 // (parse_date's runtime behavior is unit-tested in standardization.test.ts.)
 
 const parseDateTerms = (params: Record<string, unknown>) => ({
@@ -598,7 +627,6 @@ const parseDateTerms = (params: Record<string, unknown>) => ({
 });
 
 test("an over-large parse_date inputFormat is rejected by the length cap", () => {
-  // A non-token literal, so this isolates the length cap from the ReDoS screen.
   const result = safeParseLinkageTerms(
     parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH + 1) }),
   );
@@ -632,7 +660,6 @@ test("a real-sized parse_date format parses and is preserved (no clamp)", () => 
 });
 
 test("a parse_date format at exactly the length maximum parses; one over is rejected", () => {
-  // Non-token literal so this isolates the length cap from the ReDoS screen.
   expect(
     safeParseLinkageTerms(
       parseDateTerms({ inputFormat: "x".repeat(MAX_DATE_FORMAT_LENGTH) }),
@@ -645,25 +672,19 @@ test("a parse_date format at exactly the length maximum parses; one over is reje
   ).toBe(false);
 });
 
-test("a catastrophic-backtracking parse_date inputFormat is rejected by the ReDoS screen", () => {
-  // "MM".repeat(24) is 48 chars -- well under the length cap -- but expands to 24
-  // adjacent `(\d{1,2})` groups, a catastrophic-backtracking regex. The length cap
-  // does not catch it (it is short); the ReDoS screen, extended to reconstruct
-  // parse_date's pattern, does. Without this the per-row regex would hang the
-  // acceptor over the full dataset.
+test("a former-ReDoS parse_date inputFormat now validates (linear-time engine bounds it)", () => {
+  // "MM".repeat(24) is 48 chars -- under the length cap -- and expands to 24
+  // adjacent `(\d{1,2})` groups, which catastrophically backtrack on `new RegExp`.
+  // parse_date now compiles this under the linear-time engine, which bounds it by
+  // construction, so the format is accepted (not rejected by a screen) and its
+  // per-row match stays linear over the full dataset.
   const result = safeParseLinkageTerms(
     parseDateTerms({ inputFormat: "MM".repeat(24) }),
   );
-  expect(result.success).toBe(false);
-  if (result.success) return;
-  expect(result.error.issues[0].path).toContain("linkageKeys");
-  expect(result.error.issues[0].message).toMatch(/catastrophic backtracking/);
+  expect(result.success).toBe(true);
 });
 
-test("common parse_date formats are not falsely flagged by the ReDoS screen", () => {
-  // Legitimate layouts (separated, or with at most two adjacent ambiguous groups
-  // like YYYYMMDD) must not be over-rejected by the catastrophic-backtracking
-  // screen.
+test("common parse_date formats validate", () => {
   for (const inputFormat of [
     "MM/DD/YYYY",
     "YYYY-MM-DD",
@@ -678,8 +699,8 @@ test("common parse_date formats are not falsely flagged by the ReDoS screen", ()
 
 test("a non-string parse_date format still validates, so the runtime factory handles it", () => {
   // Only a string format drives the regex build / output allocation; the factory
-  // treats a non-string as an empty/absent format, so neither the length cap nor
-  // the ReDoS screen pre-empts it (behavior unchanged).
+  // treats a non-string as an empty/absent format, so the length cap does not
+  // pre-empt it (behavior unchanged).
   expect(
     safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 })).success,
   ).toBe(true);
