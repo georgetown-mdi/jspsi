@@ -18,21 +18,29 @@ interface Chunk {
 
 /**
  * A faithful model of the PeerJS binary connection's chunk reassembly: it
- * accumulates slices into `_chunkedData` keyed by message id and deletes the
- * entry once the frame completes -- the exact lifecycle boundChunkReassembly
- * wraps. `completed` records each id whose frame finished, for observation.
+ * accumulates slices into `_chunkedData` keyed by message id (storing the chunk
+ * total from the first chunk, as PeerJS does) and deletes the entry once the
+ * frame completes -- the exact lifecycle boundChunkReassembly wraps. `completed`
+ * records each id whose frame finished, for observation.
  */
 class FakeChunkedConnection {
-  _chunkedData: Record<number, { data: Array<Uint8Array>; count: number }> = {};
+  _chunkedData: Record<
+    number,
+    { data: Array<Uint8Array>; count: number; total: number }
+  > = {};
   completed: Array<number> = [];
 
   _handleChunk = (chunk: Chunk): void => {
     const id = chunk.__peerData;
-    const info = this._chunkedData[id] ?? { data: [], count: 0 };
+    const info = this._chunkedData[id] ?? {
+      data: [],
+      count: 0,
+      total: chunk.total,
+    };
     info.data[chunk.n] = chunk.data;
     info.count++;
     this._chunkedData[id] = info;
-    if (info.count === chunk.total) {
+    if (info.count === info.total) {
       delete this._chunkedData[id];
       this.completed.push(id);
     }
@@ -48,16 +56,58 @@ function makeChunk(id: number, n: number, total: number, bytes: number): Chunk {
   return { __peerData: id, n, total, data: new Uint8Array(bytes) };
 }
 
-function install(
+/** Deliver `bytes` as a frame split into `total` (>= 2) ordered chunks, so the
+ * reassembly and completion-time structural scan are exercised. */
+function feedFrame(
   conn: FakeChunkedConnection,
-  options?: { maxFrameBytes?: number; maxConcurrentReassemblies?: number },
-) {
+  id: number,
+  bytes: Uint8Array,
+  total: number,
+): void {
+  const per = Math.ceil(bytes.length / total) || 1;
+  for (let n = 0; n < total; n++) {
+    conn._handleChunk({
+      __peerData: id,
+      n,
+      total,
+      data: bytes.subarray(n * per, Math.min(bytes.length, (n + 1) * per)),
+    });
+  }
+}
+
+/** A BinaryPack array32 header declaring `count` elements (no element bytes --
+ * the scan rejects an over-budget count at the header, before reading them). */
+function array32Header(count: number): Uint8Array {
+  return new Uint8Array([
+    0xdd,
+    (count >>> 24) & 0xff,
+    (count >>> 16) & 0xff,
+    (count >>> 8) & 0xff,
+    count & 0xff,
+  ]);
+}
+
+type InstallOptions = {
+  maxFrameBytes?: number;
+  maxConcurrentReassemblies?: number;
+  maxFrameNodes?: number;
+  maxReassemblyDepth?: number;
+  maxChunks?: number;
+  minChunkResidentBytes?: number;
+};
+
+function install(conn: FakeChunkedConnection, options?: InstallOptions) {
   const fail = vi.fn();
-  boundChunkReassembly(conn as unknown as DataConnection, fail, options);
+  // Default the per-chunk residency floor to 0 so byte-cap tests measure pure
+  // payload; the residency behavior is exercised by its own test.
+  boundChunkReassembly(conn as unknown as DataConnection, fail, {
+    minChunkResidentBytes: 0,
+    ...options,
+  });
   return fail;
 }
 
-describe("boundChunkReassembly", () => {
+describe("boundChunkReassembly: wire-byte and partial bounds", () => {
   test("rejects an over-cap reassembly and does not store the over-cap chunk", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameBytes: 100 });
@@ -70,6 +120,7 @@ describe("boundChunkReassembly", () => {
     const err = fail.mock.calls[0][0] as ConnectionError;
     expect(err).toBeInstanceOf(ConnectionError);
     expect(err.kind).toBe("protocol");
+    expect(err.message).toContain("size limit");
     // The over-cap chunk was never delegated to the original, so only the two
     // in-cap chunks were stored -- allocation did not track the peer's claim.
     expect(conn._chunkedData[1].count).toBe(2);
@@ -108,7 +159,7 @@ describe("boundChunkReassembly", () => {
     });
 
     conn._handleChunk(makeChunk(1, 0, 5, 60)); // 60
-    conn._handleChunk(makeChunk(2, 0, 5, 60)); // 60 + 60 = 120 > 100, no single frame over cap
+    conn._handleChunk(makeChunk(2, 0, 5, 60)); // 60 + 60 = 120 > 100
 
     expect(fail).toHaveBeenCalledTimes(1);
     expect((fail.mock.calls[0][0] as ConnectionError).kind).toBe("protocol");
@@ -183,10 +234,91 @@ describe("boundChunkReassembly", () => {
     expect((fail.mock.calls[0][0] as ConnectionError).kind).toBe("protocol");
   });
 
+  test("bounds a flood of tiny chunks by per-chunk residency", () => {
+    const conn = new FakeChunkedConnection();
+    // 256-byte residency floor, 1000-byte cap: four 1-byte chunks (4 payload
+    // bytes) are charged 256 each and trip the cap, where payload alone would not.
+    const fail = install(conn, {
+      maxFrameBytes: 1000,
+      minChunkResidentBytes: 256,
+    });
+
+    conn._handleChunk(makeChunk(1, 0, 100, 1)); // 256
+    conn._handleChunk(makeChunk(1, 1, 100, 1)); // 512
+    conn._handleChunk(makeChunk(1, 2, 100, 1)); // 768
+    expect(fail).not.toHaveBeenCalled();
+    conn._handleChunk(makeChunk(1, 3, 100, 1)); // 1024 > 1000
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toContain(
+      "size limit",
+    );
+  });
+
+  test("bounds the retained chunk count per reassembly", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxChunks: 3 });
+
+    conn._handleChunk(makeChunk(1, 0, 100, 10));
+    conn._handleChunk(makeChunk(1, 1, 100, 10));
+    conn._handleChunk(makeChunk(1, 2, 100, 10));
+    expect(fail).not.toHaveBeenCalled();
+    conn._handleChunk(makeChunk(1, 3, 100, 10)); // 4th chunk > 3
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toContain(
+      "chunk",
+    );
+  });
+
   test("throws when the PeerJS chunk internals are absent", () => {
     expect(() =>
       boundChunkReassembly({} as unknown as DataConnection, vi.fn()),
     ).toThrow(/chunk-reassembly internals/);
+  });
+});
+
+describe("boundChunkReassembly: deserialized-structure bound", () => {
+  test("rejects a frame that declares more values than the node budget", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameNodes: 100 });
+
+    // An array declaring 1000 elements deserializes to 1000+ JS values; rejected
+    // at the header, before the unpack allocates, even though the wire is tiny.
+    feedFrame(conn, 1, array32Header(1000), 2);
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    const err = fail.mock.calls[0][0] as ConnectionError;
+    expect(err.kind).toBe("protocol");
+    expect(err.message).toContain("structure limit");
+    expect(conn.completed).toEqual([]);
+  });
+
+  test("accepts a small structure under the node budget and completes it", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameNodes: 100 });
+
+    // fixarray of three fixints -> four values, well under the budget.
+    feedFrame(conn, 1, new Uint8Array([0x93, 0x01, 0x02, 0x03]), 2);
+
+    expect(fail).not.toHaveBeenCalled();
+    expect(conn.completed).toEqual([1]);
+  });
+
+  test("skips a large binary payload without materializing or miscounting it", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameNodes: 4 });
+
+    // A raw16 of 10 bytes is a single value; the scan skips its payload across
+    // chunk boundaries and counts one node, so it passes a tiny node budget.
+    const raw = new Uint8Array(13);
+    raw[0] = 0xda; // raw16
+    raw[1] = 0x00;
+    raw[2] = 0x0a; // length 10
+    feedFrame(conn, 1, raw, 3);
+
+    expect(fail).not.toHaveBeenCalled();
+    expect(conn.completed).toEqual([1]);
   });
 });
 
