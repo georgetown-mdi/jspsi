@@ -1012,6 +1012,48 @@ export function safeParseLinkageTerms(raw: unknown) {
   return safeParseCamelized(LinkageTermsSchema, raw, PARAMS_WIDTH_BOUND);
 }
 
+/**
+ * {@link LinkageTermsSchema} preceded by the shared {@link camelizeKeys} pre-pass
+ * (carrying the {@link MAX_PARAMS_ENTRIES} params width bound), so the value is
+ * folded to the canonical camelCase key form BEFORE it is validated -- exactly as
+ * {@link parseLinkageTerms} does for the config-load and post-handshake wire paths.
+ *
+ * This is the linkage-terms schema the invitation decode path uses (in place of
+ * the bare {@link LinkageTermsSchema}) at the `linkageTerms` field of
+ * `InvitationTokenSchema`. The bare schema leaves `transform.params` keys verbatim
+ * (the record is `z.unknown()` content with no key-form constraint), so without
+ * this a token's params would stay snake_case while the same agreement loaded from
+ * config or received off the wire is camelCase -- desyncing the canonical
+ * comparison, the agreed-terms hash (`computeTermsHash`), and the standardization
+ * runtime (which reads `params.inputFormat`). Folding here makes "a decoded token's
+ * `transform.params` is camelCase" a structural invariant at the decode chokepoint,
+ * so every downstream consumer sees the one form they already expect.
+ *
+ * The pre-pass runs BEFORE validation, not after, and that ordering is
+ * load-bearing: the per-step ReDoS and length screens (`parse_date` / `pad_left`
+ * refines on {@link TransformStep}'s schema, and the catastrophic-backtracking
+ * screen on {@link LinkageTermsSchema}) read their inputs at the camelCase param
+ * names (`inputFormat`, `length`, `pattern`). A snake_case-params token validated
+ * first and folded after would evade those screens entirely, then activate the
+ * unscreened value -- a ReDoS/DoS bypass. Folding first runs every screen on the
+ * normalized form. The pre-pass is bounded: it throws NestingDepthExceededError /
+ * NodeCountExceededError (both UsageError subclasses, fixed input-free messages) on
+ * a pathologically deep or wide `params`, bringing the schema-opaque,
+ * decode-unbounded params under the same depth/width discipline the other parse
+ * paths apply; the throw propagates from `.parse` for the caller to surface.
+ *
+ * The accepted-token SET widens only as the config path's already does: a
+ * snake_case STRUCTURAL key (e.g. `linkage_fields`) now folds and validates rather
+ * than being rejected, matching how a hand-authored config is read. This wraps only
+ * the linkage-terms field, so the token's other fields and the strict
+ * connection-endpoint credential allowlist are unaffected.
+ */
+export const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> =
+  z.preprocess(
+    (raw) => camelizeKeys(raw, PARAMS_WIDTH_BOUND),
+    LinkageTermsSchema,
+  );
+
 // --- Compatibility -----------------------------------------------------------
 
 export interface CompatibilityResult {
@@ -1097,6 +1139,16 @@ export function validateCompatibility(
   // between plain and Zod-parsed objects) does not affect the result; fields are
   // pre-sorted by name because their array order is not significant, whereas
   // linkage keys are ordered most-to-least precise and compared in place.
+  //
+  // No casing fold is applied here: `transform.params` keys (the only
+  // partner-controlled keys whose form could vary) are normalized to camelCase at
+  // every parse chokepoint that produces a LinkageTerms -- config load and the
+  // post-handshake wire path via parseLinkageTerms, and the invitation decode path
+  // via InvitationLinkageTermsSchema -- so both sides reach this comparison in
+  // the one camelCase form. The encoder sorts keys but does not fold casing, which
+  // is why the normalization is a parse-layer invariant rather than something this
+  // comparison re-does (and why the agreed-terms hash, which also does not fold,
+  // stays cross-party reproducible: it hashes the same camelCase form).
   //
   // canonicalString throws CanonicalEncodingError on a value outside the
   // reproducible domain. A partner can reach this: transform `params` is

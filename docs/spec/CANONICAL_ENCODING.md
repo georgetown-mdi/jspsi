@@ -98,6 +98,23 @@ comparator, and is the ordering RFC 8785 specifies. Duplicate keys cannot occur
 
 Array element order is **significant** and is preserved as given.
 
+The encoder sorts keys but does **not** fold their **casing**: two objects whose
+keys differ only in snake_case-vs-camelCase form (`{"input_format": ...}` vs
+`{"inputFormat": ...}`) encode to different bytes. This matters for the
+partner-controlled `transform.params` keys, the only linkage-terms keys whose
+form could vary. They are normalized to camelCase at **every** parse path that
+produces a `LinkageTerms` -- config load and the post-handshake wire path (via
+`camelizeKeys` in `parseLinkageTerms`), and the invitation decode path (via
+`InvitationLinkageTermsSchema`, which camelizes before validating). So by the
+time terms reach a canonical encoding they are already camelCase on both sides: a
+casing fold is a parse-layer invariant, not something the consumers re-do. The
+agreed-terms hash (`computeTermsHash`) and the cross-party
+`validateCompatibility` comparison therefore both encode the same camelCase form
+without folding, which is what keeps the hash cross-party reproducible. A
+third-party implementation reproducing the agreed-terms hash must normalize
+`transform.params` keys to camelCase the same way (a `snake_case` key in a token
+is folded at decode, so the hashed form is camelCase).
+
 ### Numbers
 
 A number MUST be finite. RFC 8785 serializes a number as ECMAScript

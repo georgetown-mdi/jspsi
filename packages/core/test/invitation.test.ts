@@ -20,6 +20,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
 } from "../src/config/linkageTerms";
+import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
@@ -189,6 +190,134 @@ test("decodeInvitation rejects linkage terms carrying a catastrophic-backtrackin
   await expect(decodeInvitation(encoded)).rejects.toThrow(
     /catastrophic backtracking/,
   );
+});
+
+// --- transform.params key-casing normalization at decode ---------------------
+// The invitation decode path is the chokepoint that folds partner-controlled
+// transform.params keys to camelCase (InvitationLinkageTermsSchema), so a
+// decoded token's params match the form every other parse path produces and the
+// per-step ReDoS/length screens run on the normalized form.
+
+test("decodeInvitation normalizes snake_case transform.params keys to camelCase", async () => {
+  // A hand-crafted token can carry snake_case params (the params record is
+  // z.unknown() content with no key-form constraint). The decode chokepoint folds
+  // them to camelCase, so a third-party token converges with a psilink-minted one
+  // and the standardization runtime (which reads params.inputFormat) sees them.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "parse_date",
+                  params: {
+                    input_format: "MM/DD/YYYY",
+                    output_format: "YYYYMMDD",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(
+    decoded.linkageTerms.linkageKeys[0].elements[0].transform?.[0].params,
+  ).toEqual({ inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" });
+});
+
+test("decodeInvitation screens a snake_case parse_date inputFormat for ReDoS (the fold precedes the screen)", async () => {
+  // The catastrophic-backtracking screen reads the camelCase `inputFormat`. Because
+  // the decode fold runs BEFORE validation, a snake_case `input_format` carrying a
+  // runaway format is normalized first and then screened, so it is rejected -- not
+  // folded into effect after the screen already passed over the absent camelCase
+  // key. "MM" x24 expands to 24 adjacent ambiguous groups, the flagged ReDoS shape.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "parse_date",
+                  params: { input_format: "MM".repeat(24) },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    /catastrophic backtracking/,
+  );
+});
+
+test("decodeInvitation rejects a deeply-nested transform.params at decode (bounded fold)", async () => {
+  // transform.params is z.unknown() content, so a one-key-per-level params decodes
+  // structurally (parseBoundedJson admits up to 4096 levels). The camelCase fold is
+  // the bounded camelizeKeys walk, so params nested past MAX_NESTING_DEPTH is a clean
+  // NestingDepthExceededError (a UsageError) at decode rather than a stack overflow
+  // from a raw recursion. Build the value iteratively so the test does not recurse.
+  let deep: Record<string, unknown> = { leaf: "x" };
+  for (let i = 0; i < 3000; i++) deep = { a: deep };
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "K",
+          elements: [
+            { field: "ssn", transform: [{ function: "noop", params: deep }] },
+          ],
+        },
+      ],
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    NestingDepthExceededError,
+  );
+});
+
+test("decodeInvitation accepts snake_case structural linkage-terms keys, like the config path", async () => {
+  // Folding before validation makes the invitation path read snake_case
+  // linkage-terms keys the same way a hand-authored config does (parseLinkageTerms
+  // camelizes), so a token spelled snake_case at the structural level is accepted
+  // and normalized, not rejected. Only the linkage-terms field is folded; the
+  // token's other fields and the strict connection-endpoint allowlist are
+  // unaffected (covered by their own tests).
+  const token = {
+    version: "1",
+    sharedSecret: VALID_SECRET,
+    linkageTerms: {
+      version: "1.0.0",
+      identity: "Test Party",
+      date: "2025-01-01",
+      algorithm: "psi",
+      output: { expects_output: true, share_with_partner: false },
+      deduplicate: false,
+      linkage_fields: [{ name: "ssn", type: "ssn" }],
+      linkage_keys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(decoded.linkageTerms.linkageFields[0].name).toBe("ssn");
+  expect(decoded.linkageTerms.output.expectsOutput).toBe(true);
 });
 
 // --- Checksum ----------------------------------------------------------------

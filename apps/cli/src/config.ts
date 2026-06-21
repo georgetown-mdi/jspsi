@@ -357,24 +357,20 @@ export const RECONCILE_UNSET = "(unset)";
  * how the schema treats them.
  *
  * `depth` bounds the native recursion at the same {@link MAX_NESTING_DEPTH} the
- * camelize/snakeize chokepoint applies on the config-parse path. This walk runs
- * over an invitation's linkage terms, and the invitation decode path -- unlike
- * the post-handshake wire path -- does NOT run `camelizeKeys` over the
- * `z.unknown()` `transform.params` value, so without this guard a
- * partner-controlled one-key-per-level `params` (bounded only by the 64 KiB
- * encoded-invitation cap and `parseBoundedJson`'s 4096-level decode depth, both
- * above the ~2000-level native call-stack limit) would overflow this walk with an
- * unguarded `RangeError` that the command boundary maps to a generic
- * internal-error exit (69) -- catchable and non-fatal, but ungraceful. `nfcDeep`
- * overflows first and carries no boundary guard of its own; the recursive
- * `canonicalString` it feeds would instead convert a deep-input overflow into a
- * typed `CanonicalEncodingError`. Rejecting at 256 turns that into a clean,
- * terminal {@link NestingDepthExceededError} (a `UsageError`, CLI exit 64) long
- * before the overflow, with headroom far above any real config (the deepest
- * schema path is under a dozen levels, and `params` legitimately holds shallow
- * scalars). The existing-config side is already bounded to this depth at load
- * (camelized through the same `MAX_NESTING_DEPTH` chokepoint), so no legitimate
- * reconcile pair exceeds it. See docs/spec/CHANNEL_SECURITY.md.
+ * camelize chokepoint applies on every linkage-terms parse path. Both sides now
+ * reach this walk already depth-bounded: the invitation decode path normalizes
+ * `transform.params` through the bounded `camelizeKeys` chokepoint (core's
+ * `InvitationLinkageTermsSchema`), so a partner-controlled one-key-per-level
+ * `params` is rejected at decode before it could reach here, and the
+ * existing-config side is bounded the same way at load. This guard is the
+ * reconcile walk's own backstop, kept because `nfcDeep` is an independent
+ * recursion that must not rely on every caller having pre-bounded its input: an
+ * unguarded deep value would overflow this walk with a `RangeError` the command
+ * boundary maps to a generic internal-error exit (69), whereas rejecting at 256
+ * yields a clean, terminal {@link NestingDepthExceededError} (a `UsageError`, CLI
+ * exit 64) long before the overflow, with headroom far above any real config (the
+ * deepest schema path is under a dozen levels, and `params` legitimately holds
+ * shallow scalars). See docs/spec/CHANNEL_SECURITY.md.
  */
 function nfcDeep(value: unknown, depth = 0): unknown {
   if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
@@ -395,6 +391,12 @@ function nfcDeep(value: unknown, depth = 0): unknown {
  * canonical encoder sorts object keys, so property-insertion order does not
  * affect the result; array order is preserved, so the caller pre-sorts any list
  * whose order is not significant.
+ *
+ * No key-casing fold is applied: `transform.params` keys (the only ones whose
+ * form could vary) are normalized to camelCase upstream on every parse path that
+ * produces these terms -- the existing config at load, and the invitation's
+ * adopted terms at decode (core's InvitationLinkageTermsSchema) -- so both sides
+ * reach this compare in the one camelCase form.
  */
 function nfcCanonical(value: unknown): string {
   return canonicalString(nfcDeep(value));
@@ -489,6 +491,15 @@ export function diffLinkageTerms(
   // cross-party validateCompatibility re-checks compatibility at exchange setup
   // and surfaces an un-encodable value as a hard error there, so reuse stays
   // backstopped.
+  //
+  // Only CanonicalEncodingError is softened to a warning. nfcDeep's own depth
+  // guard can also throw NestingDepthExceededError, and that is deliberately left
+  // to propagate as the terminal exit-64 usage error item 202775336 established
+  // for a pathological token -- a too-deep structure is rejected, not
+  // reconciled-and-deferred the way an un-encodable value is. Both sides are now
+  // depth-bounded upstream (the invitation's params at decode, the config at
+  // load), so this backstop is not normally reachable; it stays because nfcDeep
+  // is an independent recursion that must not depend on its callers (see nfcDeep).
   const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean => {
     let ca: string;
     let cb: string;

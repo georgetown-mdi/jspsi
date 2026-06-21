@@ -1144,6 +1144,35 @@ test("a non-canonical linkage-key param is reported, not thrown", () => {
   ).toBe(true);
 });
 
+test("a transform.params value difference is an incompatibility", () => {
+  // The comparison operates on already-camelCase terms -- every parse path (config
+  // load, the post-handshake wire, and the invitation decode chokepoint) normalizes
+  // params key casing before terms reach here -- so this checks the substance: a
+  // different param VALUE under the same key diverges canonically and is reported.
+  const withParams = (
+    params: Record<string, unknown>,
+  ): LinkageTerms["linkageKeys"] => [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "parse_date", params }] },
+      ],
+    },
+  ];
+  const a: LinkageTerms = {
+    ...termsA,
+    linkageKeys: withParams({ inputFormat: "MMDDYYYY" }),
+  };
+  const b: LinkageTerms = {
+    ...termsB,
+    linkageKeys: withParams({ inputFormat: "YYYYMMDD" }),
+  };
+  const { errors } = validateCompatibility(a, b);
+  expect(errors.some((e) => e.includes("linkage keys do not match"))).toBe(
+    true,
+  );
+});
+
 test("legal agreement present on one side only is an error", () => {
   const { errors } = validateCompatibility(
     {

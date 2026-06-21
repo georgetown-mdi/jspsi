@@ -84,6 +84,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - Linkage terms that pair `output.expects_output: false` with `payload.receive` columns are rejected as incoherent at parse time. See `docs/EXCHANGE_REFERENCE.md`.
 - Linkage terms that reference an undeclared linkage field, or whose `swap` names no element in its key, are rejected as incoherent at decode, instead of silently collapsing the affected key to an empty result. See `docs/EXCHANGE_REFERENCE.md`.
 - The web app parses a dropped CSV in a Web Worker, so a large (near-10MB) file no longer freezes the interface -- input and painting stay responsive -- while it is read.
+- An invitation whose linkage-terms `transform.params` carries `snake_case` parameter keys (which the config and wire paths normalize to `camelCase`, but the invitation decoder left verbatim) is now normalized to `camelCase` at decode, the same as every other path. This closes a class of latent failures with such a token: a false `linkage_keys` conflict on `psilink accept`, a cross-party agreement-hash divergence in the exchange records, the standardization runtime silently ignoring the parameters (degrading or emptying the match), and the per-step ReDoS/length screens being bypassed. The decoder also now accepts `snake_case` structural linkage-terms keys, matching how a hand-authored config is read. Invitations produced by psilink are unaffected (they are already `camelCase`). See `docs/spec/CANONICAL_ENCODING.md` and `docs/spec/CHANNEL_SECURITY.md`.
 
 ### Security
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LinkageTermsSchema } from "./linkageTerms.js";
+import { InvitationLinkageTermsSchema } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
@@ -373,7 +373,11 @@ export interface InvitationToken {
 
 const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   version: z.literal("1"),
-  linkageTerms: LinkageTermsSchema,
+  // InvitationLinkageTermsSchema, not the bare LinkageTermsSchema: it camelizes
+  // transform.params keys (and runs the ReDoS/length screens on the normalized
+  // form) before validating, the one place the invitation path would otherwise
+  // leave params verbatim. See its doc for why the fold must precede validation.
+  linkageTerms: InvitationLinkageTermsSchema,
   sharedSecret: z
     .string()
     .regex(
@@ -525,6 +529,10 @@ export async function encodeInvitation(
  *   (checked at the boundary before any other work), is too short to carry a
  *   checksum, fails the checksum, or is invalid base64url.
  * @throws {ZodError} on schema validation failure.
+ * @throws {NestingDepthExceededError|NodeCountExceededError} if the token's
+ *   `transform.params` is too deeply nested or too wide for the bounded camelCase
+ *   pre-pass `InvitationLinkageTermsSchema` runs before validating; both are
+ *   `UsageError` subclasses a caller surfaces as a clean bounded rejection.
  */
 export async function decodeInvitation(
   encoded: string,
@@ -563,6 +571,10 @@ export async function decodeInvitation(
   } catch {
     throw new Error("invitation payload is not valid JSON");
   }
+  // InvitationTokenSchema normalizes transform.params key casing to camelCase as
+  // it validates (via InvitationLinkageTermsSchema), so a decoded token's params
+  // match the form every other parse path produces -- the decode chokepoint for
+  // the casing asymmetry. See InvitationLinkageTermsSchema for why.
   return InvitationTokenSchema.parse(raw);
 }
 
