@@ -5,6 +5,7 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
+import { coerceToPatternString } from "../utils/linearRegex.js";
 import {
   linkageTermsHaveNonConformantTransformRegex,
   REGEX_STEP_PATTERN_PARAM,
@@ -602,17 +603,20 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // screen provided (see MAX_TRANSFORM_PATTERN_LENGTH). The engine bounds
   // backtracking by construction (a pattern that compiles cannot blow up
   // exponentially); this length cap is the orthogonal source-length sanity bound.
-  // Only a string param drives the compile (a non-string is coerced to a short
-  // literal), so the bound is on string length; dialect conformance is enforced
-  // separately on LinkageTermsSchema.
+  // It measures the COERCED source the factory actually compiles
+  // (coerceToPatternString), not the raw value: a non-string param renders via
+  // String(...) to the literal that compiles, and an array (`["a", "a", ...]`)
+  // renders to an arbitrarily long source -- so capping only string-typed values
+  // would let an array slip an oversized source past this bound. Dialect
+  // conformance is enforced separately on LinkageTermsSchema.
   .refine(
     (step) => {
       const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
       if (paramKey === undefined) return true;
       const value = step.params?.[paramKey];
+      if (value === undefined) return true;
       return (
-        typeof value !== "string" ||
-        value.length <= MAX_TRANSFORM_PATTERN_LENGTH
+        coerceToPatternString(value).length <= MAX_TRANSFORM_PATTERN_LENGTH
       );
     },
     {

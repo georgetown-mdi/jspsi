@@ -766,14 +766,34 @@ test("the pattern-length cap also covers split_on's delimiter param", () => {
   ).toBe(false);
 });
 
-test("a non-string transform regex pattern still validates, so coercion handles it", () => {
-  // Only a string pattern drives the compile; the gate and factory both coerce a
-  // non-string to a short literal, so the length cap does not pre-empt it (behavior
-  // matches the pad_left / parse_date non-string cases above).
+test("a short non-string transform regex pattern still validates, so coercion handles it", () => {
+  // A scalar non-string coerces to a short literal (String(123) === "123"), which
+  // the gate and factory both compile, so the length cap does not pre-empt it.
   expect(
     safeParseLinkageTerms(
       regexStepTerms("replace_regex", { pattern: 123, replacement: "" }),
     ).success,
+  ).toBe(true);
+});
+
+test("an oversized NON-string pattern (array) is caught by the length cap", () => {
+  // The cap measures the COERCED source, not just string-typed values: an array
+  // renders via String(...) to its comma-joined elements, so a long array would
+  // otherwise slip an oversized compile source past the bound. coerceToPatternString
+  // here mirrors exactly what the refine and the factory compile.
+  const overlong = Array.from(
+    { length: MAX_TRANSFORM_PATTERN_LENGTH },
+    () => "a",
+  ); // String(...) === "a,a,a,..." -- ~2x over the cap
+  const result = safeParseLinkageTerms(
+    regexStepTerms("replace_regex", { pattern: overlong, replacement: "" }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) =>
+      /transform regex pattern must not exceed/.test(i.message),
+    ),
   ).toBe(true);
 });
 

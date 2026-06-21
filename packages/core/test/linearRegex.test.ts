@@ -97,6 +97,11 @@ describe("coerceToPatternString", () => {
     expect(coerceToPatternString(true)).toBe("true");
     expect(coerceToPatternString(null)).toBe("null");
     expect(coerceToPatternString(undefined)).toBe("undefined");
+    // An array renders via String(...) to its comma-joined elements -- NOT a short
+    // literal: this is the value a partner can grow without bound, so the source
+    // it compiles to is what MAX_TRANSFORM_PATTERN_LENGTH must measure.
+    expect(coerceToPatternString(["a", "b"])).toBe("a,b");
+    expect(coerceToPatternString({})).toBe("[object Object]");
   });
 
   test("a coerced non-string still compiles under the engine (no TypeError)", () => {
@@ -104,6 +109,10 @@ describe("coerceToPatternString", () => {
     // first guarantees the gate and the factory see the same compilable string.
     expect(patternConformsToDialect(coerceToPatternString(5))).toBe(true);
     expect(patternConformsToDialect(coerceToPatternString(null))).toBe(true);
+    expect(patternConformsToDialect(coerceToPatternString(["a", "b"]))).toBe(
+      true,
+    );
+    expect(patternConformsToDialect(coerceToPatternString({}))).toBe(true);
   });
 });
 
