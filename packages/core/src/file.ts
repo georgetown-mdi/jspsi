@@ -43,3 +43,35 @@ export function loadCSVFile(
     });
   });
 }
+
+/**
+ * Read only the column header names from a CSV, without parsing its rows. The
+ * Advanced-options editor (apps/web) is column-aware -- it seeds metadata-aware
+ * defaults and populates field pickers from the header alone -- and needs those
+ * names before the inviter commits to generating, where parsing the whole file
+ * (which `loadCSVFile` does, and which `generateInvitation` still does at mint
+ * time) would be wasted work held in memory through the edit session.
+ *
+ * `preview: 1` caps the parse at one data row, so PapaParse reads only enough of
+ * the file to yield the header and that first row and then stops, rather than
+ * reading the whole file (the header is in `meta.fields` regardless of how many
+ * data rows are parsed). Parsed inline (no `worker`): the read is tiny, so the
+ * worker's setup cost and its final-chunk-only contract buy nothing here.
+ * Resolves with the header field list (empty when the file has no header row);
+ * rejects on a read/parse error, the same failure contract as {@link loadCSVFile}.
+ */
+export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
+  return new Promise((resolve, reject) => {
+    Papa.parse(file, {
+      header: true,
+      preview: 1,
+      skipEmptyLines: true,
+      complete: (results, _file) => {
+        resolve(results.meta.fields ?? []);
+      },
+      error: (error, _file) => {
+        reject(error);
+      },
+    });
+  });
+}
