@@ -36,14 +36,18 @@ export interface IRealm {
 export const MAX_OUTSTANDING_QUEUES = 1000;
 export const MAX_MESSAGES_PER_QUEUE = 100;
 // The message-count cap alone leaves a queue's resident ceiling at
-// MAX_MESSAGES_PER_QUEUE times the inbound frame cap (256 KiB, the vendored
-// MAX_SIGNALING_PAYLOAD_BYTES) -- ~25 MiB per queue, ~25 GiB across the full
-// MAX_OUTSTANDING_QUEUES. This byte cap holds it down directly: a flood of
-// max-size frames cannot push one queue past 256 KiB, so the global resident
-// ceiling is ~256 MiB. It equals one max frame, so any single legal frame is
+// MAX_MESSAGES_PER_QUEUE times the worst-case heap residency of one inbound
+// frame. A frame is capped at 256 KiB on the wire (the vendored
+// MAX_SIGNALING_PAYLOAD_BYTES), but V8 stores its payload as two bytes per
+// character once it holds any non-Latin1 character, so one frame can occupy
+// ~512 KiB of heap -- ~50 MiB per queue, ~50 GiB across the full
+// MAX_OUTSTANDING_QUEUES. This byte cap holds it down directly, in the same
+// worst-case resident bytes messageByteSize measures (UTF-16, 2 bytes/char): a
+// flood cannot push one queue past 512 KiB, so the global resident ceiling is
+// ~512 MiB. The cap is 2x the wire frame cap, so any single legal frame is
 // always holdable; real signaling frames are KB-scale, so a queue still holds
 // dozens of them.
-export const MAX_QUEUE_BYTES = 256 * 1024;
+export const MAX_QUEUE_BYTES = 512 * 1024;
 
 export class Realm implements IRealm {
   private readonly clients = new Map<string, IClient>();
@@ -80,6 +84,11 @@ export class Realm implements IRealm {
   }
 
   public addMessageToQueue(id: string, message: IMessage): void {
+    // Size the frame before allocating anything: a malformed non-string payload
+    // throws here (and is dropped upstream) so it never consumes a queue slot,
+    // and the size is computed once for both the byte cap and `addMessage`.
+    const messageBytes = messageByteSize(message);
+
     let queue = this.getMessageQueueById(id);
 
     if (!queue) {
@@ -92,9 +101,7 @@ export class Realm implements IRealm {
 
     // Cap the depth of any one queue for the same reason, by message count and
     // by total buffered bytes -- the byte check keeps the resident ceiling far
-    // below the count cap times the max frame size. Size the frame once and
-    // hand it to `addMessage` so the queue does not measure it a second time.
-    const messageBytes = messageByteSize(message);
+    // below the count cap times the max frame size.
     if (queue.size() >= MAX_MESSAGES_PER_QUEUE) return;
     if (queue.byteSize() + messageBytes > MAX_QUEUE_BYTES) return;
 

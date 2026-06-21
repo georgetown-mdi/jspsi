@@ -2,18 +2,24 @@ import { Buffer } from "node:buffer";
 import type { IMessage } from "./message.ts";
 
 /**
- * UTF-8 byte size of a queued signaling message, summed over its string fields.
- * The optional `payload` dominates; `type`/`src`/`dst` are short ids. Used to
- * bound a relay reconnect queue's resident bytes (see `MAX_QUEUE_BYTES`),
- * measured in the same UTF-8 bytes as the inbound frame cap so the two bounds
- * speak the same units.
+ * Resident byte size of a queued signaling message, summed over its string
+ * fields. Measured as UTF-16 code units times two (`utf16le`), not UTF-8,
+ * because V8 stores a JavaScript string as two bytes per code unit the moment
+ * it holds any non-Latin1 character (>= U+0100): a UTF-8 measure undercounts
+ * such a payload by up to 2x, letting it occupy roughly twice its measured size
+ * in the heap. Counting the worst-case two-byte residency bounds a relay
+ * reconnect queue's actual memory regardless of payload charset (see
+ * `MAX_QUEUE_BYTES`). The optional `payload` dominates; `type`/`src`/`dst` are
+ * short ids. `Buffer.byteLength` throws on a non-string `payload`, so a
+ * malformed frame is rejected before it can be queued rather than silently
+ * undercounted.
  */
 export function messageByteSize(message: IMessage): number {
   return (
-    Buffer.byteLength(message.type, "utf8") +
-    Buffer.byteLength(message.src, "utf8") +
-    Buffer.byteLength(message.dst, "utf8") +
-    (message.payload ? Buffer.byteLength(message.payload, "utf8") : 0)
+    Buffer.byteLength(message.type, "utf16le") +
+    Buffer.byteLength(message.src, "utf16le") +
+    Buffer.byteLength(message.dst, "utf16le") +
+    (message.payload ? Buffer.byteLength(message.payload, "utf16le") : 0)
   );
 }
 
