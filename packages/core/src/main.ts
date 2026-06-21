@@ -17,6 +17,15 @@ export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
 // direction so the read and write paths share one recurse-and-skip traversal;
 // not a stable public API (see the declaration's JSDoc).
 export { snakeizeKeys } from "./utils/camelizeKeys";
+// The camelize/snakeize nesting-depth discipline, re-applied by the CLI's
+// invitation-vs-config reconcile to its own recursive NFC/canonical walk
+// (apps/cli/src/config.ts, nfcDeep): the invitation decode path does not run
+// camelizeKeys over the z.unknown() transform.params, so the same bound must be
+// asserted at that downstream consumer. See docs/spec/CHANNEL_SECURITY.md.
+export {
+  MAX_NESTING_DEPTH,
+  NestingDepthExceededError,
+} from "./utils/camelizeKeys";
 export {
   canonicalString,
   canonicalBytes,
