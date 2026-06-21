@@ -82,6 +82,7 @@ const CR = String.fromCharCode(0x000d); // CARRIAGE RETURN
 const LF = String.fromCharCode(0x000a); // LINE FEED
 const TAB = String.fromCharCode(0x0009); // CHARACTER TABULATION
 const SP = String.fromCharCode(0x0020); // SPACE
+const EACUTE = String.fromCharCode(0x00e9); // LATIN SMALL LETTER E WITH ACUTE (NFC-stable)
 
 const cases = [
   // `.` spans a CODE POINT under RE2, but a UTF-16 code unit under JavaScript's
@@ -111,6 +112,16 @@ const cases = [
   FILTER("^.$", LF),
   FILTER("\\s", SP),
   FILTER("\\s", TAB),
+  // `\p{...}` property membership and inline `(?i)` folding both track re2js's
+  // bundled Unicode tables -- the surface a re2js upgrade is most likely to shift
+  // -- and both build targets must agree on them. Pinned on NFC-stable inputs (the
+  // pipeline NFC-normalizes before matching, so a non-NFC-stable input would test
+  // NFC rather than the engine). The Node-only engine-layer pins in
+  // linearRegex.test.ts cover the folds that NFC would otherwise canonicalize away.
+  FILTER("^\\p{L}+$", EACUTE), // an accented letter is \p{L} -> passes
+  FILTER("^\\p{L}+$", "1"), // a digit is not \p{L} -> null
+  FILTER("^\\p{Nd}+$", "5"), // a decimal digit is \p{Nd} -> passes
+  REPLACE("(?i)b", "X", "ABC"), // (?i) folds ASCII case -> "AXC"
 ];
 
 const vectors = cases.map(({ step, value, input }, idx) => ({

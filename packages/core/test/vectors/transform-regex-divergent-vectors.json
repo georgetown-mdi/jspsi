@@ -169,6 +169,59 @@
       ],
       "input": "\t",
       "expected": "\t"
+    },
+    {
+      "name": "filter_regex-divergent-13",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\p{L}+$"
+          }
+        }
+      ],
+      "input": "é",
+      "expected": "é"
+    },
+    {
+      "name": "filter_regex-divergent-14",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\p{L}+$"
+          }
+        }
+      ],
+      "input": "1",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-15",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\p{Nd}+$"
+          }
+        }
+      ],
+      "input": "5",
+      "expected": "5"
+    },
+    {
+      "name": "replace_regex-divergent-16",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "(?i)b",
+            "replacement": "X"
+          }
+        }
+      ],
+      "input": "ABC",
+      "expected": "AXC"
     }
   ]
 }

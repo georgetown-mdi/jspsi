@@ -140,6 +140,53 @@ describe("RE2 vs JavaScript class semantics", () => {
   });
 });
 
+// --- Unicode-property and case-folding semantics -----------------------------
+// PROTOCOL.md admits \p{...} property classes and inline (?i) into the dialect.
+// re2js bakes its Unicode property and case-folding tables into the published
+// build, so a re2js upgrade carrying a newer Unicode database could silently
+// shift which code points these match -- and because both parties hash the same
+// partner pattern into their keys, any shift is a SILENT key divergence. These
+// pin the load-bearing behavior so a drift fails CI instead. (re2js stays on a
+// caret range for security and bug fixes; this is the guard that an upgrade did
+// not move semantics we rely on, which is why pinning the version is unnecessary.)
+// Verified against re2js 2.8.3.
+//
+// Note: the standardization pipeline NFC-normalizes input before the engine sees
+// it, canonicalizing some of these code points (e.g. KELVIN SIGN U+212A -> "K").
+// These pin the engine layer directly (no NFC), covering the dialect's documented
+// surface; the NFC-stable cases (an accented letter, LATIN SMALL LETTER LONG S)
+// are the ones that remain engine-dependent after normalization.
+
+describe("Unicode-property and case-folding semantics (pinned vs re2js drift)", () => {
+  test("\\p{L} matches ASCII and accented letters, not digits", () => {
+    const re = compileLinearRegex("^\\p{L}+$");
+    expect(re.test("Abc")).toBe(true);
+    expect(re.test("\u00e9")).toBe(true); // e-acute, NFC-stable
+    expect(re.test("123")).toBe(false);
+  });
+
+  test("\\p{Nd} matches decimal digits, not letters", () => {
+    const re = compileLinearRegex("^\\p{Nd}+$");
+    expect(re.test("123")).toBe(true);
+    expect(re.test("abc")).toBe(false);
+  });
+
+  test("(?i) folds ASCII case", () => {
+    expect(compileLinearRegex("(?i)^abc$").test("ABC")).toBe(true);
+  });
+
+  test("(?i) applies re2js's Unicode case-folding orbit", () => {
+    // Folds drawn from re2js's bundled CASE_ORBIT table -- the surface a Unicode
+    // database bump in an upgrade would move. LATIN SMALL LETTER LONG S U+017F is
+    // NFC-stable and folds to 's'; KELVIN SIGN U+212A folds to 'k' (NFC also maps
+    // it to 'K', so this matters only for the raw engine); LATIN CAPITAL LETTER I
+    // WITH DOT ABOVE U+0130 deliberately does NOT fold to ASCII 'i'.
+    expect(compileLinearRegex("(?i)^s$").test("\u017f")).toBe(true);
+    expect(compileLinearRegex("(?i)^k$").test("\u212a")).toBe(true);
+    expect(compileLinearRegex("(?i)^i$").test("\u0130")).toBe(false);
+  });
+});
+
 // --- Linearity (the whole point) ---------------------------------------------
 
 describe("linear-time execution", () => {
