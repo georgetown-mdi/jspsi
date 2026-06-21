@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Divider,
+  Grid,
   Group,
   List,
   Modal,
@@ -34,13 +36,23 @@ import {
   setColumnType,
 } from "@psi/metadataEditing";
 
+import { applyStepOverrides, isStepValid } from "@psi/standardizationAuthoring";
+
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
+import { StandardizationPreview } from "@components/StandardizationPreview";
+import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 
-import type { LinkageField, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  LinkageField,
+  LinkageTerms,
+  Metadata,
+  StandardizationStep,
+} from "@psilink/core";
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 import type { AlertContent } from "@components/FileAcquire";
+import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 
 /**
  * The acceptor "Prepare your data" editor: the surface that turns the old
@@ -67,6 +79,7 @@ import type { AlertContent } from "@components/FileAcquire";
 export function PrepareData({
   linkageTerms,
   columns,
+  rawRows,
   onLaunch,
   onBack,
 }: {
@@ -75,6 +88,8 @@ export function PrepareData({
   linkageTerms: LinkageTerms;
   /** The acceptor's own CSV column names, from the parsed file. */
   columns: Array<string>;
+  /** The parsed CSV rows, the sample source for the before->after preview. */
+  rawRows: Array<Record<string, string>>;
   /** Commit the prepared data and move to the exchange: the edited metadata and
    * standardization, plus an optional partial-coverage advisory to surface through
    * the run. */
@@ -103,15 +118,50 @@ export function PrepareData({
   );
   const [metadata, setMetadata] = useState<Metadata>(initialMetadata);
 
-  // Standardization is derived from the current metadata: the recommended per-type
-  // cleaning for whatever columns each field is currently bound to. Deriving it
-  // (rather than holding stale steps) keeps the verdict honest after a remap and
-  // preserves the acceptor's prior behavior, where cleaning was inferred from the
-  // adopted terms. The same object feeds the verdict and onLaunch.
-  const standardization = useMemo(
+  // The operator's per-field step edits, keyed by linkage-field name (the
+  // transformation `output`) and paired with the input column they were authored
+  // against. Held as an override LAYER over the derived default rather than as the
+  // whole standardization, so the binding (input column, which fields exist) is
+  // always re-derived from the current metadata and the verdict stays honest. An
+  // empty map means no edits, so the effective standardization equals the derived
+  // default -- the acceptor's prior behavior, byte for byte.
+  const [stepOverrides, setStepOverrides] = useState<
+    Map<string, FieldStepOverride>
+  >(new Map());
+
+  // The recommended per-type cleaning for whatever columns each field is currently
+  // bound to: the binding (input column, which fields exist) is always re-derived
+  // from the current metadata, so it tracks a remap.
+  const baseStandardization = useMemo(
     () => getDefaultStandardization(metadata, linkageTerms),
     [metadata, linkageTerms],
   );
+
+  // The effective standardization the verdict and onLaunch consume: the derived
+  // bindings with each field's authored steps layered on where the operator edited
+  // them. An override survives an unrelated metadata edit (the field's binding is
+  // unchanged) but is dropped if the field is re-bound to a different column, so
+  // steps authored for one column never silently clean another (see
+  // applyStepOverrides).
+  const standardization = useMemo(
+    () => applyStepOverrides(baseStandardization, stepOverrides),
+    [baseStandardization, stepOverrides],
+  );
+
+  // Field name -> its declared linkage field, for the per-field card label and the
+  // value-level constraint check the preview runs. The field `name` is the
+  // transformation `output`, so this resolves every card's field.
+  const fieldByName = useMemo(
+    () =>
+      new Map(linkageTerms.linkageFields.map((field) => [field.name, field])),
+    [linkageTerms],
+  );
+
+  const setFieldSteps = (
+    output: string,
+    input: string,
+    steps: Array<StandardizationStep>,
+  ) => setStepOverrides((prev) => new Map(prev).set(output, { input, steps }));
 
   const verdict = useMemo(
     () =>
@@ -129,6 +179,18 @@ export function PrepareData({
   const blocked = satisfiable === 0;
   const partial = satisfiable > 0 && satisfiable < totalKeys;
   const disclosed = disclosedColumnNames(metadata);
+  // Every authored step must be well-formed before launch: a step the operator
+  // left mid-edit (e.g. a cleared `substring.start`) carries a param the inline
+  // input already flags, but launch is gated on it too so a malformed pipeline --
+  // which core would run as a silent full-field exclusion, or throw on at compile
+  // -- can never reach the exchange.
+  const standardizationValid = useMemo(
+    () =>
+      standardization.every((transformation) =>
+        (transformation.steps ?? []).every(isStepValid),
+      ),
+    [standardization],
+  );
   // A seed can carry more than one identifier (an `id` and an `identifier`
   // column both infer to `role: identifier`); the grid surfaces this as a visible
   // error, and launch is gated on it too so the file cannot run with an ambiguous
@@ -292,11 +354,92 @@ export function PrepareData({
         caption="Your columns, their types, and how each is used"
       />
 
+      {standardization.length > 0 && (
+        <Stack
+          gap="sm"
+          component="section"
+          aria-label="Clean your data to match"
+        >
+          <Divider />
+          <div>
+            <Text size="sm" fw={600}>
+              Clean your data to match
+            </Text>
+            <Text size="xs" c="dimmed">
+              Each field is cleaned by an ordered list of steps before matching.
+              Edit the steps and watch the before-and-after on a sample of your
+              rows. Cleaning runs on your device and changes only your own match
+              rate; it is never sent to your partner.
+            </Text>
+          </div>
+          {standardization.map((transformation) => {
+            const field = fieldByName.get(transformation.output);
+            // Every standardization output is a declared linkage field (both
+            // `standardization` and `fieldByName` derive from the same
+            // `linkageTerms.linkageFields`), so this never resolves to undefined;
+            // assert it as a check rather than silently dropping a field's card if
+            // that ever stops holding. The message names no partner-controlled
+            // value (the output is a partner-supplied field name).
+            if (field === undefined)
+              throw new Error(
+                "standardization output does not resolve to a declared linkage field",
+              );
+            const steps = transformation.steps ?? [];
+            return (
+              <Paper withBorder p="md" key={transformation.output}>
+                <Grid gap="lg" align="flex-start">
+                  <Grid.Col span={{ base: 12, md: 7 }}>
+                    <StandardizationStepEditor
+                      fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+                      inputColumn={transformation.input}
+                      steps={steps}
+                      onStepsChange={(next) =>
+                        setFieldSteps(
+                          transformation.output,
+                          transformation.input,
+                          next,
+                        )
+                      }
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 5 }}>
+                    <Text size="xs" fw={600} mb="xs">
+                      Preview
+                    </Text>
+                    <StandardizationPreview
+                      field={field}
+                      inputColumn={transformation.input}
+                      steps={steps}
+                      rawRows={rawRows}
+                    />
+                  </Grid.Col>
+                </Grid>
+              </Paper>
+            );
+          })}
+        </Stack>
+      )}
+
+      {!standardizationValid && (
+        <Text size="sm" c="red" role="alert">
+          Finish or fix the highlighted cleaning steps before continuing.
+        </Text>
+      )}
+
       <Group justify="space-between">
-        <Button variant="default" onClick={() => setMetadata(initialMetadata)}>
+        <Button
+          variant="default"
+          onClick={() => {
+            setMetadata(initialMetadata);
+            setStepOverrides(new Map());
+          }}
+        >
           Reset to recommended
         </Button>
-        <Button onClick={openConfirm} disabled={blocked || multipleIdentifiers}>
+        <Button
+          onClick={openConfirm}
+          disabled={blocked || multipleIdentifiers || !standardizationValid}
+        >
           Continue to exchange
         </Button>
       </Group>

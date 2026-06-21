@@ -208,6 +208,29 @@ test("allowedCharacters rejects an invalid character class", () => {
   expect(result.error.issues[0].message).toMatch(/character class/);
 });
 
+test("allowedCharacters rejects a class the runtime engine cannot compile", () => {
+  // Validation runs the same linear-time engine the web constraint check uses, so
+  // a class the native engine accepts but that engine rejects -- the degenerate
+  // empty class, or a native-only construct like an octal/backreference escape --
+  // is refused here rather than silently failing open at check time.
+  for (const allowedCharacters of ["", "\\1"]) {
+    const result = safeParseLinkageTerms({
+      ...base,
+      linkageFields: [
+        {
+          name: "lastName",
+          type: "last_name",
+          constraints: { allowedCharacters },
+        },
+      ],
+      linkageKeys: [{ name: "Last Name", elements: [{ field: "lastName" }] }],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(result.error.issues[0].message).toMatch(/character class/);
+  }
+});
+
 // ─── parse vs safeParse ──────────────────────────────────────────────────────
 
 test("parseLinkageTerms throws ZodError on invalid input", () => {

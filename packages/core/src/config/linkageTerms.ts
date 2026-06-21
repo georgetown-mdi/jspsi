@@ -6,7 +6,10 @@ import { safeParseCamelized } from "./safeParseCamelized.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
-import { coerceToPatternString } from "../utils/linearRegex.js";
+import {
+  coerceToPatternString,
+  patternConformsToDialect,
+} from "../utils/linearRegex.js";
 import {
   linkageTermsHaveNonConformantTransformRegex,
   REGEX_STEP_PATTERN_PARAM,
@@ -317,25 +320,21 @@ interface NameConstraints {
 }
 
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
-  // Validated as a regex character class so consuming code can safely
-  // interpolate it into new RegExp(`[${allowedCharacters}]`) without injection
-  // risk. Note the brackets that get added. The `.max()` precedes the refine so
-  // an oversized value is rejected on length before a large partner-controlled
-  // string is compiled into a RegExp here; a real character class is short.
+  // Validated as a character class under the linear-time engine (re2js) -- the
+  // SAME engine that executes it: the web constraint check compiles
+  // `^[allowedCharacters]$` under that engine to flag values outside the class.
+  // Validating with the engine that runs it guarantees a class accepted here
+  // compiles at check time, so the advisory cannot silently fail open on a class
+  // the native engine accepts but re2js rejects (a backreference, a POSIX/Unicode
+  // class, or the degenerate empty class). Note the brackets that get added. The
+  // `.max()` precedes the refine so an oversized value is rejected on length
+  // before a large partner-controlled string is compiled; a real class is short.
   allowedCharacters: z
     .string()
     .max(MAX_NAME_LENGTH)
-    .refine(
-      (val) => {
-        try {
-          new RegExp(`[${val}]`);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      { message: "allowedCharacters must be a valid regex character class" },
-    )
+    .refine((val) => patternConformsToDialect(`[${val}]`), {
+      message: "allowedCharacters must be a valid regex character class",
+    })
     .optional(),
   affixesAllowed: z.boolean().optional(),
   exclude: ExcludeSchema.optional(),
