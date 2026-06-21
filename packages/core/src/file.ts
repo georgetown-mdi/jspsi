@@ -6,6 +6,19 @@ import type { LocalFile } from "papaparse";
   return (x as File).name !== undefined;
 } */
 
+/**
+ * Parse a CSV file to its COMPLETE row set. Resolves a {@link Papa.ParseResult}
+ * whose `data` and `errors` are accumulated across every PapaParse chunk, so a
+ * file larger than one `Papa.LocalChunkSize` chunk is returned whole rather than
+ * truncated to its final chunk (see the accumulation note in the body). Rejects
+ * on a read/stream error.
+ *
+ * Caveat on `meta`: only `meta.fields` (the header) is whole-file-stable. The
+ * rest of `meta` (`cursor`, `truncated`, `aborted`, ...) is the FINAL chunk's --
+ * it is captured per chunk and only `fields` persists across chunks -- so a
+ * consumer must not read whole-file position or truncation state off it. Every
+ * current consumer reads only `data` and `meta.fields`.
+ */
 export function loadCSVFile(
   file: LocalFile,
 ): Promise<Papa.ParseResult<unknown>> {

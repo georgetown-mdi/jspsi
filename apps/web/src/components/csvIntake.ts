@@ -6,11 +6,13 @@
  * accumulates across PapaParse chunks (it no longer truncates a file that spans
  * more than one `LocalChunkSize` chunk), so the cap is free of the former
  * single-chunk constraint and is set instead against what a browser tab can read,
- * parse, hash, and hold as a PSI payload without exhausting memory: 100 MB is
- * roughly one to two million identifier rows, comfortably inside the
- * tens-of-millions-of-rows / 1-2 GB browser envelope `docs/spec/PROTOCOL.md`
- * documents, while well above the prior 10 MB. The value is tunable against that
- * memory budget; the rationale lives in `docs/spec/PROTOCOL.md`.
+ * parse, and hold for the exchange. The dominant cost is the parsed row array,
+ * retained for the whole exchange, so 100 MB (roughly one to two million
+ * identifier rows) resolves to a few hundred MB resident -- a profile sized for
+ * the modern-workstation execution target, well above the prior 10 MB, and
+ * tunable upward as that profile is measured. The rationale, and why this intake
+ * budget is distinct from the comparison-step memory, lives in
+ * `docs/spec/PROTOCOL.md`.
  *
  * No-silent-truncation is the invariant that actually matters here, and it is
  * pinned directly by a multi-chunk correctness test in worker mode
