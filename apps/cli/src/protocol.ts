@@ -855,13 +855,26 @@ export async function runProtocol(
     // regardless, and the gate keys on abortArmed, still true.)
     exchangeComplete = true;
 
-    const { headers, rows } = buildOutputTable(
-      associationTable,
-      prepared.rawRows,
-      prepared.metadata,
-      partnerPayload,
-    );
-    await writeOutput(output, headers, rows);
+    // The result table is withheld (associationTable undefined) when this party's
+    // agreed terms give it no output -- a one-sided exchange where it is the PSI
+    // sender/helper. It contributed its records to find the match but is not
+    // entitled to the result, so there is nothing to write: report that plainly
+    // rather than writing an empty CSV that reads like a zero-match run. The audit
+    // record below is still written (the helper's record does not bind the table).
+    if (associationTable === undefined) {
+      log.info(
+        "exchange complete: your records contributed to the match, but by the " +
+          "agreed terms you receive no result, so no result file was written.",
+      );
+    } else {
+      const { headers, rows } = buildOutputTable(
+        associationTable,
+        prepared.rawRows,
+        prepared.metadata,
+        partnerPayload,
+      );
+      await writeOutput(output, headers, rows);
+    }
 
     // Persist the self-attested record after the results: it is a secondary
     // audit artifact, so it is written last and its failure is non-fatal (see
@@ -870,8 +883,9 @@ export async function runProtocol(
     // already warned -- the exchange still succeeded). It is likewise not reached
     // if the result-CSV write above failed (that await throws to the catch),
     // which also avoids orphaning the plaintext-opening file on a disk that just
-    // failed mid-write. The record and its opening are a single optional field,
-    // so one check covers both.
+    // failed mid-write. A withheld result writes no CSV but still records the
+    // exchange (the record is independent of the returned table). The record and
+    // its opening are a single optional field, so one check covers both.
     if (recordOutput !== undefined && audit !== undefined)
       writeExchangeRecord(
         recordOutput,

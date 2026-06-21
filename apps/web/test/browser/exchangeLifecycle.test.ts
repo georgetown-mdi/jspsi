@@ -231,11 +231,16 @@ test("the live exchange links the correct records", (ctx) => {
     return ctx.skip(serverUnreachableNote);
   }
 
+  // Both parties' terms are both-output here, so each is entitled to the result
+  // and the exchange returns a table to both (the withholding gate only fires for
+  // a non-receiving party). Assert that, then narrow off the now-optional field.
+  expect(responder.result.associationTable).toBeDefined();
+  expect(initiator.result.associationTable).toBeDefined();
   const responderTable = sortAssociationTable(
-    responder.result.associationTable,
+    responder.result.associationTable!,
   );
   const initiatorTable = sortAssociationTable(
-    initiator.result.associationTable,
+    initiator.result.associationTable!,
     true,
   );
 

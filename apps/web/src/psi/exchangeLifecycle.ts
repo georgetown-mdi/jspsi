@@ -105,8 +105,17 @@ export interface RecordDownloads {
  * file plus the self-attested audit record and its private opening data, each an
  * object URL the UI exposes as a download with a timestamped filename. */
 export interface ExchangeOutputs {
-  /** The matched results (CSV). */
-  resultsUrl: string;
+  /** The matched results (CSV). Absent only when the result was withheld from
+   * this party (see {@link resultWithheld}); a receiver always has it. */
+  resultsUrl?: string;
+  /** True when this party's agreed terms give it no output (a one-sided exchange
+   * where it is the PSI sender / helper): the exchange withholds the result table
+   * (`ExchangeResult.associationTable` is undefined), so there is no results file
+   * to offer. The UI shows that this party contributed to the match but receives
+   * no result table, rather than an empty CSV that reads like a zero-match run.
+   * The audit record is still produced and offered (the helper's record does not
+   * bind the table). */
+  resultWithheld?: boolean;
   /** The record and opening downloads as a single optional group, present or
    * absent together. Absent only when building the record failed (the exchange
    * still succeeded and the results remain available; see

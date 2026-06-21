@@ -1088,6 +1088,53 @@ export function safeParseLinkageTerms(raw: unknown) {
 // would throw the camelize bounds. See the invitationLinkageTermsSchema note in
 // config/invitation.ts.
 
+// --- Acceptance --------------------------------------------------------------
+
+/**
+ * Derive the {@link LinkageTerms} an ACCEPTOR runs from the inviter's terms
+ * decoded from an invitation. The acceptor adopts the inviter's shared, agreed
+ * fields verbatim -- `version`, `algorithm`, `linkageFields`, `linkageKeys`,
+ * `legalAgreement`, and so on are cross-checked for equality at exchange time,
+ * so both sides must carry an identical set -- but two facets are the acceptor's
+ * own perspective and are derived, not copied:
+ *
+ * - `identity` is replaced with the acceptor's own name, so the inviter's
+ *   identity does not leak into the acceptor's prepared terms (and from there
+ *   into its exchange record).
+ * - `output` is MIRRORED, not copied. {@link validateCompatibility}, run by both
+ *   parties, compares output as a mirror: it requires
+ *   `local.output.shareWithPartner === partner.output.expectsOutput` and
+ *   `local.output.expectsOutput === partner.output.shareWithPartner`. So the
+ *   acceptor's `expectsOutput` is the inviter's `shareWithPartner`, and the
+ *   acceptor's `shareWithPartner` is the inviter's `expectsOutput`. A verbatim
+ *   copy is only ACCIDENTALLY correct for the symmetric "both receive" case
+ *   (`expectsOutput` and `shareWithPartner` both true, where each value equals
+ *   its mirror); for any one-sided configuration a copy makes both sides claim to
+ *   receive, fails the mirror, and aborts the exchange before any data moves.
+ *
+ * `deduplicate` and `payload` are left as adopted from the inviter's terms. Both
+ * are per-party in principle, but the web Advanced-options editor and the CLI
+ * default acceptance author neither one-sided (`deduplicate` stays false, and no
+ * `payload` block is authored), so they are symmetric or absent in practice and a
+ * verbatim adoption is correct for the configurations these front ends produce.
+ * Mirroring per-party payload `send`/`receive` lists is deferred to the payload-
+ * authoring work. Metadata and standardization stay per-party and local (they are
+ * never embedded in the token); this function shapes only the agreed linkage terms.
+ */
+export function deriveAcceptedLinkageTerms(
+  inviterTerms: LinkageTerms,
+  acceptorIdentity: string,
+): LinkageTerms {
+  return {
+    ...inviterTerms,
+    identity: acceptorIdentity,
+    output: {
+      expectsOutput: inviterTerms.output.shareWithPartner,
+      shareWithPartner: inviterTerms.output.expectsOutput,
+    },
+  };
+}
+
 // --- Compatibility -----------------------------------------------------------
 
 export interface CompatibilityResult {

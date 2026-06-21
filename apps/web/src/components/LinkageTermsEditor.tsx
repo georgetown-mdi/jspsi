@@ -47,7 +47,20 @@ import type { LinkageTerms, Metadata } from "@psilink/core";
 import type {
   AdvancedInviteDraft,
   AdvancedInviteSeed,
+  OutputDirection,
 } from "@psi/advancedInvite";
+
+/** The three output-direction choices, in the order shown. The first
+ * ({@link OutputDirection} `"both"`) is the recommended default; the labels are
+ * phrased from the inviter's ("you") point of view. */
+const OUTPUT_DIRECTION_OPTIONS: Array<{
+  value: OutputDirection;
+  label: string;
+}> = [
+  { value: "both", label: "Both you and your partner (recommended)" },
+  { value: "inviter", label: "Only you" },
+  { value: "partner", label: "Only your partner" },
+];
 
 /** Upper bound on the inviter's name, mirroring the quick compose screen's bound
  * (it flows into the token's linkage terms and the deep-link URL). The core schema
@@ -74,14 +87,15 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
  * supports -- identity, invitation lifetime, an optional legal agreement, and which
  * linkage keys are active and in what order.
  *
- * Output sharing, the matching algorithm, deduplication, fuzzy comparisons, and
- * payload columns are deliberately NOT settable here (see {@link buildAdvancedTerms}):
- * the engine does not yet honor one-sided output or payload transmission
- * end-to-end, so surfacing those as controls would mint an invitation whose
- * headline behavior silently does not happen. They are visible read-only in the
- * preview (it annotates dedup/fuzzy as proposed-not-applied and states the
- * matching method), so nothing is hidden -- only the unselectable controls are
- * absent.
+ * The matching algorithm, deduplication, fuzzy comparisons, and payload columns
+ * are deliberately NOT settable here (see {@link buildAdvancedTerms}): each is a
+ * capability not yet honored end-to-end or tracked as its own authoring task, so
+ * surfacing it as a control would mint an invitation whose headline behavior
+ * silently does not happen. They are visible read-only in the preview (it
+ * annotates dedup/fuzzy as proposed-not-applied and states the matching method),
+ * so nothing is hidden -- only the unselectable controls are absent. Output
+ * sharing IS settable (the 3-way "who receives the matched results" control),
+ * now that one-sided output is honored end-to-end.
  *
  * Validation runs through {@link validateAdvancedInvite} (the core schema is the
  * single source); Generate is disabled until the draft parses and at least one key
@@ -121,6 +135,8 @@ export function LinkageTermsEditor({
   const freshDraft = (): AdvancedInviteDraft => ({
     identity: initialIdentity ?? seed.terms.identity,
     lifetimeSeconds: INVITATION_LIFETIME_SECONDS,
+    // The recommended default is the symmetric both-receive exchange.
+    outputDirection: "both",
     metadata: seed.metadata,
     keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
   });
@@ -296,6 +312,22 @@ export function LinkageTermsEditor({
               errorProps={{ role: "alert" }}
             />
 
+            <Select
+              label="Who receives the matched results"
+              description="Both parties, only you, or only your partner. The party that receives nothing still contributes its records to find the match."
+              data={OUTPUT_DIRECTION_OPTIONS}
+              value={draft.outputDirection}
+              allowDeselect={false}
+              // The three options are the only valid output pairs, so a choice can
+              // never yield the forbidden "neither party receives" combination
+              // (buildAdvancedTerms maps each via outputForDirection). Mantine
+              // infers the value type from the typed data, so `value` is already an
+              // OutputDirection after the null guard.
+              onChange={(value) =>
+                value !== null && updateDraft({ outputDirection: value })
+              }
+            />
+
             <Stack gap="xs">
               <Text size="sm" fw={600}>
                 Your columns
@@ -454,11 +486,11 @@ export function LinkageTermsEditor({
               icon={<IconInfoCircle aria-hidden />}
               title="Fixed in this version"
             >
-              Both you and your partner receive the matched result, matched
-              identifiers are revealed (not just a count), and each record
-              matches at most one of your partner&apos;s. These are not
-              adjustable yet. Which of your columns are sent to your partner is
-              set per column under Your columns above.
+              Matched identifiers are revealed (not just a count), and each
+              record matches at most one of your partner&apos;s. These are not
+              adjustable yet. Who receives the matched results is set above;
+              which of your columns are sent to your partner is set per column
+              under Your columns above.
             </Alert>
           </Stack>
         </Grid.Col>

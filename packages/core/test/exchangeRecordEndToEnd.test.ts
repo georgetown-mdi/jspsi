@@ -108,6 +108,12 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(init.record.commitments.associationTable).toBeDefined();
   expect(resp.record.commitments.associationTable).toBeDefined();
 
+  // Both are entitled to output, so the exchange returns the result table to each
+  // -- the returned-result gate is the same entitlement predicate as the record
+  // gate above.
+  expect(initiator.associationTable).toBeDefined();
+  expect(responder.associationTable).toBeDefined();
+
   // Governance metadata is derived from the agreed terms on both sides and agrees
   // on the cross-party-consistent fields. firstNameTerms configure no payload and
   // no legal agreement, so the payload categories are explicitly empty.
@@ -275,6 +281,14 @@ test("single-output: result size omitted, but each party records its own exposur
   // the record does not bind it.
   expect(init.record.commitments.associationTable).toBeDefined();
   expect(resp.record.commitments.associationTable).toBeUndefined();
+
+  // The privacy gate this work adds: the exchange RETURNS the result table only to
+  // the entitled party. The receiver (initiator) gets it; the sender/helper
+  // (responder) gets undefined -- withheld at the return on the same entitlement
+  // predicate as the record's committed table, so neither front end can write a
+  // result the helper is not entitled to.
+  expect(initiator.associationTable).toBeDefined();
+  expect(responder.associationTable).toBeUndefined();
 
   // Terms hash still matches across parties.
   expect(init.record.termsHash).toBe(resp.record.termsHash);

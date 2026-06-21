@@ -82,6 +82,29 @@ describe("LinkageTermsEditor", () => {
     expect(lifetime).toBe(INVITATION_LIFETIME_SECONDS);
   });
 
+  test("choosing 'Only your partner' yields partner-only output terms", async () => {
+    // The 3-way output control is wired to the built terms: selecting the
+    // partner-only direction produces the corresponding one-sided output pair (the
+    // editor never offers the forbidden "neither receives" combination).
+    mount();
+    // Mantine's Select renders a labeled input (not role=textbox), so target it by
+    // its label; clicking opens the dropdown, then pick the partner-only option.
+    await userEvent.click(
+      page.getByLabelText("Who receives the matched results"),
+    );
+    // Target the dropdown option by role, not text: the Select's description also
+    // contains the substring "only your partner".
+    await userEvent.click(
+      page.getByRole("option", { name: "Only your partner" }),
+    );
+    await userEvent.click(generateButton());
+    const [terms] = onGenerate.mock.calls[0];
+    expect(terms.output).toEqual({
+      expectsOutput: false,
+      shareWithPartner: true,
+    });
+  });
+
   test("clearing the name disables Generate and shows an inline error", async () => {
     mount();
     await userEvent.clear(nameField());

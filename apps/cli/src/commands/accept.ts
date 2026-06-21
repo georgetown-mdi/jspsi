@@ -6,6 +6,7 @@ import logLibrary from "loglevel";
 
 import {
   describeDecodeError,
+  deriveAcceptedLinkageTerms,
   getLogger,
   decodeInvitation,
   isInvitationExpired,
@@ -274,9 +275,16 @@ export async function validateAccept(params: {
   );
 
   const myIdentity = options.identity ?? userInfo().username;
-  // Adopt the invitation's linkage keys, algorithm, and output policy, but record
-  // this party's own identity (the invitation's identity is the inviter's).
-  const myTerms: LinkageTerms = { ...token.linkageTerms, identity: myIdentity };
+  // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
+  // party's own identity (the invitation's identity is the inviter's) and MIRROR
+  // the output direction rather than copying it: validateCompatibility compares
+  // output as a mirror, so a verbatim copy only happens to agree in the symmetric
+  // both-receive case and would abort any one-sided exchange. The shared core
+  // helper also backs the web acceptor (see deriveAcceptedLinkageTerms).
+  const myTerms: LinkageTerms = deriveAcceptedLinkageTerms(
+    token.linkageTerms,
+    myIdentity,
+  );
 
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;

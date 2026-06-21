@@ -1,4 +1,8 @@
-import { decodeInvitation, isInvitationExpired } from "@psilink/core";
+import {
+  decodeInvitation,
+  deriveAcceptedLinkageTerms,
+  isInvitationExpired,
+} from "@psilink/core";
 
 import type {
   ExchangeDataSpec,
@@ -80,12 +84,16 @@ export async function prepareAcceptedInvitation(
 /**
  * Build the data-preparation spec a web acceptor runs against its own CSV. It
  * adopts the inviter's `linkageTerms` (decoded from the invitation and shown on
- * the consent screen) verbatim, so the PSI run is governed by the terms the
- * acceptor reviewed and consented to rather than a default inferred from the
- * acceptor's own columns -- but it substitutes the acceptor's identity for the
- * inviter's, so the inviter's `identity` does not leak into the acceptor's
- * prepared terms. Mirrors the CLI acceptor's
- * `{ ...token.linkageTerms, identity: myIdentity }` (`apps/cli/src/commands/accept.ts`).
+ * the consent screen), so the PSI run is governed by the terms the acceptor
+ * reviewed and consented to rather than a default inferred from the acceptor's
+ * own columns. The agreed fields/keys are adopted verbatim, but the acceptor's
+ * own perspective is derived via {@link deriveAcceptedLinkageTerms}: its identity
+ * replaces the inviter's (so the inviter's `identity` does not leak into the
+ * acceptor's prepared terms), and its `output` is the MIRROR of the inviter's
+ * (`expectsOutput`/`shareWithPartner` swapped), not a verbatim copy -- a copy
+ * only happens to satisfy `validateCompatibility`'s output mirror in the
+ * symmetric "both receive" case, and would abort any one-sided exchange. The same
+ * helper backs the CLI acceptor (`apps/cli/src/commands/accept.ts`).
  *
  * When the acceptor has prepared its data in the editor, its edited `metadata`
  * and `standardization` are supplied alongside the adopted terms; otherwise
@@ -111,7 +119,7 @@ export function acceptorExchangeDataSpec(
   edits?: AcceptorDataEdits,
 ): ExchangeDataSpec {
   return {
-    linkageTerms: { ...linkageTerms, identity: acceptorName },
+    linkageTerms: deriveAcceptedLinkageTerms(linkageTerms, acceptorName),
     ...(edits && {
       metadata: edits.metadata,
       standardization: edits.standardization,
