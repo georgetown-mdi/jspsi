@@ -1,0 +1,370 @@
+{
+  "vectors": [
+    {
+      "name": "replace_regex-0",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "[^0-9]",
+            "replacement": ""
+          }
+        }
+      ],
+      "input": "(555) 123-4567",
+      "expected": "5551234567"
+    },
+    {
+      "name": "replace_regex-1",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "[^0-9]",
+            "replacement": ""
+          }
+        }
+      ],
+      "input": "abc",
+      "expected": ""
+    },
+    {
+      "name": "replace_regex-2",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "^1(\\d{10})$",
+            "replacement": "$1"
+          }
+        }
+      ],
+      "input": "15551234567",
+      "expected": "5551234567"
+    },
+    {
+      "name": "replace_regex-3",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "^1(\\d{10})$",
+            "replacement": "$1"
+          }
+        }
+      ],
+      "input": "5551234567",
+      "expected": "5551234567"
+    },
+    {
+      "name": "extract_regex-4",
+      "steps": [
+        {
+          "function": "extract_regex",
+          "params": {
+            "pattern": "(\\d{4})$"
+          }
+        }
+      ],
+      "input": "5551234",
+      "expected": "1234"
+    },
+    {
+      "name": "extract_regex-5",
+      "steps": [
+        {
+          "function": "extract_regex",
+          "params": {
+            "pattern": "(\\d{4})$"
+          }
+        }
+      ],
+      "input": "12",
+      "expected": null
+    },
+    {
+      "name": "extract_regex-6",
+      "steps": [
+        {
+          "function": "extract_regex",
+          "params": {
+            "pattern": "\\d+"
+          }
+        }
+      ],
+      "input": "abc123def",
+      "expected": "123"
+    },
+    {
+      "name": "filter_regex-7",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "[A-Z]"
+          }
+        }
+      ],
+      "input": "ABC",
+      "expected": "ABC"
+    },
+    {
+      "name": "filter_regex-8",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "[A-Z]"
+          }
+        }
+      ],
+      "input": "abc",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-9",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\d{9}$"
+          }
+        }
+      ],
+      "input": "123456789",
+      "expected": "123456789"
+    },
+    {
+      "name": "filter_regex-10",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\d{9}$"
+          }
+        }
+      ],
+      "input": "12345678",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-11",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\d{10}$"
+          }
+        }
+      ],
+      "input": "5551234567",
+      "expected": "5551234567"
+    },
+    {
+      "name": "filter_regex-12",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+          }
+        }
+      ],
+      "input": "a@b.co",
+      "expected": "a@b.co"
+    },
+    {
+      "name": "filter_regex-13",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+          }
+        }
+      ],
+      "input": "not-an-email",
+      "expected": null
+    },
+    {
+      "name": "parse_date-14",
+      "steps": [
+        {
+          "function": "parse_date",
+          "params": {
+            "inputFormat": "MM/DD/YYYY",
+            "outputFormat": "YYYYMMDD"
+          }
+        }
+      ],
+      "input": "01/02/2020",
+      "expected": "20200102"
+    },
+    {
+      "name": "parse_date-15",
+      "steps": [
+        {
+          "function": "parse_date",
+          "params": {
+            "inputFormat": "MM/DD/YYYY",
+            "outputFormat": "YYYYMMDD"
+          }
+        }
+      ],
+      "input": "1/2/2020",
+      "expected": "20200102"
+    },
+    {
+      "name": "parse_date-16",
+      "steps": [
+        {
+          "function": "parse_date",
+          "params": {
+            "inputFormat": "YYYY-MM-DD",
+            "outputFormat": "YYYYMMDD"
+          }
+        }
+      ],
+      "input": "2020-12-31",
+      "expected": "20201231"
+    },
+    {
+      "name": "parse_date-17",
+      "steps": [
+        {
+          "function": "parse_date",
+          "params": {
+            "inputFormat": "MM/DD/YYYY",
+            "outputFormat": "YYYYMMDD"
+          }
+        }
+      ],
+      "input": "13/40/2020",
+      "expected": null
+    },
+    {
+      "name": "replace_regex-18",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "(a)(b)",
+            "replacement": "$2$1"
+          }
+        }
+      ],
+      "input": "abab",
+      "expected": "baba"
+    },
+    {
+      "name": "replace_regex-19",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "\\d",
+            "replacement": "#"
+          }
+        }
+      ],
+      "input": "a1b2",
+      "expected": "a#b#"
+    },
+    {
+      "name": "extract_regex-20",
+      "steps": [
+        {
+          "function": "extract_regex",
+          "params": {
+            "pattern": "([a-z]+)@"
+          }
+        }
+      ],
+      "input": "user@example.com",
+      "expected": "user"
+    },
+    {
+      "name": "split_on-21",
+      "steps": [
+        {
+          "function": "split_on",
+          "params": {
+            "delimiter": "[;,]",
+            "includeOriginal": false
+          }
+        }
+      ],
+      "input": "a;b,c",
+      "expected": ["a", "b", "c"]
+    },
+    {
+      "name": "split_on-22",
+      "steps": [
+        {
+          "function": "split_on",
+          "params": {
+            "delimiter": "\\s+",
+            "includeOriginal": false
+          }
+        }
+      ],
+      "input": "a  b   c",
+      "expected": ["a", "b", "c"]
+    },
+    {
+      "name": "split_on-23",
+      "steps": [
+        {
+          "function": "split_on",
+          "params": {
+            "delimiter": "-",
+            "includeOriginal": true
+          }
+        }
+      ],
+      "input": "a-b-c",
+      "expected": ["a-b-c", "a", "b", "c"]
+    },
+    {
+      "name": "split_on-24",
+      "steps": [
+        {
+          "function": "split_on",
+          "params": {
+            "delimiter": "-",
+            "includeOriginal": false
+          }
+        }
+      ],
+      "input": "nodelim",
+      "expected": ["nodelim"]
+    },
+    {
+      "name": "filter_regex-25",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^.+$"
+          }
+        }
+      ],
+      "input": "café",
+      "expected": "café"
+    },
+    {
+      "name": "parse_date-26",
+      "steps": [
+        {
+          "function": "parse_date",
+          "params": {
+            "inputFormat": "MMMMMMMMMMMMMMMMMMMMMMMM",
+            "outputFormat": "YYYYMMDD"
+          }
+        }
+      ],
+      "input": "111111111111",
+      "expected": null
+    }
+  ]
+}

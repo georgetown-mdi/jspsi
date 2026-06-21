@@ -7,6 +7,11 @@ import {
   INFER_DATE_SCAN_CAP,
 } from "../src/utils/date";
 import { runPipeline } from "../src/standardization";
+import {
+  coerceToPatternString,
+  patternConformsToDialect,
+} from "../src/utils/linearRegex";
+import { REGEX_STEP_PATTERN_PARAM } from "../src/config/transformRegexDialect";
 import type { ColumnMetadata } from "../src/config/metadata";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 
@@ -120,6 +125,35 @@ describe("getDefaultStandardization — structure", () => {
     for (const t of result) {
       expect(t.steps).toBeDefined();
       expect((t.steps ?? []).length).toBeGreaterThan(0);
+    }
+  });
+
+  test("every raw-pattern step in every default pipeline is in the linear-time dialect", () => {
+    // The dialect gate rejects out-of-dialect partner patterns at terms validation;
+    // a SHIPPED default that drifted out of dialect would only surface as a remote
+    // exchange failing to validate the bundled terms. Pin it here directly
+    // (CONTRIBUTING: encode a runtime fact as a check) so a new default the engine
+    // cannot compile trips this test, not a counterparty.
+    const transformations = getDefaultStandardization(
+      fullMetadata,
+      minimalTerms,
+    );
+    const patterns: string[] = [];
+    for (const t of transformations) {
+      for (const step of t.steps ?? []) {
+        const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
+        if (paramKey === undefined) continue;
+        const raw = step.params?.[paramKey];
+        if (raw === undefined) continue;
+        patterns.push(coerceToPatternString(raw));
+      }
+    }
+    // Guard: the defaults DO exercise regex steps, so this is not a vacuous pass.
+    expect(patterns.length).toBeGreaterThan(0);
+    for (const pattern of patterns) {
+      expect(patternConformsToDialect(pattern), `pattern: ${pattern}`).toBe(
+        true,
+      );
     }
   });
 });
@@ -440,6 +474,38 @@ describe("default email_address pipeline", () => {
 
   test("returns null for a string without a domain dot", () => {
     expect(run("user@nodot")).toBeNull();
+  });
+
+  test("strips non-ASCII before the @-pattern filter (CHANNEL_SECURITY ordering claim)", () => {
+    // The RE2 dialect's `\s` is ASCII-only, narrower than JavaScript's. The
+    // email filter pattern uses `[^\s@]`, so CHANNEL_SECURITY.md relies on
+    // `remove_non_ascii` running before this filter_regex, so no non-ASCII code
+    // point ever reaches that class. Pin the ordering so the doc's runtime claim
+    // cannot rot silently (CONTRIBUTING: encode a runtime fact as a check).
+    const [t] = getDefaultStandardization(
+      [
+        {
+          name: "EMAIL",
+          type: "email_address",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
+      {
+        ...minimalTerms,
+        linkageFields: [{ name: "email_address", type: "email_address" }],
+      },
+    );
+    const steps = t.steps ?? [];
+    const asciiIdx = steps.findIndex((s) => s.function === "remove_non_ascii");
+    const emailFilterIdx = steps.findIndex(
+      (s) =>
+        s.function === "filter_regex" &&
+        typeof s.params?.pattern === "string" &&
+        s.params.pattern.includes("@"),
+    );
+    expect(asciiIdx).toBeGreaterThanOrEqual(0);
+    expect(emailFilterIdx).toBeGreaterThan(asciiIdx);
   });
 });
 

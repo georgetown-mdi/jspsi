@@ -396,12 +396,14 @@ const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
  * makes "a decoded token's `transform.params` is camelCase" a structural invariant.
  *
  * The pre-pass runs BEFORE validation, and that ordering is load-bearing: the
- * per-step ReDoS and length screens (`parse_date` / `pad_left` refines on
- * `TransformStep`, and the catastrophic-backtracking screen on
- * {@link LinkageTermsSchema}) read their inputs at the camelCase param names
+ * per-step length screens (`parse_date` / `pad_left` refines on `TransformStep`,
+ * and the raw-pattern length cap) and the dialect-conformance gate on
+ * {@link LinkageTermsSchema} read their inputs at the camelCase param names
  * (`inputFormat`, `length`, `pattern`). A snake_case-params token validated first
- * and folded after would evade those screens, then activate the unscreened value --
- * a ReDoS/DoS bypass. Folding first runs every screen on the normalized form. The
+ * and folded after would evade the screen keyed on a multi-word name (an
+ * `input_format` slipping the format-length cap), then activate the unscreened
+ * value once camelized downstream -- a DoS bound bypass. Folding first runs every
+ * screen on the normalized form. The
  * pre-pass is bounded: it throws NestingDepthExceededError / NodeCountExceededError
  * (UsageError subclasses, fixed input-free messages) on a pathologically deep or
  * wide `params`; the throw propagates from {@link InvitationTokenSchema}'s `.parse`
@@ -429,9 +431,10 @@ const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> = z.preprocess(
 const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   version: z.literal("1"),
   // InvitationLinkageTermsSchema, not the bare LinkageTermsSchema: it camelizes
-  // transform.params keys (and runs the ReDoS/length screens on the normalized
-  // form) before validating, the one place the invitation path would otherwise
-  // leave params verbatim. See its doc for why the fold must precede validation.
+  // transform.params keys (and runs the length and dialect screens on the
+  // normalized form) before validating, the one place the invitation path would
+  // otherwise leave params verbatim. See its doc for why the fold must precede
+  // validation.
   linkageTerms: InvitationLinkageTermsSchema,
   sharedSecret: z
     .string()

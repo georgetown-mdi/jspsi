@@ -14,14 +14,17 @@ const pkg = require("./package.json");
 // @noble/curves is bundled in the UMD browser build only because it ships
 // ESM-only and has no UMD global name; the ESM/CJS builds keep it external.
 const ALWAYS_BUNDLED = new Set(["@openmined/psi.js"]);
-// canonicalize and redos-detector are bundled into the standalone UMD browser
-// build because they ship with no UMD global name; the ESM/CJS builds keep them
-// external (the consuming apps bundle them).
+// canonicalize and re2js are bundled into the standalone UMD browser build
+// because they ship with no UMD global name; the ESM/CJS builds keep them
+// external (the consuming apps bundle them). re2js is the linear-time regex
+// engine that executes partner transform patterns; it is pure JS, so the same
+// build serves both the CLI (Node) and the web (browser) -- see
+// docs/spec/PROTOCOL.md "Transform regular-expression dialect".
 const UMD_BUNDLED = new Set([
   "@openmined/psi.js",
   "@noble/curves",
   "canonicalize",
-  "redos-detector",
+  "re2js",
 ]);
 
 // Returns an `external` predicate that matches bare package names and their

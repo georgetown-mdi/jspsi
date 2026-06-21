@@ -1,0 +1,227 @@
+{
+  "vectors": [
+    {
+      "name": "extract_regex-divergent-0",
+      "steps": [
+        {
+          "function": "extract_regex",
+          "params": {
+            "pattern": "^(.)$"
+          }
+        }
+      ],
+      "input": "😀",
+      "expected": "😀"
+    },
+    {
+      "name": "replace_regex-divergent-1",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "a*",
+            "replacement": "X"
+          }
+        }
+      ],
+      "input": "😀",
+      "expected": "X😀X"
+    },
+    {
+      "name": "filter_regex-divergent-2",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": " ",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-3",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": "\u000b",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-4",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": " ",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-5",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": " ",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-6",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": "　",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-7",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^.$"
+          }
+        }
+      ],
+      "input": "\r",
+      "expected": "\r"
+    },
+    {
+      "name": "filter_regex-divergent-8",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^.$"
+          }
+        }
+      ],
+      "input": " ",
+      "expected": " "
+    },
+    {
+      "name": "filter_regex-divergent-9",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^.$"
+          }
+        }
+      ],
+      "input": " ",
+      "expected": " "
+    },
+    {
+      "name": "filter_regex-divergent-10",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^.$"
+          }
+        }
+      ],
+      "input": "\n",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-11",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": " ",
+      "expected": " "
+    },
+    {
+      "name": "filter_regex-divergent-12",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "\\s"
+          }
+        }
+      ],
+      "input": "\t",
+      "expected": "\t"
+    },
+    {
+      "name": "filter_regex-divergent-13",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\p{L}+$"
+          }
+        }
+      ],
+      "input": "é",
+      "expected": "é"
+    },
+    {
+      "name": "filter_regex-divergent-14",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\p{L}+$"
+          }
+        }
+      ],
+      "input": "1",
+      "expected": null
+    },
+    {
+      "name": "filter_regex-divergent-15",
+      "steps": [
+        {
+          "function": "filter_regex",
+          "params": {
+            "pattern": "^\\p{Nd}+$"
+          }
+        }
+      ],
+      "input": "5",
+      "expected": "5"
+    },
+    {
+      "name": "replace_regex-divergent-16",
+      "steps": [
+        {
+          "function": "replace_regex",
+          "params": {
+            "pattern": "(?i)b",
+            "replacement": "X"
+          }
+        }
+      ],
+      "input": "ABC",
+      "expected": "AXC"
+    }
+  ]
+}

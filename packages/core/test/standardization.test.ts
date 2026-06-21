@@ -855,6 +855,54 @@ describe("buildKeyStrings: NFC normalization of the assembled key", () => {
   });
 });
 
+describe("buildKeyStrings: element-transform compilation reused across rows", () => {
+  // The element transform compiles once and is memoized by the step array's
+  // identity, then reused for every row. A memoization bug would cross-contaminate
+  // rows or stale a result, so build several rows through one regex element
+  // transform and assert each is independently correct.
+  test("a regex element transform yields the correct key for each row", () => {
+    const key = {
+      name: "SSN4",
+      elements: [
+        {
+          field: "ssn",
+          transform: [
+            { function: "extract_regex", params: { pattern: "(\\d{4})$" } },
+          ],
+        },
+      ],
+    };
+    const rows = [{ SSN: "111223333" }, { SSN: "444556666" }, { SSN: "abc" }];
+    const dataset = new StandardizedDataset([
+      new StandardizedField("ssn", "SSN", [], rows),
+    ]);
+    expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set(["3333"]));
+    expect(buildKeyStrings(key, dataset, 1)).toEqual(new Set(["6666"]));
+    // No 4-digit tail -> the element produces no value -> the key collapses.
+    expect(buildKeyStrings(key, dataset, 2)).toBeNull();
+  });
+});
+
+describe("regex factories fail closed (no fallback to new RegExp)", () => {
+  // A pattern outside the linear-time dialect -- a backreference or lookaround,
+  // which new RegExp would accept and run -- must throw, never silently fall back
+  // to the backtracking engine (which would reopen the ReDoS hole). This encodes
+  // the no-fallback invariant as a check rather than relying on absent code. The
+  // factory compiles eagerly, so runPipeline throws when it builds the step.
+  test("an out-of-dialect pattern throws instead of running", () => {
+    const cases: Array<{ function: string; params: Record<string, unknown> }> =
+      [
+        { function: "filter_regex", params: { pattern: "(a)\\1" } },
+        { function: "replace_regex", params: { pattern: "a(?=b)" } },
+        { function: "extract_regex", params: { pattern: "(?<=a)b" } },
+        { function: "split_on", params: { delimiter: "(a)\\1" } },
+      ];
+    for (const step of cases) {
+      expect(() => runPipeline("anything", [step])).toThrow();
+    }
+  });
+});
+
 // --- StandardizedField -------------------------------------------------------
 
 describe("StandardizedField", () => {

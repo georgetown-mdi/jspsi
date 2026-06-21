@@ -19,6 +19,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
+  MAX_DATE_FORMAT_LENGTH,
 } from "../src/config/linkageTerms";
 import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
@@ -160,12 +161,16 @@ test("round-trips full linkage terms including all fields", async () => {
   expect(decoded.expires).toBe("2030-01-01T00:00:00.000Z");
 });
 
-test("decodeInvitation rejects linkage terms carrying a catastrophic-backtracking regex", async () => {
+test("decodeInvitation rejects linkage terms carrying an out-of-dialect transform regex", async () => {
   // A crafted invitation -- valid checksum (the checksum is a transcription-error
   // detector, not an authenticity guarantee, so anyone can recompute it over a
-  // hostile payload) whose linkage terms embed a ReDoS pattern in an element
-  // transform. InvitationTokenSchema embeds LinkageTermsSchema, so the
-  // catastrophic-backtracking check fires at decode, before any pattern executes.
+  // hostile payload) whose linkage terms embed a transform pattern outside the
+  // linear-time dialect (a backreference, which the engine cannot compile).
+  // InvitationTokenSchema embeds LinkageTermsSchema, so the dialect-conformance
+  // check fires at decode, before any pattern executes. (A pattern that merely
+  // backtracks catastrophically on `new RegExp`, like `(a+)+$`, is now in-dialect
+  // and accepted -- the linear-time engine runs it safely; see standardization
+  // and linearRegex tests.)
   const malicious = {
     ...baseToken,
     linkageTerms: {
@@ -177,7 +182,7 @@ test("decodeInvitation rejects linkage terms carrying a catastrophic-backtrackin
             {
               field: "ssn",
               transform: [
-                { function: "filter_regex", params: { pattern: "(a+)+$" } },
+                { function: "filter_regex", params: { pattern: "(a)\\1" } },
               ],
             },
           ],
@@ -188,7 +193,7 @@ test("decodeInvitation rejects linkage terms carrying a catastrophic-backtrackin
   const encoded = await encodeRaw(malicious);
   await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
   await expect(decodeInvitation(encoded)).rejects.toThrow(
-    /catastrophic backtracking/,
+    /linear-time dialect/,
   );
 });
 
@@ -196,7 +201,7 @@ test("decodeInvitation rejects linkage terms carrying a catastrophic-backtrackin
 // The invitation decode path is the chokepoint that folds partner-controlled
 // transform.params keys to camelCase (InvitationLinkageTermsSchema), so a
 // decoded token's params match the form every other parse path produces and the
-// per-step ReDoS/length screens run on the normalized form.
+// per-step length and dialect screens run on the normalized form.
 
 test("decodeInvitation normalizes snake_case transform.params keys to camelCase", async () => {
   // A hand-crafted token can carry snake_case params (the params record is
@@ -234,12 +239,14 @@ test("decodeInvitation normalizes snake_case transform.params keys to camelCase"
   ).toEqual({ inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" });
 });
 
-test("decodeInvitation screens a snake_case parse_date inputFormat for ReDoS (the fold precedes the screen)", async () => {
-  // The catastrophic-backtracking screen reads the camelCase `inputFormat`. Because
-  // the decode fold runs BEFORE validation, a snake_case `input_format` carrying a
-  // runaway format is normalized first and then screened, so it is rejected -- not
-  // folded into effect after the screen already passed over the absent camelCase
-  // key. "MM" x24 expands to 24 adjacent ambiguous groups, the flagged ReDoS shape.
+test("decodeInvitation screens a snake_case parse_date inputFormat for length (the fold precedes the screen)", async () => {
+  // The per-step length screen reads the camelCase `inputFormat`. Because the
+  // decode fold runs BEFORE validation, a snake_case `input_format` over the
+  // format-length cap is normalized first and then screened, so it is rejected --
+  // not folded into effect after the screen already passed over the absent
+  // camelCase key. (parse_date's catastrophic-backtracking exposure is closed by
+  // the linear-time engine, not a screen; the residual the fold protects is the
+  // length cap on the regex parse_date expands per row.)
   const token = {
     ...baseToken,
     linkageTerms: {
@@ -253,7 +260,9 @@ test("decodeInvitation screens a snake_case parse_date inputFormat for ReDoS (th
               transform: [
                 {
                   function: "parse_date",
-                  params: { input_format: "MM".repeat(24) },
+                  params: {
+                    input_format: "M".repeat(MAX_DATE_FORMAT_LENGTH + 1),
+                  },
                 },
               ],
             },
@@ -263,27 +272,28 @@ test("decodeInvitation screens a snake_case parse_date inputFormat for ReDoS (th
     },
   };
   await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
-    /catastrophic backtracking/,
+    /must not exceed/,
   );
 });
 
 test("decodeInvitation: a param spelling the fold leaves non-canonical is inert (screen and runtime read the same name)", async () => {
-  // The complement of the ReDoS-screen test above, pinning the safety margin the
-  // whole fold rests on: the catastrophic-backtracking screen and the
-  // standardization runtime (parseDateFactory) read the SAME camelCase param name,
-  // `inputFormat`. A spelling the snake->camel fold does NOT canonicalize to that
-  // name -- here SCREAMING_SNAKE `INPUT_FORMAT`, whose `_F` the fold leaves intact
-  // (camelizeKeys only collapses `_` followed by a lowercase letter) -- is therefore
-  // invisible to BOTH: the screen does not fire, so decode does not reject, AND the
-  // runtime never reads it (`params.inputFormat` is absent, so parse_date falls back
-  // to its default format). A runaway format parked under such a key is inert, never
-  // a value that slips the screen and then activates downstream. The "MM" x24 bomb
-  // is the same payload the ReDoS-screen test rejects under the canonical key; under
-  // this non-canonical key it parses cleanly and is left verbatim. Were a future
-  // camelizeKeys change to canonicalize `INPUT_FORMAT` to `inputFormat`, the
+  // The complement of the length-screen test above, pinning the safety margin the
+  // whole fold rests on: the per-step length screen and the standardization runtime
+  // (parseDateFactory) read the SAME camelCase param name, `inputFormat`. A spelling
+  // the snake->camel fold does NOT canonicalize to that name -- here SCREAMING_SNAKE
+  // `INPUT_FORMAT`, whose `_F` the fold leaves intact (camelizeKeys only collapses
+  // `_` followed by a lowercase letter) -- is therefore invisible to BOTH: the
+  // length screen does not fire, so decode does not reject, AND the runtime never
+  // reads it (`params.inputFormat` is absent, so parse_date falls back to its
+  // default format). An over-cap format parked under such a key is inert, never a
+  // value that slips the screen and then activates downstream. The over-cap format
+  // is the same payload the length-screen test rejects under the canonical key;
+  // under this non-canonical key it parses cleanly and is left verbatim. Were a
+  // future camelizeKeys change to canonicalize `INPUT_FORMAT` to `inputFormat`, the
   // fold-before-validation ordering would route this very token through the screen
   // and decode would start rejecting it -- so this test fails loudly either way,
   // guarding the screen/runtime name agreement against silent drift.
+  const overCap = "M".repeat(MAX_DATE_FORMAT_LENGTH + 1);
   const token = {
     ...baseToken,
     linkageTerms: {
@@ -297,7 +307,7 @@ test("decodeInvitation: a param spelling the fold leaves non-canonical is inert 
               transform: [
                 {
                   function: "parse_date",
-                  params: { INPUT_FORMAT: "MM".repeat(24) },
+                  params: { INPUT_FORMAT: overCap },
                 },
               ],
             },
@@ -309,9 +319,10 @@ test("decodeInvitation: a param spelling the fold leaves non-canonical is inert 
   const decoded = await decodeInvitation(await encodeRaw(token));
   const params =
     decoded.linkageTerms.linkageKeys[0].elements[0].transform?.[0].params;
-  // The bomb stayed under the non-canonical key, untouched; the canonical name the
-  // runtime reads is absent, so parse_date sees no format and uses its default.
-  expect(params).toEqual({ INPUT_FORMAT: "MM".repeat(24) });
+  // The over-cap format stayed under the non-canonical key, untouched; the
+  // canonical name the runtime reads is absent, so parse_date sees no format and
+  // uses its default.
+  expect(params).toEqual({ INPUT_FORMAT: overCap });
   expect(params).not.toHaveProperty("inputFormat");
 });
 
