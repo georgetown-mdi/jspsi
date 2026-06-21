@@ -243,6 +243,7 @@ export function PrepareData({
                 placeholder="Choose a column"
                 data={columns}
                 value={null}
+                allowDeselect={false}
                 onChange={(columnName) =>
                   columnName !== null && remap(type, columnName)
                 }

@@ -151,7 +151,12 @@ export function LinkageTermsEditor({
   // exactly the producible fields, so a reconciled key (all of whose fields are
   // offerable) shows satisfiable and stays correct after a remap.
   const producibleFieldNames = useMemo(() => {
-    const offerable = getDefaultLinkageTerms(draft.identity, draft.metadata);
+    // identity is deliberately NOT a dependency: getDefaultLinkageTerms uses it
+    // only to populate terms.identity, never to derive the field or key set, so
+    // it cannot change which fields are producible. Pass a constant so a keystroke
+    // in the name field does not recompute this (and the real input sensitivity --
+    // the column metadata -- stays legible in the dependency array).
+    const offerable = getDefaultLinkageTerms("", draft.metadata);
     const { unsatisfied } = assessLinkageSatisfiability(
       seed.columns,
       offerable,
@@ -164,7 +169,7 @@ export function LinkageTermsEditor({
         .map((f) => f.name)
         .filter((name) => !unsatisfiedNames.has(name)),
     );
-  }, [draft.identity, draft.metadata, seed.columns]);
+  }, [draft.metadata, seed.columns]);
   const keyIsSatisfiable = (index: number): boolean =>
     draft.keys[index].key.elements.every((el) =>
       producibleFieldNames.has(el.field),
