@@ -1,7 +1,8 @@
 import type { LinkageTerms } from "./linkageTerms.js";
 import {
   coerceToPatternString,
-  patternConformsToDialect,
+  transformProgramSize,
+  MAX_TRANSFORM_PROGRAM_SIZE,
 } from "../utils/linearRegex.js";
 
 // --- Transform-regex dialect conformance -------------------------------------
@@ -58,6 +59,22 @@ export const REGEX_STEP_PATTERN_PARAM: Readonly<Record<string, string>> = {
  */
 export const REGEX_DIALECT_TOTAL_BUDGET_MS = 2000;
 
+/**
+ * Upper bound on the SUM of compiled program sizes across every raw-pattern step in
+ * one linkage-terms set. The per-pattern cap ({@link MAX_TRANSFORM_PROGRAM_SIZE})
+ * bounds one pattern's per-row cost, but per-row regex work is the SUM over every
+ * step in every key element, and the count bounds permit up to 256 steps x 256
+ * elements x 256 keys -- so a terms set can chain many under-cap patterns into a
+ * large cumulative per-row cost (e.g. 256 length-preserving `(b*b*){42}`
+ * `replace_regex` steps, each ~254 instructions and well under the per-pattern cap,
+ * cost seconds per row on a long field). This caps that aggregate. The full bundled-
+ * default template sums to under 200 instructions, so a legitimate terms set has
+ * wide headroom; 2048 is ~10x that and far below the amplification a hostile set
+ * would need. (Field-value length is the other per-row-cost factor, bounded
+ * separately; see docs/spec/PROTOCOL.md.)
+ */
+export const MAX_TRANSFORM_TOTAL_PROGRAM_SIZE = 2048;
+
 /** Optional override for the conformance budget; defaulted from the constant
  * above. Exposed so tests can drive the budget-exhaustion path deterministically. */
 export interface RegexDialectBudget {
@@ -67,16 +84,22 @@ export interface RegexDialectBudget {
 }
 
 /**
- * Whether any linkage-key element transform in `terms` uses a raw-pattern step
- * whose pattern is OUTSIDE the linear-time dialect (the engine cannot compile it),
- * or whether the conformance budget is exhausted before a pattern is checked
- * (fail closed). Returns `true` to reject. Walks every transform step across all
- * keys and elements; for each raw-pattern step ({@link REGEX_STEP_PATTERN_PARAM})
- * it checks the pattern the factory would compile -- coerced to a string exactly
- * as the factory coerces it ({@link coerceToPatternString}), so the verdict here
- * matches what executes. An omitted pattern is skipped (the factory compiles it to
- * a degenerate but in-dialect literal); `parse_date` is not a raw-pattern step and
- * is not screened (its generated regex is always in-dialect).
+ * Whether any linkage-key element transform in `terms` uses a raw-pattern step that
+ * the dialect rejects -- a pattern OUTSIDE the linear-time dialect (the engine
+ * cannot compile it) or one whose compiled program exceeds the per-pattern cap
+ * ({@link MAX_TRANSFORM_PROGRAM_SIZE}) -- or whose patterns exceed the AGGREGATE
+ * program-size cap across the whole terms set ({@link MAX_TRANSFORM_TOTAL_PROGRAM_SIZE}),
+ * or whether the conformance budget is exhausted before a pattern is checked (each
+ * fail closed). Returns `true` to reject. Walks every transform step across all keys
+ * and elements; for each raw-pattern step ({@link REGEX_STEP_PATTERN_PARAM}) it
+ * sizes the pattern the factory would compile -- coerced to a string exactly as the
+ * factory coerces it ({@link coerceToPatternString}), so the verdict here matches
+ * what executes. The per-pattern cap bounds one pattern's per-row cost; the
+ * aggregate cap bounds the TOTAL per-row regex work, so a terms set cannot chain
+ * many under-cap patterns into a large cumulative cost. An omitted pattern is
+ * skipped (the factory compiles it to a degenerate but in-dialect literal);
+ * `parse_date` is not a raw-pattern step and is not screened (its generated regex
+ * is always in-dialect and low-ambiguity).
  *
  * The message the caller attaches names no partner-controlled value -- the
  * offending pattern is located by inspection, not echoed -- consistent with the
@@ -88,6 +111,7 @@ export function linkageTermsHaveNonConformantTransformRegex(
 ): boolean {
   const totalBudgetMs = budget.totalBudgetMs ?? REGEX_DIALECT_TOTAL_BUDGET_MS;
   const startedAt = Date.now();
+  let totalProgramSize = 0;
 
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
@@ -100,7 +124,12 @@ export function linkageTermsHaveNonConformantTransformRegex(
         if (raw === undefined) continue;
 
         if (Date.now() - startedAt >= totalBudgetMs) return true;
-        if (!patternConformsToDialect(coerceToPatternString(raw))) return true;
+        const programSize = transformProgramSize(coerceToPatternString(raw));
+        // Per-pattern: out of dialect (Infinity) or too large a single program.
+        if (programSize > MAX_TRANSFORM_PROGRAM_SIZE) return true;
+        // Aggregate: bound the TOTAL per-row regex work across every step.
+        totalProgramSize += programSize;
+        if (totalProgramSize > MAX_TRANSFORM_TOTAL_PROGRAM_SIZE) return true;
       }
     }
   }

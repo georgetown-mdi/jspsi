@@ -788,9 +788,9 @@ test("a non-string transform regex pattern still validates, so coercion handles 
 
 test("a transform regex whose compiled program is too large is rejected by the dialect gate", () => {
   // `(.*){1000}` is in-dialect (it compiles) and is well under the 1000-char length
-  // cap, but expands to ~4000 instructions and costs ~1s per row even on a 1-char
-  // value. The dialect gate's program-size bound rejects it, fail closed, before any
-  // row runs -- the length and per-repetition caps do not catch this.
+  // cap, but expands to ~4000 instructions -- over the per-pattern program-size cap.
+  // The dialect gate rejects it, fail closed, before any row runs -- the length and
+  // per-repetition caps do not catch this.
   const result = safeParseLinkageTerms(
     regexStepTerms("filter_regex", { pattern: "(.*){1000}" }),
   );
@@ -798,6 +798,40 @@ test("a transform regex whose compiled program is too large is rejected by the d
   if (result.success) return;
   expect(
     result.error.issues.some((i) =>
+      /outside the linear-time dialect/.test(i.message),
+    ),
+  ).toBe(true);
+});
+
+test("many under-cap regex steps are rejected by the aggregate program-size cap", () => {
+  // Step-count amplification: each `(b*b*){42}` is ~254 instructions (under the
+  // per-pattern cap) and length-preserving, so chaining many of them multiplies
+  // per-row cost into seconds. The aggregate cap (sum of program sizes across all
+  // steps) rejects a chain whose total exceeds the budget, even though every single
+  // pattern conforms. ~8 such steps fit under the 2048 budget; ~16 do not.
+  const amplifierSteps = (n: number) => ({
+    ...base,
+    linkageKeys: [
+      {
+        name: "RX",
+        elements: [
+          {
+            field: "ssn",
+            transform: Array.from({ length: n }, () => ({
+              function: "replace_regex",
+              params: { pattern: "(b*b*){42}", replacement: "" },
+            })),
+          },
+        ],
+      },
+    ],
+  });
+  expect(safeParseLinkageTerms(amplifierSteps(8)).success).toBe(true);
+  const tooMany = safeParseLinkageTerms(amplifierSteps(16));
+  expect(tooMany.success).toBe(false);
+  if (tooMany.success) return;
+  expect(
+    tooMany.error.issues.some((i) =>
       /outside the linear-time dialect/.test(i.message),
     ),
   ).toBe(true);

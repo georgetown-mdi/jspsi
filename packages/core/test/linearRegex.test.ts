@@ -94,9 +94,9 @@ describe("patternConformsToDialect", () => {
 describe("patternConformsToDialect program-size cap", () => {
   test("rejects an in-dialect pattern whose compiled program is too large", () => {
     for (const pattern of [
-      "(.*){1000}", // thousands of instructions, ~1s per row even on a 1-char input
+      "(.*){1000}", // ~4000 instructions, over the cap
       "(.*){64}", // 258 instructions, just over the cap
-      "(.*){1000}".repeat(99), // the documented per-row DoS pattern
+      "(.*){1000}".repeat(99), // ~396k instructions; ~1s per row even on a 1-char input
       "[a-z]{1000}".repeat(90), // flat-concatenation expansion bomb
       "a".repeat(1000), // a long literal is ~1002 instructions, over the cap
     ]) {
@@ -112,7 +112,15 @@ describe("patternConformsToDialect program-size cap", () => {
     // A long sparse pattern (many tiny groups) is program-small, so it passes the
     // program-size cap even at the 1000-character length-cap boundary.
     expect(patternConformsToDialect("(?:x)".repeat(200))).toBe(true);
-    // The boundary: just under the cap conforms, just over does not.
+  });
+
+  test("the program-size boundary is exact (<= the cap conforms, one over does not)", () => {
+    // A literal compiles to length + 2 instructions, so a 254-char literal is exactly
+    // 256 (the cap, accepted) and a 255-char literal is 257 (one over, rejected) --
+    // the two values that distinguish `<= cap` from `< cap`.
+    expect(patternConformsToDialect("a".repeat(254))).toBe(true); // 256 instructions
+    expect(patternConformsToDialect("a".repeat(255))).toBe(false); // 257 instructions
+    // The same boundary via a dense pattern.
     expect(patternConformsToDialect("(.*){63}")).toBe(true); // 254 instructions
     expect(patternConformsToDialect("(.*){64}")).toBe(false); // 258 instructions
   });

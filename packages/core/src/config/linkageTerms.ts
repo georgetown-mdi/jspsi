@@ -1008,14 +1008,16 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     // Reject a transform regex outside the linear-time dialect before it can run.
     // Element-transform regex patterns are partner-controlled and execute per row
     // over the full dataset, under the linear-time engine (utils/linearRegex.ts),
-    // so they cannot backtrack catastrophically; this rejects a pattern that
-    // engine cannot compile (a backreference, lookaround, or unsupported escape),
-    // AND one whose compiled program exceeds the size bound -- a small pattern can
+    // so they cannot backtrack catastrophically; this rejects a pattern the engine
+    // cannot compile (a backreference, lookaround, or unsupported escape), one whose
+    // compiled program exceeds the per-pattern size bound -- a small pattern can
     // expand into a huge program via a counted repetition over a sub-expression
     // (e.g. `(.*){1000}`), which matches linearly but with a per-row constant large
-    // enough to be a denial of service. Both are fail closed, before any execution
-    // and before both parties commit to terms they could not evaluate identically.
-    // The check belongs here so every parse path (initiator/joiner
+    // enough to be a denial of service -- AND a terms set whose patterns exceed the
+    // AGGREGATE program-size bound across all steps (many under-cap patterns chained
+    // into a large cumulative per-row cost). All are fail closed, before any
+    // execution and before both parties commit to terms they could not evaluate
+    // identically. The check belongs here so every parse path (initiator/joiner
     // parseLinkageTerms, the invitation-token decode, and ExchangeSpecSchema)
     // inherits it. See transformRegexDialect.ts for the model and
     // docs/spec/PROTOCOL.md for the normative dialect. The message names no
@@ -1026,8 +1028,8 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
       message:
         "a linkage key element transform uses a regular expression outside the " +
         "linear-time dialect (RE2 syntax; backreferences and lookaround are not " +
-        "supported, and the pattern must compile to a bounded program); it is " +
-        "rejected before any pattern executes",
+        "supported, and the patterns must compile to a bounded program size, " +
+        "individually and in total); it is rejected before any pattern executes",
       path: ["linkageKeys"],
     });
 

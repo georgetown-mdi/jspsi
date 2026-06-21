@@ -96,6 +96,39 @@ describe("linkageTermsHaveNonConformantTransformRegex", () => {
     ).toBe(false);
   });
 
+  test("returns true for a single in-dialect pattern over the per-pattern program-size cap", () => {
+    // `(.*){1000}` compiles (~4000 instructions) but exceeds the per-pattern cap, so
+    // it is rejected on program size, not on an unsupported feature.
+    expect(
+      linkageTermsHaveNonConformantTransformRegex(
+        termsWith([
+          { function: "filter_regex", params: { pattern: "(.*){1000}" } },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test("returns true when many under-cap patterns exceed the aggregate program-size cap", () => {
+    // Each `(b*b*){42}` is ~254 instructions -- under the per-pattern cap -- but
+    // chaining enough of them exceeds the aggregate cap across the whole terms set,
+    // the step-count amplification the per-pattern cap alone does not bound. ~8 such
+    // steps fit under the 2048 budget; 16 do not.
+    const amp = {
+      function: "replace_regex",
+      params: { pattern: "(b*b*){42}" },
+    };
+    expect(
+      linkageTermsHaveNonConformantTransformRegex(
+        termsWith(Array.from({ length: 8 }, () => amp)),
+      ),
+    ).toBe(false);
+    expect(
+      linkageTermsHaveNonConformantTransformRegex(
+        termsWith(Array.from({ length: 16 }, () => amp)),
+      ),
+    ).toBe(true);
+  });
+
   test("rejects (fail closed) when the conformance budget is exhausted", () => {
     // A zero budget exhausts before the first pattern is checked, so any terms set
     // with a raw-pattern step rejects closed -- the DoS bound against a terms set
