@@ -16,6 +16,7 @@ import {
 import { getDefaultStandardization } from "../src/defaults/standardization";
 import { SEMANTIC_TYPES } from "../src/types";
 import type { Metadata } from "../src/config/metadata";
+import { isSafePattern } from "redos-detector";
 
 // A budget generous enough that timing never decides a correctness assertion.
 const BUDGET = { totalBudgetMs: 10000, perPatternMaxMs: 1000 };
@@ -99,6 +100,30 @@ describe("transformPatternIsUnsafe", () => {
     expect(
       transformPatternIsUnsafe(longSafe, REGEX_ANALYSIS_PER_PATTERN_MS),
     ).toBe(true);
+  });
+
+  test("rejects a pattern the analyzer cannot certify within budget (fail closed on resource limit)", () => {
+    // 100 nested optional groups. V8 runs this in microseconds -- it is NOT
+    // catastrophic -- but redos-detector's path enumeration cannot clear its state
+    // space within any small budget and returns a resource-limit verdict
+    // (`timedOut`, safe:false) rather than certifying it. The whole control's
+    // fail-closed property rests on a "could not certify" verdict mapping to
+    // reject, not accept; this pins both the library's resource-limit -> unsafe
+    // contract and the wrapper's reject on it, so a future redos-detector that maps
+    // a timeout to safe:true (a silent fail-open) fails this test rather than
+    // shipping. The pattern times out even at a multi-second budget, so the tiny
+    // budget here makes the verdict machine-independent.
+    const uncertifiable = "(?:".repeat(100) + "a" + ")?".repeat(100);
+    expect(uncertifiable.length).toBeLessThanOrEqual(
+      MAX_ANALYZED_PATTERN_LENGTH,
+    );
+    const verdict = isSafePattern(uncertifiable, {
+      maxScore: 200,
+      maxSteps: 20000,
+      timeout: 1,
+    });
+    expect(verdict.safe).toBe(false); // library cannot certify -> unsafe
+    expect(transformPatternIsUnsafe(uncertifiable, 1)).toBe(true); // wrapper rejects
   });
 });
 

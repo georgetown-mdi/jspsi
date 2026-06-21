@@ -76,10 +76,17 @@ export const KNOWN_SAFE_TRANSFORM_PATTERNS: ReadonlySet<string> = new Set([
  */
 export const MAX_ANALYZED_PATTERN_LENGTH = 1000;
 
-// redos-detector budget knobs, pinned to its documented defaults so a future
-// version's default change cannot silently shift the safe/unsafe verdict of this
-// security check. `maxScore` is the ambiguity-score ceiling above which a pattern
-// is reported unsafe; `maxSteps` bounds the analysis-loop work.
+// redos-detector knobs, pinned to its documented defaults so a future version's
+// default change cannot silently shift the safe/unsafe verdict of this security
+// check. `maxScore` is the ambiguity-score ceiling above which a pattern is
+// reported unsafe; `maxSteps` bounds the analysis-loop work. `downgradePattern`
+// (passed at the call site) is pinned to its default `true`: a pattern with a
+// feature the analyzer cannot model directly -- a backreference or a lookbehind --
+// is over-approximated into a WIDER pattern and analyzed rather than throwing, and
+// because the downgrade only widens, a `safe` verdict on it is sound for the
+// original. Pinning it fixes that behavior against a default flip; the alternative
+// `false` throws on those patterns, which the call site's catch rejects closed
+// anyway, so `true` is both behavior-preserving and less over-rejecting.
 const REGEX_ANALYSIS_MAX_SCORE = 200;
 const REGEX_ANALYSIS_MAX_STEPS = 20000;
 
@@ -145,6 +152,7 @@ export function transformPatternIsUnsafe(
       maxScore: REGEX_ANALYSIS_MAX_SCORE,
       maxSteps: REGEX_ANALYSIS_MAX_STEPS,
       timeout: timeoutMs,
+      downgradePattern: true,
     });
     return !result.safe;
   } catch {
