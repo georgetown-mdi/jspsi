@@ -124,7 +124,9 @@ edge cases a reproducer must match: an underscore NOT followed by an ASCII
 lowercase letter is left intact, so `input_format` -> `inputFormat` but
 `INPUT_FORMAT` -> `INPUT_FORMAT` (the `_F` does not fold), `field_1` -> `field_1`
 (digit), and `input__format` -> `input_Format` (only the second underscore folds);
-an already-camelCase key has no underscore-plus-lowercase and is unchanged. psilink
+a LEADING underscore before a lowercase letter still folds and is dropped, so
+`_format` -> `Format`; an already-camelCase key has no underscore-plus-lowercase
+and is unchanged. psilink
 emits only camelCase keys, so a token it produced is already in this normal form --
 the fold is observable only for a hand-authored or third-party token carrying
 `snake_case` keys.
