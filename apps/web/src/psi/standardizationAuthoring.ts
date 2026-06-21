@@ -387,7 +387,10 @@ export interface ConstraintViolation {
  * transform-regex paths use (#248, re2js) instead, so the blow-up is impossible by
  * construction -- no partner pattern ever touches the backtracking engine, and a
  * pattern that engine cannot compile is treated as "cannot check" (no violation,
- * fail-open) rather than throwing. (2) Warning suppression: a breakout that matches
+ * fail-open) rather than throwing. NameConstraintsSchema validates the class under
+ * this same engine, so for a decoded token that fail-open is a backstop, not a
+ * path: a class that would not compile here is rejected at terms validation.
+ * (2) Warning suppression: a breakout that matches
  * everything (e.g. `a]|.*[b`) would silently pass disallowed values. Testing one
  * code point at a time against `^[allowed]$` defeats it -- a multi-character breakout
  * construct cannot match a single character -- so a genuinely disallowed value is
