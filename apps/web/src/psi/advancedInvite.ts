@@ -21,16 +21,20 @@ import type { LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
  * than through the UI.
  *
  * Scope of this iteration (see the board item): the editor reviews and reorders
- * the metadata-derived defaults and attaches identity, lifetime, and an optional
- * legal agreement. It deliberately exposes NO control for output sharing,
- * `algorithm` (psi-c), `deduplicate`, fuzzy comparisons, or payload columns:
- * those are carried from the seed unchanged, so a draft can only ever emit the
- * default `psi` / both-receive / no-dedup / no-fuzzy / no-payload shape. Element,
- * transform, and swap internals are read-only too. Each of those is a capability
- * the engine does not yet honor end-to-end (one-sided output and payload
- * transmission) or is tracked as its own authoring task; surfacing a settable
- * control here would let the editor mint an invitation whose headline behavior
- * silently does not happen.
+ * the metadata-derived defaults, edits the per-party column metadata (semantic
+ * type and disclosure -- see {@link setDraftMetadata}), and attaches identity,
+ * lifetime, and an optional legal agreement. It deliberately exposes NO control
+ * for output sharing, `algorithm` (psi-c), `deduplicate`, or fuzzy comparisons:
+ * those are carried from the seed unchanged, so a draft's TERMS can only ever
+ * emit the default `psi` / both-receive / no-dedup / no-fuzzy shape, and no
+ * payload block is authored into the terms. Element, transform, and swap
+ * internals are read-only too. Each of those is a capability the engine does not
+ * yet honor end-to-end (one-sided output) or is tracked as its own authoring
+ * task; surfacing a settable control here would let the editor mint an invitation
+ * whose headline behavior silently does not happen. The column METADATA is
+ * editable and threaded into the inviter's own `prepareForExchange` (never the
+ * token), so its disclosure choices govern what the inviter sends without
+ * touching the agreed terms.
  */
 
 /** One linkage key in the editor, paired with whether it is active. Display and
