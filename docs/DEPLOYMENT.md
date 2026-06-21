@@ -38,6 +38,36 @@ Two further protections depend on the deployment and are the reverse proxy's res
 
 A deployment that exposes the web application directly, with no reverse proxy, gets the unconditional in-application guards above but neither Origin enforcement nor per-address rate limiting; run the coordination server behind a reverse proxy for those.
 
+Both controls scope to the `/api/peerjs` upgrade path. The following nginx reference shows where each goes; the rate and connection limits are illustrative starting points to tune to your load, not recommended values:
+
+```nginx
+# http{} context: per-client-address shared-memory zones.
+limit_req_zone  $binary_remote_addr  zone=psilink_sig_req:10m   rate=10r/s;
+limit_conn_zone $binary_remote_addr  zone=psilink_sig_conn:10m;
+
+# Optional Origin allowlist (a browser always sends Origin on a WS upgrade).
+map $http_origin $psilink_origin_ok {
+    default                        0;
+    "https://psilink.example.org"  1;   # replace with your public origin(s)
+}
+
+# server{} context: scope the controls to the signaling upgrade location.
+location /api/peerjs {
+    if ($psilink_origin_ok = 0) { return 403; }   # remove to skip Origin checks
+
+    limit_req   zone=psilink_sig_req burst=20 nodelay;   # new-connection rate per address
+    limit_conn  psilink_sig_conn 32;                     # concurrent connections per address
+
+    proxy_pass          http://psilink_app;              # your upstream
+    proxy_http_version  1.1;
+    proxy_set_header    Upgrade    $http_upgrade;
+    proxy_set_header    Connection "upgrade";
+    proxy_set_header    Host       $host;
+}
+```
+
+Origin is enforced by the browser and can be omitted or forged by a non-browser client, so the allowlist is defense-in-depth that cuts drive-by cross-site connections rather than authentication; the per-address `limit_req`/`limit_conn` are the resource-exhaustion control that complements the in-application bounds above. The bundled AWS Elastic Beanstalk reference under `apps/web/deploy/aws_eb/` does not include either control; add them there (or at your own proxy) before exposing a deployment publicly.
+
 ## Diagnosing web connection failures
 
 By default the web client logs PeerJS connection activity at errors-only, so a normal exchange prints no connection-diagnostic detail to the browser console. This is deliberate: PeerJS's warning-level logs interpolate the remote peer id, and a web exchange's peer ids are rendezvous addresses derived from the invitation secret, which the app keeps out of its logs (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)).
