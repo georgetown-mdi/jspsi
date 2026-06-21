@@ -27,6 +27,8 @@ import {
 
 import {
   INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
+  MAX_TEXT_LENGTH,
   assessLinkageSatisfiability,
 } from "@psilink/core";
 
@@ -377,6 +379,7 @@ export function LinkageTermsEditor({
                     ref={legalRefInput}
                     value={draft.legalAgreement.reference}
                     onChange={(e) => updateLegal({ reference: e.target.value })}
+                    maxLength={MAX_NAME_LENGTH}
                     label="Agreement reference"
                     placeholder="MOU-2025-0042"
                     error={errors.legalReference}
@@ -385,6 +388,7 @@ export function LinkageTermsEditor({
                   <TextInput
                     value={draft.legalAgreement.purpose}
                     onChange={(e) => updateLegal({ purpose: e.target.value })}
+                    maxLength={MAX_TEXT_LENGTH}
                     label="Purpose of the disclosure"
                     placeholder="Program evaluation"
                     error={errors.legalPurpose}
