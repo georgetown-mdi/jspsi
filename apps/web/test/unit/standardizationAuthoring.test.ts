@@ -4,6 +4,7 @@ import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "@psilink/core";
 
 import {
   STANDARDIZATION_FUNCTION_GROUPS,
+  applyStepOverrides,
   authorableFunctionNames,
   checkValueConstraints,
   describeParamFields,
@@ -12,7 +13,9 @@ import {
   validateParamValue,
 } from "../../src/psi/standardizationAuthoring.js";
 
-import type { LinkageField } from "@psilink/core";
+import type { LinkageField, Standardization } from "@psilink/core";
+
+import type { FieldStepOverride } from "../../src/psi/standardizationAuthoring.js";
 
 describe("function grouping parity with the descriptor table", () => {
   // The grouping is the add menu's source of truth; pin it to core's descriptor
@@ -177,6 +180,46 @@ describe("isStepValid (the launch gate's basis)", () => {
 
   test("a function core does not recognize is treated as valid", () => {
     expect(isStepValid({ function: "totally_unknown" })).toBe(true);
+  });
+});
+
+describe("applyStepOverrides (per-field override layer)", () => {
+  const base: Standardization = [
+    { output: "fn", input: "fname", steps: [{ function: "to_upper_case" }] },
+    { output: "ln", input: "lname", steps: [{ function: "to_upper_case" }] },
+  ];
+
+  test("applies an override while its input column still matches the binding", () => {
+    const overrides = new Map<string, FieldStepOverride>([
+      ["fn", { input: "fname", steps: [{ function: "trim_whitespace" }] }],
+    ]);
+    const result = applyStepOverrides(base, overrides);
+    expect(result.find((t) => t.output === "fn")?.steps).toEqual([
+      { function: "trim_whitespace" },
+    ]);
+    // An unrelated field is untouched.
+    expect(result.find((t) => t.output === "ln")?.steps).toEqual([
+      { function: "to_upper_case" },
+    ]);
+  });
+
+  test("drops a stale override after the field re-binds to a different column", () => {
+    // The field now binds to `notes`, but the override was authored against `fname`.
+    const rebased: Standardization = [
+      { output: "fn", input: "notes", steps: [{ function: "to_upper_case" }] },
+    ];
+    const overrides = new Map<string, FieldStepOverride>([
+      ["fn", { input: "fname", steps: [{ function: "trim_whitespace" }] }],
+    ]);
+    // Falls back to the re-derived recommended steps, not the stale override -- so
+    // steps authored to clean `fname` never silently drive `notes`.
+    expect(applyStepOverrides(rebased, overrides)[0].steps).toEqual([
+      { function: "to_upper_case" },
+    ]);
+  });
+
+  test("no override leaves the base unchanged", () => {
+    expect(applyStepOverrides(base, new Map())).toEqual(base);
   });
 });
 

@@ -374,14 +374,31 @@ export function StandardizationStepEditor({
           {STANDARDIZATION_FUNCTION_GROUPS.map((group) => (
             <div key={group.label}>
               <Menu.Label>{group.label}</Menu.Label>
-              {group.functionNames.map((functionName) => (
-                <Menu.Item
-                  key={functionName}
-                  onClick={() => addStep(functionName)}
-                >
-                  {functionDisplay(functionName).label}
-                </Menu.Item>
-              ))}
+              {group.functionNames.map((functionName) => {
+                const display = functionDisplay(functionName);
+                return (
+                  <Menu.Item
+                    key={functionName}
+                    onClick={() => addStep(functionName)}
+                  >
+                    <Stack gap={0}>
+                      <Text size="sm">{display.label}</Text>
+                      {/* The descriptor's plain-language consequence -- e.g.
+                          coalesce's "can create matches that would not otherwise
+                          occur" -- shown at the moment of choice, not just the
+                          bare label. */}
+                      <Text
+                        size="xs"
+                        c="dimmed"
+                        maw={320}
+                        style={{ whiteSpace: "normal" }}
+                      >
+                        {display.blurb}
+                      </Text>
+                    </Stack>
+                  </Menu.Item>
+                );
+              })}
             </div>
           ))}
         </Menu.Dropdown>

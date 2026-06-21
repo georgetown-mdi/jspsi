@@ -36,7 +36,7 @@ import {
   setColumnType,
 } from "@psi/metadataEditing";
 
-import { isStepValid } from "@psi/standardizationAuthoring";
+import { applyStepOverrides, isStepValid } from "@psi/standardizationAuthoring";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
@@ -52,6 +52,7 @@ import type {
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 import type { AlertContent } from "@components/FileAcquire";
+import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 
 /**
  * The acceptor "Prepare your data" editor: the surface that turns the old
@@ -118,14 +119,14 @@ export function PrepareData({
   const [metadata, setMetadata] = useState<Metadata>(initialMetadata);
 
   // The operator's per-field step edits, keyed by linkage-field name (the
-  // transformation `output`). Held as an override LAYER over the derived default
-  // rather than as the whole standardization, so a metadata remap that re-binds a
-  // field's input column keeps the operator's authored steps (they re-apply to the
-  // new column) and the verdict stays honest off the freshly-derived bindings. An
+  // transformation `output`) and paired with the input column they were authored
+  // against. Held as an override LAYER over the derived default rather than as the
+  // whole standardization, so the binding (input column, which fields exist) is
+  // always re-derived from the current metadata and the verdict stays honest. An
   // empty map means no edits, so the effective standardization equals the derived
   // default -- the acceptor's prior behavior, byte for byte.
   const [stepOverrides, setStepOverrides] = useState<
-    Map<string, Array<StandardizationStep>>
+    Map<string, FieldStepOverride>
   >(new Map());
 
   // The recommended per-type cleaning for whatever columns each field is currently
@@ -138,16 +139,12 @@ export function PrepareData({
 
   // The effective standardization the verdict and onLaunch consume: the derived
   // bindings with each field's authored steps layered on where the operator edited
-  // them. Field-name keyed, so an override survives a column remap and re-applies
-  // to the re-derived input column.
+  // them. An override survives an unrelated metadata edit (the field's binding is
+  // unchanged) but is dropped if the field is re-bound to a different column, so
+  // steps authored for one column never silently clean another (see
+  // applyStepOverrides).
   const standardization = useMemo(
-    () =>
-      baseStandardization.map((transformation) => {
-        const override = stepOverrides.get(transformation.output);
-        return override === undefined
-          ? transformation
-          : { ...transformation, steps: override };
-      }),
+    () => applyStepOverrides(baseStandardization, stepOverrides),
     [baseStandardization, stepOverrides],
   );
 
@@ -160,8 +157,11 @@ export function PrepareData({
     [linkageTerms],
   );
 
-  const setFieldSteps = (output: string, steps: Array<StandardizationStep>) =>
-    setStepOverrides((prev) => new Map(prev).set(output, steps));
+  const setFieldSteps = (
+    output: string,
+    input: string,
+    steps: Array<StandardizationStep>,
+  ) => setStepOverrides((prev) => new Map(prev).set(output, { input, steps }));
 
   const verdict = useMemo(
     () =>
@@ -394,7 +394,11 @@ export function PrepareData({
                       inputColumn={transformation.input}
                       steps={steps}
                       onStepsChange={(next) =>
-                        setFieldSteps(transformation.output, next)
+                        setFieldSteps(
+                          transformation.output,
+                          transformation.input,
+                          next,
+                        )
                       }
                     />
                   </Grid.Col>

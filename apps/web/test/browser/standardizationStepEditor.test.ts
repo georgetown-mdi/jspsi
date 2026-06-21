@@ -272,6 +272,27 @@ describe("StandardizationStepEditor", () => {
     expect(emitted?.[0].params).toEqual({ length: 2 });
   });
 
+  test("the add menu surfaces each function's plain-language consequence", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [],
+        rawRows: [{ n: "mary" }],
+      }),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Add a step" }));
+    // coalesce's blurb carries the match-creating consequence, shown at the moment
+    // of choice rather than hidden behind the bare label.
+    await expect
+      .element(
+        page.getByText("can create matches that would not otherwise occur", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
   test("adds a step from the grouped menu and removes it again", async () => {
     render(
       createElement(EditorWithPreview, {

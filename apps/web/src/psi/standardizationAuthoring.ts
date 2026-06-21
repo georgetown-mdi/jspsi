@@ -2,11 +2,47 @@ import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "@psilink/core";
 
 import type {
   LinkageField,
+  Standardization,
   StandardizationFunctionDescriptor,
   StandardizationStep,
 } from "@psilink/core";
 
 import type { ZodType } from "zod";
+
+/**
+ * The operator's per-field authored step list, paired with the input column it was
+ * authored against. The column is what makes a re-bind detectable: an override is
+ * applied only while the field still binds to {@link FieldStepOverride.input} (see
+ * {@link applyStepOverrides}).
+ */
+export interface FieldStepOverride {
+  /** The input column the steps were authored against. */
+  input: string;
+  /** The authored pipeline steps. */
+  steps: Array<StandardizationStep>;
+}
+
+/**
+ * Layer per-field authored step overrides onto a derived standardization, keyed by
+ * the field name (`output`) but gated on the input column: an override applies only
+ * while the field is still bound to the column it was authored against. A field
+ * re-bound to a DIFFERENT column drops its now-stale override and falls back to the
+ * re-derived recommended pipeline, so steps authored to clean one column never
+ * silently drive a different column after a remap; a field whose binding is
+ * unchanged keeps its override across an unrelated metadata edit. Pure over its
+ * inputs; the host re-derives `base` from the current metadata each render.
+ */
+export function applyStepOverrides(
+  base: Standardization,
+  overrides: ReadonlyMap<string, FieldStepOverride>,
+): Standardization {
+  return base.map((transformation) => {
+    const override = overrides.get(transformation.output);
+    return override !== undefined && override.input === transformation.input
+      ? { ...transformation, steps: override.steps }
+      : transformation;
+  });
+}
 
 /**
  * The descriptor for a function name, or `undefined` for a name core does not
