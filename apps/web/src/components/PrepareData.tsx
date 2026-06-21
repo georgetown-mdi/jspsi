@@ -29,6 +29,7 @@ import {
 import {
   SEMANTIC_TYPE_LABELS,
   disclosedColumnNames,
+  hasMultipleIdentifiers,
   normalizeForEditor,
   setColumnType,
 } from "@psi/metadataEditing";
@@ -123,6 +124,11 @@ export function PrepareData({
   const blocked = satisfiable === 0;
   const partial = satisfiable > 0 && satisfiable < totalKeys;
   const disclosed = disclosedColumnNames(metadata);
+  // A seed can carry more than one identifier (an `id` and an `identifier`
+  // column both infer to `role: identifier`); the grid surfaces this as a visible
+  // error, and launch is gated on it too so the file cannot run with an ambiguous
+  // identifier even when every linkage key is otherwise satisfiable.
+  const multipleIdentifiers = hasMultipleIdentifiers(metadata);
 
   // The field types the file cannot currently produce, de-duplicated by type for
   // the fix UI (several fields can share a type). `LinkageField["type"]` is a
@@ -195,6 +201,7 @@ export function PrepareData({
           color="red"
           icon={<IconAlertCircle aria-hidden />}
           title="This file cannot match yet"
+          role="status"
         >
           None of the agreed linkage keys can be satisfied by your columns, so
           no matches are possible. Set the columns below to the missing field
@@ -255,7 +262,7 @@ export function PrepareData({
         <Button variant="default" onClick={() => setMetadata(initialMetadata)}>
           Reset to recommended
         </Button>
-        <Button onClick={openConfirm} disabled={blocked}>
+        <Button onClick={openConfirm} disabled={blocked || multipleIdentifiers}>
           Continue to exchange
         </Button>
       </Group>

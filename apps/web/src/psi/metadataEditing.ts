@@ -129,27 +129,29 @@ export function normalizeForEditor(metadata: Metadata): Metadata {
 
 /**
  * Set one column's disclosure choice, enforcing the single-identifier rule live:
- * choosing `identifier` for one column demotes any other `identifier` column to
- * `ignored` (not sent, not indexed) so at most one identifier survives. Demoting
- * to `ignored` rather than `payload` keeps the displaced column from being
- * silently transmitted; the caller announces the demotion. Returns a new metadata
- * array (the input is not mutated).
+ * choosing `identifier` for one column demotes EVERY other `identifier` column to
+ * `ignored` (not sent, not indexed) so at most one identifier survives. A seed can
+ * carry more than one (`inferMetadata` marks both an `id` and an `identifier`
+ * column `role: identifier`), so all of them are demoted, not just the first found.
+ * Demoting to `ignored` rather than `payload` keeps a displaced column from being
+ * silently transmitted; the caller announces the demotions by the returned names.
+ * Returns a new metadata array (the input is not mutated).
  */
 export function setColumnDisclosure(
   metadata: Metadata,
   columnName: string,
   choice: DisclosureChoice,
-): { metadata: Metadata; demotedIdentifier?: string } {
-  let demotedIdentifier: string | undefined;
+): { metadata: Metadata; demotedIdentifiers: Array<string> } {
+  const demotedIdentifiers: Array<string> = [];
   const next = metadata.map((column) => {
     if (column.name === columnName) return applyDisclosure(column, choice);
     if (choice === "identifier" && column.role === "identifier") {
-      demotedIdentifier = column.name;
+      demotedIdentifiers.push(column.name);
       return applyDisclosure(column, "ignored");
     }
     return column;
   });
-  return { metadata: next, demotedIdentifier };
+  return { metadata: next, demotedIdentifiers };
 }
 
 /**

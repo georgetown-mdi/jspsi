@@ -88,16 +88,18 @@ export function MetadataGrid({
     onChange(setColumnType(metadata, columnName, type));
   };
   const onDisclosure = (columnName: string, choice: DisclosureChoice) => {
-    const { metadata: next, demotedIdentifier } = setColumnDisclosure(
+    const { metadata: next, demotedIdentifiers } = setColumnDisclosure(
       metadata,
       columnName,
       choice,
     );
     setActionAnnouncement(
-      demotedIdentifier === undefined
+      demotedIdentifiers.length === 0
         ? ""
-        : `${demotedIdentifier} is no longer the row identifier and will ` +
-            "not be sent; only one column can be the row identifier.",
+        : `${demotedIdentifiers.join(", ")} ${
+            demotedIdentifiers.length === 1 ? "is" : "are"
+          } no longer the row identifier and will not be sent; only one ` +
+            "column can be the row identifier.",
     );
     onChange(next);
   };

@@ -332,6 +332,32 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
   });
 
+  test("a file with two identifier columns gates Continue even when keys are satisfiable", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // `id` and `identifier` both infer to role:identifier, so the seed carries two
+    // identifiers. The name columns satisfy both keys (not blocked), but the grid
+    // flags the ambiguous identifier and Continue stays disabled until it is fixed.
+    await reachEditor(
+      csvFile("id,identifier,first_name,last_name\n1,2,Alice,Smith\n"),
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Only one column can be the row identifier. Choose a single identifier.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Continue to exchange" }))
+      .toBeDisabled();
+    expect(exchangeMounted()).toBe(false);
+  });
+
   test("a zero-coverage file shows the block and disables Continue, so nothing dials", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();

@@ -108,16 +108,47 @@ describe("single-identifier rule", () => {
       }),
       col({ name: "b", type: "identifier", role: "payload", isPayload: true }),
     ];
-    const { metadata: next, demotedIdentifier } = setColumnDisclosure(
+    const { metadata: next, demotedIdentifiers } = setColumnDisclosure(
       md,
       "b",
       "identifier",
     );
-    expect(demotedIdentifier).toBe("a");
+    expect(demotedIdentifiers).toEqual(["a"]);
     expect(next.find((c) => c.name === "a")?.role).toBe("ignored");
     expect(next.find((c) => c.name === "b")?.role).toBe("identifier");
     // The displaced identifier is not silently disclosed.
     expect(disclosedColumnNames(next)).toEqual([]);
+    expect(hasMultipleIdentifiers(next)).toBe(false);
+  });
+
+  test("demotes every prior identifier and names them all, not just the last", () => {
+    // inferMetadata can seed two identifiers (an `id` and an `identifier` column),
+    // so choosing identifier on a third column must demote both -- and report both,
+    // or a screen-reader user hears only one displacement.
+    const md: Metadata = [
+      col({
+        name: "a",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      }),
+      col({
+        name: "b",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      }),
+      col({ name: "c", type: "first_name", role: "linkage", isPayload: false }),
+    ];
+    const { metadata: next, demotedIdentifiers } = setColumnDisclosure(
+      md,
+      "c",
+      "identifier",
+    );
+    expect(demotedIdentifiers).toEqual(["a", "b"]);
+    expect(next.find((x) => x.name === "a")?.role).toBe("ignored");
+    expect(next.find((x) => x.name === "b")?.role).toBe("ignored");
+    expect(next.find((x) => x.name === "c")?.role).toBe("identifier");
     expect(hasMultipleIdentifiers(next)).toBe(false);
   });
 });
