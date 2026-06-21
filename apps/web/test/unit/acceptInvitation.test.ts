@@ -5,6 +5,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   prepareForExchange,
+  validateCompatibility,
 } from "@psilink/core";
 
 import {
@@ -131,6 +132,41 @@ describe("acceptorExchangeDataSpec", () => {
     // The source terms are left untouched (the substitution is a copy).
     expect(inviterTerms.identity).toBe("Inviting Org");
   });
+
+  // The acceptor's output is the MIRROR of the inviter's, not a verbatim copy, so a
+  // one-sided invitation produces terms that pass validateCompatibility (the
+  // engine now honors one-sided output end-to-end). The symmetric both-receive
+  // case is unchanged. Pinned for each of the three output directions.
+  test.each([
+    {
+      direction: "both",
+      inviter: { expectsOutput: true, shareWithPartner: true },
+      acceptor: { expectsOutput: true, shareWithPartner: true },
+    },
+    {
+      direction: "inviter-only",
+      inviter: { expectsOutput: true, shareWithPartner: false },
+      acceptor: { expectsOutput: false, shareWithPartner: true },
+    },
+    {
+      direction: "partner-only",
+      inviter: { expectsOutput: false, shareWithPartner: true },
+      acceptor: { expectsOutput: true, shareWithPartner: false },
+    },
+  ])(
+    "derives the acceptor's output as the mirror of the inviter's ($direction)",
+    ({ inviter, acceptor }) => {
+      const oneSided: LinkageTerms = { ...inviterTerms, output: inviter };
+      const spec = acceptorExchangeDataSpec(oneSided, "Accepting Org");
+
+      expect(spec.linkageTerms?.output).toStrictEqual(acceptor);
+      // The derived terms agree with the inviter's under the cross-party mirror
+      // check, so the exchange would not abort on an output mismatch.
+      expect(
+        validateCompatibility(oneSided, spec.linkageTerms!).errors,
+      ).toEqual([]);
+    },
+  );
 
   test("prepares an exchange on the inviter's keys while metadata derives from the acceptor's CSV", () => {
     // The acceptor's CSV column shape differs from the inviter's terms: it adds

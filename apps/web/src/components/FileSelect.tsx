@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { Button, Group, List, Paper, Stack, Text } from "@mantine/core";
 import { Dropzone, MIME_TYPES } from "@mantine/dropzone";
 import {
@@ -11,7 +13,12 @@ import log from "loglevel";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
+import type { FileRejection } from "@mantine/dropzone";
 import type { PaperProps } from "@mantine/core";
+
+// Whole megabytes, derived from the cap so the displayed limit and the
+// over-size message can never drift from the value the dropzone enforces.
+const MAX_CSV_FILE_MB = MAX_CSV_FILE_BYTES / 1024 ** 2;
 
 interface FileSelectProps extends PaperProps {
   handleSubmit: () => void;
@@ -41,8 +48,39 @@ export default function FileSelect(props: FileSelectProps) {
     ...paperProps
   } = props;
 
+  // A user-visible reason the last drop was refused (over the size cap, or an
+  // unsupported type). The dropzone enforces `maxSize` itself -- an over-cap file
+  // never reaches the parser -- but on its own it only flashes a reject icon, so
+  // surface why here. Cleared on the next accepted drop.
+  const [rejectionMessage, setRejectionMessage] = useState<string | undefined>(
+    undefined,
+  );
+
   const handleDrop = (acceptedFiles: Array<File>) => {
+    setRejectionMessage(undefined);
     setFiles(acceptedFiles);
+  };
+
+  const handleReject = (rejectedFiles: Array<FileRejection>) => {
+    log.warn("rejected file(s):", rejectedFiles);
+    const codes = new Set(
+      rejectedFiles.flatMap((rejection) =>
+        rejection.errors.map((error) => error.code),
+      ),
+    );
+    // Report each distinct reason: a batch can mix a too-large file with a
+    // wrong-type one, so checking the size code alone would hide the type
+    // rejection. Any non-size rejection is a type/format problem against the
+    // accept list, and the empty-reasons fallback keeps an unexpected code from
+    // producing a silent reject.
+    const reasons: Array<string> = [];
+    if (codes.has("file-too-large"))
+      reasons.push(`larger than the ${MAX_CSV_FILE_MB} MB maximum`);
+    if (codes.has("file-invalid-type") || reasons.length === 0)
+      reasons.push("not a supported file type");
+    setRejectionMessage(
+      `That file is ${reasons.join(" and ")}. Choose a CSV file under ${MAX_CSV_FILE_MB} MB.`,
+    );
   };
 
   return (
@@ -50,10 +88,8 @@ export default function FileSelect(props: FileSelectProps) {
       <Stack gap="md">
         <Dropzone
           onDrop={handleDrop}
-          onReject={(rejectedFiles) => {
-            log.warn("rejected file(s):", rejectedFiles);
-          }}
-          maxSize={MAX_CSV_FILE_BYTES} // 10MB; see csvIntake.ts for the bound
+          onReject={handleReject}
+          maxSize={MAX_CSV_FILE_BYTES} // see csvIntake.ts for the bound
           accept={[
             "text/plain",
             MIME_TYPES.csv,
@@ -110,10 +146,16 @@ export default function FileSelect(props: FileSelectProps) {
               Drag files here or click to select
             </Text>
             <Text size="xs" c="dimmed" inline mt={7}>
-              (Max file size: 10MB)
+              (Max file size: {MAX_CSV_FILE_MB} MB)
             </Text>
           </Group>
         </Dropzone>
+
+        {!submitted && rejectionMessage && (
+          <Text size="sm" c="red" role="alert">
+            {rejectionMessage}
+          </Text>
+        )}
 
         {files.length > 0 && (
           <List spacing="xs" size="sm" center icon={<IconFile size={16} />}>

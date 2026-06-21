@@ -166,6 +166,14 @@ beforeAll(async () => {
   inviterPeer.disconnect();
   acceptorPeer.disconnect();
 
+  // Both parties' terms are both-output, so each is entitled to the result and
+  // the exchange returns a table to both; the withholding gate only fires for a
+  // non-receiving party. Narrow off the now-optional return, failing loudly if
+  // that invariant ever breaks here.
+  if (rawServerResult === undefined || rawClientResult === undefined)
+    throw new Error(
+      "both-output exchange unexpectedly withheld a result table",
+    );
   serverResult = sortAssociationTable(rawServerResult);
   clientResult = sortAssociationTable(rawClientResult, true);
 }, 60_000);

@@ -2,13 +2,16 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
   inferMetadata,
   safeParseLinkageTerms,
+  validateCompatibility,
 } from "@psilink/core";
 
 import {
   buildAdvancedTerms,
+  outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
   validateAdvancedInvite,
@@ -18,7 +21,10 @@ import {
   setColumnType,
 } from "../../src/psi/metadataEditing.js";
 
-import type { AdvancedInviteDraft } from "../../src/psi/advancedInvite.js";
+import type {
+  AdvancedInviteDraft,
+  OutputDirection,
+} from "../../src/psi/advancedInvite.js";
 
 /** The names of the draft keys that reference an `ssn` field. */
 function ssnKeyNames(draft: AdvancedInviteDraft): Array<string> {
@@ -355,7 +361,11 @@ describe("controls the editor does not expose stay at their safe defaults", () =
     ].filter((d) => d.keys.some((k) => k.enabled));
   };
 
-  test("(d) output is always both-receive and never a forbidden combination", () => {
+  test("(d) output defaults to both-receive when the direction is left at its default", () => {
+    // The variants exercise every control EXCEPT the output direction, which they
+    // leave at the seed default ("both"), so the built output stays the symmetric
+    // both-receive pair. The 3-way control's own mapping is covered separately
+    // below.
     for (const draft of variants()) {
       const built = buildAdvancedTerms(draft);
       expect(built.output).toStrictEqual({
@@ -377,6 +387,66 @@ describe("controls the editor does not expose stay at their safe defaults", () =
       ).toBe(true);
       // No payload is authored either.
       expect(built.payload).toBeUndefined();
+    }
+  });
+});
+
+describe("the 3-way output direction control", () => {
+  const DIRECTIONS: ReadonlyArray<{
+    direction: OutputDirection;
+    output: { expectsOutput: boolean; shareWithPartner: boolean };
+  }> = [
+    {
+      direction: "both",
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
+    {
+      direction: "inviter",
+      output: { expectsOutput: true, shareWithPartner: false },
+    },
+    {
+      direction: "partner",
+      output: { expectsOutput: false, shareWithPartner: true },
+    },
+  ];
+
+  test("each choice maps to the correct expectsOutput/shareWithPartner pair", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    for (const { direction, output } of DIRECTIONS) {
+      // Both the pure mapping and the built terms agree on the pair.
+      expect(outputForDirection(direction)).toStrictEqual(output);
+      expect(
+        buildAdvancedTerms({ ...draft, outputDirection: direction }).output,
+      ).toStrictEqual(output);
+    }
+  });
+
+  test("no choice can yield the forbidden 'neither receives' combination", () => {
+    const pairs = DIRECTIONS.map((d) => outputForDirection(d.direction));
+    // None of the three valid directions maps to {false, false}, and the type has
+    // no fourth value -- so the forbidden pair is unrepresentable, not merely
+    // validated after the fact.
+    expect(pairs).not.toContainEqual({
+      expectsOutput: false,
+      shareWithPartner: false,
+    });
+    // The three are distinct, so the control offers three genuinely different pairs.
+    expect(new Set(pairs.map((p) => JSON.stringify(p))).size).toBe(3);
+  });
+
+  test("every direction's built terms parse and pass the cross-party mirror check", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    for (const { direction } of DIRECTIONS) {
+      const terms = buildAdvancedTerms({
+        ...draft,
+        outputDirection: direction,
+      });
+      // The inviter's terms parse through the core schema...
+      expect(safeParseLinkageTerms(terms).success).toBe(true);
+      // ...and an acceptor that mirrors them agrees under validateCompatibility, so
+      // the one-sided invitation would not abort the exchange on an output mismatch.
+      const acceptor = deriveAcceptedLinkageTerms(terms, "Accepting Org");
+      expect(validateCompatibility(terms, acceptor).errors).toEqual([]);
     }
   });
 });

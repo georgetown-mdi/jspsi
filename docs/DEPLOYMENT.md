@@ -51,8 +51,10 @@ map $http_origin $psilink_origin_ok {
     "https://psilink.example.org"  1;   # replace with your public origin(s)
 }
 
-# server{} context: scope the controls to the signaling upgrade location.
-location /api/peerjs {
+# server{} context: scope the controls to the signaling upgrade location. The `^~`
+# prefix makes this match win over the catch-all `location /` and stops a later
+# regex location from taking precedence and silently dropping these limits.
+location ^~ /api/peerjs {
     if ($psilink_origin_ok = 0) { return 403; }   # remove to skip Origin checks
 
     limit_req   zone=psilink_sig_req burst=20 nodelay;   # new-connection rate per address
@@ -67,6 +69,10 @@ location /api/peerjs {
 ```
 
 Origin is enforced by the browser and can be omitted or forged by a non-browser client, so the allowlist is defense-in-depth that cuts drive-by cross-site connections rather than authentication; the per-address `limit_req`/`limit_conn` are the resource-exhaustion control that complements the in-application bounds above. The bundled AWS Elastic Beanstalk reference under `apps/web/deploy/aws_eb/` applies the per-address `limit_req`/`limit_conn` on `/api/peerjs` by default -- with the illustrative numbers above, to tune to your load -- and ships the Origin allowlist as a commented-out template you enable by uncommenting the `map` and its matching `if` and setting your public origin (it cannot ship active, because the map defaults to deny and would otherwise reject every client). On a load-balanced environment nginx sees the load balancer's address rather than the client's, so the per-address limits need the real client address recovered from `X-Forwarded-For` to throttle per client instead of collapsing onto one bucket; the reference ships a commented `real_ip` template you scope to the load balancer's subnet(s) -- not the whole VPC, which would let any host in it forge `X-Forwarded-For` -- for that. Confirm the limits suit your load, recover the real client address if you run load-balanced, and enable Origin enforcement if you want it, before exposing a deployment publicly.
+
+The same reference also curates the TLS posture of the terminator it ships. On top of the TLS 1.2+ floor it sets an explicit forward-secrecy, AEAD-only `ssl_ciphers` list (ECDHE with AES-GCM / ChaCha20-Poly1305), active by default, so the TLS 1.2 handshake no longer falls back to the platform default suite list, which still permits CBC-mode SHA1 and non-forward-secret plain-RSA key exchange; the list constrains TLS 1.2 only, as TLS 1.3 selects from its own AEAD suites. The trade-off is that this floor refuses pre-2014 clients with no ECDHE-AEAD suite (Internet Explorer 11 on Windows 7, Android 4.x, Java 7); if you must serve such a population, widen the list deliberately rather than leaving it at this default.
+
+HSTS (`Strict-Transport-Security`), by contrast, ships as a commented opt-in template rather than active, because the reference is commonly run with a test or self-signed certificate and an active HSTS header pins HTTPS in the browser -- a pinned host cannot be reached over plain HTTP to recover, and a bad certificate can no longer be click-through-accepted. For a production deployment with a valid certificate you should enable it: uncomment the header, start from a short `max-age` and raise it once verified, and leave `preload` off unless you have deliberately committed the host to the browser preload list (a one-way step). HSTS is honored only on an HTTPS response, so it -- and SSL-strip protection generally -- takes effect on first contact only if plain HTTP is already redirected to HTTPS. Configure that redirect at the Elastic Beanstalk load balancer (an ALB HTTP listener that 301s to HTTPS); without it, plain-HTTP requests are not upgraded and an enabled HSTS policy never reaches the browser on a first visit. Do the redirect there rather than adding a `:80` server to this nginx config, which would conflict with the platform's own default `:80` server.
 
 ## Diagnosing web connection failures
 

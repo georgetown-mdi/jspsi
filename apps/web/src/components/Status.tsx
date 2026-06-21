@@ -32,6 +32,15 @@ export interface StatusProps extends PaperProps {
    * h3 below the inviter section's h2. */
   headingOrder?: 2 | 3;
   resultsFileURL: string | undefined;
+  /** True when this party's agreed terms give it no output (a one-sided exchange
+   * where it is the PSI sender / helper): no results file is offered, and the card
+   * states that it contributed to the match but receives no result table -- rather
+   * than presenting an empty or missing download as a failure. The audit-record
+   * downloads, when present, are still offered. The "no result table" message is
+   * shown only once the exchange completes (the component gates it on the `done`
+   * stage internally), so a caller may pass this as soon as it is known -- a
+   * pre-completion value does not surface a premature message. */
+  resultWithheld?: boolean | undefined;
   /** Self-attested audit record (JSON); safe to retain or share. */
   recordFileURL?: string | undefined;
   /** Download filename for the audit record (timestamped per exchange by the
@@ -56,6 +65,7 @@ export function Status(props: StatusProps) {
     headingRef,
     headingOrder = 2,
     resultsFileURL,
+    resultWithheld,
     recordFileURL,
     recordFileName,
     openingFileURL,
@@ -158,14 +168,31 @@ export function Status(props: StatusProps) {
             visual affordance, not the click guard; the undefined href is. All
             three buttons share this intentional pattern.
           */}
-          <Group justify="center" gap="xs" component="span">
-            <Text>Download result:</Text>
-            <a href={resultsFileURL} download="results.csv">
-              <ActionIcon variant="light" color="blue" disabled={!isCompleted}>
-                <IconDownload size={18} />
-              </ActionIcon>
-            </a>
-          </Group>
+          {resultWithheld ? (
+            // One-sided exchange, this party is the PSI sender/helper: the result
+            // table is withheld by the agreed terms, so there is no results file.
+            // State that it contributed to the match but receives no result --
+            // shown only at completion, so it does not read as a mid-run error.
+            isCompleted && (
+              <Text ta="center" size="sm" c="dimmed">
+                Your records contributed to the match. By the agreed terms, you
+                receive no result table, so there is nothing to download here.
+              </Text>
+            )
+          ) : (
+            <Group justify="center" gap="xs" component="span">
+              <Text>Download result:</Text>
+              <a href={resultsFileURL} download="results.csv">
+                <ActionIcon
+                  variant="light"
+                  color="blue"
+                  disabled={!isCompleted}
+                >
+                  <IconDownload size={18} />
+                </ActionIcon>
+              </a>
+            </Group>
+          )}
 
           {recordFileURL !== undefined && (
             <Group justify="center" gap="xs" component="span">

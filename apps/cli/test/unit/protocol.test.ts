@@ -82,6 +82,7 @@ vi.mock("@psilink/core", async (importActual) => {
 });
 
 import {
+  buildOutputTable,
   parseExchangeRecord,
   parseOpeningData,
   runExchange,
@@ -537,6 +538,57 @@ test("writes the self-attested record and opening when runExchange returns an au
       sampleOpening,
     );
   }
+});
+
+// --- One-sided result withholding via runProtocol ----------------------------
+
+test("writes no result file for a non-receiving party when the exchange withholds the table", async () => {
+  // The CLI half of the one-sided result-withholding gate: when the exchange
+  // returns no association table (this party's agreed terms give it no output, so
+  // it is the PSI sender/helper), runProtocol must write no result CSV -- it
+  // contributed to the match but is not entitled to the result. Both parties model
+  // a withheld result here, so neither writes an output file and the table
+  // formatter (buildOutputTable) is never reached.
+  async function runExchangeWithheld(): Promise<unknown> {
+    // Drain the drop dir exactly as the default mock does, so neither party's
+    // cleanup races the other's poller, then return a withheld result.
+    await defaultRunExchange();
+    return { associationTable: undefined, partnerPayload: {} };
+  }
+  vi.mocked(runExchange).mockImplementation(runExchangeWithheld as never);
+  // Other tests in this file call buildOutputTable through runProtocol's normal
+  // (non-withheld) path, so clear its accumulated calls before asserting it is not
+  // reached here.
+  vi.mocked(buildOutputTable).mockClear();
+
+  const outputA = path.join(tmpDir, "out-a.csv");
+  const outputB = path.join(tmpDir, "out-b.csv");
+
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      outputA,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      outputB,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  // No result file is written for either non-receiving party...
+  expect(fs.existsSync(outputA)).toBe(false);
+  expect(fs.existsSync(outputB)).toBe(false);
+  // ...and the table-formatting step is never reached, so there is nothing in
+  // memory to write either.
+  expect(vi.mocked(buildOutputTable)).not.toHaveBeenCalled();
 });
 
 // --- Expired token via runProtocol -------------------------------------------

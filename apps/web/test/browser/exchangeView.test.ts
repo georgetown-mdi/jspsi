@@ -35,7 +35,7 @@ vi.mock("@psi/rendezvous", () => ({
 // callback synchronously, inside the triggering click's act() scope.
 const lifecycle = vi.hoisted(
   (): {
-    outcome: "none" | "success" | "failure";
+    outcome: "none" | "success" | "failure" | "withheld";
     calls: Array<{
       exchangeRole: "initiator" | "responder";
       sharedSecret: string;
@@ -52,7 +52,15 @@ vi.mock("@psi/exchangeLifecycle", () => ({
     sharedSecret: string;
     signal: AbortSignal;
     onStage: (stageId: string) => void;
-    onResult: (outputs: { resultsUrl: string }) => void;
+    generateOutput: (
+      result: unknown,
+      prepared: unknown,
+    ) => { resultsUrl?: string; resultWithheld?: boolean; record?: unknown };
+    onResult: (outputs: {
+      resultsUrl?: string;
+      resultWithheld?: boolean;
+      record?: unknown;
+    }) => void;
     onError: (failure: { category: string; error: unknown }) => void;
   }) => {
     lifecycle.calls.push({
@@ -63,6 +71,19 @@ vi.mock("@psi/exchangeLifecycle", () => ({
     });
     if (lifecycle.outcome === "success")
       options.onResult({ resultsUrl: "blob:results" });
+    else if (lifecycle.outcome === "withheld")
+      // Drive ExchangeView's REAL generateOutput with a withheld result
+      // (associationTable undefined), so the web result path's withholding is
+      // exercised end-to-end: generateOutput must produce no results URL and flag
+      // the result as withheld, which Status then presents as "contributed, no
+      // result". The withheld branch reads only result.associationTable/audit, so a
+      // minimal result and an empty prepared suffice.
+      options.onResult(
+        options.generateOutput(
+          { associationTable: undefined, audit: undefined },
+          {},
+        ),
+      );
     else if (lifecycle.outcome === "failure")
       options.onError({ category: "exchange", error: new Error("transport") });
     return Promise.resolve();
@@ -153,7 +174,7 @@ function render(config: ExchangeConfig) {
 }
 
 // Set the run outcome a test wants the lifecycle stub to deliver, then mount.
-function setOutcome(outcome: "none" | "success" | "failure") {
+function setOutcome(outcome: "none" | "success" | "failure" | "withheld") {
   lifecycle.outcome = outcome;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -278,6 +299,27 @@ describe("ExchangeView Start->run wiring", () => {
     await userEvent.click(page.getByRole("button", { name: "Start" }));
     await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Partial CSV coverage");
+  });
+
+  test("a non-receiving party is shown it contributed but gets no result download", async () => {
+    // The web half of the one-sided result-withholding gate: the exchange returns
+    // no association table to a party not entitled to output, so generateOutput
+    // produces no results file. The run still completes successfully -- it must read
+    // as "you contributed, no result", not as a failure or an empty download.
+    setOutcome("withheld");
+    render(acceptorConfig("secret-a"));
+
+    await userEvent.click(page.getByRole("button", { name: "Start" }));
+    await expect.element(page.getByText("Done")).toBeInTheDocument();
+
+    // The completion message states the contribution and the absence of a result...
+    expect(document.body.textContent).toContain(
+      "Your records contributed to the match",
+    );
+    // ...no results download is offered (the table was withheld)...
+    expect(container!.querySelector('a[download="results.csv"]')).toBeNull();
+    // ...and it is not presented as a failure.
+    expect(document.body.textContent).not.toContain("Exchange failed");
   });
 });
 
