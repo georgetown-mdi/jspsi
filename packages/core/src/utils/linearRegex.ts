@@ -37,17 +37,38 @@ import { RE2JS } from "re2js";
 
 /**
  * Upper bound on the number of distinct compiled patterns held in
- * {@link compileCache}. The per-row key-building path recompiles each element
- * transform per row ({@link applyElementTransform}), so without memoization a
- * dataset of N rows would recompile the same pattern N times; the cache makes the
- * compile pay once per distinct pattern. The bound keeps a long-lived process
- * (many exchanges, each with its own partner-controlled patterns) from growing
- * the cache without limit -- on overflow the oldest entry is evicted. A single
- * terms set holds far fewer distinct patterns than this (the count bounds in
- * config/linkageTerms.ts cap keys/elements/steps), so a legitimate exchange never
- * evicts mid-build.
+ * {@link compileCache}. This is a secondary cache keyed by the pattern SOURCE: the
+ * per-row key-building path already compiles each step once (`StandardizedField`
+ * compiles in its constructor, and `applyElementTransform` memoizes per transform
+ * array), so this does not guard a per-row recompile; it additionally dedupes
+ * identical pattern sources across distinct steps arrays and across exchanges in a
+ * long-lived process. The bound keeps that from growing without limit -- on
+ * overflow the oldest entry is evicted. A single terms set holds far fewer distinct
+ * patterns than this (the count bounds in config/linkageTerms.ts cap
+ * keys/elements/steps), so a legitimate exchange never evicts mid-build.
  */
 const COMPILE_CACHE_MAX = 1024;
+
+/**
+ * Upper bound on a partner pattern's compiled RE2 program size (its instruction
+ * count). RE2 matching is linear in the input length, but with a per-row constant
+ * factor proportional to the program size -- and the program size is PARTNER-
+ * controlled: a short, in-dialect pattern can expand into a huge program via a
+ * counted repetition over a sub-expression (e.g. `(.*){1000}` compiles to ~4000
+ * instructions and costs ~1 s per row even on a one-character value). The pattern-
+ * length cap, the per-repetition `{n}<=1000` limit, and re2js's rejection of
+ * nested counted repetition do NOT bound this; only the program size does. This
+ * caps it so the worst per-row match cost stays in the single-digit-millisecond
+ * range on realistic field values.
+ *
+ * 2000 sits above what a maximally long ORDINARY pattern (bounded by the 1000-
+ * character length cap, e.g. a long literal or alternation) compiles to (~1000-
+ * 1500 instructions), so it never rejects a pattern that already passed the length
+ * cap; and well below the expansion bombs (a single `(.*){500}` is 2002, the
+ * documented attack patterns are 90k-396k). See docs/spec/PROTOCOL.md for the
+ * normative dialect bound.
+ */
+export const MAX_TRANSFORM_PROGRAM_SIZE = 2000;
 
 /**
  * Memoized compiled patterns, keyed by the exact pattern source. Insertion-
@@ -172,18 +193,38 @@ export function coerceToPatternString(raw: unknown): string {
 }
 
 /**
- * Whether `pattern` is in the linear-time dialect: it compiles under the engine.
- * The single conformance oracle for both the terms-validation gate
+ * The size of a compiled pattern's RE2 program, in instructions -- the proxy for
+ * its per-row match cost (see {@link MAX_TRANSFORM_PROGRAM_SIZE}). Reads re2js's
+ * internal compiled program (`re2Input.prog.inst`). That field is not a documented
+ * API, but re2js is pinned exactly via the lockfile, so its shape is stable for
+ * the version we ship; and the read FAILS CLOSED: if the internal shape ever
+ * changes under an upgrade, this returns Infinity so every pattern is rejected
+ * (never silently admitted past the cap), and the bundled-default conformance
+ * tests fail loudly to flag the upgrade for review.
+ */
+function compiledProgramSize(re: RE2JS): number {
+  const inst = (re as unknown as { re2Input?: { prog?: { inst?: unknown[] } } })
+    .re2Input?.prog?.inst;
+  return Array.isArray(inst) ? inst.length : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Whether `pattern` is in the linear-time dialect: it compiles under the engine
+ * AND its compiled program is within {@link MAX_TRANSFORM_PROGRAM_SIZE}. The
+ * single conformance oracle for both the terms-validation gate
  * ({@link linkageTermsHaveNonConformantTransformRegex}) and the editor-facing
  * `regexPatternSchema`, so the editor accepts exactly the patterns an exchange
- * will execute. Returns `false` (reject, fail closed) on any compile failure,
- * including a feature RE2 drops (backreference, lookaround) -- which is the point:
- * those are the patterns that could otherwise backtrack catastrophically.
+ * will execute. Returns `false` (reject, fail closed) on any compile failure --
+ * including a feature RE2 drops (backreference, lookaround), which could otherwise
+ * backtrack catastrophically -- and on a pattern whose program exceeds the size
+ * bound, which matches linearly but with a per-row constant large enough to be a
+ * denial of service.
  */
 export function patternConformsToDialect(pattern: string): boolean {
   try {
-    compileCached(pattern);
-    return true;
+    return (
+      compiledProgramSize(compileCached(pattern)) <= MAX_TRANSFORM_PROGRAM_SIZE
+    );
   } catch {
     return false;
   }

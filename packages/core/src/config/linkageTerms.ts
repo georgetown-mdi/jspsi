@@ -596,13 +596,15 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
     },
   )
   // The four `tier: "regex"` functions compile their raw `pattern` / `delimiter`
-  // under the linear-time engine, recompiled per row by applyElementTransform, so
-  // an unbounded pattern compiles an ever-larger program every row. The engine
-  // bounds backtracking by construction; this bounds the per-row COMPILE cost,
-  // preserving the parse-cost ceiling the removed redos-detector screen provided
-  // (see MAX_TRANSFORM_PATTERN_LENGTH). Only a string param drives the compile
-  // (a non-string is coerced to a short literal), so the bound is on string
-  // length; dialect conformance is enforced separately on LinkageTermsSchema.
+  // under the linear-time engine. applyElementTransform compiles each step once per
+  // distinct transform array (memoized), so this caps that one-time compile and
+  // source-parse cost, preserving the parse-cost ceiling the removed redos-detector
+  // screen provided (see MAX_TRANSFORM_PATTERN_LENGTH). The engine bounds
+  // backtracking by construction, and the dialect gate's program-size cap bounds the
+  // per-row MATCH cost (see patternConformsToDialect); this length cap is the
+  // orthogonal source-length bound. Only a string param drives the compile (a
+  // non-string is coerced to a short literal), so the bound is on string length;
+  // dialect conformance is enforced separately on LinkageTermsSchema.
   .refine(
     (step) => {
       const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
@@ -1007,12 +1009,16 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     // Element-transform regex patterns are partner-controlled and execute per row
     // over the full dataset, under the linear-time engine (utils/linearRegex.ts),
     // so they cannot backtrack catastrophically; this rejects a pattern that
-    // engine cannot compile (a backreference, lookaround, or unsupported escape)
-    // -- fail closed, before any execution and before both parties commit to terms
-    // they could not evaluate identically. The check belongs here so every parse
-    // path (initiator/joiner parseLinkageTerms, the invitation-token decode, and
-    // ExchangeSpecSchema) inherits it. See transformRegexDialect.ts for the model
-    // and docs/spec/PROTOCOL.md for the normative dialect. The message names no
+    // engine cannot compile (a backreference, lookaround, or unsupported escape),
+    // AND one whose compiled program exceeds the size bound -- a small pattern can
+    // expand into a huge program via a counted repetition over a sub-expression
+    // (e.g. `(.*){1000}`), which matches linearly but with a per-row constant large
+    // enough to be a denial of service. Both are fail closed, before any execution
+    // and before both parties commit to terms they could not evaluate identically.
+    // The check belongs here so every parse path (initiator/joiner
+    // parseLinkageTerms, the invitation-token decode, and ExchangeSpecSchema)
+    // inherits it. See transformRegexDialect.ts for the model and
+    // docs/spec/PROTOCOL.md for the normative dialect. The message names no
     // partner-controlled value -- the offending pattern is located by inspection,
     // not echoed -- consistent with the unsanitized parse-error path the
     // referential-integrity refines above rely on.
@@ -1020,7 +1026,8 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
       message:
         "a linkage key element transform uses a regular expression outside the " +
         "linear-time dialect (RE2 syntax; backreferences and lookaround are not " +
-        "supported); it is rejected before any pattern executes",
+        "supported, and the pattern must compile to a bounded program); it is " +
+        "rejected before any pattern executes",
       path: ["linkageKeys"],
     });
 

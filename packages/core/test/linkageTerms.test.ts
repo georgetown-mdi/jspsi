@@ -782,6 +782,23 @@ test("a non-string transform regex pattern still validates, so coercion handles 
   ).toBe(true);
 });
 
+test("a transform regex whose compiled program is too large is rejected by the dialect gate", () => {
+  // `(.*){1000}` is in-dialect (it compiles) and is well under the 1000-char length
+  // cap, but expands to ~4000 instructions and costs ~1s per row even on a 1-char
+  // value. The dialect gate's program-size bound rejects it, fail closed, before any
+  // row runs -- the length and per-repetition caps do not catch this.
+  const result = safeParseLinkageTerms(
+    regexStepTerms("filter_regex", { pattern: "(.*){1000}" }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) =>
+      /outside the linear-time dialect/.test(i.message),
+    ),
+  ).toBe(true);
+});
+
 test("a swap resolving via element field names validates", () => {
   const result = safeParseLinkageTerms({
     ...base,

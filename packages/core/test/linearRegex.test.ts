@@ -85,6 +85,59 @@ describe("patternConformsToDialect", () => {
   });
 });
 
+// --- Program-size cap --------------------------------------------------------
+// In-dialect patterns can still expand into a huge compiled program (a short
+// pattern times a large counted repetition over a sub-expression), which matches
+// linearly but with a per-row constant large enough to be a denial of service.
+// MAX_TRANSFORM_PROGRAM_SIZE bounds it. See PROTOCOL.md and CHANNEL_SECURITY.md.
+
+describe("patternConformsToDialect program-size cap", () => {
+  test("rejects an in-dialect pattern whose compiled program is too large", () => {
+    for (const pattern of [
+      "(.*){1000}", // ~4000 instructions, ~1s per row even on a 1-char input
+      "(.*){500}", // 2002 instructions, just over the cap
+      "(.*){1000}".repeat(99), // the documented per-row DoS pattern
+      "[a-z]{1000}".repeat(90), // flat-concatenation expansion bomb
+    ]) {
+      expect(patternConformsToDialect(pattern)).toBe(false);
+    }
+  });
+
+  test("accepts a max-length ordinary pattern (under the program-size cap)", () => {
+    // A 1000-char literal compiles to ~1002 instructions, under the cap, so the
+    // length cap stays the binding constraint for ordinary patterns.
+    expect(patternConformsToDialect("a".repeat(1000))).toBe(true);
+    // A large alternation compiles compactly (a DFA), so it conforms despite length.
+    const alternation =
+      "(?:" + Array.from({ length: 140 }, (_, i) => "abc" + i).join("|") + ")";
+    expect(patternConformsToDialect(alternation)).toBe(true);
+  });
+
+  test("the bundled default patterns are far under the program-size cap", () => {
+    // Also the canary for the fail-closed program-size read: if a re2js upgrade
+    // changes the internal compiled-program shape, compiledProgramSize returns
+    // Infinity and every pattern (including these) flips to non-conformant, failing
+    // loudly here rather than silently admitting an oversized program.
+    for (const pattern of [
+      "[^0-9]",
+      "^\\d{9}$",
+      "(\\d{4})$",
+      "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+    ]) {
+      expect(patternConformsToDialect(pattern)).toBe(true);
+    }
+  });
+
+  test("a maximal parse_date expansion stays under the program-size cap", () => {
+    // parse_date is not screened by the dialect gate; its safety relies on the
+    // 256-char format cap keeping its generated regex small. Pin that the worst-case
+    // expansion (128 adjacent (\d{1,2}) groups, from a 256-char all-DD format)
+    // compiles AND stays under the cap, so it cannot become a per-row DoS.
+    const worstParseDateSource = "^" + "(\\d{1,2})".repeat(128) + "$";
+    expect(patternConformsToDialect(worstParseDateSource)).toBe(true);
+  });
+});
+
 // --- Param coercion ----------------------------------------------------------
 
 describe("coerceToPatternString", () => {
