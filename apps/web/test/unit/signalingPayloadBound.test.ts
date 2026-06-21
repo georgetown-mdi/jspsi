@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
+import WebSocket, { WebSocketServer as WsServer } from "ws";
 import { afterEach, describe, expect, test } from "vitest";
-import WebSocket from "ws";
 
 import {
   MAX_SIGNALING_PAYLOAD_BYTES,
@@ -76,6 +76,12 @@ function connectRegistered(port: number, id: string): Promise<WebSocket> {
       if (type === "OPEN") resolve(ws);
     });
     ws.on("error", reject);
+    // A clean server close before OPEN (e.g. the concurrent-limit or invalid-key
+    // path) emits no `error`; reject so a misconfigured registration fails the
+    // test promptly instead of hanging until the vitest timeout.
+    ws.on("close", () =>
+      reject(new Error("signaling socket closed before OPEN")),
+    );
   });
 }
 
@@ -137,5 +143,30 @@ describe("signaling-server inbound frame bound", () => {
       payload: "sdp-blob",
       src: "normal",
     });
+  });
+
+  test("a custom factory that drops the maxPayload bound fails closed at construction", () => {
+    const httpServer = createServer();
+    try {
+      expect(
+        () =>
+          new WebSocketServer({
+            server: httpServer,
+            realm: new Realm(),
+            config: {
+              path: "/",
+              key: KEY,
+              concurrent_limit: 5000,
+              // A factory that ignores the passed options (their maxPayload),
+              // building a server on the ws 100 MiB default -- the silent-bypass
+              // the guard must catch.
+              createWebSocketServer: (options) =>
+                new WsServer({ path: options.path, noServer: true }),
+            },
+          }),
+      ).toThrow(/maxPayload/);
+    } finally {
+      httpServer.close();
+    }
   });
 });

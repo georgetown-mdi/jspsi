@@ -84,6 +84,17 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       ? config.createWebSocketServer(options)
       : new Server(options);
 
+    // `createWebSocketServer` is an injection seam: a factory is handed `options`
+    // (carrying the maxPayload bound above) but is free to ignore them, which
+    // would silently drop the frame-size cap and reopen the DoS. The default
+    // `new Server(options)` path always honors it; fail closed at startup rather
+    // than trust an injected factory that built a server without the cap.
+    if (this.socketServer.options.maxPayload !== MAX_SIGNALING_PAYLOAD_BYTES) {
+      throw new Error(
+        "PeerJS signaling WebSocket server is missing its required maxPayload bound",
+      );
+    }
+
     // This listener lives for the life of `server`, with no teardown -- by
     // design, not omission. The peer server is a per-process singleton
     // (`usePeerServer`) bound to the process-lived dev/Nitro HTTP server, so this
