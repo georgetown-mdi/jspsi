@@ -55,13 +55,34 @@ function CleanedValue({
   const violations = checkValueConstraints(field, value);
   return (
     <Group gap={4} wrap="wrap">
-      <Badge
-        variant="light"
-        color="blue"
-        styles={{ label: { textTransform: "none" } }}
-      >
-        {sanitizeForDisplay(value) || "(empty)"}
-      </Badge>
+      {value === "" ? (
+        // An empty string is NOT a drop: the pipeline returned a value, so it
+        // becomes an (empty) PSI key and participates in matching. Render it
+        // distinctly from the grey "dropped" chip so the operator does not read a
+        // degenerate empty key as an excluded record.
+        <Tooltip
+          label="Cleaned to an empty value. It is not dropped -- it still participates in matching, as an empty key."
+          multiline
+          w={240}
+        >
+          <Badge
+            variant="light"
+            color="orange"
+            role="img"
+            aria-label="Cleaned to an empty value, which still participates in matching"
+          >
+            empty value
+          </Badge>
+        </Tooltip>
+      ) : (
+        <Badge
+          variant="light"
+          color="blue"
+          styles={{ label: { textTransform: "none" } }}
+        >
+          {sanitizeForDisplay(value)}
+        </Badge>
+      )}
       {violations.map((violation) => (
         <Tooltip
           key={violation.label}

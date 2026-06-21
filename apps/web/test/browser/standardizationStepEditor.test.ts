@@ -116,6 +116,24 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
         .toBeInTheDocument();
   });
 
+  test("an empty cleaned value is shown distinctly from a dropped value", async () => {
+    // remove_dashes turns "---" into "" -- a value (an empty PSI key), not a drop.
+    render(
+      createElement(StandardizationPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        steps: [{ function: "remove_dashes" }],
+        rawRows: [{ n: "---" }],
+      }),
+    );
+    // Rendered as a value outcome carrying the distinct "empty value" chip, never
+    // the grey "dropped" chip.
+    await expect
+      .element(page.getByTestId("outcome-value"))
+      .toHaveTextContent("empty value");
+    expect(page.getByTestId("outcome-dropped").elements()).toHaveLength(0);
+  });
+
   test("an incomplete step shows guidance instead of crashing the preview", async () => {
     // pad_left with no length yet throws when compiled; the preview must catch it.
     render(

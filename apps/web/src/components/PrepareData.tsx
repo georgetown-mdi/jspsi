@@ -36,6 +36,8 @@ import {
   setColumnType,
 } from "@psi/metadataEditing";
 
+import { isStepValid } from "@psi/standardizationAuthoring";
+
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationPreview } from "@components/StandardizationPreview";
@@ -177,6 +179,18 @@ export function PrepareData({
   const blocked = satisfiable === 0;
   const partial = satisfiable > 0 && satisfiable < totalKeys;
   const disclosed = disclosedColumnNames(metadata);
+  // Every authored step must be well-formed before launch: a step the operator
+  // left mid-edit (e.g. a cleared `substring.start`) carries a param the inline
+  // input already flags, but launch is gated on it too so a malformed pipeline --
+  // which core would run as a silent full-field exclusion, or throw on at compile
+  // -- can never reach the exchange.
+  const standardizationValid = useMemo(
+    () =>
+      standardization.every((transformation) =>
+        (transformation.steps ?? []).every(isStepValid),
+      ),
+    [standardization],
+  );
   // A seed can carry more than one identifier (an `id` and an `identifier`
   // column both infer to `role: identifier`); the grid surfaces this as a visible
   // error, and launch is gated on it too so the file cannot run with an ambiguous
@@ -360,7 +374,16 @@ export function PrepareData({
           </div>
           {standardization.map((transformation) => {
             const field = fieldByName.get(transformation.output);
-            if (field === undefined) return null;
+            // Every standardization output is a declared linkage field (both
+            // `standardization` and `fieldByName` derive from the same
+            // `linkageTerms.linkageFields`), so this never resolves to undefined;
+            // assert it as a check rather than silently dropping a field's card if
+            // that ever stops holding. The message names no partner-controlled
+            // value (the output is a partner-supplied field name).
+            if (field === undefined)
+              throw new Error(
+                "standardization output does not resolve to a declared linkage field",
+              );
             const steps = transformation.steps ?? [];
             return (
               <Paper withBorder p="md" key={transformation.output}>
@@ -393,6 +416,12 @@ export function PrepareData({
         </Stack>
       )}
 
+      {!standardizationValid && (
+        <Text size="sm" c="red" role="alert">
+          Finish or fix the highlighted cleaning steps before continuing.
+        </Text>
+      )}
+
       <Group justify="space-between">
         <Button
           variant="default"
@@ -403,7 +432,10 @@ export function PrepareData({
         >
           Reset to recommended
         </Button>
-        <Button onClick={openConfirm} disabled={blocked || multipleIdentifiers}>
+        <Button
+          onClick={openConfirm}
+          disabled={blocked || multipleIdentifiers || !standardizationValid}
+        >
           Continue to exchange
         </Button>
       </Group>

@@ -3,6 +3,7 @@ import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "@psilink/core";
 import type {
   LinkageField,
   StandardizationFunctionDescriptor,
+  StandardizationStep,
 } from "@psilink/core";
 
 import type { ZodType } from "zod";
@@ -32,12 +33,12 @@ export function descriptorFor(
  *
  * Everything authoring-related is driven from core's
  * {@link STANDARDIZATION_FUNCTION_DESCRIPTORS}, the shared descriptor table, so the
- * editor never re-encodes a function's parameter shape, label, or risk tier. Only
- * the `tier: "standard"` functions (plus `coalesce`) are offered: the
- * `tier: "regex"` family (raw-pattern authoring) is the deferred expert tier (see
- * board item 202533670), so it is excluded from the add menu here -- a default
- * pipeline's existing regex steps are still rendered and reorderable by the editor,
- * just not authored from scratch.
+ * editor never re-encodes a function's parameter shape, label, or risk tier. The
+ * add menu offers exactly the functions whose descriptor `tier` is `"standard"`
+ * (`coalesce` among them); the `tier: "regex"` family (raw-pattern authoring) is
+ * the deferred expert tier (see board item 202533670), so it is excluded from the
+ * menu here -- a default pipeline's existing regex steps are still rendered and
+ * reorderable by the editor, just not authored from scratch.
  */
 
 // --- Function intent grouping ------------------------------------------------
@@ -59,8 +60,8 @@ export interface StandardizationFunctionGroup {
 /**
  * The standard-tier standardization functions, grouped by authoring intent for the
  * add-step menu. Covers exactly the functions whose descriptor `tier` is
- * `"standard"` (every member of core's function registry except the four
- * `tier: "regex"` raw-pattern functions, plus `coalesce`); a parity test
+ * `"standard"` (`coalesce` is one of them; the four `tier: "regex"` raw-pattern
+ * functions are the only ones excluded); a parity test
  * ({@link authorableFunctionNames}) pins this set against the descriptor table in
  * both directions, so a standard-tier function added to core cannot ship without a
  * group here, and a regex-tier function cannot leak into the menu.
@@ -290,6 +291,32 @@ export function validateParamValue(
   const result = schema.safeParse(value);
   if (result.success) return { ok: true };
   return { ok: false, message: result.error.issues[0]?.message };
+}
+
+/**
+ * Whether every parameter of `step` is well-formed for its function: each required
+ * param present and each value matching the descriptor's declared type (the same
+ * check {@link validateParamValue} drives the inline input errors from). This is
+ * the basis for gating launch on a well-formed pipeline -- a step the operator left
+ * mid-edit (e.g. a cleared `substring.start`, which the `NumberInput` reports as an
+ * empty string) is not valid, so the host keeps it out of the exchange, where a
+ * malformed param would otherwise run as a silent full-field exclusion or throw at
+ * compile. A step naming a function core does not recognize is treated as valid:
+ * it is not authored through this surface and its params are not editable, so there
+ * is nothing here to judge.
+ */
+export function isStepValid(step: StandardizationStep): boolean {
+  const descriptor = descriptorFor(step.function);
+  if (descriptor === undefined) return true;
+  return describeParamFields(descriptor).every((field) => {
+    const value = step.params?.[field.key];
+    const isEmpty =
+      value === undefined ||
+      value === "" ||
+      (Array.isArray(value) && value.length === 0);
+    if (field.optional && isEmpty) return true;
+    return validateParamValue(descriptor, field.key, value).ok;
+  });
 }
 
 // --- Value-level constraint check --------------------------------------------

@@ -8,6 +8,7 @@ import {
   checkValueConstraints,
   describeParamFields,
   functionDisplay,
+  isStepValid,
   validateParamValue,
 } from "../../src/psi/standardizationAuthoring.js";
 
@@ -130,6 +131,52 @@ describe("param value validation per the descriptor's declared type", () => {
 
   test("rejects an unknown parameter key", () => {
     expect(validateParamValue(substring, "nope", 1).ok).toBe(false);
+  });
+});
+
+describe("isStepValid (the launch gate's basis)", () => {
+  test("a fully-specified or no-param step is valid", () => {
+    expect(
+      isStepValid({ function: "substring", params: { start: 1, length: 3 } }),
+    ).toBe(true);
+    expect(isStepValid({ function: "to_upper_case" })).toBe(true);
+    // null_if's value/values are both optional, so an empty step is valid.
+    expect(isStepValid({ function: "null_if" })).toBe(true);
+  });
+
+  test("a step missing or clearing a required param is invalid", () => {
+    // start is required and absent.
+    expect(isStepValid({ function: "substring", params: { length: 3 } })).toBe(
+      false,
+    );
+    // start cleared in the NumberInput stores undefined; an empty string is also
+    // rejected (defends the runtime even if a "" ever reaches here).
+    expect(
+      isStepValid({ function: "substring", params: { start: "", length: 3 } }),
+    ).toBe(false);
+    // pad_left needs a length; a fresh step (char defaulted, no length) is invalid.
+    expect(isStepValid({ function: "pad_left", params: { char: "0" } })).toBe(
+      false,
+    );
+  });
+
+  test("a regex-tier default step is valid (its params are not authored here)", () => {
+    expect(
+      isStepValid({
+        function: "replace_regex",
+        params: { pattern: "[^0-9]", replacement: "" },
+      }),
+    ).toBe(true);
+    expect(
+      isStepValid({
+        function: "filter_regex",
+        params: { pattern: "^\\d{9}$" },
+      }),
+    ).toBe(true);
+  });
+
+  test("a function core does not recognize is treated as valid", () => {
+    expect(isStepValid({ function: "totally_unknown" })).toBe(true);
   });
 });
 

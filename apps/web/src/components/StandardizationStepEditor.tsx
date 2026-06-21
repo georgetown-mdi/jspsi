@@ -93,7 +93,11 @@ function ParamInput({
         <NumberInput
           {...common}
           value={value as number | string | undefined}
-          onChange={(next) => onChange(next)}
+          // A cleared NumberInput reports `""`; store it as an unset param
+          // (undefined), not the empty string, so a required numeric param reads
+          // as missing -- the inline error fires and launch is gated -- rather than
+          // a string that core coerces to a silent full-field exclusion at runtime.
+          onChange={(next) => onChange(next === "" ? undefined : next)}
           allowDecimal={false}
         />
       );
@@ -222,7 +226,9 @@ function StepRow({
  * structured value is JSON-encoded; the caller sanitizes the whole line. */
 function describeReadonlyParam(value: unknown): string {
   if (typeof value === "string") return value;
-  if (value === null || value === undefined) return String(value);
+  // A null/undefined param has no value to show; render it blank rather than the
+  // literal strings "null"/"undefined", which would read as data to the operator.
+  if (value === null || value === undefined) return "";
   try {
     return JSON.stringify(value);
   } catch {
