@@ -11,37 +11,28 @@ import {
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
+import { useNavigate } from "@tanstack/react-router";
 
 import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
+import { invitationLocation } from "@psi/invitationLocation";
 
+import {
+  clearAdvancedHandoff,
+  stashAdvancedHandoff,
+} from "@components/advancedHandoff";
 import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 
-import type { GeneratedInvitation, InvitationLocation } from "@psi/invitation";
 import type { AlertContent } from "@components/FileAcquire";
+import type { GeneratedInvitation } from "@psi/invitation";
 
 /** Upper bound on the inviter's name. It flows into the token's linkage terms
  * and so into the encoded invitation and its deep-link URL; bounding it keeps the
  * shared artifact a sensible length rather than letting an arbitrarily long name
  * produce an unwieldy, possibly over-long link. */
 const MAX_INVITER_NAME_LENGTH = 200;
-
-/** This page's location, in the shape {@link generateInvitation} consumes. It
- * reads `window`, so it must be called from a client-side path; it throws rather
- * than return a wrong value if ever reached during SSR, since there is no
- * sensible server-side location. The sole caller is the submit handler, an event
- * that cannot fire during render. */
-function invitationLocation(): InvitationLocation {
-  if (typeof window === "undefined")
-    throw new Error("invitationLocation must be called in the browser");
-  return {
-    origin: window.location.origin,
-    hostname: window.location.hostname,
-    port: window.location.port,
-  };
-}
 
 /** A generated invitation together with the inviter name that produced it. The
  * invitation carries the file-derived linkage terms and the parsed rows (so the
@@ -53,6 +44,7 @@ interface InviterSession {
 }
 
 export function InvitePanel() {
+  const navigate = useNavigate();
   const [session, setSession] = useState<InviterSession>();
   const [error, setError] = useState<AlertContent>();
   const [files, setFiles] = useState<Array<File>>([]);
@@ -216,16 +208,21 @@ export function InvitePanel() {
           <Anchor
             component="button"
             type="button"
-            // Disabled for now (the configuration GUI is a later roadmap item),
-            // but a real focusable control rather than inert text: aria-disabled
-            // (not the native `disabled` attribute, which would drop it from the
-            // tab order) keeps it reachable and announced disabled, and the click
-            // is suppressed so it does nothing until that feature lands.
-            aria-disabled="true"
-            c="dimmed"
             ta="left"
-            style={{ width: "fit-content", cursor: "not-allowed" }}
-            onClick={(e) => e.preventDefault()}
+            style={{ width: "fit-content" }}
+            // Open the column-aware editor. Hand off the already-chosen file and
+            // name in memory (a File cannot ride the URL), so the editor opens
+            // seeded without a re-drop; if no file is chosen yet, clear any stale
+            // hand-off so the editor falls back to its own file picker.
+            onClick={() => {
+              if (filesRef.current.length > 0)
+                stashAdvancedHandoff({
+                  file: filesRef.current[0],
+                  name: form.state.values.inviterName.trim(),
+                });
+              else clearAdvancedHandoff();
+              void navigate({ to: "/advanced" });
+            }}
           >
             Advanced options
           </Anchor>

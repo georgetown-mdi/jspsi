@@ -47,7 +47,7 @@ export * from "./config/metadata";
 export * from "./config/signing";
 export * from "./signingIdentity";
 export * from "./standardization";
-export { loadCSVFile } from "./file";
+export { loadCSVFile, loadCSVColumns } from "./file";
 
 export { inferDateFormat } from "./utils/date.js";
 export {

@@ -161,6 +161,67 @@ describe("generateInvitation", () => {
     ).not.toEqual([]);
   });
 
+  test("embeds authored linkageTerms verbatim and round-trips them unchanged", async () => {
+    // The Advanced-options editor authors a set the quick path would not derive
+    // for this file (a single key, a different identity), and supplies it. It
+    // must be embedded as-is -- no default derivation, and inviterName not
+    // consulted for the terms' identity.
+    const base = getDefaultLinkageTerms(
+      "Authored Org",
+      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+    );
+    const authored = { ...base, linkageKeys: base.linkageKeys.slice(0, 1) };
+
+    const { encoded, linkageTerms } = await generateInvitation({
+      inviterName: "ignored-name",
+      file: csvStream(ALL_COLUMNS_CSV),
+      location,
+      linkageTerms: authored,
+    });
+
+    const token = await decodeInvitation(encoded);
+    // (f) authored terms round-trip through generateInvitation and decode back equal.
+    expect(token.linkageTerms).toStrictEqual(authored);
+    // The returned object is the embedded one, for the inviter's own exchange.
+    expect(linkageTerms).toStrictEqual(authored);
+    // The default derivation is skipped: the file carries every default column,
+    // so the quick path would have embedded the full multi-key set.
+    expect(token.linkageTerms.linkageKeys).toHaveLength(1);
+    expect(token.linkageTerms.linkageKeys.length).toBeLessThan(
+      getDefaultLinkageTerms(
+        "ignored-name",
+        inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+      ).linkageKeys.length,
+    );
+    // inviterName is not consulted for the identity when terms are authored.
+    expect(token.linkageTerms.identity).toBe("Authored Org");
+  });
+
+  test("fails closed when authored terms no column can satisfy reach the mint", async () => {
+    // A defense-in-depth backstop on the mint boundary: even if the editor's gate
+    // were bypassed, authored terms whose every key references a field the file
+    // cannot produce must not mint a token (it would run to a silent empty
+    // result). The only key needs ssn4; PARTIAL_CSV has no ssn4 column.
+    const base = getDefaultLinkageTerms(
+      "Org",
+      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+    );
+    const ssn4Key = base.linkageKeys.find((k) =>
+      k.elements.some((e) => e.field === "ssn4"),
+    );
+    expect(ssn4Key).toBeDefined();
+    const needsSsn4 = { ...base, linkageKeys: [ssn4Key!] };
+
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: needsSsn4,
+      }),
+    ).rejects.toBeInstanceOf(InvitationFileError);
+  });
+
   test("returns the embedded shared secret so the inviter can derive its id", async () => {
     const { encoded, sharedSecret } = await generateInvitation({
       inviterName: "County Health Dept",

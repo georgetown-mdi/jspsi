@@ -5,6 +5,7 @@ import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
+import { linkageTermsHaveUnsafeTransformRegex } from "./transformRegexSafety.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 
 // --- Untrusted-input bounds --------------------------------------------------
@@ -841,7 +842,24 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
           "(name if present, otherwise field) within the same key",
         path: ["linkageKeys"],
       },
-    );
+    )
+    // Reject a catastrophic-backtracking (ReDoS) regex in any element transform
+    // before it can run. Element-transform regex patterns are partner-controlled
+    // and execute per row over the full dataset, where a crafted pattern hangs the
+    // single JavaScript thread; the check belongs here so every parse path
+    // (initiator/joiner parseLinkageTerms, the invitation-token decode, and
+    // ExchangeSpecSchema) inherits it before any pattern executes. See
+    // transformRegexSafety.ts for the threat model and the best-effort nature of
+    // the heuristic. The message names no partner-controlled value -- the offending
+    // pattern is located by inspection, not echoed -- consistent with the
+    // unsanitized parse-error path the referential-integrity refines above rely on.
+    .refine((a) => !linkageTermsHaveUnsafeTransformRegex(a), {
+      message:
+        "a linkage key element transform uses a regular expression vulnerable " +
+        "to catastrophic backtracking (ReDoS); it is rejected before any " +
+        "pattern executes",
+      path: ["linkageKeys"],
+    });
 
 // --- Parse -------------------------------------------------------------------
 

@@ -14,12 +14,14 @@ const pkg = require("./package.json");
 // @noble/curves is bundled in the UMD browser build only because it ships
 // ESM-only and has no UMD global name; the ESM/CJS builds keep it external.
 const ALWAYS_BUNDLED = new Set(["@openmined/psi.js"]);
-// canonicalize is bundled into the standalone UMD browser build because it
-// ships CommonJS with no UMD global name; the ESM/CJS builds keep it external.
+// canonicalize and redos-detector are bundled into the standalone UMD browser
+// build because they ship with no UMD global name; the ESM/CJS builds keep them
+// external (the consuming apps bundle them).
 const UMD_BUNDLED = new Set([
   "@openmined/psi.js",
   "@noble/curves",
   "canonicalize",
+  "redos-detector",
 ]);
 
 // Returns an `external` predicate that matches bare package names and their
