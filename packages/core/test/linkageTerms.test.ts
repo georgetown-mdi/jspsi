@@ -707,14 +707,11 @@ test("a non-string parse_date format still validates, so the runtime factory han
   ).toBe(true);
 });
 
-// ─── transform regex pattern-length bound (source pre-filter) ──
+// ─── transform regex pattern-length bound (source sanity pre-filter) ──
 // The four tier:"regex" functions compile their raw pattern / delimiter under the
 // linear-time engine (compiled once per transform array, memoized).
-// MAX_TRANSFORM_PATTERN_LENGTH caps the pattern SOURCE length -- a cheap pre-filter
-// on parse cost, independent of the program-size cap that bounds per-row match cost
-// (see the dialect-gate test below and linearRegex.test.ts). Use a SPARSE pattern
-// (many tiny non-capturing groups, program-small) so the LENGTH cap -- not the
-// program-size cap -- is the binding control at the boundary.
+// MAX_TRANSFORM_PATTERN_LENGTH caps the pattern SOURCE length -- a cheap sanity
+// pre-filter on parse cost. Pin both edges of the cap.
 
 const regexStepTerms = (fn: string, params: Record<string, unknown>) => ({
   ...base,
@@ -726,28 +723,18 @@ const regexStepTerms = (fn: string, params: Record<string, unknown>) => ({
   ],
 });
 
-// `(?:x)` is 5 chars and ~1 instruction, so this is at the length cap yet far under
-// the program-size cap; appending one more group pushes it just over the length cap
-// while staying program-small, isolating the length cap as the rejecting control.
-const sparseAtLengthCap = "(?:x)".repeat(
-  Math.floor(MAX_TRANSFORM_PATTERN_LENGTH / 5),
-);
-const sparseOverLengthCap = "(?:x)".repeat(
-  Math.floor(MAX_TRANSFORM_PATTERN_LENGTH / 5) + 1,
-);
-
-test("a replace_regex pattern at the length cap parses; one over is rejected by the length cap", () => {
+test("a replace_regex pattern at the length cap parses; one over is rejected", () => {
   expect(
     safeParseLinkageTerms(
       regexStepTerms("replace_regex", {
-        pattern: sparseAtLengthCap,
+        pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH),
         replacement: "",
       }),
     ).success,
   ).toBe(true);
   const over = safeParseLinkageTerms(
     regexStepTerms("replace_regex", {
-      pattern: sparseOverLengthCap,
+      pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
       replacement: "",
     }),
   );
@@ -765,20 +752,24 @@ test("the pattern-length cap also covers split_on's delimiter param", () => {
   // so the same cap must apply -- a regression if the map and the refine drift apart.
   expect(
     safeParseLinkageTerms(
-      regexStepTerms("split_on", { delimiter: sparseAtLengthCap }),
+      regexStepTerms("split_on", {
+        delimiter: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH),
+      }),
     ).success,
   ).toBe(true);
   expect(
     safeParseLinkageTerms(
-      regexStepTerms("split_on", { delimiter: sparseOverLengthCap }),
+      regexStepTerms("split_on", {
+        delimiter: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
+      }),
     ).success,
   ).toBe(false);
 });
 
 test("a non-string transform regex pattern still validates, so coercion handles it", () => {
-  // Only a string pattern drives the per-row compile; the gate and factory both
-  // coerce a non-string to a short literal, so the length cap does not pre-empt it
-  // (behavior matches the pad_left / parse_date non-string cases above).
+  // Only a string pattern drives the compile; the gate and factory both coerce a
+  // non-string to a short literal, so the length cap does not pre-empt it (behavior
+  // matches the pad_left / parse_date non-string cases above).
   expect(
     safeParseLinkageTerms(
       regexStepTerms("replace_regex", { pattern: 123, replacement: "" }),
@@ -786,52 +777,16 @@ test("a non-string transform regex pattern still validates, so coercion handles 
   ).toBe(true);
 });
 
-test("a transform regex whose compiled program is too large is rejected by the dialect gate", () => {
-  // `(.*){1000}` is in-dialect (it compiles) and is well under the 1000-char length
-  // cap, but expands to ~4000 instructions -- over the per-pattern program-size cap.
-  // The dialect gate rejects it, fail closed, before any row runs -- the length and
-  // per-repetition caps do not catch this.
+test("a transform regex outside the dialect is rejected by the gate", () => {
+  // A backreference is a feature RE2 drops, so the engine cannot compile it; the
+  // dialect gate rejects it fail-closed, before any row runs.
   const result = safeParseLinkageTerms(
-    regexStepTerms("filter_regex", { pattern: "(.*){1000}" }),
+    regexStepTerms("filter_regex", { pattern: "(a)\\1" }),
   );
   expect(result.success).toBe(false);
   if (result.success) return;
   expect(
     result.error.issues.some((i) =>
-      /outside the linear-time dialect/.test(i.message),
-    ),
-  ).toBe(true);
-});
-
-test("many under-cap regex steps are rejected by the aggregate program-size cap", () => {
-  // Step-count amplification: each `(b*b*){42}` is ~254 instructions (under the
-  // per-pattern cap) and length-preserving, so chaining many of them multiplies
-  // per-row cost into seconds. The aggregate cap (sum of program sizes across all
-  // steps) rejects a chain whose total exceeds the budget, even though every single
-  // pattern conforms. ~8 such steps fit under the 2048 budget; ~16 do not.
-  const amplifierSteps = (n: number) => ({
-    ...base,
-    linkageKeys: [
-      {
-        name: "RX",
-        elements: [
-          {
-            field: "ssn",
-            transform: Array.from({ length: n }, () => ({
-              function: "replace_regex",
-              params: { pattern: "(b*b*){42}", replacement: "" },
-            })),
-          },
-        ],
-      },
-    ],
-  });
-  expect(safeParseLinkageTerms(amplifierSteps(8)).success).toBe(true);
-  const tooMany = safeParseLinkageTerms(amplifierSteps(16));
-  expect(tooMany.success).toBe(false);
-  if (tooMany.success) return;
-  expect(
-    tooMany.error.issues.some((i) =>
       /outside the linear-time dialect/.test(i.message),
     ),
   ).toBe(true);

@@ -50,41 +50,6 @@ import { RE2JS } from "re2js";
 const COMPILE_CACHE_MAX = 1024;
 
 /**
- * Upper bound on a partner pattern's compiled RE2 program size (its instruction
- * count). Per-row regex cost is O(program_size x input_length): RE2 matching is
- * linear in the input, but with a per-row constant factor proportional to the
- * program size, and the program size is PARTNER-controlled -- a short, in-dialect
- * pattern can expand into a huge program via a counted repetition over a sub-
- * expression (`(.*){1000}` is ~4000 instructions and ~1 ms per row on a one-character
- * value; repeated toward the length cap it reaches hundreds of thousands of
- * instructions and ~1 s per row even on a one-character value). The pattern-length
- * cap, the per-repetition `{n}<=1000` limit, and re2js's rejection of nested counted
- * repetition do NOT bound this; only the program size does.
- *
- * This caps the program-size factor. It does NOT by itself bound per-row cost on
- * an arbitrarily long field value -- a hard bound also needs an input-length limit,
- * tracked as follow-up work -- but it removes the input-INDEPENDENT blow-up (a
- * pattern that costs ~1 s per row even on a one-character input) and collapses the
- * residual: the worst high-ambiguity pattern's per-row cost grows super-linearly
- * with program size, so capping the program size low makes the residual tiny -- the
- * worst pattern at this cap (e.g. `(.*.*){k}`) measures well under a millisecond per
- * row even on a 1000-character field, versus ~90 ms at a 2000-instruction cap and an
- * unbounded hang with no cap.
- *
- * 256 is far above the bundled defaults (under 20 instructions) and any realistic
- * field-standardization pattern, while rejecting the dense expansions. A long or
- * dense ORDINARY pattern (over 256 instructions, e.g. a 255-character literal) is
- * rejected by this cap rather than by the 1000-character length cap; that is
- * acceptable, since a pattern that dense is implausible for field standardization.
- * `parse_date` is not screened by the gate and its generated regex can exceed this
- * (a 256-character format expands to ~640 instructions), but that regex is low-
- * ambiguity by construction (only bounded `\d` quantifiers, never an unbounded
- * quantifier over a sub-expression), so it stays cheap per row regardless. See
- * docs/spec/PROTOCOL.md for the normative dialect bound.
- */
-export const MAX_TRANSFORM_PROGRAM_SIZE = 256;
-
-/**
  * Memoized compiled patterns, keyed by the exact pattern source. Insertion-
  * ordered (a plain `Map`), so the oldest entry is `keys().next().value`. A
  * pattern that fails to compile is not cached (the `RE2JS.compile` throw
@@ -207,52 +172,19 @@ export function coerceToPatternString(raw: unknown): string {
 }
 
 /**
- * The size of a compiled pattern's RE2 program, in instructions -- the proxy for
- * its per-row match cost (see {@link MAX_TRANSFORM_PROGRAM_SIZE}). Reads re2js's
- * internal compiled program (`re2Input.prog.inst`). That field is not a documented
- * API, but re2js is pinned exactly via the lockfile, so its shape is stable for
- * the version we ship; and the read FAILS CLOSED: if the internal shape ever
- * changes under an upgrade, this returns Infinity so every pattern is rejected
- * (never silently admitted past the cap), and the bundled-default conformance
- * tests fail loudly to flag the upgrade for review.
- */
-function compiledProgramSize(re: RE2JS): number {
-  const inst = (re as unknown as { re2Input?: { prog?: { inst?: unknown[] } } })
-    .re2Input?.prog?.inst;
-  return Array.isArray(inst) ? inst.length : Number.POSITIVE_INFINITY;
-}
-
-/**
- * The compiled program size of `pattern`, in instructions, or `Infinity` if the
- * engine cannot compile it (a feature RE2 drops -- backreference, lookaround -- or
- * a syntax error). The numeric form the dialect gate uses to enforce both the
- * per-pattern cap ({@link MAX_TRANSFORM_PROGRAM_SIZE}) and the aggregate cap across
- * all of a terms set's patterns ({@link MAX_TRANSFORM_TOTAL_PROGRAM_SIZE}). Fails
- * closed: a non-compilable or shape-broken pattern returns `Infinity`, so it
- * exceeds every cap and is rejected, never silently admitted.
- */
-export function transformProgramSize(pattern: string): number {
-  try {
-    return compiledProgramSize(compileCached(pattern));
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
-}
-
-/**
- * Whether `pattern` is in the linear-time dialect: it compiles under the engine
- * AND its compiled program is within {@link MAX_TRANSFORM_PROGRAM_SIZE}. The
- * single conformance oracle for both the terms-validation gate
+ * Whether `pattern` is in the linear-time dialect: it compiles under the engine.
+ * The single conformance oracle for both the terms-validation gate
  * ({@link linkageTermsHaveNonConformantTransformRegex}) and the editor-facing
  * `regexPatternSchema`, so the editor accepts exactly the patterns an exchange
- * will execute. Returns `false` (reject, fail closed) on any compile failure --
- * including a feature RE2 drops (backreference, lookaround), which could otherwise
- * backtrack catastrophically -- and on a pattern whose program exceeds the size
- * bound, which matches linearly but with a per-row constant large enough to be a
- * denial of service. (The gate additionally enforces the aggregate cap across all
- * patterns; this per-pattern oracle does not, so the editor surfaces a single
- * pattern's conformance independent of the rest of the terms.)
+ * will execute. Returns `false` (reject, fail closed) on any compile failure,
+ * including a feature RE2 drops (backreference, lookaround) -- which is the point:
+ * those are the patterns that could otherwise backtrack catastrophically.
  */
 export function patternConformsToDialect(pattern: string): boolean {
-  return transformProgramSize(pattern) <= MAX_TRANSFORM_PROGRAM_SIZE;
+  try {
+    compileCached(pattern);
+    return true;
+  } catch {
+    return false;
+  }
 }

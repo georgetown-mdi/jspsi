@@ -553,8 +553,7 @@ const regexPatternSchema = z
   .refine(patternConformsToDialect, {
     message:
       "must be a valid regular expression in the linear-time dialect " +
-      "(RE2 syntax; backreferences and lookaround are not supported, and the " +
-      "pattern must compile to a bounded program size)",
+      "(RE2 syntax; backreferences and lookaround are not supported)",
   });
 
 /**
