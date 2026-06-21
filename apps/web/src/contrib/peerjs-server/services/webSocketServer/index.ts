@@ -91,9 +91,10 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
         // when we are the ONLY upgrade listener (the production server, where
         // nothing else will answer) close it rather than leak an open socket:
         // Node will not auto-destroy an unhandled upgrade once any `upgrade`
-        // listener exists, and no socket timeout reaps it. This restores the
-        // prompt reject the old `{ server, path }` wiring did, without clobbering
-        // co-resident listeners.
+        // listener exists, so close it here rather than leak it (the production
+        // connection idle-timeout is at best a far coarser backstop). This
+        // restores the prompt reject the old `{ server, path }` wiring did,
+        // without clobbering co-resident listeners.
         if (server.listenerCount("upgrade") === 1 && !socket.destroyed) {
           socket.destroy();
         }
