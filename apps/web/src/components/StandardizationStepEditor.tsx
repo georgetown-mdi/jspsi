@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 import {
   ActionIcon,
   Badge,
@@ -266,6 +268,24 @@ export function StandardizationStepEditor({
   /** Emit the next step array on any add, remove, reorder, or param edit. */
   onStepsChange: (steps: Array<StandardizationStep>) => void;
 }) {
+  // A stable React key per step, tracked by object identity so a reorder follows
+  // the logical step (rather than its array position) and a param edit keeps the
+  // same row mounted -- the move/remove handlers preserve each step's object
+  // reference, and setParam carries the id across its immutable replacement, so a
+  // controlled input never loses focus or a transient value on an edit. A
+  // WeakMap so an id is released when its step is dropped; lazily assigning during
+  // render is idempotent (same object -> same id) and safe under StrictMode.
+  const stepIds = useRef(new WeakMap<StandardizationStep, string>());
+  const nextStepId = useRef(0);
+  const keyFor = (step: StandardizationStep): string => {
+    let id = stepIds.current.get(step);
+    if (id === undefined) {
+      id = String(nextStepId.current++);
+      stepIds.current.set(step, id);
+    }
+    return id;
+  };
+
   const addStep = (functionName: string) =>
     onStepsChange([...steps, newStep(functionName)]);
 
@@ -282,11 +302,26 @@ export function StandardizationStepEditor({
 
   const setParam = (index: number, key: string, value: unknown) =>
     onStepsChange(
-      steps.map((step, i) =>
-        i === index
-          ? { ...step, params: { ...step.params, [key]: value } }
-          : step,
-      ),
+      steps.map((step, i) => {
+        if (i !== index) return step;
+        const params = { ...step.params };
+        // A cleared param (NumberInput reports an empty input as undefined) drops
+        // the key rather than writing an explicit `undefined` own-property, so the
+        // step's shape matches core's default pipelines (absent keys omitted) and
+        // survives a JSON round-trip. An emptied params object is dropped entirely,
+        // matching a no-param step.
+        if (value === undefined) delete params[key];
+        else params[key] = value;
+        const next: StandardizationStep =
+          Object.keys(params).length > 0
+            ? { ...step, params }
+            : { function: step.function };
+        // Carry the row's identity across the immutable replacement so the edited
+        // input stays mounted (keeps focus) rather than remounting on each change.
+        const id = stepIds.current.get(step);
+        if (id !== undefined) stepIds.current.set(next, id);
+        return next;
+      }),
     );
 
   return (
@@ -312,7 +347,7 @@ export function StandardizationStepEditor({
         >
           {steps.map((step, index) => (
             <StepRow
-              key={index}
+              key={keyFor(step)}
               step={step}
               index={index}
               count={steps.length}

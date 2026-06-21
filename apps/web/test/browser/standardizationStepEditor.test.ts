@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -232,6 +232,44 @@ describe("StandardizationStepEditor", () => {
         .getByText("start must not be 0 (positions are 1-indexed)")
         .elements(),
     ).toHaveLength(0);
+  });
+
+  test("editing a numeric param across keystrokes keeps the input mounted", async () => {
+    // A stable per-step key carries the row's identity across each immutable param
+    // update, so the controlled input is not remounted between keystrokes; typing
+    // a multi-digit value lands every digit (a per-keystroke remount would drop
+    // focus and lose all but the first).
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [{ function: "substring", params: { length: 5 } }],
+        rawRows: [{ n: "abcdef" }],
+      }),
+    );
+    const start = page.getByRole("textbox", { name: "Start position" });
+    await userEvent.type(start, "12");
+    await expect.element(start).toHaveValue("12");
+  });
+
+  test("clearing a param drops the key rather than writing undefined", async () => {
+    const onStepsChange = vi.fn<(steps: Array<StandardizationStep>) => void>();
+    render(
+      createElement(StandardizationStepEditor, {
+        fieldLabel: "First name",
+        inputColumn: "n",
+        steps: [{ function: "substring", params: { start: 3, length: 2 } }],
+        onStepsChange,
+      }),
+    );
+    await userEvent.clear(
+      page.getByRole("textbox", { name: "Start position" }),
+    );
+    // The emitted step omits `start` entirely (no explicit `undefined` own-property),
+    // matching core's default-pipeline shape.
+    const emitted = onStepsChange.mock.calls.at(-1)?.[0];
+    expect(emitted?.[0].params && "start" in emitted[0].params).toBe(false);
+    expect(emitted?.[0].params).toEqual({ length: 2 });
   });
 
   test("adds a step from the grouped menu and removes it again", async () => {
