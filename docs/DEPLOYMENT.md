@@ -51,8 +51,10 @@ map $http_origin $psilink_origin_ok {
     "https://psilink.example.org"  1;   # replace with your public origin(s)
 }
 
-# server{} context: scope the controls to the signaling upgrade location.
-location /api/peerjs {
+# server{} context: scope the controls to the signaling upgrade location. The `^~`
+# prefix makes this match win over the catch-all `location /` and stops a later
+# regex location from taking precedence and silently dropping these limits.
+location ^~ /api/peerjs {
     if ($psilink_origin_ok = 0) { return 403; }   # remove to skip Origin checks
 
     limit_req   zone=psilink_sig_req burst=20 nodelay;   # new-connection rate per address
