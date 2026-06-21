@@ -30,11 +30,16 @@ function concatSlices(slices: Array<Uint8Array>): Uint8Array {
 }
 
 /**
- * A faithful model of the PeerJS binary connection: `_handleChunk` accumulates
+ * A test double for the PeerJS binary connection's reassembly/unpack surface.
+ * The unit tests drive each wrapped method with the input it processes -- chunk
+ * objects into `_handleChunk`, frame bytes into `_handleDataMessage` -- rather
+ * than through real PeerJS's entry ordering (where `_handleDataMessage` is the
+ * sole entry and routes a chunk envelope to `_handleChunk`); that end-to-end
+ * ordering is exercised by the live browser exchange test. What is modeled here
+ * is the completion recursion this guard depends on: `_handleChunk` accumulates
  * slices keyed by message id (storing the chunk total from the first chunk) and,
- * on completion, concatenates and recurses into `_handleDataMessage` -- the sole
- * point at which a frame is "unpacked". `delivered` records each frame that
- * reached that unpack point (i.e. was not refused first).
+ * on completion, concatenates and recurses into `_handleDataMessage`, the unpack
+ * point. `delivered` records each frame that reached it (i.e. was not refused).
  */
 class FakeChunkedConnection {
   _chunkedData: Record<
@@ -99,6 +104,17 @@ function arrayOfFixints(n: number): Uint8Array {
   return new Uint8Array(out);
 }
 
+/** A BinaryPack str32 header declaring a `byteLen`-byte string (no payload). */
+function str32Header(byteLen: number): Uint8Array {
+  return new Uint8Array([
+    0xd9,
+    (byteLen >>> 24) & 0xff,
+    (byteLen >>> 16) & 0xff,
+    (byteLen >>> 8) & 0xff,
+    byteLen & 0xff,
+  ]);
+}
+
 type InstallOptions = {
   maxFrameBytes?: number;
   maxConcurrentReassemblies?: number;
@@ -106,6 +122,7 @@ type InstallOptions = {
   maxReassemblyDepth?: number;
   maxChunks?: number;
   minChunkResidentBytes?: number;
+  maxStringBytes?: number;
 };
 
 function install(conn: FakeChunkedConnection, options?: InstallOptions) {
@@ -350,6 +367,20 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toEqual([]);
   });
 
+  test("rejects an oversized string the value count alone would miss", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxStringBytes: 100 });
+
+    // One value (so the node budget does not catch it), but a 1000-byte string
+    // unpacks to a JS string far larger than one slot -- refused by the string cap.
+    conn._handleDataMessage({ data: str32Header(1000) });
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    const err = fail.mock.calls[0][0] as ConnectionError;
+    expect(err.kind).toBe("protocol");
+    expect(conn.delivered).toEqual([]);
+  });
+
   test("accepts a small valid structure and delegates to unpack", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxFrameNodes: 100 });
@@ -418,6 +449,24 @@ describe("structureOverBudget", () => {
 
   test("flags an array declaring more than the bytes that follow", () => {
     expect(structureOverBudget(array32Header(1000), 1_000_000, 256)).toBe(true);
+  });
+
+  test("flags a string longer than the per-string byte cap", () => {
+    expect(structureOverBudget(str32Header(1000), 1_000_000, 256, 100)).toBe(
+      true,
+    );
+  });
+
+  test("passes a short fixstr under the per-string cap", () => {
+    // fixstr "abc" (0xb3 + 3 bytes) is one value and well under any string cap.
+    expect(
+      structureOverBudget(
+        new Uint8Array([0xb3, 0x61, 0x62, 0x63]),
+        100,
+        256,
+        100,
+      ),
+    ).toBe(false);
   });
 
   test("flags excessive nesting depth", () => {

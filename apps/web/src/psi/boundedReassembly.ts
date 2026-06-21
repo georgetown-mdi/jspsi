@@ -70,12 +70,16 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  * matched record -- which deserializes to ~5 values per record. At the set-size
  * ceiling the 256 MiB byte cap implies (~4 million elements), that is ~21 million
  * values; 2^25 leaves headroom so no exchange the byte cap admits is rejected on
- * a downstream frame. Residual: a single frame's retained structure is bounded to
- * roughly this count times the ~8-byte per-slot cost (~268 MiB) -- fixed, and far
- * below the unbounded allocation the wire-byte cap alone permitted; reaching it
- * requires proportional wire bytes (the per-container byte check above), so a
- * pathological frame is no cheaper than a legitimate one of the same size.
- * Fixed, not configurable.
+ * a downstream frame. Residual: a single frame's deserialized structure is
+ * bounded to this count times the per-value cost, which is ~8 bytes for a number
+ * array slot but ~64 bytes for an empty object, so a worst-case frame of empty
+ * objects deserializes to ~2 GiB -- fixed, far below the unbounded allocation the
+ * wire-byte cap alone permitted, and reaching it requires proportional wire bytes
+ * (~33 MiB; the per-container byte check ties value count to wire size), so a
+ * pathological frame is no cheaper than a legitimate one of the same size, and
+ * its structure is freed when the schema layer rejects it. (Strings, whose
+ * deserialized size is not reflected in the value count, are bounded separately
+ * by {@link MAX_WEBRTC_STRING_BYTES}.) Fixed, not configurable.
  */
 export const MAX_WEBRTC_FRAME_NODES = 33_554_432;
 
@@ -107,6 +111,24 @@ export const MAX_CHUNKS_PER_REASSEMBLY = 131_072;
  * byte cap so a tiny-chunk flood is bounded by true memory; see
  * {@link MAX_CHUNKS_PER_REASSEMBLY}. */
 export const MIN_CHUNK_RESIDENT_BYTES = 256;
+
+/**
+ * Maximum byte length of a single BinaryPack string a frame may contain. The
+ * {@link MAX_WEBRTC_FRAME_NODES} value count treats a string as one value, but
+ * `unpack_string` builds a JS string of the declared length (~2x its wire size in
+ * UTF-16) via a per-code-point concatenation whose transient cons-string tree is
+ * many times larger again, so a single ~256 MiB-wire `str32` -- one value, within
+ * the node budget -- would spike to multiple GiB. This caps each string's
+ * declared length so that transient is bounded; binary set frames are `bin` (not
+ * strings) and every legitimate string a PSI frame carries (the `{theirIndex,
+ * iteration}` keys, a `status` value, a payload cell) is far shorter, so the cap
+ * never rejects one.
+ *
+ * Value: 1,048,576 (1 MiB), orders of magnitude above any legitimate string yet
+ * small enough that the worst-case build transient stays in the tens of MiB.
+ * Fixed, not configurable.
+ */
+export const MAX_WEBRTC_STRING_BYTES = 1024 * 1024;
 
 /**
  * One slice of a chunked PeerJS frame, as it reaches the connection's
@@ -241,10 +263,11 @@ class ByteCursor {
 
 /** Reads one BinaryPack value's header at the cursor, skipping a scalar's
  * payload, and returns the number of child values a container declares (0 for a
- * scalar). Mirrors `peerjs-js-binarypack`'s `Unpacker.unpack` marker dispatch:
- * a map of K pairs declares 2K children (K keys + K values). An unknown marker
- * yields 0 (BinaryPack returns `undefined` for it without consuming a payload). */
-function readValueChildren(cursor: ByteCursor): number {
+ * scalar), or `-1` for a string whose declared length exceeds `maxStringBytes`.
+ * Mirrors `peerjs-js-binarypack`'s `Unpacker.unpack` marker dispatch: a map of K
+ * pairs declares 2K children (K keys + K values). An unknown marker yields 0
+ * (BinaryPack returns `undefined` for it without consuming a payload). */
+function readValueChildren(cursor: ByteCursor, maxStringBytes: number): number {
   const type = cursor.u8();
   if (type < 0x80) return 0; // positive fixint
   if ((type ^ 0xe0) < 0x20) return 0; // negative fixint
@@ -286,14 +309,28 @@ function readValueChildren(cursor: ByteCursor): number {
     case 0xd3: // int64
       cursor.skip(8);
       return 0;
-    case 0xd8: // str16
     case 0xda: // raw16
-      cursor.skip(cursor.u16());
-      return 0;
-    case 0xd9: // str32
+      cursor.skip(cursor.u16()); // unpack_raw copies `size` bytes (~1x wire),
+      return 0; // bounded by the wire-byte cap; no separate cap needed
     case 0xdb: // raw32
       cursor.skip(cursor.u32());
       return 0;
+    case 0xd8: {
+      // str16: unpack_string builds a JS string of the declared length, ~2x its
+      // wire size and with a large transient cons-string tree, so a per-string
+      // byte cap bounds it (legitimate PSI frames carry only short strings).
+      const size = cursor.u16();
+      if (size > maxStringBytes) return -1;
+      cursor.skip(size);
+      return 0;
+    }
+    case 0xd9: {
+      // str32
+      const size = cursor.u32();
+      if (size > maxStringBytes) return -1;
+      cursor.skip(size);
+      return 0;
+    }
     case 0xdc: // array16
       return cursor.u16();
     case 0xdd: // array32
@@ -309,22 +346,25 @@ function readValueChildren(cursor: ByteCursor): number {
 
 /**
  * Whether the BinaryPack value in `buf` would deserialize to more than `maxNodes`
- * values, nest deeper than `maxDepth`, or declare any container with more
- * elements than the bytes that follow it can encode. Walks the structure reading
- * only container headers and scalar lengths -- never materializing the payload --
- * and rejects as soon as the running total of declared values breaches the budget
- * or a container over-declares, so an over-cap frame is caught before `unpack`
- * allocates (including the `new Array(N)`-from-a-tiny-header case, where each
- * declared element must be backed by at least one wire byte). A read past the end
- * (a malformed/truncated frame) returns `false`: every container it passed was
- * within both the node budget and the bytes-that-follow check, so the structure
- * it commits `unpack` to is already bounded, and PeerJS's own unpack handles the
- * malformation downstream.
+ * values, nest deeper than `maxDepth`, contain a string longer than
+ * `maxStringBytes`, or declare any container with more elements than the bytes
+ * that follow it can encode. Walks the structure reading only container headers
+ * and scalar lengths -- never materializing the payload -- and rejects as soon as
+ * the running total of declared values breaches the budget, a container
+ * over-declares, or a string over-declares, so an over-cap frame is caught before
+ * `unpack` allocates (the `new Array(N)`-from-a-tiny-header case, where each
+ * declared element must be backed by at least one wire byte, and the
+ * giant-string case, where `unpack_string` builds a JS string far larger than
+ * the value count reflects). A read past the end (a malformed/truncated frame)
+ * returns `false`: every container it passed was within both the node budget and
+ * the bytes-that-follow check, so the structure it commits `unpack` to is already
+ * bounded, and PeerJS's own unpack handles the malformation downstream.
  */
 export function structureOverBudget(
   buf: Uint8Array,
   maxNodes: number,
   maxDepth: number,
+  maxStringBytes: number = MAX_WEBRTC_STRING_BYTES,
 ): boolean {
   const cursor = new ByteCursor(buf);
   // remaining[d] = child values still to read at nesting level d; one root value.
@@ -340,7 +380,9 @@ export function structureOverBudget(
         continue;
       }
       remaining[top]--;
-      const children = readValueChildren(cursor);
+      const children = readValueChildren(cursor, maxStringBytes);
+      // A string over the per-string byte cap (`-1`) is refused outright.
+      if (children < 0) return true;
       if (children > 0) {
         // Each declared element needs at least one byte to encode, so a container
         // claiming more elements than the bytes that follow is a zero-fill lie.
@@ -431,6 +473,7 @@ export function boundChunkReassembly(
     maxReassemblyDepth?: number;
     maxChunks?: number;
     minChunkResidentBytes?: number;
+    maxStringBytes?: number;
   },
 ): void {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
@@ -441,6 +484,7 @@ export function boundChunkReassembly(
   const maxChunks = options?.maxChunks ?? MAX_CHUNKS_PER_REASSEMBLY;
   const minChunkBytes =
     options?.minChunkResidentBytes ?? MIN_CHUNK_RESIDENT_BYTES;
+  const maxStringBytes = options?.maxStringBytes ?? MAX_WEBRTC_STRING_BYTES;
 
   assertChunkReassemblySupported(conn);
   const internals = conn as unknown as ChunkedDataConnection;
@@ -509,7 +553,14 @@ export function boundChunkReassembly(
   // covers a tiny unchunked frame that never reaches `_handleChunk` at all.
   internals._handleDataMessage = (message: PeerDataMessage): void => {
     if (failed) return;
-    if (structureOverBudget(toUint8(message.data), maxFrameNodes, maxDepth)) {
+    if (
+      structureOverBudget(
+        toUint8(message.data),
+        maxFrameNodes,
+        maxDepth,
+        maxStringBytes,
+      )
+    ) {
       failClosed(frameBoundError(`${maxFrameNodes}-value structure limit`));
       return;
     }
