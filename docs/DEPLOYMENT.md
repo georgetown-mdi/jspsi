@@ -66,7 +66,7 @@ location /api/peerjs {
 }
 ```
 
-Origin is enforced by the browser and can be omitted or forged by a non-browser client, so the allowlist is defense-in-depth that cuts drive-by cross-site connections rather than authentication; the per-address `limit_req`/`limit_conn` are the resource-exhaustion control that complements the in-application bounds above. The bundled AWS Elastic Beanstalk reference under `apps/web/deploy/aws_eb/` does not include either control; add them there (or at your own proxy) before exposing a deployment publicly.
+Origin is enforced by the browser and can be omitted or forged by a non-browser client, so the allowlist is defense-in-depth that cuts drive-by cross-site connections rather than authentication; the per-address `limit_req`/`limit_conn` are the resource-exhaustion control that complements the in-application bounds above. The bundled AWS Elastic Beanstalk reference under `apps/web/deploy/aws_eb/` applies the per-address `limit_req`/`limit_conn` on `/api/peerjs` by default -- with the illustrative numbers above, to tune to your load -- and ships the Origin allowlist as a commented-out template you enable by uncommenting the `map` and its matching `if` and setting your public origin (it cannot ship active, because the map defaults to deny and would otherwise reject every client). Confirm the limits suit your load, and enable Origin enforcement if you want it, before exposing a deployment publicly.
 
 ## Diagnosing web connection failures
 
