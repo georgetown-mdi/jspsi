@@ -29,8 +29,8 @@ const defaultPeerFactory: PeerFactory = (id, options) => new Peer(id, options);
 /**
  * The WebSocket heartbeat cadence the PeerJS client sends, pinned here rather
  * than left to the `peerjs` default. `peerjs` is a caret range (`^1.5.5`) whose
- * default `pingInterval` (~5s) is a default parameter inside a bundled file --
- * not exported -- so a minor bump could silently change the cadence. The
+ * default `pingInterval` (5,000 ms in 1.5.x) is a default parameter inside a
+ * bundled file -- not exported -- so a minor bump could silently change it. The
  * signaling server's "unconfirmed" reap window (`unconfirmed_timeout` in the
  * vendored peerjs-server reaper) is justified as a multiple of this cadence: a
  * real peer graduates to the generous `alive_timeout` window the moment its

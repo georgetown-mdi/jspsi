@@ -21,8 +21,12 @@ import type { IMessage } from "@peerjs-server/models/message";
 // the full window), and the relay's per-destination queue bounds (a spray to many
 // unregistered destinations cannot allocate queues without limit).
 
-const ALIVE_TIMEOUT_MS = 90_000;
-const UNCONFIRMED_TIMEOUT_MS = 20_000;
+// Source the reap windows from the production defaults (90_000 / 20_000) rather
+// than mirroring the literals, so the behavioral tests below exercise the same
+// values the `liveness-timeout config invariant` block pins -- a future edit to
+// the defaults cannot leave a behavioral test passing against a stale local copy.
+const ALIVE_TIMEOUT_MS = defaultConfig.alive_timeout;
+const UNCONFIRMED_TIMEOUT_MS = defaultConfig.unconfirmed_timeout;
 const CHECK_INTERVAL_MS = 100;
 
 describe("two-tier liveness reaper", () => {
@@ -84,10 +88,10 @@ describe("two-tier liveness reaper", () => {
     const reaper = startReaper(realm);
     try {
       // The PeerJS client's first heartbeat lands at the pinned cadence, which is
-      // comfortably inside the unconfirmed window, so the peer is still
-      // registered when that frame arrives -- a real but slow-to-pair invited
-      // peer is never cut before it can graduate.
-      expect(PEER_PING_INTERVAL_MS).toBeLessThan(UNCONFIRMED_TIMEOUT_MS);
+      // comfortably inside the unconfirmed window (pinned at >= 4x the cadence by
+      // the invariant test below), so the peer is still registered when that
+      // frame arrives -- a real but slow-to-pair invited peer is never cut before
+      // it can graduate.
       vi.advanceTimersByTime(PEER_PING_INTERVAL_MS);
       expect(realm.getClientById("slow")).toBeDefined();
 
