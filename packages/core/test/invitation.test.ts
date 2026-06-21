@@ -267,6 +267,54 @@ test("decodeInvitation screens a snake_case parse_date inputFormat for ReDoS (th
   );
 });
 
+test("decodeInvitation: a param spelling the fold leaves non-canonical is inert (screen and runtime read the same name)", async () => {
+  // The complement of the ReDoS-screen test above, pinning the safety margin the
+  // whole fold rests on: the catastrophic-backtracking screen and the
+  // standardization runtime (parseDateFactory) read the SAME camelCase param name,
+  // `inputFormat`. A spelling the snake->camel fold does NOT canonicalize to that
+  // name -- here SCREAMING_SNAKE `INPUT_FORMAT`, whose `_F` the fold leaves intact
+  // (camelizeKeys only collapses `_` followed by a lowercase letter) -- is therefore
+  // invisible to BOTH: the screen does not fire, so decode does not reject, AND the
+  // runtime never reads it (`params.inputFormat` is absent, so parse_date falls back
+  // to its default format). A runaway format parked under such a key is inert, never
+  // a value that slips the screen and then activates downstream. The "MM" x24 bomb
+  // is the same payload the ReDoS-screen test rejects under the canonical key; under
+  // this non-canonical key it parses cleanly and is left verbatim. Were a future
+  // camelizeKeys change to canonicalize `INPUT_FORMAT` to `inputFormat`, the
+  // fold-before-validation ordering would route this very token through the screen
+  // and decode would start rejecting it -- so this test fails loudly either way,
+  // guarding the screen/runtime name agreement against silent drift.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "parse_date",
+                  params: { INPUT_FORMAT: "MM".repeat(24) },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  const params =
+    decoded.linkageTerms.linkageKeys[0].elements[0].transform?.[0].params;
+  // The bomb stayed under the non-canonical key, untouched; the canonical name the
+  // runtime reads is absent, so parse_date sees no format and uses its default.
+  expect(params).toEqual({ INPUT_FORMAT: "MM".repeat(24) });
+  expect(params).not.toHaveProperty("inputFormat");
+});
+
 test("decodeInvitation rejects a deeply-nested transform.params at decode (bounded fold)", async () => {
   // transform.params is z.unknown() content, so a one-key-per-level params decodes
   // structurally (parseBoundedJson admits up to 4096 levels). The camelCase fold is
