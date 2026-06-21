@@ -13,6 +13,7 @@ import type {
   InvitationToken,
   LinkageField,
   LinkageTerms,
+  Metadata,
   WebRTCEndpoint,
 } from "@psilink/core";
 
@@ -117,6 +118,15 @@ export interface GeneratedInvitation {
   /** The CSV column names, paired with {@link rawRows} -- the two inputs the
    * inviter's exchange feeds to `prepareForExchange`. Local-only. */
   columns: Array<string>;
+  /**
+   * The inviter's edited per-party column metadata, from the Advanced-options
+   * editor. Threaded into the inviter's own `prepareForExchange` (never encoded in
+   * the token), so its disclosure choices govern what the inviter sends and its
+   * column->type bindings match the run that the authored keys were derived from.
+   * Absent on the quick path, where metadata is inferred from the columns
+   * downstream as before. Local-only.
+   */
+  metadata?: Metadata;
 }
 
 /** Why {@link generateInvitation} refused to mint an invitation for the given
@@ -259,6 +269,14 @@ export async function generateInvitation(params: {
    * are derived from the file's columns as before.
    */
   linkageTerms?: LinkageTerms;
+  /**
+   * The inviter's edited column metadata from the Advanced-options editor, paired
+   * with `linkageTerms`. Returned on {@link GeneratedInvitation} and threaded into
+   * the inviter's own exchange (never embedded in the token); the fail-closed
+   * satisfiability re-check binds against it too, so the verdict matches the run.
+   * Omitted on the quick path, where metadata is inferred downstream.
+   */
+  metadata?: Metadata;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
@@ -316,6 +334,8 @@ export async function generateInvitation(params: {
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
       columns,
       linkageTerms,
+      undefined,
+      params.metadata,
     );
     if (satisfiableKeyCount === 0)
       throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
@@ -366,5 +386,6 @@ export async function generateInvitation(params: {
     linkageTerms,
     rawRows,
     columns,
+    metadata: params.metadata,
   };
 }

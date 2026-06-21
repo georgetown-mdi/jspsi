@@ -2,6 +2,7 @@ import * as z from "zod";
 
 import type { HandshakeRole, AssociationTable } from "./types.js";
 import type { Metadata } from "./config/metadata.js";
+import { isDisclosedToPartner } from "./config/metadata.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import { receiveParsed } from "./connection/messageConnection.js";
@@ -108,9 +109,7 @@ export function preparePayload(
   metadata: Metadata,
   associationTable: AssociationTable,
 ): PayloadWireMessage {
-  const payloadCols = metadata.filter(
-    (col) => col.isPayload && col.role !== "ignored",
-  );
+  const payloadCols = metadata.filter(isDisclosedToPartner);
   if (payloadCols.length === 0 || associationTable[0].length === 0) {
     return { hasData: false };
   }

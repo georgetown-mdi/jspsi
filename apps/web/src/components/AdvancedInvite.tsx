@@ -31,7 +31,7 @@ import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms, Metadata } from "@psilink/core";
 
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 import type { AlertContent } from "@components/FileAcquire";
@@ -172,6 +172,7 @@ export function AdvancedInvite() {
   const handleGenerate = async (
     terms: LinkageTerms,
     lifetimeSeconds: number,
+    metadata: Metadata,
   ) => {
     if (phase.status !== "editing") return;
     setError(undefined);
@@ -183,6 +184,7 @@ export function AdvancedInvite() {
         location: invitationLocation(),
         linkageTerms: terms,
         lifetimeSeconds,
+        metadata,
       });
       if (!mountedRef.current) return;
       // Reset before the transition: the editing UI unmounts here so the flag is
@@ -268,8 +270,8 @@ export function AdvancedInvite() {
           <LinkageTermsEditor
             seed={phase.seed}
             initialIdentity={phase.identity}
-            onGenerate={(terms, lifetimeSeconds) =>
-              void handleGenerate(terms, lifetimeSeconds)
+            onGenerate={(terms, lifetimeSeconds, metadata) =>
+              void handleGenerate(terms, lifetimeSeconds, metadata)
             }
             generating={generating}
           />
@@ -296,6 +298,7 @@ export function AdvancedInvite() {
             sharedSecret={phase.invitation.sharedSecret}
             expires={phase.invitation.expires}
             linkageTerms={phase.invitation.linkageTerms}
+            metadata={phase.invitation.metadata}
             share={{
               deepLink: phase.invitation.deepLink,
               encoded: phase.invitation.encoded,
