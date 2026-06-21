@@ -87,6 +87,9 @@ describe("LinkageTermsEditor", () => {
     // partner-only direction produces the corresponding one-sided output pair (the
     // editor never offers the forbidden "neither receives" combination).
     mount();
+    // Wait for the editor to finish its initial render/hydration before driving
+    // the Select, so the click does not race an unmounted control under load.
+    await expect.element(generateButton()).toBeEnabled();
     // Mantine's Select renders a labeled input (not role=textbox), so target it by
     // its label; clicking opens the dropdown, then pick the partner-only option.
     await userEvent.click(

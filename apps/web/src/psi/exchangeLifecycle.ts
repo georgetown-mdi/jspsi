@@ -101,27 +101,41 @@ export interface RecordDownloads {
   openingFileName: string;
 }
 
-/** The downloadable artifacts produced after a successful exchange: the results
- * file plus the self-attested audit record and its private opening data, each an
- * object URL the UI exposes as a download with a timestamped filename. */
-export interface ExchangeOutputs {
-  /** The matched results (CSV). Absent only when the result was withheld from
-   * this party (see {@link resultWithheld}); a receiver always has it. */
-  resultsUrl?: string;
-  /** True when this party's agreed terms give it no output (a one-sided exchange
-   * where it is the PSI sender / helper): the exchange withholds the result table
-   * (`ExchangeResult.associationTable` is undefined), so there is no results file
-   * to offer. The UI shows that this party contributed to the match but receives
-   * no result table, rather than an empty CSV that reads like a zero-match run.
-   * The audit record is still produced and offered (the helper's record does not
-   * bind the table). */
-  resultWithheld?: boolean;
+/** Fields common to both shapes of {@link ExchangeOutputs}. */
+interface ExchangeOutputsBase {
   /** The record and opening downloads as a single optional group, present or
    * absent together. Absent only when building the record failed (the exchange
-   * still succeeded and the results remain available; see
-   * {@link ExchangeResult.audit}). */
+   * still succeeded and the result, if any, remains available; see
+   * {@link ExchangeResult.audit}). Offered to a receiver and a helper alike -- the
+   * helper's record is produced even though it does not bind the result table. */
   record?: RecordDownloads;
 }
+
+/** A receiver's outputs: the matched results file (CSV), plus the optional record
+ * downloads. `resultWithheld` is necessarily absent/false here. */
+interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
+  /** The matched results (CSV), as an object URL the UI exposes as a download. */
+  resultsUrl: string;
+  resultWithheld?: false;
+}
+
+/** A non-receiving helper's outputs: no results file, only the optional record
+ * downloads. The exchange withheld the result table from this party (its agreed
+ * terms give it no output; `ExchangeResult.associationTable` is undefined), so the
+ * UI shows that it contributed to the match but receives no result table, rather
+ * than an empty CSV that reads like a zero-match run. `resultsUrl` is necessarily
+ * absent here. */
+interface WithheldExchangeOutputs extends ExchangeOutputsBase {
+  resultWithheld: true;
+  resultsUrl?: undefined;
+}
+
+/** The downloadable artifacts produced after a successful exchange: each is an
+ * object URL the UI exposes as a download with a timestamped filename. The matched
+ * result is present XOR withheld, so the two cases are a discriminated union rather
+ * than two independent optionals -- the invalid states ("both a result and
+ * withheld", "neither") are unrepresentable. */
+export type ExchangeOutputs = ReceivedExchangeOutputs | WithheldExchangeOutputs;
 
 /** Pure output-generation step: build the local results file plus the record
  * and opening artifacts from the exchange result and return their URLs. May

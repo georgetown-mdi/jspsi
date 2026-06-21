@@ -36,7 +36,10 @@ export interface StatusProps extends PaperProps {
    * where it is the PSI sender / helper): no results file is offered, and the card
    * states that it contributed to the match but receives no result table -- rather
    * than presenting an empty or missing download as a failure. The audit-record
-   * downloads, when present, are still offered. */
+   * downloads, when present, are still offered. The "no result table" message is
+   * shown only once the exchange completes (the component gates it on the `done`
+   * stage internally), so a caller may pass this as soon as it is known -- a
+   * pre-completion value does not surface a premature message. */
   resultWithheld?: boolean | undefined;
   /** Self-attested audit record (JSON); safe to retain or share. */
   recordFileURL?: string | undefined;
