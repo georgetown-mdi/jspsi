@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
-import { createElement } from "react";
+import { StrictMode, createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
@@ -57,6 +57,23 @@ vi.mock("@components/ExchangeView", () => ({
   },
 }));
 
+// Count loadCSVColumns calls (keeping every other core export real) so the
+// StrictMode warm-path test can assert the header read fires once, not once per
+// double-invoked effect.
+const core = vi.hoisted(() => ({ loadCSVColumnsCalls: 0 }));
+vi.mock("@psilink/core", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    loadCSVColumns: (file: unknown) => {
+      core.loadCSVColumnsCalls += 1;
+      return (actual.loadCSVColumns as (f: unknown) => Promise<Array<string>>)(
+        file,
+      );
+    },
+  };
+});
+
 const CSV = "ssn,first_name,last_name,dob\n123456789,Alice,Smith,1990-01-02\n";
 
 function csvFile(): File {
@@ -94,6 +111,21 @@ function mount() {
   );
 }
 
+// Mount the way the production entry does (client.tsx wraps the app in StrictMode),
+// so the double-invoked render/effect path is exercised, not just the bare one.
+function mountStrict() {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  root.render(
+    createElement(
+      StrictMode,
+      null,
+      createElement(MantineProvider, null, createElement(AdvancedInvite)),
+    ),
+  );
+}
+
 afterEach(() => {
   root?.unmount();
   container?.remove();
@@ -101,6 +133,7 @@ afterEach(() => {
   container = undefined;
   exchange.lastProps = undefined;
   gen.impl = undefined;
+  core.loadCSVColumnsCalls = 0;
   clearAdvancedHandoff();
 });
 
@@ -126,6 +159,24 @@ describe("AdvancedInvite", () => {
     await expect
       .element(page.getByRole("textbox", { name: "Your name" }))
       .toHaveValue("County Health Dept");
+  });
+
+  test("under StrictMode a warm hand-off seeds once and is consumed", async () => {
+    // The production entry mounts under StrictMode, which double-invokes the render
+    // initializer and the mount effect. The warm path must still open the editor
+    // seeded, read the headers only once, and consume the stash.
+    stashAdvancedHandoff({ file: csvFile(), name: "County Health Dept" });
+    mountStrict();
+    await expect
+      .element(page.getByText("Customize your invitation"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("textbox", { name: "Your name" }))
+      .toHaveValue("County Health Dept");
+    // The double-invoked effect is latched, so the header read fires once, and the
+    // stash is consumed (a return navigation would fall back to the picker).
+    expect(core.loadCSVColumnsCalls).toBe(1);
+    expect(peekAdvancedHandoff()).toBeUndefined();
   });
 
   test("consuming a warm hand-off clears it so a return navigation gets the picker", async () => {

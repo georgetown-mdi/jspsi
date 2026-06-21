@@ -10,8 +10,10 @@
  *
  * Client-only by construction: the sole writer is the compose screen's
  * "Advanced options" click (a browser event) and the sole reader is the
- * `/advanced` route (`ssr: false`), so this module-level value is never touched
- * during server rendering and cannot leak across requests. It is overwritten (or
+ * `/advanced` route (`ssr: false`), so this module-level value must never be
+ * touched during server rendering, where it would leak across requests --
+ * `assertClient` (below) enforces that rather than leaving it to this comment. It
+ * is overwritten (or
  * cleared) on every Advanced click, so it always reflects the latest one, and the
  * `/advanced` route clears it once it has read the file into its own state -- so a
  * back/forward navigation that returns to `/advanced` without a fresh click finds
@@ -30,21 +32,41 @@ export interface AdvancedHandoff {
 
 let pending: AdvancedHandoff | undefined;
 
+/** Fail loudly if the hand-off is touched outside the browser. The store is
+ * client-only by design -- the writer is a click handler and the reader sits
+ * behind the `/advanced` route's `ssr: false` -- and that is load-bearing for
+ * confidentiality: module-level state on the server is shared across every
+ * request, so a server-side read or write would leak one user's file selection to
+ * another. This turns a future regression (a render-time read on an SSR'd route,
+ * or dropping `ssr: false`) into an immediate error rather than a silent
+ * cross-request leak, per the repo convention of encoding a "does not happen at
+ * runtime" claim as a check rather than a comment. */
+function assertClient(): void {
+  if (typeof window === "undefined")
+    throw new Error(
+      "advancedHandoff is client-only: it must never be read or written during " +
+        "server rendering, where module state is shared across requests.",
+    );
+}
+
 /** Stash the inviter's compose-screen selection, to be read by the `/advanced`
  * route after navigation. */
 export function stashAdvancedHandoff(handoff: AdvancedHandoff): void {
+  assertClient();
   pending = handoff;
 }
 
 /** Clear any stashed selection -- used when the inviter opens Advanced without a
  * file selected, so a stale earlier selection is not resurrected. */
 export function clearAdvancedHandoff(): void {
+  assertClient();
   pending = undefined;
 }
 
-/** Read the stashed selection without clearing it. Pure, so it is safe to call
- * from a render-time state initializer (including React StrictMode's double
- * invoke); the Advanced click is the only mutator. */
+/** Read the stashed selection without clearing it. Pure (no mutation), so it is
+ * safe to call from a render-time state initializer (including React StrictMode's
+ * double invoke); the Advanced click is the only mutator. */
 export function peekAdvancedHandoff(): AdvancedHandoff | undefined {
+  assertClient();
   return pending;
 }

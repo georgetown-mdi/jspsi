@@ -152,10 +152,16 @@ export function AdvancedInvite() {
     setPhase({ status: "editing", seed, identity: name, file });
   };
 
-  // On mount, consume a warm hand-off if one is present. Runs once: the hand-off
-  // is read once via the lazy initializer above and does not change for this mount.
+  // On mount, consume a warm hand-off if one is present. Latched so it runs once
+  // even though React StrictMode invokes this effect twice (setup/cleanup/setup):
+  // a second enterEditor would re-read the same file's headers for nothing. The ref
+  // persists across the StrictMode remount (same instance), so the second setup
+  // no-ops.
+  const warmStartedRef = useRef(false);
   useEffect(() => {
-    if (handoff) void enterEditor(handoff.file, handoff.name);
+    if (warmStartedRef.current || !handoff) return;
+    warmStartedRef.current = true;
+    void enterEditor(handoff.file, handoff.name);
   }, []);
 
   const handleFileSubmit = () => {
