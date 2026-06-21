@@ -11,13 +11,13 @@ import type { FieldValue } from "../src/standardization";
 // runPipeline now runs those steps on the linear-time engine (re2js). Asserting
 // the engine reproduces every vector pins that in-dialect patterns are
 // byte-identical to the previous engine for the patterns and inputs these vectors
-// cover -- including every bundled default-template pattern. The one known
-// divergence from `new RegExp` is outside that domain and not exercised here: `.`
-// matches a code point under RE2 but a UTF-16 code unit under JS, so the two
-// engines differ on a non-BMP input (documented in PROTOCOL.md); all vector
-// inputs are BMP. apps/web/test/browser/transformRegex.test.ts asserts the
-// BROWSER build reproduces the same vectors, so the two build targets agree
-// byte-for-byte.
+// cover -- including every bundled default-template pattern. That corpus
+// deliberately excludes the inputs where re2js and `new RegExp` differ (e.g. `.`
+// over a non-BMP code point, `\s` being ASCII-only); those are exercised
+// separately by the divergent vector set below, whose expected values come from
+// re2js itself rather than `new RegExp`. apps/web/test/browser/transformRegex.test.ts
+// replays both files in the BROWSER build, so the two build targets are checked to
+// agree byte-for-byte on both the agree-domain and the divergent inputs.
 
 interface Vector {
   name: string;
@@ -29,6 +29,24 @@ interface Vector {
 const { vectors } = JSON.parse(
   readFileSync(
     new URL("./vectors/transform-regex-vectors.json", import.meta.url),
+    { encoding: "utf8" },
+  ),
+) as { vectors: Vector[] };
+
+// A second set covering the inputs where re2js DIVERGES from `new RegExp` (the
+// documented code-point / class differences: `.` over a code point, `\s`
+// ASCII-only, `.` excluding only `\n`). Their expected values come from re2js
+// itself (generate-transform-regex-divergent-vectors.mjs), not `new RegExp`, so
+// they pin re2js's own behavior on exactly the inputs where an ESM/CJS build or a
+// re2js version change would first diverge -- the cases the agree-domain corpus
+// above cannot reach. The browser suite replays the same file, so the two build
+// targets are checked to agree here too.
+const { vectors: divergentVectors } = JSON.parse(
+  readFileSync(
+    new URL(
+      "./vectors/transform-regex-divergent-vectors.json",
+      import.meta.url,
+    ),
     { encoding: "utf8" },
   ),
 ) as { vectors: Vector[] };
@@ -48,6 +66,21 @@ describe("transform-regex-vectors.json", () => {
 
   test.each(vectors)(
     "$name: the linear-time engine reproduces the JS-RegExp reference output",
+    (vector) => {
+      expect(serialize(runPipeline(vector.input, vector.steps))).toEqual(
+        vector.expected,
+      );
+    },
+  );
+});
+
+describe("transform-regex-divergent-vectors.json", () => {
+  test("the divergent vector file is non-empty", () => {
+    expect(divergentVectors.length).toBeGreaterThan(0);
+  });
+
+  test.each(divergentVectors)(
+    "$name: the linear-time engine reproduces the pinned re2js output",
     (vector) => {
       expect(serialize(runPipeline(vector.input, vector.steps))).toEqual(
         vector.expected,

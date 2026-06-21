@@ -19,6 +19,11 @@ import { runPipeline } from "@psilink/core";
 // Node suite's readFileSync + JSON.parse) rather than via the bundler's JSON
 // import, matching canonical.test.ts.
 import vectorsRaw from "../../../../packages/core/test/vectors/transform-regex-vectors.json?raw";
+// The divergent set: inputs where re2js differs from `new RegExp` (code-point `.`,
+// ASCII-only `\s`), with expected values pinned from re2js itself. Replaying it in
+// the browser is the cross-build check that matters most -- it exercises exactly
+// the inputs on which an ESM/CJS build or version divergence would first surface.
+import divergentVectorsRaw from "../../../../packages/core/test/vectors/transform-regex-divergent-vectors.json?raw";
 
 interface Vector {
   name: string;
@@ -28,6 +33,9 @@ interface Vector {
 }
 
 const vectors = (JSON.parse(vectorsRaw) as { vectors: Array<Vector> }).vectors;
+const divergentVectors = (
+  JSON.parse(divergentVectorsRaw) as { vectors: Array<Vector> }
+).vectors;
 
 function serialize(
   value: ReturnType<typeof runPipeline>,
@@ -40,6 +48,15 @@ function serialize(
 describe("transform-regex dialect in the browser", () => {
   test.each(vectors)(
     "$name: browser output matches the checked-in vector",
+    (vector) => {
+      expect(serialize(runPipeline(vector.input, vector.steps))).toEqual(
+        vector.expected,
+      );
+    },
+  );
+
+  test.each(divergentVectors)(
+    "$name: browser output matches the pinned re2js divergent vector",
     (vector) => {
       expect(serialize(runPipeline(vector.input, vector.steps))).toEqual(
         vector.expected,

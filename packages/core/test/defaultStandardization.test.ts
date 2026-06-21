@@ -441,6 +441,38 @@ describe("default email_address pipeline", () => {
   test("returns null for a string without a domain dot", () => {
     expect(run("user@nodot")).toBeNull();
   });
+
+  test("strips non-ASCII before the @-pattern filter (CHANNEL_SECURITY ordering claim)", () => {
+    // The RE2 dialect's `\s` is ASCII-only, narrower than JavaScript's. The
+    // email filter pattern uses `[^\s@]`, so CHANNEL_SECURITY.md relies on
+    // `remove_non_ascii` running before this filter_regex, so no non-ASCII code
+    // point ever reaches that class. Pin the ordering so the doc's runtime claim
+    // cannot rot silently (CONTRIBUTING: encode a runtime fact as a check).
+    const [t] = getDefaultStandardization(
+      [
+        {
+          name: "EMAIL",
+          type: "email_address",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
+      {
+        ...minimalTerms,
+        linkageFields: [{ name: "email_address", type: "email_address" }],
+      },
+    );
+    const steps = t.steps ?? [];
+    const asciiIdx = steps.findIndex((s) => s.function === "remove_non_ascii");
+    const emailFilterIdx = steps.findIndex(
+      (s) =>
+        s.function === "filter_regex" &&
+        typeof s.params?.pattern === "string" &&
+        s.params.pattern.includes("@"),
+    );
+    expect(asciiIdx).toBeGreaterThanOrEqual(0);
+    expect(emailFilterIdx).toBeGreaterThan(asciiIdx);
+  });
 });
 
 // --- inferDateFormat ---------------------------------------------------------

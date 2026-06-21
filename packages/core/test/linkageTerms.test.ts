@@ -11,6 +11,7 @@ import {
   MAX_PARAMS_ENTRIES,
   MAX_PAD_LEFT_LENGTH,
   MAX_DATE_FORMAT_LENGTH,
+  MAX_TRANSFORM_PATTERN_LENGTH,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -703,6 +704,81 @@ test("a non-string parse_date format still validates, so the runtime factory han
   // pre-empt it (behavior unchanged).
   expect(
     safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 })).success,
+  ).toBe(true);
+});
+
+// ─── transform regex pattern-length bound (partner-controlled per-row compile) ──
+// The four tier:"regex" functions compile their raw pattern / delimiter under the
+// linear-time engine, recompiled per row by applyElementTransform, so an unbounded
+// pattern compiles an ever-larger program every row. The engine bounds backtracking
+// by construction; MAX_TRANSFORM_PATTERN_LENGTH bounds the per-row COMPILE cost and
+// is the successor to the removed redos-detector screen's parse-cost ceiling -- the
+// only control bounding a single accepted (in-dialect, linear) pattern's compile
+// cost -- so pin both edges of the cap. (Dialect conformance is enforced separately.)
+
+const regexStepTerms = (fn: string, params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "RX",
+      elements: [{ field: "ssn", transform: [{ function: fn, params }] }],
+    },
+  ],
+});
+
+test("a replace_regex pattern at exactly the length maximum parses; one over is rejected", () => {
+  // A long literal is in-dialect (it compiles), so the only control that can reject
+  // it is the length cap -- which is what makes this a clean test of that cap.
+  expect(
+    safeParseLinkageTerms(
+      regexStepTerms("replace_regex", {
+        pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH),
+        replacement: "",
+      }),
+    ).success,
+  ).toBe(true);
+  const over = safeParseLinkageTerms(
+    regexStepTerms("replace_regex", {
+      pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
+      replacement: "",
+    }),
+  );
+  expect(over.success).toBe(false);
+  if (over.success) return;
+  expect(
+    over.error.issues.some((i) =>
+      /transform regex pattern must not exceed/.test(i.message),
+    ),
+  ).toBe(true);
+});
+
+test("the pattern-length cap also covers split_on's delimiter param", () => {
+  // split_on keys on `delimiter`, not `pattern`; REGEX_STEP_PATTERN_PARAM maps it,
+  // so the same cap must apply -- a regression if the map and the refine drift apart.
+  expect(
+    safeParseLinkageTerms(
+      regexStepTerms("split_on", {
+        delimiter: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH),
+      }),
+    ).success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(
+      regexStepTerms("split_on", {
+        delimiter: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
+      }),
+    ).success,
+  ).toBe(false);
+});
+
+test("a non-string transform regex pattern still validates, so coercion handles it", () => {
+  // Only a string pattern drives the per-row compile; the gate and factory both
+  // coerce a non-string to a short literal, so the length cap does not pre-empt it
+  // (behavior matches the pad_left / parse_date non-string cases above).
+  expect(
+    safeParseLinkageTerms(
+      regexStepTerms("replace_regex", { pattern: 123, replacement: "" }),
+    ).success,
   ).toBe(true);
 });
 
