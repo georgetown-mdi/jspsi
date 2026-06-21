@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { InvitationLinkageTermsSchema } from "./linkageTerms.js";
+import { LinkageTermsSchema, MAX_PARAMS_ENTRIES } from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
+import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
@@ -370,6 +371,60 @@ export interface InvitationToken {
    */
   connectionEndpoint?: ConnectionEndpoint;
 }
+
+// The params width bound the decode fold carries, mirrored from linkageTerms.ts's
+// PARAMS_WIDTH_BOUND (kept module-private there, so the bound and the schema below
+// both stay off @psilink/core's wholesale public export). Both derive the value
+// from the one shared MAX_PARAMS_ENTRIES constant, so they cannot drift: an
+// over-MAX_PARAMS_ENTRIES params record is left verbatim by the camelize pre-pass
+// and rejected by the schema's own count refine, not rewritten key by key.
+const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
+  ["params", MAX_PARAMS_ENTRIES],
+]);
+
+/**
+ * {@link LinkageTermsSchema} preceded by the shared {@link camelizeKeys} pre-pass
+ * (carrying the {@link MAX_PARAMS_ENTRIES} params width bound), so a decoded token's
+ * value is folded to the canonical camelCase key form BEFORE it is validated --
+ * exactly as `parseLinkageTerms` does for the config-load and post-handshake wire
+ * paths. This is the decode chokepoint for the casing asymmetry: the bare schema
+ * leaves `transform.params` keys verbatim (`z.unknown()` content with no key-form
+ * constraint), so without this a token's params would stay snake_case while the
+ * same agreement loaded from config or received off the wire is camelCase --
+ * desyncing the canonical comparison, the agreed-terms hash (`computeTermsHash`),
+ * and the standardization runtime (which reads `params.inputFormat`). Folding here
+ * makes "a decoded token's `transform.params` is camelCase" a structural invariant.
+ *
+ * The pre-pass runs BEFORE validation, and that ordering is load-bearing: the
+ * per-step ReDoS and length screens (`parse_date` / `pad_left` refines on
+ * `TransformStep`, and the catastrophic-backtracking screen on
+ * {@link LinkageTermsSchema}) read their inputs at the camelCase param names
+ * (`inputFormat`, `length`, `pattern`). A snake_case-params token validated first
+ * and folded after would evade those screens, then activate the unscreened value --
+ * a ReDoS/DoS bypass. Folding first runs every screen on the normalized form. The
+ * pre-pass is bounded: it throws NestingDepthExceededError / NodeCountExceededError
+ * (UsageError subclasses, fixed input-free messages) on a pathologically deep or
+ * wide `params`; the throw propagates from {@link InvitationTokenSchema}'s `.parse`
+ * for {@link decodeInvitation} / {@link encodeInvitation} to surface as a clean
+ * bounded rejection.
+ *
+ * The accepted-token SET widens only as the config path's already does: a
+ * snake_case STRUCTURAL key (e.g. `linkage_fields`) now folds and validates rather
+ * than being rejected, matching how a hand-authored config is read. Only the
+ * linkage-terms field is wrapped, so the token's other fields and the strict
+ * connection-endpoint credential allowlist are unaffected.
+ *
+ * Module-private by design: a `z.preprocess` that throws does not honor the
+ * non-throwing contract a `.safeParse()` implies (Zod does not trap a preprocessor
+ * throw), so keeping this schema off `@psilink/core`'s public export means no
+ * external caller can reach a schema whose `.safeParse()` would surprise them with
+ * a throw. Its only consumer is {@link InvitationTokenSchema}, which uses `.parse()`;
+ * code needing a non-throwing linkage-terms parse uses `safeParseLinkageTerms`.
+ */
+const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> = z.preprocess(
+  (raw) => camelizeKeys(raw, PARAMS_WIDTH_BOUND),
+  LinkageTermsSchema,
+);
 
 const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   version: z.literal("1"),

@@ -360,7 +360,7 @@ export const RECONCILE_UNSET = "(unset)";
  * camelize chokepoint applies on every linkage-terms parse path. Both sides now
  * reach this walk already depth-bounded: the invitation decode path normalizes
  * `transform.params` through the bounded `camelizeKeys` chokepoint (core's
- * `InvitationLinkageTermsSchema`), so a partner-controlled one-key-per-level
+ * invitation decode pre-pass), so a partner-controlled one-key-per-level
  * `params` is rejected at decode before it could reach here, and the
  * existing-config side is bounded the same way at load. This guard is the
  * reconcile walk's own backstop, kept because `nfcDeep` is an independent
@@ -395,7 +395,7 @@ function nfcDeep(value: unknown, depth = 0): unknown {
  * No key-casing fold is applied: `transform.params` keys (the only ones whose
  * form could vary) are normalized to camelCase upstream on every parse path that
  * produces these terms -- the existing config at load, and the invitation's
- * adopted terms at decode (core's InvitationLinkageTermsSchema) -- so both sides
+ * adopted terms at decode (core's invitation decode pre-pass) -- so both sides
  * reach this compare in the one camelCase form.
  */
 function nfcCanonical(value: unknown): string {
