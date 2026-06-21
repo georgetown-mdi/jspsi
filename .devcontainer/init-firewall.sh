@@ -137,7 +137,8 @@ for domain in \
   "console.anthropic.com" \
   "marketplace.visualstudio.com" \
   "vscode.blob.core.windows.net" \
-  "update.code.visualstudio.com"; do
+  "update.code.visualstudio.com" \
+  "registry.npmjs.org"; do
   add_domain "$domain" optional || true
 done
 
