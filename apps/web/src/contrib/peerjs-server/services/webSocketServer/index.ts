@@ -27,6 +27,20 @@ type CustomConfig = Pick<
 
 const WS_PATH = "peerjs";
 
+// Cap inbound WebSocket frames well below the `ws` 100 MiB default. This server
+// brokers only small control messages -- SDP OFFER/ANSWER, ICE CANDIDATE,
+// HEARTBEAT and the like, all KB-scale; the PSI payload itself flows peer-to-peer
+// over the WebRTC data channel and never crosses this socket -- so 256 KiB sits
+// far above any legitimate signaling frame yet hundreds of times below both the
+// default and the size a single object or array needs to drive JSON.parse into an
+// uncatchable, process-terminating V8 abort. `ws` rejects an over-cap frame in the
+// receiver (close 1009) before the message handler's JSON.parse can run, so a
+// single oversized frame from any unauthenticated client -- this server is
+// internet-facing in production, gated only by the well-known default key -- can
+// neither crash the broker (taking down rendezvous for every peer) nor pin its
+// memory. See docs/spec/CHANNEL_SECURITY.md.
+export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
+
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
   private readonly realm: IRealm;
@@ -63,11 +77,23 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const options: WebSocket.ServerOptions = {
       path: this.path,
       noServer: true,
+      maxPayload: MAX_SIGNALING_PAYLOAD_BYTES,
     };
 
     this.socketServer = config.createWebSocketServer
       ? config.createWebSocketServer(options)
       : new Server(options);
+
+    // `createWebSocketServer` is an injection seam: a factory is handed `options`
+    // (carrying the maxPayload bound above) but is free to ignore them, which
+    // would silently drop the frame-size cap and reopen the DoS. The default
+    // `new Server(options)` path always honors it; fail closed at startup rather
+    // than trust an injected factory that built a server without the cap.
+    if (this.socketServer.options.maxPayload !== MAX_SIGNALING_PAYLOAD_BYTES) {
+      throw new Error(
+        "PeerJS signaling WebSocket server is missing its required maxPayload bound",
+      );
+    }
 
     // This listener lives for the life of `server`, with no teardown -- by
     // design, not omission. The peer server is a per-process singleton
