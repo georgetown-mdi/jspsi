@@ -7,20 +7,20 @@ import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
 
-import Papa from "papaparse";
-
 import FileSelect from "@components/FileSelect";
+import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import type { Root } from "react-dom/client";
 
-// Capture the props FileSelect hands the Mantine dropzone. Core's loadCSVFile
-// parses in PapaParse worker mode, which silently drops every row past the first
-// `Papa.LocalChunkSize` chunk, so the only thing keeping an accepted file
-// single-chunk is the dropzone's byte cap -- AND only if FileSelect actually
-// passes a within-chunk value as `maxSize`. Asserting the cap constant in
-// isolation would miss a rewire to an unsafe literal, so capture and check the
-// value the dropzone really receives. The Accept/Reject/Idle statics are
-// referenced in FileSelect's JSX, so the stub must carry them.
+// Capture the props FileSelect hands the Mantine dropzone. The intake cap is the
+// documented browser-memory ceiling (MAX_CSV_FILE_BYTES); core's loadCSVFile now
+// accumulates across PapaParse chunks, so the cap is no longer tied to a single
+// chunk -- the no-silent-truncation invariant is pinned directly in
+// loadCSVFile.test.ts instead. What this guard still protects is the wiring:
+// FileSelect must pass the cap CONSTANT through as `maxSize`, not a stale literal
+// that could silently drift from the value the rest of the app documents. So
+// capture and check the value the dropzone really receives. The Accept/Reject/Idle
+// statics are referenced in FileSelect's JSX, so the stub must carry them.
 const dropzone = vi.hoisted(() => ({
   props: undefined as Record<string, unknown> | undefined,
 }));
@@ -38,6 +38,25 @@ vi.mock("@mantine/dropzone", () => {
 let container: HTMLElement | undefined;
 let root: Root | undefined;
 
+function renderFileSelect() {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  root.render(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(FileSelect, {
+        submitLabel: "Start",
+        handleSubmit: () => {},
+        files: [],
+        setFiles: () => {},
+        submitted: false,
+      }),
+    ),
+  );
+}
+
 afterEach(() => {
   root?.unmount();
   container?.remove();
@@ -47,33 +66,44 @@ afterEach(() => {
 });
 
 describe("FileSelect intake size cap", () => {
-  test("hands the dropzone a maxSize within one PapaParse chunk", async () => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    root.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(FileSelect, {
-          submitLabel: "Start",
-          handleSubmit: () => {},
-          files: [],
-          setFiles: () => {},
-          submitted: false,
-        }),
-      ),
-    );
+  test("hands the dropzone the documented cap constant as maxSize", async () => {
+    renderFileSelect();
 
     await vi.waitFor(() => expect(dropzone.props).toBeDefined());
 
-    // Worker-mode parsing past one chunk truncates silently, so the cap the
-    // dropzone enforces -- whatever FileSelect actually passes -- must not exceed
-    // PapaParse's local chunk size. A future rewire to a larger literal fails
-    // here instead of shipping silent data loss.
-    expect(typeof dropzone.props?.maxSize).toBe("number");
-    expect(dropzone.props?.maxSize as number).toBeLessThanOrEqual(
-      Papa.LocalChunkSize,
+    // Pin the wiring, not the arithmetic: FileSelect must pass MAX_CSV_FILE_BYTES
+    // through unchanged, so a future rewire to a hardcoded literal fails here
+    // instead of silently shipping a cap that disagrees with the documented one.
+    expect(dropzone.props?.maxSize).toBe(MAX_CSV_FILE_BYTES);
+  });
+
+  test("shows a clear over-size message when the dropzone rejects a too-large file", async () => {
+    renderFileSelect();
+
+    await vi.waitFor(() => expect(dropzone.props).toBeDefined());
+
+    const onReject = dropzone.props?.onReject as (
+      rejected: Array<{
+        file: File;
+        errors: Array<{ code: string; message: string }>;
+      }>,
+    ) => void;
+    onReject([
+      {
+        file: new File(["x"], "big.csv", { type: "text/csv" }),
+        errors: [
+          { code: "file-too-large", message: "file is larger than ..." },
+        ],
+      },
+    ]);
+
+    // The message names the cap (derived from MAX_CSV_FILE_BYTES) so the user is
+    // told why the file was refused rather than left with a flashed reject icon.
+    const maxMb = MAX_CSV_FILE_BYTES / 1024 ** 2;
+    await vi.waitFor(() =>
+      expect(container?.textContent).toContain(
+        `larger than the ${maxMb} MB maximum`,
+      ),
     );
   });
 });
