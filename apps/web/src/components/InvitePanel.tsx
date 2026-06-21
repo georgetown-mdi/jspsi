@@ -281,12 +281,15 @@ export function InvitePanel() {
           {/* Awareness surface: the columns the quick path will send to the
               partner, shown before the operator generates. Wrapped in a standing
               polite live region so its asynchronous appearance after a file is
-              chosen is announced. Nothing is shown when the quick path would send
+              chosen is announced; aria-atomic so the heading, sentence, and
+              change-link read as one unit rather than a fragment when they insert
+              in a single tick (matching the verdict/summary regions in PrepareData
+              and MetadataGrid). Nothing is shown when the quick path would send
               nothing (no disclosure to surface). The column set derives from the
               same predicate the wire uses, so it cannot over- or under-state what
               leaves the machine; column names are the operator's own but sanitized
               for display, matching the other file-derived text on this screen. */}
-          <div role="status" aria-live="polite">
+          <div role="status" aria-live="polite" aria-atomic="true">
             {disclosedColumns && disclosedColumns.length > 0 && (
               <Paper withBorder p="md">
                 <Text size="sm" fw={600} mb={4}>
