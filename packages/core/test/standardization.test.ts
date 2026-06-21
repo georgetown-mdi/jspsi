@@ -892,6 +892,13 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
   // so the invariant is a check instead. compileLinearRegex is the entry point
   // every regex/parse_date factory calls exactly once at closure-build time, so
   // its call count over a build IS the element-transform compile count.
+  //
+  // The spy reaches standardization.ts's static `compileLinearRegex` import
+  // through Vitest's module transform; under a future native-ESM pool (e.g.
+  // `vmForks`) the namespace spy could stop intercepting that binding. The
+  // failure mode is safe either way: the first row always compiles exactly once,
+  // so a working spy sees >= 1 and a broken one sees 0 -- a 0 count fails these
+  // assertions loudly, it never lets a per-row regression pass as green.
   test("a regex element transform compiles once across many rows, not per row", () => {
     const key = {
       name: "SSN4",
