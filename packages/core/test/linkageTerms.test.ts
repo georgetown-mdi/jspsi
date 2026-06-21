@@ -423,6 +423,80 @@ test("a swap target matching no element in its key is rejected", () => {
   expect(result.error.issues[0].message).toMatch(/swap target/);
 });
 
+// ─── Catastrophic-backtracking (ReDoS) transform regexes ─────────────────────
+// Element-transform regex patterns are partner-controlled and run per row over
+// the full dataset; a crafted catastrophic pattern hangs the single JS thread.
+// The check lives in LinkageTermsSchema so every parse path inherits it. (The
+// per-pattern analysis and the four covered functions are unit-tested in
+// transformRegexSafety.test.ts; these assert the schema-level wiring.)
+
+test("a catastrophic-backtracking regex in an element transform is rejected at validation", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [
+              { function: "filter_regex", params: { pattern: "(a+)+$" } },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/catastrophic backtracking/);
+});
+
+test("the bundled email-filter pattern in an element transform validates (allowlisted)", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [
+              {
+                function: "filter_regex",
+                params: { pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
+test("an element-transform regex that cannot compile still validates, so the runtime SyntaxError boundary handles it", () => {
+  // An invalid pattern is not pre-empted by this check: the standardization
+  // factory's own new RegExp(...) throws at runtime and the exchange aborts
+  // through the existing sanitized error boundary -- unchanged by this hardening.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [{ function: "filter_regex", params: { pattern: "(" } }],
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
 test("a swap resolving via element field names validates", () => {
   const result = safeParseLinkageTerms({
     ...base,
