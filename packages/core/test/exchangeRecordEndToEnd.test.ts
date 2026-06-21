@@ -300,3 +300,26 @@ test("single-output: result size omitted, but each party records its own exposur
     (await verifyRecordCommitments(resp.record, resp.opening)).allValid,
   ).toBe(true);
 });
+
+test("single-output (responder receives): the gate withholds from the initiator", async () => {
+  // The mirror of the test above, exercising the OTHER one-sided direction live:
+  // the responder is the sole receiver and the initiator is the sender/helper. This
+  // covers the partner-only direction at the gate, which the test above (initiator
+  // receives) does not -- so the withholding is asserted for both directions, not
+  // just by predicate argument.
+  const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
+  const senderOut: Output = { expectsOutput: false, shareWithPartner: true };
+  const [initiator, responder] = await runBoth(senderOut, receiverOut);
+
+  expect(initiator.resolvedRole).toBe("sender");
+  expect(responder.resolvedRole).toBe("receiver");
+
+  // The entitled party (responder) gets the table; the helper (initiator) gets
+  // undefined -- withheld at the return.
+  expect(responder.associationTable).toBeDefined();
+  expect(initiator.associationTable).toBeUndefined();
+
+  // And the record gate matches: only the entitled responder commits the table.
+  expect(built(responder).record.commitments.associationTable).toBeDefined();
+  expect(built(initiator).record.commitments.associationTable).toBeUndefined();
+});

@@ -2386,3 +2386,45 @@ test("a verbatim copy of one-sided inviter output would FAIL the mirror (why mir
     validateCompatibility(inviterTerms, verbatim).errors.length,
   ).toBeGreaterThan(0);
 });
+
+test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (deduplicate)", () => {
+  // An inviter that is the sole receiver may validly carry deduplicate: true
+  // (deduplicate requires expectsOutput, which the inviter has). The acceptor
+  // mirrors to expectsOutput: false, where deduplicate: true is forbidden -- so the
+  // derivation must throw rather than produce an invalid, never-re-validated config.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    deduplicate: true,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).toThrow(/cannot be accepted unchanged/);
+});
+
+test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (payload.receive)", () => {
+  // Same shape via payload: an inviter sole-receiver with a non-empty
+  // payload.receive mirrors to expectsOutput: false with a non-empty receive list,
+  // which the schema forbids (a non-receiving party gets no payload columns).
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+    payload: { receive: [{ name: "dob" }] },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).toThrow(/cannot be accepted unchanged/);
+});
+
+test("deriveAcceptedLinkageTerms accepts a coherent deduplicate config (no false positive)", () => {
+  // deduplicate: true with both-receive mirrors to an acceptor that also receives,
+  // so deduplicate stays valid -- the fail-closed gate must NOT reject it.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    deduplicate: true,
+    output: { expectsOutput: true, shareWithPartner: true },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).not.toThrow();
+});

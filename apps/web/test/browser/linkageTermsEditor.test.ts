@@ -90,10 +90,11 @@ describe("LinkageTermsEditor", () => {
     // Wait for the editor to finish its initial render/hydration before driving
     // the Select, so the click does not race an unmounted control under load.
     await expect.element(generateButton()).toBeEnabled();
-    // Mantine's Select renders a labeled input (not role=textbox), so target it by
-    // its label; clicking opens the dropdown, then pick the partner-only option.
+    // Mantine's Select input has role=combobox; target it by role+name rather than
+    // by label, since the open options listbox shares the same aria label (a
+    // getByLabelText would match both). Clicking opens the dropdown.
     await userEvent.click(
-      page.getByLabelText("Who receives the matched results"),
+      page.getByRole("combobox", { name: "Who receives the matched results" }),
     );
     // Target the dropdown option by role, not text: the Select's description also
     // contains the substring "only your partner".
@@ -104,6 +105,28 @@ describe("LinkageTermsEditor", () => {
     const [terms] = onGenerate.mock.calls[0];
     expect(terms.output).toEqual({
       expectsOutput: false,
+      shareWithPartner: true,
+    });
+  });
+
+  test("Reset to recommended restores the output direction to both-receive", async () => {
+    // The output direction is the headline new control, so pin that reset returns
+    // it to the symmetric default (asserted via Generate, not the Select display).
+    mount();
+    await expect.element(generateButton()).toBeEnabled();
+    await userEvent.click(
+      page.getByRole("combobox", { name: "Who receives the matched results" }),
+    );
+    await userEvent.click(
+      page.getByRole("option", { name: "Only your partner" }),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Reset to recommended" }),
+    );
+    await userEvent.click(generateButton());
+    const [terms] = onGenerate.mock.calls[0];
+    expect(terms.output).toEqual({
+      expectsOutput: true,
       shareWithPartner: true,
     });
   });
