@@ -74,7 +74,7 @@ function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
             size={16}
             aria-hidden
             style={{
-              transform: open ? "rotate(90deg)" : undefined,
+              transform: open ? "rotate(90deg)" : "rotate(0deg)",
               transition: "transform 150ms ease",
             }}
           />
@@ -374,7 +374,7 @@ export function InvitationTerms({
             size={16}
             aria-hidden
             style={{
-              transform: detailsOpen ? "rotate(90deg)" : undefined,
+              transform: detailsOpen ? "rotate(90deg)" : "rotate(0deg)",
               transition: "transform 150ms ease",
             }}
           />

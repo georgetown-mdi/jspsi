@@ -414,9 +414,12 @@ function describeExecutedValue(value: unknown): string {
  * or other reformatted field is canonicalized by a standardization the token does
  * not carry, so "the first 6 characters" there would be unverifiable. The params
  * are partner-controlled and typed `unknown`, so they are narrowed to integers
- * before use; a negative start (counts from the end -- no faithful "first N") or a
- * non-integer falls back to undefined, and the caller then leads with the glossary
- * description. Core's `substring` is SQL SUBSTR: 1-indexed positive `start`.
+ * before use; only a positive integer start yields a literal. A non-positive start
+ * has no faithful "first N" -- a negative counts from the end, and 0 is a no-op
+ * (core's schema rejects it and the factory maps it to an always-null fn) -- and a
+ * non-integer is not a usable slice, so all fall back to undefined and the caller
+ * then leads with the glossary description. Core's `substring` is SQL SUBSTR:
+ * 1-indexed positive `start`.
  */
 function substringEffect(
   step: TransformStep,
@@ -504,6 +507,13 @@ function summarizeTransform(
  * matching rather than broaden it, so they carry no marker. "fuzzy" is reserved
  * for the genuine fuzzy-comparison expansion, distinct from `substring`'s
  * "partial".
+ *
+ * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
+ * header is deliberately terse, so an element carrying more than one loosening
+ * rule -- a `substring` AND a fuzzy comparison, say -- shows just the first while
+ * its complete rule set sits one expand down in {@link MatchKeyDetails}. The
+ * element stays flagged as loose either way, the property the always-visible
+ * signal must preserve.
  */
 function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   const functions = new Set((element.transform ?? []).map((s) => s.function));
