@@ -1,6 +1,7 @@
 import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
   encodeInvitation,
   generateSharedSecret,
@@ -254,6 +255,12 @@ export function deepLinkFor(origin: string, encoded: string): string {
  *
  * @throws {InvitationFileError} when the file is unreadable or unlinkable (before
  *                               any secret is minted).
+ * @throws {UsageError} (from core) when authored terms declare a `payload.send`
+ *                      column the edited metadata does not transmit, so the token
+ *                      and the partner's consent screen cannot over-declare. A
+ *                      defense-in-depth backstop: the Advanced editor authors no
+ *                      payload block today, so this cannot fire until payload
+ *                      authoring lands (item 202741998).
  */
 export async function generateInvitation(params: {
   inviterName: string;
@@ -361,6 +368,15 @@ export async function generateInvitation(params: {
     );
     if (satisfiableKeyCount === 0)
       throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+    // Reject an over-declaring payload.send before the token is minted, so the
+    // partner's consent screen never carries a column this party's metadata gates
+    // off. The Advanced editor authors no payload block today (a no-op), but this
+    // is the mint-boundary guard once payload authoring lands (item 202741998);
+    // the exchange-time check in prepareForExchange runs too late for the consent
+    // surface. The quick path (else) builds terms from columns and authors no
+    // payload, so needs no check.
+    if (params.metadata !== undefined)
+      assertPayloadSendDisclosed(linkageTerms.payload, params.metadata);
   } else {
     const metadata = inferMetadata(columns);
     linkageTerms = getDefaultLinkageTerms(inviterName, metadata);

@@ -5,6 +5,7 @@ import { userInfo } from "node:os";
 import {
   getLogger,
   encodeInvitation,
+  assertPayloadSendDisclosed,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   UsageError,
@@ -386,6 +387,18 @@ export async function validateInvite(params: {
           "the invitation's linkage terms from it.",
       );
     }
+
+    // Reject an over-declaring payload.send before the token is minted, so the
+    // partner's consent screen and the encoded token never carry a dictionary
+    // that names a column this party's metadata gates off; the exchange-time
+    // check in prepareForExchange protects the record but runs too late for the
+    // consent surface. Only this config-as-source path can carry a hand-authored
+    // payload.send -- the online and infer paths build terms from columns and
+    // author none. Gated on an explicit metadata block: without one, metadata is
+    // inferred from the exchange's input columns (unknown here), so that case is
+    // left to the exchange-time check.
+    if (configSource.metadata !== undefined)
+      assertPayloadSendDisclosed(configTerms.payload, configSource.metadata);
 
     const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();

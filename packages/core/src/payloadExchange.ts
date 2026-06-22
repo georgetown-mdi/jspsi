@@ -160,11 +160,20 @@ export function preparePayload(
  * not receiving) and is already cross-checked against the partner's advertised
  * `send` in `validateCompatibility`.
  *
- * Enforced from `prepareForExchange`, the one step with both the parsed terms
- * and the metadata in scope, so the CLI and web paths get identical behavior.
- * Offending names are partner-controlled on the accept side (the adopted
- * inviter terms), so the message routes each through {@link sanitizeForDisplay},
- * matching `validateCompatibility`'s payload-mismatch messages.
+ * Enforced at two points, both of which have the local metadata beside the
+ * terms. `prepareForExchange` covers every exchange -- including the paths that
+ * never mint an invitation (zero-setup, the acceptor, a hand-authored exchange
+ * config) -- and protects the exchange record, which is built downstream of it.
+ * But the over-declared dictionary also reaches the partner's consent screen via
+ * the invitation token, which is encoded BEFORE `prepareForExchange` runs, so the
+ * check also runs at the invitation-mint boundary (the CLI `validateInvite`
+ * config path and the web `generateInvitation` authoring path) to keep the
+ * consent surface and the token honest. The two points are disjoint entry paths,
+ * not redundant: neither alone covers both the consent screen and the
+ * non-invite exchanges. Offending names are partner-controlled on the accept
+ * side (the adopted inviter terms), so the message routes each through
+ * {@link sanitizeForDisplay}, matching `validateCompatibility`'s payload-mismatch
+ * messages.
  *
  * @throws {UsageError} when `payload.send` names any column metadata does not
  *   disclose. A {@link UsageError} so the CLI classifies it as a configuration
