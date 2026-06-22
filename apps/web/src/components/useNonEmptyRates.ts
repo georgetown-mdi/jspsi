@@ -50,6 +50,10 @@ export function useNonEmptyRates(
   useEffect(() => {
     const controller = new NonEmptyRateController(rawRows, spawnWorker);
     controllerRef.current = controller;
+    // Drop any prior file's coverage immediately: until the new sweep settles the
+    // host shows the pending state, never the previous file's rate (or alarm) for a
+    // same-named field.
+    setRates(null);
     return () => {
       controller.dispose();
       controllerRef.current = null;
@@ -70,9 +74,13 @@ export function useNonEmptyRates(
           setPending(false);
         })
         .catch(() => {
-          // Superseded by dispose, or a worker error: keep the prior rates but
-          // clear pending so the UI never hangs mid-check.
-          if (!cancelled) setPending(false);
+          // A worker error (dispose never settles -- see the controller) leaves the
+          // coverage unknown: clear the prior rates rather than leave a stale rate or
+          // alarm on screen, and clear pending so the UI never hangs mid-check.
+          if (!cancelled) {
+            setRates(null);
+            setPending(false);
+          }
         });
     }, AGGREGATE_DEBOUNCE_MS);
     return () => {

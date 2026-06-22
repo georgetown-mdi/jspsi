@@ -219,14 +219,17 @@ export function PrepareData({
   // order so the read is stable.
   const silentEmptyLabels = useMemo(() => {
     if (nonEmptyRates === null) return [];
-    const labels: Array<string> = [];
+    // De-duplicated by label (a Set preserves standardization order): two fields of
+    // the same semantic type that both collapse announce the label once, matching
+    // how the visible unsatisfied-types fix UI de-dupes by type.
+    const labels = new Set<string>();
     for (const transformation of standardization) {
       const rate = nonEmptyRates.get(transformation.output);
       const field = fieldByName.get(transformation.output);
       if (rate !== undefined && field !== undefined && isSilentEmpty(rate))
-        labels.push(SEMANTIC_TYPE_LABELS[field.type]);
+        labels.add(SEMANTIC_TYPE_LABELS[field.type]);
     }
-    return labels;
+    return [...labels];
   }, [nonEmptyRates, standardization, fieldByName]);
 
   // One polite live region for the whole editor announces a collapse (debounced,

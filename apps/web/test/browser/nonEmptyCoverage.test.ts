@@ -111,6 +111,18 @@ describe("FieldCoverage: the visible value-level defense", () => {
     );
   });
 
+  test("a near-full rate shows >99%, never a 100% while a row is dropped", async () => {
+    render(
+      createElement(FieldCoverage, {
+        rate: rate({ total: 10000, produced: 9999, rate: 9999 / 10000 }),
+        pending: false,
+      }),
+    );
+    await expect
+      .element(page.getByTestId("coverage-rate"))
+      .toHaveTextContent("9,999 of 10,000 rows produce a value (>99%)");
+  });
+
   test("an unavailable rate (steps mid-edit) renders nothing", async () => {
     // Render a sentinel beside it so the absence assertion runs after the commit,
     // not before it (when everything would be trivially absent).

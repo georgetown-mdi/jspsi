@@ -7,7 +7,7 @@ import type {
 
 /**
  * The off-main-thread entry for the silent-empty aggregate. Seeded once with the
- * full row set, it recomputes {@link computeNonEmptyRates} for each standardization
+ * full row set, it recomputes {@link computeFieldCoverage} for each standardization
  * the controller posts and returns the rates tagged with the request token. Bundled
  * by Vite from {@link ./nonEmptyAggregateWorkerClient}; it pulls in only the pure
  * compute and core's pipeline runner, nothing DOM.

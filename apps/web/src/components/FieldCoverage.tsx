@@ -5,12 +5,18 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
-/** Format the share of rows that produce a key. A non-zero rate that rounds to 0% is
- * shown as "<1%" rather than "0%", so the readout never reads like the silent-empty
- * alarm (a true 0%) when a few rows do produce a value. */
+/** Format the share of rows that produce a key. The ends are guarded so the percent
+ * never overstates the extremes: a non-zero rate that rounds to 0% shows "<1%"
+ * (never a "0%" that reads like the silent-empty alarm), and a sub-100% rate that
+ * rounds to 100% shows ">99%" (never a "100%" while a row is in fact dropped). */
 function formatRate(coverage: FieldValueCoverage): string {
   const percent = coverage.rate * 100;
-  const shown = percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
+  const shown =
+    percent > 0 && percent < 1
+      ? "<1%"
+      : percent > 99 && percent < 100
+        ? ">99%"
+        : `${Math.round(percent)}%`;
   return (
     `${coverage.produced.toLocaleString()} of ${coverage.total.toLocaleString()} ` +
     `rows produce a value (${shown})`
