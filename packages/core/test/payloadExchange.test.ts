@@ -574,6 +574,29 @@ test("exchangePayloads: a partner column name at the length bound is accepted", 
   expect(received.columns).toEqual([name]);
 });
 
+test("exchangePayloads: an empty partner column name is accepted at the wire", async () => {
+  // The wire predicate bounds only the name LENGTH (the upper bound), not the
+  // `.min(1)` floor the operator's own terms carry. An empty partner name is
+  // deliberately left to the record schema, which rejects it at record build --
+  // non-fatally, so the record is skipped while the exchange and its result are
+  // unaffected (exchangeRecord.test.ts pins that record-layer rejection). Pinning
+  // acceptance here stops a future `.min(1)` on the wire from silently escalating
+  // an empty name to a full exchange failure.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [""],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const received = await initiatorPromise;
+  expect(received.columns).toEqual([""]);
+});
+
 // --- buildOutputTable --------------------------------------------------------
 
 test("buildOutputTable: our header uses identifier column name", () => {

@@ -71,12 +71,19 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       // unnecessary for `columns`; both predicates mirror their replaced element
       // schema exactly -- typeof-string for `z.string()`, Number.isSafeInteger
       // and `>= 0` for `z.number().int().nonnegative()`. `columns` additionally
-      // bounds each NAME's LENGTH to MAX_NAME_LENGTH: a received column name flows
-      // verbatim into this party's local exchange-record file (via
-      // governance.payloadReceived), so it is bounded on the wire exactly as the
-      // operator's own `terms.payload.receive` names are. This is a per-ELEMENT
-      // length check folded into the same single `every` pass, not a count
-      // `.max()`, so it caps accumulation at one issue regardless of element count.
+      // bounds each NAME's LENGTH to the same MAX_NAME_LENGTH ceiling the
+      // operator's own `terms.payload.receive` names carry: a received column name
+      // flows verbatim into this party's local exchange-record file (via
+      // governance.payloadReceived), and it was bounded that way before it began
+      // deriving from the partner's wire message rather than from local terms.
+      // Only that UPPER bound is enforced here, not the `.min(1)` floor those
+      // names also carry: an empty name is deliberately left to
+      // RecordPayloadColumnSchema, which rejects it at record build via the
+      // non-fatal guard (skipping the record, not failing the exchange), so the
+      // wire must not escalate an empty partner name to an exchange failure. This
+      // is a per-ELEMENT length check folded into the same single `every` pass,
+      // not a count `.max()`, so it caps accumulation at one issue regardless of
+      // element count.
       columns: singleIssueArray<string>(
         (value) => typeof value === "string" && value.length <= MAX_NAME_LENGTH,
         `each column name must be a string of at most ${MAX_NAME_LENGTH} characters`,
