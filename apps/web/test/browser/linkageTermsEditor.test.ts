@@ -96,11 +96,12 @@ describe("LinkageTermsEditor", () => {
     await userEvent.click(
       page.getByRole("combobox", { name: "Who receives the matched results" }),
     );
-    // Target the dropdown option by role, not text: the Select's description also
-    // contains the substring "only your partner".
-    await userEvent.click(
-      page.getByRole("option", { name: "Only your partner" }),
-    );
+    // Select "Only your partner" (the third option) by keyboard, not by clicking
+    // the option: the choice is then independent of the option's pixel position,
+    // which the editor's tall edit rail can push out of the fixed test viewport.
+    // The open dropdown highlights the current value ("both"), so two ArrowDowns
+    // reach "Only your partner".
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     await userEvent.click(generateButton());
     const [terms] = onGenerate.mock.calls[0];
     expect(terms.output).toEqual({
@@ -117,9 +118,9 @@ describe("LinkageTermsEditor", () => {
     await userEvent.click(
       page.getByRole("combobox", { name: "Who receives the matched results" }),
     );
-    await userEvent.click(
-      page.getByRole("option", { name: "Only your partner" }),
-    );
+    // Keyboard-select "Only your partner" (see the partner-only test above for
+    // why the option is not clicked by position).
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     await userEvent.click(
       page.getByRole("button", { name: "Reset to recommended" }),
     );
@@ -182,5 +183,34 @@ describe("LinkageTermsEditor", () => {
     await userEvent.click(generateButton());
     const [terms] = onGenerate.mock.calls[0];
     expect(terms.legalAgreement?.reference).toBe("MOU-2025-0042");
+  });
+
+  test("Expert authoring reveals key editing with psi-c and deduplicate gated off", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // The gated settings are surfaced as controls but disabled until the run
+    // applies them, so a count-only (psi-c) or duplicate-matching setting cannot
+    // be authored ahead of engine support. This fails loudly if a control is ever
+    // wired active prematurely.
+    await expect
+      .element(page.getByRole("combobox", { name: "Matching method" }))
+      .toBeDisabled();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: "Allow a record to match more than one of your partner's",
+        }),
+      )
+      .toBeDisabled();
+    // The element-by-element authoring surface and the import/export escape hatch
+    // are present.
+    await expect
+      .element(page.getByRole("button", { name: "Add a key" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Download JSON" }))
+      .toBeInTheDocument();
   });
 });
