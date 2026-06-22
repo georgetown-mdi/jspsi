@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  canonicalString,
   deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
   inferMetadata,
+  prepareForExchange,
   safeParseLinkageTerms,
   validateCompatibility,
 } from "@psilink/core";
@@ -25,6 +27,8 @@ import type {
   AdvancedInviteDraft,
   OutputDirection,
 } from "../../src/psi/advancedInvite.js";
+
+import type { Metadata } from "@psilink/core";
 
 /** The names of the draft keys that reference an `ssn` field. */
 function ssnKeyNames(draft: AdvancedInviteDraft): Array<string> {
@@ -448,5 +452,130 @@ describe("the 3-way output direction control", () => {
       const acceptor = deriveAcceptedLinkageTerms(terms, "Accepting Org");
       expect(validateCompatibility(terms, acceptor).errors).toEqual([]);
     }
+  });
+});
+
+describe("inviter standardization: per-field column binding and multi-field", () => {
+  // Two columns of one semantic type (a maiden and a current name) and a date, so
+  // the inviter can bind each name column to its own field. NAME_STEPS uppercases,
+  // so a row whose two name columns differ yields two distinct cleaned values.
+  const NAME_STEPS = [{ function: "to_upper_case" }];
+  const metadata: Metadata = [
+    {
+      name: "maiden_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "current_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "dob_col",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const columns = ["maiden_col", "current_col", "dob_col"];
+  const rawRows = [{ maiden_col: "Smith", current_col: "Jones", dob_col: "X" }];
+
+  // A draft binding the two first_name columns to two distinct fields, each
+  // referenced by its own key -- what the workbench's "add another field" + the
+  // expert key editor produce.
+  function multiFieldDraft(): AdvancedInviteDraft {
+    return {
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata,
+      standardization: [
+        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
+        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "maiden", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "current", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+      ],
+    };
+  }
+
+  test("buildAdvancedTerms declares two distinct fields of the one type", () => {
+    const terms = buildAdvancedTerms(multiFieldDraft());
+    const firstNameFields = terms.linkageFields.filter(
+      (field) => field.type === "first_name",
+    );
+    expect(firstNameFields.map((field) => field.name)).toEqual([
+      "first_name",
+      "first_name_2",
+    ]);
+    // The built terms are valid and a mirroring acceptor agrees, so the multi-field
+    // invitation is well-formed cross-party.
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    const acceptor = deriveAcceptedLinkageTerms(terms, "Acceptor");
+    expect(validateCompatibility(terms, acceptor).errors).toEqual([]);
+  });
+
+  test("each same-typed field round-trips through prepareForExchange to its own column's distinct value", () => {
+    const draft = multiFieldDraft();
+    const terms = buildAdvancedTerms(draft);
+    // The exact { linkageTerms, metadata, standardization } the editor hands the
+    // inviter's exchange, run through the exchange's own preparation: each field
+    // reads its bound column, so the differing name columns produce distinct values
+    // rather than the collapsed identical pair a one-field-per-type default gives.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata, standardization: draft.standardization },
+      "Inviter",
+      rawRows,
+      columns,
+    );
+    expect(prepared.dataset.getField("first_name")?.get(0)).toEqual(["SMITH"]);
+    expect(prepared.dataset.getField("first_name_2")?.get(0)).toEqual([
+      "JONES",
+    ]);
+  });
+
+  test("a per-party cleaning edit does not move the cross-party terms (local-only invariant)", () => {
+    // Editing a field's cleaning steps or input-column binding changes only this
+    // party's local standardization -- the cross-party LinkageTerms carry the field
+    // name/type/constraints, never the cleaning -- so the agreement (and its hash)
+    // is byte-identical. This is the inviter mirror of the acceptor's cross-party
+    // hash-invariance test.
+    const { draft } = seedAdvancedInvite("Inviter", ALL_COLUMNS);
+    const baseline = canonicalString(buildAdvancedTerms(draft));
+    const edited = canonicalString(
+      buildAdvancedTerms({
+        ...draft,
+        standardization: draft.standardization.map((transformation) =>
+          transformation.output === "first_name"
+            ? { ...transformation, steps: [{ function: "to_lower_case" }] }
+            : transformation,
+        ),
+      }),
+    );
+    expect(edited).toEqual(baseline);
+  });
+
+  test("the seeded default standardization yields the same terms as no standardization (guided path unchanged)", () => {
+    // authoredLinkageFields over getDefaultStandardization reproduces the default
+    // per-type field set, so seeding the draft with the recommended cleaning does
+    // not move the terms the guided path would build.
+    const { draft } = seedAdvancedInvite("Inviter", ALL_COLUMNS);
+    const seeded = canonicalString(buildAdvancedTerms(draft));
+    const empty = canonicalString(
+      buildAdvancedTerms({ ...draft, standardization: [] }),
+    );
+    expect(seeded).toEqual(empty);
   });
 });
