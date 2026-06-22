@@ -866,6 +866,89 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     ).toBe(false);
   });
 
+  // The consent restriction's negative arm: an imported document (which is
+  // attacker-influenceable -- any schema-valid document is accepted) can declare an
+  // extra same-typed field, but the reconstruction binds it only to a column the
+  // operator marked for matching (`role: linkage`), never one they roled `identifier`
+  // (row-identifier) or `payload` (sent-to-partner). The positive arm -- a
+  // `role: linkage` second column still binds and generates unchanged -- is the
+  // round-trip test above (current_col is `linkage` there). "Member 007" is the value
+  // the confirmed first_name_2 -> identifier column case hashed into a key; these
+  // assert it is no longer pulled in.
+  test.each(["identifier", "payload"] as const)(
+    "never reconstructs an extra binding to a role: %s column; its value is not pulled into a key",
+    (blockedRole) => {
+      // The second first_name-typed column is present and non-ignored but roled
+      // identifier/payload, so it must not back the import-declared second field.
+      const blockedMetadata: Metadata = [
+        {
+          name: "maiden_col",
+          type: "first_name",
+          role: "linkage",
+          isPayload: false,
+        },
+        {
+          name: "current_col",
+          type: "first_name",
+          role: blockedRole,
+          isPayload: blockedRole === "payload",
+        },
+        {
+          name: "dob_col",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
+      ];
+      const blockedRows = [
+        { maiden_col: "Smith", current_col: "Member 007", dob_col: "X" },
+      ];
+      const exported = buildAdvancedTerms(multiFieldDraft());
+      const seed = seedFor(columns, blockedMetadata);
+      const imported = draftFromTerms(exported, seed, 3600, blockedRows);
+
+      // The binding is restricted, not silently established: first_name_2 gets no
+      // transformation, and nothing binds the identifier/payload column.
+      expect(
+        imported.standardization.some((t) => t.output === "first_name_2"),
+      ).toBe(false);
+      expect(
+        imported.standardization.some((t) => t.input === "current_col"),
+      ).toBe(false);
+
+      // The identifier/payload column's cleaned value ("MEMBER 007") is never pulled
+      // into a key: the run declares no first_name_2 field, and the one name field it
+      // does build reads maiden_col ("SMITH"), not current_col.
+      const built = buildAdvancedTerms(imported);
+      const prepared = prepareForExchange(
+        {
+          linkageTerms: built,
+          metadata: blockedMetadata,
+          standardization: imported.standardization,
+        },
+        "Inviter",
+        blockedRows,
+        columns,
+      );
+      expect(prepared.dataset.getField("first_name_2")).toBeUndefined();
+      expect(prepared.dataset.getField("first_name")?.get(0)).toEqual([
+        "SMITH",
+      ]);
+
+      // Fail-closed: the key that referenced the unbound second field cannot generate,
+      // while the first-name key still can. The operator re-establishes the second
+      // binding deliberately -- in the workbench, or by roling the column `linkage` --
+      // rather than having the import do it for them.
+      const { satisfiableKeyCount } = assessLinkageSatisfiability(
+        seed.columns,
+        built,
+        imported.standardization,
+        blockedMetadata,
+      );
+      expect(satisfiableKeyCount).toBe(1);
+    },
+  );
+
   test("a single-field import reconstructs the seed's default standardization byte-for-byte", () => {
     // No multi-field fields means no extras, so the reconstruction is exactly the
     // default per-type standardization the import path has always opened on.
