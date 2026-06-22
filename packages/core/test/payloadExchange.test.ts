@@ -11,6 +11,7 @@ import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
 import type { Payload } from "../src/config/linkageTerms";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { PartnerPayload } from "../src/payloadExchange";
 
 import {
@@ -531,6 +532,46 @@ test("exchangePayloads: a legitimately large partner payload parses", async () =
   });
   const received = await initiatorPromise;
   expect(received.rows).toHaveLength(n);
+});
+
+test("exchangePayloads: an over-long partner column name is rejected at the wire", async () => {
+  // A received column name flows verbatim into this party's local exchange-record
+  // file, so the wire predicate bounds each name's LENGTH to MAX_NAME_LENGTH. A
+  // name one character over the bound is rejected as a clean protocol error
+  // before any column name reaches the record.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["a".repeat(MAX_NAME_LENGTH + 1)],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+test("exchangePayloads: a partner column name at the length bound is accepted", async () => {
+  // The boundary case: a name of exactly MAX_NAME_LENGTH is legitimate and must
+  // pass unchanged, so the bound rejects only what exceeds it.
+  const name = "a".repeat(MAX_NAME_LENGTH);
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [name],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const received = await initiatorPromise;
+  expect(received.columns).toEqual([name]);
 });
 
 // --- buildOutputTable --------------------------------------------------------
