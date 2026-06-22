@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { SEMANTIC_TYPES } from "../types";
+import { MAX_NAME_LENGTH } from "./linkageTerms.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { SemanticType } from "../types";
@@ -45,7 +46,15 @@ export interface ColumnMetadata {
 }
 
 const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
-  name: z.string(),
+  // Bounded `.min(1).max(MAX_NAME_LENGTH)` to match the `name` fields of the
+  // linkage-terms schema. Without the floor an empty name parses cleanly here
+  // and surfaces only later as a downstream failure; this rejects it at config
+  // parse with a clear, early error instead. This metadata is the operator's
+  // own LOCAL config, not partner-supplied input, so it is friendliness/UX
+  // hardening, not a partner-threat-model bound. Like the uniqueness refine
+  // below, the `.min`/`.max` messages are static and do not echo the
+  // operator-authored name.
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   type: z.enum(SEMANTIC_TYPES),
   role: ColumnRoleSchema,
   isPayload: z.boolean(),

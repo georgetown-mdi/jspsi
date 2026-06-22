@@ -102,7 +102,9 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
  * its `params` keys, a payload column `name`, a legal-agreement `reference`, the
  * `version` string, and a name-constraint `allowedCharacters` class. A real value
  * is a short label (tens of characters); 256 is far above any legitimate one yet
- * refuses a megabyte-scale string.
+ * refuses a megabyte-scale string. The metadata `ColumnMetadata.name`
+ * (config/metadata.ts) reuses this same bound for parity, though that field is
+ * operator-local config, not partner-controlled.
  */
 export const MAX_NAME_LENGTH = 256;
 
