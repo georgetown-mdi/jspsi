@@ -145,8 +145,13 @@ function mappedRecord(theirIndex: number, iteration: number): Array<number> {
   ];
 }
 
-/** A BinaryPack array16 of `n` mapped-element records (the mapped-element frame). */
+/** A BinaryPack array16 of `n` mapped-element records (the mapped-element frame).
+ * Bounded to the array16 count so a large `n` fails loud rather than silently
+ * truncating the header; the budget derivation uses {@link expectedMappedCost}
+ * (pure arithmetic) for the multi-million-record ceiling, never a real buffer. */
 function mappedElementFrame(n: number): Uint8Array {
+  if (n > 0xffff)
+    throw new RangeError(`mappedElementFrame: n=${n} exceeds array16`);
   const out: Array<number> = [0xdc, (n >>> 8) & 0xff, n & 0xff];
   for (let i = 0; i < n; i++) out.push(...mappedRecord(i % 128, 0));
   return new Uint8Array(out);
@@ -561,6 +566,14 @@ describe("structureOverBudget", () => {
         100,
       ),
     ).toBe(false);
+  });
+
+  test("flags a fixstr over the per-string cap, uniformly with the wide markers", () => {
+    // fixstr "abcd" (4 bytes) against a 2-byte cap: the cap fires on fixstr too,
+    // not only str16/str32, so the marker dispatch is one rule.
+    expect(
+      structureOverBudget(new Uint8Array(fixstr("abcd")), 1000, 256, 2),
+    ).toBe(true);
   });
 
   test("flags excessive nesting depth", () => {

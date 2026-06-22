@@ -336,6 +336,23 @@ function stringWeight(declaredBytes: number): number {
   );
 }
 
+/** A string value of `declaredBytes` wire bytes: refused (`weight = -1`) if it
+ * exceeds `maxStringBytes`, else its payload skipped and its resident weight
+ * charged. Shared by every string marker (`fixstr`/`str16`/`str32`) so the
+ * per-string cap is enforced uniformly rather than only on the wide markers --
+ * a `fixstr` is at most 15 bytes so the cap cannot fire for it in production, but
+ * routing it through here keeps the marker dispatch a single rule instead of one
+ * that rests on a "fixstr is always small" assumption. */
+function stringValue(
+  cursor: ByteCursor,
+  declaredBytes: number,
+  maxStringBytes: number,
+): ValueHeader {
+  if (declaredBytes > maxStringBytes) return { children: 0, weight: -1 };
+  cursor.skip(declaredBytes);
+  return { children: 0, weight: stringWeight(declaredBytes) };
+}
+
 const SCALAR: ValueHeader = {
   children: 0,
   weight: WEBRTC_VALUE_WEIGHTS.scalar,
@@ -361,11 +378,8 @@ function readValueHeader(
     cursor.skip(type ^ 0xa0); // fixraw (binary), payload bounded by the wire cap
     return SCALAR;
   }
-  if ((type ^ 0xb0) <= 0x0f) {
-    const size = type ^ 0xb0; // fixstr (<= 15 bytes, always under the per-string cap)
-    cursor.skip(size);
-    return { children: 0, weight: stringWeight(size) };
-  }
+  if ((type ^ 0xb0) <= 0x0f)
+    return stringValue(cursor, type ^ 0xb0, maxStringBytes); // fixstr (<= 15 bytes)
   if ((type ^ 0x90) <= 0x0f)
     return { children: type ^ 0x90, weight: WEBRTC_VALUE_WEIGHTS.array }; // fixarray
   if ((type ^ 0x80) <= 0x0f)
@@ -404,23 +418,14 @@ function readValueHeader(
     case 0xdb: // raw32
       cursor.skip(cursor.u32());
       return SCALAR;
-    case 0xd8: {
+    case 0xd8:
       // str16: unpack_string builds a JS string of the declared length, ~2x its
-      // wire size and with a large transient cons-string tree, so a per-string
+      // wire size and with a large transient cons-string tree, so the per-string
       // byte cap bounds the build (legitimate PSI frames carry only short
       // strings) while the weight bounds its resident size.
-      const size = cursor.u16();
-      if (size > maxStringBytes) return { children: 0, weight: -1 };
-      cursor.skip(size);
-      return { children: 0, weight: stringWeight(size) };
-    }
-    case 0xd9: {
-      // str32
-      const size = cursor.u32();
-      if (size > maxStringBytes) return { children: 0, weight: -1 };
-      cursor.skip(size);
-      return { children: 0, weight: stringWeight(size) };
-    }
+      return stringValue(cursor, cursor.u16(), maxStringBytes);
+    case 0xd9: // str32
+      return stringValue(cursor, cursor.u32(), maxStringBytes);
     case 0xdc: // array16
       return { children: cursor.u16(), weight: WEBRTC_VALUE_WEIGHTS.array };
     case 0xdd: // array32
