@@ -18,6 +18,10 @@ import type {
   LinkageTerms,
   TransformStep,
 } from "./config/linkageTerms.js";
+import {
+  MAX_DATE_FORMAT_LENGTH,
+  MAX_TRANSFORM_PATTERN_LENGTH,
+} from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 
@@ -539,17 +543,29 @@ export interface StandardizationFunctionDescriptor {
 const noParams = z.object({});
 
 /**
- * A user-authored regular-expression param. Required, and validated to compile
- * under the linear-time dialect ({@link patternConformsToDialect}) -- the same
- * engine the regex factories run, so the editor accepts exactly the patterns an
+ * A user-authored regular-expression param. Required, bounded in length, and
+ * validated to compile under the linear-time dialect ({@link patternConformsToDialect})
+ * -- the same engine the regex factories run, so the editor accepts the patterns an
  * exchange will execute and rejects what RE2 drops (backreferences, lookaround).
  * This replaces the danger-tier "catastrophic backtracking is the editor's
  * problem" gate: under a non-backtracking engine there is no danger tier to gate,
  * only the dialect to conform to. See docs/spec/PROTOCOL.md.
+ *
+ * The length cap matches {@link MAX_TRANSFORM_PATTERN_LENGTH} (the same bound the
+ * linkage-terms validation gate applies to wire patterns) and is checked BEFORE the
+ * dialect compile, so an oversized source is rejected without paying the compile
+ * cost -- an in-dialect pattern compiles in time super-linear in its length, which a
+ * live editor preview must never incur on the main thread for a pathological-length
+ * paste. Deliberately stricter than the factory (which compiles any length), like
+ * substring's footgun rejections; the descriptor drift test pins only short patterns,
+ * so this divergence does not break it.
  */
 const regexPatternSchema = z
   .string()
   .min(1)
+  .max(MAX_TRANSFORM_PATTERN_LENGTH, {
+    message: `must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
+  })
   .refine(patternConformsToDialect, {
     message:
       "must be a valid regular expression in the linear-time dialect " +
@@ -674,14 +690,32 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     blurb:
       "Reformat a date between token layouts (YYYY, MM, DD) so different formats can match.",
     tier: "standard",
-    // Format strings are bounded to non-empty only, not their token content: a
-    // tokenless format is accepted, mirroring the factory, which builds a regex
-    // from any string and simply matches little (yielding null) rather than
-    // throwing. Requiring a YYYY/MM/DD token would reject a shape the factory
-    // accepts; surfacing tokenless formats is editor guidance, not validation.
+    // Format strings are bounded to non-empty and to MAX_DATE_FORMAT_LENGTH (the
+    // same bound the linkage-terms gate applies to wire formats), but NOT to their
+    // token content: a tokenless format is accepted, mirroring the factory, which
+    // builds a regex from any string and simply matches little (yielding null)
+    // rather than throwing. Requiring a YYYY/MM/DD token would reject a shape the
+    // factory accepts; surfacing tokenless formats is editor guidance, not
+    // validation. The length cap IS enforced here (deliberately stricter than the
+    // factory, like regexPatternSchema): the factory expands the format into a
+    // regex compiled under the linear-time engine, so an over-length format pays a
+    // super-linear compile that a live editor preview must not incur on the main
+    // thread -- the same vector regexPatternSchema bounds, through a sibling param.
     params: z.object({
-      inputFormat: z.string().min(1).default("MM/DD/YYYY"),
-      outputFormat: z.string().min(1).default("YYYYMMDD"),
+      inputFormat: z
+        .string()
+        .min(1)
+        .max(MAX_DATE_FORMAT_LENGTH, {
+          message: `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+        })
+        .default("MM/DD/YYYY"),
+      outputFormat: z
+        .string()
+        .min(1)
+        .max(MAX_DATE_FORMAT_LENGTH, {
+          message: `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+        })
+        .default("YYYYMMDD"),
     }),
   },
   pad_left: {

@@ -10,6 +10,7 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
   TagsInput,
   Text,
   TextInput,
@@ -25,6 +26,7 @@ import { useIsomorphicEffect } from "@mantine/hooks";
 import { sanitizeForDisplay } from "@psilink/core";
 
 import {
+  STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
   describeParamFields,
   descriptorFor,
@@ -34,7 +36,10 @@ import {
 
 import type { StandardizationFunctionDescriptor } from "@psilink/core";
 
-import type { ParamField } from "@psi/standardizationAuthoring";
+import type {
+  ParamField,
+  StandardizationFunctionGroup,
+} from "@psi/standardizationAuthoring";
 import type { ReactNode } from "react";
 
 /**
@@ -134,6 +139,18 @@ function ParamInput({
           placeholder="Type a value and press Enter"
         />
       );
+    case "boolean":
+      // A boolean param (e.g. split_on's includeOriginal) always validates, so it
+      // carries no error; render the switch with its label rather than spreading
+      // `common`, whose error/errorProps a Switch does not use.
+      return (
+        <Switch
+          label={paramField.label}
+          size="xs"
+          checked={value === true}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+        />
+      );
     default:
       return (
         <TextInput
@@ -151,6 +168,7 @@ function StepRow({
   step,
   index,
   count,
+  expert,
   onParam,
   onMove,
   onRemove,
@@ -158,21 +176,27 @@ function StepRow({
   step: EditableStep;
   index: number;
   count: number;
+  /** When set, the raw-pattern (`tier: "regex"`) family is editable here (the
+   * gated expert tier); otherwise those steps render read-only. */
+  expert: boolean;
   onParam: (key: string, value: unknown) => void;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
 }) {
   const descriptor = descriptorFor(step.function);
   const { label } = functionDisplay(step.function);
-  // The raw-pattern family (`tier: "regex"`) and any unrecognized function are
-  // shown read-only: authoring a raw pattern from scratch is the deferred expert
-  // tier (board item 202533670). An existing pipeline's regex steps -- a default
-  // standardization pipeline's, or an imported set of linkage terms' -- still
-  // render here and stay reorderable and removable; only their pattern is not
-  // editable in this slice. `editableDescriptor` narrows to the standard-tier
-  // descriptor (or undefined), so the typed param branch passes a non-optional one.
+  const isRegexTier = descriptor?.tier === "regex";
+  // The raw-pattern family (`tier: "regex"`) is editable ONLY behind the expert
+  // opt-in (board item 202533670); without it -- and for any unrecognized function
+  // -- the step is shown read-only. An existing pipeline's regex steps (a default
+  // standardization pipeline's, or an imported set of linkage terms') always render
+  // here and stay reorderable and removable; only editing their pattern needs the
+  // opt-in. `editableDescriptor` narrows to the descriptor whose params this row
+  // authors (standard tier always, regex tier under `expert`), so the typed param
+  // branch passes a non-optional one.
   const editableDescriptor =
-    descriptor !== undefined && descriptor.tier === "standard"
+    descriptor !== undefined &&
+    (descriptor.tier === "standard" || (expert && isRegexTier))
       ? descriptor
       : undefined;
 
@@ -184,7 +208,9 @@ function StepRow({
             <Text size="sm" fw={500}>
               {label}
             </Text>
-            {editableDescriptor === undefined && (
+            {/* The "advanced" badge marks a raw-pattern step as a risk surface even
+                when editable, and marks an unrecognized (read-only) step. */}
+            {(isRegexTier || editableDescriptor === undefined) && (
               <Badge size="xs" variant="light" color="gray">
                 advanced
               </Badge>
@@ -273,6 +299,7 @@ export function StepListEditor({
   onStepsChange,
   addStepLabel = "Add a step",
   emptyHint = "No steps: the value is used as-is. Add a step to clean it.",
+  expert = false,
 }: {
   /** The ordered pipeline steps. */
   steps: Array<EditableStep>;
@@ -282,6 +309,12 @@ export function StepListEditor({
   addStepLabel?: string;
   /** Hint shown when the list is empty. */
   emptyHint?: ReactNode;
+  /** When set, the gated expert tier is unlocked: the raw-pattern
+   * ({@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}) functions appear in the add
+   * menu and existing regex steps' patterns become editable. Defaults to off, so a
+   * host that does not opt in (e.g. the cross-party element-transform editor today)
+   * keeps the standard surface, with regex steps read-only. */
+  expert?: boolean;
 }) {
   // A stable React key per step, tracked by object identity so a reorder follows
   // the logical step (rather than its array position) and a param edit keeps the
@@ -404,6 +437,36 @@ export function StepListEditor({
       }),
     );
 
+  // One add-menu group: a plain-language heading and its functions, each shown with
+  // the descriptor's own label and consequence blurb. Shared by the standard and the
+  // gated expert groups so both render identically.
+  const renderMenuGroup = (group: StandardizationFunctionGroup) => (
+    <div key={group.label}>
+      <Menu.Label>{group.label}</Menu.Label>
+      {group.functionNames.map((functionName) => {
+        const display = functionDisplay(functionName);
+        return (
+          <Menu.Item key={functionName} onClick={() => addStep(functionName)}>
+            <Stack gap={0}>
+              <Text size="sm">{display.label}</Text>
+              {/* The descriptor's plain-language consequence -- e.g. coalesce's
+                  "can create matches that would not otherwise occur" -- shown at the
+                  moment of choice, not just the bare label. */}
+              <Text
+                size="xs"
+                c="dimmed"
+                maw={320}
+                style={{ whiteSpace: "normal" }}
+              >
+                {display.blurb}
+              </Text>
+            </Stack>
+          </Menu.Item>
+        );
+      })}
+    </div>
+  );
+
   return (
     <Stack gap="xs">
       {steps.length === 0 ? (
@@ -423,6 +486,7 @@ export function StepListEditor({
               step={step}
               index={index}
               count={steps.length}
+              expert={expert}
               onParam={(key, value) => setParam(index, key, value)}
               onMove={(direction) => moveStep(index, direction)}
               onRemove={() => removeStep(index)}
@@ -444,36 +508,13 @@ export function StepListEditor({
           </Button>
         </Menu.Target>
         <Menu.Dropdown>
-          {STANDARDIZATION_FUNCTION_GROUPS.map((group) => (
-            <div key={group.label}>
-              <Menu.Label>{group.label}</Menu.Label>
-              {group.functionNames.map((functionName) => {
-                const display = functionDisplay(functionName);
-                return (
-                  <Menu.Item
-                    key={functionName}
-                    onClick={() => addStep(functionName)}
-                  >
-                    <Stack gap={0}>
-                      <Text size="sm">{display.label}</Text>
-                      {/* The descriptor's plain-language consequence -- e.g.
-                          coalesce's "can create matches that would not otherwise
-                          occur" -- shown at the moment of choice, not just the
-                          bare label. */}
-                      <Text
-                        size="xs"
-                        c="dimmed"
-                        maw={320}
-                        style={{ whiteSpace: "normal" }}
-                      >
-                        {display.blurb}
-                      </Text>
-                    </Stack>
-                  </Menu.Item>
-                );
-              })}
-            </div>
-          ))}
+          {STANDARDIZATION_FUNCTION_GROUPS.map(renderMenuGroup)}
+          {/* The raw-pattern (regex) family appears only behind the expert opt-in,
+              after a divider, so it is never mixed into the standard menu or offered
+              as a recommended step. */}
+          {expert && <Menu.Divider />}
+          {expert &&
+            STANDARDIZATION_EXPERT_FUNCTION_GROUPS.map(renderMenuGroup)}
         </Menu.Dropdown>
       </Menu>
     </Stack>

@@ -1,5 +1,7 @@
 import { StandardizedField } from "@psilink/core";
 
+import { isStepValid } from "./standardizationAuthoring";
+
 import type { Standardization } from "@psilink/core";
 
 /**
@@ -99,11 +101,15 @@ export interface FieldValueCoverage {
   /** {@link produced} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
   rate: number;
   /**
-   * True when the field's steps could not be compiled -- a step left mid-edit (e.g.
-   * a `pad_left` with no length yet) throws at compile. Coverage is then not
-   * computable, so it MUST NOT be read as a 0% collapse: the host already gates
-   * launch on a malformed pipeline, and a false alarm would be noise on top of that
-   * step's own inline error.
+   * True when the field's steps are not all valid, so its coverage is not computed.
+   * Two cases reach it: a step left mid-edit (e.g. a `pad_left` with no length yet),
+   * and an in-dialect but over-length regex source (rejected by the length cap).
+   * Both are caught by {@link isStepValid} BEFORE the pipeline is compiled, so a
+   * malformed step never throws at compile and a pathological-length pattern never
+   * reaches the compiler on the (inline, below-threshold) main-thread sweep. Coverage
+   * is then not computable, so it MUST NOT be read as a 0% collapse: the host already
+   * gates launch on a malformed pipeline, and a false alarm would be noise on top of
+   * that step's own inline error.
    */
   unavailable: boolean;
 }
@@ -125,9 +131,14 @@ export interface FieldValueCoverage {
  *
  * Each field gets its own {@link StandardizedField}, which compiles the steps once
  * (so a regex/`parse_date` pipeline is not recompiled per row); the field and its
- * per-row cache fall out of scope after its loop. A field whose steps do not compile
- * is returned `unavailable` rather than throwing, so one mid-edit step does not blank
- * the whole aggregate.
+ * per-row cache fall out of scope after its loop. A field whose steps are not all
+ * valid ({@link isStepValid}) is returned `unavailable` WITHOUT compiling, so one
+ * mid-edit step does not blank the whole aggregate AND an in-dialect but over-length
+ * regex source never reaches the compiler on this sweep -- which runs inline on the
+ * main thread below the off-thread threshold, where the super-linear-in-length
+ * compile the length cap exists to bound would otherwise block the tab. The compile
+ * is also still wrapped, so a step that slips past the validity gate yet throws is
+ * caught rather than blanking the aggregate.
  */
 export function computeFieldCoverage(
   rawRows: ReadonlyArray<Record<string, string>>,
@@ -140,11 +151,17 @@ export function computeFieldCoverage(
       input: transformation.input,
       total,
     };
+    const steps = transformation.steps ?? [];
+    // An invalid step is never compiled here -- see the `unavailable` doc: this keeps
+    // a malformed step from throwing and a pathological-length pattern off the
+    // main-thread compile path, mirroring the preview's gate.
+    if (!steps.every(isStepValid))
+      return { ...base, produced: 0, rate: 0, unavailable: true };
     try {
       const field = new StandardizedField(
         transformation.output,
         transformation.input,
-        transformation.steps ?? [],
+        steps,
         rawRows,
       );
       let produced = 0;

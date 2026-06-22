@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Stack, Text, VisuallyHidden } from "@mantine/core";
+import { Select, Stack, Text, VisuallyHidden } from "@mantine/core";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
@@ -38,6 +38,9 @@ export function StandardizationStepEditor({
   inputColumn,
   steps,
   onStepsChange,
+  expert = false,
+  inputColumnOptions,
+  onInputColumnChange,
 }: {
   /** Human-readable label for the field this pipeline produces (a safe
    * semantic-type label, never the partner-controlled field name). */
@@ -48,6 +51,17 @@ export function StandardizationStepEditor({
   steps: Array<StandardizationStep>;
   /** Emit the next step array on any add, remove, reorder, or param edit. */
   onStepsChange: (steps: Array<StandardizationStep>) => void;
+  /** Forwarded to {@link StepListEditor}: when set, the gated expert tier (raw
+   * regular-expression steps) is authorable here. Defaults to off. */
+  expert?: boolean;
+  /** The columns this field MAY bind to -- the operator's non-ignored columns of
+   * the field's semantic type. When more than one is offered and
+   * {@link onInputColumnChange} is set, the input column becomes a selectable
+   * control (so two fields of one type can take distinct columns); otherwise the
+   * single bound column is shown read-only. */
+  inputColumnOptions?: Array<string>;
+  /** Rebind this field to the chosen input column. Omitted where binding is fixed. */
+  onInputColumnChange?: (column: string) => void;
 }) {
   // Announce the step-list summary on a debounce: a burst of add/remove/reorder
   // edits announces once, not per action, and a reorder (which leaves the count
@@ -80,12 +94,37 @@ export function StandardizationStepEditor({
         <Text size="sm" fw={600}>
           {fieldLabel}
         </Text>
-        <Text size="xs" c="dimmed">
-          from your column {sanitizeForDisplay(inputColumn)}
-        </Text>
+        {onInputColumnChange !== undefined &&
+        (inputColumnOptions?.length ?? 0) > 1 ? (
+          // More than one of the operator's columns has this field's type, so the
+          // binding is a real choice: let the operator pick which column feeds this
+          // field. This is what gives two same-typed fields distinct columns (the
+          // default binds both to the first). Column names are the operator's own
+          // CSV headers; the value stays raw (it must match for the binding) while
+          // the visible label is sanitized, matching this surface's display rule.
+          <Select
+            size="xs"
+            label="Column to clean"
+            data={(inputColumnOptions ?? []).map((column) => ({
+              value: column,
+              label: sanitizeForDisplay(column),
+            }))}
+            value={inputColumn}
+            allowDeselect={false}
+            onChange={(next) => next !== null && onInputColumnChange(next)}
+          />
+        ) : (
+          <Text size="xs" c="dimmed">
+            from your column {sanitizeForDisplay(inputColumn)}
+          </Text>
+        )}
       </div>
 
-      <StepListEditor steps={steps} onStepsChange={onStepsChange} />
+      <StepListEditor
+        steps={steps}
+        onStepsChange={onStepsChange}
+        expert={expert}
+      />
 
       {/* One polite, atomic live region for this field's step list: announces the
           debounced summary after an add, remove, or reorder, never the whole card

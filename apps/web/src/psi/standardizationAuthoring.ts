@@ -50,6 +50,30 @@ export function applyStepOverrides(
 }
 
 /**
+ * Layer per-field input-column overrides onto a derived standardization: rebind a
+ * field (`output`) to an operator-chosen input column. The derived steps are kept
+ * unchanged -- the host only offers columns of the field's own semantic type, so the
+ * recommended cleaning still applies. This is what lets two fields of one semantic
+ * type bind to DISTINCT columns: the default type fallback binds every same-typed
+ * field to the FIRST column of the type (see {@link resolveFieldColumns}), so an
+ * explicit per-field input is the only way to give the second its own column. Pure;
+ * the host re-derives `base` from the current metadata each render and passes only
+ * overrides whose column is still a valid same-typed binding, so a remap that
+ * invalidates an override drops it rather than rebinding a wrong-typed column.
+ */
+export function applyInputOverrides(
+  base: Standardization,
+  overrides: ReadonlyMap<string, string>,
+): Standardization {
+  return base.map((transformation) => {
+    const column = overrides.get(transformation.output);
+    return column !== undefined && column !== transformation.input
+      ? { ...transformation, input: column }
+      : transformation;
+  });
+}
+
+/**
  * The descriptor for a function name, or `undefined` for a name core does not
  * recognize. The descriptor table is a total `Record`, so a bare index is typed
  * as always-present; the `Object.hasOwn` guard models the genuinely-absent case
@@ -75,11 +99,14 @@ export function descriptorFor(
  * Everything authoring-related is driven from core's
  * {@link STANDARDIZATION_FUNCTION_DESCRIPTORS}, the shared descriptor table, so the
  * editor never re-encodes a function's parameter shape, label, or risk tier. The
- * add menu offers exactly the functions whose descriptor `tier` is `"standard"`
- * (`coalesce` among them); the `tier: "regex"` family (raw-pattern authoring) is
- * the deferred expert tier (see board item 202533670), so it is excluded from the
- * menu here -- a default pipeline's existing regex steps are still rendered and
- * reorderable by the editor, just not authored from scratch.
+ * standard add menu ({@link STANDARDIZATION_FUNCTION_GROUPS}) offers exactly the
+ * functions whose descriptor `tier` is `"standard"` (`coalesce` among them). The
+ * `tier: "regex"` family (raw-pattern authoring) is the gated expert tier (board
+ * item 202533670): it is excluded from the standard menu and offered only behind
+ * the editor's explicit expert opt-in, through
+ * {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS} -- never as a recommended fix. A
+ * default pipeline's existing regex steps are always rendered and reorderable; only
+ * editing their pattern (or adding one from scratch) requires that opt-in.
  */
 
 // --- Function intent grouping ------------------------------------------------
@@ -146,6 +173,46 @@ export const authorableFunctionNames: ReadonlySet<string> = new Set(
 );
 
 /**
+ * The expert-tier raw-pattern functions (`tier: "regex"`), grouped for the gated
+ * "advanced" section of the add-step menu. Each authors an operator-supplied
+ * regular expression: it runs under the linear-time engine (so a pattern cannot
+ * backtrack catastrophically) and the descriptor's schema bounds the pattern's
+ * length and rejects out-of-dialect syntax, but a wrong pattern still shapes which
+ * records match. So they are offered ONLY behind the editor's explicit expert
+ * opt-in -- never in {@link STANDARDIZATION_FUNCTION_GROUPS} (the standard menu) and
+ * never surfaced as a recommended fix.
+ *
+ * A parity test ({@link expertFunctionNames}) pins this set to the descriptor
+ * table's `tier: "regex"` names in both directions, so a regex-tier function added
+ * to core cannot ship without a group here, and a standard-tier function cannot
+ * leak into the expert menu.
+ */
+export const STANDARDIZATION_EXPERT_FUNCTION_GROUPS: Array<StandardizationFunctionGroup> =
+  [
+    {
+      label: "Raw patterns (advanced)",
+      functionNames: [
+        "filter_regex",
+        "extract_regex",
+        "replace_regex",
+        "split_on",
+      ],
+    },
+  ];
+
+/**
+ * Every function name the gated expert tier lets an operator add, flattened from
+ * {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}. Exported so the parity test can
+ * assert this set equals the descriptor table's `tier: "regex"` names in both
+ * directions, and that it is disjoint from {@link authorableFunctionNames}.
+ */
+export const expertFunctionNames: ReadonlySet<string> = new Set(
+  STANDARDIZATION_EXPERT_FUNCTION_GROUPS.flatMap(
+    (group) => group.functionNames,
+  ),
+);
+
+/**
  * The editor-facing label and one-line blurb for a function, taken from its
  * descriptor -- except `coalesce`, whose generic "Coalesce" name is replaced with
  * the plain-language framing the acceptance criteria call for ("If empty,
@@ -185,9 +252,17 @@ export function functionDisplay(functionName: string): {
  * - `number` -- a numeric input.
  * - `enum` -- a select over {@link ParamField.enumOptions}.
  * - `stringArray` -- a multi-value (tag) input.
- * - `string` -- a plain text input (the fallback).
+ * - `boolean` -- a switch (e.g. `split_on`'s `includeOriginal`).
+ * - `string` -- a plain text input (the fallback; the regex-family `pattern` /
+ *   `delimiter` params render here too and validate against the descriptor's
+ *   dialect-and-length schema).
  */
-export type ParamFieldKind = "number" | "string" | "enum" | "stringArray";
+export type ParamFieldKind =
+  | "number"
+  | "string"
+  | "enum"
+  | "stringArray"
+  | "boolean";
 
 /**
  * One parameter of a standardization function, reduced to what the editor needs to
@@ -214,7 +289,8 @@ export interface ParamField {
 
 /** Plain-language labels for the known param keys, so a control never shows a raw
  * camelCase key. A key with no entry falls back to its raw form (unreachable for a
- * bundled function's params; this is exhaustive for the standard tier). */
+ * bundled function's params; this is exhaustive across the standard and expert
+ * tiers, pinned by the label-coverage test). */
 const PARAM_LABELS: Record<string, string> = {
   start: "Start position",
   length: "Length",
@@ -225,6 +301,10 @@ const PARAM_LABELS: Record<string, string> = {
   value: "Value to drop",
   values: "Values to drop",
   default: "Default value",
+  pattern: "Pattern",
+  delimiter: "Delimiter pattern",
+  replacement: "Replacement",
+  includeOriginal: "Keep the original value too",
 };
 
 // The Zod v4 internal `_def` carries the discriminant `type` and the wrapper's
@@ -304,6 +384,9 @@ export function describeParamFields(
         break;
       case "array":
         kind = "stringArray";
+        break;
+      case "boolean":
+        kind = "boolean";
         break;
       default:
         kind = "string";
