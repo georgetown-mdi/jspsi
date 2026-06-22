@@ -188,6 +188,81 @@ describe('default chains: a blank input yields null, never ""', () => {
       }
     });
   }
+
+  // A non-blank "junk" cell that CLEANS to empty (separators or punctuation a
+  // type strips entirely) is the other half of "blank/'' cleaned value" in item
+  // 203074970: it never arrives as whitespace but reduces to "" partway through.
+  // Every default type drops these characters, so each maps to null for the same
+  // reason a literal blank does; pin it so a chain that let a cleaned-empty value
+  // survive trips this test.
+  const cleansToEmpty = ["---", "...", "!!!", "@@@"];
+  for (const t of transformations) {
+    test(`${t.output}: a non-blank value that cleans to empty maps to null`, () => {
+      for (const junk of cleansToEmpty) {
+        expect(
+          runPipeline(junk, t.steps!),
+          `input ${JSON.stringify(junk)}`,
+        ).toBeNull();
+      }
+    });
+  }
+});
+
+// --- SSN / SSN4 explicit blank-drop ------------------------------------------
+
+describe("default SSN / SSN4 pipelines: explicit blank-drop before pad_left", () => {
+  // Item 203074970: SSN/SSN4 pad a cleaned value to a fixed width, so a value
+  // that cleaned to empty would pad into an all-zeros placeholder ("000000000" /
+  // "0000") before reaching any null-mapping step -- dropped only as a side
+  // effect of the terminal placeholder null_if happening to list that value. An
+  // explicit `null_if ""` placed BEFORE pad_left drops the empty value as empty,
+  // so the blank-cell footgun (live since item 203074741 stopped dropping "" at
+  // the linkage layer) is prevented here and stays prevented even if an operator
+  // edits the placeholder list. Pin the step's presence, its position, and the
+  // fact that it -- not the placeholder null_if -- carries the blank-drop.
+  const cases: Array<{ type: "ssn" | "ssn4"; column: string }> = [
+    { type: "ssn", column: "SSN" },
+    { type: "ssn4", column: "SSN4" },
+  ];
+
+  function stepsFor(type: "ssn" | "ssn4", column: string) {
+    const [t] = getDefaultStandardization(
+      [{ name: column, type, role: "linkage", isPayload: false }],
+      { ...minimalTerms, linkageFields: [{ name: type, type }] },
+    );
+    return t.steps ?? [];
+  }
+
+  for (const { type, column } of cases) {
+    test(`${type}: an explicit null_if "" precedes pad_left`, () => {
+      const steps = stepsFor(type, column);
+      const emptyDropIdx = steps.findIndex(
+        (s) => s.function === "null_if" && s.params?.value === "",
+      );
+      const padIdx = steps.findIndex((s) => s.function === "pad_left");
+      expect(emptyDropIdx).toBeGreaterThanOrEqual(0);
+      expect(padIdx).toBeGreaterThan(emptyDropIdx);
+    });
+
+    test(`${type}: a blank or cleaned-empty value still drops with the placeholder null_if removed`, () => {
+      // Prove the explicit empty-drop is load-bearing, not redundant with the
+      // terminal placeholder null_if: strip the placeholder step (the null_if
+      // listing all-zeros/sequential placeholders via `values`) and a value that
+      // is blank ("", "   ") OR cleans to empty through the chain ("abc", "----"
+      // lose every non-digit) must still map to null. Without the explicit
+      // `null_if ""`, such a value would pad to an all-zeros value and survive as
+      // a matchable key.
+      const withoutPlaceholder = stepsFor(type, column).filter(
+        (s) => !(s.function === "null_if" && s.params?.values !== undefined),
+      );
+      for (const input of ["", "   ", "abc", "----"]) {
+        expect(
+          runPipeline(input, withoutPlaceholder),
+          `input ${JSON.stringify(input)}`,
+        ).toBeNull();
+      }
+    });
+  }
 });
 
 // --- SSN pipeline ------------------------------------------------------------
