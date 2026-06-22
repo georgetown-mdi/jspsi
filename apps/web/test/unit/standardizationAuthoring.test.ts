@@ -14,7 +14,6 @@ import {
   applyInputOverrides,
   applyStepOverrides,
   authorableFunctionNames,
-  checkValueConstraints,
   describeParamFields,
   descriptorFor,
   expertFunctionNames,
@@ -25,7 +24,6 @@ import {
 
 import type {
   ColumnMetadata,
-  LinkageField,
   LinkageTerms,
   Standardization,
 } from "@psilink/core";
@@ -549,108 +547,5 @@ describe("acceptor per-field column binding (multiple fields of one type)", () =
     expect(prepared.dataset.getField("current_name")?.get(0)).toEqual([
       "JONES",
     ]);
-  });
-});
-
-describe("value-level constraint check", () => {
-  test("flags a cleaned value that violates a field constraint and passes one that meets it", () => {
-    const field: LinkageField = {
-      name: "first_name",
-      type: "first_name",
-      constraints: { allowedCharacters: "A-Z ", exclude: ["TEST"] },
-    };
-    // A lowercase residue violates allowedCharacters: "A-Z ".
-    expect(checkValueConstraints(field, "mary").length).toBeGreaterThan(0);
-    // A value on the exclude list violates it.
-    expect(
-      checkValueConstraints(field, "TEST").some(
-        (v) => v.label === "excluded value",
-      ),
-    ).toBe(true);
-    // A conforming cleaned value passes.
-    expect(checkValueConstraints(field, "MARY JANE")).toEqual([]);
-  });
-
-  test("flags an invalid date only under validOnly", () => {
-    const withConstraint: LinkageField = {
-      name: "dob",
-      type: "date_of_birth",
-      constraints: { validOnly: true },
-    };
-    const withoutConstraint: LinkageField = {
-      name: "dob",
-      type: "date_of_birth",
-    };
-    // 2021-02-30 is not a real day.
-    expect(checkValueConstraints(withConstraint, "20210230").length).toBe(1);
-    expect(checkValueConstraints(withConstraint, "20210228")).toEqual([]);
-    // No constraint declared -> nothing is flagged.
-    expect(checkValueConstraints(withoutConstraint, "20210230")).toEqual([]);
-  });
-
-  test("flags every structurally invalid SSN branch under validOnly, and passes valid forms", () => {
-    const field: LinkageField = {
-      name: "ssn",
-      type: "ssn",
-      constraints: { validOnly: true },
-    };
-    const flagged = (value: string) =>
-      checkValueConstraints(field, value).some(
-        (v) => v.label === "invalid SSN",
-      );
-    // Each SSA structural rule is its own branch: area 000 / 666 / >= 900, group
-    // 00, and serial 0000 are never issued.
-    expect(flagged("000223456")).toBe(true);
-    expect(flagged("666223456")).toBe(true);
-    expect(flagged("900223456")).toBe(true);
-    expect(flagged("123003456")).toBe(true); // group 00
-    expect(flagged("123450000")).toBe(true); // serial 0000
-    // A structurally valid 9-digit value, and a non-9-digit value (left to the
-    // format-shaping pipeline, not judged here), are not flagged.
-    expect(flagged("123456789")).toBe(false);
-    expect(flagged("12345678")).toBe(false);
-  });
-
-  test("a partner-crafted allowedCharacters that breaks out of the class cannot stall the check", () => {
-    // `allowedCharacters` is partner-controlled and only validated to compile as a
-    // `[...]` class body, so this value closes the class and injects a
-    // catastrophic-backtracking construct (`^[x](a+)+b[y]...`). Matching the whole
-    // value against `^[allowed]*$` would have hung the thread (ReDoS); the check
-    // tests one character at a time, so a long crafted value returns promptly and
-    // still flags the disallowed input. The test completing under the default
-    // timeout is itself the regression guard.
-    const field: LinkageField = {
-      name: "fn",
-      type: "first_name",
-      constraints: { allowedCharacters: "x](a+)+b[y" },
-    };
-    const hostile = "x" + "a".repeat(60) + "!";
-    expect(
-      checkValueConstraints(field, hostile).some(
-        (v) => v.label === "disallowed characters",
-      ),
-    ).toBe(true);
-  });
-
-  test("a partner-crafted allowedCharacters cannot silently suppress the disallowed-characters warning", () => {
-    // `a]|.*[b` breaks the class into `^[a]|.*[b]$`-shaped alternation that, matched
-    // against the whole value, matches anything and would never warn. Tested per
-    // character, a genuinely disallowed value is still flagged -- the warning the
-    // operator relies on cannot be turned off by class breakout.
-    const field: LinkageField = {
-      name: "fn",
-      type: "first_name",
-      constraints: { allowedCharacters: "a]|.*[b" },
-    };
-    expect(
-      checkValueConstraints(field, "Z@#$").some(
-        (v) => v.label === "disallowed characters",
-      ),
-    ).toBe(true);
-  });
-
-  test("returns nothing for a field with no declared constraints", () => {
-    const field: LinkageField = { name: "phone", type: "phone_number" };
-    expect(checkValueConstraints(field, "anything")).toEqual([]);
   });
 });

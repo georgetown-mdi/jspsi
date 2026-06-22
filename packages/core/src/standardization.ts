@@ -6,6 +6,7 @@ import {
   coerceToPatternString,
   patternConformsToDialect,
 } from "./utils/linearRegex.js";
+import type { CompiledLinearRegex } from "./utils/linearRegex.js";
 import type {
   Standardization,
   StandardizationStep,
@@ -1574,4 +1575,316 @@ export function assessLinkageSatisfiability(
     k.elements.every((e) => producibleNames.has(e.field)),
   ).length;
   return { unsatisfied, satisfiableKeyCount };
+}
+
+// --- Value-level constraints -------------------------------------------------
+//
+// "Does a cleaned value meet a field's declared constraints?" -- the value-level
+// companion to validateStandardizationAgainstTerms (which checks only NAMES: that
+// standardization outputs map to declared fields, and that step function names are
+// known). Promoted out of the web workbench so the web's constraint badges and the
+// CLI's prepare-path warnings run ONE implementation (board item 202994324).
+// Warn-not-enforce throughout, matching the LinkageField constraint contract ("the
+// application warns if violated but does not enforce them", config/linkageTerms.ts):
+// nothing here throws or rejects a value; each surface decides how to present the
+// result (a web badge, a CLI warning line).
+//
+// Coverage is authoritative: every constraint with a CLEAN value-level test is
+// checked, and one that has none is deliberately left UNFLAGGED rather than guessed
+// at, so a warning never fires on a value the check cannot actually judge.
+//
+//   - exclude (all field types), allowedCharacters (name fields), date_of_birth
+//     validOnly, ssn validOnly: checked (the four the pre-promotion web-local check
+//     covered; their behavior is preserved, not changed).
+//   - ssn4 validOnly: checked for the ONE SSA structural rule a bare last-four can
+//     be judged against -- the serial is not 0000. The last four digits ARE the
+//     serial; the area/group rules and the 9-digit-only checks have no last-four
+//     analogue. The web-local check omitted ssn4; promotion adds this sound test
+//     (see isStructurallyValidSsn4).
+//   - affixesAllowed (name fields): NOT checked, by deliberate decision. Flagging a
+//     residual honorific/suffix would mean re-running remove_affixes' heuristic
+//     token-match over a fixed list (dr, miss, sir, judge, jr, sr, ...) that
+//     collides with legitimate name values -- "Judge" and "Miss" are real surnames
+//     -- so any such test false-positives on real data. Whether affixes were
+//     removed is a pipeline choice, not a defect of the value, so there is no clean
+//     value-level property to flag. This would only need revisiting if affix
+//     membership became an exact, collision-free set.
+
+/**
+ * The kind of value-level constraint a cleaned value violated. A stable,
+ * partner-independent discriminant a surface can branch on; the fixed
+ * {@link ConstraintViolation.label} / `detail` copy is keyed off it.
+ *
+ * - `excluded` -- the value is on the field's agreed `exclude` denylist (any
+ *   field type).
+ * - `disallowedCharacters` -- a name value carries a character outside the field's
+ *   `allowedCharacters` class.
+ * - `invalidDate` -- a `date_of_birth` value in canonical YYYYMMDD form names no
+ *   real calendar day (under `validOnly`).
+ * - `invalidSsn` -- a 9-digit `ssn` value breaks an SSA structural rule (under
+ *   `validOnly`).
+ * - `invalidSsn4` -- a 4-digit `ssn4` value is the all-zero serial 0000, the one
+ *   SSA structural rule a bare last-four can be judged against (under `validOnly`).
+ */
+export type ConstraintViolationKind =
+  | "excluded"
+  | "disallowedCharacters"
+  | "invalidDate"
+  | "invalidSsn"
+  | "invalidSsn4";
+
+/**
+ * A single value-level constraint violation: a warn-not-enforce signal that a
+ * cleaned value does not meet one of a field's declared constraints. The `kind`
+ * is a stable discriminant; `label` and `detail` are FIXED copy keyed off it --
+ * never a partner-controlled value -- so a surface may render them verbatim (the
+ * web workbench badge) or print them (the CLI), or switch on `kind` for its own
+ * wording. An empty result from {@link checkValueConstraints} means the value
+ * conforms to every constraint that has a clean value-level test.
+ */
+export interface ConstraintViolation {
+  /** Stable, partner-independent discriminant; see {@link ConstraintViolationKind}. */
+  kind: ConstraintViolationKind;
+  /** Short fixed badge caption (e.g. "excluded value"). */
+  label: string;
+  /** One-line fixed plain-language explanation of the violation. */
+  detail: string;
+}
+
+/** Whether `value` contains only characters in the field's `allowedCharacters`
+ * class. `allowedCharacters` is partner-controlled (it arrives in the invitation
+ * token), and {@link NameConstraintsSchema} only checks that it compiles as the
+ * body of a `[...]` class -- NOT that it cannot break out of one. A crafted value
+ * can close the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`).
+ *
+ * Two hazards follow, each guarded here. (1) ReDoS: matching against an attacker-
+ * chosen pattern on the native `RegExp` engine could backtrack catastrophically
+ * and hang the single, non-interruptible thread. The class is compiled under the
+ * linear-time engine the transform-regex paths use ({@link compileLinearRegex},
+ * re2js) instead, so the blow-up is impossible by construction -- no partner
+ * pattern ever touches the backtracking engine -- and a pattern that engine cannot
+ * compile is treated as "cannot check" (no violation, fail-open) rather than
+ * throwing. {@link NameConstraintsSchema} validates the class under this SAME
+ * engine, so for a decoded token that fail-open is a backstop, not a path: a class
+ * that would not compile here is rejected at terms validation. (2) Warning
+ * suppression: a breakout that matches everything (e.g. `a]|.*[b`) would silently
+ * pass disallowed values. Testing one code point at a time against `^[allowed]$`
+ * defeats it -- a multi-character breakout construct cannot match a single
+ * character -- so a genuinely disallowed value is still flagged. For a legitimate
+ * class this is exactly `^[allowed]*$` (every character must be in the class). The
+ * empty string trivially conforms. */
+function withinAllowedCharacters(value: string, allowed: string): boolean {
+  let oneOf: CompiledLinearRegex;
+  try {
+    oneOf = compileLinearRegex(`^[${allowed}]$`);
+  } catch {
+    return true;
+  }
+  for (const character of value) if (!oneOf.test(character)) return false;
+  return true;
+}
+
+/** Whether a standardized value is a valid calendar date in canonical YYYYMMDD
+ * form -- the output the default `date_of_birth` pipeline produces. A value not in
+ * that form is not flagged (the operator may target a different output format, and
+ * a false "invalid date" badge would mislead); only an 8-digit value that names no
+ * real calendar day is. */
+function isValidStandardizedDate(value: string): boolean {
+  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
+  if (match === null) return true;
+  const [, year, month, day] = match;
+  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() + 1 === Number(month) &&
+    date.getUTCDate() === Number(day)
+  );
+}
+
+/** Whether a 9-digit value satisfies the SSA structural rules: area not 000 or
+ * 666 and below 900, group not 00, serial not 0000. A value that is not exactly 9
+ * digits is left to the format-shaping pipeline and not flagged here. */
+function isStructurallyValidSsn(value: string): boolean {
+  if (!/^\d{9}$/.test(value)) return true;
+  const area = Number(value.slice(0, 3));
+  const group = Number(value.slice(3, 5));
+  const serial = Number(value.slice(5, 9));
+  return (
+    area !== 0 && area !== 666 && area < 900 && group !== 0 && serial !== 0
+  );
+}
+
+/** Whether a 4-digit `ssn4` (last-four / serial) value satisfies the one SSA
+ * structural rule a bare last-four can be judged against: the serial is not 0000.
+ * The last four digits of an SSN are the serial, and the SSA never issues serial
+ * 0000; the area/group rules and the 9-digit-only checks have no last-four
+ * analogue, so 0000 is the whole judgeable surface. A value that is not exactly 4
+ * digits is left to the format-shaping pipeline and not flagged, mirroring the
+ * 9-digit scoping of {@link isStructurallyValidSsn}. */
+function isStructurallyValidSsn4(value: string): boolean {
+  if (!/^\d{4}$/.test(value)) return true;
+  return value !== "0000";
+}
+
+/**
+ * Report which of a linkage `field`'s declared constraints a single cleaned
+ * `value` violates -- the value-level constraint check the web workbench renders
+ * as badges and the CLI surfaces as warnings. Returns the violations as
+ * warn-not-enforce signals; an empty array means the value conforms to every
+ * constraint that has a clean value-level test. Warn, never block (see the
+ * section note above): a violation is reported, never thrown.
+ *
+ * A constraint with no clean value-level test is intentionally NOT flagged, so a
+ * warning never fires on a value the check cannot actually judge: `affixesAllowed`
+ * is omitted by deliberate decision, and `date_of_birth` / `ssn` / `ssn4`
+ * `validOnly` only judge a value of the constraint's canonical width (see each
+ * helper). The copy returned is fixed and keyed off the violated constraint --
+ * never a partner-controlled value -- so it is safe to render or print verbatim.
+ */
+export function checkValueConstraints(
+  field: LinkageField,
+  value: string,
+): ConstraintViolation[] {
+  const constraints = field.constraints;
+  if (constraints === undefined) return [];
+  const violations: ConstraintViolation[] = [];
+
+  // `exclude` is shared by every constraint shape: the cleaned value must not be
+  // one of the listed values.
+  if (constraints.exclude?.includes(value))
+    violations.push({
+      kind: "excluded",
+      label: "excluded value",
+      detail: "This cleaned value is on the agreed excluded-values list.",
+    });
+
+  switch (field.type) {
+    case "first_name":
+    case "last_name": {
+      // `affixesAllowed` is intentionally not checked here -- it has no clean
+      // value-level test (see the section note).
+      const allowed = field.constraints?.allowedCharacters;
+      if (allowed !== undefined && !withinAllowedCharacters(value, allowed))
+        violations.push({
+          kind: "disallowedCharacters",
+          label: "disallowed characters",
+          detail:
+            "This cleaned value contains characters outside the field's allowed set.",
+        });
+      break;
+    }
+    case "date_of_birth":
+      if (
+        field.constraints?.validOnly === true &&
+        !isValidStandardizedDate(value)
+      )
+        violations.push({
+          kind: "invalidDate",
+          label: "invalid date",
+          detail: "This cleaned value is not a valid calendar date.",
+        });
+      break;
+    case "ssn":
+      if (
+        field.constraints?.validOnly === true &&
+        !isStructurallyValidSsn(value)
+      )
+        violations.push({
+          kind: "invalidSsn",
+          label: "invalid SSN",
+          detail:
+            "This cleaned value does not meet the Social Security Administration's structural rules.",
+        });
+      break;
+    case "ssn4":
+      if (
+        field.constraints?.validOnly === true &&
+        !isStructurallyValidSsn4(value)
+      )
+        violations.push({
+          kind: "invalidSsn4",
+          label: "invalid SSN (last 4)",
+          detail:
+            "This cleaned value is the all-zero serial 0000, which the Social Security Administration never issues.",
+        });
+      break;
+    case "phone_number":
+    case "email_address":
+      // Only `exclude` (handled above) has a clean value-level test for these
+      // types; nothing further to check.
+      break;
+  }
+
+  return violations;
+}
+
+/**
+ * A per-field aggregate of value-level constraint violations across a whole
+ * standardized dataset: how many produced values of one linkage field tripped one
+ * constraint kind. The CLI's exchange/prepare path surfaces these (one line per
+ * entry) where the web workbench shows per-value badges, so it reports a COUNT --
+ * not the offending values, which are the operator's own data and are never echoed
+ * into a log.
+ */
+export interface ConstraintViolationSummary {
+  /** The linkage field name whose values violated. Partner-controlled on the
+   * accept path (adopted from the inviter's terms via
+   * {@link deriveAcceptedLinkageTerms}), so a display surface must sanitize it. */
+  field: string;
+  /** The constraint kind violated; see {@link ConstraintViolationKind}. */
+  kind: ConstraintViolationKind;
+  /** The fixed badge caption shared with {@link ConstraintViolation.label}, so a
+   * caller need not re-derive copy from the kind. */
+  label: string;
+  /** How many produced values across the dataset tripped this kind. */
+  count: number;
+}
+
+/**
+ * Sweep a whole {@link StandardizedDataset} and aggregate the value-level
+ * constraint violations its produced values trip, per (field, kind). Runs the same
+ * per-value {@link checkValueConstraints} the web workbench renders badges from --
+ * one implementation for both surfaces -- over every produced value of every
+ * declared field, so the CLI warns on exactly the violations the web shows.
+ * Warn-not-enforce: it only counts; it never throws or rejects a value, and the
+ * caller decides how to surface the result (the CLI logs a warning per entry and
+ * proceeds). An empty result means every produced value conforms.
+ *
+ * A field declared in `terms` but absent from the dataset (it resolved to no
+ * column) contributes nothing. Each row's produced value set is checked
+ * element-wise, so a fan-out value (e.g. from `split_on`) is judged per candidate.
+ * The dataset caches each row's values, so this pre-pass warms the same cache the
+ * key-building exchange reuses rather than computing them twice.
+ */
+export function summarizeDatasetConstraintViolations(
+  terms: LinkageTerms,
+  dataset: StandardizedDataset,
+  rowCount: number,
+): ConstraintViolationSummary[] {
+  // Keyed "field/kind" so two fields sharing a kind stay distinct; the NUL
+  // separator cannot appear in a `kind` literal, so the join is unambiguous.
+  const summaries = new Map<string, ConstraintViolationSummary>();
+  for (const field of terms.linkageFields) {
+    if (field.constraints === undefined) continue;
+    const standardized = dataset.getField(field.name);
+    if (standardized === undefined) continue;
+    for (let index = 0; index < rowCount; index++) {
+      for (const value of standardized.get(index)) {
+        for (const violation of checkValueConstraints(field, value)) {
+          const key = `${field.name}\u0000${violation.kind}`;
+          const existing = summaries.get(key);
+          if (existing === undefined)
+            summaries.set(key, {
+              field: field.name,
+              kind: violation.kind,
+              label: violation.label,
+              count: 1,
+            });
+          else existing.count += 1;
+        }
+      }
+    }
+  }
+  return [...summaries.values()];
 }

@@ -45,6 +45,7 @@ import {
   type CommonBootstrapOptions,
 } from "./bootstrap";
 import { checkLinkageSatisfiability } from "./linkagePreflight";
+import { warnOnValueConstraints } from "./valueConstraintWarnings";
 import {
   runProtocol,
   type AuthPersist,
@@ -583,6 +584,7 @@ export async function prepareDataset(
   );
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);
+  warnOnValueConstraints(prepared, log);
   return prepared;
 }
 

@@ -320,15 +320,17 @@ interface NameConstraints {
 }
 
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
-  // Validated as a character class under the linear-time engine (re2js) -- the
-  // SAME engine that executes it: the web constraint check compiles
-  // `^[allowedCharacters]$` under that engine to flag values outside the class.
-  // Validating with the engine that runs it guarantees a class accepted here
-  // compiles at check time, so the advisory cannot silently fail open on a class
-  // the native engine accepts but re2js rejects (a backreference, a POSIX/Unicode
-  // class, or the degenerate empty class). Note the brackets that get added. The
-  // `.max()` precedes the refine so an oversized value is rejected on length
-  // before a large partner-controlled string is compiled; a real class is short.
+  // Validated to compile as a character class under the linear-time engine
+  // (re2js) -- the SAME engine that executes it: the core value-level constraint
+  // check (`checkValueConstraints` in standardization.ts, shared by the web
+  // workbench and the CLI) compiles `^[allowedCharacters]$` under that engine, one
+  // code point at a time, to flag values outside the class. Validating with the
+  // engine that runs it guarantees a class accepted here compiles at check time,
+  // so the advisory cannot silently fail open on a class the native engine accepts
+  // but re2js rejects (a backreference, a POSIX/Unicode class, or the degenerate
+  // empty class). Note the brackets that get added. The `.max()` precedes the
+  // refine so an oversized value is rejected on length before a large
+  // partner-controlled string is compiled; a real class is short.
   allowedCharacters: z
     .string()
     .max(MAX_NAME_LENGTH)

@@ -40,8 +40,15 @@ vi.mock("@psilink/core", async (importActual) => {
     // advisory without the PSI stack or data-shape fragility. loadCSVFile stays
     // real so it consumes the input stream (a mock would leave a dangling
     // createReadStream whose async open races the afterEach cleanup). Only the
-    // handler tests exercise this path; loadConfig never calls it.
-    prepareForExchange: vi.fn().mockReturnValue({ warnings: [] }),
+    // handler tests exercise this path; loadConfig never calls it. The shape
+    // carries the empty fields the value-constraint sweep (warnOnValueConstraints)
+    // reads, so the sweep is a no-op here rather than tripping on a partial stub.
+    prepareForExchange: vi.fn().mockReturnValue({
+      warnings: [],
+      linkageTerms: { linkageFields: [] },
+      dataset: { getField: () => undefined },
+      rowCount: 0,
+    }),
   };
 });
 

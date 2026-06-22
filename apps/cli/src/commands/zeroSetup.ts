@@ -46,6 +46,7 @@ import {
 } from "./bootstrap";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
+import { warnOnValueConstraints } from "./valueConstraintWarnings";
 import {
   decodeUrlComponent,
   redactUrlCredentials,
@@ -330,6 +331,7 @@ async function prepareDataset(
   );
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);
+  warnOnValueConstraints(prepared, log);
   return prepared;
 }
 

@@ -9,13 +9,15 @@ import {
   describeTransformCoercions,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
+  checkValueConstraints,
+  summarizeDatasetConstraintViolations,
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
 import * as linearRegex from "../src/utils/linearRegex";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageField, LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 import {
   StandardizationSchema,
@@ -2327,5 +2329,325 @@ describe("describeTransformCoercions", () => {
     expect(
       describeTransformCoercions({ function: "not_a_real_function" }),
     ).toEqual([]);
+  });
+});
+
+// --- checkValueConstraints ---------------------------------------------------
+
+describe("checkValueConstraints", () => {
+  test("flags an excluded value across field types and passes one not on the list", () => {
+    // `exclude` is shared by every constraint shape, so the denylist is honored
+    // for a name as much as for an SSN or an `exclude`-only type (phone_number).
+    const name: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { exclude: ["TEST"] },
+    };
+    const phone: LinkageField = {
+      name: "ph",
+      type: "phone_number",
+      constraints: { exclude: ["0000000000"] },
+    };
+    expect(checkValueConstraints(name, "TEST").map((v) => v.kind)).toEqual([
+      "excluded",
+    ]);
+    expect(checkValueConstraints(name, "MARY")).toEqual([]);
+    expect(
+      checkValueConstraints(phone, "0000000000").map((v) => v.kind),
+    ).toEqual(["excluded"]);
+    expect(checkValueConstraints(phone, "1234567890")).toEqual([]);
+  });
+
+  test("flags a name value with a character outside allowedCharacters and passes a conforming one", () => {
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "A-Z " },
+    };
+    // A lowercase residue is outside `A-Z `.
+    expect(
+      checkValueConstraints(field, "mary").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+    expect(checkValueConstraints(field, "MARY JANE")).toEqual([]);
+  });
+
+  test("flags an invalid date only under validOnly, and only in canonical YYYYMMDD form", () => {
+    const withConstraint: LinkageField = {
+      name: "dob",
+      type: "date_of_birth",
+      constraints: { validOnly: true },
+    };
+    const withoutConstraint: LinkageField = {
+      name: "dob",
+      type: "date_of_birth",
+    };
+    // 2021-02-30 is not a real day.
+    expect(
+      checkValueConstraints(withConstraint, "20210230").map((v) => v.kind),
+    ).toEqual(["invalidDate"]);
+    expect(checkValueConstraints(withConstraint, "20210228")).toEqual([]);
+    // A value in another output format is not judged (the operator may target it).
+    expect(checkValueConstraints(withConstraint, "2021-02-30")).toEqual([]);
+    // No constraint declared -> nothing flagged.
+    expect(checkValueConstraints(withoutConstraint, "20210230")).toEqual([]);
+  });
+
+  test("flags every structurally invalid SSN branch under validOnly, and passes valid forms", () => {
+    const field: LinkageField = {
+      name: "ssn",
+      type: "ssn",
+      constraints: { validOnly: true },
+    };
+    const flaggedSsn = (value: string) =>
+      checkValueConstraints(field, value).some((v) => v.kind === "invalidSsn");
+    // Each SSA structural rule is its own branch: area 000 / 666 / >= 900, group
+    // 00, and serial 0000 are never issued.
+    expect(flaggedSsn("000223456")).toBe(true);
+    expect(flaggedSsn("666223456")).toBe(true);
+    expect(flaggedSsn("900223456")).toBe(true);
+    expect(flaggedSsn("123003456")).toBe(true); // group 00
+    expect(flaggedSsn("123450000")).toBe(true); // serial 0000
+    // A structurally valid 9-digit value, and a non-9-digit value (left to the
+    // format-shaping pipeline, not judged here), are not flagged.
+    expect(flaggedSsn("123456789")).toBe(false);
+    expect(flaggedSsn("12345678")).toBe(false);
+  });
+
+  test("flags an ssn4 whose serial is 0000 under validOnly, and passes any other 4-digit value", () => {
+    // The last four digits are the SSA serial, whose one structural rule is that
+    // it is not 0000; that is the whole judgeable surface for a bare last-four.
+    const field: LinkageField = {
+      name: "ssn4",
+      type: "ssn4",
+      constraints: { validOnly: true },
+    };
+    expect(checkValueConstraints(field, "0000").map((v) => v.kind)).toEqual([
+      "invalidSsn4",
+    ]);
+    expect(checkValueConstraints(field, "0001")).toEqual([]);
+    expect(checkValueConstraints(field, "6789")).toEqual([]);
+    // Not exactly four digits -> left to the format-shaping pipeline, not judged.
+    expect(checkValueConstraints(field, "000")).toEqual([]);
+    expect(checkValueConstraints(field, "00000")).toEqual([]);
+    // Without validOnly the serial rule does not apply.
+    expect(
+      checkValueConstraints({ name: "ssn4", type: "ssn4" }, "0000"),
+    ).toEqual([]);
+  });
+
+  test("does not flag a constraint with no clean value-level test", () => {
+    // affixesAllowed is intentionally not checked: a value with a surviving
+    // honorific/suffix is not flagged, because affix detection collides with
+    // legitimate name values and has no clean value-level test.
+    const affix: LinkageField = {
+      name: "ln",
+      type: "last_name",
+      constraints: { affixesAllowed: false },
+    };
+    expect(checkValueConstraints(affix, "SMITH JR")).toEqual([]);
+    expect(checkValueConstraints(affix, "JUDGE")).toEqual([]);
+    // An `exclude`-only type with no declared exclusion has nothing to judge.
+    expect(
+      checkValueConstraints(
+        { name: "email", type: "email_address" },
+        "a@b.com",
+      ),
+    ).toEqual([]);
+    // A field with no constraints at all returns nothing.
+    expect(
+      checkValueConstraints(
+        { name: "phone", type: "phone_number" },
+        "anything",
+      ),
+    ).toEqual([]);
+  });
+
+  test("a partner-crafted allowedCharacters that breaks out of the class cannot stall the check", () => {
+    // `allowedCharacters` is partner-controlled and only validated to compile as a
+    // `[...]` class body, so this value closes the class and injects a
+    // catastrophic-backtracking construct. Matching the whole value against
+    // `^[allowed]*$` would have hung the thread (ReDoS); testing one character at a
+    // time on the linear-time engine returns promptly and still flags the
+    // disallowed input. The test completing under the default timeout is itself the
+    // regression guard.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "x](a+)+b[y" },
+    };
+    const hostile = "x" + "a".repeat(60) + "!";
+    expect(
+      checkValueConstraints(field, hostile).some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+
+  test("a partner-crafted allowedCharacters cannot silently suppress the disallowed-characters warning", () => {
+    // `a]|.*[b` breaks the class into match-anything alternation that, applied to
+    // the whole value, would never warn. Tested per character, a genuinely
+    // disallowed value is still flagged -- the warning cannot be turned off by
+    // class breakout.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "a]|.*[b" },
+    };
+    expect(
+      checkValueConstraints(field, "Z@#$").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+});
+
+// --- summarizeDatasetConstraintViolations ------------------------------------
+
+describe("summarizeDatasetConstraintViolations", () => {
+  const sweepTerms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "test",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [
+      {
+        name: "last_name",
+        type: "last_name",
+        constraints: { allowedCharacters: "A-Z " },
+      },
+      {
+        name: "date_of_birth",
+        type: "date_of_birth",
+        constraints: { validOnly: true },
+      },
+    ],
+    linkageKeys: [
+      {
+        name: "LN+DOB",
+        elements: [{ field: "last_name" }, { field: "date_of_birth" }],
+      },
+    ],
+  };
+  const metadata: ColumnMetadata[] = [
+    { name: "LN", type: "last_name", role: "linkage", isPayload: false },
+    { name: "DOB", type: "date_of_birth", role: "linkage", isPayload: false },
+  ];
+
+  test("aggregates per (field, kind) across all rows, counting each violating value", () => {
+    const rows = [
+      { LN: "SMITH", DOB: "19900115" }, // both conform
+      { LN: "lower", DOB: "20210230" }, // disallowed chars + invalid date
+      { LN: "Mixed", DOB: "20211301" }, // disallowed chars + invalid date
+    ];
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      metadata,
+      sweepTerms,
+    );
+    const summaries = summarizeDatasetConstraintViolations(
+      sweepTerms,
+      dataset,
+      rows.length,
+    );
+    expect(
+      summaries.map((s) => ({ field: s.field, kind: s.kind, count: s.count })),
+    ).toEqual(
+      expect.arrayContaining([
+        { field: "last_name", kind: "disallowedCharacters", count: 2 },
+        { field: "date_of_birth", kind: "invalidDate", count: 2 },
+      ]),
+    );
+    expect(summaries).toHaveLength(2);
+    // The aggregate carries the fixed badge caption for the caller to render.
+    expect(summaries.find((s) => s.kind === "invalidDate")?.label).toBe(
+      "invalid date",
+    );
+  });
+
+  test("returns nothing when every produced value conforms", () => {
+    const rows = [{ LN: "SMITH", DOB: "19900115" }];
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      metadata,
+      sweepTerms,
+    );
+    expect(
+      summarizeDatasetConstraintViolations(sweepTerms, dataset, rows.length),
+    ).toEqual([]);
+  });
+
+  test("a field with no declared constraints, or absent from the dataset, contributes nothing", () => {
+    // last_name has no constraints; date_of_birth resolves to no column (its
+    // metadata column is missing), so neither contributes a summary.
+    const terms: LinkageTerms = {
+      ...sweepTerms,
+      linkageFields: [
+        { name: "last_name", type: "last_name" },
+        {
+          name: "date_of_birth",
+          type: "date_of_birth",
+          constraints: { validOnly: true },
+        },
+      ],
+    };
+    const rows = [{ LN: "lower" }];
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      [{ name: "LN", type: "last_name", role: "linkage", isPayload: false }],
+      terms,
+    );
+    expect(
+      summarizeDatasetConstraintViolations(terms, dataset, rows.length),
+    ).toEqual([]);
+  });
+
+  test("judges a fan-out value per candidate", () => {
+    // split_on fans "AAAA BBBB" into two name candidates; the lowercase-residue
+    // check runs on each, so a two-candidate row contributes two violations.
+    const terms: LinkageTerms = {
+      ...sweepTerms,
+      linkageFields: [
+        {
+          name: "last_name",
+          type: "last_name",
+          constraints: { allowedCharacters: "A-Z" },
+        },
+      ],
+      linkageKeys: [{ name: "LN", elements: [{ field: "last_name" }] }],
+    };
+    const standardization = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "split_on", params: { delimiter: " " } }],
+      },
+    ];
+    const rows = [{ LN: "aa bb" }];
+    const dataset = buildStandardizedDataset(
+      standardization,
+      rows,
+      [{ name: "LN", type: "last_name", role: "linkage", isPayload: false }],
+      terms,
+    );
+    const summaries = summarizeDatasetConstraintViolations(
+      terms,
+      dataset,
+      rows.length,
+    );
+    expect(summaries).toEqual([
+      {
+        field: "last_name",
+        kind: "disallowedCharacters",
+        label: "disallowed characters",
+        count: 2,
+      },
+    ]);
   });
 });
