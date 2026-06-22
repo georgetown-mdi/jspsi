@@ -1153,12 +1153,42 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (pattern filter)");
     expect(
       headerFor([{ function: "null_if", params: { values: ["x"] } }]),
-    ).toBe("last name (value exclusion)");
+    ).toBe("last name (excludes values)");
+
+    // parse_date is routine canonicalization when it reformats between full
+    // layouts, but matches on only part of the date when its output drops a
+    // component its input carries (a year-only output collapses every date in a
+    // year; a tokenless output collapses every date to a constant).
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "SAME" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("last name");
 
     // Routine standardization is not flagged.
     expect(headerFor([{ function: "pad_left", params: { length: 5 } }])).toBe(
       "last name",
     );
+    // A bare parse_date defaults to the full layout on both sides -- no drop.
     expect(headerFor([{ function: "parse_date" }])).toBe("last name");
     expect(headerFor(undefined)).toBe("last name");
   });

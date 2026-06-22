@@ -4,6 +4,7 @@ import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 
 import type {
   Algorithm,
+  DateFormatToken,
   InvitationToken,
   LinkageField,
   LinkageKey,
@@ -501,21 +502,77 @@ function summarizeTransform(
 }
 
 /**
+ * The date-component vocabulary `parse_date` layouts are built from, pinned to
+ * core's {@link DateFormatToken} so adding a token there breaks this build rather
+ * than silently missing a dropped component below. Detection is set-membership
+ * only -- which components a format string carries -- and these tokens are
+ * pairwise non-substrings, so `String.includes` recovers core's greedy
+ * tokenization exactly for this vocabulary; a future overlapping token (a 2-digit
+ * year, say) would surface as a compile error to revisit the membership test.
+ */
+const DATE_FORMAT_COMPONENTS: Record<DateFormatToken, true> = {
+  YYYY: true,
+  MM: true,
+  DD: true,
+};
+
+// Core's parseDateFactory defaults (standardization.ts): an absent format is the
+// full MM/DD/YYYY -> YYYYMMDD layout, which carries every component, so an absent
+// outputFormat drops nothing.
+const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
+const DEFAULT_PARSE_DATE_OUTPUT = "YYYYMMDD";
+
+/** The date components a `parse_date` format layout carries. */
+function dateComponentsOf(format: string): Set<DateFormatToken> {
+  const present = new Set<DateFormatToken>();
+  for (const token of Object.keys(
+    DATE_FORMAT_COMPONENTS,
+  ) as Array<DateFormatToken>)
+    if (format.includes(token)) present.add(token);
+  return present;
+}
+
+/**
+ * Whether a `parse_date` step's output layout omits a date component its input
+ * carries -- the case that collapses distinct dates (an `outputFormat` of "YYYY"
+ * makes every date in a year match; a tokenless output collapses every date to a
+ * constant) rather than merely reformatting between equivalent layouts, which is
+ * routine canonicalization. The params are partner-controlled and typed
+ * `unknown`, so each format is narrowed to a string, falling back to core's
+ * default layout (which carries every component) when absent.
+ */
+function parseDateDropsComponent(step: TransformStep): boolean {
+  if (step.function !== "parse_date") return false;
+  const rawInput = step.params?.inputFormat;
+  const rawOutput = step.params?.outputFormat;
+  const input =
+    typeof rawInput === "string" ? rawInput : DEFAULT_PARSE_DATE_INPUT;
+  const output =
+    typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
+  const outputComponents = dateComponentsOf(output);
+  return [...dateComponentsOf(input)].some(
+    (component) => !outputComponents.has(component),
+  );
+}
+
+/**
  * The terse informative marker for a key element's collapsed-header entry, or
  * undefined when the element matches exactly or only canonicalizes its value
- * (case, whitespace, accents, affixes, padding, date reformatting -- routine
- * standardization, deliberately not flagged so the recommended setup stays
- * clean). It names any rule that materially changes which records match: where the
- * direction is determinable from the terms it names the EFFECT ("partial" for a
- * truncation; "fuzzy" / "sound-alike" / "multiple" / "fallback" for an expansion),
- * and where an arbitrary partner-authored pattern makes the direction
- * indeterminate it names the RULE directly ("pattern replacement", "pattern
- * extraction", "pattern filter", "value exclusion"). Informative, not a
- * broaden-only warning: `filter_regex` and `null_if` narrow matching but are still
- * surfaced. "fuzzy" is reserved for the genuine fuzzy-comparison expansion,
- * distinct from `substring`'s "partial". None of the regex/value rules appear on
- * the default or guided path (only `substring` and `swap` do), so an
- * expert-authored rule is what trips those markers.
+ * (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
+ * reformats between equivalent layouts -- routine standardization, deliberately
+ * not flagged so the recommended setup stays clean). It names any rule that
+ * materially changes which records match: where the direction is determinable
+ * from the terms it names the EFFECT ("partial" for a truncation, or for a
+ * `parse_date` whose output layout drops a component its input carries and so
+ * matches on only part of the date; "fuzzy" / "sound-alike" / "multiple" /
+ * "fallback" for an expansion), and where an arbitrary partner-authored pattern
+ * or value list makes the direction indeterminate it names the RULE directly
+ * ("pattern replacement", "pattern extraction", "pattern filter", "excludes
+ * values"). Informative, not a broaden-only warning: `filter_regex` and `null_if`
+ * narrow matching but are still surfaced. "fuzzy" is reserved for the genuine
+ * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
+ * regex/value rules appear on the default or guided path (only `substring` and
+ * `swap` do), so an expert-authored rule is what trips those markers.
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
@@ -524,19 +581,24 @@ function summarizeTransform(
  * {@link MatchKeyDetails}. The element stays flagged either way.
  */
 function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
-  const functions = new Set((element.transform ?? []).map((s) => s.function));
+  const steps = element.transform ?? [];
+  const functions = new Set(steps.map((s) => s.function));
   // Effect named where the direction is determinable from the terms.
   if (functions.has("substring")) return "partial";
   if (element.generateFuzzyComparisons !== undefined) return "fuzzy";
   if (functions.has("phonetic")) return "sound-alike";
   if (functions.has("split_on")) return "multiple";
   if (functions.has("coalesce")) return "fallback";
+  // parse_date is routine date canonicalization UNLESS its output layout drops a
+  // component its input carries, which collapses distinct dates -- then it
+  // matches on only part of the date.
+  if (steps.some(parseDateDropsComponent)) return "partial";
   // Rule named directly where a partner-authored pattern or value list makes the
   // matching direction indeterminate from the terms alone.
   if (functions.has("replace_regex")) return "pattern replacement";
   if (functions.has("extract_regex")) return "pattern extraction";
   if (functions.has("filter_regex")) return "pattern filter";
-  if (functions.has("null_if")) return "value exclusion";
+  if (functions.has("null_if")) return "excludes values";
   return undefined;
 }
 
