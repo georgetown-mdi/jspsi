@@ -158,6 +158,38 @@ describe("getDefaultStandardization — structure", () => {
   });
 });
 
+// --- Default chains never emit the empty string ------------------------------
+
+describe('default chains: a blank input yields null, never ""', () => {
+  // The empty-string-as-matchable-key change (link.ts removeDuplicatesAndUndefineds
+  // now drops only undefined, not every falsy value) rests on the premise that the
+  // default per-type cleaning maps a blank value to null, so a fully-default
+  // exchange never emits "" as a key and is unaffected. docs/spec/PROTOCOL.md (Key
+  // input data) and the CHANGELOG state this as prose; pin it as a check here so a
+  // future default chain that let a blank fall through to "" trips this test rather
+  // than silently widening default matching (CONTRIBUTING: encode a runtime fact as
+  // a check). null (record excluded) and "" (a matchable key) are now distinct
+  // outcomes downstream, so toBeNull also asserts the value is not "".
+  const blanks = ["", " ", "   ", "\t", " \t\n "];
+  const transformations = getDefaultStandardization(fullMetadata, minimalTerms);
+
+  // Guard: every default linkage field is exercised, so this is not a vacuous pass.
+  test("covers all seven default linkage fields", () => {
+    expect(transformations).toHaveLength(7);
+  });
+
+  for (const t of transformations) {
+    test(`${t.output}: every blank input maps to null`, () => {
+      for (const blank of blanks) {
+        expect(
+          runPipeline(blank, t.steps!),
+          `input ${JSON.stringify(blank)}`,
+        ).toBeNull();
+      }
+    });
+  }
+});
+
 // --- SSN pipeline ------------------------------------------------------------
 
 describe("default SSN pipeline", () => {
