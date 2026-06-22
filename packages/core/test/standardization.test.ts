@@ -2582,6 +2582,46 @@ describe("summarizeDatasetConstraintViolations", () => {
     ).toEqual([]);
   });
 
+  test("aggregates exclude-denylist hits across rows (the memoized membership path)", () => {
+    // A denylist field swept over multiple rows exercises the per-row reuse the
+    // exclude-Set memoization optimizes: the same field (and its `exclude` array)
+    // is checked every row, and the aggregate must credit every hit -- including a
+    // repeat of the same excluded value on a later row.
+    const terms: LinkageTerms = {
+      ...sweepTerms,
+      linkageFields: [
+        {
+          name: "last_name",
+          type: "last_name",
+          constraints: { exclude: ["SMITH", "TEST"] },
+        },
+      ],
+      linkageKeys: [{ name: "LN", elements: [{ field: "last_name" }] }],
+    };
+    const rows = [
+      { LN: "SMITH" }, // excluded
+      { LN: "JONES" }, // conforms
+      { LN: "SMITH" }, // excluded again -- second row against the same memoized set
+      { LN: "TEST" }, // excluded
+    ];
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      [{ name: "LN", type: "last_name", role: "linkage", isPayload: false }],
+      terms,
+    );
+    expect(
+      summarizeDatasetConstraintViolations(terms, dataset, rows.length),
+    ).toEqual([
+      {
+        field: "last_name",
+        kind: "excluded",
+        label: "excluded value",
+        count: 3,
+      },
+    ]);
+  });
+
   test("a field with no declared constraints, or absent from the dataset, contributes nothing", () => {
     // last_name has no constraints; date_of_birth resolves to no column (its
     // metadata column is missing), so neither contributes a summary.
