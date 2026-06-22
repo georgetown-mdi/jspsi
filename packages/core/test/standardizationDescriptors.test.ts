@@ -6,7 +6,10 @@ import {
   runPipeline,
 } from "../src/standardization";
 
-import { MAX_TRANSFORM_PATTERN_LENGTH } from "../src/config/linkageTerms";
+import {
+  MAX_DATE_FORMAT_LENGTH,
+  MAX_TRANSFORM_PATTERN_LENGTH,
+} from "../src/config/linkageTerms";
 
 // --- Descriptor / registry parity --------------------------------------------
 
@@ -298,6 +301,20 @@ describe("param schemas", () => {
           { function: "parse_date", params: { inputFormat: "garbage" } },
         ]),
       ).not.toThrow();
+    });
+
+    // The format schema caps length at MAX_DATE_FORMAT_LENGTH (the same bound the
+    // linkage-terms gate applies to wire formats), so an over-length format -- which
+    // the factory would expand into a regex and compile under the linear-time engine,
+    // paying a super-linear compile cost on the editor's live-preview thread -- is
+    // rejected at authoring, the same defense regexPatternSchema gives the raw-regex
+    // family through a sibling param.
+    test("rejects a format longer than MAX_DATE_FORMAT_LENGTH", () => {
+      const atLimit = "Y".repeat(MAX_DATE_FORMAT_LENGTH);
+      const overLimit = "Y".repeat(MAX_DATE_FORMAT_LENGTH + 1);
+      expect(schema.safeParse({ inputFormat: atLimit }).success).toBe(true);
+      expect(schema.safeParse({ inputFormat: overLimit }).success).toBe(false);
+      expect(schema.safeParse({ outputFormat: overLimit }).success).toBe(false);
     });
   });
 

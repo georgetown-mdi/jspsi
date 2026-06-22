@@ -18,7 +18,10 @@ import type {
   LinkageTerms,
   TransformStep,
 } from "./config/linkageTerms.js";
-import { MAX_TRANSFORM_PATTERN_LENGTH } from "./config/linkageTerms.js";
+import {
+  MAX_DATE_FORMAT_LENGTH,
+  MAX_TRANSFORM_PATTERN_LENGTH,
+} from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 
@@ -687,14 +690,32 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     blurb:
       "Reformat a date between token layouts (YYYY, MM, DD) so different formats can match.",
     tier: "standard",
-    // Format strings are bounded to non-empty only, not their token content: a
-    // tokenless format is accepted, mirroring the factory, which builds a regex
-    // from any string and simply matches little (yielding null) rather than
-    // throwing. Requiring a YYYY/MM/DD token would reject a shape the factory
-    // accepts; surfacing tokenless formats is editor guidance, not validation.
+    // Format strings are bounded to non-empty and to MAX_DATE_FORMAT_LENGTH (the
+    // same bound the linkage-terms gate applies to wire formats), but NOT to their
+    // token content: a tokenless format is accepted, mirroring the factory, which
+    // builds a regex from any string and simply matches little (yielding null)
+    // rather than throwing. Requiring a YYYY/MM/DD token would reject a shape the
+    // factory accepts; surfacing tokenless formats is editor guidance, not
+    // validation. The length cap IS enforced here (deliberately stricter than the
+    // factory, like regexPatternSchema): the factory expands the format into a
+    // regex compiled under the linear-time engine, so an over-length format pays a
+    // super-linear compile that a live editor preview must not incur on the main
+    // thread -- the same vector regexPatternSchema bounds, through a sibling param.
     params: z.object({
-      inputFormat: z.string().min(1).default("MM/DD/YYYY"),
-      outputFormat: z.string().min(1).default("YYYYMMDD"),
+      inputFormat: z
+        .string()
+        .min(1)
+        .max(MAX_DATE_FORMAT_LENGTH, {
+          message: `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+        })
+        .default("MM/DD/YYYY"),
+      outputFormat: z
+        .string()
+        .min(1)
+        .max(MAX_DATE_FORMAT_LENGTH, {
+          message: `must not exceed ${MAX_DATE_FORMAT_LENGTH} characters`,
+        })
+        .default("YYYYMMDD"),
     }),
   },
   pad_left: {
