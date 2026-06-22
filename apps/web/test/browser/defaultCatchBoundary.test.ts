@@ -130,7 +130,9 @@ describe("DefaultCatchBoundary", () => {
       await expect.element(home).toBeInTheDocument();
       await expect.element(home).toHaveAttribute("href", "/");
 
-      expect(page.getByRole("button", { name: "Go back" }).query()).toBeNull();
+      await expect
+        .element(page.getByRole("button", { name: "Go back" }))
+        .not.toBeInTheDocument();
     });
   });
 
@@ -139,7 +141,8 @@ describe("DefaultCatchBoundary", () => {
       const back = vi
         .spyOn(window.history, "back")
         .mockImplementation(() => undefined);
-      routerMock.matchedRouteId = "/some-route";
+      // matchedRouteId defaults to the non-root "/some-route" (set in the hoisted
+      // holder and restored by afterEach), so the non-root branch needs no setup.
       mountBoundary();
 
       const goBack = page.getByRole("button", { name: "Go back" });
@@ -147,7 +150,9 @@ describe("DefaultCatchBoundary", () => {
       await userEvent.click(goBack);
 
       expect(back).toHaveBeenCalledOnce();
-      expect(page.getByRole("link", { name: "Home" }).query()).toBeNull();
+      await expect
+        .element(page.getByRole("link", { name: "Home" }))
+        .not.toBeInTheDocument();
     });
   });
 });
