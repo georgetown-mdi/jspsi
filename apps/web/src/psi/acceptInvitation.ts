@@ -89,11 +89,14 @@ export async function prepareAcceptedInvitation(
  * own columns. The agreed fields/keys are adopted verbatim, but the acceptor's
  * own perspective is derived via {@link deriveAcceptedLinkageTerms}: its identity
  * replaces the inviter's (so the inviter's `identity` does not leak into the
- * acceptor's prepared terms), and its `output` is the MIRROR of the inviter's
- * (`expectsOutput`/`shareWithPartner` swapped), not a verbatim copy -- a copy
- * only happens to satisfy `validateCompatibility`'s output mirror in the
- * symmetric "both receive" case, and would abort any one-sided exchange. The same
- * helper backs the CLI acceptor (`apps/cli/src/commands/accept.ts`).
+ * acceptor's prepared terms), and its `output` and `payload` are MIRRORED, not
+ * copied (output's `expectsOutput`/`shareWithPartner` swapped, payload's
+ * `send`/`receive` swapped). A verbatim copy only happens to satisfy
+ * `validateCompatibility`'s mirrors in the symmetric case and would abort any
+ * asymmetric exchange. The payload mirror is what makes the acceptor's `receive`
+ * the inviter's `send` (so it validates exactly what it gets) while leaving its
+ * `send` open when the inviter left `receive` unauthored. The same helper backs
+ * the CLI acceptor (`apps/cli/src/commands/accept.ts`).
  *
  * When the acceptor has prepared its data in the editor, its edited `metadata`
  * and `standardization` are supplied alongside the adopted terms; otherwise

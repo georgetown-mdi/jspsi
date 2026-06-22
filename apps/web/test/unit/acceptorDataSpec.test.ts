@@ -77,6 +77,26 @@ describe("acceptorExchangeDataSpec", () => {
     expect(spec.metadata).toEqual(md);
     expect(spec.standardization).toEqual(std);
   });
+
+  test("mirrors the inviter's payload: an asymmetric send becomes the acceptor's receive", () => {
+    // The common invite/accept shape: the inviter authors a send and leaves receive
+    // unset. The acceptor's derived terms mirror it -- receive = the inviter's send
+    // (so it validates exactly what it gets) -- while its own send stays open (it
+    // takes its disclosure from its metadata; the inviter is lazy on receive).
+    const inviterTerms: LinkageTerms = {
+      ...terms,
+      payload: { send: [{ name: "enrollment_date" }] },
+    };
+    const accepted = termsOf(
+      acceptorExchangeDataSpec(inviterTerms, "Acceptor"),
+    );
+    expect(accepted.payload).toStrictEqual({
+      receive: [{ name: "enrollment_date" }],
+    });
+    expect(accepted.payload?.send).toBeUndefined();
+    expect(validateCompatibility(inviterTerms, accepted).errors).toEqual([]);
+    expect(validateCompatibility(accepted, inviterTerms).errors).toEqual([]);
+  });
 });
 
 describe("editing metadata changes the verdict and reaches the run", () => {

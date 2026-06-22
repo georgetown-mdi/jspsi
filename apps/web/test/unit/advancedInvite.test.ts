@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
   canonicalString,
   deriveAcceptedLinkageTerms,
@@ -22,6 +23,7 @@ import {
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
 import {
+  disclosedColumnNames,
   setColumnDisclosure,
   setColumnType,
 } from "../../src/psi/metadataEditing.js";
@@ -456,6 +458,85 @@ describe("the 3-way output direction control", () => {
       const acceptor = deriveAcceptedLinkageTerms(terms, "Accepting Org");
       expect(validateCompatibility(terms, acceptor).errors).toEqual([]);
     }
+  });
+});
+
+describe("payload authoring", () => {
+  // "notes" and "comments" infer as `other` columns -> disclosed (sent) by default;
+  // the linkage columns are not.
+  const PAYLOAD_COLUMNS = [...ALL_COLUMNS, "notes", "comments"];
+
+  test("terms.payload.send is exactly the disclosed columns; receive is never authored", () => {
+    const { draft } = seedAdvancedInvite("Org", PAYLOAD_COLUMNS);
+    const disclosed = disclosedColumnNames(draft.metadata);
+    expect(disclosed).toEqual(["notes", "comments"]);
+    const built = buildAdvancedTerms(draft);
+    expect(built.payload?.send?.map((c) => c.name)).toEqual(disclosed);
+    // The inviter does not know the partner's schema, so it authors no receive and
+    // takes whatever the partner discloses (validateCompatibility is lazy on it).
+    expect(built.payload?.receive).toBeUndefined();
+  });
+
+  test("payload.send never over-declares: it is a subset of the disclosed set, and core's reject agrees", () => {
+    // Disclose one linkage column explicitly; the rest stay not-sent.
+    const { draft } = seedAdvancedInvite("Org", PAYLOAD_COLUMNS);
+    const metadata = setColumnDisclosure(
+      draft.metadata,
+      "last_name",
+      "payload",
+    ).metadata;
+    const built = buildAdvancedTerms({ ...draft, metadata });
+    const disclosed = new Set(disclosedColumnNames(metadata));
+    for (const column of built.payload?.send ?? [])
+      expect(disclosed.has(column.name)).toBe(true);
+    // A not-disclosed linkage column is never placed into send.
+    expect(built.payload?.send?.some((c) => c.name === "ssn")).toBe(false);
+    // The exact core reject this guard keeps the operator clear of (202710475)
+    // accepts the editor's send against the same metadata.
+    expect(() =>
+      assertPayloadSendDisclosed(built.payload, metadata),
+    ).not.toThrow();
+  });
+
+  test("the editor never authors payload.receive, so receive-while-no-output is unrepresentable", () => {
+    // The one combination the schema forbids (a non-empty receive with
+    // expectsOutput false) cannot be expressed through the guided editor, in any
+    // output direction, because the editor authors no receive at all.
+    const { draft } = seedAdvancedInvite("Org", PAYLOAD_COLUMNS);
+    for (const direction of ["both", "inviter", "partner"] as const)
+      expect(
+        buildAdvancedTerms({ ...draft, outputDirection: direction }).payload
+          ?.receive,
+      ).toBeUndefined();
+  });
+
+  test("sending while only the inviter receives is blocked live and the acceptor cannot derive it", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", PAYLOAD_COLUMNS);
+    const inviterOnly = { ...draft, outputDirection: "inviter" as const };
+    const result = validateAdvancedInvite(inviterOnly, seed);
+    expect(result.errors.payload).toBeDefined();
+    expect(result.canGenerate).toBe(false);
+    // The live block mirrors the schema reject the acceptor would otherwise hit.
+    expect(() =>
+      deriveAcceptedLinkageTerms(buildAdvancedTerms(inviterOnly), "Acceptor"),
+    ).toThrow();
+    // Sharing the result with the partner ("both") clears the conflict.
+    expect(
+      validateAdvancedInvite({ ...draft, outputDirection: "both" }, seed).errors
+        .payload,
+    ).toBeUndefined();
+  });
+
+  test("a disclosed-payload invitation round-trips through the acceptor mirror", () => {
+    const { draft } = seedAdvancedInvite("Org", PAYLOAD_COLUMNS);
+    const built = buildAdvancedTerms(draft); // both-receive, sends notes+comments
+    const acceptor = deriveAcceptedLinkageTerms(built, "Acceptor");
+    // The acceptor's receive is the inviter's send (validated exactly); its send
+    // stays open (the inviter's absent receive), so it is not forced to declare one.
+    expect(acceptor.payload).toStrictEqual({ receive: built.payload?.send });
+    expect(acceptor.payload?.send).toBeUndefined();
+    expect(validateCompatibility(built, acceptor).errors).toEqual([]);
+    expect(validateCompatibility(acceptor, built).errors).toEqual([]);
   });
 });
 
