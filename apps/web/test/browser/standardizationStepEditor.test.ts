@@ -446,6 +446,53 @@ describe("StandardizationStepEditor raw-pattern expert tier", () => {
   });
 });
 
+describe("StandardizationStepEditor input-column binding", () => {
+  test("offers a labeled column selector when more than one column has the field's type, and rebinds on change", async () => {
+    const onInputColumnChange = vi.fn<(column: string) => void>();
+    render(
+      createElement(StandardizationStepEditor, {
+        fieldLabel: "First name",
+        inputColumn: "maiden_col",
+        steps: [],
+        inputColumnOptions: ["maiden_col", "current_col"],
+        onInputColumnChange,
+        onStepsChange: () => {},
+      }),
+    );
+    // The binding is a real choice (two same-typed columns), so it is a labeled,
+    // keyboard-operable select rather than the read-only note. Mantine's Select input
+    // has role=combobox, named by its label.
+    const select = page.getByRole("combobox", { name: "Column to clean" });
+    await expect.element(select).toBeInTheDocument();
+    expect(page.getByText(/from your column/).elements()).toHaveLength(0);
+    // Choosing the other column rebinds the field to it.
+    await userEvent.click(select);
+    await userEvent.click(page.getByRole("option", { name: "current_col" }));
+    expect(onInputColumnChange).toHaveBeenCalledWith("current_col");
+  });
+
+  test("shows the bound column read-only when only one column has the field's type", async () => {
+    render(
+      createElement(StandardizationStepEditor, {
+        fieldLabel: "First name",
+        inputColumn: "maiden_col",
+        steps: [],
+        inputColumnOptions: ["maiden_col"],
+        onInputColumnChange: () => {},
+        onStepsChange: () => {},
+      }),
+    );
+    // One column of the type means no real choice, so it stays the read-only note --
+    // no select to mislead the operator into thinking there is an alternative.
+    await expect
+      .element(page.getByText("from your column maiden_col"))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("combobox", { name: "Column to clean" }).elements(),
+    ).toHaveLength(0);
+  });
+});
+
 describe("StandardizationStepEditor accessibility", () => {
   test("removing a step keeps focus on a neighbor instead of dropping it to <body>", async () => {
     render(

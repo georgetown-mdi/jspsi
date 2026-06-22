@@ -4,12 +4,14 @@ import {
   MAX_TRANSFORM_PATTERN_LENGTH,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
   getDefaultStandardization,
+  prepareForExchange,
   runPipeline,
 } from "@psilink/core";
 
 import {
   STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
+  applyInputOverrides,
   applyStepOverrides,
   authorableFunctionNames,
   checkValueConstraints,
@@ -452,6 +454,101 @@ describe("applyStepOverrides (per-field override layer)", () => {
 
   test("no override leaves the base unchanged", () => {
     expect(applyStepOverrides(base, new Map())).toEqual(base);
+  });
+});
+
+describe("applyInputOverrides (per-field input-column rebind)", () => {
+  const base: Standardization = [
+    { output: "maiden_name", input: "name_col", steps: [] },
+    { output: "current_name", input: "name_col", steps: [] },
+  ];
+
+  test("rebinds a field to its chosen column, leaving steps and other fields alone", () => {
+    const result = applyInputOverrides(
+      base,
+      new Map([["current_name", "other_col"]]),
+    );
+    expect(result.map((t) => [t.output, t.input])).toEqual([
+      ["maiden_name", "name_col"],
+      ["current_name", "other_col"],
+    ]);
+  });
+
+  test("a no-op override (same column) and an absent override leave the base unchanged", () => {
+    expect(
+      applyInputOverrides(base, new Map([["maiden_name", "name_col"]])),
+    ).toEqual(base);
+    expect(applyInputOverrides(base, new Map())).toEqual(base);
+  });
+});
+
+describe("acceptor per-field column binding (multiple fields of one type)", () => {
+  // Two linkage fields of one semantic type -- the maiden + current name case. The
+  // adopted terms declare both (an inviter authored them); the acceptor must bind
+  // each to a DISTINCT column of its own file.
+  const terms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "acceptor",
+    date: "2026-01-01",
+    algorithm: "psi",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [
+      { name: "maiden_name", type: "first_name" },
+      { name: "current_name", type: "first_name" },
+    ],
+    linkageKeys: [
+      { name: "maiden", elements: [{ field: "maiden_name" }] },
+      { name: "current", elements: [{ field: "current_name" }] },
+    ],
+  };
+  const metadata: Array<ColumnMetadata> = [
+    {
+      name: "maiden_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "current_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const rawRows = [{ maiden_col: "Smith", current_col: "Jones" }];
+
+  test("the default type fallback collapses both same-typed fields onto the first column", () => {
+    const base = getDefaultStandardization(metadata, terms);
+    expect(base.map((t) => [t.output, t.input])).toEqual([
+      ["maiden_name", "maiden_col"],
+      ["current_name", "maiden_col"],
+    ]);
+  });
+
+  test("an input override gives the second field its own column and round-trips through prepareForExchange to distinct values", () => {
+    const standardization = applyInputOverrides(
+      getDefaultStandardization(metadata, terms),
+      new Map([["current_name", "current_col"]]),
+    );
+    expect(standardization.map((t) => [t.output, t.input])).toEqual([
+      ["maiden_name", "maiden_col"],
+      ["current_name", "current_col"],
+    ]);
+    // The same { metadata, standardization } the editor hands onLaunch, run through
+    // the exchange's own preparation: each field now reads its own column, so a row
+    // whose two name columns differ produces two distinct cleaned values (NAME_STEPS
+    // uppercases) rather than the collapsed identical pair the default would give.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata, standardization },
+      "acceptor",
+      rawRows,
+      ["maiden_col", "current_col"],
+    );
+    expect(prepared.dataset.getField("maiden_name")?.get(0)).toEqual(["SMITH"]);
+    expect(prepared.dataset.getField("current_name")?.get(0)).toEqual([
+      "JONES",
+    ]);
   });
 });
 

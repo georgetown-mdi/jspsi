@@ -50,6 +50,30 @@ export function applyStepOverrides(
 }
 
 /**
+ * Layer per-field input-column overrides onto a derived standardization: rebind a
+ * field (`output`) to an operator-chosen input column. The derived steps are kept
+ * unchanged -- the host only offers columns of the field's own semantic type, so the
+ * recommended cleaning still applies. This is what lets two fields of one semantic
+ * type bind to DISTINCT columns: the default type fallback binds every same-typed
+ * field to the FIRST column of the type (see {@link resolveFieldColumns}), so an
+ * explicit per-field input is the only way to give the second its own column. Pure;
+ * the host re-derives `base` from the current metadata each render and passes only
+ * overrides whose column is still a valid same-typed binding, so a remap that
+ * invalidates an override drops it rather than rebinding a wrong-typed column.
+ */
+export function applyInputOverrides(
+  base: Standardization,
+  overrides: ReadonlyMap<string, string>,
+): Standardization {
+  return base.map((transformation) => {
+    const column = overrides.get(transformation.output);
+    return column !== undefined && column !== transformation.input
+      ? { ...transformation, input: column }
+      : transformation;
+  });
+}
+
+/**
  * The descriptor for a function name, or `undefined` for a name core does not
  * recognize. The descriptor table is a total `Record`, so a bare index is typed
  * as always-present; the `Object.hasOwn` guard models the genuinely-absent case

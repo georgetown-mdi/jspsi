@@ -38,7 +38,11 @@ import {
   setColumnType,
 } from "@psi/metadataEditing";
 
-import { applyStepOverrides, isStepValid } from "@psi/standardizationAuthoring";
+import {
+  applyInputOverrides,
+  applyStepOverrides,
+  isStepValid,
+} from "@psi/standardizationAuthoring";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
@@ -135,32 +139,74 @@ export function PrepareData({
     Map<string, FieldStepOverride>
   >(new Map());
 
-  // The recommended per-type cleaning for whatever columns each field is currently
-  // bound to: the binding (input column, which fields exist) is always re-derived
-  // from the current metadata, so it tracks a remap.
+  // The operator's per-field input-column choices, keyed by field name -- like the
+  // step edits, an override LAYER over the derived binding (empty means every field
+  // takes its default type-fallback column). This is what lets two fields of one
+  // semantic type bind to DISTINCT columns: the default binds every same-typed field
+  // to the FIRST column of the type, so an explicit per-field input is the only way
+  // to give the second its own column.
+  const [inputOverrides, setInputOverrides] = useState<Map<string, string>>(
+    new Map(),
+  );
+
+  // The recommended per-type cleaning for the default type-fallback binding,
+  // re-derived from the current metadata so it tracks a remap.
   const baseStandardization = useMemo(
     () => getDefaultStandardization(metadata, linkageTerms),
     [metadata, linkageTerms],
   );
 
-  // The effective standardization the verdict and onLaunch consume: the derived
-  // bindings with each field's authored steps layered on where the operator edited
-  // them. An override survives an unrelated metadata edit (the field's binding is
-  // unchanged) but is dropped if the field is re-bound to a different column, so
-  // steps authored for one column never silently clean another (see
-  // applyStepOverrides).
-  const standardization = useMemo(
-    () => applyStepOverrides(baseStandardization, stepOverrides),
-    [baseStandardization, stepOverrides],
-  );
-
-  // Field name -> its declared linkage field, for the per-field card label and the
-  // value-level constraint check the preview runs. The field `name` is the
-  // transformation `output`, so this resolves every card's field.
+  // Field name -> its declared linkage field, for the per-field card label, the
+  // value-level constraint check the preview runs, and the input-column choices
+  // below. The field `name` is the transformation `output`.
   const fieldByName = useMemo(
     () =>
       new Map(linkageTerms.linkageFields.map((field) => [field.name, field])),
     [linkageTerms],
+  );
+
+  // The operator's non-ignored columns of a semantic type, in metadata order -- the
+  // columns a field of that type MAY bind to. More than one makes the input column a
+  // real choice (and lets two same-typed fields each take their own).
+  const columnsForType = (type: LinkageField["type"]): Array<string> =>
+    metadata
+      .filter((column) => column.role !== "ignored" && column.type === type)
+      .map((column) => column.name);
+
+  // The input-column overrides that still apply: an override is dropped when its
+  // chosen column is no longer a non-ignored column of the field's type (a metadata
+  // remap can invalidate one), so a stale binding never drives a wrong-typed column
+  // -- the field falls back to the default type-fallback binding instead.
+  const effectiveInputOverrides = useMemo(() => {
+    const valid = new Map<string, string>();
+    for (const [output, column] of inputOverrides) {
+      const field = fieldByName.get(output);
+      if (
+        field !== undefined &&
+        metadata.some(
+          (c) =>
+            c.name === column && c.role !== "ignored" && c.type === field.type,
+        )
+      )
+        valid.set(output, column);
+    }
+    return valid;
+  }, [inputOverrides, metadata, fieldByName]);
+
+  // The effective standardization the verdict and onLaunch consume: the derived
+  // bindings rebound to the operator's chosen input columns, with each field's
+  // authored steps layered on where it edited them. The input rebind runs FIRST so a
+  // step override authored against the old column is then seen as stale and dropped
+  // (applyStepOverrides gates on the current input), never silently cleaning a
+  // different column. With no overrides this equals the derived default byte for
+  // byte -- the acceptor's prior behavior.
+  const standardization = useMemo(
+    () =>
+      applyStepOverrides(
+        applyInputOverrides(baseStandardization, effectiveInputOverrides),
+        stepOverrides,
+      ),
+    [baseStandardization, effectiveInputOverrides, stepOverrides],
   );
 
   const setFieldSteps = (
@@ -168,6 +214,9 @@ export function PrepareData({
     input: string,
     steps: Array<StandardizationStep>,
   ) => setStepOverrides((prev) => new Map(prev).set(output, { input, steps }));
+
+  const setInputColumn = (output: string, column: string) =>
+    setInputOverrides((prev) => new Map(prev).set(output, column));
 
   const verdict = useMemo(
     () =>
@@ -462,6 +511,10 @@ export function PrepareData({
                         inputColumn={transformation.input}
                         steps={steps}
                         expert={expert}
+                        inputColumnOptions={columnsForType(field.type)}
+                        onInputColumnChange={(column) =>
+                          setInputColumn(transformation.output, column)
+                        }
                         onStepsChange={(next) =>
                           setFieldSteps(
                             transformation.output,
@@ -515,6 +568,7 @@ export function PrepareData({
           onClick={() => {
             setMetadata(initialMetadata);
             setStepOverrides(new Map());
+            setInputOverrides(new Map());
           }}
         >
           Reset to recommended
