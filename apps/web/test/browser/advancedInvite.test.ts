@@ -57,19 +57,18 @@ vi.mock("@components/ExchangeView", () => ({
   },
 }));
 
-// Count loadCSVColumns calls (keeping every other core export real) so the
-// StrictMode warm-path test can assert the header read fires once, not once per
-// double-invoked effect.
-const core = vi.hoisted(() => ({ loadCSVColumnsCalls: 0 }));
+// Count loadCSVFile calls (keeping every other core export real) so the StrictMode
+// warm-path test can assert the file parse fires once, not once per double-invoked
+// effect. The editor parses the full file on entry (for the workbench preview), so
+// this is the parse the warm path must not double-fire.
+const core = vi.hoisted(() => ({ loadCSVFileCalls: 0 }));
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    loadCSVColumns: (file: unknown) => {
-      core.loadCSVColumnsCalls += 1;
-      return (actual.loadCSVColumns as (f: unknown) => Promise<Array<string>>)(
-        file,
-      );
+    loadCSVFile: (file: unknown) => {
+      core.loadCSVFileCalls += 1;
+      return (actual.loadCSVFile as (f: unknown) => Promise<unknown>)(file);
     },
   };
 });
@@ -133,7 +132,7 @@ afterEach(() => {
   container = undefined;
   exchange.lastProps = undefined;
   gen.impl = undefined;
-  core.loadCSVColumnsCalls = 0;
+  core.loadCSVFileCalls = 0;
   clearAdvancedHandoff();
 });
 
@@ -152,7 +151,7 @@ describe("AdvancedInvite", () => {
   test("a warm hand-off seeds the editor without a re-drop", async () => {
     stashAdvancedHandoff({ file: csvFile(), name: "County Health Dept" });
     mount();
-    // The header is read and the editor opens, name prefilled from the hand-off.
+    // The file is parsed and the editor opens, name prefilled from the hand-off.
     await expect
       .element(page.getByText("Customize your invitation"))
       .toBeInTheDocument();
@@ -173,9 +172,9 @@ describe("AdvancedInvite", () => {
     await expect
       .element(page.getByRole("textbox", { name: "Your name" }))
       .toHaveValue("County Health Dept");
-    // The double-invoked effect is latched, so the header read fires once, and the
+    // The double-invoked effect is latched, so the file parse fires once, and the
     // stash is consumed (a return navigation would fall back to the picker).
-    expect(core.loadCSVColumnsCalls).toBe(1);
+    expect(core.loadCSVFileCalls).toBe(1);
     expect(peekAdvancedHandoff()).toBeUndefined();
   });
 
