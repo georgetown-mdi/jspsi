@@ -17,13 +17,14 @@ describe("withSecurityHeaders", () => {
     }
   });
 
-  test("denies framing and suppresses the referrer", () => {
+  test("denies framing, suppresses the referrer, and blocks MIME sniffing", () => {
     const hardened = withSecurityHeaders(new Response("ok"));
     expect(hardened.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(hardened.headers.get("X-Frame-Options")).toBe("DENY");
     expect(hardened.headers.get("Content-Security-Policy")).toBe(
       "frame-ancestors 'none'",
     );
+    expect(hardened.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
   test("preserves status, statusText, body, and existing headers", async () => {

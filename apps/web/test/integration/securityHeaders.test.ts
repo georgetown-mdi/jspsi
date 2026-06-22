@@ -19,6 +19,7 @@ const expectedHeaders: Record<string, string> = {
   "referrer-policy": "no-referrer",
   "x-frame-options": "DENY",
   "content-security-policy": "frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
 };
 
 async function expectSecurityHeaders(path: string): Promise<void> {

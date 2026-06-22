@@ -16,11 +16,17 @@
  * this one value to add such a policy rather than setting a second
  * `Content-Security-Policy` header: a browser enforces the intersection of
  * multiple CSP headers, which can silently tighten and break the page.
+ *
+ * `X-Content-Type-Options: nosniff` stops a browser from MIME-sniffing a
+ * response away from its declared `Content-Type`, so a response cannot be
+ * reinterpreted as a different, executable type. No route reflects untrusted
+ * bytes back over HTTP today, so this too is defense-in-depth.
  */
 export const securityResponseHeaders: Readonly<Record<string, string>> = {
   "Referrer-Policy": "no-referrer",
   "X-Frame-Options": "DENY",
   "Content-Security-Policy": "frame-ancestors 'none'",
+  "X-Content-Type-Options": "nosniff",
 };
 
 /**
