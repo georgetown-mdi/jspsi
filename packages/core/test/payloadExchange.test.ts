@@ -194,6 +194,23 @@ test("assertPayloadSendDisclosed: a fully disclosed send dictionary is accepted"
   expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
 });
 
+test("assertPayloadSendDisclosed: an identifier column left isPayload:true is disclosed and accepted", () => {
+  // isDisclosedToPartner is isPayload && role !== "ignored", so a role:identifier
+  // column left isPayload:true IS transmitted -- the subtle case the predicate's
+  // doc warns about. A payload.send naming it must be accepted, not flagged.
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    {
+      name: "patient_id",
+      type: "identifier",
+      role: "identifier",
+      isPayload: true,
+    },
+  ];
+  const payload: Payload = { send: [{ name: "patient_id" }] };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
+});
+
 test("assertPayloadSendDisclosed: an absent or empty payload is a no-op", () => {
   const meta: Metadata = [
     { name: "diagnosis", type: "other", role: "payload", isPayload: true },
