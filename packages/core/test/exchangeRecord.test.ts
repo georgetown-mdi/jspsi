@@ -467,15 +467,19 @@ describe("governance metadata", () => {
   });
 
   test("omits the legal agreement when the terms have none", async () => {
-    // baseInputs.localTerms (termsA) has no legalAgreement and no payload.
+    // baseInputs.localTerms (termsA) has no legalAgreement and no payload data
+    // dictionary, yet the committed payloads carry columns: the payload categories
+    // are read from the committed disclosure, not the (absent) dictionary, so they
+    // report the committed columns -- here with bare names, since there is no
+    // dictionary to attach descriptions from.
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
     expect("legalAgreement" in record.governance).toBe(false);
     expect(record.governance.algorithm).toBe("psi");
     expect(record.governance.matchingBasis).toEqual([
       { name: "ssn", type: "ssn" },
     ]);
-    expect(record.governance.payloadSent).toEqual([]);
-    expect(record.governance.payloadReceived).toEqual([]);
+    expect(record.governance.payloadSent).toEqual([{ name: "dose" }]);
+    expect(record.governance.payloadReceived).toEqual([{ name: "status" }]);
   });
 
   test("matching basis covers only the fields the linkage keys reference", async () => {
@@ -501,8 +505,21 @@ describe("governance metadata", () => {
 
   test("represents the no-payload count-only (psi-c) case explicitly", async () => {
     const countOnly: LinkageTerms = { ...termsA, algorithm: "psi-c" };
+    // A count-only exchange commits no payload, so the committed sets are the
+    // empty no-data value -- the payload categories are read from those committed
+    // sets, so they are empty too.
+    const noPayload: CommittedPayload = {
+      columns: [],
+      rowIndices: [],
+      rows: [],
+    };
     const { record } = await buildExchangeRecord(
-      { ...baseInputs, localTerms: countOnly },
+      {
+        ...baseInputs,
+        localTerms: countOnly,
+        localPayloadSent: noPayload,
+        partnerPayloadReceived: noPayload,
+      },
       fixedRandomness,
     );
     expect(record.governance.algorithm).toBe("psi-c");
@@ -522,6 +539,66 @@ describe("governance metadata", () => {
     // 'status' has no description -> the key is omitted, not set to undefined.
     expect(record.governance.payloadReceived).toEqual([{ name: "status" }]);
     expect("description" in record.governance.payloadReceived[0]).toBe(false);
+  });
+
+  test("payload categories reflect the committed columns when no data dictionary is authored (web regression)", async () => {
+    // The web term builders never populate terms.payload, yet real columns flow
+    // through the metadata disclosure gate and are committed. The record must
+    // report the committed columns in both directions -- otherwise an accounting
+    // of disclosures under-reports what was sent and received.
+    const sent: CommittedPayload = {
+      columns: ["dose", "visit_date"],
+      rowIndices: [0],
+      rows: [["10mg", "2025-02-01"]],
+    };
+    const received: CommittedPayload = {
+      columns: ["status"],
+      rowIndices: [0],
+      rows: [["active"]],
+    };
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: termsA, // no payload dictionary, as the web path produces
+        localPayloadSent: sent,
+        partnerPayloadReceived: received,
+      },
+      fixedRandomness,
+    );
+    expect(record.governance.payloadSent).toEqual([
+      { name: "dose" },
+      { name: "visit_date" },
+    ]);
+    expect(record.governance.payloadReceived).toEqual([{ name: "status" }]);
+  });
+
+  test("payloadSent follows the committed set, not payload.send, when they differ", async () => {
+    // The data dictionary may legitimately under-declare what the metadata gate
+    // discloses (a declaration is validated only as a SUBSET of the gate). The
+    // committed set is authoritative: a disclosed column absent from payload.send
+    // still appears (bare), a declared column keeps its description, and the order
+    // is the committed order.
+    const sent: CommittedPayload = {
+      columns: ["dose", "extra"],
+      rowIndices: [0],
+      rows: [["10mg", "x"]],
+    };
+    const underDeclared: LinkageTerms = {
+      ...termsA,
+      payload: {
+        send: [
+          { name: "dose", description: "Administered dose in milligrams." },
+        ],
+      },
+    };
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, localTerms: underDeclared, localPayloadSent: sent },
+      fixedRandomness,
+    );
+    expect(record.governance.payloadSent).toEqual([
+      { name: "dose", description: "Administered dose in milligrams." },
+      { name: "extra" },
+    ]);
   });
 
   // The privacy invariant on the record body: it carries only readable governance

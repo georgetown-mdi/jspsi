@@ -275,12 +275,14 @@ export interface ExchangeRecordGovernance {
    * only -- never values. Sorted by `name` (UTF-16 code unit) so both parties and
    * both implementations derive the same order. */
   matchingBasis: RecordLinkageField[];
-  /** The payload columns this party sent for matched records (names and any
-   * descriptions). Empty when this party sent no payload (count-only `psi-c`, or
-   * no payload configured) -- represented explicitly, not by omission. */
+  /** The payload columns this party committed as sent for matched records (names
+   * and any data-dictionary descriptions) -- the columns the disclosure gate
+   * actually transmitted, not a declared dictionary that may under-state them.
+   * Empty when this party committed no payload (count-only `psi-c`, no columns
+   * disclosed, or no matched records) -- represented explicitly, not by omission. */
   payloadSent: RecordPayloadColumn[];
-  /** The payload columns this party received for matched records. Empty when this
-   * party received no payload. */
+  /** The payload columns this party committed as received for matched records.
+   * Empty when this party received no payload. */
   payloadReceived: RecordPayloadColumn[];
 }
 
@@ -597,24 +599,53 @@ export interface BuiltExchangeRecord {
 }
 
 /**
- * Derive the record's readable governance metadata from this party's agreed
- * terms. The source is the local terms throughout: `algorithm`, `legalAgreement`,
- * and the linkage fields/keys are cross-party validated (so they equal the
- * partner's), while `payload.send`/`payload.receive` are this party's own view of
- * what it sent and received. Reads names, types, descriptions, and the agreement
- * reference and purpose only -- never a value.
+ * Derive the record's readable governance metadata.
+ *
+ * `algorithm`, `legalAgreement`, and the matching basis come from this party's
+ * agreed terms: the first two are cross-party validated (so they equal the
+ * partner's), and the matching basis is the linkage fields the keys reference.
+ *
+ * The payload column SETS, however, are read from the COMMITTED payloads
+ * (`localPayloadSent` / `partnerPayloadReceived`), not from the optional
+ * `terms.payload.send`/`receive` data dictionary. The dictionary is operator-
+ * authored and may be empty (the web term builders never populate it) or
+ * under-declare what the metadata disclosure gate actually transmits, while the
+ * committed columns ARE what flowed -- the output of the same
+ * `isDisclosedToPartner` gate that drives `preparePayload`. Sourcing the readable
+ * list from the committed columns keeps `payloadSent`/`payloadReceived` from
+ * drifting from the committed bytes (reading "sent nothing" while real columns
+ * were committed), and -- because a sender's `localPayloadSent` and the receiver's
+ * `partnerPayloadReceived` commit over byte-identical data -- keeps the two
+ * parties' records mutually consistent for the same exchange. The dictionary is
+ * still consulted, by column name, for the optional data-dictionary DESCRIPTION
+ * attached to each committed column; a committed column the dictionary does not
+ * describe carries a bare name. Reads names, types, descriptions, and the
+ * agreement reference and purpose only -- never a value.
  */
-function governanceFromTerms(terms: LinkageTerms): ExchangeRecordGovernance {
-  const toColumn = (c: {
-    name: string;
-    description?: string;
-  }): RecordPayloadColumn =>
-    // Omit `description` entirely when absent rather than emitting `undefined`:
-    // an absent key and a null/undefined key are distinct in the canonical
-    // encoding the deferred signing work will hash over this record.
-    c.description !== undefined
-      ? { name: c.name, description: c.description }
-      : { name: c.name };
+function governanceFromTerms(
+  terms: LinkageTerms,
+  localPayloadSent: CommittedPayload,
+  partnerPayloadReceived: CommittedPayload,
+): ExchangeRecordGovernance {
+  // Map the columns ACTUALLY committed for a direction into record columns,
+  // attaching each column's data-dictionary description from the operator-authored
+  // declared list (looked up by name) when one is present. The committed columns
+  // are authoritative for the set; the dictionary only annotates them. Omit
+  // `description` entirely when absent rather than emitting `undefined`: an absent
+  // key and a null/undefined key are distinct in the canonical encoding the
+  // deferred signing work will hash over this record.
+  const describeCommitted = (
+    committedColumns: readonly string[],
+    declared: ReadonlyArray<{ name: string; description?: string }> | undefined,
+  ): RecordPayloadColumn[] => {
+    const descriptionByName = new Map(
+      (declared ?? []).map((c) => [c.name, c.description] as const),
+    );
+    return committedColumns.map((name) => {
+      const description = descriptionByName.get(name);
+      return description !== undefined ? { name, description } : { name };
+    });
+  };
 
   // The matching basis is the linkage fields the keys ACTUALLY reference, not
   // every declared field: a declared-but-unused field was not matched on, so
@@ -656,8 +687,14 @@ function governanceFromTerms(terms: LinkageTerms): ExchangeRecordGovernance {
         }
       : {}),
     matchingBasis,
-    payloadSent: (terms.payload?.send ?? []).map(toColumn),
-    payloadReceived: (terms.payload?.receive ?? []).map(toColumn),
+    payloadSent: describeCommitted(
+      localPayloadSent.columns,
+      terms.payload?.send,
+    ),
+    payloadReceived: describeCommitted(
+      partnerPayloadReceived.columns,
+      terms.payload?.receive,
+    ),
   };
 }
 
@@ -717,11 +754,16 @@ export async function buildExchangeRecord(
     termsHash,
     localIdentity: identitySchema.parse(inputs.localTerms.identity),
     partnerIdentity: identitySchema.parse(inputs.partnerTerms.identity),
-    // Readable governance metadata, derived from this party's agreed terms (which
-    // are already schema-validated, so the governance fields are well-formed by
-    // construction). Carries no values -- only names, categories, descriptions,
-    // and the agreement reference.
-    governance: governanceFromTerms(inputs.localTerms),
+    // Readable governance metadata. The agreement, algorithm, and matching basis
+    // come from this party's agreed terms (already schema-validated, so well-formed
+    // by construction); the payload column sets come from the committed payloads, so
+    // the readable disclosure cannot diverge from the committed bytes. Carries no
+    // values -- only names, categories, descriptions, and the agreement reference.
+    governance: governanceFromTerms(
+      inputs.localTerms,
+      inputs.localPayloadSent,
+      inputs.partnerPayloadReceived,
+    ),
     // This party's own input row count, validated on build with the
     // same schema the parser uses (as createdAt/resultSize below): a negative or
     // non-safe-integer count throws here rather than producing a record the parser
