@@ -29,8 +29,11 @@ let root: Root | undefined;
 const onGenerate =
   vi.fn<(terms: LinkageTerms, lifetimeSeconds: number) => void>();
 
-function mount(initialIdentity = "County Health Dept"): AdvancedInviteSeed {
-  const { seed } = seedAdvancedInvite(initialIdentity, ALL_COLUMNS);
+function mount(
+  initialIdentity = "County Health Dept",
+  columns: Array<string> = ALL_COLUMNS,
+): AdvancedInviteSeed {
+  const { seed } = seedAdvancedInvite(initialIdentity, columns);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -139,6 +142,60 @@ describe("LinkageTermsEditor", () => {
     await expect
       .element(page.getByText("Enter a name to identify yourself."))
       .toBeInTheDocument();
+  });
+
+  test("two identifier columns gate Generate until one is resolved", async () => {
+    // Mirrors the acceptor's two-identifier gate (acceptConsentGate.test.ts): `id`
+    // and `identifier` both infer to role:identifier, so the seed carries two. The
+    // name + dob columns make the LN+FN+DOB key satisfiable (validation otherwise
+    // passes), but the grid flags the ambiguous identifier and Generate stays
+    // disabled -- with the footer status consistent with the button -- until the
+    // operator picks a single one.
+    mount("County Health Dept", [
+      "id",
+      "identifier",
+      "first_name",
+      "last_name",
+      "dob",
+    ]);
+    await expect
+      .element(
+        page.getByText(
+          "Only one column can be the row identifier. Choose a single identifier.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect.element(generateButton()).toBeDisabled();
+    await expect
+      .element(page.getByText("Resolve the highlighted items to continue."))
+      .toBeInTheDocument();
+
+    // The block is announced, not a silent visual-only footer swap: the footer
+    // status sits in a polite live region (the acceptor verdict idiom), so a
+    // screen reader hears the gate engage and later release.
+    const footerStatus = page
+      .getByText("Resolve the highlighted items to continue.")
+      .element()
+      .closest('[role="status"]');
+    expect(footerStatus?.getAttribute("aria-live")).toBe("polite");
+
+    // Demote one identifier to Ignored, leaving a single row identifier: the grid
+    // error clears and Generate re-enables. The disclosure dropdown opens
+    // highlighting the current "Row identifier - not sent" choice; two steps down
+    // reach "Ignored" ("Row identifier - not sent" -> "Sent to your partner" ->
+    // "Ignored").
+    await userEvent.click(
+      page.getByRole("combobox", { name: "How column id is used" }),
+    );
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    await expect
+      .element(
+        page.getByText(
+          "Only one column can be the row identifier. Choose a single identifier.",
+        ),
+      )
+      .not.toBeInTheDocument();
+    await expect.element(generateButton()).toBeEnabled();
   });
 
   test("Reset to recommended restores the seeded name after an edit", async () => {

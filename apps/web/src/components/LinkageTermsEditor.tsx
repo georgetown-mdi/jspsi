@@ -41,6 +41,7 @@ import {
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
+import { hasMultipleIdentifiers } from "@psi/metadataEditing";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { InvitationTerms } from "@components/InvitationTerms";
@@ -192,6 +193,19 @@ export function LinkageTermsEditor({
   );
   const previewTerms = useMemo(() => buildAdvancedTerms(draft), [draft]);
 
+  // The single-identifier gate, mirroring the acceptor (PrepareData's
+  // `multipleIdentifiers`): `inferMetadata` can SEED two row-identifier columns
+  // (an `id` and an `identifier` both infer to `role: identifier`), which the
+  // grid surfaces as its red "Only one column can be the row identifier" error.
+  // Fold it into a single `canGenerate` used uniformly by the footer status, the
+  // Generate button, and `handleGenerate`, so the three stay consistent and an
+  // invitation cannot be minted while the metadata is in that known-invalid state.
+  // `validateAdvancedInvite` is metadata-disclosure-agnostic by design, so this
+  // stays a component gate over the same predicate the acceptor uses rather than a
+  // new validation rule.
+  const canGenerate =
+    validation.canGenerate && !hasMultipleIdentifiers(draft.metadata);
+
   // Per-key satisfiability badge, derived from the draft's CURRENT metadata so it
   // tracks column-type edits. A field is producible when the edited metadata has a
   // non-ignored column of its type; the offerable terms for that metadata declare
@@ -324,7 +338,7 @@ export function LinkageTermsEditor({
   };
 
   const handleGenerate = () => {
-    if (!validation.canGenerate || validation.terms === undefined) return;
+    if (!canGenerate || validation.terms === undefined) return;
     onGenerate(validation.terms, draft.lifetimeSeconds, draft.metadata);
   };
 
@@ -673,8 +687,16 @@ export function LinkageTermsEditor({
         }}
       >
         <Group justify="space-between">
-          <Group gap="xs">
-            {validation.canGenerate ? (
+          {/* The validation status lives in ONE stable, polite, atomic live
+              region -- the same idiom as the acceptor's PrepareData verdict. The
+              wrapper persists across renders while the inner text swaps, so a
+              screen reader hears the Ready <-> Resolve transition (including the
+              inviter newly blocking on the two-identifier state), not only the
+              sighted footer change; a bare swap of two separately-mounted nodes
+              would not reliably announce it. Polite, not assertive, so it does
+              not fight the heading focus on mount. */}
+          <div role="status" aria-live="polite" aria-atomic="true">
+            {canGenerate ? (
               <Text size="sm" c="dimmed">
                 Ready to generate.
               </Text>
@@ -688,14 +710,14 @@ export function LinkageTermsEditor({
                 Resolve the highlighted items to continue.
               </Text>
             )}
-          </Group>
+          </div>
           <Group gap="sm">
             <Button variant="default" onClick={handleReset}>
               Reset to recommended
             </Button>
             <Button
               onClick={handleGenerate}
-              disabled={!validation.canGenerate || generating}
+              disabled={!canGenerate || generating}
               loading={generating}
             >
               Generate invitation
