@@ -244,19 +244,21 @@ describe("default SSN / SSN4 pipelines: explicit blank-drop before pad_left", ()
       expect(padIdx).toBeGreaterThan(emptyDropIdx);
     });
 
-    test(`${type}: a blank still drops with the placeholder null_if removed`, () => {
+    test(`${type}: a blank or cleaned-empty value still drops with the placeholder null_if removed`, () => {
       // Prove the explicit empty-drop is load-bearing, not redundant with the
       // terminal placeholder null_if: strip the placeholder step (the null_if
-      // listing all-zeros/sequential placeholders via `values`) and a blank must
-      // still map to null. Without the explicit `null_if ""`, the blank would pad
-      // to an all-zeros value and survive as a matchable key.
+      // listing all-zeros/sequential placeholders via `values`) and a value that
+      // is blank ("", "   ") OR cleans to empty through the chain ("abc", "----"
+      // lose every non-digit) must still map to null. Without the explicit
+      // `null_if ""`, such a value would pad to an all-zeros value and survive as
+      // a matchable key.
       const withoutPlaceholder = stepsFor(type, column).filter(
         (s) => !(s.function === "null_if" && s.params?.values !== undefined),
       );
-      for (const blank of ["", "   ", "abc", "----"]) {
+      for (const input of ["", "   ", "abc", "----"]) {
         expect(
-          runPipeline(blank, withoutPlaceholder),
-          `input ${JSON.stringify(blank)}`,
+          runPipeline(input, withoutPlaceholder),
+          `input ${JSON.stringify(input)}`,
         ).toBeNull();
       }
     });
