@@ -50,10 +50,13 @@ export function useNonEmptyRates(
   useEffect(() => {
     const controller = new NonEmptyRateController(rawRows, spawnWorker);
     controllerRef.current = controller;
-    // Drop any prior file's coverage immediately: until the new sweep settles the
-    // host shows the pending state, never the previous file's rate (or alarm) for a
-    // same-named field.
+    // Drop any prior file's coverage immediately and re-enter the pending state: until
+    // the new sweep settles the host shows "Checking...", never nothing and never the
+    // previous file's rate (or alarm) for a same-named field. Resetting pending here
+    // (not only in the compute effect, which runs second) keeps the two in lockstep
+    // for the new row set rather than relying on effect-ordering and update batching.
     setRates(null);
+    setPending(true);
     return () => {
       controller.dispose();
       controllerRef.current = null;

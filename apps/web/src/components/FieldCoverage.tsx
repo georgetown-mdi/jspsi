@@ -45,7 +45,11 @@ export function FieldCoverage({
 }: {
   /** This field's coverage, or `undefined` before the first sweep settles. */
   rate: FieldValueCoverage | undefined;
-  /** Whether a recompute is in flight (debounce pending or worker running). */
+  /** Whether a recompute is in flight. Consulted only before the first result: it
+   * drives the "Checking..." placeholder while `rate` is still `undefined`. Once a
+   * rate exists it is shown across later recomputes with no staleness treatment --
+   * the background sweep is debounced precisely so the readout does not flicker on
+   * every keystroke. */
   pending: boolean;
 }) {
   if (rate === undefined)
