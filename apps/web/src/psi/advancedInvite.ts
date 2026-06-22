@@ -836,16 +836,101 @@ export function gatedActiveSettingMessage(
   );
 }
 
+/**
+ * Reconstruct the importer's local standardization for an imported terms document.
+ * Standardization is per-party and never travels in the token, so the imported
+ * {@link LinkageTerms} carry the field DECLARATIONS (`linkageFields`) but not the
+ * column BINDING that produced them; this rebuilds a binding the inviter's own
+ * columns can satisfy, the import-time analogue of the workbench's `addFieldForType`
+ * (the producer of these bindings).
+ *
+ * It starts from the full per-type default ({@link defaultStandardizationForRows}
+ * over the seed's default terms -- the standardization a single-field import has
+ * always opened on, and the seed's own), then adds a binding for each imported
+ * linkage field the default does not already declare: the multi-field fields, a
+ * second-or-later field of one semantic type (e.g. `first_name_2`). Each such field
+ * binds to the next non-`ignored` column of its type not already bound, reusing its
+ * type's recommended cleaning steps (derived from {@link defaultStandardizationForRows}
+ * over the IMPORTED terms, so the steps and the row-inferred date format hold even
+ * when the seed's default terms declare no field of that type). `authoredLinkageFields`
+ * over the result then re-emits the imported fields' names in their original order,
+ * so {@link buildAdvancedTerms} reproduces the imported `linkageFields` and the
+ * cross-party hash is unchanged.
+ *
+ * Fail-closed: a field whose type has no free, non-`ignored` column left (the
+ * inviter's columns cannot supply a distinct binding) gets no transformation, so it
+ * stays undeclared and the key referencing it surfaces as unsatisfiable -- it is
+ * never bound to an absent, `ignored`, or already-taken column. An import that
+ * declares only the single default field per type adds nothing, so it reconstructs
+ * the seed's default standardization byte-for-byte.
+ */
+function standardizationForImportedTerms(
+  metadata: Metadata,
+  defaultTerms: LinkageTerms,
+  terms: LinkageTerms,
+  rawRows: ReadonlyArray<Record<string, string>>,
+): Standardization {
+  const base = defaultStandardizationForRows(metadata, defaultTerms, rawRows);
+  // The recommended steps each imported field's type cleans with, keyed by field
+  // name. Derived from the default standardization over the IMPORTED terms (not the
+  // seed's), so it covers every imported field's type -- including one the inviter
+  // has columns for but no default key uses, which the seed's default terms (and so
+  // `base`) would not carry -- and bakes in the row-inferred date format. The input
+  // columns it picks collide on the first per type; only the steps are read here,
+  // and the distinct columns are assigned below.
+  const stepsByField = new Map(
+    defaultStandardizationForRows(metadata, terms, rawRows).map(
+      (transformation) => [transformation.output, transformation.steps],
+    ),
+  );
+  // The default-named field each type already binds; only the EXTRA same-typed
+  // fields (first_name_2, ...) need a reconstructed binding.
+  const baseOutputs = new Set(
+    base.map((transformation) => transformation.output),
+  );
+  // Columns already bound -- by the default base, then by each extra added below --
+  // so every reconstructed same-typed field takes its OWN column (mirroring
+  // addFieldForType's free-column search, which produced these bindings).
+  const boundColumns = new Set(
+    base.map((transformation) => transformation.input),
+  );
+
+  const extras: Standardization = [];
+  for (const field of terms.linkageFields) {
+    if (baseOutputs.has(field.name)) continue;
+    // No recommended steps means the type has no non-`ignored` column (or no default
+    // pipeline), so the field cannot be reconstructed -- leave it undeclared
+    // (fail-closed).
+    if (!stepsByField.has(field.name)) continue;
+    const freeColumn = metadata.find(
+      (column) =>
+        column.type === field.type &&
+        column.role !== "ignored" &&
+        !boundColumns.has(column.name),
+    );
+    if (freeColumn === undefined) continue;
+    boundColumns.add(freeColumn.name);
+    extras.push({
+      output: field.name,
+      input: freeColumn.name,
+      steps: stepsByField.get(field.name),
+    });
+  }
+  return [...base, ...extras];
+}
+
 /** Build an editor draft from imported, validated {@link LinkageTerms}. identity,
  * output direction, algorithm, deduplicate, the optional legal agreement, and
  * every linkage key (all enabled) come from the imported terms; the column
  * metadata stays the inviter's own (`seed.metadata`), since terms carry no
  * per-party column binding, and the lifetime is the caller's (terms do not carry
- * it). Field DEFINITIONS are re-derived from the inviter's columns at build time,
- * so an imported key referencing a field the columns cannot produce surfaces as
- * unsatisfiable rather than silently mis-binding (the deferred multi-field /
- * custom-binding case). The caller refuses a gated-active import first (see
- * {@link gatedActiveSettingMessage}). */
+ * it). The local standardization is reconstructed from the imported field
+ * declarations against the inviter's columns (see
+ * {@link standardizationForImportedTerms}), so a multi-field document's distinct
+ * same-typed bindings are restored when the columns can supply them and the
+ * import/export round-trip holds; a field no column can satisfy stays undeclared
+ * and its key surfaces as unsatisfiable rather than silently mis-binding. The
+ * caller refuses a gated-active import first (see {@link gatedActiveSettingMessage}). */
 export function draftFromTerms(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
@@ -867,15 +952,10 @@ export function draftFromTerms(
           }
         : undefined,
     metadata: seed.metadata,
-    // Imported terms carry no per-party binding (standardization is local), so the
-    // cleaning stays the inviter's own default for its columns -- the same default
-    // the guided path seeds, with the dob format inferred from the rows. An imported
-    // key referencing a custom multi-field name therefore finds no such field and
-    // surfaces as unsatisfiable (the deferred import-of-multi-field case noted
-    // above), rather than silently mis-binding.
-    standardization: defaultStandardizationForRows(
+    standardization: standardizationForImportedTerms(
       seed.metadata,
       seed.terms,
+      terms,
       rawRows,
     ),
     keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),

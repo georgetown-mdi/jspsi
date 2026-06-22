@@ -362,8 +362,11 @@ export function LinkageTermsEditor({
 
   // Load an imported, validated terms set into the draft (the import panel has
   // already refused any gated-active setting). The metadata stays the inviter's
-  // own columns -- terms carry no per-party binding -- so an imported key the
-  // columns cannot satisfy shows as not-satisfiable rather than silently breaking.
+  // own columns -- terms carry no per-party binding -- and draftFromTerms
+  // reconstructs the local standardization from the imported field declarations:
+  // a multi-field document's distinct same-typed bindings are restored when the
+  // columns can supply them, and a key the columns cannot satisfy shows as
+  // not-satisfiable rather than silently breaking.
   const handleImport = (terms: LinkageTerms) => {
     setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds, rawRows));
     // The imported keys are author-controlled (not the metadata template), so a
