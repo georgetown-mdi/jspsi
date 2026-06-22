@@ -20,7 +20,8 @@ import type { LinkageTerms } from "@psilink/core";
  * it. The browser may copy the blob asynchronously, so revoking too soon (even on
  * the next task) can abort the save; a generous fixed delay outlives the transfer
  * while still freeing the URL rather than leaking it for the document lifetime.
- * Matches the long-standing file-saver convention. */
+ * A fixed multi-second delay in the same spirit as the long-used file-saver
+ * approach (which defers its own revoke by tens of seconds). */
 const REVOKE_DELAY_MS = 60_000;
 
 /** Trigger a client-side download of `content` as `filename`. The terms never
