@@ -898,10 +898,13 @@ function standardizationForImportedTerms(
   const extras: Standardization = [];
   for (const field of terms.linkageFields) {
     if (baseOutputs.has(field.name)) continue;
-    // No recommended steps means the type has no non-`ignored` column (or no default
-    // pipeline), so the field cannot be reconstructed -- leave it undeclared
-    // (fail-closed).
-    if (!stepsByField.has(field.name)) continue;
+    // The default standardization over the imported terms emitted no transformation
+    // for this field -- its type has no non-`ignored` column to bind, or no default
+    // cleaning pipeline -- so it cannot be reconstructed and is left undeclared
+    // (fail-closed). Reading the steps here (rather than a separate `.has()` probe)
+    // also narrows them to a defined array for the push below.
+    const steps = stepsByField.get(field.name);
+    if (steps === undefined) continue;
     const freeColumn = metadata.find(
       (column) =>
         column.type === field.type &&
@@ -913,7 +916,7 @@ function standardizationForImportedTerms(
     extras.push({
       output: field.name,
       input: freeColumn.name,
-      steps: stepsByField.get(field.name),
+      steps,
     });
   }
   return [...base, ...extras];
