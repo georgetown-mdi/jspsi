@@ -56,6 +56,7 @@ export class NonEmptyRateController {
   >();
   private readonly failers = new Map<number, (error: unknown) => void>();
   private disposed = false;
+  private failed = false;
 
   constructor(
     rawRows: ReadonlyArray<Record<string, string>>,
@@ -84,7 +85,9 @@ export class NonEmptyRateController {
    * Compute the per-field rates for `standardization`. Resolves inline (already
    * settled) below the threshold, or when the worker posts back the matching token
    * above it. A compute superseded by {@link dispose} never settles -- the caller
-   * (the hook) guards with its own cancellation flag and ignores a stale result.
+   * (the hook) guards with its own cancellation flag and ignores a stale result. A
+   * compute after a worker failure ({@link onError}) rejects at once, so the hook
+   * settles to an unavailable state rather than posting to a dead worker and hanging.
    */
   compute(
     standardization: Standardization,
@@ -93,6 +96,17 @@ export class NonEmptyRateController {
       return Promise.resolve(
         computeFieldCoverage(this.rawRows, standardization),
       );
+    if (this.disposed)
+      // Superseded by dispose: leave it unsettled (the hook discards it via its own
+      // cancellation flag). Rejecting on a teardown the caller already abandoned
+      // would surface an unhandled rejection.
+      return new Promise<Array<FieldValueCoverage>>(() => {
+        /* intentionally never settles -- see above */
+      });
+    if (this.failed)
+      // The worker is gone (see onError); reject fast rather than post to a dead
+      // worker and hang forever on a promise it can never answer.
+      return Promise.reject(new Error("aggregate worker failed"));
     const token = this.nextToken++;
     return new Promise((resolve, reject) => {
       this.pending.set(token, resolve);
@@ -120,8 +134,13 @@ export class NonEmptyRateController {
   }
 
   private onError(error: unknown): void {
-    // A worker-level failure fails every in-flight compute so the hook can settle
-    // to an unavailable state rather than hang.
+    if (this.disposed) return;
+    // A worker-level failure is unrecoverable for this row set: terminate the broken
+    // worker and mark the controller failed so a later compute() rejects fast (the
+    // hook then settles to an unavailable state) instead of posting to a dead worker
+    // that never replies and hangs the check. Fail every in-flight compute likewise.
+    this.failed = true;
+    this.worker?.terminate();
     for (const fail of this.failers.values()) fail(error);
     this.pending.clear();
     this.failers.clear();

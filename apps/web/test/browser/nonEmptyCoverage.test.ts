@@ -123,6 +123,26 @@ describe("FieldCoverage: the visible value-level defense", () => {
       .toHaveTextContent("9,999 of 10,000 rows produce a value (>99%)");
   });
 
+  test("an empty file (zero rows) renders nothing, never a 0% that reads like the alarm", async () => {
+    // Render a sentinel beside it so the absence assertion runs after the commit.
+    render(
+      createElement(
+        "div",
+        null,
+        createElement(FieldCoverage, {
+          rate: rate({ total: 0, produced: 0, rate: 0 }),
+          pending: false,
+        }),
+        createElement("span", { "data-testid": "sentinel" }, "ready"),
+      ),
+    );
+    await expect.element(page.getByTestId("sentinel")).toBeInTheDocument();
+    expect(page.getByTestId("coverage-rate").elements()).toHaveLength(0);
+    expect(page.getByTestId("coverage-silent-empty").elements()).toHaveLength(
+      0,
+    );
+  });
+
   test("an unavailable rate (steps mid-edit) renders nothing", async () => {
     // Render a sentinel beside it so the absence assertion runs after the commit,
     // not before it (when everything would be trivially absent).

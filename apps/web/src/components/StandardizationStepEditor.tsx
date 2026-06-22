@@ -21,6 +21,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
+import { useIsomorphicEffect } from "@mantine/hooks";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
@@ -334,9 +335,14 @@ export function StandardizationStepEditor({
     onStepsChange(next);
   };
 
-  // Apply the pending focus once the new list is in the DOM. Keyed on the step array
-  // so it runs exactly on a structural commit, after React has rendered the new rows.
-  useEffect(() => {
+  // Apply the pending focus once the new list is in the DOM. A layout effect (not a
+  // passive one) so focus lands synchronously before paint -- otherwise a removed or
+  // moved control leaves focus on <body> for a frame, a visible flicker. Keyed on the
+  // step array, so it also fires on a param edit (which produces a new array); that is
+  // a no-op because only the move/remove handlers set pendingFocusRef -- the null
+  // guard below exits at once when no structural edit queued a target. (Isomorphic so
+  // it degrades to a passive effect under SSR rather than warning.)
+  useIsomorphicEffect(() => {
     const pending = pendingFocusRef.current;
     if (pending === null) return;
     pendingFocusRef.current = null;

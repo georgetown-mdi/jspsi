@@ -57,6 +57,11 @@ export function FieldCoverage({
 
   if (rate.unavailable) return null;
 
+  // An empty file has nothing to measure: "0 of 0 rows produce a value (0%)" would
+  // read like the silent-empty alarm (which {@link formatRate} is careful never to
+  // emit), so render nothing. Emptiness is conveyed upstream, not by this readout.
+  if (rate.total === 0) return null;
+
   if (isSilentEmpty(rate))
     return (
       <Alert

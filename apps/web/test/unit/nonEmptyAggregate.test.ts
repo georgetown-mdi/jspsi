@@ -220,4 +220,45 @@ describe("NonEmptyRateController: off-main-thread dispatch above the threshold",
     controller.dispose();
     expect(fake.terminated).toBe(true);
   });
+
+  test("a worker error fails the in-flight compute and a later compute rejects, never hanging", async () => {
+    const fake = new FakeAggregateWorker();
+    const controller = new NonEmptyRateController(
+      rowsOf(NON_EMPTY_WORKER_ROW_THRESHOLD + 1),
+      () => fake,
+    );
+
+    // The compute in flight when the worker dies is rejected (not left hanging), so
+    // the hook can settle to an unavailable state.
+    const inFlight = controller.compute(UPPER);
+    fake.onerror?.("boom");
+    await expect(inFlight).rejects.toBe("boom");
+    // The broken worker is torn down so nothing keeps posting to it.
+    expect(fake.terminated).toBe(true);
+
+    // A later compute on the now-failed controller rejects at once rather than posting
+    // to the dead worker and hanging on a promise it can never answer (the regression
+    // this guards: a one-off worker error otherwise wedged the check in `pending`).
+    await expect(controller.compute(UPPER)).rejects.toThrow(
+      "aggregate worker failed",
+    );
+  });
+
+  test("a compute after dispose neither posts to the terminated worker nor settles", async () => {
+    const fake = new FakeAggregateWorker();
+    const controller = new NonEmptyRateController(
+      rowsOf(NON_EMPTY_WORKER_ROW_THRESHOLD + 1),
+      () => fake,
+    );
+    controller.dispose();
+
+    const settled = vi.fn();
+    void controller.compute(UPPER).then(settled, settled);
+    // Flush microtasks: the disposed compute must not resolve, reject, or post a
+    // compute message to the terminated worker.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    expect(fake.received.filter((m) => m.kind === "compute")).toHaveLength(0);
+  });
 });
