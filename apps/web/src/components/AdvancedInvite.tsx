@@ -41,9 +41,9 @@ import type { GeneratedInvitation } from "@psi/invitation";
 /**
  * The Advanced-options invite flow's container (the `/advanced` route's
  * component). It acquires the inviter's CSV -- either handed over from the compose
- * screen's "Advanced options" click or chosen here on a cold load -- reads its
- * column headers (not the whole file; see {@link loadCSVColumns}), seeds the
- * {@link LinkageTermsEditor} from them, and on Generate mints the invitation from
+ * screen's "Advanced options" click or chosen here on a cold load -- parses it in
+ * full (see {@link loadCSVFile}), seeds the {@link LinkageTermsEditor} from its
+ * columns, and on Generate mints the invitation from
  * the authored terms and transitions in place to the shared {@link ExchangeView},
  * mirroring the quick compose screen's session -> exchange handoff.
  *
