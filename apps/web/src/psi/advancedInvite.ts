@@ -538,17 +538,37 @@ export function updateKeyAt(
   };
 }
 
-/** Apply `fn` to one element of one key (field, alias, transform, or fuzzy). */
+/** Drop a key's `swap` when either target no longer names one of its element
+ * identifiers (`name ?? field`) -- e.g. after the targeted element is removed or
+ * its alias/field is edited. Without this an orphaned swap target lingers in the
+ * draft and blocks Generate (the schema's swap-target refine rejects it) with a
+ * key-list error rather than the swap control simply clearing; pruning keeps the
+ * control and the data consistent. Returns the key unchanged when the swap (if
+ * any) still resolves, so it never perturbs a valid key's identity. */
+function pruneStaleSwap(key: LinkageKey): LinkageKey {
+  if (key.swap === undefined) return key;
+  const ids = new Set(key.elements.map((el) => el.name ?? el.field));
+  if (key.swap.every((target) => ids.has(target))) return key;
+  const next = { ...key };
+  delete next.swap;
+  return next;
+}
+
+/** Apply `fn` to one element of one key (field, alias, transform, or fuzzy). A
+ * field or alias edit changes the element's identifier, so a now-orphaned swap is
+ * pruned (see {@link pruneStaleSwap}). */
 export function updateElementAt(
   draft: AdvancedInviteDraft,
   keyIndex: number,
   elementIndex: number,
   fn: (element: LinkageKeyElement) => LinkageKeyElement,
 ): AdvancedInviteDraft {
-  return updateKeyAt(draft, keyIndex, (key) => ({
-    ...key,
-    elements: key.elements.map((el, i) => (i === elementIndex ? fn(el) : el)),
-  }));
+  return updateKeyAt(draft, keyIndex, (key) =>
+    pruneStaleSwap({
+      ...key,
+      elements: key.elements.map((el, i) => (i === elementIndex ? fn(el) : el)),
+    }),
+  );
 }
 
 /** Append a new, enabled linkage key with a unique name and a single element
@@ -594,10 +614,12 @@ export function removeElement(
   keyIndex: number,
   elementIndex: number,
 ): AdvancedInviteDraft {
-  return updateKeyAt(draft, keyIndex, (key) => ({
-    ...key,
-    elements: key.elements.filter((_, i) => i !== elementIndex),
-  }));
+  return updateKeyAt(draft, keyIndex, (key) =>
+    pruneStaleSwap({
+      ...key,
+      elements: key.elements.filter((_, i) => i !== elementIndex),
+    }),
+  );
 }
 
 /** Move an element within its key by one position (-1 earlier, +1 later).

@@ -14,6 +14,7 @@ import {
   addKey,
   buildAdvancedTerms,
   gatedActiveSettingMessage,
+  removeElement,
   removeKey,
   seedAdvancedInvite,
   updateElementAt,
@@ -145,6 +146,37 @@ describe("expert authoring round-trips", () => {
     // and decode byte-for-byte -- the cross-party contract is exactly what was
     // authored.
     expect(token.linkageTerms).toStrictEqual(authored);
+  });
+
+  test("removing a swapped element prunes the now-orphaned swap", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    let d: AdvancedInviteDraft = { ...draft, keys: [] };
+    d = addKey(d, "first_name");
+    d = addElement(d, 0, "last_name");
+    d = updateKeyAt(d, 0, (key) => ({
+      ...key,
+      swap: ["first_name", "last_name"],
+    }));
+    expect(d.keys[0].key.swap).toEqual(["first_name", "last_name"]);
+    // Removing last_name orphans its swap target, so the swap is pruned rather
+    // than left dangling to block Generate.
+    d = removeElement(d, 0, 1);
+    expect(d.keys[0].key.swap).toBeUndefined();
+  });
+
+  test("re-pointing a swapped element's field prunes the now-orphaned swap", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    let d: AdvancedInviteDraft = { ...draft, keys: [] };
+    d = addKey(d, "first_name");
+    d = addElement(d, 0, "last_name");
+    d = updateKeyAt(d, 0, (key) => ({
+      ...key,
+      swap: ["first_name", "last_name"],
+    }));
+    // Changing element 0's field from first_name to ssn changes its identifier,
+    // orphaning the "first_name" swap target.
+    d = updateElementAt(d, 0, 0, (el) => ({ ...el, field: "ssn" }));
+    expect(d.keys[0].key.swap).toBeUndefined();
   });
 
   test("removeKey and the element helpers keep the terms schema-valid", () => {

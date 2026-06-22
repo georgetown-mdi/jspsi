@@ -159,9 +159,18 @@ function readableTermsError(error: ZodError): string {
     return "The imported terms are not valid linkage terms.";
   const issue = error.issues[0];
 
+  // Locate the problem by its structural path (schema field names and array
+  // indices), but never echo a parsed value. The one partner-controlled segment a
+  // path can carry is a transform `params` record KEY (params is a `z.record` over
+  // arbitrary keys); truncate the path at `params` so that key cannot leak into the
+  // message -- everything before it is fixed schema structure. (The line is
+  // sanitized too, but the contract is value-free, so this closes it at the source.)
+  const paramsIndex = issue.path.indexOf("params");
+  const safePath =
+    paramsIndex >= 0 ? issue.path.slice(0, paramsIndex + 1) : issue.path;
   const where =
-    issue.path.length > 0
-      ? issue.path.map((segment) => String(segment)).join(".")
+    safePath.length > 0
+      ? safePath.map((segment) => String(segment)).join(".")
       : "the document";
 
   // Fixed, value-free phrasing per Zod code. `custom` is the schema's own refines

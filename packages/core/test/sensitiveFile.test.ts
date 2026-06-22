@@ -59,6 +59,24 @@ test.each(throwingChannels)(
   },
 );
 
+test("the JSON structural bound stays path-only (no source), like every channel", () => {
+  // parseSensitiveJson routes through parseBoundedJson, which rejects a
+  // structurally pathological document (here nesting past the depth bound) BEFORE
+  // JSON.parse can run. That rejection -- a distinct channel from a syntax error
+  // -- must also surface path-only, never the source. Pins the core-only behavior
+  // the promotion added.
+  const deep = "[".repeat(5000) + `"${SECRET}"` + "]".repeat(5000);
+  let caught: unknown;
+  try {
+    parseSensitiveJson(deep, LABEL);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(LABEL);
+  expect((caught as Error).message).not.toContain(SECRET);
+});
+
 test("suppresses the source-bearing YAML warning channel (stderr)", () => {
   const spy = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
   // An unresolved custom tag is a NON-fatal warning: default YAML.parse emits the

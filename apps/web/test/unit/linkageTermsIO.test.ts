@@ -102,6 +102,33 @@ describe("importLinkageTerms rejection", () => {
     }
   });
 
+  test("never echoes a transform params key (a partner-controlled path segment)", () => {
+    // The one partner-controlled segment a Zod issue path can carry is a transform
+    // `params` record key (params is a record over arbitrary keys). An over-long
+    // key fails the schema's key-length bound with the key in the issue path; the
+    // readable error must locate it ("...params") without echoing the key.
+    const hostileKey = "x".repeat(300) + "PWNEDKEY";
+    const broken = {
+      ...TERMS,
+      linkageKeys: [
+        {
+          name: "k",
+          elements: [
+            {
+              field: "first_name",
+              transform: [
+                { function: "substring", params: { [hostileKey]: 1 } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const result = importLinkageTerms(JSON.stringify(broken));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).not.toContain("PWNEDKEY");
+  });
+
   test("rejects an over-length document before parsing", () => {
     const huge = " ".repeat(MAX_IMPORT_CHARS + 1);
     const result = importLinkageTerms(huge);
