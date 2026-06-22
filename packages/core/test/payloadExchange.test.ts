@@ -11,6 +11,7 @@ import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
 import type { Payload } from "../src/config/linkageTerms";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { PartnerPayload } from "../src/payloadExchange";
 
 import {
@@ -531,6 +532,106 @@ test("exchangePayloads: a legitimately large partner payload parses", async () =
   });
   const received = await initiatorPromise;
   expect(received.rows).toHaveLength(n);
+});
+
+test("exchangePayloads: an over-long partner column name is rejected at the wire", async () => {
+  // A received column name flows verbatim into this party's local exchange-record
+  // file, so the wire predicate bounds each name's LENGTH to MAX_NAME_LENGTH. A
+  // name one character over the bound is rejected as a clean protocol error
+  // before any column name reaches the record.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["a".repeat(MAX_NAME_LENGTH + 1)],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+test("exchangePayloads: a partner column name at the length bound is accepted", async () => {
+  // The boundary case: a name of exactly MAX_NAME_LENGTH is legitimate and must
+  // pass unchanged, so the bound rejects only what exceeds it.
+  const name = "a".repeat(MAX_NAME_LENGTH);
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [name],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const received = await initiatorPromise;
+  expect(received.columns).toEqual([name]);
+});
+
+test("exchangePayloads: an empty partner column name is accepted at the wire", async () => {
+  // The wire predicate bounds only the name LENGTH (the upper bound), not the
+  // `.min(1)` floor the operator's own terms carry. An empty partner name is
+  // deliberately left to the record schema, which rejects it at record build --
+  // non-fatally, so the record is skipped while the exchange and its result are
+  // unaffected (exchangeRecord.test.ts pins that record-layer rejection). Pinning
+  // acceptance here stops a future `.min(1)` on the wire from silently escalating
+  // an empty name to a full exchange failure.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [""],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const received = await initiatorPromise;
+  expect(received.columns).toEqual([""]);
+});
+
+test("exchangePayloads: the column-name length bound counts UTF-16 code units", async () => {
+  // The bound is value.length (UTF-16 code units), matching every other
+  // MAX_NAME_LENGTH use in the codebase, and the wire and record bounds use the
+  // identical unit so they cannot disagree. Pin the unit so a future switch to
+  // code points or graphemes fails here: an astral (surrogate-pair) character
+  // counts as its two code units, not one visible character.
+  const astral = "\u{1D54F}"; // U+1D54F, one visible char, two UTF-16 code units
+  const atBound = astral.repeat(MAX_NAME_LENGTH / 2); // exactly MAX_NAME_LENGTH units
+  expect(atBound.length).toBe(MAX_NAME_LENGTH);
+
+  // At the bound: accepted and round-tripped unchanged.
+  const [acceptA, acceptB] = createMessagePipe();
+  const acceptP = exchangePayloads(acceptA, "initiator", { hasData: false });
+  await acceptB.receive();
+  await acceptB.send({
+    hasData: true,
+    columns: [atBound],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  expect((await acceptP).columns).toEqual([atBound]);
+
+  // One code unit over: rejected as a clean protocol error.
+  const [rejectA, rejectB] = createMessagePipe();
+  const rejectP = exchangePayloads(rejectA, "initiator", { hasData: false });
+  await rejectB.receive();
+  await rejectB.send({
+    hasData: true,
+    columns: [atBound + "a"],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const err = await rejectP.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
 });
 
 // --- buildOutputTable --------------------------------------------------------

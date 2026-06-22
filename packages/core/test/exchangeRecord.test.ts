@@ -25,6 +25,7 @@ import type {
 } from "../src/exchangeRecord";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { LinkageTerms } from "../src/config/linkageTerms";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -639,6 +640,50 @@ describe("governance metadata", () => {
         fixedRandomness,
       ),
     ).rejects.toThrow();
+  });
+
+  test("rejects an over-long committed column name on build (partner-sent)", async () => {
+    // Same provenance as the empty-name case: a partner-supplied column name is
+    // bounded on the wire (payloadExchange.ts), and the record schema bounds it
+    // independently so an over-long name cannot reach the on-disk record by any
+    // path. A name one character over MAX_NAME_LENGTH is rejected on build.
+    const longReceived: CommittedPayload = {
+      columns: ["a".repeat(MAX_NAME_LENGTH + 1)],
+      rowIndices: [0],
+      rows: [["x"]],
+    };
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, partnerPayloadReceived: longReceived },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("rejects an over-long payload column name on parse (read path)", async () => {
+    // The on-disk read backstop: a record whose payloadReceived name exceeds the
+    // bound is rejected by parseExchangeRecord, so an over-long name an older or
+    // hand-edited file might carry cannot be admitted. A name at the bound parses.
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        partnerPayloadReceived: {
+          columns: ["a".repeat(MAX_NAME_LENGTH)],
+          rowIndices: [0],
+          rows: [["x"]],
+        },
+      },
+      fixedRandomness,
+    );
+    expect(() => parseExchangeRecord(record)).not.toThrow();
+    const overLong = {
+      ...record,
+      governance: {
+        ...record.governance,
+        payloadReceived: [{ name: "a".repeat(MAX_NAME_LENGTH + 1) }],
+      },
+    };
+    expect(() => parseExchangeRecord(overLong)).toThrow();
   });
 
   // The privacy invariant on the record body: it carries only readable governance
