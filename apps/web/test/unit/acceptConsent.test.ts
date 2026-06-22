@@ -853,6 +853,21 @@ describe("summarizeInvitation", () => {
       false,
     );
   });
+
+  test("marks psi-c as proposed but not yet applied", () => {
+    // psi-c is surfaced (terms as proposed) but flagged not-applied, so the
+    // count-only claim cannot read as in force while the run still reveals
+    // matched identifiers.
+    const summary = summarizeInvitation(
+      makeToken({
+        algorithm: "psi-c",
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [{ name: "K", elements: [{ field: "ssn" }] }],
+      }),
+    );
+    expect(summary.algorithm).toBe("psi-c");
+    expect(summary.psiCApplied).toBe(false);
+  });
 });
 
 describe("accept screen: terms render from a decoded token", () => {
@@ -884,7 +899,7 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(one).toContain("matches at most one");
   });
 
-  test("renders psi-c as the count-only description", () => {
+  test("renders psi-c as the count-only description, flagged not-yet-applied", () => {
     const html = renderPanel({
       decode: {
         status: "ready",
@@ -892,7 +907,13 @@ describe("accept screen: terms render from a decoded token", () => {
       },
     });
     expect(html).toContain("number of records");
-    expect(html).not.toContain("shared identifiers");
+    // psi-c is a disclosure guarantee the run does not yet honor, so the
+    // count-only line is flagged proposed-but-not-applied -- the matched
+    // identifiers are still revealed. This note pairs with PSI_C gating in
+    // APPLIED_SETTINGS and fails loudly if that flag flips without updating the
+    // copy.
+    expect(html).toContain("does not yet apply it");
+    expect(html).toContain("still revealed");
   });
 
   test("renders the transform, swap, fuzzy, and constraint rules that affect matching", () => {

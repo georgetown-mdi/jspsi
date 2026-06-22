@@ -62,6 +62,25 @@ describe("function grouping parity with the descriptor table", () => {
     expect(display.label.toLowerCase()).toContain("substitute a default");
     expect(display.label).not.toBe("Coalesce");
   });
+
+  test("an unrecognized (imported) function name is sanitized for display", () => {
+    // The add-step menu only offers descriptor-backed functions, but an imported
+    // linkage-terms document carries a free-text transform `function`. An
+    // unrecognized name falls back to the raw name as its label -- which the editor
+    // renders as text and into aria-labels -- so it must be sanitized: a bidi /
+    // control / homoglyph payload must not survive into the DOM to spoof a benign
+    // function name.
+    // Construct the payload from code points so the test source stays ASCII.
+    const rlo = String.fromCharCode(0x202e); // right-to-left override (bidi)
+    const bel = String.fromCharCode(0x07); // a C0 control char
+    const hostile = `to_upper_case${rlo}evomer${bel}`;
+    const display = functionDisplay(hostile);
+    // The raw bidi-override and control code points must not survive the render.
+    expect(display.label).not.toContain(rlo);
+    expect(display.label).not.toContain(bel);
+    // The printable ASCII prefix is preserved; the dangerous bytes are escaped.
+    expect(display.label).toContain("to_upper_case");
+  });
 });
 
 describe("descriptor-driven typed param fields", () => {
@@ -217,6 +236,22 @@ describe("param value validation per the descriptor's declared type", () => {
 
   test("rejects an unknown parameter key", () => {
     expect(validateParamValue(substring, "nope", 1).ok).toBe(false);
+  });
+
+  test("rejects an integer beyond the safe range (canonical-encoding hazard)", () => {
+    // A transform param is embedded in the cross-party token and canonically
+    // encoded; an integer at or beyond 2^53 cannot round-trip reproducibly
+    // (canonicalString throws on a non-safe integer), so the descriptor's
+    // z.number().int() must reject it before it can be authored. This pins the
+    // boundary against a future zod change that could regress it.
+    expect(validateParamValue(substring, "start", 2 ** 53).ok).toBe(false);
+    expect(validateParamValue(substring, "length", 2 ** 53).ok).toBe(false);
+    expect(validateParamValue(padLeft, "length", 2 ** 53).ok).toBe(false);
+    // The largest safe integer is still within range, so the bound sits exactly
+    // at the safe-integer edge, not below any legitimate value.
+    expect(
+      validateParamValue(substring, "start", Number.MAX_SAFE_INTEGER).ok,
+    ).toBe(true);
   });
 });
 

@@ -9,9 +9,23 @@ import {
   safeParseLinkageTerms,
 } from "@psilink/core";
 
+import { APPLIED_SETTINGS } from "./appliedSettings";
 import { normalizeForEditor } from "./metadataEditing";
 
-import type { LinkageKey, LinkageTerms, Metadata, Output } from "@psilink/core";
+import type {
+  Algorithm,
+  LinkageKey,
+  LinkageKeyElement,
+  LinkageTerms,
+  Metadata,
+  Output,
+} from "@psilink/core";
+
+/** The per-element fuzzy-comparison expansion, derived from the core element type
+ * (core does not export the bare union). `undefined` means no expansion. */
+export type FuzzyComparison = NonNullable<
+  LinkageKeyElement["generateFuzzyComparisons"]
+>;
 
 /**
  * The pure data model behind the Advanced-options editor: seeding a draft from the
@@ -20,23 +34,28 @@ import type { LinkageKey, LinkageTerms, Metadata, Output } from "@psilink/core";
  * component drives, so the seed/build/validate contract is checked here rather
  * than through the UI.
  *
- * Scope of this iteration (see the board item): the editor reviews and reorders
- * the metadata-derived defaults, edits the per-party column metadata (semantic
- * type and disclosure -- see {@link setDraftMetadata}), chooses who receives the
- * matched results (the 3-way output direction -- see {@link OutputDirection}),
- * and attaches identity, lifetime, and an optional legal agreement. It still
- * exposes NO control for `algorithm` (psi-c), `deduplicate`, or fuzzy comparisons:
- * those are carried from the seed unchanged, so a draft's TERMS can only ever emit
- * the default `psi` / no-dedup / no-fuzzy shape, and no payload block is authored
- * into the terms. Element, transform, and swap internals are read-only too. Each
- * of those is a capability tracked as its own authoring task; surfacing a settable
- * control here would let the editor mint an invitation whose headline behavior
- * silently does not happen. The output direction IS settable now that one-sided
- * output is honored end-to-end (the acceptor mirrors the inviter's output and the
- * exchange withholds the result from a non-receiving party). The column METADATA
- * is editable and threaded into the inviter's own `prepareForExchange` (never the
- * token), so its disclosure choices govern what the inviter sends without touching
- * the agreed terms.
+ * Scope: the guided editor reviews and reorders the metadata-derived default
+ * keys, edits the per-party column metadata (semantic type and disclosure -- see
+ * {@link setDraftMetadata}), chooses who receives the matched results (the 3-way
+ * output direction -- see {@link OutputDirection}), and attaches identity,
+ * lifetime, and an optional legal agreement. An expert tier additionally authors
+ * linkage keys element-by-element (a field reference chosen from the declared
+ * list, a per-element transform pipeline, and a two-of-N swap -- see
+ * {@link addKey}, {@link updateElementAt}, and the sibling helpers) and
+ * imports/exports the whole terms document.
+ *
+ * `algorithm` (psi-c), `deduplicate`, and per-element fuzzy comparisons are GATED:
+ * {@link buildAdvancedTerms} clamps them to the applied behavior (`psi` / no-dedup
+ * / no-fuzzy) while their {@link APPLIED_SETTINGS} flag is false, the editor
+ * controls are disabled to match, and an import that turns one on is refused
+ * ({@link gatedActiveSettingMessage}) -- so the editor can never mint an invitation
+ * whose headline behavior silently does not happen (psi-c being the privacy
+ * footgun). No payload block is authored into the terms. The output direction is
+ * settable now that one-sided output is honored end-to-end (the acceptor mirrors
+ * the inviter's output and the exchange withholds the result from a non-receiving
+ * party). The column METADATA is editable and threaded into the inviter's own
+ * `prepareForExchange` (never the token), so its disclosure choices govern what
+ * the inviter sends without touching the agreed terms.
  */
 
 /** One linkage key in the editor, paired with whether it is active. Display and
@@ -100,6 +119,18 @@ export interface AdvancedInviteDraft {
    * (the symmetric exchange). The forbidden "neither receives" pair is
    * unrepresentable -- it has no `OutputDirection`. */
   outputDirection: OutputDirection;
+  /** The matching algorithm. `psi` reveals matched identifiers; `psi-c` reveals
+   * only the count. Gated: {@link buildAdvancedTerms} clamps it to `psi` while
+   * {@link APPLIED_SETTINGS}.psiC is false, so the built terms can never carry a
+   * count-only setting the run does not yet honor (the editor control is disabled
+   * to match). Carried so the control unlocks the moment the flag flips. */
+  algorithm: Algorithm;
+  /** Whether more than one of the holder's records may match the same partner
+   * record -- deduplication of the holder's OWN inputs, which lets multiple of its
+   * inputs map to the same matched output (see EXCHANGE_REFERENCE
+   * `linkage_terms.deduplicate`). Gated: {@link buildAdvancedTerms} clamps it to
+   * `false` while {@link APPLIED_SETTINGS}.deduplicate is false. */
+  deduplicate: boolean;
   legalAgreement?: DraftLegalAgreement;
   /** The inviter's per-party column metadata (semantic type + disclosure role),
    * editable in the grid. Editing a column's type re-derives which keys are
@@ -175,6 +206,10 @@ export function seedAdvancedInvite(
       // The default is the symmetric both-receive exchange, matching the quick
       // path and getDefaultLinkageTerms' output.
       outputDirection: "both",
+      // Carried from the recommended terms (psi / no-dedup); the gated controls
+      // hold these at the safe defaults until APPLIED_SETTINGS flips.
+      algorithm: terms.algorithm,
+      deduplicate: terms.deduplicate,
       metadata,
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     },
@@ -253,9 +288,21 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // overrides identity, the output direction, the enabled keys, and the legal
   // agreement.
   const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
+  // Gate the matching algorithm and per-element fuzzy expansion behind the
+  // applied-flags: clamp the built terms so they can NEVER carry a setting the run
+  // does not yet honor, regardless of how the draft reached this state (a UI gap,
+  // an import). This is the structural guarantee the gating tests pin -- the
+  // disabled editor controls and the import refusal are the user-facing half, this
+  // is the half that holds even if one of those is bypassed. psi-c is the privacy
+  // footgun (a count-only claim while identifiers are revealed); deduplicate's
+  // worst case is a silent no-op, but the same clamp applies.
+  const algorithm: Algorithm = APPLIED_SETTINGS.psiC ? draft.algorithm : "psi";
+  const deduplicate = APPLIED_SETTINGS.deduplicate ? draft.deduplicate : false;
   const enabledKeys = draft.keys
     .filter((entry) => entry.enabled)
-    .map((entry) => entry.key);
+    .map((entry) =>
+      APPLIED_SETTINGS.fuzzyComparisons ? entry.key : stripFuzzy(entry.key),
+    );
   const referenced = new Set(
     enabledKeys.flatMap((key) => key.elements.map((el) => el.field)),
   );
@@ -266,6 +313,8 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const terms: LinkageTerms = {
     ...baseTerms,
     identity: normalizeText(draft.identity),
+    algorithm,
+    deduplicate,
     // The chosen 3-way output direction; one of the three valid pairs, so it never
     // produces the forbidden "neither receives" combination (see OutputDirection).
     output: outputForDirection(draft.outputDirection),
@@ -445,4 +494,250 @@ function messageForField(field: AdvancedField): string {
     case "keys":
       return "Enable at least one linkage key.";
   }
+}
+
+// --- Gated-setting clamp -----------------------------------------------------
+
+/** Drop every element's `generateFuzzyComparisons`, returning the key unchanged
+ * when none carries one. The fuzzy half of the {@link buildAdvancedTerms} gating
+ * clamp -- the built terms never propose a fuzzy expansion the run does not apply,
+ * regardless of how an element acquired one. */
+function stripFuzzy(key: LinkageKey): LinkageKey {
+  if (key.elements.every((el) => el.generateFuzzyComparisons === undefined))
+    return key;
+  return {
+    ...key,
+    elements: key.elements.map((el) => {
+      if (el.generateFuzzyComparisons === undefined) return el;
+      const next = { ...el };
+      delete next.generateFuzzyComparisons;
+      return next;
+    }),
+  };
+}
+
+// --- Expert key / element authoring ------------------------------------------
+//
+// Pure immutable edits over the draft's linkage keys, the tested boundary the
+// expert-mode UI drives. Field references are chosen by the caller from the
+// declared field list (the metadata-derived offerable set), so a key authored
+// through these is referentially valid by construction; the core schema's
+// referential-integrity refines remain the single validation source.
+
+/** Replace the linkage key at `keyIndex` by applying `fn` to it. The basis for
+ * every expert key edit (rename, swap, and -- via {@link updateElementAt} -- the
+ * element edits), so the immutable update lives in one place. */
+export function updateKeyAt(
+  draft: AdvancedInviteDraft,
+  keyIndex: number,
+  fn: (key: LinkageKey) => LinkageKey,
+): AdvancedInviteDraft {
+  return {
+    ...draft,
+    keys: draft.keys.map((entry, i) =>
+      i === keyIndex ? { ...entry, key: fn(entry.key) } : entry,
+    ),
+  };
+}
+
+/** Drop a key's `swap` when either target no longer names one of its element
+ * identifiers (`name ?? field`) -- e.g. after the targeted element is removed or
+ * its alias/field is edited. Without this an orphaned swap target lingers in the
+ * draft and blocks Generate (the schema's swap-target refine rejects it) with a
+ * key-list error rather than the swap control simply clearing; pruning keeps the
+ * control and the data consistent. Returns the key unchanged when the swap (if
+ * any) still resolves, so it never perturbs a valid key's identity. */
+function pruneStaleSwap(key: LinkageKey): LinkageKey {
+  if (key.swap === undefined) return key;
+  const ids = new Set(key.elements.map((el) => el.name ?? el.field));
+  if (key.swap.every((target) => ids.has(target))) return key;
+  const next = { ...key };
+  delete next.swap;
+  return next;
+}
+
+/** Apply `fn` to one element of one key (field, alias, transform, or fuzzy). A
+ * field or alias edit changes the element's identifier, so a now-orphaned swap is
+ * pruned (see {@link pruneStaleSwap}). */
+export function updateElementAt(
+  draft: AdvancedInviteDraft,
+  keyIndex: number,
+  elementIndex: number,
+  fn: (element: LinkageKeyElement) => LinkageKeyElement,
+): AdvancedInviteDraft {
+  return updateKeyAt(draft, keyIndex, (key) =>
+    pruneStaleSwap({
+      ...key,
+      elements: key.elements.map((el, i) => (i === elementIndex ? fn(el) : el)),
+    }),
+  );
+}
+
+/** Append a new, enabled linkage key with a unique name and a single element
+ * referencing `fieldName` (chosen by the caller from the declared fields, so the
+ * key is referentially valid and non-empty by construction). */
+export function addKey(
+  draft: AdvancedInviteDraft,
+  fieldName: string,
+): AdvancedInviteDraft {
+  const name = uniqueKeyName(
+    "New key",
+    new Set(draft.keys.map((entry) => entry.key.name)),
+  );
+  const key: LinkageKey = { name, elements: [{ field: fieldName }] };
+  return { ...draft, keys: [...draft.keys, { key, enabled: true }] };
+}
+
+/** Remove the linkage key at `index`. */
+export function removeKey(
+  draft: AdvancedInviteDraft,
+  index: number,
+): AdvancedInviteDraft {
+  return { ...draft, keys: draft.keys.filter((_, i) => i !== index) };
+}
+
+/** Append an element referencing `fieldName` to the key at `keyIndex`. */
+export function addElement(
+  draft: AdvancedInviteDraft,
+  keyIndex: number,
+  fieldName: string,
+): AdvancedInviteDraft {
+  return updateKeyAt(draft, keyIndex, (key) => ({
+    ...key,
+    elements: [...key.elements, { field: fieldName }],
+  }));
+}
+
+/** Remove the element at `elementIndex` from the key at `keyIndex`. A key must
+ * keep at least one element (the schema's `.min(1)`); the caller gates the remove
+ * control so the last element cannot be removed. */
+export function removeElement(
+  draft: AdvancedInviteDraft,
+  keyIndex: number,
+  elementIndex: number,
+): AdvancedInviteDraft {
+  return updateKeyAt(draft, keyIndex, (key) =>
+    pruneStaleSwap({
+      ...key,
+      elements: key.elements.filter((_, i) => i !== elementIndex),
+    }),
+  );
+}
+
+/** Move an element within its key by one position (-1 earlier, +1 later).
+ * Element order is significant -- elements are concatenated and hashed in order --
+ * so this is a real matching change, not cosmetic. An out-of-range move is a
+ * no-op. */
+export function moveElement(
+  draft: AdvancedInviteDraft,
+  keyIndex: number,
+  elementIndex: number,
+  direction: -1 | 1,
+): AdvancedInviteDraft {
+  return updateKeyAt(draft, keyIndex, (key) => {
+    const target = elementIndex + direction;
+    if (target < 0 || target >= key.elements.length) return key;
+    const elements = [...key.elements];
+    [elements[elementIndex], elements[target]] = [
+      elements[target],
+      elements[elementIndex],
+    ];
+    return { ...key, elements };
+  });
+}
+
+/** A name not already in `taken`, preferring `base` then `base 2`, `base 3`, ...
+ * Keeps authored key names unique (the schema rejects duplicates). Bounded by the
+ * taken-set size: among `base` and `base 2..base (size+2)` there are `taken.size + 2`
+ * distinct candidates against `taken.size` taken names, so at least two are always
+ * free and the loop always returns. */
+function uniqueKeyName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; n <= taken.size + 2; n++) {
+    const candidate = `${base} ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // Unreachable given the pigeonhole bound above; encode that as a check rather
+  // than return a candidate that could itself collide if the bound ever regressed.
+  throw new Error("uniqueKeyName exhausted its candidate range");
+}
+
+// --- Import ------------------------------------------------------------------
+
+/** Inverse of {@link outputForDirection}: map an {@link Output} pair to the 3-way
+ * direction for an imported terms set. The "neither receives"
+ * `{ expectsOutput: false, shareWithPartner: false }` pair has no direction; it is
+ * NOT rejected by {@link safeParseLinkageTerms} (the schema accepts any two output
+ * booleans -- the "neither party expects output" check runs later, in
+ * `validateCompatibility` at exchange time), so an imported set could carry it. The
+ * final branch maps that (malformed, exchange-rejected) pair to the safe `"both"`
+ * default, which the inviter sees selected and reviews before generating, rather
+ * than loading a forbidden state silently. */
+function directionForOutput(output: Output): OutputDirection {
+  if (output.expectsOutput && output.shareWithPartner) return "both";
+  if (output.expectsOutput) return "inviter";
+  if (output.shareWithPartner) return "partner";
+  return "both";
+}
+
+/** A message naming any setting an imported terms set turns on that the run does
+ * not yet honor (gated by {@link APPLIED_SETTINGS}), or `undefined` when none. The
+ * editor refuses such an import rather than load a draft whose headline behavior
+ * silently does not happen -- the same gate the disabled GUI controls and the
+ * {@link buildAdvancedTerms} clamp enforce, applied at the one door (import) that
+ * could otherwise carry a gated setting in from outside. */
+export function gatedActiveSettingMessage(
+  terms: LinkageTerms,
+): string | undefined {
+  const blocked: Array<string> = [];
+  if (terms.algorithm === "psi-c" && !APPLIED_SETTINGS.psiC)
+    blocked.push("count-only matching (psi-c)");
+  if (terms.deduplicate && !APPLIED_SETTINGS.deduplicate)
+    blocked.push("duplicate matches");
+  if (
+    !APPLIED_SETTINGS.fuzzyComparisons &&
+    terms.linkageKeys.some((key) =>
+      key.elements.some((el) => el.generateFuzzyComparisons !== undefined),
+    )
+  )
+    blocked.push("fuzzy comparisons");
+  if (blocked.length === 0) return undefined;
+  return (
+    `These terms turn on ${blocked.join(", ")}, which this version of the ` +
+    "exchange does not yet apply. Remove those settings and import again."
+  );
+}
+
+/** Build an editor draft from imported, validated {@link LinkageTerms}. identity,
+ * output direction, algorithm, deduplicate, the optional legal agreement, and
+ * every linkage key (all enabled) come from the imported terms; the column
+ * metadata stays the inviter's own (`seed.metadata`), since terms carry no
+ * per-party column binding, and the lifetime is the caller's (terms do not carry
+ * it). Field DEFINITIONS are re-derived from the inviter's columns at build time,
+ * so an imported key referencing a field the columns cannot produce surfaces as
+ * unsatisfiable rather than silently mis-binding (the deferred multi-field /
+ * custom-binding case). The caller refuses a gated-active import first (see
+ * {@link gatedActiveSettingMessage}). */
+export function draftFromTerms(
+  terms: LinkageTerms,
+  seed: AdvancedInviteSeed,
+  lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
+): AdvancedInviteDraft {
+  return {
+    identity: terms.identity,
+    lifetimeSeconds,
+    outputDirection: directionForOutput(terms.output),
+    algorithm: terms.algorithm,
+    deduplicate: terms.deduplicate,
+    legalAgreement:
+      terms.legalAgreement !== undefined
+        ? {
+            reference: terms.legalAgreement.reference,
+            purpose: terms.legalAgreement.purpose,
+            expirationDate: terms.legalAgreement.expirationDate,
+          }
+        : undefined,
+    metadata: seed.metadata,
+    keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+  };
 }

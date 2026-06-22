@@ -267,7 +267,13 @@ export function AdvancedInvite() {
 
       {phase.status === "editing" && (
         <Stack mt="md">
+          {/* Key on the seed's columns so a future path that swaps the editing
+              seed in place (rather than remounting, the only way today) gets a
+              fresh editor -- resetting the draft AND the editor's per-session
+              expert state (keysAuthored, expertMode). Mirrors the key on the
+              invitation view below and the reset comment in handleGenerate. */}
           <LinkageTermsEditor
+            key={phase.seed.columns.join(" ")}
             seed={phase.seed}
             initialIdentity={phase.identity}
             onGenerate={(terms, lifetimeSeconds, metadata) =>

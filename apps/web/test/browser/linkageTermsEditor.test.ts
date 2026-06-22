@@ -96,11 +96,12 @@ describe("LinkageTermsEditor", () => {
     await userEvent.click(
       page.getByRole("combobox", { name: "Who receives the matched results" }),
     );
-    // Target the dropdown option by role, not text: the Select's description also
-    // contains the substring "only your partner".
-    await userEvent.click(
-      page.getByRole("option", { name: "Only your partner" }),
-    );
+    // Select "Only your partner" (the third option) by keyboard, not by clicking
+    // the option: the choice is then independent of the option's pixel position,
+    // which the editor's tall edit rail can push out of the fixed test viewport.
+    // The open dropdown highlights the current value ("both"), so two ArrowDowns
+    // reach "Only your partner".
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     await userEvent.click(generateButton());
     const [terms] = onGenerate.mock.calls[0];
     expect(terms.output).toEqual({
@@ -117,9 +118,9 @@ describe("LinkageTermsEditor", () => {
     await userEvent.click(
       page.getByRole("combobox", { name: "Who receives the matched results" }),
     );
-    await userEvent.click(
-      page.getByRole("option", { name: "Only your partner" }),
-    );
+    // Keyboard-select "Only your partner" (see the partner-only test above for
+    // why the option is not clicked by position).
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     await userEvent.click(
       page.getByRole("button", { name: "Reset to recommended" }),
     );
@@ -182,5 +183,119 @@ describe("LinkageTermsEditor", () => {
     await userEvent.click(generateButton());
     const [terms] = onGenerate.mock.calls[0];
     expect(terms.legalAgreement?.reference).toBe("MOU-2025-0042");
+  });
+
+  test("Expert authoring reveals key editing with psi-c and deduplicate gated off", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // The gated settings are surfaced as controls but disabled until the run
+    // applies them, so a count-only (psi-c) or duplicate-matching setting cannot
+    // be authored ahead of engine support. This fails loudly if a control is ever
+    // wired active prematurely.
+    await expect
+      .element(page.getByRole("combobox", { name: "Matching method" }))
+      .toBeDisabled();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: "Allow more than one of your records to match the same partner record",
+        }),
+      )
+      .toBeDisabled();
+    // The element-by-element authoring surface and the import/export escape hatch
+    // are present.
+    await expect
+      .element(page.getByRole("button", { name: "Add a key" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Download JSON" }))
+      .toBeInTheDocument();
+  });
+
+  test("an expert-authored key survives a metadata edit after expert mode is toggled off", async () => {
+    // Regression: authoring a key, turning expert mode OFF, then editing a column
+    // must not silently re-derive the key list from the template and drop the
+    // authored key (the keys are author-controlled once an expert edit occurs).
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Author a new key (appended as "New key"), which marks the key list
+    // author-controlled. Locate it by its edit-rail reorder control (unique to the
+    // editor; the name also appears in the live preview, so plain text is
+    // ambiguous).
+    const authoredKeyControl = () =>
+      page.getByRole("button", { name: "Move New key earlier" });
+    await userEvent.click(page.getByRole("button", { name: "Add a key" }));
+    await expect.element(authoredKeyControl()).toBeInTheDocument();
+    // Back to the guided view; the authored key is still listed.
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await expect.element(authoredKeyControl()).toBeInTheDocument();
+    // Edit a column's disclosure (any metadata change drives the reconcile path).
+    // first_name opens at "match"; one step down selects "payload".
+    await userEvent.click(
+      page.getByRole("combobox", { name: "How column first_name is used" }),
+    );
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    // The authored key is still present -- the metadata edit did not clobber it.
+    await expect.element(authoredKeyControl()).toBeInTheDocument();
+  });
+
+  test("a column-type change in expert mode still reconciles keys when none were authored", async () => {
+    // Opening expert mode does not make the keys author-controlled: they are still
+    // the metadata template, so a column-type change must re-derive the offerable
+    // key set. If reconciliation were suppressed merely because the expert panel is
+    // open, a key would keep referencing the dropped field and block Generate.
+    mount();
+    await expect.element(generateButton()).toBeEnabled();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Retype dob to "Other" (four options past Date of birth) without touching any
+    // key. The date-of-birth-backed keys must drop; Generate stays valid through the
+    // remaining ssn/name keys. Keyboard-select so it is independent of option pixel
+    // position in the narrow test viewport.
+    await userEvent.click(
+      page.getByRole("combobox", { name: "Type for column dob" }),
+    );
+    await userEvent.keyboard(
+      "{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}",
+    );
+    await expect.element(generateButton()).toBeEnabled();
+  });
+
+  test("removing an element keeps focus on that key's Add control", async () => {
+    // The removed element row held focus on its trash button; without a deliberate
+    // move, focus would fall to document.body. It must land on the owning key's
+    // always-present "Add an element" button. (.first() scopes to the first key,
+    // whose element labels also appear under other ssn-leading keys.)
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    const firstAddElement = page
+      .getByRole("button", { name: "Add an element" })
+      .first();
+    await userEvent.click(
+      page.getByRole("button", { name: "Remove element 1 (ssn)" }).first(),
+    );
+    await expect.element(firstAddElement).toHaveFocus();
+  });
+
+  test("removing a key keeps focus on the Add a key control", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: /^Remove key / }).first(),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Add a key" }))
+      .toHaveFocus();
   });
 });
