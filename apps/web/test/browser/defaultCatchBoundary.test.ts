@@ -11,6 +11,7 @@ import { MantineProvider } from "@mantine/core";
 
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { mantineTheme } from "@theme";
+import { whenDiagnostic } from "@utils/diagnostics";
 
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -63,6 +64,13 @@ vi.mock("@tanstack/react-router", () => ({
     ),
 }));
 
+// Mock the diagnostic gate so both of its states are testable here: the default
+// implementation (set in beforeEach) runs the sink -- the development /
+// diagnostics-on case the suite otherwise assumes -- and the gated-off test
+// overrides it to a no-op to prove the boundary delegates its console decision to
+// the gate. The gate's own env/flag logic is covered by test/unit/diagnostics.test.ts.
+vi.mock("@utils/diagnostics", () => ({ whenDiagnostic: vi.fn() }));
+
 let container: HTMLElement | undefined;
 let root: Root | undefined;
 
@@ -80,11 +88,14 @@ function mountBoundary(error: Error = new Error("boom")) {
   mount(createElement(DefaultCatchBoundary, { error, reset: () => undefined }));
 }
 
-// DefaultCatchBoundary logs every caught error via console.error by design (out
-// of scope here); silence that expected noise so the suite output stays clean.
-// Restored by vi.restoreAllMocks() in afterEach.
+// DefaultCatchBoundary routes its caught-error console.error through
+// whenDiagnostic (mocked above), so mock console.error to keep that expected
+// noise out of the run output; the dev-gating tests below assert against this
+// same spy. whenDiagnostic defaults to running its sink (the diagnostics-on
+// case); a single test overrides it. Restored by vi.restoreAllMocks().
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  vi.mocked(whenDiagnostic).mockImplementation((emit) => emit());
 });
 
 afterEach(() => {
@@ -95,21 +106,106 @@ afterEach(() => {
   routerMock.matchedRouteId = "/some-route";
   vi.restoreAllMocks();
   routerMock.invalidate.mockReset();
+  vi.mocked(whenDiagnostic).mockReset();
 });
 
 describe("DefaultCatchBoundary", () => {
   test("renders the error component and the retry action", async () => {
     mountBoundary(new Error("boom"));
 
-    // The boundary forwards `error` into <ErrorComponent error={error} />; the
-    // mock surfaces error.message, so asserting the text (not just the marker's
-    // presence) proves the prop is wired through and would catch a dropped error.
+    // The boundary now hands ErrorComponent a *sanitized* clone of the error;
+    // "boom" survives sanitizing unchanged, so the mock (which surfaces
+    // error.message) still shows "boom". Asserting the text -- not just the
+    // marker's presence -- proves the message is wired through and would catch a
+    // dropped error.
     await expect
       .element(page.getByTestId("error-component"))
       .toHaveTextContent("boom");
     await expect
       .element(page.getByRole("button", { name: "Try again" }))
       .toBeInTheDocument();
+  });
+
+  test("escapes control characters in the rendered message", async () => {
+    // ESC (0x1b) drives ANSI sequences and LF (0x0a) enables log-line spoofing;
+    // the boundary must hand ErrorComponent the escaped form (sanitizeForDisplay
+    // rewrites each to a visible \xHH), never the raw bytes.
+    mountBoundary(new Error("danger\x1b[31m\nhere"));
+
+    await expect
+      .element(page.getByTestId("error-component"))
+      .toHaveTextContent("danger\\x1b[31m\\x0ahere");
+  });
+
+  test("redacts a leaked private-key block before it reaches the DOM", async () => {
+    // The key-redaction backstop is the second protection sanitizeErrorForDisplay
+    // adds at this sink: an unanticipated path that interpolates key material into
+    // an error must not render it. (Live secrets are kept out upstream; this is
+    // defense in depth.)
+    const pem =
+      "-----BEGIN PRIVATE KEY-----\nMIIBVgIBADAN\n-----END PRIVATE KEY-----";
+    mountBoundary(new Error(`failed to load key: ${pem}`));
+
+    const errorComponent = page.getByTestId("error-component");
+    await expect
+      .element(errorComponent)
+      .toHaveTextContent("[redacted private key]");
+    // Both the markers and the key body must be gone -- the whole block is
+    // replaced, so neither the BEGIN line nor the base64 payload survives.
+    await expect
+      .element(errorComponent)
+      .not.toHaveTextContent("BEGIN PRIVATE KEY");
+    await expect.element(errorComponent).not.toHaveTextContent("MIIBVgIBADAN");
+  });
+
+  test("sanitizes a non-Error thrown value without crashing", async () => {
+    // A route error is an arbitrary thrown value at runtime even though the prop
+    // is typed Error; this last-resort boundary must survive a raw string (the
+    // sanitizer renders any non-Error via its String() form) and still escape it.
+    mountBoundary("raw\x1bstring" as unknown as Error);
+
+    await expect
+      .element(page.getByTestId("error-component"))
+      .toHaveTextContent("raw\\x1bstring");
+  });
+
+  test("dev-gates the raw error to the console via whenDiagnostic", async () => {
+    const rawError = new Error("boom");
+    mountBoundary(rawError);
+
+    // Wait for the render to commit before asserting the synchronous log.
+    await expect
+      .element(page.getByTestId("error-component"))
+      .toBeInTheDocument();
+    // whenDiagnostic is mocked to run its sink (the diagnostics-on case), so this
+    // asserts the boundary hands the gate the LIVE Error object -- the full
+    // structured value, not the sanitized display clone -- so a developer keeps
+    // the expandable stack and `.cause` chain. That the boundary delegates to the
+    // gate (rather than logging unconditionally) is the next test; the gate's own
+    // env/flag suppression is covered by diagnostics.test.ts.
+    expect(console.error).toHaveBeenCalledWith(
+      "DefaultCatchBoundary Error:",
+      rawError,
+    );
+  });
+
+  test("does not log to the console when the diagnostic gate is closed", async () => {
+    // The production / diagnostics-off case: whenDiagnostic runs nothing. The
+    // boundary must then put its line on no console -- proof it delegates the
+    // decision to the gate rather than calling console.error directly. Without
+    // this, a regression to a bare console.error would pass every other test while
+    // leaking the raw Error (with .stack) to a production browser console.
+    vi.mocked(whenDiagnostic).mockImplementation(() => undefined);
+    mountBoundary(new Error("boom"));
+
+    await expect
+      .element(page.getByTestId("error-component"))
+      .toBeInTheDocument();
+    expect(whenDiagnostic).toHaveBeenCalledOnce();
+    expect(console.error).not.toHaveBeenCalledWith(
+      "DefaultCatchBoundary Error:",
+      expect.anything(),
+    );
   });
 
   test("'Try again' invalidates the router", async () => {
