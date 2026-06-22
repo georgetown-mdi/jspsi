@@ -62,9 +62,12 @@ export interface FieldValueCoverage {
   /** Rows examined -- the full parsed row count. */
   total: number;
   /**
-   * Rows whose pipeline yields at least one key. `null` and an empty `Set` are not a
-   * key; an empty STRING is -- it is a participating key element, distinct from a
-   * dropped value -- so an all-`""` field is fully PRODUCED, not zero coverage.
+   * Rows whose pipeline yields exactly one matchable key. `null` and an empty `Set`
+   * (value set `[]`) are not a key; an empty STRING is -- it is a participating key
+   * element distinct from a dropped value, so an all-`""` field is fully PRODUCED, not
+   * zero coverage. A fan-out `Set` of two or more values is NOT counted: core's key
+   * iterator excludes a multi-value row (fan-out not yet in scope), so it produces no
+   * matchable key today.
    */
   produced: number;
   /** {@link produced} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
@@ -81,8 +84,12 @@ export interface FieldValueCoverage {
 
 /**
  * Compute per-field value coverage over the WHOLE row set. For each transformation,
- * runs its pipeline over every row's input column and counts the rows that yield a
- * key (a non-null, non-empty-Set value set; an empty STRING counts).
+ * runs its pipeline over every row's input column and counts the rows that yield
+ * exactly one matchable key (an empty STRING counts; a dropped null/empty-Set, and a
+ * multi-value fan-out Set that core's key iterator excludes, do not).
+ *
+ * This is a per-field proxy: it measures the field's own standardization pipeline, not
+ * a linkage key's element transforms or its cross-field (composite-key) collapse.
  *
  * The sweep observes empties: a row whose input column is blank (or absent) is run
  * through the pipeline too, so a `coalesce` that substitutes a default for an empty
@@ -116,9 +123,13 @@ export function computeFieldCoverage(
       );
       let produced = 0;
       for (let index = 0; index < total; index++)
-        // `StandardizedField.get` has reduced the result to its value set: `[]` for a
-        // dropped (null) or empty-Set value, otherwise the produced key(s).
-        if (field.get(index).length > 0) produced++;
+        // A row produces a matchable key iff its value set is exactly one value.
+        // `StandardizedField.get` reduces the FieldValue to its value set: `[]` for a
+        // dropped (null) or empty-Set value (no key); one value (an ordinary key, or
+        // `""`) is matchable; a fan-out `Set` of two or more is NOT -- core's `valueAt`
+        // excludes a multi-value row ("fan-out not yet in scope"), so counting it would
+        // be a false all-clear. If core brings fan-out into scope, update this in step.
+        if (field.get(index).length === 1) produced++;
       return {
         ...base,
         produced,

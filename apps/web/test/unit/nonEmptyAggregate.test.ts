@@ -80,6 +80,33 @@ describe("computeFieldCoverage: the silent-empty defense", () => {
     expect(isSilentEmpty(coverage)).toBe(false);
   });
 
+  test("a fan-out (multi-value) row is not produced, matching core's key exclusion", () => {
+    // split_on emits a multi-value Set for a value that splits; core's valueAt excludes
+    // a multi-value row (fan-out not yet in scope), so it yields no matchable key. The
+    // metric must agree -- counting it would be a false all-clear. A value with no
+    // delimiter stays a one-element Set (a single matchable key) and is produced.
+    const standardization: Standardization = [
+      {
+        output: "first_name",
+        input: "n",
+        steps: [{ function: "split_on", params: { delimiter: " " } }],
+      },
+    ];
+    const mixed = computeFieldCoverage(
+      [{ n: "mary jane" }, { n: "ann marie" }, { n: "mary" }],
+      standardization,
+    )[0];
+    expect(mixed.produced).toBe(1); // only the unsplit "mary"
+    expect(isSilentEmpty(mixed)).toBe(false);
+
+    const allFanOut = computeFieldCoverage(
+      [{ n: "mary jane" }, { n: "ann marie" }],
+      standardization,
+    )[0];
+    expect(allFanOut.produced).toBe(0);
+    expect(isSilentEmpty(allFanOut)).toBe(true);
+  });
+
   test("the sweep observes empties, so coalesce rescuing dropped rows raises coverage", () => {
     // The aggregate runs over the WHOLE row set (the preview's sample skips empties),
     // so a coalesce that substitutes a default for an otherwise-dropped value is
