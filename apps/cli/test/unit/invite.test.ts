@@ -440,6 +440,39 @@ test("validateInvite: a config plus a disagreeing input fails naming the unsatis
   }
 });
 
+test("validateInvite: a config whose payload.send over-declares is rejected before minting", async () => {
+  // An explicit metadata block gates `secret` off (role: ignored), but the
+  // hand-authored payload.send still lists it. The over-declaration must be
+  // caught at the mint boundary, before the token or the partner's consent
+  // screen can carry a column whose values never flow.
+  const terms: LinkageTerms = {
+    ...defaultTerms(),
+    payload: { send: [{ name: "secret" }] },
+  };
+  const metadata: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "secret", type: "other", role: "ignored", isPayload: true },
+  ];
+  const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
+  try {
+    const promise = validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    await expect(promise).rejects.toBeInstanceOf(UsageError);
+    await expect(promise).rejects.toThrow(/secret/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a config's explicit standardization lets an otherwise-unsatisfying input pass", async () => {
   const terms = defaultTerms();
   // The config maps tax_id -> ssn explicitly; the input carries tax_id (inferred

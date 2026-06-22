@@ -249,6 +249,30 @@ describe("generateInvitation", () => {
     ).rejects.toBeInstanceOf(InvitationFileError);
   });
 
+  test("fails closed when authored terms over-declare payload.send at the mint", async () => {
+    // Defense-in-depth backstop: the Advanced editor authors no payload block
+    // today, so this cannot fire from the UI until payload authoring lands (item
+    // 202741998). Constructed by hand here to prove the mint boundary rejects an
+    // over-declaring payload.send rather than letting the token and the partner's
+    // consent screen carry a column the metadata gates off. `ssn` is a linkage
+    // column (isPayload:false), so it is not disclosed and may not be declared.
+    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const authored = {
+      ...getDefaultLinkageTerms("Org", metadata),
+      payload: { send: [{ name: "ssn" }] },
+    };
+
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: authored,
+        metadata,
+      }),
+    ).rejects.toThrow(/does not transmit/);
+  });
+
   test("returns the embedded shared secret so the inviter can derive its id", async () => {
     const { encoded, sharedSecret } = await generateInvitation({
       inviterName: "County Health Dept",
