@@ -27,6 +27,7 @@ import {
   clearAdvancedHandoff,
   peekAdvancedHandoff,
 } from "@components/advancedHandoff";
+import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
@@ -229,7 +230,18 @@ export function AdvancedInvite() {
   };
 
   return (
-    <Paper>
+    <Paper
+      // The acquire, loading, and exchange screens are single entry/reading columns,
+      // so the panel self-constrains to EXCHANGE_READING_WIDTH (centered) rather than
+      // filling the route's wide container -- matching the home and accept exchange
+      // screens. The terms editor (editing) is a genuine wide editor and keeps the
+      // full route width, mirroring the accept route's "Prepare your data" phase.
+      style={
+        phase.status === "editing"
+          ? undefined
+          : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
+      }
+    >
       <Title order={1}>Invite someone to a data exchange</Title>
 
       {phase.status === "acquire" && (

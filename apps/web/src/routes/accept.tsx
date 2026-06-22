@@ -9,8 +9,7 @@ export const Route = createFileRoute("/accept")({
   component: AcceptInvitation,
   // The widest named width: the linkage terms are the densest content in the app
   // -- nested keys, elements, transforms, and parameters -- so they need more
-  // room than the home page, not less, to stay legible. The shell sizes its
-  // chrome and this route's content to this one width (the route owns no
-  // Container of its own).
+  // room than the home page, not less, to stay legible. The shell sizes this
+  // route's content to this one width (the route owns no Container of its own).
   staticData: { contentWidth: "xxl" },
 });

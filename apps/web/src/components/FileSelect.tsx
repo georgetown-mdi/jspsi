@@ -118,7 +118,10 @@ export default function FileSelect(props: FileSelectProps) {
           <Group
             justify="center"
             gap="xl"
-            mih={220}
+            // A compact drop target: tall enough to read as a drop zone and stay an
+            // easy click/drag target, without the bulk the prior 220 added (it
+            // dominated the invite panel). Shared by every screen that drops a file.
+            mih={140}
             style={{ pointerEvents: "none" }}
           >
             {/* Drag-state icon colors must clear WCAG 2.1 1.4.11's 3:1
