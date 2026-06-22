@@ -70,8 +70,12 @@ export default function AcceptForm() {
                 errorProps={{ role: "alert" }}
                 withAsterisk
                 required
+                // Taller resting box than the lone link/code strictly needs:
+                // beside the equal-width invite panel (the far taller, file-bearing
+                // flow) a 2-row paste box looked stunted, so give it more vertical
+                // presence. Still autosizes to grow past this for a long pasted URL.
                 autosize
-                minRows={2}
+                minRows={6}
                 label="Invitation link or code"
                 description="Paste the link or code your partner sent you"
                 placeholder="https://...#... or the bare code"

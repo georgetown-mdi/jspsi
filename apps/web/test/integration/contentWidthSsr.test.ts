@@ -2,13 +2,13 @@ import { describe, expect, test } from "vitest";
 
 // The content-width seam exercised end to end through the real router, at the
 // SSR boundary: a route declares its width in staticData, the root route
-// resolves it (useMatches -> resolveContentWidth), and the shell sizes both its
-// header chrome and the content container to that one value. The unit test
-// covers the resolver and the browser test covers the shell with a mocked
-// router; only this test drives the real router -> RootComponent -> staticData
-// -> shell path. It needs no browser: the shell is server-rendered, so the
-// declared width is already in the HTML. The accept route is ssr:false for its
-// component, but the shell still server-renders, so its width appears too.
+// resolves it (useMatches -> resolveContentWidth), and the shell sizes its
+// content container to that one value. The unit test covers the resolver and the
+// browser test covers the shell with a mocked router; only this test drives the
+// real router -> RootComponent -> staticData -> shell path. It needs no browser:
+// the shell is server-rendered, so the declared width is already in the HTML. The
+// accept route is ssr:false for its component, but the shell still server-renders,
+// so its width appears too.
 //
 // The port matches the dev-server globalSetup, which derives it the same way.
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -37,17 +37,19 @@ async function shellContainerWidths(path: string): Promise<Array<string>> {
 }
 
 describe("content width seam (SSR, real router)", () => {
-  test("chrome and content render at the route's one declared width", async () => {
+  test("content renders at the route's declared width", async () => {
     const home = await shellContainerWidths("/");
     const accept = await shellContainerWidths("/accept");
 
-    // The header chrome and the content container, both server-rendered.
-    expect(home.length).toBeGreaterThanOrEqual(2);
-    expect(accept.length).toBeGreaterThanOrEqual(2);
+    // Exactly one content container on the home route now that the header (which
+    // carried its own container) is gone -- pins the count so a reintroduced second
+    // container, or a dropped one, fails here rather than passing vacuously. The
+    // accept route is checked only for presence, since its phase content may nest
+    // its own container.
+    expect(home.length).toBe(1);
+    expect(accept.length).toBeGreaterThanOrEqual(1);
 
-    // Within a route every container resolves to one shared width, so the chrome
-    // and content edges align.
-    expect(new Set(home).size).toBe(1);
+    // Within a route every content container resolves to one shared width.
     expect(new Set(accept).size).toBe(1);
 
     // The seam is per-route, not a fixed width: the accept route opts into the

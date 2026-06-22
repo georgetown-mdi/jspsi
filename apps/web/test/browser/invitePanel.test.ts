@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
-import { createElement } from "react";
+import { createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
@@ -22,6 +22,7 @@ import type { Root } from "react-dom/client";
 
 import type { ExchangeConfig } from "@components/ExchangeView";
 import type { GeneratedInvitation } from "@psi/invitation";
+import type { InviterSession } from "@components/InvitePanel";
 import type { LinkageTerms } from "@psilink/core";
 
 // Drive generateInvitation from the test: each case sets `gen.impl`. The real
@@ -143,11 +144,21 @@ let container: HTMLElement | undefined;
 let root: Root | undefined;
 let consoleErrorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
+// InvitePanel is now controlled: HomePage owns the inviter session and feeds it
+// back so the panel can swap the compose form for the exchange view. Stand in for
+// that owner with a minimal stateful harness, so generating still drives the
+// transition (the panel calls setSession; the harness re-renders it with the
+// stored value) exactly as it does under HomePage.
+function Harness() {
+  const [session, setSession] = useState<InviterSession>();
+  return createElement(InvitePanel, { session, setSession });
+}
+
 function mount() {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, createElement(InvitePanel)));
+  root.render(createElement(MantineProvider, null, createElement(Harness)));
 }
 
 // Enter a name, select a file, then click Generate -- the full compose action.

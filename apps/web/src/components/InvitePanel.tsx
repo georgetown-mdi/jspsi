@@ -43,14 +43,24 @@ const MAX_INVITER_NAME_LENGTH = 200;
  * invitation carries the file-derived linkage terms and the parsed rows (so the
  * exchange below reuses them without re-parsing), and the secret seeds the
  * rendezvous peer id the inviter listens on. */
-interface InviterSession {
+export interface InviterSession {
   invitation: GeneratedInvitation;
   inviterName: string;
 }
 
-export function InvitePanel() {
+interface InvitePanelProps {
+  /** The generated session, lifted to {@link HomePage} so it can swap the resting
+   * two-column layout for a full-width exchange view once an invitation exists.
+   * `undefined` shows the compose form; a value shows the {@link ExchangeView}. */
+  session: InviterSession | undefined;
+  /** Store (on Generate) or clear (on a generation failure) the session in the
+   * owner. The owner re-renders this panel with the new value, which is what
+   * drives the compose-form -> exchange-view transition below. */
+  setSession: (session: InviterSession | undefined) => void;
+}
+
+export function InvitePanel({ session, setSession }: InvitePanelProps) {
   const navigate = useNavigate();
-  const [session, setSession] = useState<InviterSession>();
   const [error, setError] = useState<AlertContent>();
   const [files, setFiles] = useState<Array<File>>([]);
   // The selected file is read back inside the form's onSubmit, which runs in a
